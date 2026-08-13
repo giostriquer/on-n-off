@@ -81,12 +81,10 @@ impl AgentAdapter for FakeAdapter {
     }
 
     fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
-        let source = source.trim();
-        if source.is_empty() {
-            return Err(AdapterError::message("install source is empty"));
-        }
+        let parsed = crate::install_source::parse_install_source(source)?;
+        let source = parsed.as_cli_source();
         let mut tab = self.lock_tab()?;
-        let name = plugin_name_from_source(source);
+        let name = plugin_name_from_source(&source);
         let id = format!("{name}@local");
         if tab.plugins.iter().any(|plugin| plugin.id == id) {
             return Err(AdapterError::message(format!("plugin already installed: {id}")));
@@ -302,5 +300,23 @@ mod tests {
         assert!(!tab.user_skills[0].enabled);
         assert!(tab.plugins[0].enabled);
         assert!(tab.plugins[0].skills[0].enabled);
+    }
+
+    #[test]
+    fn install_success_adds_plugin_and_failure_does_not() {
+        let adapter = FakeAdapter::claude();
+        let tab = adapter.install_plugin("acme/tools").expect("install");
+        assert!(tab.plugins.iter().any(|plugin| plugin.id == "tools@local"));
+        let err = adapter.install_plugin("").expect_err("empty");
+        assert!(err.message.contains("HTTPS"));
+        let tab = adapter.list_tab().expect("list");
+        assert_eq!(tab.plugins.iter().filter(|plugin| plugin.id == "tools@local").count(), 1);
+    }
+
+    #[test]
+    fn uninstall_removes_plugin() {
+        let adapter = FakeAdapter::claude();
+        let tab = adapter.uninstall_plugin("workbench@workshop").expect("uninstall");
+        assert!(tab.plugins.iter().all(|plugin| plugin.id != "workbench@workshop"));
     }
 }

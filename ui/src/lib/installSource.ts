@@ -1,8 +1,11 @@
 export type InstallSource =
   | { kind: "git-url"; value: string }
-  | { kind: "github"; owner: string; repo: string; ref?: string };
+  | { kind: "github"; owner: string; repo: string; ref?: string }
+  | { kind: "plugin"; id: string }
+  | { kind: "folder"; value: string };
 
 const GITHUB_SHORTHAND = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:@([A-Za-z0-9._/-]+))?$/;
+const PLUGIN_ID = /^[^/\s\\]+@[^/\s\\]+$/;
 const HTTPS_GIT = /^https:\/\/[^\s]+\/[^\s]+$/i;
 
 export function parseInstallSource(input: string): InstallSource | { error: string } {
@@ -15,6 +18,12 @@ export function parseInstallSource(input: string): InstallSource | { error: stri
   }
   if (HTTPS_GIT.test(value)) {
     return { kind: "git-url", value };
+  }
+  if (looksLikeAbsPath(value)) {
+    return { kind: "folder", value };
+  }
+  if (PLUGIN_ID.test(value)) {
+    return { kind: "plugin", id: value };
   }
   const shorthand = GITHUB_SHORTHAND.exec(value);
   if (shorthand) {
@@ -40,5 +49,12 @@ export function resolvedInstallSource(text: string): string | null {
   if (parsed.kind === "github") {
     return parsed.ref ? `${parsed.owner}/${parsed.repo}@${parsed.ref}` : `${parsed.owner}/${parsed.repo}`;
   }
+  if (parsed.kind === "plugin") {
+    return parsed.id;
+  }
   return parsed.value;
+}
+
+function looksLikeAbsPath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\") || value.startsWith("/");
 }

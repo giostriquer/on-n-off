@@ -6,9 +6,10 @@ use std::sync::Mutex;
 use serde::Deserialize;
 
 use crate::adapter::AgentAdapter;
-use crate::cli::AgentCli;
+use crate::cli::{AgentCli, INSTALL_TIMEOUT};
 use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, PluginDto, SkillDto};
+use crate::install_source::{parse_install_source, InstallSource};
 use crate::paths::{agent_info, claude_root, plugin_id_parts};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 
@@ -189,6 +190,29 @@ impl AgentAdapter for ClaudeAdapter {
         self.io.backup_file(AgentId::Claude, &settings)?;
         let action = if enabled { "enable" } else { "disable" };
         self.cli.run(&["plugin", action, "-s", "user", plugin_id])?;
+        self.list_tab()
+    }
+
+    fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
+        let _guard = self
+            .write
+            .lock()
+            .map_err(|_| AdapterError::message("write lock poisoned"))?;
+        let parsed = parse_install_source(source)?;
+        self.io.backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
+        self.cli
+            .run_args_timed(&parsed.claude_install_argv(), INSTALL_TIMEOUT)?;
+        self.list_tab()
+    }
+
+    fn uninstall_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
+        let _guard = self
+            .write
+            .lock()
+            .map_err(|_| AdapterError::message("write lock poisoned"))?;
+        self.list_tab()?.ensure_plugin(plugin_id)?;
+        self.io.backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
+        self.cli.run_args(&InstallSource::claude_uninstall_argv(plugin_id))?;
         self.list_tab()
     }
 }
@@ -391,6 +415,54 @@ mod tests {
             .expect_err("cli");
         assert!(err.message.contains("nope"));
         assert_eq!(fs::read_to_string(root.join("settings.json")).unwrap(), before);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn claude_argv_stub(root: &Path, exit: i32, stderr: &str) -> AgentCli {
+        let dir = root.join("_cli");
+        fs::create_dir_all(&dir).unwrap();
+        let body = if exit == 0 {
+            "@echo off\r\necho %* > \"%~dp0args.txt\"\r\nexit /b 0\r\n".to_string()
+        } else {
+            format!("@echo off\r\necho {stderr} 1>&2\r\nexit /b {exit}\r\n")
+        };
+        let bin = dir.join("claude.cmd");
+        fs::write(&bin, body).unwrap();
+        AgentCli::new(bin.to_string_lossy().as_ref())
+    }
+
+    #[test]
+    fn install_plugin_id_and_git_source_use_official_argv() {
+        let root = fixture();
+        let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 0, ""));
+        adapter.install_plugin("workbench@workshop").expect("plugin");
+        let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
+        assert!(args.contains("plugin install -s user -y workbench@workshop"), "{args}");
+        adapter.install_plugin("acme/tools").expect("git");
+        let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
+        assert!(args.contains("plugin marketplace add --scope user acme/tools"), "{args}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn install_cli_failure_does_not_mutate_settings() {
+        let root = fixture();
+        let before = fs::read_to_string(root.join("settings.json")).unwrap();
+        let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 2, "denied"));
+        let err = adapter.install_plugin("acme/tools").expect_err("cli");
+        assert!(err.message.contains("denied"));
+        assert_eq!(fs::read_to_string(root.join("settings.json")).unwrap(), before);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn uninstall_uses_official_argv_and_backs_up() {
+        let root = fixture();
+        let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 0, ""));
+        adapter.uninstall_plugin("workbench@workshop").expect("uninstall");
+        let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
+        assert!(args.contains("plugin uninstall -s user -y workbench@workshop"), "{args}");
+        assert!(root.join("_backups/claude").read_dir().unwrap().next().is_some());
         let _ = fs::remove_dir_all(root);
     }
 }

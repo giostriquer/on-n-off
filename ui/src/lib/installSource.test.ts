@@ -17,7 +17,7 @@ describe("parseInstallSource", () => {
     });
   });
 
-  it("accepts owner/repo, owner/repo@ref, and https git urls", () => {
+  it("accepts owner/repo, owner/repo@ref, https git urls, plugin ids, and folders", () => {
     expect(parseInstallSource("acme/tools")).toEqual({
       kind: "github",
       owner: "acme",
@@ -33,6 +33,14 @@ describe("parseInstallSource", () => {
     expect(parseInstallSource("https://github.com/acme/tools.git")).toEqual({
       kind: "git-url",
       value: "https://github.com/acme/tools.git",
+    });
+    expect(parseInstallSource("workbench@workshop")).toEqual({
+      kind: "plugin",
+      id: "workbench@workshop",
+    });
+    expect(parseInstallSource(String.raw`E:\dev\dummy-plugin`)).toEqual({
+      kind: "folder",
+      value: String.raw`E:\dev\dummy-plugin`,
     });
   });
 });

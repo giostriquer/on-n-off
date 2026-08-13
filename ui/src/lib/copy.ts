@@ -12,7 +12,7 @@ export const copy = {
   uninstallTitle: (name: string) => `Uninstall “${name}”?`,
   uninstallBody: (agent: string) =>
     `Removes it from ${agent}. This does not delete your backup.`,
-  installHelper: "HTTPS git or owner/repo. SSH later.",
+  installHelper: "HTTPS git, owner/repo, or name@marketplace. SSH later.",
   installInvalid: "Use an HTTPS git URL or owner/repo.",
   filterPlaceholder: "Filter plugins & skills…",
   refresh: "Refresh",

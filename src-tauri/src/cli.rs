@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use crate::dto::{AdapterError, ErrorKind};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(45);
+pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const STDERR_LIMIT: usize = 400;
 
 pub struct AgentCli {
@@ -26,6 +27,20 @@ impl AgentCli {
     }
 
     pub fn run(&self, args: &[&str]) -> Result<String, AdapterError> {
+        self.run_timed(args, self.timeout)
+    }
+
+    pub fn run_args(&self, args: &[String]) -> Result<String, AdapterError> {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run(&refs)
+    }
+
+    pub fn run_args_timed(&self, args: &[String], timeout: Duration) -> Result<String, AdapterError> {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run_timed(&refs, timeout)
+    }
+
+    fn run_timed(&self, args: &[&str], timeout: Duration) -> Result<String, AdapterError> {
         let mut child = Command::new(&self.binary)
             .args(args)
             .stdout(Stdio::piped())
@@ -59,7 +74,7 @@ impl AgentCli {
                     }
                     return Err(AdapterError::message(trim_cli(&stderr, &stdout)));
                 }
-                Ok(None) if started.elapsed() >= self.timeout => {
+                Ok(None) if started.elapsed() >= timeout => {
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(AdapterError::message(format!(

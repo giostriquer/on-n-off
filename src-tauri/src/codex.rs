@@ -6,8 +6,10 @@ use std::sync::Mutex;
 use serde::Deserialize;
 
 use crate::adapter::AgentAdapter;
+use crate::cli::{AgentCli, INSTALL_TIMEOUT};
 use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, PluginDto, SkillDto};
+use crate::install_source::{parse_install_source, InstallSource};
 use crate::paths::{
     agent_info, agents_skills_root, codex_root, newest_dir, normalize_skill_path, plugin_id_parts,
 };
@@ -49,6 +51,7 @@ pub struct CodexAdapter {
     agents_skills: PathBuf,
     io: ConfigIo,
     write: Mutex<()>,
+    cli: AgentCli,
 }
 
 impl CodexAdapter {
@@ -58,17 +61,24 @@ impl CodexAdapter {
             agents_skills: agents_skills_root().unwrap_or_else(|_| PathBuf::new()),
             io: ConfigIo::production(),
             write: Mutex::new(()),
+            cli: AgentCli::new("codex"),
         }
     }
 
     #[cfg(test)]
     pub fn at(root: PathBuf, agents_skills: PathBuf) -> Self {
+        Self::at_with_cli(root, agents_skills, AgentCli::new("on-n-off-no-such-codex.exe"))
+    }
+
+    #[cfg(test)]
+    pub fn at_with_cli(root: PathBuf, agents_skills: PathBuf, cli: AgentCli) -> Self {
         let io = ConfigIo::at(root.join("_backups"));
         Self {
             root: Some(root),
             agents_skills,
             io,
             write: Mutex::new(()),
+            cli,
         }
     }
 
@@ -193,6 +203,29 @@ impl AgentAdapter for CodexAdapter {
             plugin_id,
             enabled,
         )?;
+        self.list_tab()
+    }
+
+    fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
+        let _guard = self
+            .write
+            .lock()
+            .map_err(|_| AdapterError::message("write lock poisoned"))?;
+        let parsed = parse_install_source(source)?;
+        self.io.backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
+        self.cli
+            .run_args_timed(&parsed.codex_install_argv(), INSTALL_TIMEOUT)?;
+        self.list_tab()
+    }
+
+    fn uninstall_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
+        let _guard = self
+            .write
+            .lock()
+            .map_err(|_| AdapterError::message("write lock poisoned"))?;
+        self.list_tab()?.ensure_plugin(plugin_id)?;
+        self.io.backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
+        self.cli.run_args(&InstallSource::codex_uninstall_argv(plugin_id))?;
         self.list_tab()
     }
 }
@@ -336,6 +369,46 @@ mod tests {
         assert!(text.contains("[plugins.\"toolkit@workshop\"]"));
         assert!(text.contains("[[skills.config]]"));
         assert!(root.join("_backups/codex").read_dir().unwrap().next().is_some());
+        let _ = fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    fn codex_argv_stub(root: &Path, exit: i32, stderr: &str) -> AgentCli {
+        let dir = root.join("_cli");
+        fs::create_dir_all(&dir).unwrap();
+        let body = if exit == 0 {
+            "@echo off\r\necho %* > \"%~dp0args.txt\"\r\nexit /b 0\r\n".to_string()
+        } else {
+            format!("@echo off\r\necho {stderr} 1>&2\r\nexit /b {exit}\r\n")
+        };
+        let bin = dir.join("codex.cmd");
+        fs::write(&bin, body).unwrap();
+        AgentCli::new(bin.to_string_lossy().as_ref())
+    }
+
+    #[test]
+    fn install_and_uninstall_use_official_argv() {
+        let (root, agents_skills) = fixture();
+        let adapter = CodexAdapter::at_with_cli(root.clone(), agents_skills, codex_argv_stub(&root, 0, ""));
+        adapter.install_plugin("workbench@workshop").expect("add");
+        let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
+        assert!(args.contains("plugin add --json workbench@workshop"), "{args}");
+        adapter.install_plugin("acme/tools@main").expect("market");
+        let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
+        assert!(args.contains("plugin marketplace add --json acme/tools --ref main"), "{args}");
+        adapter.uninstall_plugin("workbench@workshop").expect("remove");
+        let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
+        assert!(args.contains("plugin remove --json workbench@workshop"), "{args}");
+        let _ = fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn install_cli_failure_does_not_mutate_config() {
+        let (root, agents_skills) = fixture();
+        let before = fs::read_to_string(root.join("config.toml")).unwrap();
+        let adapter = CodexAdapter::at_with_cli(root.clone(), agents_skills, codex_argv_stub(&root, 3, "nope"));
+        let err = adapter.install_plugin("acme/tools").expect_err("cli");
+        assert!(err.message.contains("nope"));
+        assert_eq!(fs::read_to_string(root.join("config.toml")).unwrap(), before);
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 }

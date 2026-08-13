@@ -5,6 +5,7 @@
   import InstallSheet from "$lib/InstallSheet.svelte";
   import PluginList from "$lib/PluginList.svelte";
   import Rocker from "$lib/Rocker.svelte";
+  import { open } from "@tauri-apps/plugin-dialog";
   import * as api from "$lib/api";
   import { copy } from "$lib/copy";
   import { displayError, parseInvokeError } from "$lib/error";
@@ -131,6 +132,11 @@
     void mutate(() => api.setSkillEnabled(selected, skill.id, enabled));
   }
 
+  async function pickFolder(): Promise<string | null> {
+    const dir = await open({ directory: true, multiple: false });
+    return typeof dir === "string" ? dir : null;
+  }
+
   async function install(source: string) {
     installError = null;
     const agentId = selected;
@@ -233,11 +239,13 @@
     agentName={currentAgent.displayName}
     busy={currentTab.inFlight}
     error={installError}
+    installFolder={currentAgent.installFolder}
     onCancel={() => {
       installOpen = false;
       installError = null;
     }}
     onInstall={(source) => void install(source)}
+    onPickFolder={pickFolder}
   />
 {/if}
 

@@ -6,14 +6,18 @@
     agentName,
     busy = false,
     error = null,
+    installFolder = false,
     onCancel,
     onInstall,
+    onPickFolder = async () => null,
   }: {
     agentName: string;
     busy?: boolean;
     error?: string | null;
+    installFolder?: boolean;
     onCancel: () => void;
     onInstall: (source: string) => void;
+    onPickFolder?: () => Promise<string | null>;
   } = $props();
 
   let text = $state("");
@@ -35,6 +39,16 @@
       onCancel();
     }
   }
+
+  async function pickFolder() {
+    if (!installFolder || busy) {
+      return;
+    }
+    const dir = await onPickFolder();
+    if (dir) {
+      text = dir;
+    }
+  }
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -48,6 +62,12 @@
       <input type="text" bind:value={text} disabled={busy} placeholder="owner/repo or https://…" />
     </label>
     <p class="hint">{copy.installHelper}</p>
+    <button type="button" class="folder" disabled={!installFolder || busy} onclick={() => void pickFolder()}>
+      {copy.folder}
+    </button>
+    {#if !installFolder}
+      <p class="hint">{copy.folderUnsupported}</p>
+    {/if}
     {#if inlineError}
       <p class="err">{inlineError}</p>
     {/if}
@@ -131,6 +151,20 @@
 
   .err {
     color: var(--trip);
+  }
+
+  .folder {
+    margin-top: 10px;
+    background: var(--well);
+    color: var(--silkscreen);
+    border: 1px solid var(--mute);
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+
+  .folder:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .actions {
