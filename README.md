@@ -5,9 +5,9 @@ A desktop switchboard for Claude and Codex plugins and skills. Global agent conf
 ## Run
 
 ```bash
-npm install
-npm test
-npm run tauri dev
+bun install
+bun run test
+bun run tauri dev
 ```
 
 Rust adapter tests:
