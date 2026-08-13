@@ -1,0 +1,53 @@
+:root[data-theme="dark"] {
+  --void: #14171c;
+  --plate: #1e242c;
+  --well: #272f3a;
+  --silkscreen: #d6cbb3;
+  --brass: #c9a227;
+  --trip: #d64c3a;
+  --mute: #8b939e;
+}
+
+:root[data-theme="light"] {
+  --void: #d8dce2;
+  --plate: #eceef1;
+  --well: #cfd4db;
+  --silkscreen: #1a1f27;
+  --brass: #8f6f10;
+  --trip: #b42318;
+  --mute: #5c6570;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--void);
+  color: var(--silkscreen);
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+#app {
+  height: 100%;
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

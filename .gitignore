@@ -20,6 +20,10 @@ dist/
 build/
 out/
 *.log
+/target/
+src-tauri/target/
+src-tauri/gen/schemas
+ui/dist
 
 # Workbench scratch
 .workbench/

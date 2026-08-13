@@ -1,7 +1,19 @@
 # on-n-off
 
-A desktop settings manager for AI agents.
+A desktop switchboard for Claude and Codex plugins and skills. Global agent config stays the source of truth.
 
-Install plugins, manage them, and turn skills on and off. Manipulates global agent settings — especially Codex and Claude — from one place.
+## Run
+
+```bash
+npm install
+npm test
+npm run tauri dev
+```
+
+Rust adapter tests:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
+```
 
 Private while the product is taking shape.
