@@ -25,6 +25,30 @@ pub fn agents_skills_root() -> Result<PathBuf, AdapterError> {
     Ok(user_home()?.join(".agents").join("skills"))
 }
 
+pub fn gemini_root() -> Result<PathBuf, AdapterError> {
+    Ok(user_home()?.join(".gemini"))
+}
+
+pub fn antigravity_cli_root() -> Result<PathBuf, AdapterError> {
+    Ok(gemini_root()?.join("antigravity-cli"))
+}
+
+pub fn antigravity_config_plugins() -> Result<PathBuf, AdapterError> {
+    Ok(gemini_root()?.join("config").join("plugins"))
+}
+
+pub fn antigravity_cli_plugins() -> Result<PathBuf, AdapterError> {
+    Ok(antigravity_cli_root()?.join("plugins"))
+}
+
+pub fn antigravity_mcp_config() -> Result<PathBuf, AdapterError> {
+    Ok(gemini_root()?.join("config").join("mcp_config.json"))
+}
+
+pub fn antigravity_cli_skills() -> Result<PathBuf, AdapterError> {
+    Ok(antigravity_cli_root()?.join("skills"))
+}
+
 pub fn binary_on_path(name: &str) -> bool {
     let Some(path) = env::var_os("PATH") else {
         return false;
@@ -73,12 +97,21 @@ pub fn agent_info(id: AgentId, binary: &str) -> AgentInfo {
         plugin_toggle: match id {
             AgentId::Claude => cli_ok,
             AgentId::Codex => true,
+            AgentId::Antigravity => cli_ok,
         },
     }
 }
 
 pub fn backup_root() -> Result<PathBuf, AdapterError> {
     Ok(user_home()?.join(".on-n-off").join("backups"))
+}
+
+pub fn flags_path_for(home: &std::path::Path) -> PathBuf {
+    home.join(".on-n-off").join("flags.json")
+}
+
+pub fn flags_path() -> Result<PathBuf, AdapterError> {
+    Ok(flags_path_for(&user_home()?))
 }
 
 pub fn normalize_skill_path(path: &str) -> String {
@@ -130,6 +163,12 @@ pub fn scratch_dir(prefix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flags_path_lives_under_on_n_off_home() {
+        let path = flags_path_for(&PathBuf::from(r"C:\scratch"));
+        assert_eq!(path, PathBuf::from(r"C:\scratch\.on-n-off\flags.json"));
+    }
 
     #[test]
     fn normalize_skill_path_unifies_slash_and_skill_md() {

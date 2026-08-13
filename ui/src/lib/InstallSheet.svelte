@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { Dialog } from "@skeletonlabs/skeleton-svelte";
   import { copy } from "./copy";
-  import { isValidInstallInput, parseInstallSource, resolvedInstallSource } from "./installSource";
+  import { installHint, isValidInstallInput, parseInstallSource, resolvedInstallSource } from "./installSource";
 
   let {
     agentName,
@@ -25,6 +26,7 @@
   const parsed = $derived(parseInstallSource(text));
   const valid = $derived(isValidInstallInput(text));
   const inlineError = $derived(text.trim() && "error" in parsed ? parsed.error : null);
+  const hint = $derived(installHint(parsed));
 
   function submit() {
     const source = resolvedInstallSource(text);
@@ -32,12 +34,6 @@
       return;
     }
     onInstall(source);
-  }
-
-  function onKey(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      onCancel();
-    }
   }
 
   async function pickFolder() {
@@ -51,145 +47,71 @@
   }
 </script>
 
-<svelte:window onkeydown={onKey} />
-
-<div class="overlay">
-  <button type="button" class="backdrop" aria-label={copy.cancel} onclick={onCancel}></button>
-  <div class="sheet" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="install-title">
-    <h2 id="install-title">Install — {agentName}</h2>
-    <label class="field">
-      <span class="label">Source</span>
-      <input type="text" bind:value={text} disabled={busy} placeholder="owner/repo or https://…" />
-    </label>
-    <p class="hint">{copy.installHelper}</p>
-    <button type="button" class="folder" disabled={!installFolder || busy} onclick={() => void pickFolder()}>
-      {copy.folder}
-    </button>
-    {#if !installFolder}
-      <p class="hint">{copy.folderUnsupported}</p>
-    {/if}
-    {#if inlineError}
-      <p class="err">{inlineError}</p>
-    {/if}
-    {#if error}
-      <p class="err">{error}</p>
-    {/if}
-    <div class="actions">
-      <button type="button" onclick={onCancel}>{copy.cancel}</button>
-      <button type="button" class="primary" disabled={!valid || busy} onclick={submit}>
-        {busy ? copy.installing : copy.install}
-      </button>
-    </div>
-  </div>
-</div>
-
-<style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 20;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .backdrop {
-    position: absolute;
-    inset: 0;
-    border: 0;
-    padding: 0;
-    background: rgb(0 0 0 / 0.45);
-    cursor: pointer;
-  }
-
-  .sheet {
-    position: relative;
-    width: min(440px, calc(100vw - 32px));
-    background: var(--plate);
-    color: var(--silkscreen);
-    padding: 20px;
-    border: 1px solid var(--mute);
-  }
-
-  h2 {
-    margin: 0 0 16px;
-    font-family: "IBM Plex Sans Condensed", sans-serif;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-size: 16px;
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .label {
-    font-size: 12px;
-    color: var(--mute);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  input[type="text"] {
-    background: var(--well);
-    color: var(--silkscreen);
-    border: 1px solid var(--mute);
-    padding: 8px 10px;
-  }
-
-  .hint,
-  .err {
-    font-size: 12px;
-    margin: 8px 0 0;
-  }
-
-  .hint {
-    color: var(--mute);
-  }
-
-  .err {
-    color: var(--trip);
-  }
-
-  .folder {
-    margin-top: 10px;
-    background: var(--well);
-    color: var(--silkscreen);
-    border: 1px solid var(--mute);
-    padding: 8px 12px;
-    cursor: pointer;
-  }
-
-  .folder:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 16px;
-  }
-
-  .actions button {
-    background: var(--well);
-    color: var(--silkscreen);
-    border: 1px solid var(--mute);
-    padding: 8px 12px;
-    cursor: pointer;
-  }
-
-  .actions button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .primary {
-    background: var(--brass) !important;
-    color: var(--void) !important;
-    border-color: var(--brass) !important;
-  }
-</style>
+<Dialog
+  open
+  onOpenChange={(details) => {
+    if (!details.open) {
+      onCancel();
+    }
+  }}
+>
+  <Dialog.Backdrop class="fixed inset-0 z-50 bg-black/55" />
+  <Dialog.Positioner class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <Dialog.Content class="w-[470px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] shadow-[var(--drop)]">
+      <header class="flex items-center gap-2.5 border-b border-[var(--hair)] px-4 py-[13px]">
+        <span class="size-2 shrink-0 bg-[var(--fill)]" aria-hidden="true"></span>
+        <Dialog.Title class="text-[14px] font-semibold tracking-[0.05em] uppercase">
+          Install — {agentName}
+        </Dialog.Title>
+      </header>
+      <div class="flex flex-col gap-2.5 p-4">
+        <span class="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)]">SOURCE</span>
+        <input
+          class="w-full rounded-lg border border-[var(--hair)] bg-[var(--well)] px-2.5 py-[9px] font-mono text-[13px] text-[var(--silkscreen)]"
+          type="text"
+          bind:value={text}
+          disabled={busy}
+          aria-label="Install source"
+          placeholder="name@marketplace, owner/repo, or npx skills add …"
+        />
+        <p class="text-[11.5px] text-[var(--mute)]">{hint}</p>
+        <div class="flex items-center gap-2.5">
+          <button
+            type="button"
+            class="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3 text-[12.5px] text-[var(--silkscreen)] disabled:opacity-45"
+            disabled={!installFolder || busy}
+            onclick={() => void pickFolder()}
+          >
+            {copy.folder}
+          </button>
+          {#if !installFolder}
+            <span class="flex-1 text-[11.5px] text-[var(--mute)]">{copy.folderUnsupported}</span>
+          {/if}
+        </div>
+        {#if inlineError}
+          <p class="text-[13px] text-[var(--trip)]" role="alert">{inlineError}</p>
+        {/if}
+        {#if error}
+          <p class="border-l-[3px] border-[var(--trip)] bg-[var(--well)] px-2.5 py-2 font-mono text-xs text-[var(--silkscreen)]" role="alert">
+            {error}
+          </p>
+        {/if}
+        <footer class="mt-1 flex justify-end gap-2">
+          <Dialog.CloseTrigger
+            class="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)]"
+          >
+            {copy.cancel}
+          </Dialog.CloseTrigger>
+          <button
+            type="button"
+            class="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-4 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
+            disabled={!valid || busy}
+            onclick={submit}
+          >
+            {busy ? copy.installing : copy.install}
+          </button>
+        </footer>
+      </div>
+    </Dialog.Content>
+  </Dialog.Positioner>
+</Dialog>

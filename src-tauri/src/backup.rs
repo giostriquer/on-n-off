@@ -75,6 +75,7 @@ fn agent_dir(agent: AgentId) -> &'static str {
     match agent {
         AgentId::Claude => "claude",
         AgentId::Codex => "codex",
+        AgentId::Antigravity => "antigravity",
     }
 }
 

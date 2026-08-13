@@ -34,6 +34,41 @@ pub fn scan_user_skills(skills_root: &Path) -> Vec<ScannedSkill> {
     skills
 }
 
+/// Flat `name.md` skills (Antigravity CLI / workspace style).
+pub fn scan_skill_markdown_files(dir: &Path) -> Vec<ScannedSkill> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut skills = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let lower = name.to_ascii_lowercase();
+        if lower == "skill.md" || !lower.ends_with(".md") {
+            continue;
+        }
+        if let Some(skill) = skill_from_file(&path, &path.with_extension("")) {
+            skills.push(skill);
+        }
+    }
+    skills
+}
+
+pub fn scan_antigravity_skills(skills_root: &Path) -> Vec<ScannedSkill> {
+    if !skills_root.is_dir() {
+        return Vec::new();
+    }
+    let mut skills = scan_skills_dir(skills_root);
+    skills.extend(scan_skill_markdown_files(skills_root));
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills
+}
+
 fn scan_skills_dir(dir: &Path) -> Vec<ScannedSkill> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
@@ -130,6 +165,20 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("SKILL.md"), "---\nname: solo\ndescription: One shot\n---\n").unwrap();
         let skills = scan_plugin_skills(&root);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "solo");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn scans_flat_markdown_skills_for_antigravity() {
+        let root = std::env::temp_dir().join(format!("on-n-off-flat-skill-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("solo.md"), "---\nname: solo\ndescription: Flat\n---\n").unwrap();
+        fs::write(root.join("SKILL.md"), "---\nname: ignore-root\n---\n").unwrap();
+        assert!(scan_user_skills(&root).is_empty());
+        let skills = scan_antigravity_skills(&root);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "solo");
         let _ = fs::remove_dir_all(root);

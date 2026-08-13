@@ -17,9 +17,9 @@ describe("InstallSheet", () => {
     const install = screen.getByRole("button", { name: "Install" });
     expect(install.hasAttribute("disabled")).toBe(true);
 
-    const field = screen.getByPlaceholderText("owner/repo or https://…");
+    const field = screen.getByPlaceholderText("name@marketplace, owner/repo, or npx skills add …");
     await user.type(field, "???");
-    expect(screen.getByText("Use an HTTPS git URL or owner/repo.")).toBeTruthy();
+    expect(screen.getByText("Use an HTTPS git URL, owner/repo, name@marketplace, or npx skills add.")).toBeTruthy();
     expect(install.hasAttribute("disabled")).toBe(true);
   });
 
@@ -33,7 +33,7 @@ describe("InstallSheet", () => {
       },
     });
 
-    await user.type(screen.getByPlaceholderText("owner/repo or https://…"), "acme/tools");
+    await user.type(screen.getByPlaceholderText("name@marketplace, owner/repo, or npx skills add …"), "acme/tools");
     expect(screen.getByRole("button", { name: "Install" }).hasAttribute("disabled")).toBe(false);
   });
 });

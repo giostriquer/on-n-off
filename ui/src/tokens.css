@@ -1,32 +1,52 @@
-:root[data-theme="dark"] {
-  --void: #14171c;
-  --plate: #1e242c;
-  --well: #272f3a;
-  --silkscreen: #d6cbb3;
-  --brass: #c9a227;
-  --trip: #d64c3a;
-  --mute: #8b939e;
+@import "tailwindcss";
+@import "@skeletonlabs/skeleton";
+@import "@skeletonlabs/skeleton-svelte";
+@import "./onnoff-theme.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Instrument Sans", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
 }
 
-:root[data-theme="light"] {
-  --void: #d8dce2;
-  --plate: #eceef1;
-  --well: #cfd4db;
-  --silkscreen: #1a1f27;
-  --brass: #8f6f10;
-  --trip: #b42318;
-  --mute: #5c6570;
+@source "../../node_modules/@skeletonlabs/skeleton-svelte/dist";
+
+:root {
+  --desk: light-dark(#e8e8e4, #0e1012);
+  --void: light-dark(#f6f6f4, #191c20);
+  --plate: light-dark(#ffffff, #20242a);
+  --well: light-dark(#f1f1ee, #282d34);
+  --silkscreen: light-dark(#17191d, #eef0f2);
+  --brass: light-dark(#0f7a4a, #35c07a);
+  --trip: light-dark(#c0362c, #e2594c);
+  --mute: light-dark(#6c727c, #8c939d);
+  --hair: light-dark(rgba(23, 25, 29, 0.11), rgba(238, 240, 242, 0.12));
+  --live: light-dark(#0f7a4a, #35c07a);
+  --fill: light-dark(#0f7a4a, #e9edf1);
+  --fill-ink: light-dark(#f8f8f6, #151a1f);
+  --warn: light-dark(#9a5f08, #e0b341);
+  --drop: light-dark(0 24px 60px rgba(23, 25, 29, 0.16), 0 32px 74px rgba(0, 0, 0, 0.72));
+  /* Usage chart series — quiet, not brand-colored */
+  --usage-a: light-dark(#5c6b78, #8b9aa8);
+  --usage-b: light-dark(#8a7d5c, #c2b48a);
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
 }
 
 html,
 body {
-  margin: 0;
-  height: 100%;
   background: var(--void);
   color: var(--silkscreen);
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: "Instrument Sans", sans-serif;
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
 }
 
 #app {
@@ -36,6 +56,7 @@ body {
 button,
 input {
   font-family: inherit;
+  border-radius: 8px;
 }
 
 :focus-visible {

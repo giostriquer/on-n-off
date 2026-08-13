@@ -25,12 +25,34 @@ describe("SkillRow", () => {
   it("does not render a rocker for locked plugin skills", () => {
     render(SkillRow, { props: { skill: locked, onToggle: () => undefined } });
     expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("with plugin")).toBeTruthy();
     expect(screen.getByText("Claude only enables this with the whole plugin.")).toBeTruthy();
+    expect(screen.getByText("enabled with plugin")).toBeTruthy();
+  });
+
+  it("labels project skills as local, not plugin-locked", () => {
+    render(SkillRow, {
+      props: {
+        skill: {
+          ...locked,
+          id: "project:local-feed",
+          pluginId: null,
+          name: "local-feed",
+          origin: "project",
+        },
+        onToggle: () => undefined,
+      },
+    });
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("project")).toBeTruthy();
+    expect(screen.getByText("Local to this project. Presence is on; no disable yet.")).toBeTruthy();
+    expect(screen.getByText("project skill")).toBeTruthy();
   });
 
   it("renders a pressed rocker for togglable skills", () => {
     render(SkillRow, { props: { skill: togglable, onToggle: () => undefined } });
     const rocker = screen.getByRole("button", { name: "statusline on" });
     expect(rocker.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("user-togglable")).toBeTruthy();
   });
 });

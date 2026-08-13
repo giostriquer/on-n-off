@@ -28,6 +28,15 @@ export const LOCKED_AGENTS: AgentInfo[] = [
     installFolder: false,
     pluginToggle: false,
   },
+  {
+    id: "antigravity",
+    displayName: "Antigravity",
+    cliOk: false,
+    cliError: null,
+    installGit: false,
+    installFolder: false,
+    pluginToggle: false,
+  },
 ];
 
 export function emptyTab(): TabState {

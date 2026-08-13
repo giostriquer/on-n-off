@@ -3,6 +3,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::dto::{AdapterError, ErrorKind};
+use crate::install_source::InstallSource;
+use crate::paths::binary_on_path;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(45);
 pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -87,6 +89,18 @@ impl AgentCli {
             }
         }
     }
+}
+
+pub fn run_npx_skills(source: &InstallSource, agent: &str) -> Result<String, AdapterError> {
+    if !source.is_npx_skills() {
+        return Err(AdapterError::message("not an npx skills install"));
+    }
+    if !binary_on_path("npx") {
+        return Err(AdapterError::message(
+            "npx not found. Skill install needs Node.js.",
+        ));
+    }
+    AgentCli::new("npx").run_args_timed(&source.npx_skills_argv(agent), INSTALL_TIMEOUT)
 }
 
 fn trim_cli(stderr: &str, stdout: &str) -> String {

@@ -67,6 +67,64 @@ impl ConfigIo {
         self.backups.backup(agent, path)
     }
 
+    pub fn patch_json_mcp_enabled(
+        &self,
+        agent: AgentId,
+        path: &Path,
+        mcp_id: &str,
+        enabled: bool,
+    ) -> Result<(), AdapterError> {
+        self.patch_json(agent, path, |root| {
+            let object = root.as_object_mut().ok_or_else(|| {
+                AdapterError::message("claude.json root must be an object")
+            })?;
+            let servers = object
+                .get_mut("mcpServers")
+                .and_then(JsonValue::as_object_mut)
+                .ok_or_else(|| AdapterError::message("mcpServers missing"))?;
+            let entry = servers
+                .get_mut(mcp_id)
+                .and_then(JsonValue::as_object_mut)
+                .ok_or_else(|| AdapterError::message(format!("mcp server not found: {mcp_id}")))?;
+            entry.insert("disabled".to_string(), JsonValue::Bool(!enabled));
+            let list = object
+                .entry("disabledMcpServers")
+                .or_insert_with(|| JsonValue::Array(Vec::new()));
+            let list = list.as_array_mut().ok_or_else(|| {
+                AdapterError::message("disabledMcpServers must be an array")
+            })?;
+            list.retain(|item| item.as_str() != Some(mcp_id));
+            if !enabled {
+                list.push(JsonValue::String(mcp_id.to_string()));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn patch_antigravity_mcp_enabled(
+        &self,
+        agent: AgentId,
+        path: &Path,
+        mcp_id: &str,
+        enabled: bool,
+    ) -> Result<(), AdapterError> {
+        self.patch_json(agent, path, |root| {
+            let object = root.as_object_mut().ok_or_else(|| {
+                AdapterError::message("mcp_config.json root must be an object")
+            })?;
+            let servers = object
+                .get_mut("mcpServers")
+                .and_then(JsonValue::as_object_mut)
+                .ok_or_else(|| AdapterError::message("mcpServers missing"))?;
+            let entry = servers
+                .get_mut(mcp_id)
+                .and_then(JsonValue::as_object_mut)
+                .ok_or_else(|| AdapterError::message(format!("mcp server not found: {mcp_id}")))?;
+            entry.insert("disabled".to_string(), JsonValue::Bool(!enabled));
+            Ok(())
+        })
+    }
+
     pub fn patch_toml_plugin_enabled(
         &self,
         agent: AgentId,
@@ -83,6 +141,27 @@ impl ConfigIo {
                 .get_mut(plugin_id)
                 .and_then(Item::as_table_mut)
                 .ok_or_else(|| AdapterError::message(format!("plugin not in config: {plugin_id}")))?;
+            entry["enabled"] = value(enabled);
+            Ok(())
+        })
+    }
+
+    pub fn patch_toml_mcp_enabled(
+        &self,
+        agent: AgentId,
+        path: &Path,
+        mcp_id: &str,
+        enabled: bool,
+    ) -> Result<(), AdapterError> {
+        self.patch_toml(agent, path, |doc| {
+            let servers = doc
+                .get_mut("mcp_servers")
+                .and_then(Item::as_table_mut)
+                .ok_or_else(|| AdapterError::message("mcp_servers table missing"))?;
+            let entry = servers
+                .get_mut(mcp_id)
+                .and_then(Item::as_table_mut)
+                .ok_or_else(|| AdapterError::message(format!("mcp server not found: {mcp_id}")))?;
             entry["enabled"] = value(enabled);
             Ok(())
         })
@@ -320,6 +399,90 @@ mod tests {
         let text = fs::read_to_string(&path).unwrap();
         assert_eq!(text.matches("[[skills.config]]").count(), 1);
         assert!(text.contains("enabled = true"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn json_mcp_toggle_sets_disabled_flag_and_list() {
+        let root = crate::paths::scratch_dir("on-n-off-json-mcp");
+        let path = root.join(".claude.json");
+        fs::write(
+            &path,
+            r#"{
+  "numStartups": 3,
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
+    "docs": { "type": "http", "url": "https://docs.example/mcp" }
+  }
+}"#,
+        )
+        .unwrap();
+        let io = ConfigIo::at(root.join("backups"));
+        io.patch_json_mcp_enabled(AgentId::Claude, &path, "github", false)
+            .unwrap();
+        let value: JsonValue = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value["numStartups"], 3);
+        assert_eq!(value["mcpServers"]["docs"]["url"], "https://docs.example/mcp");
+        assert_eq!(value["mcpServers"]["github"]["disabled"], true);
+        assert_eq!(value["mcpServers"]["github"]["command"], "npx");
+        assert_eq!(value["disabledMcpServers"], json!(["github"]));
+        io.patch_json_mcp_enabled(AgentId::Claude, &path, "github", true)
+            .unwrap();
+        let value: JsonValue = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value["mcpServers"]["github"]["disabled"], false);
+        assert_eq!(value["disabledMcpServers"], json!([]));
+        let err = io
+            .patch_json_mcp_enabled(AgentId::Claude, &path, "missing", false)
+            .expect_err("missing");
+        assert!(err.message.contains("mcp server not found"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn antigravity_mcp_toggle_sets_disabled_only() {
+        let root = crate::paths::scratch_dir("on-n-off-agy-mcp");
+        let path = root.join("mcp_config.json");
+        fs::write(
+            &path,
+            r#"{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "gh"] } } }"#,
+        )
+        .unwrap();
+        let io = ConfigIo::at(root.join("backups"));
+        io.patch_antigravity_mcp_enabled(AgentId::Antigravity, &path, "github", false)
+            .unwrap();
+        let value: JsonValue = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value["mcpServers"]["github"]["disabled"], true);
+        assert!(value.get("disabledMcpServers").is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn toml_mcp_enable_only_flips_enabled() {
+        let root = crate::paths::scratch_dir("on-n-off-toml-mcp");
+        let path = root.join("config.toml");
+        fs::write(
+            &path,
+            "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[mcp_servers.github]\ncommand = \"npx\"\nargs = [\"-y\", \"@modelcontextprotocol/server-github\"]\nextra = 1\n\n[mcp_servers.docs]\nurl = \"https://docs.example/mcp\"\nenabled = false\n",
+        )
+        .unwrap();
+        let io = ConfigIo::at(root.join("backups"));
+        io.patch_toml_mcp_enabled(AgentId::Codex, &path, "github", false)
+            .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[plugins.\"workbench@workshop\"]"), "{text}");
+        assert!(text.contains("extra = 1"), "{text}");
+        assert!(text.contains("[mcp_servers.github]"), "{text}");
+        assert!(text.contains("[mcp_servers.docs]"), "{text}");
+        assert!(text.contains("enabled = false"), "{text}");
+        io.patch_toml_mcp_enabled(AgentId::Codex, &path, "docs", true)
+            .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("url = \"https://docs.example/mcp\""), "{text}");
+        assert_eq!(text.matches("enabled = true").count(), 2, "{text}");
+        let err = io
+            .patch_toml_mcp_enabled(AgentId::Codex, &path, "missing", false)
+            .expect_err("missing");
+        assert!(err.message.contains("mcp server not found"));
         let _ = fs::remove_dir_all(root);
     }
 

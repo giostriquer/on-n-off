@@ -12,6 +12,10 @@ pub enum InstallSource {
     },
     LocalDir(PathBuf),
     Plugin(String),
+    NpxSkills {
+        source: String,
+        skill: Option<String>,
+    },
 }
 
 pub fn parse_install_source(input: &str) -> Result<InstallSource, AdapterError> {
@@ -21,6 +25,9 @@ pub fn parse_install_source(input: &str) -> Result<InstallSource, AdapterError> 
     }
     if value.starts_with("git@") || value.to_ascii_lowercase().starts_with("ssh://") {
         return Err(AdapterError::message(INVALID));
+    }
+    if let Some(parsed) = parse_npx_skills(value) {
+        return parsed;
     }
     if is_https_git(value) {
         return Ok(InstallSource::GitUrl(value.to_string()));
@@ -61,7 +68,36 @@ impl InstallSource {
             } => format!("{owner}/{repo}"),
             Self::LocalDir(path) => path.display().to_string(),
             Self::Plugin(id) => id.clone(),
+            Self::NpxSkills { source, skill } => match skill {
+                Some(skill) => format!("{source} --skill {skill}"),
+                None => source.clone(),
+            },
         }
+    }
+
+    pub fn is_npx_skills(&self) -> bool {
+        matches!(self, Self::NpxSkills { .. })
+    }
+
+    pub fn npx_skills_argv(&self, agent: &str) -> Vec<String> {
+        let Self::NpxSkills { source, skill } = self else {
+            return Vec::new();
+        };
+        let mut args = vec![
+            "-y".into(),
+            "skills".into(),
+            "add".into(),
+            source.clone(),
+            "-g".into(),
+            "-y".into(),
+            "-a".into(),
+            agent.to_string(),
+        ];
+        if let Some(skill) = skill {
+            args.push("--skill".into());
+            args.push(skill.clone());
+        }
+        args
     }
 
     pub fn claude_install_argv(&self) -> Vec<String> {
@@ -74,6 +110,7 @@ impl InstallSource {
                 "-y".into(),
                 id.clone(),
             ],
+            Self::NpxSkills { .. } => self.npx_skills_argv("claude-code"),
             _ => vec![
                 "plugin".into(),
                 "marketplace".into(),
@@ -99,6 +136,7 @@ impl InstallSource {
     pub fn codex_install_argv(&self) -> Vec<String> {
         match self {
             Self::Plugin(id) => vec!["plugin".into(), "add".into(), "--json".into(), id.clone()],
+            Self::NpxSkills { .. } => self.npx_skills_argv("codex"),
             Self::GitHub {
                 owner,
                 repo,
@@ -130,9 +168,62 @@ impl InstallSource {
             plugin_id.to_string(),
         ]
     }
+
+    pub fn agy_install_argv(&self) -> Vec<String> {
+        match self {
+            Self::NpxSkills { .. } => self.npx_skills_argv("antigravity"),
+            _ => vec!["plugin".into(), "install".into(), self.as_cli_source()],
+        }
+    }
+
+    pub fn agy_uninstall_argv(plugin_id: &str) -> Vec<String> {
+        let (name, _) = crate::paths::plugin_id_parts(plugin_id);
+        vec!["plugin".into(), "uninstall".into(), name]
+    }
+
+    pub fn plugin_marketplace(plugin_id: &str) -> Option<&str> {
+        plugin_id
+            .split_once('@')
+            .map(|(_, source)| source)
+            .filter(|source| !source.is_empty() && !source.eq_ignore_ascii_case("local"))
+    }
+
+    pub fn claude_marketplace_update_argv(marketplace: &str) -> Vec<String> {
+        vec![
+            "plugin".into(),
+            "marketplace".into(),
+            "update".into(),
+            marketplace.to_string(),
+        ]
+    }
+
+    pub fn claude_update_argv(plugin_id: &str) -> Vec<String> {
+        vec![
+            "plugin".into(),
+            "update".into(),
+            "-s".into(),
+            "user".into(),
+            "-y".into(),
+            plugin_id.to_string(),
+        ]
+    }
+
+    pub fn codex_marketplace_upgrade_argv(marketplace: &str) -> Vec<String> {
+        vec![
+            "plugin".into(),
+            "marketplace".into(),
+            "upgrade".into(),
+            "--json".into(),
+            marketplace.to_string(),
+        ]
+    }
+
+    pub fn codex_update_argv(plugin_id: &str) -> Vec<String> {
+        vec!["plugin".into(), "add".into(), "--json".into(), plugin_id.to_string()]
+    }
 }
 
-const INVALID: &str = "Use an HTTPS git URL or owner/repo.";
+const INVALID: &str = "Use an HTTPS git URL, owner/repo, name@marketplace, or npx skills add.";
 
 fn is_https_git(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
@@ -145,6 +236,94 @@ fn looks_like_abs_path(value: &str) -> bool {
             && value.as_bytes()[0].is_ascii_alphabetic()
             && value.as_bytes()[1] == b':'
             && (value.as_bytes()[2] == b'\\' || value.as_bytes()[2] == b'/'))
+}
+
+fn parse_npx_skills(value: &str) -> Option<Result<InstallSource, AdapterError>> {
+    let tokens = tokenize(value);
+    let Some(first) = tokens.first() else {
+        return None;
+    };
+    let npx = first.eq_ignore_ascii_case("npx");
+    if !npx && !first.eq_ignore_ascii_case("skills") {
+        return None;
+    }
+    let mut index = if npx { 1 } else { 0 };
+    if npx {
+        while index < tokens.len() && is_npx_prefix_flag(&tokens[index]) {
+            index += 1;
+        }
+    }
+    if index >= tokens.len() || !tokens[index].eq_ignore_ascii_case("skills") {
+        return Some(Err(AdapterError::message(INVALID)));
+    }
+    index += 1;
+    if index >= tokens.len() || !tokens[index].eq_ignore_ascii_case("add") {
+        return Some(Err(AdapterError::message(INVALID)));
+    }
+    index += 1;
+    let mut source = None;
+    let mut skill = None;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        if token == "--skill" || token == "-s" {
+            index += 1;
+            skill = tokens.get(index).cloned();
+        } else if token == "-a" || token == "--agent" || token == "--agents" {
+            index += 1;
+        } else if !is_skills_ignore_flag(token) && !token.starts_with('-') && source.is_none() {
+            source = Some(token.clone());
+        }
+        index += 1;
+    }
+    let Some(source) = source else {
+        return Some(Err(AdapterError::message(INVALID)));
+    };
+    if source.starts_with("git@") || source.to_ascii_lowercase().starts_with("ssh://") {
+        return Some(Err(AdapterError::message(INVALID)));
+    }
+    Some(Ok(InstallSource::NpxSkills { source, skill }))
+}
+
+fn tokenize(value: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    for ch in value.chars() {
+        if let Some(mark) = quote {
+            if ch == mark {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            quote = Some(ch);
+            continue;
+        }
+        if ch.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn is_npx_prefix_flag(token: &str) -> bool {
+    matches!(token, "-y" | "--yes" | "-q" | "--quiet")
+}
+
+fn is_skills_ignore_flag(token: &str) -> bool {
+    matches!(
+        token,
+        "-g" | "--global" | "-y" | "--yes" | "--all" | "--copy" | "-l" | "--list"
+    )
 }
 
 fn parse_plugin_id(value: &str) -> Option<String> {
@@ -211,6 +390,20 @@ mod tests {
             parse_install_source("workbench@workshop").unwrap(),
             InstallSource::Plugin("workbench@workshop".into())
         );
+        assert_eq!(
+            parse_install_source("npx -y skills add vercel-labs/agent-skills -g --skill web-design").unwrap(),
+            InstallSource::NpxSkills {
+                source: "vercel-labs/agent-skills".into(),
+                skill: Some("web-design".into()),
+            }
+        );
+        assert_eq!(
+            parse_install_source("skills add anthropics/skills").unwrap(),
+            InstallSource::NpxSkills {
+                source: "anthropics/skills".into(),
+                skill: None,
+            }
+        );
     }
 
     #[test]
@@ -260,6 +453,47 @@ mod tests {
         assert_eq!(
             InstallSource::codex_uninstall_argv("workbench@workshop"),
             ["plugin", "remove", "--json", "workbench@workshop"]
+        );
+        assert_eq!(InstallSource::plugin_marketplace("workbench@workshop"), Some("workshop"));
+        assert_eq!(InstallSource::plugin_marketplace("local-only"), None);
+        assert_eq!(
+            InstallSource::claude_marketplace_update_argv("workshop"),
+            ["plugin", "marketplace", "update", "workshop"]
+        );
+        assert_eq!(
+            InstallSource::claude_update_argv("workbench@workshop"),
+            ["plugin", "update", "-s", "user", "-y", "workbench@workshop"]
+        );
+        assert_eq!(
+            InstallSource::codex_marketplace_upgrade_argv("workshop"),
+            ["plugin", "marketplace", "upgrade", "--json", "workshop"]
+        );
+        assert_eq!(
+            InstallSource::codex_update_argv("workbench@workshop"),
+            ["plugin", "add", "--json", "workbench@workshop"]
+        );
+        let npx = InstallSource::NpxSkills {
+            source: "vercel-labs/agent-skills".into(),
+            skill: Some("web-design".into()),
+        };
+        assert_eq!(
+            npx.npx_skills_argv("claude-code"),
+            [
+                "-y",
+                "skills",
+                "add",
+                "vercel-labs/agent-skills",
+                "-g",
+                "-y",
+                "-a",
+                "claude-code",
+                "--skill",
+                "web-design"
+            ]
+        );
+        assert_eq!(
+            npx.npx_skills_argv("codex")[7],
+            "codex"
         );
     }
 }

@@ -1,7 +1,8 @@
 use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
+use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, McpServerDto, PluginDto, SkillDto};
+use crate::sort::sort_tab;
 
 pub struct FakeAdapter {
     id: AgentId,
@@ -57,7 +58,9 @@ impl AgentAdapter for FakeAdapter {
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
-        Ok(self.lock_tab()?.clone())
+        let mut tab = self.lock_tab()?.clone();
+        sort_tab(&mut tab);
+        Ok(tab)
     }
 
     fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
@@ -80,10 +83,43 @@ impl AgentAdapter for FakeAdapter {
         Ok(tab.clone())
     }
 
+    fn set_mcp_enabled(&self, mcp_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+        let mut tab = self.lock_tab()?;
+        tab.ensure_mcp_togglable(mcp_id)?;
+        let server = tab
+            .mcp_servers
+            .iter_mut()
+            .find(|server| server.id == mcp_id)
+            .ok_or_else(|| AdapterError::message(format!("mcp server not found: {mcp_id}")))?;
+        server.enabled = enabled;
+        Ok(tab.clone())
+    }
+
     fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
         let parsed = crate::install_source::parse_install_source(source)?;
-        let source = parsed.as_cli_source();
         let mut tab = self.lock_tab()?;
+        if let crate::install_source::InstallSource::NpxSkills {
+            source: skill_source,
+            skill: skill_name,
+        } = &parsed
+        {
+            let name = skill_name
+                .clone()
+                .unwrap_or_else(|| plugin_name_from_source(skill_source));
+            if tab.user_skills.iter().any(|row| row.name == name) {
+                return Err(AdapterError::message(format!("skill already installed: {name}")));
+            }
+            tab.user_skills.push(skill(
+                &name,
+                None,
+                &name,
+                "Installed via npx skills add",
+                true,
+                true,
+            ));
+            return Ok(tab.clone());
+        }
+        let source = parsed.as_cli_source();
         let name = plugin_name_from_source(&source);
         let id = format!("{name}@local");
         if tab.plugins.iter().any(|plugin| plugin.id == id) {
@@ -93,7 +129,11 @@ impl AgentAdapter for FakeAdapter {
             id,
             name,
             source: source.to_string(),
+            version: String::new(),
+            upstream: String::new(),
+            out_of_sync: false,
             enabled: true,
+            togglable: true,
             skills: Vec::new(),
         });
         Ok(tab.clone())
@@ -106,6 +146,20 @@ impl AgentAdapter for FakeAdapter {
         if tab.plugins.len() == before {
             return Err(AdapterError::message(format!("plugin not found: {plugin_id}")));
         }
+        Ok(tab.clone())
+    }
+
+    fn update_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
+        let mut tab = self.lock_tab()?;
+        let plugin = tab
+            .plugins
+            .iter_mut()
+            .find(|plugin| plugin.id == plugin_id)
+            .ok_or_else(|| AdapterError::message(format!("plugin not found: {plugin_id}")))?;
+        if !plugin.upstream.is_empty() {
+            plugin.version = plugin.upstream.clone();
+        }
+        plugin.out_of_sync = false;
         Ok(tab.clone())
     }
 }
@@ -146,6 +200,7 @@ fn skill(
         description: description.to_string(),
         enabled,
         togglable,
+        origin: String::new(),
     }
 }
 
@@ -154,7 +209,11 @@ fn plugin(id: &str, name: &str, source: &str, enabled: bool, skills: Vec<SkillDt
         id: id.to_string(),
         name: name.to_string(),
         source: source.to_string(),
+        version: String::new(),
+        upstream: String::new(),
+        out_of_sync: false,
         enabled,
+        togglable: true,
         skills,
     }
 }
@@ -210,6 +269,15 @@ fn claude_seed() -> AgentTabDto {
             true,
             true,
         )],
+        mcp_servers: vec![McpServerDto {
+            id: "github".to_string(),
+            name: "github".to_string(),
+            system: "stdio".to_string(),
+            source: "npx -y @modelcontextprotocol/server-github".to_string(),
+            enabled: true,
+            togglable: true,
+            origin: String::new(),
+        }],
     }
 }
 
@@ -251,6 +319,7 @@ fn codex_seed() -> AgentTabDto {
                 true,
             ),
         ],
+        mcp_servers: vec![],
     }
 }
 
@@ -267,15 +336,20 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "workbench@workshop",
+                "superpowers@claude-plugins-official",
                 "toolkit@workshop",
-                "superpowers@claude-plugins-official"
+                "workbench@workshop"
             ]
         );
-        assert!(tab.plugins[0].enabled);
-        assert!(!tab.plugins[2].enabled);
+        assert!(!tab.plugins[0].enabled);
+        assert!(tab.plugins[2].enabled);
 
-        let brainstorming = &tab.plugins[0].skills[0];
+        let workbench = tab
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "workbench@workshop")
+            .unwrap();
+        let brainstorming = &workbench.skills[0];
         assert_eq!(brainstorming.id, "workbench@workshop:brainstorming");
         assert!(!brainstorming.togglable);
         assert_eq!(tab.user_skills[0].id, "statusline");
@@ -290,7 +364,12 @@ mod tests {
             .expect_err("locked skill");
         assert!(err.message.contains("not togglable"));
         let tab = adapter.list_tab().expect("list");
-        assert!(tab.plugins[0].skills[0].enabled);
+        let workbench = tab
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "workbench@workshop")
+            .unwrap();
+        assert!(workbench.skills[0].enabled);
     }
 
     #[test]
@@ -298,8 +377,24 @@ mod tests {
         let adapter = FakeAdapter::claude();
         let tab = adapter.set_skill_enabled("statusline", false).expect("toggle");
         assert!(!tab.user_skills[0].enabled);
-        assert!(tab.plugins[0].enabled);
-        assert!(tab.plugins[0].skills[0].enabled);
+        let workbench = tab
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "workbench@workshop")
+            .unwrap();
+        assert!(workbench.enabled);
+        assert!(workbench.skills[0].enabled);
+    }
+
+    #[test]
+    fn toggling_an_mcp_returns_the_full_tab() {
+        let adapter = FakeAdapter::claude();
+        let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
+        let github = tab.mcp_servers.iter().find(|server| server.id == "github").unwrap();
+        assert!(!github.enabled);
+        assert!(github.togglable);
+        let err = adapter.set_mcp_enabled("missing", true).expect_err("missing");
+        assert!(err.message.contains("mcp server not found"));
     }
 
     #[test]
@@ -307,6 +402,10 @@ mod tests {
         let adapter = FakeAdapter::claude();
         let tab = adapter.install_plugin("acme/tools").expect("install");
         assert!(tab.plugins.iter().any(|plugin| plugin.id == "tools@local"));
+        let tab = adapter
+            .install_plugin("npx skills add vercel-labs/agent-skills --skill web-design")
+            .expect("npx");
+        assert!(tab.user_skills.iter().any(|row| row.name == "web-design"));
         let err = adapter.install_plugin("").expect_err("empty");
         assert!(err.message.contains("HTTPS"));
         let tab = adapter.list_tab().expect("list");
@@ -318,5 +417,19 @@ mod tests {
         let adapter = FakeAdapter::claude();
         let tab = adapter.uninstall_plugin("workbench@workshop").expect("uninstall");
         assert!(tab.plugins.iter().all(|plugin| plugin.id != "workbench@workshop"));
+    }
+
+    #[test]
+    fn update_clears_out_of_sync() {
+        let adapter = FakeAdapter::claude();
+        let tab = adapter.update_plugin("workbench@workshop").expect("update");
+        let plugin = tab
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "workbench@workshop")
+            .unwrap();
+        assert!(!plugin.out_of_sync);
+        let err = adapter.update_plugin("missing@workshop").expect_err("missing");
+        assert!(err.message.contains("plugin not found"));
     }
 }

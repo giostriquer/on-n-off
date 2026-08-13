@@ -1,12 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentId, AgentInfo, AgentTabDto } from "./types";
+import type { AgentId, AgentInfo, AgentTabDto, FeatureFlags, ProjectDto } from "./types";
+import type { UsageSummary, UsageSummaryInput } from "./usageTypes";
 
 export function listAgents(): Promise<AgentInfo[]> {
   return invoke("list_agents");
 }
 
-export function listPlugins(agentId: AgentId): Promise<AgentTabDto> {
-  return invoke("list_plugins", { agent_id: agentId });
+export function featureFlags(): Promise<FeatureFlags> {
+  return invoke("feature_flags");
+}
+
+export function listProjects(agentId: AgentId): Promise<ProjectDto[]> {
+  return invoke("list_projects", { agentId });
+}
+
+export function inspectProject(agentId: AgentId, path: string): Promise<ProjectDto> {
+  return invoke("inspect_project", { agentId, path });
+}
+
+export function listPlugins(agentId: AgentId, projectPath?: string | null): Promise<AgentTabDto> {
+  return invoke("list_plugins", { agentId, projectPath: projectPath || null });
 }
 
 export function setPluginEnabled(
@@ -14,7 +27,7 @@ export function setPluginEnabled(
   pluginId: string,
   enabled: boolean,
 ): Promise<AgentTabDto> {
-  return invoke("set_plugin_enabled", { agent_id: agentId, plugin_id: pluginId, enabled });
+  return invoke("set_plugin_enabled", { agentId, pluginId, enabled });
 }
 
 export function setSkillEnabled(
@@ -22,17 +35,33 @@ export function setSkillEnabled(
   skillId: string,
   enabled: boolean,
 ): Promise<AgentTabDto> {
-  return invoke("set_skill_enabled", { agent_id: agentId, skill_id: skillId, enabled });
+  return invoke("set_skill_enabled", { agentId, skillId, enabled });
+}
+
+export function setMcpEnabled(
+  agentId: AgentId,
+  mcpId: string,
+  enabled: boolean,
+): Promise<AgentTabDto> {
+  return invoke("set_mcp_enabled", { agentId, mcpId, enabled });
 }
 
 export function installPlugin(agentId: AgentId, source: string): Promise<AgentTabDto> {
-  return invoke("install_plugin", { agent_id: agentId, source });
+  return invoke("install_plugin", { agentId, source });
 }
 
 export function uninstallPlugin(agentId: AgentId, pluginId: string): Promise<AgentTabDto> {
-  return invoke("uninstall_plugin", { agent_id: agentId, plugin_id: pluginId });
+  return invoke("uninstall_plugin", { agentId, pluginId });
 }
 
-export function refresh(agentId: AgentId): Promise<AgentTabDto> {
-  return invoke("refresh", { agent_id: agentId });
+export function updatePlugin(agentId: AgentId, pluginId: string): Promise<AgentTabDto> {
+  return invoke("update_plugin", { agentId, pluginId });
+}
+
+export function refresh(agentId: AgentId, projectPath?: string | null): Promise<AgentTabDto> {
+  return invoke("refresh", { agentId, projectPath: projectPath || null });
+}
+
+export function usageSummary(input: UsageSummaryInput): Promise<UsageSummary> {
+  return invoke("usage_summary", { input });
 }

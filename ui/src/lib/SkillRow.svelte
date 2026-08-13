@@ -1,88 +1,63 @@
 <script lang="ts">
   import { copy } from "./copy";
+  import { isProjectOrigin } from "./project";
   import Rocker from "./Rocker.svelte";
   import type { SkillDto } from "./types";
 
   let {
     skill,
-    source = null,
     busy = false,
+    live = skill.togglable ? skill.enabled : false,
     onToggle,
   }: {
     skill: SkillDto;
-    source?: string | null;
     busy?: boolean;
+    live?: boolean;
     onToggle: (enabled: boolean) => void;
   } = $props();
+
+  const lockedNote = $derived(
+    isProjectOrigin(skill.origin) ? copy.skillProject : copy.skillLocked,
+  );
+  const lockedLabel = $derived(isProjectOrigin(skill.origin) ? "project" : "with plugin");
 </script>
 
-<div class="row" class:locked={!skill.togglable}>
-  <div class="meta">
-    <div class="name">{skill.name}</div>
-    {#if skill.description && !source}
-      <div class="desc">{skill.description}</div>
+<div class="flex items-center gap-2.5 px-[11px] py-2">
+  <span
+    class="size-2 shrink-0 rounded-full {live ? 'bg-[var(--live)] shadow-[0_0_7px_var(--live)]' : 'bg-[var(--mute)]'}"
+    aria-hidden="true"
+  ></span>
+  <div class="min-w-0 flex-1">
+    <div class="text-[13px] font-semibold leading-snug break-words">{skill.name}</div>
+    {#if skill.description}
+      <div class="mt-0.5 text-[11.5px] leading-snug break-words text-[var(--mute)]">{skill.description}</div>
     {/if}
     {#if !skill.togglable}
-      <div class="reason">{copy.skillLocked}</div>
+      <div class="mt-0.5 font-mono text-[10.5px] text-[var(--mute)]">
+        {isProjectOrigin(skill.origin) ? "project skill" : "enabled with plugin"}
+      </div>
+    {:else}
+      <div class="mt-0.5 font-mono text-[10.5px] text-[var(--mute)]">user-togglable</div>
     {/if}
   </div>
-  {#if source}
-    <span class="source">{source}</span>
-  {/if}
   {#if skill.togglable}
-    <Rocker
-      size="skill"
-      on={skill.enabled}
-      {busy}
-      ariaLabel={`${skill.name} ${skill.enabled ? "on" : "off"}`}
-      onToggle={() => onToggle(!skill.enabled)}
-    />
+    <div class="shrink-0">
+      <Rocker
+        size="skill"
+        on={skill.enabled}
+        {busy}
+        ariaLabel={`${skill.name} ${skill.enabled ? "on" : "off"}`}
+        onToggle={() => onToggle(!skill.enabled)}
+      />
+    </div>
   {:else}
-    <span class="pip" aria-hidden="true"></span>
+    <span
+      class="flex min-w-[88px] shrink-0 items-center gap-[7px] font-mono text-[10.5px] text-[var(--mute)]"
+      title={lockedNote}
+    >
+      <span class="size-2 shrink-0 rounded-full bg-[var(--mute)]" aria-hidden="true"></span>
+      {lockedLabel}
+      <span class="sr-only">{lockedNote}</span>
+    </span>
   {/if}
 </div>
-
-<style>
-  .row {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 10px;
-  }
-
-  .meta {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .name {
-    font-family: "IBM Plex Sans Condensed", sans-serif;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-  }
-
-  .desc,
-  .reason,
-  .source {
-    color: var(--mute);
-    font-size: 12px;
-  }
-
-  .reason {
-    margin-top: 2px;
-  }
-
-  .source {
-    align-self: center;
-  }
-
-  .pip {
-    width: 8px;
-    height: 8px;
-    margin-top: 6px;
-    border-radius: 50%;
-    background: var(--mute);
-    flex-shrink: 0;
-  }
-</style>

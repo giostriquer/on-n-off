@@ -19,3 +19,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 toml = "0.8"
 toml_edit = "0.22"
+ureq = "2"
+chrono = { version = "0.4.45", features = ["clock", "serde"] }
+chrono-tz = "0.10.4"

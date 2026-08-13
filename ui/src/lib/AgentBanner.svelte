@@ -2,13 +2,4 @@
   let { message }: { message: string } = $props();
 </script>
 
-<div class="trip" role="alert">{message}</div>
-
-<style>
-  .trip {
-    background: var(--trip);
-    color: #f7f1ea;
-    padding: 8px 16px;
-    font-size: 13px;
-  }
-</style>
+<div class="bg-[var(--trip)] px-4 py-2 text-[13px] text-[#f7f1ea]" role="alert">{message}</div>

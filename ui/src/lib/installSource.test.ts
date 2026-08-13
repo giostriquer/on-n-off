@@ -1,23 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { isValidInstallInput, parseInstallSource } from "./installSource";
 
+const INVALID = "Use an HTTPS git URL, owner/repo, name@marketplace, or npx skills add.";
+
 describe("parseInstallSource", () => {
   it("rejects empty input so Install stays disabled", () => {
-    expect(parseInstallSource("")).toEqual({ error: "Use an HTTPS git URL or owner/repo." });
-    expect(parseInstallSource("   ")).toEqual({ error: "Use an HTTPS git URL or owner/repo." });
+    expect(parseInstallSource("")).toEqual({ error: INVALID });
+    expect(parseInstallSource("   ")).toEqual({ error: INVALID });
     expect(isValidInstallInput("")).toBe(false);
   });
 
   it("rejects garbage and ssh urls", () => {
-    expect(parseInstallSource("not a source")).toEqual({
-      error: "Use an HTTPS git URL or owner/repo.",
-    });
-    expect(parseInstallSource("git@github.com:acme/tools.git")).toEqual({
-      error: "Use an HTTPS git URL or owner/repo.",
-    });
+    expect(parseInstallSource("not a source")).toEqual({ error: INVALID });
+    expect(parseInstallSource("git@github.com:acme/tools.git")).toEqual({ error: INVALID });
   });
 
-  it("accepts owner/repo, owner/repo@ref, https git urls, plugin ids, and folders", () => {
+  it("accepts owner/repo, owner/repo@ref, https git urls, plugin ids, folders, and npx skills", () => {
     expect(parseInstallSource("acme/tools")).toEqual({
       kind: "github",
       owner: "acme",
@@ -41,6 +39,15 @@ describe("parseInstallSource", () => {
     expect(parseInstallSource(String.raw`E:\dev\dummy-plugin`)).toEqual({
       kind: "folder",
       value: String.raw`E:\dev\dummy-plugin`,
+    });
+    expect(parseInstallSource("npx -y skills add vercel-labs/agent-skills -g --skill web-design")).toEqual({
+      kind: "npx-skills",
+      source: "vercel-labs/agent-skills",
+      skill: "web-design",
+    });
+    expect(parseInstallSource("skills add anthropics/skills")).toEqual({
+      kind: "npx-skills",
+      source: "anthropics/skills",
     });
   });
 });

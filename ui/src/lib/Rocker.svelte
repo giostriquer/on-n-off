@@ -1,11 +1,12 @@
 <script lang="ts">
-  type Size = "tab" | "plugin" | "skill";
+  type Size = "tab" | "plugin" | "skill" | "master" | "theme";
 
   let {
     on = false,
     size = "plugin",
     busy = false,
     disabled = false,
+    dangerOff = false,
     onLabel = "ON",
     offLabel = "OFF",
     ariaLabel,
@@ -15,6 +16,7 @@
     size?: Size;
     busy?: boolean;
     disabled?: boolean;
+    dangerOff?: boolean;
     onLabel?: string;
     offLabel?: string;
     ariaLabel: string;
@@ -36,6 +38,7 @@
   class="rocker {size}"
   class:on
   class:busy
+  class:dangerOff
   disabled={locked}
   aria-pressed={on}
   aria-label={ariaLabel}
@@ -51,20 +54,26 @@
     display: inline-grid;
     grid-template-columns: 1fr 1fr;
     padding: 0;
-    border: 1px solid var(--mute);
+    border: 1px solid var(--hair);
+    border-radius: 11px;
     background: var(--plate);
     color: var(--mute);
     cursor: pointer;
     user-select: none;
-    letter-spacing: 0.06em;
-    font-family: "IBM Plex Sans Condensed", sans-serif;
+    letter-spacing: 0.03em;
+    font-family: "Instrument Sans", sans-serif;
     font-weight: 600;
   }
 
+  .rocker.tab,
+  .rocker.theme {
+    border-radius: 8px;
+  }
+
   .rocker.tab {
-    height: 36px;
-    min-width: 132px;
-    font-size: 13px;
+    height: 30px;
+    min-width: 92px;
+    font-size: 11.5px;
   }
 
   .rocker.plugin {
@@ -75,8 +84,20 @@
 
   .rocker.skill {
     height: 22px;
+    min-width: 70px;
+    font-size: 9.5px;
+  }
+
+  .rocker.theme {
+    height: 22px;
     min-width: 72px;
-    font-size: 10px;
+    font-size: 9.5px;
+  }
+
+  .rocker.master {
+    height: 30px;
+    width: 100%;
+    font-size: 10.5px;
   }
 
   .half {
@@ -84,6 +105,10 @@
     align-items: center;
     justify-content: center;
     padding: 0 8px;
+    overflow: hidden;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
   }
 
   .rocker.on .on-side {
@@ -94,6 +119,11 @@
   .rocker:not(.on) .off {
     background: var(--well);
     color: var(--silkscreen);
+  }
+
+  .rocker.dangerOff:not(.on) .off {
+    background: var(--trip);
+    color: #f7f1ea;
   }
 
   .rocker:disabled {
