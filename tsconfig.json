@@ -8,6 +8,7 @@
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "moduleDetection": "force",
+    "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -19,8 +20,9 @@
     "types": ["vite/client", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "$lib/*": ["ui/src/lib/*"]
+      "$lib/*": ["ui/src/lib/*"],
+      "@/*": ["ui/src/*"]
     }
   },
-  "include": ["ui/src/**/*.ts", "ui/src/**/*.svelte"]
+  "include": ["ui/src/**/*.ts", "ui/src/**/*.tsx"]
 }

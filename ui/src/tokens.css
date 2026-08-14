@@ -1,6 +1,4 @@
 @import "tailwindcss";
-@import "@skeletonlabs/skeleton";
-@import "@skeletonlabs/skeleton-svelte";
 @import "./onnoff-theme.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -10,31 +8,54 @@
   --font-mono: "JetBrains Mono", monospace;
 }
 
-@source "../../node_modules/@skeletonlabs/skeleton-svelte/dist";
-
+/*
+  Explicit light/dark tokens — avoid light-dark() in Tauri WebView2,
+  which was resolving inconsistently and breaking fills/contrast.
+*/
 :root {
-  --desk: light-dark(#e8e8e4, #0e1012);
-  --void: light-dark(#f6f6f4, #191c20);
-  --plate: light-dark(#ffffff, #20242a);
-  --well: light-dark(#f1f1ee, #282d34);
-  --silkscreen: light-dark(#17191d, #eef0f2);
-  --brass: light-dark(#0f7a4a, #35c07a);
-  --trip: light-dark(#c0362c, #e2594c);
-  --mute: light-dark(#6c727c, #8c939d);
-  --hair: light-dark(rgba(23, 25, 29, 0.11), rgba(238, 240, 242, 0.12));
-  --live: light-dark(#0f7a4a, #35c07a);
-  --fill: light-dark(#0f7a4a, #e9edf1);
-  --fill-ink: light-dark(#f8f8f6, #151a1f);
-  --warn: light-dark(#9a5f08, #e0b341);
-  --drop: light-dark(0 24px 60px rgba(23, 25, 29, 0.16), 0 32px 74px rgba(0, 0, 0, 0.72));
-  /* Usage chart series — quiet, not brand-colored */
-  --usage-a: light-dark(#5c6b78, #8b9aa8);
-  --usage-b: light-dark(#8a7d5c, #c2b48a);
+  color-scheme: light;
+  --desk: #e8e8e4;
+  --void: #f6f6f4;
+  --plate: #ffffff;
+  --well: #f1f1ee;
+  --silkscreen: #17191d;
+  --brass: #0f7a4a;
+  --trip: #c0362c;
+  --mute: #6c727c;
+  --hair: rgba(23, 25, 29, 0.11);
+  --live: #0f7a4a;
+  --fill: #0f7a4a;
+  --fill-ink: #f8f8f6;
+  --warn: #9a5f08;
+  --drop: 0 24px 60px rgba(23, 25, 29, 0.16);
+  --usage-a: #5c6b78;
+  --usage-b: #8a7d5c;
+}
+
+html.dark,
+:root.dark {
+  color-scheme: dark;
+  --desk: #0e1012;
+  --void: #191c20;
+  --plate: #20242a;
+  --well: #282d34;
+  --silkscreen: #eef0f2;
+  --brass: #35c07a;
+  --trip: #e2594c;
+  --mute: #8c939d;
+  --hair: rgba(238, 240, 242, 0.12);
+  --live: #35c07a;
+  --fill: #e9edf1;
+  --fill-ink: #151a1f;
+  --warn: #e0b341;
+  --drop: 0 32px 74px rgba(0, 0, 0, 0.72);
+  --usage-a: #8b9aa8;
+  --usage-b: #c2b48a;
 }
 
 html,
 body,
-#app {
+#root {
   margin: 0;
   height: 100%;
 }
@@ -49,14 +70,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-#app {
+#root {
   height: 100%;
 }
 
-button,
-input {
-  font-family: inherit;
-  border-radius: 8px;
+@layer base {
+  button,
+  input {
+    font-family: inherit;
+  }
 }
 
 :focus-visible {
@@ -71,4 +93,16 @@ input {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  margin: -1px;
 }

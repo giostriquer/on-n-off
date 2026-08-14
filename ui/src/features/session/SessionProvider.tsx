@@ -1,0 +1,735 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import * as api from "$lib/api";
+import {
+  agentRoot,
+  catalogCounts,
+  driftRows,
+  emptyTabDto,
+  liveRows,
+  masterAllOn,
+  type LiveRow,
+  type Screen,
+} from "$lib/catalog";
+import { copy } from "$lib/copy";
+import { displayError, parseInvokeError } from "$lib/error";
+import { flagOn, mergeFlags } from "$lib/flags";
+import { filterTab } from "$lib/filterTab";
+import { mergeProjects, projectFromPath, projectLabel, sameProjectPath } from "$lib/project";
+import { LOCKED_AGENTS, emptyTab, openIds, overlayAgents, type TabState } from "$lib/session";
+import { prependTrip, type TripEntry } from "$lib/tripLog";
+import type {
+  AgentId,
+  AgentInfo,
+  AgentTabDto,
+  FeatureFlags,
+  McpServerDto,
+  PluginDto,
+  ProjectDto,
+  SkillDto,
+} from "$lib/types";
+
+export const THEME_KEY = "on-n-off.theme";
+export const AGENT_KEY = "on-n-off.agent";
+export const SCREEN_KEY = "on-n-off.screen";
+export const SCOPE_KEY = "on-n-off.scope";
+
+export type Theme = "dark" | "light";
+
+export const SCREEN_PATH: Record<Screen, string> = {
+  overview: "/overview",
+  plugins: "/plugins",
+  skills: "/skills",
+  mcp: "/mcp",
+  usage: "/usage",
+  config: "/config",
+};
+
+export function pathToScreen(pathname: string): Screen {
+  const hit = (Object.entries(SCREEN_PATH) as [Screen, string][]).find(([, path]) => path === pathname);
+  return hit?.[0] ?? "overview";
+}
+
+export function readTheme(): Theme {
+  return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
+}
+
+export function readAgent(): AgentId {
+  const value = localStorage.getItem(AGENT_KEY);
+  if (value === "codex" || value === "antigravity") {
+    return value;
+  }
+  return "claude";
+}
+
+export function readScreen(): Screen {
+  const value = localStorage.getItem(SCREEN_KEY);
+  if (
+    value === "plugins" ||
+    value === "skills" ||
+    value === "mcp" ||
+    value === "usage" ||
+    value === "config" ||
+    value === "overview"
+  ) {
+    return value;
+  }
+  return "overview";
+}
+
+function readScope(agentId: AgentId): string | null {
+  const value = localStorage.getItem(`${SCOPE_KEY}.${agentId}`)?.trim();
+  return value || null;
+}
+
+function emptyTabs(): Record<AgentId, TabState> {
+  return {
+    claude: emptyTab(),
+    codex: emptyTab(),
+    antigravity: emptyTab(),
+  };
+}
+
+type SessionContextValue = {
+  theme: Theme;
+  toggleTheme: () => void;
+  agents: AgentInfo[];
+  selected: AgentId;
+  setSelected: (id: AgentId) => void;
+  tabs: Record<AgentId, TabState>;
+  setFilter: (value: string) => void;
+  log: TripEntry[];
+  flags: FeatureFlags;
+  installOpen: boolean;
+  setInstallOpen: (open: boolean) => void;
+  installError: string | null;
+  clearInstallError: () => void;
+  uninstallTarget: PluginDto | null;
+  setUninstallTarget: (plugin: PluginDto | null) => void;
+  currentAgent: AgentInfo;
+  currentTab: TabState;
+  filtered: ReturnType<typeof filterTab> | null;
+  expandedIds: Set<string>;
+  banner: string | null;
+  canInstall: boolean;
+  counts: ReturnType<typeof catalogCounts>;
+  live: LiveRow[];
+  drift: ReturnType<typeof driftRows>;
+  allOn: boolean;
+  cliLine: string;
+  masterNote: string;
+  showMasterCut: boolean;
+  currentProjects: ProjectDto[];
+  currentScopePath: string | null;
+  currentScopeLabel: string;
+  scopeNote: string;
+  loadTab: (agentId: AgentId, probe?: boolean) => Promise<void>;
+  selectScope: (path: string | null) => Promise<void>;
+  pickProjectFolder: () => Promise<void>;
+  openProjectPath: (path: string) => Promise<void>;
+  toggleExpand: (pluginId: string) => void;
+  togglePlugin: (plugin: PluginDto, enabled: boolean) => void;
+  toggleSkill: (skill: SkillDto, enabled: boolean) => void;
+  toggleMcp: (server: McpServerDto, enabled: boolean) => void;
+  toggleLive: (row: LiveRow, enabled: boolean) => void;
+  masterCut: (enabled: boolean) => Promise<void>;
+  pickFolder: () => Promise<string | null>;
+  install: (source: string) => Promise<boolean>;
+  updatePlugin: (plugin: PluginDto) => void;
+  confirmUninstall: () => Promise<void>;
+  emptyTabDto: typeof emptyTabDto;
+};
+
+const SessionContext = createContext<SessionContextValue | null>(null);
+
+export function useAgentSession(): SessionContextValue {
+  const ctx = useContext(SessionContext);
+  if (!ctx) {
+    throw new Error("useAgentSession must be used within SessionProvider");
+  }
+  return ctx;
+}
+
+function bannerMessage(agent: AgentInfo, tabError: string | null): string | null {
+  if (tabError) {
+    return tabError;
+  }
+  if (!agent.cliOk) {
+    return agent.cliError || copy.cliMissing(agent.displayName);
+  }
+  return null;
+}
+
+function patchTab(
+  tabs: Record<AgentId, TabState>,
+  agentId: AgentId,
+  patch: Partial<TabState>,
+): Record<AgentId, TabState> {
+  return {
+    ...tabs,
+    [agentId]: { ...tabs[agentId], ...patch },
+  };
+}
+
+export function SessionProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  const [agents, setAgents] = useState<AgentInfo[]>(() => LOCKED_AGENTS.map((agent) => ({ ...agent })));
+  const [selected, setSelectedState] = useState<AgentId>(readAgent);
+  const [tabs, setTabs] = useState<Record<AgentId, TabState>>(emptyTabs);
+  const [log, setLog] = useState<TripEntry[]>([]);
+  const [flags, setFlags] = useState<FeatureFlags>(() => mergeFlags(null));
+  const [installOpen, setInstallOpen] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<PluginDto | null>(null);
+  const [projects, setProjects] = useState<Record<AgentId, ProjectDto[]>>({
+    claude: [],
+    codex: [],
+    antigravity: [],
+  });
+  const [extraProjects, setExtraProjects] = useState<Record<AgentId, ProjectDto[]>>({
+    claude: [],
+    codex: [],
+    antigravity: [],
+  });
+  const [selectedScope, setSelectedScope] = useState<Record<AgentId, string | null>>({
+    claude: readScope("claude"),
+    codex: readScope("codex"),
+    antigravity: readScope("antigravity"),
+  });
+
+  const tabsRef = useRef(tabs);
+  const agentsRef = useRef(agents);
+  const selectedRef = useRef(selected);
+  const selectedScopeRef = useRef(selectedScope);
+  const projectsRef = useRef(projects);
+  const extraProjectsRef = useRef(extraProjects);
+  const inFlightRef = useRef<Record<AgentId, boolean>>({
+    claude: false,
+    codex: false,
+    antigravity: false,
+  });
+
+  tabsRef.current = tabs;
+  agentsRef.current = agents;
+  selectedRef.current = selected;
+  selectedScopeRef.current = selectedScope;
+  projectsRef.current = projects;
+  extraProjectsRef.current = extraProjects;
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = "onnoff";
+    root.classList.toggle("dark", theme === "dark");
+    root.style.colorScheme = theme;
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(AGENT_KEY, selected);
+  }, [selected]);
+
+  const note = useCallback((tag: TripEntry["tag"], text: string) => {
+    setLog((prev) => prependTrip(prev, tag, text));
+  }, []);
+
+  const agentLabel = useCallback((agentId: AgentId): string => {
+    return agentsRef.current.find((agent) => agent.id === agentId)?.displayName ?? agentId;
+  }, []);
+
+  const scopeSuffix = useCallback((agentId: AgentId = selectedRef.current): string => {
+    const path = selectedScopeRef.current[agentId];
+    if (!path) {
+      return "all projects";
+    }
+    return (
+      mergeProjects(projectsRef.current[agentId], extraProjectsRef.current[agentId]).find((project) =>
+        sameProjectPath(project.path, path),
+      )?.label ?? projectLabel(path)
+    );
+  }, []);
+
+  const rememberExtra = useCallback(async (agentId: AgentId, path: string) => {
+    if (
+      mergeProjects(projectsRef.current[agentId], extraProjectsRef.current[agentId]).some((project) =>
+        sameProjectPath(project.path, path),
+      )
+    ) {
+      return;
+    }
+    try {
+      const inspected = await api.inspectProject(agentId, path);
+      setExtraProjects((prev) => ({ ...prev, [agentId]: [...prev[agentId], inspected] }));
+    } catch {
+      setExtraProjects((prev) => ({ ...prev, [agentId]: [...prev[agentId], projectFromPath(path)] }));
+    }
+  }, []);
+
+  const loadProjects = useCallback(
+    async (agentId: AgentId) => {
+      try {
+        const next = await api.listProjects(agentId);
+        setProjects((prev) => ({ ...prev, [agentId]: next }));
+      } catch {
+        setProjects((prev) => ({ ...prev, [agentId]: [] }));
+      }
+      const saved = selectedScopeRef.current[agentId];
+      if (saved) {
+        await rememberExtra(agentId, saved);
+      }
+    },
+    [rememberExtra],
+  );
+
+  const applyScopedTab = useCallback(async (agentId: AgentId, fallback: AgentTabDto) => {
+    try {
+      const next = await api.listPlugins(agentId, selectedScopeRef.current[agentId]);
+      setTabs((prev) => patchTab(prev, agentId, { dto: next }));
+    } catch {
+      setTabs((prev) => patchTab(prev, agentId, { dto: fallback }));
+    }
+  }, []);
+
+  const withLock = useCallback(async (agentId: AgentId, fn: () => Promise<void>) => {
+    if (inFlightRef.current[agentId]) {
+      return;
+    }
+    inFlightRef.current[agentId] = true;
+    setTabs((prev) => patchTab(prev, agentId, { inFlight: true }));
+    try {
+      await fn();
+    } finally {
+      inFlightRef.current[agentId] = false;
+      setTabs((prev) => patchTab(prev, agentId, { inFlight: false }));
+    }
+  }, []);
+
+  const loadTab = useCallback(
+    async (agentId: AgentId, probe = false) => {
+      await withLock(agentId, async () => {
+        if (probe) {
+          try {
+            setAgents(overlayAgents(await api.listAgents()));
+          } catch {
+            setAgents(overlayAgents([]));
+          }
+        }
+        setTabs((prev) => patchTab(prev, agentId, { loading: true }));
+        try {
+          await loadProjects(agentId);
+          const dto = await api.refresh(agentId, selectedScopeRef.current[agentId]);
+          setTabs((prev) => patchTab(prev, agentId, { dto, error: null }));
+          const itemCount = (dto?.plugins.length ?? 0) + (dto?.userSkills.length ?? 0);
+          if (probe || agentId === selectedRef.current) {
+            note("SYNC", `scanned ${agentLabel(agentId)} config · ${itemCount} items`);
+          }
+        } catch (error) {
+          setTabs((prev) =>
+            patchTab(prev, agentId, {
+              dto: null,
+              error: displayError(parseInvokeError(error), agentLabel(agentId)),
+            }),
+          );
+          note("TRIP", `${agentLabel(agentId)} refresh failed`);
+        } finally {
+          setTabs((prev) => patchTab(prev, agentId, { loading: false }));
+        }
+      });
+    },
+    [agentLabel, loadProjects, note, withLock],
+  );
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setFlags(mergeFlags(await api.featureFlags()));
+      } catch {
+        setFlags(mergeFlags(null));
+      }
+      try {
+        setAgents(overlayAgents(await api.listAgents()));
+      } catch (error) {
+        setAgents(overlayAgents([]));
+        const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
+        setTabs((prev) =>
+          patchTab(prev, selectedRef.current, {
+            error: displayError(parseInvokeError(error), agent.displayName),
+          }),
+        );
+      }
+      await Promise.all([loadTab("claude"), loadTab("codex"), loadTab("antigravity")]);
+    })();
+  }, [loadTab]);
+
+  const setSelected = useCallback((id: AgentId) => {
+    setSelectedState(id);
+  }, []);
+
+  const setFilter = useCallback(
+    (value: string) => {
+      setTabs((prev) => patchTab(prev, selected, { filter: value }));
+    },
+    [selected],
+  );
+
+  const selectScope = useCallback(
+    async (path: string | null) => {
+      const agentId = selectedRef.current;
+      setSelectedScope((prev) => ({ ...prev, [agentId]: path }));
+      localStorage.setItem(`${SCOPE_KEY}.${agentId}`, path ?? "");
+      await loadTab(agentId);
+    },
+    [loadTab],
+  );
+
+  const pickProjectFolder = useCallback(async () => {
+    const dir = await open({ directory: true, multiple: false });
+    if (typeof dir !== "string") {
+      return;
+    }
+    await rememberExtra(selectedRef.current, dir);
+    await selectScope(dir);
+  }, [rememberExtra, selectScope]);
+
+  const openProjectPath = useCallback(
+    async (path: string) => {
+      await rememberExtra(selectedRef.current, path);
+      await selectScope(path);
+    },
+    [rememberExtra, selectScope],
+  );
+
+  const toggleExpand = useCallback(
+    (pluginId: string) => {
+      setTabs((prev) => {
+        const next = new Set(prev[selected].expanded);
+        if (next.has(pluginId)) {
+          next.delete(pluginId);
+        } else {
+          next.add(pluginId);
+        }
+        return patchTab(prev, selected, { expanded: next });
+      });
+    },
+    [selected],
+  );
+
+  const mutate = useCallback(
+    async (fn: () => Promise<AgentTabDto>, okNote?: { tag: TripEntry["tag"]; text: string }) => {
+      const agentId = selectedRef.current;
+      await withLock(agentId, async () => {
+        try {
+          const next = await fn();
+          await applyScopedTab(agentId, next);
+          setTabs((prev) => patchTab(prev, agentId, { error: null }));
+          if (okNote) {
+            note(okNote.tag, okNote.text);
+          }
+        } catch (error) {
+          const message = displayError(parseInvokeError(error), agentLabel(agentId));
+          setTabs((prev) => patchTab(prev, agentId, { error: message }));
+          note("TRIP", message);
+        }
+      });
+    },
+    [agentLabel, applyScopedTab, note, withLock],
+  );
+
+  const togglePlugin = useCallback(
+    (plugin: PluginDto, enabled: boolean) => {
+      const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
+      void mutate(() => api.setPluginEnabled(selectedRef.current, plugin.id, enabled), {
+        tag: enabled ? "ON" : "OFF",
+        text: `${plugin.name} ${enabled ? "enabled" : "cut"} for ${agent.displayName} · ${scopeSuffix()}`,
+      });
+    },
+    [mutate, scopeSuffix],
+  );
+
+  const toggleSkill = useCallback(
+    (skill: SkillDto, enabled: boolean) => {
+      const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
+      void mutate(() => api.setSkillEnabled(selectedRef.current, skill.id, enabled), {
+        tag: enabled ? "ON" : "OFF",
+        text: `${skill.name} ${enabled ? "enabled" : "cut"} for ${agent.displayName} · ${scopeSuffix()}`,
+      });
+    },
+    [mutate, scopeSuffix],
+  );
+
+  const toggleMcp = useCallback(
+    (server: McpServerDto, enabled: boolean) => {
+      const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
+      void mutate(() => api.setMcpEnabled(selectedRef.current, server.id, enabled), {
+        tag: enabled ? "ON" : "OFF",
+        text: `${server.name} ${enabled ? "enabled" : "cut"} for ${agent.displayName} · ${scopeSuffix()}`,
+      });
+    },
+    [mutate, scopeSuffix],
+  );
+
+  const toggleLive = useCallback(
+    (row: LiveRow, enabled: boolean) => {
+      const dto = tabsRef.current[selectedRef.current].dto;
+      if (row.kind === "plugin") {
+        const plugin = dto?.plugins.find((item) => item.id === row.id);
+        if (plugin) {
+          togglePlugin(plugin, enabled);
+        }
+        return;
+      }
+      if (row.kind === "mcp") {
+        const server = dto?.mcpServers.find((item) => item.id === row.id);
+        if (server?.togglable) {
+          toggleMcp(server, enabled);
+        }
+        return;
+      }
+      const skill =
+        dto?.userSkills.find((item) => item.id === row.id) ??
+        dto?.plugins.flatMap((plugin) => plugin.skills).find((item) => item.id === row.id);
+      if (skill?.togglable) {
+        toggleSkill(skill, enabled);
+      }
+    },
+    [toggleMcp, togglePlugin, toggleSkill],
+  );
+
+  const masterCut = useCallback(
+    async (enabled: boolean) => {
+      if (!flagOn(flags, "masterCut")) {
+        return;
+      }
+      const agentId = selectedRef.current;
+      const dto = tabsRef.current[agentId].dto;
+      if (!dto) {
+        return;
+      }
+      await withLock(agentId, async () => {
+        let current = dto;
+        try {
+          for (const plugin of current.plugins) {
+            if (plugin.togglable && plugin.enabled !== enabled) {
+              current = await api.setPluginEnabled(agentId, plugin.id, enabled);
+            }
+          }
+          for (const skill of current.userSkills) {
+            if (skill.togglable && skill.enabled !== enabled) {
+              current = await api.setSkillEnabled(agentId, skill.id, enabled);
+            }
+          }
+          for (const server of current.mcpServers) {
+            if (server.togglable && server.enabled !== enabled) {
+              current = await api.setMcpEnabled(agentId, server.id, enabled);
+            }
+          }
+          await applyScopedTab(agentId, current);
+          setTabs((prev) => patchTab(prev, agentId, { error: null }));
+          note(
+            enabled ? "ON" : "TRIP",
+            `master ${enabled ? "restored" : "cut"} for ${agentLabel(agentId)} · ${scopeSuffix(agentId)}`,
+          );
+        } catch (error) {
+          setTabs((prev) =>
+            patchTab(prev, agentId, {
+              dto: current,
+              error: displayError(parseInvokeError(error), agentLabel(agentId)),
+            }),
+          );
+          note("TRIP", `master cut failed for ${agentLabel(agentId)}`);
+        }
+      });
+    },
+    [agentLabel, applyScopedTab, flags, note, scopeSuffix, withLock],
+  );
+
+  const pickFolder = useCallback(async (): Promise<string | null> => {
+    const dir = await open({ directory: true, multiple: false });
+    return typeof dir === "string" ? dir : null;
+  }, []);
+
+  const install = useCallback(
+    async (source: string): Promise<boolean> => {
+      setInstallError(null);
+      const agentId = selectedRef.current;
+      let ok = false;
+      await withLock(agentId, async () => {
+        try {
+          const next = await api.installPlugin(agentId, source);
+          await applyScopedTab(agentId, next);
+          setTabs((prev) => patchTab(prev, agentId, { error: null }));
+          setInstallOpen(false);
+          note("INST", `${source} installed · enabled on ${agentLabel(agentId)}`);
+          ok = true;
+        } catch (error) {
+          const message = displayError(parseInvokeError(error), agentLabel(agentId));
+          setInstallError(message);
+          note("TRIP", message);
+        }
+      });
+      return ok;
+    },
+    [agentLabel, applyScopedTab, note, withLock],
+  );
+
+  const updatePlugin = useCallback(
+    (plugin: PluginDto) => {
+      const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
+      void mutate(() => api.updatePlugin(selectedRef.current, plugin.id), {
+        tag: "SYNC",
+        text: `${plugin.name} updated on ${agent.displayName}`,
+      });
+    },
+    [mutate],
+  );
+
+  const confirmUninstall = useCallback(async () => {
+    if (!uninstallTarget) {
+      return;
+    }
+    const target = uninstallTarget;
+    await mutate(() => api.uninstallPlugin(selectedRef.current, target.id), {
+      tag: "TRIP",
+      text: `${target.name} uninstalled from ${agentLabel(selectedRef.current)}`,
+    });
+    setUninstallTarget(null);
+  }, [agentLabel, mutate, uninstallTarget]);
+
+  const currentAgent = agents.find((agent) => agent.id === selected) ?? agents[0];
+  const currentTab = tabs[selected];
+  const filtered = currentTab.dto ? filterTab(currentTab.dto, currentTab.filter) : null;
+  const expandedIds = openIds(currentTab.expanded, filtered?.expandIds ?? []);
+  const banner = bannerMessage(currentAgent, currentTab.error);
+  const canInstall = currentAgent.cliOk && currentAgent.installGit && !currentTab.inFlight;
+  const counts = catalogCounts(currentTab.dto);
+  const live = currentTab.dto
+    ? liveRows(currentTab.dto).filter((row) => {
+        const q = currentTab.filter.trim().toLowerCase();
+        return !q || `${row.name} ${row.meta} ${row.id}`.toLowerCase().includes(q);
+      })
+    : [];
+  const drift = currentTab.dto ? driftRows(currentTab.dto) : [];
+  const allOn = masterAllOn(currentTab.dto);
+  const cliLine = currentAgent.cliOk
+    ? `${currentAgent.id} · ${agentRoot(currentAgent.id)}`
+    : `${currentAgent.id} · offline`;
+  const masterNote = allOn
+    ? `everything live on ${currentAgent.displayName}`
+    : `cuts every item for ${currentAgent.displayName}`;
+  const showMasterCut = flagOn(flags, "masterCut");
+  const currentProjects = mergeProjects(projects[selected], extraProjects[selected]);
+  const currentScopePath = selectedScope[selected];
+  const currentScopeLabel = currentScopePath
+    ? (currentProjects.find((project) => sameProjectPath(project.path, currentScopePath))?.label ??
+      projectLabel(currentScopePath))
+    : "all projects";
+  const scopeNote = currentScopePath
+    ? `local skills · ${currentScopePath}`
+    : "global agent config is the source of truth";
+
+  const value = useMemo<SessionContextValue>(
+    () => ({
+      theme,
+      toggleTheme: () => setTheme((prev) => (prev === "dark" ? "light" : "dark")),
+      agents,
+      selected,
+      setSelected,
+      tabs,
+      setFilter,
+      log,
+      flags,
+      installOpen,
+      setInstallOpen,
+      installError,
+      clearInstallError: () => setInstallError(null),
+      uninstallTarget,
+      setUninstallTarget,
+      currentAgent,
+      currentTab,
+      filtered,
+      expandedIds,
+      banner,
+      canInstall,
+      counts,
+      live,
+      drift,
+      allOn,
+      cliLine,
+      masterNote,
+      showMasterCut,
+      currentProjects,
+      currentScopePath,
+      currentScopeLabel,
+      scopeNote,
+      loadTab,
+      selectScope,
+      pickProjectFolder,
+      openProjectPath,
+      toggleExpand,
+      togglePlugin,
+      toggleSkill,
+      toggleMcp,
+      toggleLive,
+      masterCut,
+      pickFolder,
+      install,
+      updatePlugin,
+      confirmUninstall,
+      emptyTabDto,
+    }),
+    [
+      theme,
+      agents,
+      selected,
+      setSelected,
+      tabs,
+      setFilter,
+      log,
+      flags,
+      installOpen,
+      installError,
+      uninstallTarget,
+      currentAgent,
+      currentTab,
+      filtered,
+      expandedIds,
+      banner,
+      canInstall,
+      counts,
+      live,
+      drift,
+      allOn,
+      cliLine,
+      masterNote,
+      showMasterCut,
+      currentProjects,
+      currentScopePath,
+      currentScopeLabel,
+      scopeNote,
+      loadTab,
+      selectScope,
+      pickProjectFolder,
+      openProjectPath,
+      toggleExpand,
+      togglePlugin,
+      toggleSkill,
+      toggleMcp,
+      toggleLive,
+      masterCut,
+      pickFolder,
+      install,
+      updatePlugin,
+      confirmUninstall,
+    ],
+  );
+
+  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}

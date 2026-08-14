@@ -1,17 +1,17 @@
-import { render, screen } from "@testing-library/svelte";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import Overview from "./Overview.svelte";
+import { Overview } from "./Overview";
 
 describe("Overview", () => {
   it("renders gauges, live rows, and trip log", () => {
-    render(Overview, {
-      props: {
-        counts: {
+    render(
+      <Overview
+        counts={{
           plugins: { on: 1, total: 2 },
           skills: { on: 2, total: 4 },
           mcp: { on: 1, total: 2 },
-        },
-        rows: [
+        }}
+        rows={[
           {
             kind: "plugin",
             id: "workbench@workshop",
@@ -36,8 +36,8 @@ describe("Overview", () => {
             enabled: true,
             togglable: true,
           },
-        ],
-        drift: [
+        ]}
+        drift={[
           {
             kind: "plugin",
             id: "workbench@workshop",
@@ -45,12 +45,12 @@ describe("Overview", () => {
             version: "0.22.1",
             upstream: "0.23.0",
           },
-        ],
-        log: [{ at: "14:02", tag: "ON", text: "workbench enabled for Claude · all projects" }],
-        pluginToggle: true,
-        onToggle: () => undefined,
-      },
-    });
+        ]}
+        log={[{ at: "14:02", tag: "ON", text: "workbench enabled for Claude · all projects" }]}
+        pluginToggle={true}
+        onToggle={() => undefined}
+      />,
+    );
     expect(screen.getByText("Plugins")).toBeTruthy();
     expect(screen.getByText("Skills")).toBeTruthy();
     expect(screen.getByText("MCP servers")).toBeTruthy();
@@ -71,18 +71,18 @@ describe("Overview", () => {
   });
 
   it("shows empty live and trip copy", () => {
-    render(Overview, {
-      props: {
-        counts: {
+    render(
+      <Overview
+        counts={{
           plugins: { on: 0, total: 0 },
           skills: { on: 0, total: 0 },
           mcp: { on: 0, total: 0 },
-        },
-        rows: [],
-        log: [],
-        onToggle: () => undefined,
-      },
-    });
+        }}
+        rows={[]}
+        log={[]}
+        onToggle={() => undefined}
+      />,
+    );
     expect(screen.getByText("Nothing live on this circuit.")).toBeTruthy();
     expect(screen.getByText("No trips yet this session.")).toBeTruthy();
   });

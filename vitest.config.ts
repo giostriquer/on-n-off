@@ -1,19 +1,20 @@
 import { defineConfig } from "vitest/config";
-import { svelte } from "@sveltejs/vite-plugin-svelte";
+import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
 export default defineConfig({
-  plugins: [tailwindcss(), svelte({ hot: false })],
+  plugins: [tailwindcss(), react()],
   resolve: {
     alias: {
       $lib: path.resolve(__dirname, "ui/src/lib"),
+      "@": path.resolve(__dirname, "ui/src"),
     },
     conditions: ["browser"],
   },
   test: {
     environment: "jsdom",
-    include: ["ui/src/**/*.test.ts"],
+    include: ["ui/src/**/*.test.ts", "ui/src/**/*.test.tsx"],
     setupFiles: ["./ui/src/test-setup.ts"],
   },
 });

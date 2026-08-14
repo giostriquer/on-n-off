@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/svelte";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import LeftRail from "./LeftRail.svelte";
+import { LeftRail } from "./LeftRail";
 
 const counts = {
   plugins: { on: 3, total: 4 },
@@ -11,16 +11,16 @@ const counts = {
 
 describe("LeftRail", () => {
   it("renders Studio nav labels and hides master cut by default", () => {
-    render(LeftRail, {
-      props: {
-        screen: "overview",
-        counts,
-        masterOn: false,
-        masterNote: "cuts every item for Claude",
-        onScreen: () => undefined,
-        onMaster: () => undefined,
-      },
-    });
+    render(
+      <LeftRail
+        screen="overview"
+        counts={counts}
+        masterOn={false}
+        masterNote="cuts every item for Claude"
+        onScreen={() => undefined}
+        onMaster={() => undefined}
+      />,
+    );
     expect(screen.getByRole("navigation", { name: "Section" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Overview/i }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("button", { name: /Plugins 3\/4/i })).toBeTruthy();
@@ -36,17 +36,17 @@ describe("LeftRail", () => {
     const user = userEvent.setup();
     const onScreen = vi.fn();
     const onMaster = vi.fn();
-    render(LeftRail, {
-      props: {
-        screen: "plugins",
-        counts,
-        masterOn: true,
-        masterNote: "everything live on Claude",
-        showMasterCut: true,
-        onScreen,
-        onMaster,
-      },
-    });
+    render(
+      <LeftRail
+        screen="plugins"
+        counts={counts}
+        masterOn={true}
+        masterNote="everything live on Claude"
+        showMasterCut={true}
+        onScreen={onScreen}
+        onMaster={onMaster}
+      />,
+    );
     expect(screen.getByText("Master cut")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Master cut" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("everything live on Claude")).toBeTruthy();

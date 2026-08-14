@@ -1,0 +1,87 @@
+.rocker {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 0;
+  border: 1px solid var(--hair);
+  border-radius: 11px;
+  background: var(--plate);
+  color: var(--mute);
+  cursor: pointer;
+  user-select: none;
+  letter-spacing: 0.03em;
+  font-family: "Instrument Sans", sans-serif;
+  font-weight: 600;
+  overflow: hidden;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.rocker.tab,
+.rocker.theme {
+  border-radius: 8px;
+}
+
+.rocker.tab {
+  height: 30px;
+  min-width: 92px;
+  font-size: 11.5px;
+}
+
+.rocker.plugin {
+  height: 28px;
+  min-width: 88px;
+  font-size: 11px;
+}
+
+.rocker.skill {
+  height: 22px;
+  min-width: 70px;
+  font-size: 9.5px;
+}
+
+.rocker.theme {
+  height: 22px;
+  min-width: 72px;
+  font-size: 9.5px;
+}
+
+.rocker.master {
+  height: 30px;
+  width: 100%;
+  font-size: 10.5px;
+}
+
+.rocker .half {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  overflow: hidden;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.rocker.on .on-side {
+  background: var(--brass);
+  color: var(--void);
+}
+
+.rocker:not(.on) .off {
+  background: var(--well);
+  color: var(--silkscreen);
+}
+
+.rocker.dangerOff:not(.on) .off {
+  background: var(--trip);
+  color: #f7f1ea;
+}
+
+.rocker:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rocker.busy {
+  opacity: 0.6;
+}

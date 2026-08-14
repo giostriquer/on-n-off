@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import ScopeBar from "./ScopeBar.svelte";
+import { ScopeBar } from "./ScopeBar";
 
 const projects = [
   {
@@ -26,19 +26,19 @@ describe("ScopeBar", () => {
     const onSelect = vi.fn();
     const onPickFolder = vi.fn();
     const onOpenPath = vi.fn();
-    render(ScopeBar, {
-      props: {
-        agentId: "claude",
-        projects,
-        selectedPath: null,
-        note: "global agent config is the source of truth",
-        tally: "3 plugins · 4 skills · 0 mcps live on Claude",
-        globalItems: 7,
-        onSelect,
-        onPickFolder,
-        onOpenPath,
-      },
-    });
+    render(
+      <ScopeBar
+        agentId="claude"
+        projects={projects}
+        selectedPath={null}
+        note="global agent config is the source of truth"
+        tally="3 plugins · 4 skills · 0 mcps live on Claude"
+        globalItems={7}
+        onSelect={onSelect}
+        onPickFolder={onPickFolder}
+        onOpenPath={onOpenPath}
+      />,
+    );
     expect(screen.getByText("SCOPE")).toBeTruthy();
     expect(screen.getByText("All projects")).toBeTruthy();
     expect(screen.getByText("global config")).toBeTruthy();
@@ -57,19 +57,19 @@ describe("ScopeBar", () => {
   it("filters projects and pastes a folder path", async () => {
     const onOpenPath = vi.fn();
     const onPickFolder = vi.fn();
-    render(ScopeBar, {
-      props: {
-        agentId: "codex",
-        projects,
-        selectedPath: String.raw`E:\dev\on-n-off`,
-        note: String.raw`local skills · E:\dev\on-n-off`,
-        tally: "1 plugins · 2 skills · 1 mcps live on Codex",
-        globalItems: 4,
-        onSelect: () => undefined,
-        onPickFolder,
-        onOpenPath,
-      },
-    });
+    render(
+      <ScopeBar
+        agentId="codex"
+        projects={projects}
+        selectedPath={String.raw`E:\dev\on-n-off`}
+        note={String.raw`local skills · E:\dev\on-n-off`}
+        tally="1 plugins · 2 skills · 1 mcps live on Codex"
+        globalItems={4}
+        onSelect={() => undefined}
+        onPickFolder={onPickFolder}
+        onOpenPath={onOpenPath}
+      />,
+    );
     expect(screen.getByText("2 local skills · 1 project mcps")).toBeTruthy();
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     const search = screen.getByPlaceholderText("Search projects, or paste a folder path…");
@@ -85,19 +85,19 @@ describe("ScopeBar", () => {
 
   it("picks a folder from the picker footer", async () => {
     const onPickFolder = vi.fn();
-    render(ScopeBar, {
-      props: {
-        agentId: "claude",
-        projects,
-        selectedPath: null,
-        note: "global agent config is the source of truth",
-        tally: "0 plugins · 0 skills · 0 mcps live on Claude",
-        globalItems: 0,
-        onSelect: () => undefined,
-        onPickFolder,
-        onOpenPath: () => undefined,
-      },
-    });
+    render(
+      <ScopeBar
+        agentId="claude"
+        projects={projects}
+        selectedPath={null}
+        note="global agent config is the source of truth"
+        tally="0 plugins · 0 skills · 0 mcps live on Claude"
+        globalItems={0}
+        onSelect={() => undefined}
+        onPickFolder={onPickFolder}
+        onOpenPath={() => undefined}
+      />,
+    );
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await fireEvent.click(screen.getByText("Choose folder…"));
     expect(onPickFolder).toHaveBeenCalled();

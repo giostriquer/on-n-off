@@ -2,6 +2,8 @@
 
 A desktop switchboard for Claude and Codex plugins and skills. Global agent config stays the source of truth.
 
+Frontend: React + Tailwind 4 + TanStack Router / Query + lucide-react. Backend: Tauri (Rust).
+
 ## Run
 
 ```bash
