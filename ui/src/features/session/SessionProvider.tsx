@@ -115,6 +115,7 @@ type SessionContextValue = {
   log: TripEntry[];
   flags: FeatureFlags;
   appSettings: AppSettings;
+  initialProviderReady: boolean;
   visibleAgents: AgentInfo[];
   persistAppSettings: (next: AppSettings) => Promise<AppSettings | null>;
   setProviderHidden: (id: AgentId, hidden: boolean) => Promise<void>;
@@ -199,6 +200,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [log, setLog] = useState<TripEntry[]>([]);
   const [flags, setFlags] = useState<FeatureFlags>(() => mergeFlags(null));
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [initialProviderReady, setInitialProviderReady] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<PluginDto | null>(null);
@@ -229,6 +231,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     codex: false,
     antigravity: false,
   });
+  const bootStartedRef = useRef(false);
 
   tabsRef.current = tabs;
   agentsRef.current = agents;
@@ -360,35 +363,48 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (bootStartedRef.current) {
+      return;
+    }
+    bootStartedRef.current = true;
     void (async () => {
-      try {
-        setFlags(mergeFlags(await api.featureFlags()));
-      } catch {
-        setFlags(mergeFlags(null));
-      }
-      try {
-        setAppSettings(mergeAppSettings(await api.loadAppSettings()));
-      } catch {
-        setAppSettings(DEFAULT_APP_SETTINGS);
-      }
-      try {
-        setAgents(overlayAgents(await api.listAgents()));
-      } catch (error) {
+      const [nextFlags, nextSettings, nextAgents] = await Promise.allSettled([
+        api.featureFlags(),
+        api.loadAppSettings(),
+        api.listAgents(),
+      ]);
+      setFlags(mergeFlags(nextFlags.status === "fulfilled" ? nextFlags.value : null));
+      setAppSettings(
+        nextSettings.status === "fulfilled" ? mergeAppSettings(nextSettings.value) : DEFAULT_APP_SETTINGS,
+      );
+      if (nextAgents.status === "fulfilled") {
+        setAgents(overlayAgents(nextAgents.value));
+      } else {
         setAgents(overlayAgents([]));
         const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
         setTabs((prev) =>
           patchTab(prev, selectedRef.current, {
-            error: displayError(parseInvokeError(error), agent.displayName),
+            error: displayError(parseInvokeError(nextAgents.reason), agent.displayName),
           }),
         );
       }
-      await Promise.all([loadTab("claude"), loadTab("codex"), loadTab("antigravity")]);
+      const primary = selectedRef.current;
+      await loadTab(primary);
+      setInitialProviderReady(true);
+      const background = (["claude", "codex", "antigravity"] as const).filter((id) => id !== primary);
+      void Promise.all(background.map((id) => loadTab(id)));
     })();
   }, [loadTab]);
 
-  const setSelected = useCallback((id: AgentId) => {
-    setSelectedState(id);
-  }, []);
+  const setSelected = useCallback(
+    (id: AgentId) => {
+      setSelectedState(id);
+      if (!tabsRef.current[id].dto && !inFlightRef.current[id]) {
+        void loadTab(id);
+      }
+    },
+    [loadTab],
+  );
 
   const setFilter = useCallback(
     (value: string) => {
@@ -717,6 +733,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       log,
       flags,
       appSettings,
+      initialProviderReady,
       persistAppSettings,
       setProviderHidden,
       setProviderBinary,
@@ -772,6 +789,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       log,
       flags,
       appSettings,
+      initialProviderReady,
       persistAppSettings,
       setProviderHidden,
       setProviderBinary,

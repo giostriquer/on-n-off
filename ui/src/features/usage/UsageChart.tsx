@@ -12,7 +12,7 @@ import type { UsageMetric } from "$lib/usageTypes";
 import type { AgentId } from "$lib/types";
 import "./UsageChart.css";
 
-type UsageChartProps = {
+export type UsageChartProps = {
   folded: FoldedUsage;
   metric: UsageMetric;
   onMetricChange: (metric: UsageMetric) => void;

@@ -4,16 +4,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
-use crate::cli::{AgentCli, INSTALL_TIMEOUT, run_npx_skills};
+use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
 use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
-use crate::install_source::{InstallSource, parse_install_source};
+use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{
     agent_info, antigravity_cli_plugins, antigravity_cli_root, antigravity_cli_skills,
     antigravity_config_plugins, antigravity_mcp_config, normalize_skill_path, plugin_id_parts,
 };
-use crate::scanner::{ScannedSkill, scan_antigravity_skills, scan_plugin_skills};
+use crate::scanner::{scan_antigravity_skills, scan_plugin_skills, ScannedSkill};
 use crate::sort::sort_tab;
 
 const SOURCE_CLI: &str = "cli";
@@ -194,7 +194,11 @@ impl AgentAdapter for AntigravityAdapter {
         Ok(tab)
     }
 
-    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_plugin_enabled(
+        &self,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let _guard = self
             .write
             .lock()
@@ -325,14 +329,20 @@ fn merge_enablement(map: &mut HashMap<String, bool>, text: &str) {
             }
         }
     }
-    if let Some(list) = value.get("disabledPlugins").and_then(|value| value.as_array()) {
+    if let Some(list) = value
+        .get("disabledPlugins")
+        .and_then(|value| value.as_array())
+    {
         for item in list {
             if let Some(name) = item.as_str() {
                 map.insert(name.to_string(), false);
             }
         }
     }
-    if let Some(list) = value.get("enabledPlugins").and_then(|value| value.as_array()) {
+    if let Some(list) = value
+        .get("enabledPlugins")
+        .and_then(|value| value.as_array())
+    {
         for item in list {
             if let Some(name) = item.as_str() {
                 map.insert(name.to_string(), true);
@@ -444,7 +454,9 @@ mod tests {
         )
         .unwrap();
 
-        let tab = AntigravityAdapter::at(gemini.clone()).list_tab().expect("list");
+        let tab = AntigravityAdapter::at(gemini.clone())
+            .list_tab()
+            .expect("list");
         let alpha = tab.plugins.iter().find(|p| p.id == "alpha@cli").unwrap();
         assert!(!alpha.enabled);
         assert_eq!(alpha.skills.len(), 1);

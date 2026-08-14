@@ -6,16 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::paths;
 
 /// Resolved feature flags. Unknown file keys are ignored. Defaults are off.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeatureFlags {
     pub master_cut: bool,
-}
-
-impl Default for FeatureFlags {
-    fn default() -> Self {
-        Self { master_cut: false }
-    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -33,7 +27,10 @@ pub fn parse_env_bool(raw: &str) -> Option<bool> {
 }
 
 /// File overlay first, then `ON_N_OFF_FLAG_*` env. Invalid env values are ignored.
-pub fn resolve_flags(file_json: Option<&str>, env_lookup: impl Fn(&str) -> Option<String>) -> FeatureFlags {
+pub fn resolve_flags(
+    file_json: Option<&str>,
+    env_lookup: impl Fn(&str) -> Option<String>,
+) -> FeatureFlags {
     let mut flags = FeatureFlags::default();
     if let Some(json) = file_json {
         if let Ok(overlay) = serde_json::from_str::<FlagOverlay>(json) {
@@ -54,7 +51,9 @@ pub fn load_flags() -> FeatureFlags {
     let json = paths::flags_path()
         .ok()
         .and_then(|path| fs::read_to_string(path).ok());
-    resolve_flags(json.as_deref(), |key| env::var(format!("ON_N_OFF_FLAG_{key}")).ok())
+    resolve_flags(json.as_deref(), |key| {
+        env::var(format!("ON_N_OFF_FLAG_{key}")).ok()
+    })
 }
 
 #[cfg(test)]

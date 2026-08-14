@@ -17,7 +17,7 @@ import {
 import type { UsageMetric } from "$lib/usageTypes";
 import type { AgentId } from "$lib/types";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { UsageChart } from "./UsageChart";
+import { LazyUsageChart } from "./LazyUsageChart";
 
 const WINDOWS = [
   { days: 1, label: "Past 24h" },
@@ -233,7 +233,7 @@ export function Usage() {
             </div>
           </section>
 
-          <UsageChart
+          <LazyUsageChart
             folded={folded}
             metric={metric}
             onMetricChange={setMetric}

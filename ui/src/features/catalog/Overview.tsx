@@ -16,6 +16,7 @@ type OverviewProps = {
   onToggle: (row: LiveRow, enabled: boolean) => void;
   onUpdate?: (pluginId: string) => void;
   cliOk?: boolean;
+  usageReady?: boolean;
 };
 
 const GAUGE_TO: Record<"plugins" | "skills" | "mcp", "/plugins" | "/skills" | "/mcp"> = {
@@ -35,6 +36,7 @@ export function Overview({
   onToggle,
   onUpdate,
   cliOk = false,
+  usageReady = true,
 }: OverviewProps) {
   const gauges = [
     { id: "plugins" as const, label: "Plugins", ...counts.plugins },
@@ -73,7 +75,7 @@ export function Overview({
         ))}
       </div>
 
-      <OverviewUsageCard />
+      <OverviewUsageCard ready={usageReady} />
 
       {drift.length > 0 ? (
         <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={copy.driftTitle}>

@@ -125,7 +125,11 @@ fn parse_frontmatter(contents: &str, fallback_name: &str) -> (String, String) {
             }
         }
         if let Some(value) = line.strip_prefix("description:") {
-            description = value.trim().trim_matches('"').trim_matches('\'').to_string();
+            description = value
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
         }
     }
     (name, description)
@@ -163,7 +167,11 @@ mod tests {
         let root = std::env::temp_dir().join(format!("on-n-off-root-skill-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("SKILL.md"), "---\nname: solo\ndescription: One shot\n---\n").unwrap();
+        fs::write(
+            root.join("SKILL.md"),
+            "---\nname: solo\ndescription: One shot\n---\n",
+        )
+        .unwrap();
         let skills = scan_plugin_skills(&root);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "solo");
@@ -175,7 +183,11 @@ mod tests {
         let root = std::env::temp_dir().join(format!("on-n-off-flat-skill-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("solo.md"), "---\nname: solo\ndescription: Flat\n---\n").unwrap();
+        fs::write(
+            root.join("solo.md"),
+            "---\nname: solo\ndescription: Flat\n---\n",
+        )
+        .unwrap();
         fs::write(root.join("SKILL.md"), "---\nname: ignore-root\n---\n").unwrap();
         assert!(scan_user_skills(&root).is_empty());
         let skills = scan_antigravity_skills(&root);

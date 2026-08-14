@@ -266,7 +266,10 @@ mod tests {
             },
         );
         let servers = parse_codex_map(&entries);
-        let context7 = servers.iter().find(|server| server.id == "context7").unwrap();
+        let context7 = servers
+            .iter()
+            .find(|server| server.id == "context7")
+            .unwrap();
         assert_eq!(context7.system, "stdio");
         assert!(context7.enabled);
         let docs = servers.iter().find(|server| server.id == "docs").unwrap();

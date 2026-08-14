@@ -76,12 +76,12 @@ impl UsageAggregator {
     pub fn new(options: AggregateOptions) -> Result<Self, String> {
         let hourly = match options.resolution {
             Resolution::Hour => {
-                let since = options
-                    .since_time_ms
-                    .ok_or_else(|| "Hourly usage aggregation requires exact time bounds".to_string())?;
-                let until = options
-                    .until_time_ms
-                    .ok_or_else(|| "Hourly usage aggregation requires exact time bounds".to_string())?;
+                let since = options.since_time_ms.ok_or_else(|| {
+                    "Hourly usage aggregation requires exact time bounds".to_string()
+                })?;
+                let until = options.until_time_ms.ok_or_else(|| {
+                    "Hourly usage aggregation requires exact time bounds".to_string()
+                })?;
                 Some((since, until))
             }
             Resolution::Day => None,
@@ -283,7 +283,11 @@ mod tests {
         Arc::new(table)
     }
 
-    fn aggregate(records: &[UsageRecord], time_zone: &str, resolution: Resolution) -> AggregateResult {
+    fn aggregate(
+        records: &[UsageRecord],
+        time_zone: &str,
+        resolution: Resolution,
+    ) -> AggregateResult {
         let (since_time_ms, until_time_ms) = if resolution == Resolution::Hour {
             (
                 Some(

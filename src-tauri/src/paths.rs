@@ -90,7 +90,9 @@ fn has_windows_launcher_ext(path: &std::path::Path) -> bool {
     let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
         return false;
     };
-    pathext().iter().any(|known| known.eq_ignore_ascii_case(ext))
+    pathext()
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(ext))
 }
 
 /// Prefer a Win32 launcher next to an extensionless nvm/npm shim.
@@ -278,7 +280,7 @@ mod tests {
         let dir = scratch_dir("on-n-off-cli-shim");
         std::fs::write(dir.join("claude"), "#!/usr/bin/env node\n").unwrap();
         std::fs::write(dir.join("claude.cmd"), "@echo off\r\n").unwrap();
-        let found = find_in_dirs("claude", &[dir.clone()]).expect("cmd launcher");
+        let found = find_in_dirs("claude", std::slice::from_ref(&dir)).expect("cmd launcher");
         let name = found.file_name().unwrap().to_string_lossy();
         assert!(
             name.eq_ignore_ascii_case("claude.cmd"),

@@ -7,10 +7,10 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { foldUsage, providerLabel } from "$lib/usageMerge";
 import { formatDayRange, formatPercent, formatTokens, formatUsd, makeWindow } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
-import { UsageChart } from "@/features/usage/UsageChart";
+import { LazyUsageChart } from "@/features/usage/LazyUsageChart";
 
 /** Compact Overview panel — links through to the full Usage screen. */
-export function OverviewUsageCard() {
+export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
   const window = makeWindow(30);
 
@@ -25,6 +25,7 @@ export function OverviewUsageCard() {
         sinceTime: window.sinceTime,
         untilTime: window.untilTime,
       }),
+    enabled: ready,
   });
 
   const summary = query.data ?? null;
@@ -109,7 +110,7 @@ export function OverviewUsageCard() {
               </div>
             </div>
             <div className="min-w-0 p-3">
-              <UsageChart
+              <LazyUsageChart
                 folded={folded}
                 metric={metric}
                 onMetricChange={setMetric}

@@ -188,14 +188,18 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
             .as_deref()
             .and_then(parse_iso_ms)
             .ok_or_else(|| {
-                AdapterError::message("Hourly usage requires valid sinceTime and untilTime instants")
+                AdapterError::message(
+                    "Hourly usage requires valid sinceTime and untilTime instants",
+                )
             })?;
         let until = input
             .until_time
             .as_deref()
             .and_then(parse_iso_ms)
             .ok_or_else(|| {
-                AdapterError::message("Hourly usage requires valid sinceTime and untilTime instants")
+                AdapterError::message(
+                    "Hourly usage requires valid sinceTime and untilTime instants",
+                )
             })?;
         let duration = until - since;
         if duration <= 0 || duration > MAX_HOURLY_WINDOW_MS {
@@ -473,7 +477,10 @@ mod tests {
         assert_eq!(again.buckets[0].totals.output_tokens, 20);
         assert_eq!(again.pricing.status, UsagePricingStatus::Cached);
         assert!(!again.cache_hit);
-        assert!(home.join(".on-n-off").join("usage-scan-cache.json").is_file());
+        assert!(home
+            .join(".on-n-off")
+            .join("usage-scan-cache.json")
+            .is_file());
 
         let cached = pricing::with_test_fetch(None, || {
             read_summary(UsageSummaryInput {

@@ -20,6 +20,7 @@ export function OverviewRoute() {
         }
       }}
       cliOk={session.currentAgent.cliOk}
+      usageReady={session.initialProviderReady}
     />
   );
 }

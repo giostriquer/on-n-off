@@ -15,7 +15,7 @@ import { LeftRail } from "@/features/shell/LeftRail";
 import { globalItemCount, tallyLine, type Screen } from "$lib/catalog";
 import { copy } from "$lib/copy";
 import type { AgentInfo } from "$lib/types";
-import markUrl from "@/assets/on-n-off-mark.png";
+import markUrl from "../../../../src-tauri/icons/128x128.png";
 
 export function AppShell() {
   const navigate = useNavigate();

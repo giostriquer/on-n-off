@@ -30,7 +30,9 @@ impl BackupStore {
             .and_then(|name| name.to_str())
             .ok_or_else(|| AdapterError::message("backup target has no file name"))?;
         let dir = self.root.join(agent_dir(agent));
-        fs::create_dir_all(&dir).map_err(|error| AdapterError::write(error.to_string(), Some(dir.display().to_string())))?;
+        fs::create_dir_all(&dir).map_err(|error| {
+            AdapterError::write(error.to_string(), Some(dir.display().to_string()))
+        })?;
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
@@ -53,7 +55,9 @@ impl BackupStore {
     fn prune(&self, dir: &Path, filename: &str) -> Result<(), AdapterError> {
         let prefix = format!("{filename}.");
         let mut backups: Vec<_> = fs::read_dir(dir)
-            .map_err(|error| AdapterError::write(error.to_string(), Some(dir.display().to_string())))?
+            .map_err(|error| {
+                AdapterError::write(error.to_string(), Some(dir.display().to_string()))
+            })?
             .flatten()
             .map(|entry| entry.path())
             .filter(|path| {

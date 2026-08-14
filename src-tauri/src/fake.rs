@@ -1,7 +1,9 @@
 use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, McpServerDto, PluginDto, SkillDto};
+use crate::dto::{
+    AdapterError, AgentId, AgentInfo, AgentTabDto, McpServerDto, PluginDto, SkillDto,
+};
 use crate::sort::sort_tab;
 
 pub struct FakeAdapter {
@@ -63,7 +65,11 @@ impl AgentAdapter for FakeAdapter {
         Ok(tab)
     }
 
-    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_plugin_enabled(
+        &self,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let mut tab = self.lock_tab()?;
         let plugin = tab
             .plugins
@@ -74,7 +80,11 @@ impl AgentAdapter for FakeAdapter {
         Ok(tab.clone())
     }
 
-    fn set_skill_enabled(&self, skill_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_skill_enabled(
+        &self,
+        skill_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let mut tab = self.lock_tab()?;
         tab.ensure_togglable(skill_id)?;
         let skill = find_skill_mut(&mut tab, skill_id)
@@ -107,7 +117,9 @@ impl AgentAdapter for FakeAdapter {
                 .clone()
                 .unwrap_or_else(|| plugin_name_from_source(skill_source));
             if tab.user_skills.iter().any(|row| row.name == name) {
-                return Err(AdapterError::message(format!("skill already installed: {name}")));
+                return Err(AdapterError::message(format!(
+                    "skill already installed: {name}"
+                )));
             }
             tab.user_skills.push(skill(
                 &name,
@@ -123,7 +135,9 @@ impl AgentAdapter for FakeAdapter {
         let name = plugin_name_from_source(&source);
         let id = format!("{name}@local");
         if tab.plugins.iter().any(|plugin| plugin.id == id) {
-            return Err(AdapterError::message(format!("plugin already installed: {id}")));
+            return Err(AdapterError::message(format!(
+                "plugin already installed: {id}"
+            )));
         }
         tab.plugins.push(PluginDto {
             id,
@@ -144,7 +158,9 @@ impl AgentAdapter for FakeAdapter {
         let before = tab.plugins.len();
         tab.plugins.retain(|plugin| plugin.id != plugin_id);
         if tab.plugins.len() == before {
-            return Err(AdapterError::message(format!("plugin not found: {plugin_id}")));
+            return Err(AdapterError::message(format!(
+                "plugin not found: {plugin_id}"
+            )));
         }
         Ok(tab.clone())
     }
@@ -170,7 +186,9 @@ fn find_skill_mut<'a>(tab: &'a mut AgentTabDto, skill_id: &str) -> Option<&'a mu
             return Some(skill);
         }
     }
-    tab.user_skills.iter_mut().find(|skill| skill.id == skill_id)
+    tab.user_skills
+        .iter_mut()
+        .find(|skill| skill.id == skill_id)
 }
 
 fn plugin_name_from_source(source: &str) -> String {
@@ -259,7 +277,13 @@ fn claude_seed() -> AgentTabDto {
                     false,
                 )],
             ),
-            plugin("superpowers@claude-plugins-official", "superpowers", "official", false, vec![]),
+            plugin(
+                "superpowers@claude-plugins-official",
+                "superpowers",
+                "official",
+                false,
+                vec![],
+            ),
         ],
         user_skills: vec![skill(
             "statusline",
@@ -332,7 +356,11 @@ mod tests {
         let adapter = FakeAdapter::claude();
         let tab = adapter.list_tab().expect("list");
 
-        let ids: Vec<&str> = tab.plugins.iter().map(|plugin| plugin.id.as_str()).collect();
+        let ids: Vec<&str> = tab
+            .plugins
+            .iter()
+            .map(|plugin| plugin.id.as_str())
+            .collect();
         assert_eq!(
             ids,
             [
@@ -375,7 +403,9 @@ mod tests {
     #[test]
     fn toggling_a_user_skill_returns_the_full_tab() {
         let adapter = FakeAdapter::claude();
-        let tab = adapter.set_skill_enabled("statusline", false).expect("toggle");
+        let tab = adapter
+            .set_skill_enabled("statusline", false)
+            .expect("toggle");
         assert!(!tab.user_skills[0].enabled);
         let workbench = tab
             .plugins
@@ -390,10 +420,16 @@ mod tests {
     fn toggling_an_mcp_returns_the_full_tab() {
         let adapter = FakeAdapter::claude();
         let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
-        let github = tab.mcp_servers.iter().find(|server| server.id == "github").unwrap();
+        let github = tab
+            .mcp_servers
+            .iter()
+            .find(|server| server.id == "github")
+            .unwrap();
         assert!(!github.enabled);
         assert!(github.togglable);
-        let err = adapter.set_mcp_enabled("missing", true).expect_err("missing");
+        let err = adapter
+            .set_mcp_enabled("missing", true)
+            .expect_err("missing");
         assert!(err.message.contains("mcp server not found"));
     }
 
@@ -409,14 +445,25 @@ mod tests {
         let err = adapter.install_plugin("").expect_err("empty");
         assert!(err.message.contains("HTTPS"));
         let tab = adapter.list_tab().expect("list");
-        assert_eq!(tab.plugins.iter().filter(|plugin| plugin.id == "tools@local").count(), 1);
+        assert_eq!(
+            tab.plugins
+                .iter()
+                .filter(|plugin| plugin.id == "tools@local")
+                .count(),
+            1
+        );
     }
 
     #[test]
     fn uninstall_removes_plugin() {
         let adapter = FakeAdapter::claude();
-        let tab = adapter.uninstall_plugin("workbench@workshop").expect("uninstall");
-        assert!(tab.plugins.iter().all(|plugin| plugin.id != "workbench@workshop"));
+        let tab = adapter
+            .uninstall_plugin("workbench@workshop")
+            .expect("uninstall");
+        assert!(tab
+            .plugins
+            .iter()
+            .all(|plugin| plugin.id != "workbench@workshop"));
     }
 
     #[test]
@@ -429,7 +476,9 @@ mod tests {
             .find(|plugin| plugin.id == "workbench@workshop")
             .unwrap();
         assert!(!plugin.out_of_sync);
-        let err = adapter.update_plugin("missing@workshop").expect_err("missing");
+        let err = adapter
+            .update_plugin("missing@workshop")
+            .expect_err("missing");
         assert!(err.message.contains("plugin not found"));
     }
 }

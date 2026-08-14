@@ -22,132 +22,188 @@ impl AppState {
         }
     }
 
-    fn adapter(&self, id: AgentId) -> &Arc<dyn AgentAdapter> {
+    fn adapter(&self, id: AgentId) -> Arc<dyn AgentAdapter> {
         match id {
-            AgentId::Claude => &self.claude,
-            AgentId::Codex => &self.codex,
-            AgentId::Antigravity => &self.antigravity,
+            AgentId::Claude => Arc::clone(&self.claude),
+            AgentId::Codex => Arc::clone(&self.codex),
+            AgentId::Antigravity => Arc::clone(&self.antigravity),
         }
     }
 }
 
-#[tauri::command]
-pub fn list_agents(state: tauri::State<AppState>) -> Vec<AgentInfo> {
-    vec![
-        state.claude.info(),
-        state.codex.info(),
-        state.antigravity.info(),
-    ]
+async fn blocking<T, F>(operation: &'static str, run: F) -> Result<T, AdapterError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, AdapterError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(run)
+        .await
+        .map_err(|error| AdapterError::message(format!("{operation} worker failed: {error}")))?
 }
 
 #[tauri::command]
-pub fn feature_flags() -> FeatureFlags {
-    crate::flags::load_flags()
+pub async fn list_agents(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<AgentInfo>, AdapterError> {
+    let adapters = [
+        Arc::clone(&state.claude),
+        Arc::clone(&state.codex),
+        Arc::clone(&state.antigravity),
+    ];
+    blocking("provider health", move || {
+        Ok(adapters.into_iter().map(|adapter| adapter.info()).collect())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn load_app_settings() -> AppSettings {
-    crate::settings::load_settings()
+pub async fn feature_flags() -> Result<FeatureFlags, AdapterError> {
+    blocking("feature flags", || Ok(crate::flags::load_flags())).await
 }
 
 #[tauri::command]
-pub fn save_app_settings(settings: AppSettings) -> Result<AppSettings, AdapterError> {
-    crate::settings::save_settings(settings)
+pub async fn load_app_settings() -> Result<AppSettings, AdapterError> {
+    blocking("app settings", || Ok(crate::settings::load_settings())).await
 }
 
 #[tauri::command]
-pub fn diagnose_providers() -> Vec<ProviderDiagnose> {
-    crate::settings::diagnose_all()
+pub async fn save_app_settings(settings: AppSettings) -> Result<AppSettings, AdapterError> {
+    blocking("save app settings", move || {
+        crate::settings::save_settings(settings)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn list_projects(agent_id: AgentId, state: tauri::State<AppState>) -> Vec<ProjectDto> {
-    state.adapter(agent_id).list_projects()
+pub async fn diagnose_providers() -> Result<Vec<ProviderDiagnose>, AdapterError> {
+    blocking("provider diagnostics", || {
+        Ok(crate::settings::diagnose_all())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn inspect_project(agent_id: AgentId, path: String) -> ProjectDto {
-    crate::project::inspect_project(std::path::Path::new(&path), agent_id)
+pub async fn list_projects(
+    agent_id: AgentId,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ProjectDto>, AdapterError> {
+    let adapter = state.adapter(agent_id);
+    blocking("project discovery", move || Ok(adapter.list_projects())).await
 }
 
 #[tauri::command]
-pub fn list_plugins(
+pub async fn inspect_project(agent_id: AgentId, path: String) -> Result<ProjectDto, AdapterError> {
+    blocking("project inspection", move || {
+        Ok(crate::project::inspect_project(
+            std::path::Path::new(&path),
+            agent_id,
+        ))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn list_plugins(
     agent_id: AgentId,
     project_path: Option<String>,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    state.adapter(agent_id).list_scope(project_path.as_deref())
+    let adapter = state.adapter(agent_id);
+    blocking("catalog scan", move || {
+        adapter.list_scope(project_path.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_plugin_enabled(
+pub async fn set_plugin_enabled(
     agent_id: AgentId,
     plugin_id: String,
     enabled: bool,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    state.adapter(agent_id).set_plugin_enabled(&plugin_id, enabled)
+    let adapter = state.adapter(agent_id);
+    blocking("plugin toggle", move || {
+        adapter.set_plugin_enabled(&plugin_id, enabled)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_skill_enabled(
+pub async fn set_skill_enabled(
     agent_id: AgentId,
     skill_id: String,
     enabled: bool,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    state.adapter(agent_id).set_skill_enabled(&skill_id, enabled)
+    let adapter = state.adapter(agent_id);
+    blocking("skill toggle", move || {
+        adapter.set_skill_enabled(&skill_id, enabled)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_mcp_enabled(
+pub async fn set_mcp_enabled(
     agent_id: AgentId,
     mcp_id: String,
     enabled: bool,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    state.adapter(agent_id).set_mcp_enabled(&mcp_id, enabled)
+    let adapter = state.adapter(agent_id);
+    blocking("MCP toggle", move || {
+        adapter.set_mcp_enabled(&mcp_id, enabled)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn install_plugin(
+pub async fn install_plugin(
     agent_id: AgentId,
     source: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    state.adapter(agent_id).install_plugin(&source)
+    let adapter = state.adapter(agent_id);
+    blocking("plugin install", move || adapter.install_plugin(&source)).await
 }
 
 #[tauri::command]
-pub fn uninstall_plugin(
+pub async fn uninstall_plugin(
     agent_id: AgentId,
     plugin_id: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    state.adapter(agent_id).uninstall_plugin(&plugin_id)
+    let adapter = state.adapter(agent_id);
+    blocking("plugin uninstall", move || {
+        adapter.uninstall_plugin(&plugin_id)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn update_plugin(
+pub async fn update_plugin(
     agent_id: AgentId,
     plugin_id: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    state.adapter(agent_id).update_plugin(&plugin_id)
+    let adapter = state.adapter(agent_id);
+    blocking("plugin update", move || adapter.update_plugin(&plugin_id)).await
 }
 
 #[tauri::command]
-pub fn refresh(
+pub async fn refresh(
     agent_id: AgentId,
     project_path: Option<String>,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    state.adapter(agent_id).list_scope(project_path.as_deref())
+    let adapter = state.adapter(agent_id);
+    blocking("catalog refresh", move || {
+        adapter.list_scope(project_path.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn usage_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, AdapterError> {
-    tauri::async_runtime::spawn_blocking(move || crate::usage::read_summary(input))
-        .await
-        .map_err(|error| AdapterError::message(format!("usage scan worker failed: {error}")))?
+    blocking("usage scan", move || crate::usage::read_summary(input)).await
 }

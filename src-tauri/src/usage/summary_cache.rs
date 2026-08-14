@@ -83,12 +83,7 @@ pub fn load_summary_hit(
     Some(dto)
 }
 
-pub fn store_summary(
-    path: &Path,
-    key: &str,
-    identity: &ScanCacheIdentity,
-    dto: &UsageSummaryDto,
-) {
+pub fn store_summary(path: &Path, key: &str, identity: &ScanCacheIdentity, dto: &UsageSummaryDto) {
     let mut entries = load_entries(path);
     entries.retain(|entry| entry.key != key);
     let mut stored = dto.clone();
@@ -130,9 +125,7 @@ fn load_entries(path: &Path) -> Vec<SummaryCacheEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{
-        UsagePricingDto, UsagePricingStatus, UsageSummaryDto, UsageSummaryInput,
-    };
+    use crate::dto::{UsagePricingDto, UsagePricingStatus, UsageSummaryDto, UsageSummaryInput};
     use crate::paths::scratch_dir;
 
     fn sample_dto() -> UsageSummaryDto {

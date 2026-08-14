@@ -42,18 +42,16 @@ pub fn encode_scan_cache(cache: &ScanCache) -> Value {
     let mut model_index: HashMap<String, usize> = HashMap::new();
     let mut session_index: HashMap<String, usize> = HashMap::new();
 
-    let intern = |table: &mut Vec<String>,
-                  index: &mut HashMap<String, usize>,
-                  value: &str|
-     -> usize {
-        if let Some(i) = index.get(value) {
-            return *i;
-        }
-        let next = table.len();
-        table.push(value.to_string());
-        index.insert(value.to_string(), next);
-        next
-    };
+    let intern =
+        |table: &mut Vec<String>, index: &mut HashMap<String, usize>, value: &str| -> usize {
+            if let Some(i) = index.get(value) {
+                return *i;
+            }
+            let next = table.len();
+            table.push(value.to_string());
+            index.insert(value.to_string(), next);
+            next
+        };
 
     let mut files = HashMap::new();
     for (path, entry) in cache {
@@ -150,7 +148,11 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
                 break;
             };
             let session_id = root.sessions.get(session_i).cloned().unwrap_or_default();
-            let nums = |i: usize| -> Option<u64> { arr.get(i)?.as_u64().or_else(|| arr.get(i)?.as_f64().map(|f| f as u64)) };
+            let nums = |i: usize| -> Option<u64> {
+                arr.get(i)?
+                    .as_u64()
+                    .or_else(|| arr.get(i)?.as_f64().map(|f| f as u64))
+            };
             let (Some(uncached), Some(cached), Some(cache_creation), Some(output), Some(reasoning)) =
                 (nums(3), nums(4), nums(5), nums(6), nums(7))
             else {
@@ -286,7 +288,10 @@ mod tests {
         );
         let encoded = encode_scan_cache(&cache);
         let restored = decode_scan_cache(&encoded);
-        assert_eq!(restored.get("/a.jsonl").unwrap().records[0], sample_record());
+        assert_eq!(
+            restored.get("/a.jsonl").unwrap().records[0],
+            sample_record()
+        );
     }
 
     #[test]

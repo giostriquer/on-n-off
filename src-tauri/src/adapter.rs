@@ -16,12 +16,22 @@ pub trait AgentAdapter: Send + Sync {
         Ok(tab)
     }
 
-    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_plugin_enabled(
+        &self,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let _ = (plugin_id, enabled);
-        Err(AdapterError::message("plugin enable is not implemented yet"))
+        Err(AdapterError::message(
+            "plugin enable is not implemented yet",
+        ))
     }
 
-    fn set_skill_enabled(&self, skill_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_skill_enabled(
+        &self,
+        skill_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let _ = (skill_id, enabled);
         Err(AdapterError::message("skill toggle is not implemented yet"))
     }

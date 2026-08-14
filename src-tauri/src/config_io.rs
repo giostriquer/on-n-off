@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::Path;
 
 use serde_json::Value as JsonValue;
-use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
+use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
 
 use crate::backup::BackupStore;
 use crate::dto::{AdapterError, AgentId};
@@ -46,15 +46,15 @@ impl ConfigIo {
         enabled: bool,
     ) -> Result<(), AdapterError> {
         self.patch_json(agent, path, |root| {
-            let object = root.as_object_mut().ok_or_else(|| {
-                AdapterError::message("settings.json root must be an object")
-            })?;
+            let object = root
+                .as_object_mut()
+                .ok_or_else(|| AdapterError::message("settings.json root must be an object"))?;
             let overrides = object
                 .entry("skillOverrides")
                 .or_insert_with(|| JsonValue::Object(serde_json::Map::new()));
-            let overrides = overrides.as_object_mut().ok_or_else(|| {
-                AdapterError::message("skillOverrides must be an object")
-            })?;
+            let overrides = overrides
+                .as_object_mut()
+                .ok_or_else(|| AdapterError::message("skillOverrides must be an object"))?;
             overrides.insert(
                 skill_name.to_string(),
                 JsonValue::String(if enabled { "on" } else { "off" }.to_string()),
@@ -63,7 +63,11 @@ impl ConfigIo {
         })
     }
 
-    pub fn backup_file(&self, agent: AgentId, path: &Path) -> Result<Option<std::path::PathBuf>, AdapterError> {
+    pub fn backup_file(
+        &self,
+        agent: AgentId,
+        path: &Path,
+    ) -> Result<Option<std::path::PathBuf>, AdapterError> {
         self.backups.backup(agent, path)
     }
 
@@ -75,9 +79,9 @@ impl ConfigIo {
         enabled: bool,
     ) -> Result<(), AdapterError> {
         self.patch_json(agent, path, |root| {
-            let object = root.as_object_mut().ok_or_else(|| {
-                AdapterError::message("claude.json root must be an object")
-            })?;
+            let object = root
+                .as_object_mut()
+                .ok_or_else(|| AdapterError::message("claude.json root must be an object"))?;
             let servers = object
                 .get_mut("mcpServers")
                 .and_then(JsonValue::as_object_mut)
@@ -90,9 +94,9 @@ impl ConfigIo {
             let list = object
                 .entry("disabledMcpServers")
                 .or_insert_with(|| JsonValue::Array(Vec::new()));
-            let list = list.as_array_mut().ok_or_else(|| {
-                AdapterError::message("disabledMcpServers must be an array")
-            })?;
+            let list = list
+                .as_array_mut()
+                .ok_or_else(|| AdapterError::message("disabledMcpServers must be an array"))?;
             list.retain(|item| item.as_str() != Some(mcp_id));
             if !enabled {
                 list.push(JsonValue::String(mcp_id.to_string()));
@@ -109,9 +113,9 @@ impl ConfigIo {
         enabled: bool,
     ) -> Result<(), AdapterError> {
         self.patch_json(agent, path, |root| {
-            let object = root.as_object_mut().ok_or_else(|| {
-                AdapterError::message("mcp_config.json root must be an object")
-            })?;
+            let object = root
+                .as_object_mut()
+                .ok_or_else(|| AdapterError::message("mcp_config.json root must be an object"))?;
             let servers = object
                 .get_mut("mcpServers")
                 .and_then(JsonValue::as_object_mut)
@@ -140,7 +144,9 @@ impl ConfigIo {
             let entry = plugins
                 .get_mut(plugin_id)
                 .and_then(Item::as_table_mut)
-                .ok_or_else(|| AdapterError::message(format!("plugin not in config: {plugin_id}")))?;
+                .ok_or_else(|| {
+                    AdapterError::message(format!("plugin not in config: {plugin_id}"))
+                })?;
             entry["enabled"] = value(enabled);
             Ok(())
         })
@@ -209,9 +215,12 @@ impl ConfigIo {
             })?
         };
         patch(&mut value)?;
-        let rendered = format!("{}\n", serde_json::to_string_pretty(&value).map_err(|error| {
-            AdapterError::write(error.to_string(), Some(path.display().to_string()))
-        })?);
+        let rendered = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&value).map_err(|error| {
+                AdapterError::write(error.to_string(), Some(path.display().to_string()))
+            })?
+        );
         self.commit(agent, path, &original, &rendered, |text| {
             serde_json::from_str::<JsonValue>(text).map(|_| ())
         })
@@ -293,9 +302,8 @@ fn read_or_empty(path: &Path) -> Result<String, AdapterError> {
     if !path.exists() {
         return Ok(String::new());
     }
-    fs::read_to_string(path).map_err(|error| {
-        AdapterError::parse(error.to_string(), Some(path.display().to_string()))
-    })
+    fs::read_to_string(path)
+        .map_err(|error| AdapterError::parse(error.to_string(), Some(path.display().to_string())))
 }
 
 fn rollback(store: &BackupStore, backup: Option<&Path>, dest: &Path, original: &str) {
@@ -335,9 +343,8 @@ fn atomic_replace(path: &Path, contents: &str) -> Result<(), AdapterError> {
             AdapterError::write(error.to_string(), Some(path.display().to_string()))
         })?;
     }
-    let result = fs::rename(&tmp, path).map_err(|error| {
-        AdapterError::write(error.to_string(), Some(path.display().to_string()))
-    });
+    let result = fs::rename(&tmp, path)
+        .map_err(|error| AdapterError::write(error.to_string(), Some(path.display().to_string())));
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
@@ -371,7 +378,12 @@ mod tests {
         assert_eq!(value["enabledPlugins"]["workbench@workshop"], true);
         assert_eq!(value["skillOverrides"]["legacy"], "name-only");
         assert_eq!(value["skillOverrides"]["statusline"], "off");
-        assert!(root.join("backups/claude").read_dir().unwrap().next().is_some());
+        assert!(root
+            .join("backups/claude")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -422,7 +434,10 @@ mod tests {
             .unwrap();
         let value: JsonValue = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(value["numStartups"], 3);
-        assert_eq!(value["mcpServers"]["docs"]["url"], "https://docs.example/mcp");
+        assert_eq!(
+            value["mcpServers"]["docs"]["url"],
+            "https://docs.example/mcp"
+        );
         assert_eq!(value["mcpServers"]["github"]["disabled"], true);
         assert_eq!(value["mcpServers"]["github"]["command"], "npx");
         assert_eq!(value["disabledMcpServers"], json!(["github"]));
@@ -477,7 +492,10 @@ mod tests {
         io.patch_toml_mcp_enabled(AgentId::Codex, &path, "docs", true)
             .unwrap();
         let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("url = \"https://docs.example/mcp\""), "{text}");
+        assert!(
+            text.contains("url = \"https://docs.example/mcp\""),
+            "{text}"
+        );
         assert_eq!(text.matches("enabled = true").count(), 2, "{text}");
         let err = io
             .patch_toml_mcp_enabled(AgentId::Codex, &path, "missing", false)

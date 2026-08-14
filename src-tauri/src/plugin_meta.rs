@@ -123,12 +123,17 @@ pub fn fill_remote_version(hint: &mut VersionHint) {
     if hint.remote_url.is_empty() || hint.remote_rev.is_empty() {
         return;
     }
-    if let Some(version) = remote_plugin_version(&hint.remote_url, &hint.remote_path, &hint.remote_rev) {
+    if let Some(version) =
+        remote_plugin_version(&hint.remote_url, &hint.remote_path, &hint.remote_rev)
+    {
         hint.version = version;
     }
 }
 
-pub fn resolve_versions(installed: &VersionHint, catalog: Option<&VersionHint>) -> (String, String, bool) {
+pub fn resolve_versions(
+    installed: &VersionHint,
+    catalog: Option<&VersionHint>,
+) -> (String, String, bool) {
     let catalog = catalog.cloned().unwrap_or_default();
     let upstream = usable(Some(catalog.version.as_str()))
         .filter(|value| !is_sha(value))
@@ -156,9 +161,9 @@ pub fn strip_verbatim(path: &str) -> PathBuf {
 }
 
 fn catalog_plugin_hint(root: &Path, plugin: &MarketplacePlugin) -> VersionHint {
-    let local_version = plugin.local_source_path().and_then(|relative| {
-        manifest_version(&root.join(relative.trim_start_matches("./")))
-    });
+    let local_version = plugin
+        .local_source_path()
+        .and_then(|relative| manifest_version(&root.join(relative.trim_start_matches("./"))));
     let version = usable(plugin.version.as_deref())
         .or(local_version)
         .or_else(|| {
@@ -197,7 +202,11 @@ fn read_marketplace_file(root: &Path) -> Option<MarketplaceFile> {
 }
 
 fn manifest_version(install_path: &Path) -> Option<String> {
-    for relative in [".codex-plugin/plugin.json", ".claude-plugin/plugin.json", "plugin.json"] {
+    for relative in [
+        ".codex-plugin/plugin.json",
+        ".claude-plugin/plugin.json",
+        "plugin.json",
+    ] {
         if let Ok(text) = fs::read_to_string(install_path.join(relative)) {
             if let Some(version) = parse_manifest_text(Some(&text)) {
                 return Some(version);
@@ -257,13 +266,19 @@ fn remote_plugin_version(url: &str, path: &str, rev: &str) -> Option<String> {
         return version;
     }
     let key = format!("{url}|{path}|{rev}");
-    if let Some(cached) = cache().lock().ok().and_then(|cache| cache.get(&key).cloned()) {
+    if let Some(cached) = cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&key).cloned())
+    {
         return cached;
     }
-    let version = github_manifest_urls(url, path, rev).into_iter().find_map(|manifest_url| {
-        let text = fetch_text(&manifest_url)?;
-        parse_manifest_text(Some(&text))
-    });
+    let version = github_manifest_urls(url, path, rev)
+        .into_iter()
+        .find_map(|manifest_url| {
+            let text = fetch_text(&manifest_url)?;
+            parse_manifest_text(Some(&text))
+        });
     if let Ok(mut cache) = cache().lock() {
         cache.insert(key, version.clone());
     }
@@ -291,7 +306,11 @@ fn github_manifest_urls(url: &str, path: &str, rev: &str) -> Vec<String> {
     let Some((owner, repo)) = github_repo(url) else {
         return Vec::new();
     };
-    let mut prefix = path.trim().trim_start_matches("./").trim_end_matches('/').to_string();
+    let mut prefix = path
+        .trim()
+        .trim_start_matches("./")
+        .trim_end_matches('/')
+        .to_string();
     if !prefix.is_empty() {
         prefix.push('/');
     }
@@ -386,9 +405,13 @@ fn git_origin_url(root: &Path) -> Option<String> {
 
 fn git_remote_branches(root: &Path) -> Vec<String> {
     let mut branches = Vec::new();
-    if let Ok(text) =
-        fs::read_to_string(root.join(".git").join("refs").join("remotes").join("origin").join("HEAD"))
-    {
+    if let Ok(text) = fs::read_to_string(
+        root.join(".git")
+            .join("refs")
+            .join("remotes")
+            .join("origin")
+            .join("HEAD"),
+    ) {
         if let Some(branch) = text.trim().strip_prefix("ref: refs/remotes/origin/") {
             let branch = branch.trim();
             if !branch.is_empty() {
@@ -408,7 +431,9 @@ impl MarketplacePlugin {
     fn local_source_path(&self) -> Option<&str> {
         match &self.source {
             Some(MarketplaceSource::Path(path)) => Some(path.as_str()),
-            Some(MarketplaceSource::Object { path, url, .. }) if url.as_deref().unwrap_or("").is_empty() => {
+            Some(MarketplaceSource::Object { path, url, .. })
+                if url.as_deref().unwrap_or("").is_empty() =>
+            {
                 path.as_deref()
             }
             _ => None,
@@ -423,7 +448,14 @@ impl MarketplacePlugin {
     }
 
     fn remote_pin(&self) -> (String, String, String) {
-        let Some(MarketplaceSource::Object { url, path, sha, git_ref, .. }) = &self.source else {
+        let Some(MarketplaceSource::Object {
+            url,
+            path,
+            sha,
+            git_ref,
+            ..
+        }) = &self.source
+        else {
             return Default::default();
         };
         let url = url.as_deref().unwrap_or("").trim();
@@ -435,7 +467,11 @@ impl MarketplacePlugin {
             .unwrap_or_default();
         (
             url.to_string(),
-            path.as_deref().unwrap_or("").trim().trim_start_matches("./").to_string(),
+            path.as_deref()
+                .unwrap_or("")
+                .trim()
+                .trim_start_matches("./")
+                .to_string(),
             rev,
         )
     }
@@ -451,10 +487,16 @@ fn usable_sha(value: Option<&str>) -> Option<String> {
 }
 
 #[cfg(test)]
+type RemoteVersionFetch = fn(&str, &str, &str) -> Option<String>;
+
+#[cfg(test)]
+type TextFetch = fn(&str) -> Option<String>;
+
+#[cfg(test)]
 thread_local! {
-    static TEST_REMOTE: std::cell::RefCell<Option<fn(&str, &str, &str) -> Option<String>>> =
+    static TEST_REMOTE: std::cell::RefCell<Option<RemoteVersionFetch>> =
         const { std::cell::RefCell::new(None) };
-    static TEST_FETCH: std::cell::RefCell<Option<fn(&str) -> Option<String>>> =
+    static TEST_FETCH: std::cell::RefCell<Option<TextFetch>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -464,7 +506,7 @@ fn test_remote_version(url: &str, path: &str, rev: &str) -> Option<Option<String
 }
 
 #[cfg(test)]
-fn with_remote_fetch<F: FnOnce()>(fetch: fn(&str, &str, &str) -> Option<String>, run: F) {
+fn with_remote_fetch<F: FnOnce()>(fetch: RemoteVersionFetch, run: F) {
     TEST_REMOTE.with(|slot| *slot.borrow_mut() = Some(fetch));
     run();
     TEST_REMOTE.with(|slot| *slot.borrow_mut() = None);
@@ -476,7 +518,7 @@ fn test_fetch_text(url: &str) -> Option<Option<String>> {
 }
 
 #[cfg(test)]
-fn with_fetch_text<F: FnOnce()>(fetch: fn(&str) -> Option<String>, run: F) {
+fn with_fetch_text<F: FnOnce()>(fetch: TextFetch, run: F) {
     TEST_FETCH.with(|slot| *slot.borrow_mut() = Some(fetch));
     run();
     TEST_FETCH.with(|slot| *slot.borrow_mut() = None);
@@ -539,11 +581,23 @@ mod tests {
         )
         .unwrap();
         let hints = catalog_hints(&root);
-        assert_eq!(hints.get("workbench").map(|hint| hint.version.as_str()), Some("0.23.0"));
-        assert_eq!(hints.get("toolkit").map(|hint| hint.version.as_str()), Some("0.22.1"));
-        assert_eq!(hints.get("api").map(|hint| hint.version.as_str()), Some("v1.5.5"));
+        assert_eq!(
+            hints.get("workbench").map(|hint| hint.version.as_str()),
+            Some("0.23.0")
+        );
+        assert_eq!(
+            hints.get("toolkit").map(|hint| hint.version.as_str()),
+            Some("0.22.1")
+        );
+        assert_eq!(
+            hints.get("api").map(|hint| hint.version.as_str()),
+            Some("v1.5.5")
+        );
         assert!(!hints.contains_key("mainline"));
-        assert_eq!(hints.get("superpowers").map(|hint| hint.version.as_str()), Some(""));
+        assert_eq!(
+            hints.get("superpowers").map(|hint| hint.version.as_str()),
+            Some("")
+        );
         with_remote_fetch(
             |url, path, rev| {
                 assert!(url.contains("obra/superpowers"));
@@ -594,8 +648,14 @@ mod tests {
         )
         .unwrap();
         let mut hints = catalog_hints(&root);
-        assert_eq!(hints.get("workbench").map(|hint| hint.version.as_str()), Some("0.22.1"));
-        assert_eq!(hints.get("toolkit").map(|hint| hint.version.as_str()), Some("0.5.0"));
+        assert_eq!(
+            hints.get("workbench").map(|hint| hint.version.as_str()),
+            Some("0.22.1")
+        );
+        assert_eq!(
+            hints.get("toolkit").map(|hint| hint.version.as_str()),
+            Some("0.5.0")
+        );
         with_fetch_text(
             |url| {
                 assert!(url.contains("example/workshop"));
@@ -612,8 +672,14 @@ mod tests {
             },
             || {
                 apply_remote_marketplace_versions(&mut hints, "example/workshop", &root);
-                assert_eq!(hints.get("workbench").map(|hint| hint.version.as_str()), Some("0.23.0"));
-                assert_eq!(hints.get("toolkit").map(|hint| hint.version.as_str()), Some("0.6.0"));
+                assert_eq!(
+                    hints.get("workbench").map(|hint| hint.version.as_str()),
+                    Some("0.23.0")
+                );
+                assert_eq!(
+                    hints.get("toolkit").map(|hint| hint.version.as_str()),
+                    Some("0.6.0")
+                );
                 let installed = VersionHint {
                     version: "0.22.1".into(),
                     ..VersionHint::default()
@@ -673,6 +739,9 @@ mod tests {
             strip_verbatim(r"\\?\C:\Users\me\.codex\.tmp\bundled"),
             PathBuf::from(r"C:\Users\me\.codex\.tmp\bundled")
         );
-        assert_eq!(strip_verbatim(" /tmp/market "), PathBuf::from("/tmp/market"));
+        assert_eq!(
+            strip_verbatim(" /tmp/market "),
+            PathBuf::from("/tmp/market")
+        );
     }
 }

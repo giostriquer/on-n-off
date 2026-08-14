@@ -88,7 +88,9 @@ pub struct ClaudeAdapter {
 impl ClaudeAdapter {
     pub fn new() -> Self {
         let root = claude_root().ok();
-        let claude_json = crate::paths::user_home().ok().map(|home| home.join(".claude.json"));
+        let claude_json = crate::paths::user_home()
+            .ok()
+            .map(|home| home.join(".claude.json"));
         Self {
             root,
             claude_json,
@@ -149,16 +151,18 @@ impl ClaudeAdapter {
             message: error.to_string(),
             path: Some(path.display().to_string()),
         })?;
-        let parsed: InstalledPluginsFile = serde_json::from_str(&text).map_err(|error| AdapterError {
-            kind: ErrorKind::Parse,
-            message: error.to_string(),
-            path: Some(path.display().to_string()),
-        })?;
+        let parsed: InstalledPluginsFile =
+            serde_json::from_str(&text).map_err(|error| AdapterError {
+                kind: ErrorKind::Parse,
+                message: error.to_string(),
+                path: Some(path.display().to_string()),
+            })?;
         let mut plugins = Vec::new();
         for (id, entries) in parsed.plugins {
-            let Some(entry) = entries.into_iter().find(|entry| {
-                entry.scope.as_deref().is_none_or(|scope| scope == "user")
-            }) else {
+            let Some(entry) = entries
+                .into_iter()
+                .find(|entry| entry.scope.as_deref().is_none_or(|scope| scope == "user"))
+            else {
                 continue;
             };
             plugins.push((id, entry.install_path, entry.version));
@@ -225,7 +229,8 @@ impl AgentAdapter for ClaudeAdapter {
                 .into_iter()
                 .map(|skill| claude_plugin_skill(&id, skill))
                 .collect();
-            let installed = crate::plugin_meta::installed_hint(&install_path, inventory_version.as_deref());
+            let installed =
+                crate::plugin_meta::installed_hint(&install_path, inventory_version.as_deref());
             let mut catalog = catalogs
                 .get(&source)
                 .and_then(|hints| hints.get(&name))
@@ -265,10 +270,17 @@ impl AgentAdapter for ClaudeAdapter {
             return Vec::new();
         };
         let text = fs::read_to_string(home.join(".claude.json")).unwrap_or_default();
-        crate::project::inspect_projects(crate::project::parse_claude_projects(&text), AgentId::Claude)
+        crate::project::inspect_projects(
+            crate::project::parse_claude_projects(&text),
+            AgentId::Claude,
+        )
     }
 
-    fn set_skill_enabled(&self, skill_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_skill_enabled(
+        &self,
+        skill_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let _guard = self
             .write
             .lock()
@@ -298,7 +310,11 @@ impl AgentAdapter for ClaudeAdapter {
         self.list_tab()
     }
 
-    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_plugin_enabled(
+        &self,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let _guard = self
             .write
             .lock()
@@ -321,7 +337,8 @@ impl AgentAdapter for ClaudeAdapter {
             run_npx_skills(&parsed, "claude-code")?;
             return self.list_tab();
         }
-        self.io.backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
+        self.io
+            .backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
         self.cli
             .run_args_timed(&parsed.claude_install_argv(), INSTALL_TIMEOUT)?;
         self.list_tab()
@@ -333,8 +350,10 @@ impl AgentAdapter for ClaudeAdapter {
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
         self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io.backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
-        self.cli.run_args(&InstallSource::claude_uninstall_argv(plugin_id))?;
+        self.io
+            .backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
+        self.cli
+            .run_args(&InstallSource::claude_uninstall_argv(plugin_id))?;
         self.list_tab()
     }
 
@@ -344,13 +363,18 @@ impl AgentAdapter for ClaudeAdapter {
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
         self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io.backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
+        self.io
+            .backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
         if let Some(marketplace) = InstallSource::plugin_marketplace(plugin_id) {
-            self.cli
-                .run_args_timed(&InstallSource::claude_marketplace_update_argv(marketplace), INSTALL_TIMEOUT)?;
+            self.cli.run_args_timed(
+                &InstallSource::claude_marketplace_update_argv(marketplace),
+                INSTALL_TIMEOUT,
+            )?;
         }
-        self.cli
-            .run_args_timed(&InstallSource::claude_update_argv(plugin_id), INSTALL_TIMEOUT)?;
+        self.cli.run_args_timed(
+            &InstallSource::claude_update_argv(plugin_id),
+            INSTALL_TIMEOUT,
+        )?;
         self.list_tab()
     }
 }
@@ -378,10 +402,7 @@ fn claude_plugin_skill(plugin_id: &str, skill: ScannedSkill) -> SkillDto {
 }
 
 fn claude_user_skill(skill: ScannedSkill, overrides: &HashMap<String, String>) -> SkillDto {
-    let enabled = match overrides.get(&skill.name).map(String::as_str) {
-        Some("off") => false,
-        _ => true,
-    };
+    let enabled = !matches!(overrides.get(&skill.name).map(String::as_str), Some("off"));
     SkillDto {
         id: skill.name.clone(),
         plugin_id: None,
@@ -497,7 +518,11 @@ mod tests {
         let root = fixture();
         let adapter = ClaudeAdapter::at(root.clone());
         let tab = adapter.list_tab().expect("list");
-        let ids: Vec<_> = tab.plugins.iter().map(|plugin| plugin.id.as_str()).collect();
+        let ids: Vec<_> = tab
+            .plugins
+            .iter()
+            .map(|plugin| plugin.id.as_str())
+            .collect();
         assert_eq!(
             ids,
             [
@@ -506,7 +531,11 @@ mod tests {
                 "workbench@workshop"
             ]
         );
-        let quiet = tab.plugins.iter().find(|plugin| plugin.id == "quiet@opt").unwrap();
+        let quiet = tab
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "quiet@opt")
+            .unwrap();
         let superpowers = tab
             .plugins
             .iter()
@@ -531,7 +560,11 @@ mod tests {
         assert!(workbench.out_of_sync);
         assert_eq!(tab.user_skills[0].id, "statusline");
         assert!(!tab.user_skills[0].enabled);
-        let mcp_ids: Vec<_> = tab.mcp_servers.iter().map(|server| server.id.as_str()).collect();
+        let mcp_ids: Vec<_> = tab
+            .mcp_servers
+            .iter()
+            .map(|server| server.id.as_str())
+            .collect();
         assert_eq!(mcp_ids, ["Docs", "github"]);
         assert_eq!(tab.mcp_servers[0].system, "http");
         assert!(tab.mcp_servers[1].enabled);
@@ -560,13 +593,20 @@ mod tests {
         let settings = fs::read_to_string(root.join("settings.json")).unwrap();
         assert!(!settings.contains("brainstorming"));
 
-        let tab = adapter.set_skill_enabled("statusline", true).expect("toggle");
+        let tab = adapter
+            .set_skill_enabled("statusline", true)
+            .expect("toggle");
         assert!(tab.user_skills[0].enabled);
         let value: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(root.join("settings.json")).unwrap()).unwrap();
         assert_eq!(value["skillOverrides"]["statusline"], "on");
         assert_eq!(value["enabledPlugins"]["workbench@workshop"], true);
-        assert!(root.join("_backups/claude").read_dir().unwrap().next().is_some());
+        assert!(root
+            .join("_backups/claude")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -574,22 +614,41 @@ mod tests {
     fn toggling_mcp_patches_claude_json_without_dropping_other_servers() {
         let root = fixture();
         let adapter = ClaudeAdapter::at(root.clone());
-        let err = adapter.set_mcp_enabled("missing", false).expect_err("missing");
+        let err = adapter
+            .set_mcp_enabled("missing", false)
+            .expect_err("missing");
         assert!(err.message.contains("mcp server not found"));
         let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
-        let github = tab.mcp_servers.iter().find(|server| server.id == "github").unwrap();
+        let github = tab
+            .mcp_servers
+            .iter()
+            .find(|server| server.id == "github")
+            .unwrap();
         assert!(!github.enabled);
         assert!(github.togglable);
-        let docs = tab.mcp_servers.iter().find(|server| server.id == "Docs").unwrap();
+        let docs = tab
+            .mcp_servers
+            .iter()
+            .find(|server| server.id == "Docs")
+            .unwrap();
         assert!(docs.enabled);
         let value: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(root.join(".claude.json")).unwrap()).unwrap();
         assert_eq!(value["mcpServers"]["github"]["disabled"], true);
         assert_eq!(value["mcpServers"]["github"]["command"], "npx");
-        assert_eq!(value["mcpServers"]["Docs"]["url"], "https://docs.example/mcp");
+        assert_eq!(
+            value["mcpServers"]["Docs"]["url"],
+            "https://docs.example/mcp"
+        );
         assert_eq!(value["disabledMcpServers"], serde_json::json!(["github"]));
         let tab = adapter.set_mcp_enabled("github", true).expect("on");
-        assert!(tab.mcp_servers.iter().find(|server| server.id == "github").unwrap().enabled);
+        assert!(
+            tab.mcp_servers
+                .iter()
+                .find(|server| server.id == "github")
+                .unwrap()
+                .enabled
+        );
         let value: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(root.join(".claude.json")).unwrap()).unwrap();
         assert_eq!(value["mcpServers"]["github"]["disabled"], false);
@@ -626,11 +685,23 @@ mod tests {
         let tab = adapter
             .set_plugin_enabled("workbench@workshop", false)
             .expect("disable");
-        let plugin = tab.plugins.iter().find(|plugin| plugin.id == "workbench@workshop").unwrap();
+        let plugin = tab
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "workbench@workshop")
+            .unwrap();
         assert!(!plugin.enabled);
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin disable -s user workbench@workshop"), "{args}");
-        assert!(root.join("_backups/claude").read_dir().unwrap().next().is_some());
+        assert!(
+            args.contains("plugin disable -s user workbench@workshop"),
+            "{args}"
+        );
+        assert!(root
+            .join("_backups/claude")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -643,7 +714,10 @@ mod tests {
             .set_plugin_enabled("workbench@workshop", false)
             .expect_err("cli");
         assert!(err.message.contains("nope"));
-        assert_eq!(fs::read_to_string(root.join("settings.json")).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(root.join("settings.json")).unwrap(),
+            before
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -664,12 +738,20 @@ mod tests {
     fn install_plugin_id_and_git_source_use_official_argv() {
         let root = fixture();
         let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 0, ""));
-        adapter.install_plugin("workbench@workshop").expect("plugin");
+        adapter
+            .install_plugin("workbench@workshop")
+            .expect("plugin");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin install -s user -y workbench@workshop"), "{args}");
+        assert!(
+            args.contains("plugin install -s user -y workbench@workshop"),
+            "{args}"
+        );
         adapter.install_plugin("acme/tools").expect("git");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin marketplace add --scope user acme/tools"), "{args}");
+        assert!(
+            args.contains("plugin marketplace add --scope user acme/tools"),
+            "{args}"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -677,10 +759,14 @@ mod tests {
     fn install_cli_failure_does_not_mutate_settings() {
         let root = fixture();
         let before = fs::read_to_string(root.join("settings.json")).unwrap();
-        let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 2, "denied"));
+        let adapter =
+            ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 2, "denied"));
         let err = adapter.install_plugin("acme/tools").expect_err("cli");
         assert!(err.message.contains("denied"));
-        assert_eq!(fs::read_to_string(root.join("settings.json")).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(root.join("settings.json")).unwrap(),
+            before
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -694,12 +780,26 @@ mod tests {
             "@echo off\r\necho %* >> \"%~dp0args.txt\"\r\nexit /b 0\r\n",
         )
         .unwrap();
-        let adapter = ClaudeAdapter::at_with_cli(root.clone(), AgentCli::new(dir.join("claude.cmd").to_string_lossy().as_ref()));
+        let adapter = ClaudeAdapter::at_with_cli(
+            root.clone(),
+            AgentCli::new(dir.join("claude.cmd").to_string_lossy().as_ref()),
+        );
         adapter.update_plugin("workbench@workshop").expect("update");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin marketplace update workshop"), "{args}");
-        assert!(args.contains("plugin update -s user -y workbench@workshop"), "{args}");
-        assert!(root.join("_backups/claude").read_dir().unwrap().next().is_some());
+        assert!(
+            args.contains("plugin marketplace update workshop"),
+            "{args}"
+        );
+        assert!(
+            args.contains("plugin update -s user -y workbench@workshop"),
+            "{args}"
+        );
+        assert!(root
+            .join("_backups/claude")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -707,10 +807,20 @@ mod tests {
     fn uninstall_uses_official_argv_and_backs_up() {
         let root = fixture();
         let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 0, ""));
-        adapter.uninstall_plugin("workbench@workshop").expect("uninstall");
+        adapter
+            .uninstall_plugin("workbench@workshop")
+            .expect("uninstall");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin uninstall -s user -y workbench@workshop"), "{args}");
-        assert!(root.join("_backups/claude").read_dir().unwrap().next().is_some());
+        assert!(
+            args.contains("plugin uninstall -s user -y workbench@workshop"),
+            "{args}"
+        );
+        assert!(root
+            .join("_backups/claude")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root);
     }
 }

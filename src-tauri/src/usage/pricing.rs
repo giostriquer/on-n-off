@@ -169,8 +169,7 @@ pub fn cache_savings_usd(table: &RateTable, model: &str, totals: &TokenTotals) -
     let Some(rate) = lookup_rate(table, model) else {
         return 0.0;
     };
-    totals.cached_input_tokens as f64
-        * (rate.input_cost_per_token - rate.cache_read_cost_per_token)
+    totals.cached_input_tokens as f64 * (rate.input_cost_per_token - rate.cache_read_cost_per_token)
 }
 
 pub fn rates_cache_path(home: &Path) -> PathBuf {
@@ -186,7 +185,12 @@ fn fetch_rates_json() -> Option<Value> {
         .timeout(Duration::from_secs(10))
         .user_agent("on-n-off/0.1")
         .build();
-    let body = agent.get(LITELLM_RATES_URL).call().ok()?.into_string().ok()?;
+    let body = agent
+        .get(LITELLM_RATES_URL)
+        .call()
+        .ok()?
+        .into_string()
+        .ok()?;
     serde_json::from_str(&body).ok()
 }
 
@@ -310,7 +314,10 @@ mod tests {
 
     #[test]
     fn normalize_strips_provider_prefix() {
-        assert_eq!(normalize_model_name("Anthropic/Claude-Opus-5"), "claude-opus-5");
+        assert_eq!(
+            normalize_model_name("Anthropic/Claude-Opus-5"),
+            "claude-opus-5"
+        );
         assert_eq!(normalize_model_name("  gpt-5.6  "), "gpt-5.6");
     }
 

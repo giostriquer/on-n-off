@@ -5,6 +5,9 @@ description = "Plugin and skill manager for Claude and Codex"
 authors = ["on-n-off"]
 edition = "2021"
 
+[lints.rust]
+unsafe_code = "forbid"
+
 [lib]
 name = "on_n_off_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

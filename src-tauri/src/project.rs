@@ -54,6 +54,7 @@ pub fn parse_codex_projects(text: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub fn projects_from_paths(paths: Vec<String>) -> Vec<ProjectDto> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -79,7 +80,11 @@ pub fn projects_from_paths(paths: Vec<String>) -> Vec<ProjectDto> {
         a.label
             .to_ascii_lowercase()
             .cmp(&b.label.to_ascii_lowercase())
-            .then_with(|| a.path.to_ascii_lowercase().cmp(&b.path.to_ascii_lowercase()))
+            .then_with(|| {
+                a.path
+                    .to_ascii_lowercase()
+                    .cmp(&b.path.to_ascii_lowercase())
+            })
     });
     out
 }
@@ -92,7 +97,11 @@ pub fn expand_project_path(raw: &str) -> PathBuf {
         .or_else(|| (raw == "~").then_some(""))
     {
         if let Ok(home) = crate::paths::user_home() {
-            return if rest.is_empty() { home } else { home.join(rest) };
+            return if rest.is_empty() {
+                home
+            } else {
+                home.join(rest)
+            };
         }
     }
     PathBuf::from(raw)
@@ -143,7 +152,11 @@ pub fn inspect_projects(paths: Vec<String>, agent: AgentId) -> Vec<ProjectDto> {
         a.label
             .to_ascii_lowercase()
             .cmp(&b.label.to_ascii_lowercase())
-            .then_with(|| a.path.to_ascii_lowercase().cmp(&b.path.to_ascii_lowercase()))
+            .then_with(|| {
+                a.path
+                    .to_ascii_lowercase()
+                    .cmp(&b.path.to_ascii_lowercase())
+            })
     });
     out
 }
@@ -153,17 +166,21 @@ pub fn overlay_project(tab: &mut AgentTabDto, project: &Path, agent: AgentId) {
         overlay_antigravity_plugins(tab, project);
     }
 
-    let mut seen_skill_ids: std::collections::HashSet<String> =
-        tab.user_skills.iter().map(|skill| skill.id.clone()).collect();
+    let mut seen_skill_ids: std::collections::HashSet<String> = tab
+        .user_skills
+        .iter()
+        .map(|skill| skill.id.clone())
+        .collect();
     let mut seen_skill_names: std::collections::HashSet<String> = tab
         .user_skills
         .iter()
         .map(|skill| skill.name.to_ascii_lowercase())
-        .chain(
-            tab.plugins
+        .chain(tab.plugins.iter().flat_map(|plugin| {
+            plugin
+                .skills
                 .iter()
-                .flat_map(|plugin| plugin.skills.iter().map(|skill| skill.name.to_ascii_lowercase())),
-        )
+                .map(|skill| skill.name.to_ascii_lowercase())
+        }))
         .collect();
     for dir in project_skill_dirs(project, agent) {
         for skill in scan_project_skills(&dir, agent) {
@@ -187,8 +204,11 @@ pub fn overlay_project(tab: &mut AgentTabDto, project: &Path, agent: AgentId) {
         }
     }
 
-    let mut seen_mcp: std::collections::HashSet<String> =
-        tab.mcp_servers.iter().map(|server| server.id.clone()).collect();
+    let mut seen_mcp: std::collections::HashSet<String> = tab
+        .mcp_servers
+        .iter()
+        .map(|server| server.id.clone())
+        .collect();
     for mut server in project_mcp_servers(project, agent) {
         if !server.id.starts_with("project:") {
             server.id = format!("project:{}", server.id);
@@ -346,7 +366,10 @@ mod tests {
         let root = crate::paths::scratch_dir("on-n-off-project-scope");
         fs::create_dir_all(root.join(".claude").join("skills").join("local-feed")).unwrap();
         fs::write(
-            root.join(".claude").join("skills").join("local-feed").join("SKILL.md"),
+            root.join(".claude")
+                .join("skills")
+                .join("local-feed")
+                .join("SKILL.md"),
             "---\nname: local-feed\ndescription: Project only\n---\n",
         )
         .unwrap();
@@ -406,11 +429,18 @@ mod tests {
         let root = crate::paths::scratch_dir("on-n-off-inspect-project");
         fs::create_dir_all(root.join(".claude").join("skills").join("local-feed")).unwrap();
         fs::write(
-            root.join(".claude").join("skills").join("local-feed").join("SKILL.md"),
+            root.join(".claude")
+                .join("skills")
+                .join("local-feed")
+                .join("SKILL.md"),
             "---\nname: local-feed\n---\n",
         )
         .unwrap();
-        fs::write(root.join(".mcp.json"), r#"{"mcpServers":{"repo-docs":{"command":"node"}}}"#).unwrap();
+        fs::write(
+            root.join(".mcp.json"),
+            r#"{"mcpServers":{"repo-docs":{"command":"node"}}}"#,
+        )
+        .unwrap();
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::write(root.join(".git").join("HEAD"), "ref: refs/heads/main\n").unwrap();
         let inspected = inspect_project(&root, AgentId::Claude);
@@ -475,7 +505,11 @@ mod tests {
             mcp_servers: vec![],
         };
         overlay_project(&mut tab, &root, AgentId::Claude);
-        let names: Vec<_> = tab.user_skills.iter().map(|skill| skill.name.as_str()).collect();
+        let names: Vec<_> = tab
+            .user_skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect();
         assert_eq!(names, vec!["find-skills", "vercel-react-best-practices"]);
         assert!(tab.user_skills[0].togglable);
         assert_eq!(tab.user_skills[1].origin, ORIGIN_PROJECT);

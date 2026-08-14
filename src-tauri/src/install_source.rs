@@ -219,7 +219,12 @@ impl InstallSource {
     }
 
     pub fn codex_update_argv(plugin_id: &str) -> Vec<String> {
-        vec!["plugin".into(), "add".into(), "--json".into(), plugin_id.to_string()]
+        vec![
+            "plugin".into(),
+            "add".into(),
+            "--json".into(),
+            plugin_id.to_string(),
+        ]
     }
 }
 
@@ -240,9 +245,7 @@ fn looks_like_abs_path(value: &str) -> bool {
 
 fn parse_npx_skills(value: &str) -> Option<Result<InstallSource, AdapterError>> {
     let tokens = tokenize(value);
-    let Some(first) = tokens.first() else {
-        return None;
-    };
+    let first = tokens.first()?;
     let npx = first.eq_ignore_ascii_case("npx");
     if !npx && !first.eq_ignore_ascii_case("skills") {
         return None;
@@ -391,7 +394,10 @@ mod tests {
             InstallSource::Plugin("workbench@workshop".into())
         );
         assert_eq!(
-            parse_install_source("npx -y skills add vercel-labs/agent-skills -g --skill web-design").unwrap(),
+            parse_install_source(
+                "npx -y skills add vercel-labs/agent-skills -g --skill web-design"
+            )
+            .unwrap(),
             InstallSource::NpxSkills {
                 source: "vercel-labs/agent-skills".into(),
                 skill: Some("web-design".into()),
@@ -427,7 +433,14 @@ mod tests {
         let plugin = InstallSource::Plugin("workbench@workshop".into());
         assert_eq!(
             plugin.claude_install_argv(),
-            ["plugin", "install", "-s", "user", "-y", "workbench@workshop"]
+            [
+                "plugin",
+                "install",
+                "-s",
+                "user",
+                "-y",
+                "workbench@workshop"
+            ]
         );
         assert_eq!(
             plugin.codex_install_argv(),
@@ -440,21 +453,46 @@ mod tests {
         };
         assert_eq!(
             git.claude_install_argv(),
-            ["plugin", "marketplace", "add", "--scope", "user", "acme/tools@main"]
+            [
+                "plugin",
+                "marketplace",
+                "add",
+                "--scope",
+                "user",
+                "acme/tools@main"
+            ]
         );
         assert_eq!(
             git.codex_install_argv(),
-            ["plugin", "marketplace", "add", "--json", "acme/tools", "--ref", "main"]
+            [
+                "plugin",
+                "marketplace",
+                "add",
+                "--json",
+                "acme/tools",
+                "--ref",
+                "main"
+            ]
         );
         assert_eq!(
             InstallSource::claude_uninstall_argv("workbench@workshop"),
-            ["plugin", "uninstall", "-s", "user", "-y", "workbench@workshop"]
+            [
+                "plugin",
+                "uninstall",
+                "-s",
+                "user",
+                "-y",
+                "workbench@workshop"
+            ]
         );
         assert_eq!(
             InstallSource::codex_uninstall_argv("workbench@workshop"),
             ["plugin", "remove", "--json", "workbench@workshop"]
         );
-        assert_eq!(InstallSource::plugin_marketplace("workbench@workshop"), Some("workshop"));
+        assert_eq!(
+            InstallSource::plugin_marketplace("workbench@workshop"),
+            Some("workshop")
+        );
         assert_eq!(InstallSource::plugin_marketplace("local-only"), None);
         assert_eq!(
             InstallSource::claude_marketplace_update_argv("workshop"),
@@ -491,9 +529,6 @@ mod tests {
                 "web-design"
             ]
         );
-        assert_eq!(
-            npx.npx_skills_argv("codex")[7],
-            "codex"
-        );
+        assert_eq!(npx.npx_skills_argv("codex")[7], "codex");
     }
 }

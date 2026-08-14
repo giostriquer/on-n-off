@@ -66,7 +66,10 @@ fn marketplace_path(root: &Path, name: &str, entry: &CodexMarketplace) -> Option
     if source_type == "local" || looks_like_path(source) {
         return Some(crate::plugin_meta::strip_verbatim(source));
     }
-    if source_type == "git" || source.starts_with("http") || source.ends_with(".git") {
+    if source_type == "git"
+        || source.starts_with("http")
+        || source.to_ascii_lowercase().ends_with(".git")
+    {
         return Some(root.join(".tmp").join("marketplaces").join(name));
     }
     None
@@ -100,7 +103,11 @@ impl CodexAdapter {
 
     #[cfg(test)]
     pub fn at(root: PathBuf, agents_skills: PathBuf) -> Self {
-        Self::at_with_cli(root, agents_skills, AgentCli::new("on-n-off-no-such-codex.exe"))
+        Self::at_with_cli(
+            root,
+            agents_skills,
+            AgentCli::new("on-n-off-no-such-codex.exe"),
+        )
     }
 
     #[cfg(test)]
@@ -156,7 +163,13 @@ impl CodexAdapter {
 
     fn plugin_cache_dir(&self, plugin_id: &str) -> Option<PathBuf> {
         let (name, marketplace) = plugin_id.split_once('@')?;
-        let cache = self.root().ok()?.join("plugins").join("cache").join(marketplace).join(name);
+        let cache = self
+            .root()
+            .ok()?
+            .join("plugins")
+            .join("cache")
+            .join(marketplace)
+            .join(name);
         newest_dir(&cache)
     }
 }
@@ -188,7 +201,10 @@ impl AgentAdapter for CodexAdapter {
                 .as_ref()
                 .map(|dir| crate::plugin_meta::installed_hint(dir, None))
                 .unwrap_or_default();
-            let mut catalog = catalogs.get(&source).and_then(|hints| hints.get(&name)).cloned();
+            let mut catalog = catalogs
+                .get(&source)
+                .and_then(|hints| hints.get(&name))
+                .cloned();
             if let Some(hint) = catalog.as_mut() {
                 crate::plugin_meta::fill_remote_version(hint);
             }
@@ -199,7 +215,8 @@ impl AgentAdapter for CodexAdapter {
                     scan_plugin_skills(&dir)
                         .into_iter()
                         .map(|skill| {
-                            plugin_skill_paths.insert(normalize_skill_path(&skill.skill_md.to_string_lossy()));
+                            plugin_skill_paths
+                                .insert(normalize_skill_path(&skill.skill_md.to_string_lossy()));
                             codex_skill(Some(id), skill, &enable_by_path)
                         })
                         .collect()
@@ -266,10 +283,17 @@ impl AgentAdapter for CodexAdapter {
             return Vec::new();
         };
         let text = fs::read_to_string(root.join("config.toml")).unwrap_or_default();
-        crate::project::inspect_projects(crate::project::parse_codex_projects(&text), AgentId::Codex)
+        crate::project::inspect_projects(
+            crate::project::parse_codex_projects(&text),
+            AgentId::Codex,
+        )
     }
 
-    fn set_skill_enabled(&self, skill_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_skill_enabled(
+        &self,
+        skill_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let _guard = self
             .write
             .lock()
@@ -299,7 +323,11 @@ impl AgentAdapter for CodexAdapter {
         self.list_tab()
     }
 
-    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
+    fn set_plugin_enabled(
+        &self,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<AgentTabDto, AdapterError> {
         let _guard = self
             .write
             .lock()
@@ -324,7 +352,8 @@ impl AgentAdapter for CodexAdapter {
             run_npx_skills(&parsed, "codex")?;
             return self.list_tab();
         }
-        self.io.backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
+        self.io
+            .backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
         self.cli
             .run_args_timed(&parsed.codex_install_argv(), INSTALL_TIMEOUT)?;
         self.list_tab()
@@ -336,8 +365,10 @@ impl AgentAdapter for CodexAdapter {
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
         self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io.backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
-        self.cli.run_args(&InstallSource::codex_uninstall_argv(plugin_id))?;
+        self.io
+            .backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
+        self.cli
+            .run_args(&InstallSource::codex_uninstall_argv(plugin_id))?;
         self.list_tab()
     }
 
@@ -347,15 +378,18 @@ impl AgentAdapter for CodexAdapter {
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
         self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io.backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
+        self.io
+            .backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
         if let Some(marketplace) = InstallSource::plugin_marketplace(plugin_id) {
             self.cli.run_args_timed(
                 &InstallSource::codex_marketplace_upgrade_argv(marketplace),
                 INSTALL_TIMEOUT,
             )?;
         }
-        self.cli
-            .run_args_timed(&InstallSource::codex_update_argv(plugin_id), INSTALL_TIMEOUT)?;
+        self.cli.run_args_timed(
+            &InstallSource::codex_update_argv(plugin_id),
+            INSTALL_TIMEOUT,
+        )?;
         self.list_tab()
     }
 }
@@ -369,7 +403,11 @@ fn skill_enable_map(config: &CodexConfig) -> HashMap<String, bool> {
         .collect()
 }
 
-fn codex_skill(plugin_id: Option<&str>, skill: ScannedSkill, enable_by_path: &HashMap<String, bool>) -> SkillDto {
+fn codex_skill(
+    plugin_id: Option<&str>,
+    skill: ScannedSkill,
+    enable_by_path: &HashMap<String, bool>,
+) -> SkillDto {
     let id = normalize_skill_path(&skill.skill_md.to_string_lossy());
     let enabled = enable_by_path.get(&id).copied().unwrap_or(true);
     SkillDto {
@@ -386,6 +424,20 @@ fn codex_skill(plugin_id: Option<&str>, skill: ScannedSkill, enable_by_path: &Ha
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uppercase_git_marketplace_source_uses_the_clone_cache() {
+        let root = PathBuf::from(r"C:\Users\me\.codex");
+        let entry = CodexMarketplace {
+            source_type: None,
+            source: Some("git@github.com:example/workshop.GIT".into()),
+        };
+
+        assert_eq!(
+            marketplace_path(&root, "workshop", &entry),
+            Some(root.join(".tmp").join("marketplaces").join("workshop"))
+        );
+    }
 
     fn fixture() -> (PathBuf, PathBuf) {
         let home = crate::paths::scratch_dir("on-n-off-codex-home");
@@ -412,7 +464,11 @@ mod tests {
         .unwrap();
         let extra = home.join("elsewhere/conoswiki-feed/SKILL.md");
         fs::create_dir_all(extra.parent().unwrap()).unwrap();
-        fs::write(&extra, "---\nname: conoswiki-feed\ndescription: Feed ConosWiki\n---\n").unwrap();
+        fs::write(
+            &extra,
+            "---\nname: conoswiki-feed\ndescription: Feed ConosWiki\n---\n",
+        )
+        .unwrap();
         let marketplace = root.join(".tmp/marketplaces/workshop");
         fs::create_dir_all(marketplace.join(".claude-plugin")).unwrap();
         fs::write(
@@ -446,11 +502,23 @@ mod tests {
         assert_eq!(tab.plugins[1].upstream, "0.23.0");
         assert!(tab.plugins[1].out_of_sync);
         assert_eq!(tab.plugins[1].skills.len(), 1);
-        let names: Vec<_> = tab.user_skills.iter().map(|skill| skill.name.as_str()).collect();
+        let names: Vec<_> = tab
+            .user_skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect();
         assert_eq!(names, ["conoswiki-feed", "loom-feed"]);
-        let wiki = tab.user_skills.iter().find(|skill| skill.name == "conoswiki-feed").unwrap();
+        let wiki = tab
+            .user_skills
+            .iter()
+            .find(|skill| skill.name == "conoswiki-feed")
+            .unwrap();
         assert!(!wiki.enabled);
-        let mcp_ids: Vec<_> = tab.mcp_servers.iter().map(|server| server.id.as_str()).collect();
+        let mcp_ids: Vec<_> = tab
+            .mcp_servers
+            .iter()
+            .map(|server| server.id.as_str())
+            .collect();
         assert_eq!(mcp_ids, ["docs", "github"]);
         assert!(!tab.mcp_servers[0].enabled);
         assert_eq!(tab.mcp_servers[0].system, "http");
@@ -492,8 +560,14 @@ mod tests {
             .id
             .clone();
 
-        let tab = adapter.set_skill_enabled(&loom_id, false).expect("toggle loom");
-        let loom = tab.user_skills.iter().find(|skill| skill.name == "loom-feed").unwrap();
+        let tab = adapter
+            .set_skill_enabled(&loom_id, false)
+            .expect("toggle loom");
+        let loom = tab
+            .user_skills
+            .iter()
+            .find(|skill| skill.name == "loom-feed")
+            .unwrap();
         assert!(!loom.enabled);
         let text = fs::read_to_string(root.join("config.toml")).unwrap();
         assert!(text.contains("[plugins.\"workbench@workshop\"]"));
@@ -501,14 +575,21 @@ mod tests {
         assert!(text.contains("[[skills.config]]"));
         assert!(text.contains("loom-feed"));
 
-        let tab = adapter.set_skill_enabled(&wiki_id, true).expect("toggle wiki");
+        let tab = adapter
+            .set_skill_enabled(&wiki_id, true)
+            .expect("toggle wiki");
         let wiki = tab
             .user_skills
             .iter()
             .find(|skill| skill.name == "conoswiki-feed")
             .unwrap();
         assert!(wiki.enabled);
-        assert!(root.join("_backups/codex").read_dir().unwrap().next().is_some());
+        assert!(root
+            .join("_backups/codex")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 
@@ -519,12 +600,21 @@ mod tests {
         let tab = adapter
             .set_plugin_enabled("workbench@workshop", false)
             .expect("disable");
-        let plugin = tab.plugins.iter().find(|plugin| plugin.id == "workbench@workshop").unwrap();
+        let plugin = tab
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "workbench@workshop")
+            .unwrap();
         assert!(!plugin.enabled);
         let text = fs::read_to_string(root.join("config.toml")).unwrap();
         assert!(text.contains("[plugins.\"toolkit@workshop\"]"));
         assert!(text.contains("[[skills.config]]"));
-        assert!(root.join("_backups/codex").read_dir().unwrap().next().is_some());
+        assert!(root
+            .join("_backups/codex")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 
@@ -532,10 +622,16 @@ mod tests {
     fn toggling_mcp_patches_toml_enabled_only() {
         let (root, agents_skills) = fixture();
         let adapter = CodexAdapter::at(root.clone(), agents_skills);
-        let err = adapter.set_mcp_enabled("missing", false).expect_err("missing");
+        let err = adapter
+            .set_mcp_enabled("missing", false)
+            .expect_err("missing");
         assert!(err.message.contains("mcp server not found"));
         let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
-        let github = tab.mcp_servers.iter().find(|server| server.id == "github").unwrap();
+        let github = tab
+            .mcp_servers
+            .iter()
+            .find(|server| server.id == "github")
+            .unwrap();
         assert!(!github.enabled);
         assert!(github.togglable);
         let text = fs::read_to_string(root.join("config.toml")).unwrap();
@@ -543,10 +639,24 @@ mod tests {
         assert!(text.contains("[[skills.config]]"), "{text}");
         assert!(text.contains("[mcp_servers.docs]"), "{text}");
         let tab = adapter.set_mcp_enabled("docs", true).expect("on");
-        assert!(tab.mcp_servers.iter().find(|server| server.id == "docs").unwrap().enabled);
+        assert!(
+            tab.mcp_servers
+                .iter()
+                .find(|server| server.id == "docs")
+                .unwrap()
+                .enabled
+        );
         let text = fs::read_to_string(root.join("config.toml")).unwrap();
-        assert!(text.contains("url = \"https://docs.example/mcp\""), "{text}");
-        assert!(root.join("_backups/codex").read_dir().unwrap().next().is_some());
+        assert!(
+            text.contains("url = \"https://docs.example/mcp\""),
+            "{text}"
+        );
+        assert!(root
+            .join("_backups/codex")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 
@@ -580,25 +690,48 @@ mod tests {
         );
         adapter.update_plugin("workbench@workshop").expect("update");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin marketplace upgrade --json workshop"), "{args}");
-        assert!(args.contains("plugin add --json workbench@workshop"), "{args}");
-        assert!(root.join("_backups/codex").read_dir().unwrap().next().is_some());
+        assert!(
+            args.contains("plugin marketplace upgrade --json workshop"),
+            "{args}"
+        );
+        assert!(
+            args.contains("plugin add --json workbench@workshop"),
+            "{args}"
+        );
+        assert!(root
+            .join("_backups/codex")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 
     #[test]
     fn install_and_uninstall_use_official_argv() {
         let (root, agents_skills) = fixture();
-        let adapter = CodexAdapter::at_with_cli(root.clone(), agents_skills, codex_argv_stub(&root, 0, ""));
+        let adapter =
+            CodexAdapter::at_with_cli(root.clone(), agents_skills, codex_argv_stub(&root, 0, ""));
         adapter.install_plugin("workbench@workshop").expect("add");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin add --json workbench@workshop"), "{args}");
+        assert!(
+            args.contains("plugin add --json workbench@workshop"),
+            "{args}"
+        );
         adapter.install_plugin("acme/tools@main").expect("market");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin marketplace add --json acme/tools --ref main"), "{args}");
-        adapter.uninstall_plugin("workbench@workshop").expect("remove");
+        assert!(
+            args.contains("plugin marketplace add --json acme/tools --ref main"),
+            "{args}"
+        );
+        adapter
+            .uninstall_plugin("workbench@workshop")
+            .expect("remove");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
-        assert!(args.contains("plugin remove --json workbench@workshop"), "{args}");
+        assert!(
+            args.contains("plugin remove --json workbench@workshop"),
+            "{args}"
+        );
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 
@@ -606,10 +739,17 @@ mod tests {
     fn install_cli_failure_does_not_mutate_config() {
         let (root, agents_skills) = fixture();
         let before = fs::read_to_string(root.join("config.toml")).unwrap();
-        let adapter = CodexAdapter::at_with_cli(root.clone(), agents_skills, codex_argv_stub(&root, 3, "nope"));
+        let adapter = CodexAdapter::at_with_cli(
+            root.clone(),
+            agents_skills,
+            codex_argv_stub(&root, 3, "nope"),
+        );
         let err = adapter.install_plugin("acme/tools").expect_err("cli");
         assert!(err.message.contains("nope"));
-        assert_eq!(fs::read_to_string(root.join("config.toml")).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(root.join("config.toml")).unwrap(),
+            before
+        );
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 }

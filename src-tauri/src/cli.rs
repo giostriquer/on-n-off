@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::dto::{AdapterError, ErrorKind};
@@ -37,7 +38,11 @@ impl AgentCli {
         self.run(&refs)
     }
 
-    pub fn run_args_timed(&self, args: &[String], timeout: Duration) -> Result<String, AdapterError> {
+    pub fn run_args_timed(
+        &self,
+        args: &[String],
+        timeout: Duration,
+    ) -> Result<String, AdapterError> {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         self.run_timed(&refs, timeout)
     }
@@ -48,23 +53,19 @@ impl AgentCli {
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_else(|| self.binary.clone()),
         )
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| spawn_error(&self.binary, error))?;
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| spawn_error(&self.binary, error))?;
+        let stdout = child.stdout.take().map(read_pipe);
+        let stderr = child.stderr.take().map(read_pipe);
         let started = Instant::now();
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    let mut stdout = String::new();
-                    let mut stderr = String::new();
-                    if let Some(mut out) = child.stdout.take() {
-                        let _ = out.read_to_string(&mut stdout);
-                    }
-                    if let Some(mut err) = child.stderr.take() {
-                        let _ = err.read_to_string(&mut stderr);
-                    }
+                    let stdout = join_pipe(stdout);
+                    let stderr = join_pipe(stderr);
                     if status.success() {
                         return Ok(stdout);
                     }
@@ -73,16 +74,38 @@ impl AgentCli {
                 Ok(None) if started.elapsed() >= timeout => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(AdapterError::message(format!(
-                        "{} timed out.",
-                        self.binary
-                    )));
+                    // A spawned descendant may still own inherited pipe handles after the
+                    // direct child is killed. Detach the drainers so the timeout remains a
+                    // hard deadline; they exit when those handles eventually close.
+                    drop(stdout);
+                    drop(stderr);
+                    return Err(AdapterError::message(format!("{} timed out.", self.binary)));
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-                Err(error) => return Err(AdapterError::message(error.to_string())),
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    drop(stdout);
+                    drop(stderr);
+                    return Err(AdapterError::message(error.to_string()));
+                }
             }
         }
     }
+}
+
+fn read_pipe<R: Read + Send + 'static>(mut pipe: R) -> JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut output = String::new();
+        let _ = pipe.read_to_string(&mut output);
+        output
+    })
+}
+
+fn join_pipe(reader: Option<JoinHandle<String>>) -> String {
+    reader
+        .and_then(|thread| thread.join().ok())
+        .unwrap_or_default()
 }
 
 pub fn run_npx_skills(source: &InstallSource, agent: &str) -> Result<String, AdapterError> {
@@ -143,10 +166,7 @@ mod tests {
 
     #[test]
     fn success_returns_stdout() {
-        let bin = stub(
-            "ok.cmd",
-            "@echo off\r\necho {\"ok\":true}\r\nexit /b 0\r\n",
-        );
+        let bin = stub("ok.cmd", "@echo off\r\necho {\"ok\":true}\r\nexit /b 0\r\n");
         let out = AgentCli::new(bin.to_string_lossy().as_ref())
             .run(&["plugin", "list"])
             .expect("ok");
@@ -155,10 +175,7 @@ mod tests {
 
     #[test]
     fn non_zero_returns_stderr() {
-        let bin = stub(
-            "fail.cmd",
-            "@echo off\r\necho boom 1>&2\r\nexit /b 2\r\n",
-        );
+        let bin = stub("fail.cmd", "@echo off\r\necho boom 1>&2\r\nexit /b 2\r\n");
         let err = AgentCli::new(bin.to_string_lossy().as_ref())
             .run(&["plugin", "enable", "x"])
             .expect_err("fail");
@@ -172,11 +189,30 @@ mod tests {
             "slow.cmd",
             "@echo off\r\nping -n 8 127.0.0.1 >nul\r\nexit /b 0\r\n",
         );
+        let started = Instant::now();
         let err = AgentCli::new(bin.to_string_lossy().as_ref())
             .with_timeout(Duration::from_millis(200))
             .run(&["plugin", "enable", "x"])
             .expect_err("timeout");
         assert!(err.message.to_lowercase().contains("timed out"));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "timeout returned after {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn drains_chatty_stdout_and_stderr_while_the_process_runs() {
+        let bin = stub(
+            "chatty.cmd",
+            "@echo off\r\nfor /L %%i in (1,1,5000) do @(echo stdout-%%i-abcdefghijklmnopqrstuvwxyz0123456789& echo stderr-%%i-abcdefghijklmnopqrstuvwxyz0123456789 1>&2)\r\necho complete\r\nexit /b 0\r\n",
+        );
+        let out = AgentCli::new(bin.to_string_lossy().as_ref())
+            .with_timeout(Duration::from_secs(5))
+            .run(&[])
+            .expect("chatty child must not block on full output pipes");
+        assert!(out.contains("complete"));
     }
 
     #[test]

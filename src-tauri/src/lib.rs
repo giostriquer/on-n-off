@@ -7,16 +7,16 @@ mod codex;
 mod commands;
 mod config_io;
 mod dto;
-mod flags;
-mod settings;
 #[cfg(test)]
 mod fake;
+mod flags;
 mod install_source;
 mod mcp;
 mod paths;
 mod plugin_meta;
 mod project;
 mod scanner;
+mod settings;
 mod sort;
 mod usage;
 

@@ -53,7 +53,9 @@ pub fn load_settings() -> AppSettings {
 }
 
 pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterError> {
-    settings.binary_paths.retain(|_, value| !value.trim().is_empty());
+    settings
+        .binary_paths
+        .retain(|_, value| !value.trim().is_empty());
     settings.hidden_agents.retain(|id| ALL_AGENTS.contains(id));
     settings.hidden_agents.sort_by_key(|id| match id {
         AgentId::Claude => 0,
@@ -68,11 +70,15 @@ pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterEr
     }
     let path = paths::settings_path()?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| AdapterError::write(error.to_string(), Some(path.display().to_string())))?;
+        fs::create_dir_all(parent).map_err(|error| {
+            AdapterError::write(error.to_string(), Some(path.display().to_string()))
+        })?;
     }
     let body = serde_json::to_string_pretty(&settings)
         .map_err(|error| AdapterError::message(error.to_string()))?;
-    fs::write(&path, body).map_err(|error| AdapterError::write(error.to_string(), Some(path.display().to_string())))?;
+    fs::write(&path, body).map_err(|error| {
+        AdapterError::write(error.to_string(), Some(path.display().to_string()))
+    })?;
     Ok(settings)
 }
 
@@ -232,7 +238,10 @@ mod tests {
         ));
         assert_eq!(settings.hidden_agents, vec![AgentId::Antigravity]);
         assert_eq!(
-            settings.binary_paths.get(&AgentId::Claude).map(String::as_str),
+            settings
+                .binary_paths
+                .get(&AgentId::Claude)
+                .map(String::as_str),
             Some(r"C:\bin\claude.cmd")
         );
     }

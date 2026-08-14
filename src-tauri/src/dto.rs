@@ -156,10 +156,12 @@ impl AgentTabDto {
 
     pub fn ensure_togglable(&self, skill_id: &str) -> Result<(), AdapterError> {
         match self.skill(skill_id) {
-            None => Err(AdapterError::message(format!("skill not found: {skill_id}"))),
-            Some(skill) if !skill.togglable => {
-                Err(AdapterError::message(format!("skill is not togglable: {skill_id}")))
-            }
+            None => Err(AdapterError::message(format!(
+                "skill not found: {skill_id}"
+            ))),
+            Some(skill) if !skill.togglable => Err(AdapterError::message(format!(
+                "skill is not togglable: {skill_id}"
+            ))),
             Some(_) => Ok(()),
         }
     }
@@ -183,10 +185,12 @@ impl AgentTabDto {
 
     pub fn ensure_mcp_togglable(&self, mcp_id: &str) -> Result<(), AdapterError> {
         match self.mcp_servers.iter().find(|server| server.id == mcp_id) {
-            None => Err(AdapterError::message(format!("mcp server not found: {mcp_id}"))),
-            Some(server) if !server.togglable => {
-                Err(AdapterError::message(format!("mcp server is not togglable: {mcp_id}")))
-            }
+            None => Err(AdapterError::message(format!(
+                "mcp server not found: {mcp_id}"
+            ))),
+            Some(server) if !server.togglable => Err(AdapterError::message(format!(
+                "mcp server is not togglable: {mcp_id}"
+            ))),
             Some(_) => Ok(()),
         }
     }
