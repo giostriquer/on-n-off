@@ -45,6 +45,13 @@ export function formatDayShort(day: string): string {
   return `${months[month - 1] ?? ""} ${dayOfMonth}`;
 }
 
+/** "Jul 15 to Aug 13" style window label. */
+export function formatDayRange(sinceDay: string, untilDay: string): string {
+  if (!sinceDay || !untilDay) return "";
+  if (sinceDay === untilDay) return formatDayShort(sinceDay);
+  return `${formatDayShort(sinceDay)} to ${formatDayShort(untilDay)}`;
+}
+
 export function enumerateDays(sinceDay: string, untilDay: string): readonly string[] {
   const days: string[] = [];
   const start = Date.parse(`${sinceDay}T00:00:00Z`);

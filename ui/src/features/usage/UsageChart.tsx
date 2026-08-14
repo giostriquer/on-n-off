@@ -1,13 +1,21 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { areaY, defineChart, lineY } from "@tanstack/charts";
+import { Chart } from "@tanstack/charts/react";
+import { crosshair } from "@tanstack/charts/crosshair";
+import { scaleLinear } from "@tanstack/charts/scales/linear";
+import { scalePoint } from "@tanstack/charts/scales/point";
+import { tooltip } from "@tanstack/charts/tooltip";
 import { PROVIDERS, providerLabel, type FoldedUsage } from "$lib/usageMerge";
-import { buildChartSeries } from "$lib/usageChart";
+import { buildChartSeries, toChartRows } from "$lib/usageChart";
 import { formatTokens, formatUsd } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
 import type { AgentId } from "$lib/types";
+import "./UsageChart.css";
 
 type UsageChartProps = {
   folded: FoldedUsage;
   metric: UsageMetric;
+  onMetricChange: (metric: UsageMetric) => void;
   sinceDay: string;
   untilDay: string;
   sinceTime?: string;
@@ -15,21 +23,52 @@ type UsageChartProps = {
   hourly?: boolean;
 };
 
-function bandColor(provider: AgentId): string {
-  if (provider === "claude") return "var(--usage-a)";
-  if (provider === "codex") return "var(--usage-b)";
-  return "var(--mute)";
+/** T3-like contrast: Codex near-white, Claude warm orange. */
+const PROVIDER_COLORS: Record<"light" | "dark", Record<AgentId, string>> = {
+  light: {
+    codex: "#2a2a2a",
+    claude: "#d9773a",
+    antigravity: "#6c727c",
+  },
+  dark: {
+    codex: "#ececec",
+    claude: "#e8944a",
+    antigravity: "#8c939d",
+  },
+};
+
+function useDarkTheme(): boolean {
+  const [dark, setDark] = useState(() =>
+    typeof document !== "undefined" ? document.documentElement.classList.contains("dark") : true,
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => setDark(root.classList.contains("dark"));
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  return dark;
+}
+
+function bandColor(provider: AgentId, dark: boolean): string {
+  return PROVIDER_COLORS[dark ? "dark" : "light"][provider] ?? PROVIDER_COLORS.dark.antigravity;
 }
 
 export function UsageChart({
   folded,
   metric,
+  onMetricChange,
   sinceDay,
   untilDay,
   sinceTime,
   untilTime,
   hourly = false,
 }: UsageChartProps) {
+  const dark = useDarkTheme();
   const series = useMemo(
     () =>
       buildChartSeries({
@@ -44,103 +83,146 @@ export function UsageChart({
     [folded, hourly, metric, sinceDay, sinceTime, untilDay, untilTime],
   );
 
-  const height = 140;
-  const padTop = 8;
-  const padBottom = 22;
-  const plotH = height - padTop - padBottom;
-  const preferReduced =
-    typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const labelStep = Math.max(1, Math.floor(series.columns.length / 6));
+  const rows = useMemo(() => toChartRows(series), [series]);
+  const empty = series.columns.every((column) => column.total === 0);
+  const colors = useMemo(() => PROVIDERS.map((provider) => bandColor(provider, dark)), [dark]);
 
-  function formatTotal(value: number): string {
-    return metric === "cost" ? formatUsd(value) : formatTokens(value);
-  }
+  const definition = useMemo(() => {
+    const labelStep = Math.max(1, Math.floor(series.columns.length / 5));
+    const keys = series.columns.map((column) => column.key);
+    const labelByKey = new Map(series.columns.map((column) => [column.key, column.label]));
+    const formatTick = (value: number) => (metric === "cost" ? formatUsd(value) : formatTokens(value));
+    const formatValue = (value: unknown) => {
+      const n = typeof value === "number" ? value : Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return formatTick(n);
+    };
 
-  function stackRects(
-    col: (typeof series.columns)[number],
-    x: number,
-    barW: number,
-    usable: number,
-  ) {
-    const yBase = padTop + plotH;
-    let y = yBase;
-    return col.bands
-      .filter((band) => band.value > 0)
-      .map((band) => {
-        const h = (band.value / usable) * plotH;
-        y -= h;
-        return { provider: band.provider, x, y, width: barW, height: h };
-      });
-  }
+    const base = defineChart({
+      svgAnimation:
+        typeof matchMedia === "undefined" || !matchMedia("(prefers-reduced-motion: reduce)").matches,
+      focus: "group-x",
+      maxFocusDistance: Number.POSITIVE_INFINITY,
+      focusRing: false,
+      clip: true,
+      marks: [
+        areaY(rows, {
+          x: "key",
+          y: "value",
+          z: "provider",
+          color: "provider",
+          fillOpacity: 0.22,
+        }),
+        lineY(rows, {
+          x: "key",
+          y: "value",
+          z: "provider",
+          color: "provider",
+          strokeWidth: 2,
+        }),
+        crosshair({
+          x: {
+            stroke: dark ? "rgba(255,255,255,0.28)" : "rgba(0,0,0,0.22)",
+            strokeWidth: 1,
+          },
+          y: false,
+        }),
+      ],
+      x: {
+        scale: () => scalePoint<string>().domain(keys).padding(0.08),
+        axis: {
+          ticks: {
+            values: keys.filter((_, index) => index % labelStep === 0 || index === keys.length - 1),
+            format: (value) => labelByKey.get(String(value)) ?? String(value),
+          },
+        },
+      },
+      y: {
+        scale: scaleLinear,
+        nice: true,
+        grid: true,
+        axis: {
+          ticks: {
+            count: 4,
+            format: (value) => formatTick(Number(value)),
+          },
+        },
+      },
+      color: {
+        domain: [...PROVIDERS],
+        range: colors,
+      },
+      margin: { top: 10, right: 8, bottom: 28, left: 52 },
+    });
+
+    return defineChart(base, {
+      tooltip: {
+        use: tooltip,
+        className: "usage-chart-tooltip",
+        content: (points) => {
+          const key = String(points[0]?.xValue ?? "");
+          return {
+            title: labelByKey.get(key) ?? key,
+            rows: points.map((point) => {
+              const provider = String(point.datum.provider) as AgentId;
+              return {
+                label: providerLabel(provider),
+                value: formatValue(point.yValue),
+                color: point.color,
+              };
+            }),
+          };
+        },
+      },
+    });
+  }, [colors, dark, metric, rows, series.columns]);
 
   return (
-    <section className="usage-chart rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] p-3.5" aria-label="Usage over time">
-      <div className="mb-2 flex items-center gap-3">
-        <span className="text-[11.5px] font-semibold tracking-[0.03em] uppercase">Activity</span>
+    <section className="usage-chart" aria-label="Usage over time">
+      <div className="mb-3 flex items-center gap-3">
+        <span className="text-[13px] font-semibold tracking-[-0.01em]">
+          {hourly ? "Hourly" : "Daily"} {metric === "cost" ? "cost" : "tokens"}
+        </span>
         <div className="flex-1" />
-        {PROVIDERS.map((provider) => (
-          <span key={provider} className="flex items-center gap-1.5 font-mono text-[10.5px] text-[var(--mute)] uppercase">
-            <span className="size-2 rounded-[1px]" style={{ background: bandColor(provider) }} aria-hidden="true" />
-            {providerLabel(provider)}
-          </span>
-        ))}
+        <div
+          className="inline-grid grid-flow-col overflow-hidden rounded-md border border-[var(--hair)]"
+          role="group"
+          aria-label="Metric"
+        >
+          {(
+            [
+              ["cost", "Cost"],
+              ["tokens", "Tokens"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`h-7 cursor-pointer rounded-none border-0 px-2.5 text-[10.5px] font-semibold tracking-[0.05em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--fill)] ${
+                metric === value
+                  ? "bg-[var(--fill)] text-[var(--fill-ink)]"
+                  : "bg-transparent text-[var(--mute)]"
+              }`}
+              aria-pressed={metric === value}
+              onClick={() => onMetricChange(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {series.columns.every((c) => c.total === 0) ? (
-        <p className="py-6 text-center text-[13px] text-[var(--mute)]">No activity in this window.</p>
+      {empty ? (
+        <p className="py-14 text-center text-[13px] text-[var(--mute)]">No activity in this window.</p>
       ) : (
-        <svg
-          className="block w-full"
-          viewBox={`0 0 ${Math.max(series.columns.length * 28, 280)} ${height}`}
-          role="img"
-          aria-label={metric === "cost" ? "Stacked cost by provider" : "Stacked tokens by provider"}
-        >
-          {series.columns.map((col, index) => {
-            const x = index * 28 + 4;
-            const barW = 18;
-            const usable = series.max || 1;
-            const rects = stackRects(col, x, barW, usable);
-            return (
-              <g key={col.key}>
-                {rects.map((rect) => (
-                  <rect
-                    key={rect.provider}
-                    x={rect.x}
-                    y={rect.y}
-                    width={rect.width}
-                    height={rect.height}
-                    fill={bandColor(rect.provider)}
-                    className={preferReduced ? undefined : "usage-bar"}
-                  />
-                ))}
-                {index % labelStep === 0 || index === series.columns.length - 1 ? (
-                  <text
-                    x={x + barW / 2}
-                    y={height - 6}
-                    textAnchor="middle"
-                    style={{
-                      fontSize: 9,
-                      fill: "var(--mute)",
-                      fontFamily: "var(--font-mono), monospace",
-                    }}
-                  >
-                    {col.label}
-                  </text>
-                ) : null}
-                <title>
-                  {col.label}: {formatTotal(col.total)}
-                </title>
-              </g>
-            );
-          })}
-        </svg>
+        <div className="usage-chart-host">
+          <Chart
+            definition={definition}
+            height={260}
+            ariaLabel={metric === "cost" ? "Daily cost by provider" : "Daily tokens by provider"}
+          />
+        </div>
       )}
-      <style>{`
-        .usage-bar { transition: height 120ms ease, y 120ms ease; }
-        @media (prefers-reduced-motion: reduce) {
-          .usage-bar { transition: none; }
-        }
-      `}</style>
     </section>
   );
 }

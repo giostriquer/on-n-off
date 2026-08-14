@@ -9,6 +9,14 @@ export function ConfigRoute() {
       tab={session.currentTab.dto}
       projects={session.currentProjects}
       selectedPath={session.currentScopePath}
+      log={session.log}
+      driftCount={session.drift.length}
+      onSelectScope={(path) => {
+        void session.selectScope(path);
+      }}
+      onPickFolder={() => {
+        void session.pickProjectFolder();
+      }}
     />
   );
 }

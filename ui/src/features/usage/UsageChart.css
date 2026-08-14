@@ -1,0 +1,55 @@
+.usage-chart-host {
+  width: 100%;
+  min-height: 260px;
+  color: var(--silkscreen);
+}
+
+.usage-chart-host svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+.usage-chart-host text {
+  fill: var(--mute);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.usage-chart-host .tick line,
+.usage-chart-host .domain {
+  stroke: var(--hair);
+}
+
+.usage-chart-host .grid line {
+  stroke: var(--hair);
+  stroke-opacity: 0.75;
+}
+
+.usage-chart {
+  --ts-chart-tooltip-background: var(--plate);
+  --ts-chart-tooltip-color: var(--silkscreen);
+  --ts-chart-tooltip-border: 1px solid var(--hair);
+  --ts-chart-tooltip-border-radius: 8px;
+  --ts-chart-tooltip-padding: 0.5rem 0.65rem;
+  --ts-chart-tooltip-shadow: 0 10px 28px rgb(0 0 0 / 0.22);
+  --ts-chart-tooltip-font: 500 0.72rem/1.35 "Instrument Sans", system-ui, sans-serif;
+  --ts-chart-tooltip-max-width: min(18rem, 85%);
+}
+
+.usage-chart-tooltip .ts-chart-tooltip__title {
+  margin-bottom: 0.35rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+
+.usage-chart-tooltip .ts-chart-tooltip__row {
+  gap: 0.55rem;
+}
+
+.usage-chart-tooltip .ts-chart-tooltip__swatch {
+  border-radius: 1px;
+}

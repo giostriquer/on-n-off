@@ -38,12 +38,22 @@ export type PeriodTotals = {
   byProvider: Readonly<Record<AgentId, PeriodProviderSlice>>;
 };
 
+export type TokenBreakdown = {
+  uncachedInputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+};
+
 export type FoldedUsage = {
   costUsd: number;
   totalTokens: number;
   records: number;
   sessions: number;
   cacheSavingsUsd: number;
+  activeDays: number;
+  tokens: TokenBreakdown;
   providers: readonly ProviderTotals[];
   models: readonly ModelTotals[];
   daily: readonly PeriodTotals[];
@@ -65,12 +75,22 @@ function bucketTokens(bucket: UsageBucket): number {
   return t.uncachedInputTokens + t.cachedInputTokens + t.cacheCreationTokens + t.outputTokens;
 }
 
+const EMPTY_TOKENS: TokenBreakdown = {
+  uncachedInputTokens: 0,
+  cachedInputTokens: 0,
+  cacheCreationTokens: 0,
+  outputTokens: 0,
+  reasoningTokens: 0,
+};
+
 const EMPTY: FoldedUsage = {
   costUsd: 0,
   totalTokens: 0,
   records: 0,
   sessions: 0,
   cacheSavingsUsd: 0,
+  activeDays: 0,
+  tokens: EMPTY_TOKENS,
   providers: [],
   models: [],
   daily: [],
@@ -89,6 +109,7 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
   let totalTokens = 0;
   let records = 0;
   let cacheSavingsUsd = 0;
+  const tokenAcc: TokenBreakdown = { ...EMPTY_TOKENS };
   const providerAcc = new Map<AgentId, { costUsd: number; totalTokens: number; records: number }>();
   const modelAcc = new Map<string, { provider: AgentId; costUsd: number; totalTokens: number; records: number }>();
   const dailyAcc = new Map<string, { costUsd: number; totalTokens: number; byProvider: Record<AgentId, PeriodProviderSlice> }>();
@@ -103,6 +124,11 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
     totalTokens += tokens;
     records += bucket.records;
     cacheSavingsUsd += bucket.cacheSavingsUsd;
+    tokenAcc.uncachedInputTokens += bucket.totals.uncachedInputTokens;
+    tokenAcc.cachedInputTokens += bucket.totals.cachedInputTokens;
+    tokenAcc.cacheCreationTokens += bucket.totals.cacheCreationTokens;
+    tokenAcc.outputTokens += bucket.totals.outputTokens;
+    tokenAcc.reasoningTokens += bucket.totals.reasoningTokens;
 
     const provider = providerAcc.get(bucket.provider) ?? { costUsd: 0, totalTokens: 0, records: 0 };
     provider.costUsd += bucket.costUsd;
@@ -187,12 +213,16 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
     }))
     .sort((a, b) => (a.hourStart ?? "").localeCompare(b.hourStart ?? ""));
 
+  const activeDays = daily.reduce((n, period) => n + (period.costUsd > 0 || period.totalTokens > 0 ? 1 : 0), 0);
+
   return {
     costUsd,
     totalTokens,
     records,
     sessions,
     cacheSavingsUsd,
+    activeDays,
+    tokens: tokenAcc,
     providers,
     models,
     daily,

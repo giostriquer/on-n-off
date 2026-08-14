@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(hints.get("toolkit").map(|hint| hint.version.as_str()), Some("0.5.0"));
         with_fetch_text(
             |url| {
-                assert!(url.contains("giostriquer/workshop"));
+                assert!(url.contains("example/workshop"));
                 assert!(url.contains("marketplace.json"));
                 Some(
                     r#"{
@@ -611,7 +611,7 @@ mod tests {
                 )
             },
             || {
-                apply_remote_marketplace_versions(&mut hints, "giostriquer/workshop", &root);
+                apply_remote_marketplace_versions(&mut hints, "example/workshop", &root);
                 assert_eq!(hints.get("workbench").map(|hint| hint.version.as_str()), Some("0.23.0"));
                 assert_eq!(hints.get("toolkit").map(|hint| hint.version.as_str()), Some("0.6.0"));
                 let installed = VersionHint {
@@ -624,12 +624,12 @@ mod tests {
             },
         );
         assert_eq!(
-            github_repo("git@github.com:giostriquer/workshop.git"),
-            Some(("giostriquer".into(), "workshop".into()))
+            github_repo("git@github.com:example/workshop.git"),
+            Some(("example".into(), "workshop".into()))
         );
         assert_eq!(
-            github_repo("giostriquer/workshop"),
-            Some(("giostriquer".into(), "workshop".into()))
+            github_repo("example/workshop"),
+            Some(("example".into(), "workshop".into()))
         );
         let _ = fs::remove_dir_all(root);
     }

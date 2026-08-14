@@ -29,9 +29,9 @@ export function LeftRail({
     { id: "plugins" as const, label: "Plugins", count: `${counts.plugins.on}/${counts.plugins.total}` },
     { id: "skills" as const, label: "Skills", count: `${counts.skills.on}/${counts.skills.total}` },
     { id: "mcp" as const, label: "MCP servers", count: `${counts.mcp.on}/${counts.mcp.total}` },
-    { id: "usage" as const, label: "Usage", count: "" },
     { id: "config" as const, label: "Agent config", count: "" },
   ];
+  const footerItems = [{ id: "usage" as const, label: "Usage", count: "" }];
 
   return (
     <nav
@@ -58,7 +58,7 @@ export function LeftRail({
       })}
       <div className="flex-1" />
       {showMasterCut ? (
-        <div className="flex flex-col gap-1.5 border border-dashed border-[var(--hair)] p-2.5">
+        <div className="mb-2 flex flex-col gap-1.5 border border-dashed border-[var(--hair)] p-2.5">
           <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">Master cut</span>
           <Rocker
             size="master"
@@ -72,6 +72,25 @@ export function LeftRail({
           <span className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">{masterNote}</span>
         </div>
       ) : null}
+      <div className="border-t border-[var(--hair)] pt-2">
+        {footerItems.map((item) => {
+          const active = screen === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`flex h-[34px] w-full items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11.5px] font-semibold tracking-[0.04em] uppercase ${
+                active ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
+              }`}
+              aria-current={active ? "page" : undefined}
+              onClick={() => onScreen(item.id)}
+            >
+              <span className={`h-[18px] w-[3px] shrink-0 ${active ? "bg-[var(--fill)]" : "bg-transparent"}`} />
+              <span className="flex-1">{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
     </nav>
   );
 }

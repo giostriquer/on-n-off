@@ -79,6 +79,18 @@ body {
   input {
     font-family: inherit;
   }
+
+  /* Tailwind preflight uses cursor: default on buttons; selectable chrome should show pointer. */
+  button:enabled,
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
 }
 
 :focus-visible {

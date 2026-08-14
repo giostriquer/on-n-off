@@ -385,7 +385,7 @@ mod tests {
         )
         .unwrap();
         let io = ConfigIo::at(root.join("backups"));
-        let skill = r"C:\Users\giova\fake-home\.agents\skills\loom-feed\SKILL.md";
+        let skill = r"C:\Users\me\fake-home\.agents\skills\loom-feed\SKILL.md";
         io.patch_toml_skill_enabled(AgentId::Codex, &path, skill, false)
             .unwrap();
         let text = fs::read_to_string(&path).unwrap();

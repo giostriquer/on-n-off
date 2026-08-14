@@ -18,4 +18,12 @@ Rust adapter tests:
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
+## Windows release build
+
+```bash
+bun run tauri build
+```
+
+NSIS/MSI installers are written under `src-tauri/target/release/bundle/`. See [HANDOFF.md](./HANDOFF.md) for coworker smoke-test notes.
+
 Private while the product is taking shape.

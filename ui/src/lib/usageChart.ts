@@ -70,3 +70,26 @@ export function buildChartSeries(args: {
   const max = Math.max(0, ...columns.map((c) => c.total));
   return { columns, max: max === 0 ? 1 : max };
 }
+
+export type ChartRow = {
+  key: string;
+  label: string;
+  provider: AgentId;
+  value: number;
+};
+
+/** Flatten stacked columns into long rows for TanStack Charts. */
+export function toChartRows(series: ChartSeries): ChartRow[] {
+  const rows: ChartRow[] = [];
+  for (const column of series.columns) {
+    for (const band of column.bands) {
+      rows.push({
+        key: column.key,
+        label: column.label,
+        provider: band.provider,
+        value: band.value,
+      });
+    }
+  }
+  return rows;
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatTokens, formatUsd, makeWindow } from "./usageFormat";
-import { foldUsage, providerLabel } from "./usageMerge";
-import { buildChartSeries } from "./usageChart";
+import { foldUsage, PROVIDERS, providerLabel } from "./usageMerge";
+import { buildChartSeries, toChartRows } from "./usageChart";
 import type { UsageSummary } from "./usageTypes";
 
 function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
@@ -118,6 +118,13 @@ describe("foldUsage", () => {
     expect(providerLabel("claude")).toBe("Claude");
     expect(providerLabel("codex")).toBe("Codex");
   });
+
+  it("aggregates token breakdown and active days", () => {
+    const folded = foldUsage(summary());
+    expect(folded.tokens.uncachedInputTokens).toBe(310);
+    expect(folded.tokens.outputTokens).toBe(65);
+    expect(folded.activeDays).toBe(2);
+  });
 });
 
 describe("buildChartSeries", () => {
@@ -146,6 +153,19 @@ describe("buildChartSeries", () => {
       hourly: false,
     });
     expect(series.max).toBe(1);
+  });
+
+  it("flattens stacked columns into chart rows", () => {
+    const series = buildChartSeries({
+      folded: foldUsage(summary()),
+      metric: "cost",
+      sinceDay: "2026-08-07",
+      untilDay: "2026-08-07",
+      hourly: false,
+    });
+    const rows = toChartRows(series);
+    expect(rows.length).toBe(series.columns.length * PROVIDERS.length);
+    expect(rows.some((row) => row.provider === "claude" && row.value > 0)).toBe(true);
   });
 });
 

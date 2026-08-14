@@ -2,7 +2,7 @@
 name = "on-n-off"
 version = "0.1.0"
 description = "Plugin and skill manager for Claude and Codex"
-authors = ["giostriquer"]
+authors = ["on-n-off"]
 edition = "2021"
 
 [lib]

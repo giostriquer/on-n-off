@@ -21,7 +21,6 @@ export function AppShell() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const screen = pathToScreen(pathname);
-  const usageScreen = screen === "usage";
 
   const session = useAgentSession();
   const {
@@ -98,7 +97,7 @@ export function AppShell() {
     <div className="flex h-full min-h-full flex-col bg-[var(--void)] text-[var(--silkscreen)]">
       <div className="flex h-[38px] shrink-0 items-center gap-3 border-b border-[var(--hair)] bg-[var(--plate)] px-3">
         <div className="flex-1 text-center text-[11.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
-          {usageScreen ? "on-n-off — usage" : `on-n-off — ${currentAgent.displayName} panel`}
+          on-n-off — {currentAgent.displayName} panel
         </div>
         <Rocker
           size="theme"
@@ -112,108 +111,96 @@ export function AppShell() {
 
       <header className="flex items-center gap-3.5 border-b border-[var(--hair)] bg-[var(--plate)] px-4 py-[11px]">
         <div className="shrink-0 text-[15px] font-bold tracking-[0.09em]">ON-N-OFF</div>
-        {!usageScreen ? (
-          <>
-            <div
-              className="inline-grid grid-flow-col overflow-hidden rounded-lg border border-[var(--hair)]"
-              role="tablist"
-              aria-label="Agent"
-              tabIndex={-1}
-              onKeyDown={onAgentTabKey}
+        <div
+          className="inline-grid grid-flow-col overflow-hidden rounded-lg border border-[var(--hair)]"
+          role="tablist"
+          aria-label="Agent"
+          tabIndex={-1}
+          onKeyDown={onAgentTabKey}
+        >
+          {agents.map((agent: AgentInfo) => (
+            <button
+              key={agent.id}
+              type="button"
+              role="tab"
+              id={`agent-tab-${agent.id}`}
+              aria-selected={selected === agent.id}
+              aria-controls="agent-panel"
+              tabIndex={selected === agent.id ? 0 : -1}
+              className={`h-[30px] min-w-[92px] cursor-pointer rounded-none border-0 px-3 text-[11.5px] font-semibold tracking-[0.05em] uppercase ${
+                selected === agent.id
+                  ? "bg-[var(--fill)] text-[var(--fill-ink)]"
+                  : "bg-[var(--plate)] text-[var(--mute)]"
+              }`}
+              onClick={() => setSelected(agent.id)}
             >
-              {agents.map((agent: AgentInfo) => (
-                <button
-                  key={agent.id}
-                  type="button"
-                  role="tab"
-                  id={`agent-tab-${agent.id}`}
-                  aria-selected={selected === agent.id}
-                  aria-controls="agent-panel"
-                  tabIndex={selected === agent.id ? 0 : -1}
-                  className={`h-[30px] min-w-[92px] cursor-pointer rounded-none border-0 px-3 text-[11.5px] font-semibold tracking-[0.05em] uppercase ${
-                    selected === agent.id
-                      ? "bg-[var(--fill)] text-[var(--fill-ink)]"
-                      : "bg-[var(--plate)] text-[var(--mute)]"
-                  }`}
-                  onClick={() => setSelected(agent.id)}
-                >
-                  {agent.displayName}
-                </button>
-              ))}
-            </div>
-            <div
-              className="flex items-center gap-2 pl-1"
-              aria-label={
-                currentAgent.cliOk
-                  ? `${currentAgent.displayName} online`
-                  : `${currentAgent.displayName} offline`
-              }
-            >
-              <span
-                className={`size-[7px] rounded-full ${
-                  currentAgent.cliOk ? "bg-[var(--live)] shadow-[0_0_8px_var(--live)]" : "bg-[var(--mute)]"
-                }`}
-                aria-hidden="true"
-              />
-              <span className="font-mono text-[11.5px] text-[var(--mute)]">{cliLine}</span>
-            </div>
-          </>
-        ) : (
-          <div className="font-mono text-[11.5px] text-[var(--mute)]">usage · local transcripts</div>
-        )}
+              {agent.displayName}
+            </button>
+          ))}
+        </div>
+        <div
+          className="flex items-center gap-2 pl-1"
+          aria-label={
+            currentAgent.cliOk
+              ? `${currentAgent.displayName} online`
+              : `${currentAgent.displayName} offline`
+          }
+        >
+          <span
+            className={`size-[7px] rounded-full ${
+              currentAgent.cliOk ? "bg-[var(--live)] shadow-[0_0_8px_var(--live)]" : "bg-[var(--mute)]"
+            }`}
+            aria-hidden="true"
+          />
+          <span className="font-mono text-[11.5px] text-[var(--mute)]">{cliLine}</span>
+        </div>
         <div className="flex-1" />
-        {!usageScreen ? (
-          <>
-            <label className="flex h-8 items-center gap-2 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-2.5">
-              <span className="text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)]">FILTER</span>
-              <span className="sr-only">{copy.filterPlaceholder}</span>
-              <input
-                className="w-[180px] bg-transparent text-[13px] placeholder:text-[var(--mute)] focus-visible:outline-none"
-                type="search"
-                placeholder={copy.filterPlaceholder}
-                value={currentTab.filter}
-                onChange={(event) => setFilter(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    setFilter("");
-                  }
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              className="flex size-8 items-center justify-center rounded-lg border border-[var(--hair)] bg-[var(--well)] text-[var(--silkscreen)]"
-              title={copy.refresh}
-              aria-label={copy.refresh}
-              onClick={() => void loadTab(selected, true)}
-            >
-              <RefreshCw className="size-3.5" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-3.5 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
-              disabled={!canInstall}
-              onClick={() => setInstallOpen(true)}
-            >
-              + INSTALL
-            </button>
-          </>
-        ) : null}
+        <label className="flex h-8 items-center gap-2 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-2.5">
+          <span className="text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)]">FILTER</span>
+          <span className="sr-only">{copy.filterPlaceholder}</span>
+          <input
+            className="w-[180px] bg-transparent text-[13px] placeholder:text-[var(--mute)] focus-visible:outline-none"
+            type="search"
+            placeholder={copy.filterPlaceholder}
+            value={currentTab.filter}
+            onChange={(event) => setFilter(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setFilter("");
+              }
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="flex size-8 items-center justify-center rounded-lg border border-[var(--hair)] bg-[var(--well)] text-[var(--silkscreen)]"
+          title={copy.refresh}
+          aria-label={copy.refresh}
+          onClick={() => void loadTab(selected, true)}
+        >
+          <RefreshCw className="size-3.5" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-3.5 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
+          disabled={!canInstall}
+          onClick={() => setInstallOpen(true)}
+        >
+          + INSTALL
+        </button>
       </header>
 
-      {!usageScreen ? (
-        <ScopeBar
-          agentId={selected}
-          projects={currentProjects}
-          selectedPath={currentScopePath}
-          note={scopeNote}
-          tally={tallyLine(counts, currentAgent.displayName)}
-          globalItems={globalItemCount(currentTab.dto)}
-          onSelect={(path) => void selectScope(path)}
-          onPickFolder={() => void pickProjectFolder()}
-          onOpenPath={(path) => void openProjectPath(path)}
-        />
-      ) : null}
+      <ScopeBar
+        agentId={selected}
+        projects={currentProjects}
+        selectedPath={currentScopePath}
+        note={scopeNote}
+        tally={tallyLine(counts, currentAgent.displayName)}
+        globalItems={globalItemCount(currentTab.dto)}
+        onSelect={(path) => void selectScope(path)}
+        onPickFolder={() => void pickProjectFolder()}
+        onOpenPath={(path) => void openProjectPath(path)}
+      />
 
       <div className="flex min-h-0 flex-1">
         <LeftRail
@@ -231,10 +218,10 @@ export function AppShell() {
           id="agent-panel"
           className="min-w-0 flex-1 overflow-y-auto bg-[var(--void)]"
           role="tabpanel"
-          aria-labelledby={usageScreen ? undefined : `agent-tab-${selected}`}
+          aria-labelledby={`agent-tab-${selected}`}
         >
-          {!usageScreen && banner ? <AgentBanner message={banner} /> : null}
-          {!usageScreen && currentTab.loading && !currentTab.dto ? (
+          {banner ? <AgentBanner message={banner} /> : null}
+          {currentTab.loading && !currentTab.dto && screen !== "usage" ? (
             <p className="m-5 text-[13px] text-[var(--mute)]">Loading {currentAgent.displayName}…</p>
           ) : (
             <Outlet />
