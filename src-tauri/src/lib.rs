@@ -8,6 +8,7 @@ mod commands;
 mod config_io;
 mod dto;
 mod flags;
+mod settings;
 #[cfg(test)]
 mod fake;
 mod install_source;
@@ -27,6 +28,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_agents,
             commands::feature_flags,
+            commands::load_app_settings,
+            commands::save_app_settings,
+            commands::diagnose_providers,
             commands::list_projects,
             commands::inspect_project,
             commands::list_plugins,

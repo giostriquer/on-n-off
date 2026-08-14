@@ -1,0 +1,206 @@
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { FolderOpen, RefreshCw } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { Rocker } from "@/features/agents/Rocker";
+import { ProviderIcon } from "$lib/ProviderIcon";
+import { visibleAgentIds } from "$lib/appSettings";
+import * as api from "$lib/api";
+import type { AgentId, AgentInfo, AppSettings, ProviderDiagnose } from "$lib/types";
+
+type SettingsProps = {
+  agents: AgentInfo[];
+  settings: AppSettings;
+  onToggleVisible: (id: AgentId, hidden: boolean) => void;
+  onSaveBinary: (id: AgentId, path: string) => void;
+};
+
+const BINARY_NAME: Record<AgentId, string> = {
+  claude: "claude",
+  codex: "codex",
+  antigravity: "agy",
+};
+
+export function Settings({ agents, settings, onToggleVisible, onSaveBinary }: SettingsProps) {
+  const diagnose = useQuery({
+    queryKey: ["diagnose-providers", settings.binaryPaths],
+    queryFn: () => api.diagnoseProviders(),
+  });
+  const reports = diagnose.data ?? [];
+  const visible = visibleAgentIds(settings.hiddenAgents);
+
+  return (
+    <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]">
+      <header className="flex flex-wrap items-end gap-3">
+        <div>
+          <h2 className="m-0 text-[17px] font-semibold tracking-[0.05em] uppercase">Settings</h2>
+          <p className="mt-1 font-mono text-[12px] text-[var(--mute)]">
+            providers on this machine · hide from tabs · diagnose CLI setup
+          </p>
+        </div>
+        <div className="flex-1" />
+        <button
+          type="button"
+          className="inline-flex size-8 items-center justify-center rounded-lg border border-[var(--hair)] bg-[var(--well)] text-[var(--silkscreen)] disabled:opacity-45"
+          aria-label="Re-run diagnose"
+          disabled={diagnose.isFetching}
+          onClick={() => void diagnose.refetch()}
+        >
+          <RefreshCw className={`size-3.5 ${diagnose.isFetching ? "animate-spin" : ""}`} aria-hidden="true" />
+        </button>
+      </header>
+
+      <section aria-label="Providers">
+        <div className="flex flex-col gap-3">
+          {agents.map((agent) => (
+            <ProviderCard
+              key={agent.id}
+              agent={agent}
+              shown={visible.includes(agent.id)}
+              lastVisible={visible.length === 1 && visible[0] === agent.id}
+              binaryPath={settings.binaryPaths[agent.id] ?? ""}
+              report={reports.find((item) => item.agentId === agent.id) ?? null}
+              onToggleVisible={onToggleVisible}
+              onSaveBinary={onSaveBinary}
+            />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProviderCard({
+  agent,
+  shown,
+  lastVisible,
+  binaryPath,
+  report,
+  onToggleVisible,
+  onSaveBinary,
+}: {
+  agent: AgentInfo;
+  shown: boolean;
+  lastVisible: boolean;
+  binaryPath: string;
+  report: ProviderDiagnose | null;
+  onToggleVisible: (id: AgentId, hidden: boolean) => void;
+  onSaveBinary: (id: AgentId, path: string) => void;
+}) {
+  const [draft, setDraft] = useState(binaryPath);
+  const [openDiagnose, setOpenDiagnose] = useState(!agent.cliOk);
+  const cliOk = report ? report.checks.some((check) => check.id === "cli" && check.ok) : agent.cliOk;
+
+  useEffect(() => {
+    setDraft(binaryPath);
+  }, [binaryPath]);
+
+  async function pickBinary() {
+    const picked = await open({
+      multiple: false,
+      filters: [{ name: "CLI", extensions: ["exe", "cmd", "bat"] }],
+    });
+    if (typeof picked !== "string") {
+      return;
+    }
+    setDraft(picked);
+    onSaveBinary(agent.id, picked);
+  }
+
+  return (
+    <article className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
+      <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
+        <ProviderIcon provider={agent.id} className="mt-0.5 size-5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-semibold">{agent.displayName}</div>
+          <div className="mt-1 font-mono text-[11.5px] text-[var(--mute)]">
+            {cliOk ? "CLI found" : "CLI missing"}
+            {" · "}
+            {report?.homePath ?? BINARY_NAME[agent.id]}
+          </div>
+        </div>
+        <span
+          className={`mt-0.5 shrink-0 border px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] ${
+            cliOk ? "border-[var(--live)] text-[var(--live)]" : "border-[var(--trip)] text-[var(--trip)]"
+          }`}
+        >
+          {cliOk ? "OK" : "DOWN"}
+        </span>
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+            Show in tabs
+          </span>
+          <Rocker
+            size="skill"
+            on={shown}
+            disabled={lastVisible && shown}
+            ariaLabel={`Show ${agent.displayName} in agent tabs`}
+            onToggle={() => onToggleVisible(agent.id, shown)}
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5">
+        <span className="w-[88px] shrink-0 text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
+          Binary
+        </span>
+        <input
+          className="min-w-0 flex-1 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 py-1 font-mono text-[12px] text-[var(--silkscreen)] placeholder:text-[var(--mute)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)]"
+          value={draft}
+          placeholder={BINARY_NAME[agent.id]}
+          spellCheck={false}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={() => {
+            if (draft.trim() !== binaryPath.trim()) {
+              onSaveBinary(agent.id, draft);
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="inline-flex size-8 items-center justify-center rounded-md border border-[var(--hair)] bg-[var(--well)]"
+          aria-label={`Browse ${agent.displayName} CLI`}
+          onClick={() => void pickBinary()}
+        >
+          <FolderOpen className="size-3.5" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="h-8 rounded-md border border-[var(--hair)] px-2.5 text-[10px] font-semibold tracking-[0.04em] uppercase"
+          aria-expanded={openDiagnose}
+          onClick={() => setOpenDiagnose((open) => !open)}
+        >
+          Diagnose
+        </button>
+      </div>
+
+      {openDiagnose ? (
+        <div className="border-t border-[var(--hair)] px-3.5 py-2.5">
+          {(report?.checks ?? []).length === 0 ? (
+            <p className="text-[13px] text-[var(--mute)]">Scanning this machine…</p>
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {report?.checks.map((check) => (
+                <li key={check.id} className="flex items-start gap-2.5">
+                  <span
+                    className={`mt-0.5 size-2 shrink-0 rounded-full ${
+                      check.ok ? "bg-[var(--live)] shadow-[0_0_7px_var(--live)]" : "bg-[var(--trip)]"
+                    }`}
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-[12.5px] font-semibold">{check.label}</div>
+                    <div className="font-mono text-[11px] leading-snug text-[var(--mute)]">{check.detail}</div>
+                    {check.hint ? (
+                      <div className="mt-0.5 text-[11.5px] leading-snug text-[var(--mute)]">{check.hint}</div>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </article>
+  );
+}

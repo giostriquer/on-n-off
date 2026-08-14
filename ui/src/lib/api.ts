@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentId, AgentInfo, AgentTabDto, FeatureFlags, ProjectDto } from "./types";
+import type { AgentId, AgentInfo, AgentTabDto, AppSettings, FeatureFlags, ProjectDto, ProviderDiagnose } from "./types";
 import type { UsageSummary, UsageSummaryInput } from "./usageTypes";
 
 export function listAgents(): Promise<AgentInfo[]> {
@@ -64,4 +64,16 @@ export function refresh(agentId: AgentId, projectPath?: string | null): Promise<
 
 export function usageSummary(input: UsageSummaryInput): Promise<UsageSummary> {
   return invoke("usage_summary", { input });
+}
+
+export function loadAppSettings(): Promise<AppSettings> {
+  return invoke("load_app_settings");
+}
+
+export function saveAppSettings(settings: AppSettings): Promise<AppSettings> {
+  return invoke("save_app_settings", { settings });
+}
+
+export function diagnoseProviders(): Promise<ProviderDiagnose[]> {
+  return invoke("diagnose_providers");
 }

@@ -68,3 +68,23 @@ export type AgentTabDto = {
 export type FeatureFlags = {
   masterCut: boolean;
 };
+
+export type AppSettings = {
+  hiddenAgents: AgentId[];
+  binaryPaths: Partial<Record<AgentId, string>>;
+};
+
+export type DiagnoseCheck = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+  hint?: string | null;
+};
+
+export type ProviderDiagnose = {
+  agentId: AgentId;
+  binary: string;
+  homePath: string;
+  checks: DiagnoseCheck[];
+};

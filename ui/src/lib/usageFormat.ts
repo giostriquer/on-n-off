@@ -81,7 +81,15 @@ export type UsageWindow = {
   resolution: "day" | "hour";
   sinceTime?: string;
   untilTime?: string;
+  /** True when the window is unbounded history (Full time). */
+  fullTime?: boolean;
 };
+
+/** Earliest day we request for Full time scans (agents post-date this). */
+export const USAGE_EPOCH_DAY = "2020-01-01";
+
+/** `0` means Full time (all available history from USAGE_EPOCH_DAY). */
+export const FULL_TIME_DAYS = 0;
 
 /** Calendar / rolling window in the viewer's zone (T3 makeWindow port). */
 export function makeWindow(days: number, now = new Date()): UsageWindow {
@@ -107,6 +115,15 @@ export function makeWindow(days: number, now = new Date()): UsageWindow {
     };
   }
   const untilDay = format.format(now);
+  if (days === FULL_TIME_DAYS) {
+    return {
+      sinceDay: USAGE_EPOCH_DAY,
+      untilDay,
+      timeZone,
+      resolution: "day",
+      fullTime: true,
+    };
+  }
   const [year = 0, month = 1, dayOfMonth = 1] = untilDay.split("-").map((part) => Number.parseInt(part, 10));
   const start = new Date(Date.UTC(year, month - 1, dayOfMonth - (days - 1)));
   return {

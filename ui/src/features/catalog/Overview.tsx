@@ -1,4 +1,6 @@
+import { Link } from "@tanstack/react-router";
 import { Rocker } from "@/features/agents/Rocker";
+import { OverviewUsageCard } from "@/features/usage/OverviewUsageCard";
 import { copy } from "$lib/copy";
 import { driftLine, formatPluginVersion, type CatalogCounts, type DriftRow, type LiveRow } from "$lib/catalog";
 import { tripTagClass, type TripEntry } from "$lib/tripLog";
@@ -16,6 +18,12 @@ type OverviewProps = {
   cliOk?: boolean;
 };
 
+const GAUGE_TO: Record<"plugins" | "skills" | "mcp", "/plugins" | "/skills" | "/mcp"> = {
+  plugins: "/plugins",
+  skills: "/skills",
+  mcp: "/mcp",
+};
+
 export function Overview({
   counts,
   rows,
@@ -29,20 +37,24 @@ export function Overview({
   cliOk = false,
 }: OverviewProps) {
   const gauges = [
-    { id: "plugins", label: "Plugins", ...counts.plugins },
-    { id: "skills", label: "Skills", ...counts.skills },
-    { id: "mcp", label: "MCP servers", ...counts.mcp },
+    { id: "plugins" as const, label: "Plugins", ...counts.plugins },
+    { id: "skills" as const, label: "Skills", ...counts.skills },
+    { id: "mcp" as const, label: "MCP servers", ...counts.mcp },
   ];
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]">
       <div className="grid grid-cols-3 gap-3">
         {gauges.map((gauge) => (
-          <div
+          <Link
             key={gauge.id}
-            className="relative overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] p-3.5"
+            to={GAUGE_TO[gauge.id]}
+            className="relative block overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] p-3.5 text-[var(--silkscreen)] no-underline transition-colors hover:border-[var(--mute)] hover:bg-[var(--well)]"
+            aria-label={`${gauge.label}: ${gauge.on} on of ${gauge.total} installed`}
           >
-            <div className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{gauge.label}</div>
+            <div className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
+              {gauge.label}
+            </div>
             <div className="mt-2.5 flex items-end gap-2">
               <span className="text-[34px] leading-none font-semibold">{gauge.on}</span>
               <span className="font-mono pb-1 text-xs text-[var(--mute)]">on / {gauge.total} installed</span>
@@ -57,9 +69,11 @@ export function Overview({
                 />
               ))}
             </div>
-          </div>
+          </Link>
         ))}
       </div>
+
+      <OverviewUsageCard />
 
       {drift.length > 0 ? (
         <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={copy.driftTitle}>

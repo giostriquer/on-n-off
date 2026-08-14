@@ -1,6 +1,28 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Overview } from "./Overview";
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    to,
+    children,
+    className,
+    ...rest
+  }: {
+    to: string;
+    children?: React.ReactNode;
+    className?: string;
+    [key: string]: unknown;
+  }) => (
+    <a href={to} className={className} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
+vi.mock("@/features/usage/OverviewUsageCard", () => ({
+  OverviewUsageCard: () => null,
+}));
 
 describe("Overview", () => {
   it("renders gauges, live rows, and trip log", () => {
@@ -51,9 +73,12 @@ describe("Overview", () => {
         onToggle={() => undefined}
       />,
     );
-    expect(screen.getByText("Plugins")).toBeTruthy();
-    expect(screen.getByText("Skills")).toBeTruthy();
-    expect(screen.getByText("MCP servers")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Plugins: 1 on of 2 installed/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Skills: 2 on of 4 installed/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /MCP servers: 1 on of 2 installed/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Plugins/i }).getAttribute("href")).toBe("/plugins");
+    expect(screen.getByRole("link", { name: /Skills/i }).getAttribute("href")).toBe("/skills");
+    expect(screen.getByRole("link", { name: /MCP servers/i }).getAttribute("href")).toBe("/mcp");
     expect(screen.getAllByText("1")).toHaveLength(2);
     expect(screen.getAllByText("on / 2 installed")).toHaveLength(2);
     expect(screen.getByText("Out of sync with upstream")).toBeTruthy();

@@ -58,6 +58,9 @@ body,
 #root {
   margin: 0;
   height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 html,
@@ -68,10 +71,6 @@ body {
   font-size: 14px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
-}
-
-#root {
-  height: 100%;
 }
 
 @layer base {
@@ -117,4 +116,44 @@ body {
   border: 0;
   padding: 0;
   margin: -1px;
+}
+
+/*
+  Viewport lock. The document never scrolls.
+  Only `.app-scroll` is the page scroller. Nested overflow-y:auto on routes
+  recreates the double scrollbar. Dropdowns may scroll internally (.scope-list).
+*/
+.app-frame {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+
+.app-scroll {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.app-rail {
+  display: flex;
+  width: 186px;
+  height: 100%;
+  min-height: 0;
+  flex-shrink: 0;
+  flex-direction: column;
+  overflow: hidden;
 }

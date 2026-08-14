@@ -230,7 +230,6 @@ export function ItemList({
             return (
               <article key={skill.id} className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
                 <div className="flex items-start gap-3 px-3 py-[11px]">
-                  <span className="mt-1.5 block size-6 shrink-0" aria-hidden="true" />
                   <span
                     className={`mt-2 size-2 shrink-0 rounded-full ${
                       live ? "bg-[var(--live)] shadow-[0_0_7px_var(--live)]" : "bg-[var(--mute)]"

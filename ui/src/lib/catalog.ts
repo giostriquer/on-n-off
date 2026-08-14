@@ -2,7 +2,7 @@ import { copy } from "./copy";
 import { isProjectOrigin } from "./project";
 import type { AgentId, AgentTabDto, McpServerDto, PluginDto, SkillDto } from "./types";
 
-export type Screen = "overview" | "plugins" | "skills" | "mcp" | "usage" | "config";
+export type Screen = "overview" | "plugins" | "skills" | "mcp" | "usage" | "config" | "settings";
 
 export type KindCounts = { on: number; total: number };
 

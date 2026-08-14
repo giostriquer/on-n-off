@@ -187,4 +187,12 @@ describe("usageFormat", () => {
     expect(w.resolution).toBe("day");
     expect(w.sinceTime).toBeUndefined();
   });
+
+  it("makeWindow Full time starts at the usage epoch", () => {
+    const w = makeWindow(0, new Date("2026-08-13T12:00:00.000Z"));
+    expect(w.fullTime).toBe(true);
+    expect(w.sinceDay).toBe("2020-01-01");
+    expect(w.untilDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(w.resolution).toBe("day");
+  });
 });

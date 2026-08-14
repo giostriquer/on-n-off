@@ -5,6 +5,7 @@ use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, ProjectDto, UsageSummaryDto, UsageSummaryInput,
 };
 use crate::flags::FeatureFlags;
+use crate::settings::{AppSettings, ProviderDiagnose};
 
 pub struct AppState {
     claude: Arc<dyn AgentAdapter>,
@@ -42,6 +43,21 @@ pub fn list_agents(state: tauri::State<AppState>) -> Vec<AgentInfo> {
 #[tauri::command]
 pub fn feature_flags() -> FeatureFlags {
     crate::flags::load_flags()
+}
+
+#[tauri::command]
+pub fn load_app_settings() -> AppSettings {
+    crate::settings::load_settings()
+}
+
+#[tauri::command]
+pub fn save_app_settings(settings: AppSettings) -> Result<AppSettings, AdapterError> {
+    crate::settings::save_settings(settings)
+}
+
+#[tauri::command]
+pub fn diagnose_providers() -> Vec<ProviderDiagnose> {
+    crate::settings::diagnose_all()
 }
 
 #[tauri::command]

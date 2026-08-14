@@ -2,6 +2,13 @@
 
 Private early build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity plugins, skills, MCP, and local usage estimates.
 
+## What’s new (Studio v2 chrome)
+
+- App mark / window icons refreshed (rocker-style circular glyph)
+- Theme control moved from the top strip into left-rail **Appearance** (Dark / Light)
+- Left rail icons + hover well; Usage kept as a dedicated screen and Overview summary
+- Overview gauges link to Plugins / Skills / MCP; Usage card links to full Usage
+
 ## What you get
 
 - Windows installer: `on-n-off_0.1.0_x64-setup.exe` (NSIS), or the MSI next to it
@@ -18,6 +25,8 @@ Private early build of **on-n-off**: desktop switchboard for Claude / Codex / An
 
 This is a **Windows desktop** app. It reads `%USERPROFILE%\.claude`, `.codex`, `.gemini`, and `.on-n-off`.  
 CLIs or transcripts that exist **only inside WSL** will look missing unless the same tools/data also exist on the Windows side.
+
+If a CLI works in a terminal but the app says **os error 193** / “not a valid Win32 application”, open **Settings**, click **Diagnose**, and point **Binary** at the `.cmd` or `.exe` next to the nvm/npm shim (the extensionless `claude` file is not a Windows program).
 
 ## Install & run
 

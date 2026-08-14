@@ -153,15 +153,26 @@ pub fn overlay_project(tab: &mut AgentTabDto, project: &Path, agent: AgentId) {
         overlay_antigravity_plugins(tab, project);
     }
 
-    let mut seen_skills: std::collections::HashSet<String> =
+    let mut seen_skill_ids: std::collections::HashSet<String> =
         tab.user_skills.iter().map(|skill| skill.id.clone()).collect();
+    let mut seen_skill_names: std::collections::HashSet<String> = tab
+        .user_skills
+        .iter()
+        .map(|skill| skill.name.to_ascii_lowercase())
+        .chain(
+            tab.plugins
+                .iter()
+                .flat_map(|plugin| plugin.skills.iter().map(|skill| skill.name.to_ascii_lowercase())),
+        )
+        .collect();
     for dir in project_skill_dirs(project, agent) {
         for skill in scan_project_skills(&dir, agent) {
+            let name_key = skill.name.to_ascii_lowercase();
             let id = format!(
                 "project:{}",
                 normalize_skill_path(&skill.skill_md.to_string_lossy())
             );
-            if !seen_skills.insert(id.clone()) {
+            if !seen_skill_ids.insert(id.clone()) || !seen_skill_names.insert(name_key) {
                 continue;
             }
             tab.user_skills.push(SkillDto {
@@ -415,5 +426,59 @@ mod tests {
                 .ends_with("dev/app"),
             "{expanded:?}"
         );
+    }
+
+    fn write_skill(dir: &Path, name: &str, description: &str) {
+        fs::create_dir_all(dir.join(name)).unwrap();
+        fs::write(
+            dir.join(name).join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {description}\n---\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn overlay_collapses_same_name_across_skill_roots() {
+        let root = crate::paths::scratch_dir("on-n-off-project-skill-dedupe");
+        write_skill(
+            &root.join(".claude").join("skills"),
+            "find-skills",
+            "Claude copy",
+        );
+        write_skill(
+            &root.join(".agents").join("skills"),
+            "find-skills",
+            "Agents copy",
+        );
+        write_skill(
+            &root.join(".agents").join("skills"),
+            "vercel-react-best-practices",
+            "Vercel",
+        );
+        write_skill(
+            &root.join(".claude").join("skills"),
+            "vercel-react-best-practices",
+            "Vercel again",
+        );
+
+        let mut tab = AgentTabDto {
+            plugins: vec![],
+            user_skills: vec![SkillDto {
+                id: "find-skills".into(),
+                plugin_id: None,
+                name: "find-skills".into(),
+                description: "User copy".into(),
+                enabled: true,
+                togglable: true,
+                origin: String::new(),
+            }],
+            mcp_servers: vec![],
+        };
+        overlay_project(&mut tab, &root, AgentId::Claude);
+        let names: Vec<_> = tab.user_skills.iter().map(|skill| skill.name.as_str()).collect();
+        assert_eq!(names, vec!["find-skills", "vercel-react-best-practices"]);
+        assert!(tab.user_skills[0].togglable);
+        assert_eq!(tab.user_skills[1].origin, ORIGIN_PROJECT);
+        assert!(!tab.user_skills[1].togglable);
     }
 }

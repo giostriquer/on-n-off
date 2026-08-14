@@ -35,6 +35,8 @@ export function buildChartSeries(args: {
   sinceTime?: string;
   untilTime?: string;
   hourly: boolean;
+  /** When true, only emit days that have activity (Full time). */
+  sparse?: boolean;
 }): ChartSeries {
   const { folded, metric, hourly } = args;
   const byKey = new Map<string, PeriodTotals>();
@@ -52,7 +54,9 @@ export function buildChartSeries(args: {
     ? args.sinceTime && args.untilTime
       ? [...enumerateHourStarts(args.sinceTime, args.untilTime)]
       : folded.hourly.map((p) => p.hourStart!).filter(Boolean)
-    : [...enumerateDays(args.sinceDay, args.untilDay)];
+    : args.sparse
+      ? [...byKey.keys()].sort()
+      : [...enumerateDays(args.sinceDay, args.untilDay)];
 
   const columns: ChartColumn[] = keys.map((key) => {
     const period = byKey.get(key);

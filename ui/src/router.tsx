@@ -10,6 +10,7 @@ import { McpRoute } from "@/routes/mcp";
 import { OverviewRoute } from "@/routes/overview";
 import { PluginsRoute } from "@/routes/plugins";
 import { SkillsRoute } from "@/routes/skills";
+import { SettingsRoute } from "@/routes/settings";
 import { UsageRoute } from "@/routes/usage";
 
 const rootRoute = createRootRoute({
@@ -60,6 +61,12 @@ const configRoute = createRoute({
   component: ConfigRoute,
 });
 
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: SettingsRoute,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   overviewRoute,
@@ -68,6 +75,7 @@ const routeTree = rootRoute.addChildren([
   mcpRoute,
   usageRoute,
   configRoute,
+  settingsRoute,
 ]);
 
 export const router = createRouter({

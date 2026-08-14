@@ -11,6 +11,7 @@ import {
   formatPercent,
   formatTokens,
   formatUsd,
+  FULL_TIME_DAYS,
   makeWindow,
 } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
@@ -23,6 +24,7 @@ const WINDOWS = [
   { days: 7, label: "7 days" },
   { days: 30, label: "30 days" },
   { days: 90, label: "90 days" },
+  { days: FULL_TIME_DAYS, label: "Full time" },
 ] as const;
 
 type BreakdownMode = "model" | "day";
@@ -138,6 +140,17 @@ export function Usage() {
       ? "Token counts only · pricing table unavailable"
       : "if billed at full API rate";
 
+  const activityDays = [...folded.daily]
+    .filter((period) => period.costUsd > 0 || period.totalTokens > 0)
+    .map((period) => period.day)
+    .sort();
+  const rangeSince =
+    windowDays === FULL_TIME_DAYS && activityDays.length > 0 ? activityDays[0]! : activeWindow.sinceDay;
+  const rangeUntil =
+    windowDays === FULL_TIME_DAYS && activityDays.length > 0
+      ? activityDays[activityDays.length - 1]!
+      : activeWindow.untilDay;
+
   function refresh() {
     forceRef.current = true;
     setForceRevision((n) => n + 1);
@@ -147,7 +160,8 @@ export function Usage() {
     <div className="flex flex-col gap-7 px-5 pt-[18px] pb-[28px]">
       <header className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1 font-mono text-[12px] text-[var(--mute)]">
-          {formatDayRange(activeWindow.sinceDay, activeWindow.untilDay)}
+          {windowDays === FULL_TIME_DAYS ? "Full time · " : null}
+          {formatDayRange(rangeSince, rangeUntil)}
           {loading ? <span className="ml-2">· scanning…</span> : null}
           {!loading && summary?.cacheHit ? <span className="ml-2">· cached</span> : null}
         </div>
@@ -228,6 +242,7 @@ export function Usage() {
             sinceTime={activeWindow.sinceTime}
             untilTime={activeWindow.untilTime}
             hourly={windowDays === 1}
+            sparse={windowDays === FULL_TIME_DAYS}
           />
 
           <section

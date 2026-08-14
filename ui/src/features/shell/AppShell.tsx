@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
 import { AgentBanner } from "@/features/agents/AgentBanner";
-import { Rocker } from "@/features/agents/Rocker";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import { InstallSheet } from "@/features/catalog/InstallSheet";
 import { ScopeBar } from "@/features/scope/ScopeBar";
@@ -16,6 +15,7 @@ import { LeftRail } from "@/features/shell/LeftRail";
 import { globalItemCount, tallyLine, type Screen } from "$lib/catalog";
 import { copy } from "$lib/copy";
 import type { AgentInfo } from "$lib/types";
+import markUrl from "@/assets/on-n-off-mark.png";
 
 export function AppShell() {
   const navigate = useNavigate();
@@ -25,8 +25,8 @@ export function AppShell() {
   const session = useAgentSession();
   const {
     theme,
-    toggleTheme,
-    agents,
+    setTheme,
+    visibleAgents,
     selected,
     setSelected,
     currentAgent,
@@ -78,14 +78,14 @@ export function AppShell() {
       return;
     }
     event.preventDefault();
-    const index = agents.findIndex((agent: AgentInfo) => agent.id === selected);
+    const index = visibleAgents.findIndex((agent: AgentInfo) => agent.id === selected);
     if (index < 0) {
       return;
     }
     const next =
       event.key === "ArrowRight"
-        ? agents[(index + 1) % agents.length]
-        : agents[(index - 1 + agents.length) % agents.length];
+        ? visibleAgents[(index + 1) % visibleAgents.length]
+        : visibleAgents[(index - 1 + visibleAgents.length) % visibleAgents.length];
     setSelected(next.id);
   }
 
@@ -94,23 +94,12 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex h-full min-h-full flex-col bg-[var(--void)] text-[var(--silkscreen)]">
-      <div className="flex h-[38px] shrink-0 items-center gap-3 border-b border-[var(--hair)] bg-[var(--plate)] px-3">
-        <div className="flex-1 text-center text-[11.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
-          on-n-off — {currentAgent.displayName} panel
+    <div className="app-frame bg-[var(--void)] text-[var(--silkscreen)]">
+      <header className="flex shrink-0 items-center gap-3.5 border-b border-[var(--hair)] bg-[var(--plate)] px-4 py-[11px]">
+        <div className="flex shrink-0 items-center gap-2.5">
+          <img src={markUrl} alt="" className="size-7 rounded-md" width={28} height={28} />
+          <div className="text-[15px] font-bold tracking-[0.09em]">ON-N-OFF</div>
         </div>
-        <Rocker
-          size="theme"
-          on={theme === "light"}
-          offLabel="DARK"
-          onLabel="LIGHT"
-          ariaLabel="Theme"
-          onToggle={toggleTheme}
-        />
-      </div>
-
-      <header className="flex items-center gap-3.5 border-b border-[var(--hair)] bg-[var(--plate)] px-4 py-[11px]">
-        <div className="shrink-0 text-[15px] font-bold tracking-[0.09em]">ON-N-OFF</div>
         <div
           className="inline-grid grid-flow-col overflow-hidden rounded-lg border border-[var(--hair)]"
           role="tablist"
@@ -118,7 +107,7 @@ export function AppShell() {
           tabIndex={-1}
           onKeyDown={onAgentTabKey}
         >
-          {agents.map((agent: AgentInfo) => (
+          {visibleAgents.map((agent: AgentInfo) => (
             <button
               key={agent.id}
               type="button"
@@ -202,26 +191,28 @@ export function AppShell() {
         onOpenPath={(path) => void openProjectPath(path)}
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="app-body">
         <LeftRail
           screen={screen}
           counts={counts}
+          theme={theme}
           masterOn={allOn}
           masterNote={masterNote}
           showMasterCut={showMasterCut}
           busy={currentTab.inFlight}
           masterDisabled={!currentTab.dto || currentTab.inFlight}
           onScreen={goScreen}
+          onThemeChange={setTheme}
           onMaster={(enabled) => void masterCut(enabled)}
         />
         <div
           id="agent-panel"
-          className="min-w-0 flex-1 overflow-y-auto bg-[var(--void)]"
+          className="app-scroll bg-[var(--void)]"
           role="tabpanel"
           aria-labelledby={`agent-tab-${selected}`}
         >
-          {banner ? <AgentBanner message={banner} /> : null}
-          {currentTab.loading && !currentTab.dto && screen !== "usage" ? (
+          {banner && screen !== "settings" ? <AgentBanner message={banner} /> : null}
+          {currentTab.loading && !currentTab.dto && screen !== "usage" && screen !== "settings" ? (
             <p className="m-5 text-[13px] text-[var(--mute)]">Loading {currentAgent.displayName}…</p>
           ) : (
             <Outlet />

@@ -21,6 +21,8 @@ type UsageChartProps = {
   sinceTime?: string;
   untilTime?: string;
   hourly?: boolean;
+  /** Full-time windows only plot days with activity. */
+  sparse?: boolean;
 };
 
 /** T3-like contrast: Codex near-white, Claude warm orange. */
@@ -67,6 +69,7 @@ export function UsageChart({
   sinceTime,
   untilTime,
   hourly = false,
+  sparse = false,
 }: UsageChartProps) {
   const dark = useDarkTheme();
   const series = useMemo(
@@ -79,8 +82,9 @@ export function UsageChart({
         sinceTime,
         untilTime,
         hourly,
+        sparse,
       }),
-    [folded, hourly, metric, sinceDay, sinceTime, untilDay, untilTime],
+    [folded, hourly, metric, sinceDay, sinceTime, sparse, untilDay, untilTime],
   );
 
   const rows = useMemo(() => toChartRows(series), [series]);

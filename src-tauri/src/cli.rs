@@ -43,22 +43,16 @@ impl AgentCli {
     }
 
     fn run_timed(&self, args: &[&str], timeout: Duration) -> Result<String, AdapterError> {
-        let mut child = Command::new(&self.binary)
+        let mut child = Command::new(
+            crate::paths::resolve_cli_binary(&self.binary)
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| self.binary.clone()),
+        )
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|error| {
-                if error.kind() == std::io::ErrorKind::NotFound {
-                    AdapterError {
-                        kind: ErrorKind::CliMissing,
-                        message: format!("{} CLI not found.", self.binary),
-                        path: None,
-                    }
-                } else {
-                    AdapterError::message(error.to_string())
-                }
-            })?;
+            .map_err(|error| spawn_error(&self.binary, error))?;
         let started = Instant::now();
         loop {
             match child.try_wait() {
@@ -101,6 +95,22 @@ pub fn run_npx_skills(source: &InstallSource, agent: &str) -> Result<String, Ada
         ));
     }
     AgentCli::new("npx").run_args_timed(&source.npx_skills_argv(agent), INSTALL_TIMEOUT)
+}
+
+fn spawn_error(binary: &str, error: std::io::Error) -> AdapterError {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return AdapterError {
+            kind: ErrorKind::CliMissing,
+            message: format!("{binary} CLI not found."),
+            path: None,
+        };
+    }
+    if error.raw_os_error() == Some(193) {
+        return AdapterError::message(format!(
+            "{binary} is not a Windows program (os error 193). Point Binary at the .cmd or .exe launcher — nvm/npm often leave an extensionless shim that cmd cannot run."
+        ));
+    }
+    AdapterError::message(error.to_string())
 }
 
 fn trim_cli(stderr: &str, stdout: &str) -> String {

@@ -23,6 +23,7 @@ import {
 import { copy } from "$lib/copy";
 import { displayError, parseInvokeError } from "$lib/error";
 import { flagOn, mergeFlags } from "$lib/flags";
+import { DEFAULT_APP_SETTINGS, mergeAppSettings, setAgentHidden, visibleAgentIds } from "$lib/appSettings";
 import { filterTab } from "$lib/filterTab";
 import { mergeProjects, projectFromPath, projectLabel, sameProjectPath } from "$lib/project";
 import { LOCKED_AGENTS, emptyTab, openIds, overlayAgents, type TabState } from "$lib/session";
@@ -31,6 +32,7 @@ import type {
   AgentId,
   AgentInfo,
   AgentTabDto,
+  AppSettings,
   FeatureFlags,
   McpServerDto,
   PluginDto,
@@ -52,6 +54,7 @@ export const SCREEN_PATH: Record<Screen, string> = {
   mcp: "/mcp",
   usage: "/usage",
   config: "/config",
+  settings: "/settings",
 };
 
 export function pathToScreen(pathname: string): Screen {
@@ -79,6 +82,7 @@ export function readScreen(): Screen {
     value === "mcp" ||
     value === "usage" ||
     value === "config" ||
+    value === "settings" ||
     value === "overview"
   ) {
     return value;
@@ -101,6 +105,7 @@ function emptyTabs(): Record<AgentId, TabState> {
 
 type SessionContextValue = {
   theme: Theme;
+  setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
   agents: AgentInfo[];
   selected: AgentId;
@@ -109,6 +114,12 @@ type SessionContextValue = {
   setFilter: (value: string) => void;
   log: TripEntry[];
   flags: FeatureFlags;
+  appSettings: AppSettings;
+  visibleAgents: AgentInfo[];
+  persistAppSettings: (next: AppSettings) => Promise<AppSettings | null>;
+  setProviderHidden: (id: AgentId, hidden: boolean) => Promise<void>;
+  setProviderBinary: (id: AgentId, path: string) => Promise<void>;
+  reloadAgents: () => Promise<void>;
   installOpen: boolean;
   setInstallOpen: (open: boolean) => void;
   installError: string | null;
@@ -187,6 +198,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [tabs, setTabs] = useState<Record<AgentId, TabState>>(emptyTabs);
   const [log, setLog] = useState<TripEntry[]>([]);
   const [flags, setFlags] = useState<FeatureFlags>(() => mergeFlags(null));
+  const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [installOpen, setInstallOpen] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<PluginDto | null>(null);
@@ -353,6 +365,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setFlags(mergeFlags(await api.featureFlags()));
       } catch {
         setFlags(mergeFlags(null));
+      }
+      try {
+        setAppSettings(mergeAppSettings(await api.loadAppSettings()));
+      } catch {
+        setAppSettings(DEFAULT_APP_SETTINGS);
       }
       try {
         setAgents(overlayAgents(await api.listAgents()));
@@ -603,7 +620,58 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUninstallTarget(null);
   }, [agentLabel, mutate, uninstallTarget]);
 
+  const reloadAgents = useCallback(async () => {
+    try {
+      setAgents(overlayAgents(await api.listAgents()));
+    } catch {
+      setAgents(overlayAgents([]));
+    }
+  }, []);
+
+  const persistAppSettings = useCallback(
+    async (next: AppSettings) => {
+      try {
+        const saved = mergeAppSettings(await api.saveAppSettings(next));
+        setAppSettings(saved);
+        const visible = visibleAgentIds(saved.hiddenAgents);
+        if (!visible.includes(selectedRef.current) && visible[0]) {
+          setSelectedState(visible[0]);
+        }
+        return saved;
+      } catch (error) {
+        note("TRIP", displayError(parseInvokeError(error), "Settings"));
+        return null;
+      }
+    },
+    [note],
+  );
+
+  const setProviderHidden = useCallback(
+    async (id: AgentId, hidden: boolean) => {
+      const nextHidden = setAgentHidden(appSettings.hiddenAgents, id, hidden);
+      await persistAppSettings({ ...appSettings, hiddenAgents: nextHidden });
+    },
+    [appSettings, persistAppSettings],
+  );
+
+  const setProviderBinary = useCallback(
+    async (id: AgentId, path: string) => {
+      const binaryPaths = { ...appSettings.binaryPaths };
+      if (path.trim()) {
+        binaryPaths[id] = path.trim();
+      } else {
+        delete binaryPaths[id];
+      }
+      const saved = await persistAppSettings({ ...appSettings, binaryPaths });
+      if (saved) {
+        await reloadAgents();
+      }
+    },
+    [appSettings, persistAppSettings, reloadAgents],
+  );
+
   const currentAgent = agents.find((agent) => agent.id === selected) ?? agents[0];
+  const visibleAgents = agents.filter((agent) => visibleAgentIds(appSettings.hiddenAgents).includes(agent.id));
   const currentTab = tabs[selected];
   const filtered = currentTab.dto ? filterTab(currentTab.dto, currentTab.filter) : null;
   const expandedIds = openIds(currentTab.expanded, filtered?.expandIds ?? []);
@@ -638,14 +706,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SessionContextValue>(
     () => ({
       theme,
+      setTheme,
       toggleTheme: () => setTheme((prev) => (prev === "dark" ? "light" : "dark")),
       agents,
+      visibleAgents,
       selected,
       setSelected,
       tabs,
       setFilter,
       log,
       flags,
+      appSettings,
+      persistAppSettings,
+      setProviderHidden,
+      setProviderBinary,
+      reloadAgents,
       installOpen,
       setInstallOpen,
       installError,
@@ -687,13 +762,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }),
     [
       theme,
+      setTheme,
       agents,
+      visibleAgents,
       selected,
       setSelected,
       tabs,
       setFilter,
       log,
       flags,
+      appSettings,
+      persistAppSettings,
+      setProviderHidden,
+      setProviderBinary,
+      reloadAgents,
       installOpen,
       installError,
       uninstallTarget,

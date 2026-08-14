@@ -15,9 +15,11 @@ describe("LeftRail", () => {
       <LeftRail
         screen="overview"
         counts={counts}
+        theme="dark"
         masterOn={false}
         masterNote="cuts every item for Claude"
         onScreen={() => undefined}
+        onThemeChange={() => undefined}
         onMaster={() => undefined}
       />,
     );
@@ -27,23 +29,30 @@ describe("LeftRail", () => {
     expect(screen.getByRole("button", { name: /Skills 4\/6/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /MCP servers 0\/0/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Usage$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Settings$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Agent config/i })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Theme" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Dark/i }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /Light/i }).getAttribute("aria-pressed")).toBe("false");
     expect(screen.queryByText("Master cut")).toBeNull();
     expect(screen.queryByRole("button", { name: "Master cut" })).toBeNull();
   });
 
-  it("shows master cut when the flag is on", async () => {
+  it("shows master cut when the flag is on and switches theme", async () => {
     const user = userEvent.setup();
     const onScreen = vi.fn();
     const onMaster = vi.fn();
+    const onThemeChange = vi.fn();
     render(
       <LeftRail
         screen="plugins"
         counts={counts}
+        theme="dark"
         masterOn={true}
         masterNote="everything live on Claude"
         showMasterCut={true}
         onScreen={onScreen}
+        onThemeChange={onThemeChange}
         onMaster={onMaster}
       />,
     );
@@ -54,5 +63,7 @@ describe("LeftRail", () => {
     expect(onScreen).toHaveBeenCalledWith("skills");
     await user.click(screen.getByRole("button", { name: "Master cut" }));
     expect(onMaster).toHaveBeenCalledWith(false);
+    await user.click(screen.getByRole("button", { name: /Light/i }));
+    expect(onThemeChange).toHaveBeenCalledWith("light");
   });
 });
