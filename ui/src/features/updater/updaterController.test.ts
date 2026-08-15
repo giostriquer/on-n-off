@@ -124,4 +124,47 @@ describe("UpdateController", () => {
       message: "installer refused",
     });
   });
+
+  it("installs and relaunches a downloaded update", async () => {
+    let installs = 0;
+    let relaunches = 0;
+    const controller = new UpdateController(
+      client({
+        check: async () =>
+          resource({
+            install: async () => {
+              installs += 1;
+            },
+          }),
+        relaunch: async () => {
+          relaunches += 1;
+        },
+      }),
+    );
+
+    await controller.initialize(true);
+    await controller.install();
+
+    expect(installs).toBe(1);
+    expect(relaunches).toBe(1);
+  });
+
+  it("closes a downloaded native update during cleanup", async () => {
+    let closes = 0;
+    const controller = new UpdateController(
+      client({
+        check: async () =>
+          resource({
+            close: async () => {
+              closes += 1;
+            },
+          }),
+      }),
+    );
+
+    await controller.initialize(true);
+    await controller.dispose();
+
+    expect(closes).toBe(1);
+  });
 });
