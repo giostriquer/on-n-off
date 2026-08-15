@@ -122,6 +122,7 @@ fn agent_for_binary(cli_name: &str) -> Option<AgentId> {
         "claude" => Some(AgentId::Claude),
         "codex" => Some(AgentId::Codex),
         "agy" => Some(AgentId::Antigravity),
+        "cursor-agent" => Some(AgentId::Cursor),
         _ => None,
     }
 }

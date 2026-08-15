@@ -19,6 +19,7 @@ pub struct AppState {
     claude: Arc<dyn AgentAdapter>,
     codex: Arc<dyn AgentAdapter>,
     antigravity: Arc<dyn AgentAdapter>,
+    cursor: Arc<dyn AgentAdapter>,
 }
 
 impl AppState {
@@ -27,6 +28,7 @@ impl AppState {
             claude: Arc::new(crate::claude::ClaudeAdapter::new()),
             codex: Arc::new(crate::codex::CodexAdapter::new()),
             antigravity: Arc::new(crate::antigravity::AntigravityAdapter::new()),
+            cursor: Arc::new(crate::cursor::CursorAdapter::new()),
         }
     }
 
@@ -35,6 +37,7 @@ impl AppState {
             AgentId::Claude => Arc::clone(&self.claude),
             AgentId::Codex => Arc::clone(&self.codex),
             AgentId::Antigravity => Arc::clone(&self.antigravity),
+            AgentId::Cursor => Arc::clone(&self.cursor),
         }
     }
 }
@@ -57,6 +60,7 @@ pub async fn list_agents(
         Arc::clone(&state.claude),
         Arc::clone(&state.codex),
         Arc::clone(&state.antigravity),
+        Arc::clone(&state.cursor),
     ];
     blocking("provider health", move || {
         Ok(adapters.into_iter().map(|adapter| adapter.info()).collect())

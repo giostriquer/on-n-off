@@ -2,6 +2,7 @@ mod adapter;
 mod antigravity;
 mod backup;
 mod claude;
+mod cursor;
 mod cli;
 mod codex;
 mod commands;
