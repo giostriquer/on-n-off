@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, RefreshCw } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Rocker } from "@/features/agents/Rocker";
+import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { visibleAgentIds } from "$lib/appSettings";
 import * as api from "$lib/api";
@@ -13,6 +14,7 @@ type SettingsProps = {
   settings: AppSettings;
   onToggleVisible: (id: AgentId, hidden: boolean) => void;
   onSaveBinary: (id: AgentId, path: string) => void;
+  onAutomaticUpdatesChange: (enabled: boolean) => void;
 };
 
 const BINARY_NAME: Record<AgentId, string> = {
@@ -21,7 +23,13 @@ const BINARY_NAME: Record<AgentId, string> = {
   antigravity: "agy",
 };
 
-export function Settings({ agents, settings, onToggleVisible, onSaveBinary }: SettingsProps) {
+export function Settings({
+  agents,
+  settings,
+  onToggleVisible,
+  onSaveBinary,
+  onAutomaticUpdatesChange,
+}: SettingsProps) {
   const diagnose = useQuery({
     queryKey: ["diagnose-providers", settings.binaryPaths],
     queryFn: () => api.diagnoseProviders(),
@@ -49,6 +57,11 @@ export function Settings({ agents, settings, onToggleVisible, onSaveBinary }: Se
           <RefreshCw className={`size-3.5 ${diagnose.isFetching ? "animate-spin" : ""}`} aria-hidden="true" />
         </button>
       </header>
+
+      <UpdaterSettingsCard
+        automaticUpdates={settings.automaticUpdates}
+        onAutomaticUpdatesChange={onAutomaticUpdatesChange}
+      />
 
       <section aria-label="Providers">
         <div className="flex flex-col gap-3">
