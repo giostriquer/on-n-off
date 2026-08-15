@@ -7,22 +7,21 @@ function matches(query: string, ...parts: string[]): boolean {
 
 export type FilteredTab = {
   plugins: PluginDto[];
-  userSkills: SkillDto[];
+  skills: SkillDto[];
   mcpServers: McpServerDto[];
   expandIds: string[];
-  emptyBecauseFilter: boolean;
 };
 
 export function filterTab(tab: AgentTabDto, query: string): FilteredTab {
   const q = query.trim().toLowerCase();
   const mcpServers = tab.mcpServers ?? [];
+  const skills = filterSkillList(tab, q);
   if (!q) {
     return {
       plugins: sortPlugins(tab.plugins),
-      userSkills: sortSkills(tab.userSkills),
+      skills,
       mcpServers: sortMcps(mcpServers),
       expandIds: [],
-      emptyBecauseFilter: false,
     };
   }
 
@@ -40,19 +39,15 @@ export function filterTab(tab: AgentTabDto, query: string): FilteredTab {
     }),
   );
 
-  const userSkills = sortSkills(
-    tab.userSkills.filter((skill) => matches(q, skill.name, skill.id, skill.description)),
-  );
   const filteredMcps = sortMcps(
     mcpServers.filter((server) => matches(q, server.name, server.id, server.system, server.source)),
   );
 
   return {
     plugins,
-    userSkills,
+    skills,
     mcpServers: filteredMcps,
     expandIds,
-    emptyBecauseFilter: plugins.length === 0 && userSkills.length === 0 && filteredMcps.length === 0,
   };
 }
 

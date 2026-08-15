@@ -12,11 +12,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import * as api from "$lib/api";
 import {
   agentRoot,
-  catalogCounts,
-  driftRows,
   emptyTabDto,
-  liveRows,
-  masterAllOn,
   type LiveRow,
   type Screen,
 } from "$lib/catalog";
@@ -24,7 +20,7 @@ import { copy } from "$lib/copy";
 import { displayError, parseInvokeError } from "$lib/error";
 import { flagOn, mergeFlags } from "$lib/flags";
 import { DEFAULT_APP_SETTINGS, mergeAppSettings, setAgentHidden, visibleAgentIds } from "$lib/appSettings";
-import { filterTab } from "$lib/filterTab";
+import type { FilteredTab } from "$lib/filterTab";
 import { mergeProjects, projectFromPath, projectLabel, sameProjectPath } from "$lib/project";
 import { LOCKED_AGENTS, emptyTab, openIds, overlayAgents, type TabState } from "$lib/session";
 import { prependTrip, type TripEntry } from "$lib/tripLog";
@@ -39,6 +35,7 @@ import type {
   ProjectDto,
   SkillDto,
 } from "$lib/types";
+import { deriveCatalogFilterView, deriveCatalogInventory, deriveProjectView } from "./sessionView";
 
 export const THEME_KEY = "on-n-off.theme";
 export const AGENT_KEY = "on-n-off.agent";
@@ -129,13 +126,13 @@ type SessionContextValue = {
   setUninstallTarget: (plugin: PluginDto | null) => void;
   currentAgent: AgentInfo;
   currentTab: TabState;
-  filtered: ReturnType<typeof filterTab> | null;
+  filtered: FilteredTab | null;
   expandedIds: Set<string>;
   banner: string | null;
   canInstall: boolean;
-  counts: ReturnType<typeof catalogCounts>;
+  counts: ReturnType<typeof deriveCatalogInventory>["counts"];
   live: LiveRow[];
-  drift: ReturnType<typeof driftRows>;
+  drift: ReturnType<typeof deriveCatalogInventory>["drift"];
   allOn: boolean;
   cliLine: string;
   masterNote: string;
@@ -686,22 +683,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [appSettings, persistAppSettings, reloadAgents],
   );
 
-  const currentAgent = agents.find((agent) => agent.id === selected) ?? agents[0];
-  const visibleAgents = agents.filter((agent) => visibleAgentIds(appSettings.hiddenAgents).includes(agent.id));
+  const currentAgent = useMemo(
+    () => agents.find((agent) => agent.id === selected) ?? agents[0],
+    [agents, selected],
+  );
+  const visibleAgents = useMemo(() => {
+    const visible = visibleAgentIds(appSettings.hiddenAgents);
+    return agents.filter((agent) => visible.includes(agent.id));
+  }, [agents, appSettings.hiddenAgents]);
   const currentTab = tabs[selected];
-  const filtered = currentTab.dto ? filterTab(currentTab.dto, currentTab.filter) : null;
-  const expandedIds = openIds(currentTab.expanded, filtered?.expandIds ?? []);
+  const catalogInventory = useMemo(
+    () => deriveCatalogInventory(currentTab.dto),
+    [currentTab.dto],
+  );
+  const catalogFilterView = useMemo(
+    () => deriveCatalogFilterView(currentTab.dto, currentTab.filter, catalogInventory.live),
+    [catalogInventory.live, currentTab.dto, currentTab.filter],
+  );
+  const filtered = catalogFilterView.filtered;
+  const expandedIds = useMemo(
+    () => openIds(currentTab.expanded, filtered?.expandIds ?? []),
+    [currentTab.expanded, filtered],
+  );
   const banner = bannerMessage(currentAgent, currentTab.error);
   const canInstall = currentAgent.cliOk && currentAgent.installGit && !currentTab.inFlight;
-  const counts = catalogCounts(currentTab.dto);
-  const live = currentTab.dto
-    ? liveRows(currentTab.dto).filter((row) => {
-        const q = currentTab.filter.trim().toLowerCase();
-        return !q || `${row.name} ${row.meta} ${row.id}`.toLowerCase().includes(q);
-      })
-    : [];
-  const drift = currentTab.dto ? driftRows(currentTab.dto) : [];
-  const allOn = masterAllOn(currentTab.dto);
+  const { counts, drift, allOn } = catalogInventory;
+  const live = catalogFilterView.live;
   const cliLine = currentAgent.cliOk
     ? `${currentAgent.id} · ${agentRoot(currentAgent.id)}`
     : `${currentAgent.id} · offline`;
@@ -709,15 +716,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     ? `everything live on ${currentAgent.displayName}`
     : `cuts every item for ${currentAgent.displayName}`;
   const showMasterCut = flagOn(flags, "masterCut");
-  const currentProjects = mergeProjects(projects[selected], extraProjects[selected]);
-  const currentScopePath = selectedScope[selected];
-  const currentScopeLabel = currentScopePath
-    ? (currentProjects.find((project) => sameProjectPath(project.path, currentScopePath))?.label ??
-      projectLabel(currentScopePath))
-    : "all projects";
-  const scopeNote = currentScopePath
-    ? `local skills · ${currentScopePath}`
-    : "global agent config is the source of truth";
+  const selectedProjects = projects[selected];
+  const selectedExtraProjects = extraProjects[selected];
+  const selectedScopePath = selectedScope[selected];
+  const projectView = useMemo(
+    () => deriveProjectView(selectedProjects, selectedExtraProjects, selectedScopePath),
+    [selectedExtraProjects, selectedProjects, selectedScopePath],
+  );
+  const currentProjects = projectView.projects;
+  const currentScopePath = projectView.path;
+  const currentScopeLabel = projectView.label;
+  const scopeNote = projectView.note;
 
   const value = useMemo<SessionContextValue>(
     () => ({

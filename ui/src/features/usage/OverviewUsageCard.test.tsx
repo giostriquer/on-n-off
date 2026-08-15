@@ -6,6 +6,7 @@ import { OverviewUsageCard } from "./OverviewUsageCard";
 
 const usageSummary = vi.hoisted(() => vi.fn(() => new Promise(() => undefined)));
 const preloadUsageChart = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const renderUsageChart = vi.hoisted(() => vi.fn((_props: unknown) => null));
 
 vi.mock("$lib/api", () => ({ usageSummary }));
 vi.mock("@tanstack/react-router", () => ({
@@ -16,7 +17,7 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 vi.mock("./LazyUsageChart", () => ({
-  LazyUsageChart: () => null,
+  LazyUsageChart: (props: unknown) => renderUsageChart(props),
   preloadUsageChart,
 }));
 
@@ -24,6 +25,7 @@ beforeEach(() => {
   usageSummary.mockReset();
   usageSummary.mockImplementation(() => new Promise(() => undefined));
   preloadUsageChart.mockClear();
+  renderUsageChart.mockClear();
 });
 
 const missingSummary: UsageSummary = {
@@ -55,6 +57,11 @@ const missingSummary: UsageSummary = {
   pricing: { status: "fresh", source: "fixture", knownModels: 0 },
   scanDurationMs: 5,
   cacheHit: false,
+};
+
+const availableSummary: UsageSummary = {
+  ...missingSummary,
+  sources: missingSummary.sources.map((source) => ({ ...source, status: "ok" })),
 };
 
 describe("OverviewUsageCard", () => {
@@ -106,5 +113,23 @@ describe("OverviewUsageCard", () => {
     fireEvent.mouseEnter(links[1]!);
     fireEvent.focus(links[1]!);
     expect(preloadUsageChart).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not rerender the settled chart when only the provider parent changes", async () => {
+    usageSummary.mockResolvedValue(availableSummary);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const card = (agent: string) => (
+      <QueryClientProvider client={client}>
+        <div data-agent={agent}>
+          <OverviewUsageCard />
+        </div>
+      </QueryClientProvider>
+    );
+    const view = render(card("codex"));
+
+    await waitFor(() => expect(renderUsageChart).toHaveBeenCalledTimes(1));
+    view.rerender(card("claude"));
+
+    expect(renderUsageChart).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { displayError, parseInvokeError } from "$lib/error";
@@ -23,9 +23,9 @@ function OpenUsageLink({ className }: { className: string }) {
 }
 
 /** Compact Overview panel — links through to the full Usage screen. */
-export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
+function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
-  const window = makeWindow(30);
+  const window = useMemo(() => makeWindow(30), []);
 
   const query = useQuery({
     queryKey: ["usage", 30, 0],
@@ -37,12 +37,16 @@ export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
   const displayedWindow = query.data?.window ?? window;
   const loading = query.isFetching;
   const error = query.error ? displayError(parseInvokeError(query.error), "Usage") : null;
-  const folded = foldUsage(summary);
+  const folded = useMemo(() => foldUsage(summary), [summary]);
   const bothMissing = !!summary && summary.sources.every((s) => s.status === "missing");
 
-  const models = [...folded.models]
-    .sort((a, b) => (metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens))
-    .slice(0, 4);
+  const models = useMemo(
+    () =>
+      [...folded.models]
+        .sort((a, b) => (metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens))
+        .slice(0, 4),
+    [folded.models, metric],
+  );
 
   const pricingNote = !summary
     ? ""
@@ -160,3 +164,5 @@ export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
     </section>
   );
 }
+
+export const OverviewUsageCard = memo(OverviewUsageCardView);
