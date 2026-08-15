@@ -26,6 +26,8 @@ function skillsValue(id: AgentId, rootPath: string): string {
       return `${rootPath}/antigravity-cli/skills · .agents/skills`;
     case "codex":
       return `${rootPath}/skills · ~/.agents/skills`;
+    case "cursor":
+      return `${rootPath}/skills · .cursor/skills`;
   }
 }
 
@@ -37,6 +39,8 @@ function pluginToggleValue(id: AgentId): string {
       return "agy plugin enable/disable";
     case "codex":
       return "file patch · [plugins.*.enabled]";
+    case "cursor":
+      return "not implemented yet";
   }
 }
 
@@ -48,6 +52,8 @@ function mcpToggleValue(id: AgentId): string {
       return "file patch · mcpServers.*.disabled";
     case "codex":
       return "file patch · [mcp_servers.*.enabled]";
+    case "cursor":
+      return "file patch · ~/.cursor/mcp.json disabled";
   }
 }
 
@@ -55,6 +61,17 @@ function pluginsDirValue(id: AgentId, rootPath: string): string {
   return id === "antigravity"
     ? `${rootPath}/config/plugins · antigravity-cli/plugins`
     : `${rootPath}/plugins`;
+}
+
+function cliBinaryName(id: AgentId): string {
+  switch (id) {
+    case "antigravity":
+      return "agy";
+    case "cursor":
+      return "cursor-agent";
+    default:
+      return id;
+  }
 }
 
 function Status({ ok, label }: { ok: boolean; label: string }) {
@@ -137,7 +154,7 @@ export function AgentConfig({
   const pathRows = [
     {
       label: "CLI binary",
-      value: agent.id === "antigravity" ? "agy" : agent.id,
+      value: cliBinaryName(agent.id),
       state: agent.cliOk ? "FOUND" : "MISSING",
       ok: agent.cliOk,
     },

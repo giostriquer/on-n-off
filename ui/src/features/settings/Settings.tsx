@@ -21,6 +21,7 @@ const BINARY_NAME: Record<AgentId, string> = {
   claude: "claude",
   codex: "codex",
   antigravity: "agy",
+  cursor: "cursor-agent",
 };
 
 export function Settings({

@@ -6,6 +6,7 @@ mod cli;
 mod codex;
 mod commands;
 mod config_io;
+mod cursor;
 mod dto;
 #[cfg(test)]
 mod fake;

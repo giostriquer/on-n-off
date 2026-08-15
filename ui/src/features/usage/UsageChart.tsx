@@ -31,11 +31,13 @@ const PROVIDER_COLORS: Record<"light" | "dark", Record<AgentId, string>> = {
     codex: "#2a2a2a",
     claude: "#d9773a",
     antigravity: "#6c727c",
+    cursor: "#3b6dff",
   },
   dark: {
     codex: "#ececec",
     claude: "#e8944a",
     antigravity: "#8c939d",
+    cursor: "#7aa2ff",
   },
 };
 
