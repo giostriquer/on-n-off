@@ -1,9 +1,12 @@
 [package]
 name = "on-n-off"
 version = "0.1.0"
-description = "Plugin and skill manager for Claude and Codex"
-authors = ["on-n-off"]
+description = "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration"
+authors = ["Giovanne Striquer"]
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/giostriquer/on-n-off"
+homepage = "https://github.com/giostriquer/on-n-off"
 
 [lints.rust]
 unsafe_code = "forbid"

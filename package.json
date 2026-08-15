@@ -2,8 +2,16 @@
   "name": "on-n-off",
   "version": "0.1.0",
   "private": true,
-  "description": "Desktop plugin and skill manager for Claude and Codex",
+  "description": "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration",
   "type": "module",
+  "homepage": "https://github.com/giostriquer/on-n-off#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/giostriquer/on-n-off.git"
+  },
+  "bugs": {
+    "url": "https://github.com/giostriquer/on-n-off/issues"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

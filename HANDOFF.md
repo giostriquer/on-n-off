@@ -1,6 +1,6 @@
-# Coworker handoff — Windows smoke test
+# Windows prerelease smoke test
 
-Private early build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity plugins, skills, MCP, and local usage estimates.
+Early prerelease build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity plugins, skills, MCP, and local usage estimates.
 
 ## What’s new (Studio v2 chrome)
 
@@ -74,4 +74,4 @@ Installers land under `src-tauri/target/release/bundle/nsis/` and `…/msi/` (or
 - Antigravity usage transcripts
 - Subscription billing accuracy (Usage is API-equivalent estimate)
 
-Private while the product is taking shape — ping the sender with anything that breaks on your box.
+The product is still taking shape. Open a GitHub issue with reproducible steps if anything breaks on your system. Do not include agent transcripts, credentials, or private configuration in an issue.
