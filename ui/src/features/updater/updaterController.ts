@@ -1,4 +1,5 @@
 import type { UpdaterBuildInfo } from "$lib/types";
+import { markStartup } from "$lib/startupTiming";
 import type { UpdateResource, UpdaterClient } from "./updaterClient";
 import {
   INITIAL_UPDATE_STATE,
@@ -100,6 +101,7 @@ export class UpdateController {
   }
 
   private async performCheck(target: string): Promise<void> {
+    markStartup("updater-check-start");
     this.dispatch({ type: "CHECK_STARTED" });
     let update: UpdateResource | null = null;
     try {

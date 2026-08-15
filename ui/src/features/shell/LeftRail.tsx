@@ -21,6 +21,7 @@ type LeftRailProps = {
   busy?: boolean;
   masterDisabled?: boolean;
   showMasterCut?: boolean;
+  onUsageIntent?: () => void;
   onScreen: (next: Screen) => void;
   onThemeChange: (theme: Theme) => void;
   onMaster: (enabled: boolean) => void;
@@ -46,6 +47,7 @@ export function LeftRail({
   busy = false,
   masterDisabled = false,
   showMasterCut = false,
+  onUsageIntent,
   onScreen,
   onThemeChange,
   onMaster,
@@ -123,6 +125,8 @@ export function LeftRail({
           screen === "usage" ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
         }`}
         aria-current={screen === "usage" ? "page" : undefined}
+        onMouseEnter={onUsageIntent}
+        onFocus={onUsageIntent}
         onClick={() => onScreen("usage")}
       >
         <Activity

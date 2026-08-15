@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { Rocker } from "@/features/agents/Rocker";
 import { SkillRow } from "./SkillRow";
@@ -9,17 +9,13 @@ import {
   pluginOutOfSync,
   pluginVersionNote,
   skillIsLive,
-  sortPlugins,
 } from "$lib/catalog";
 import { isProjectOrigin } from "$lib/project";
-import { filterSkillList } from "$lib/filterTab";
 import type { AgentTabDto, PluginDto, SkillDto } from "$lib/types";
 
 type Chip = "all" | "on" | "off" | "behind";
-type Kind = "plugin" | "skill";
 
-type ItemListProps = {
-  kind: Kind;
+type ItemListBaseProps = {
   tab: AgentTabDto;
   filterQuery?: string;
   expandedIds: Set<string>;
@@ -33,6 +29,9 @@ type ItemListProps = {
   onUpdate?: (plugin: PluginDto) => void;
 };
 
+type ItemListProps = ItemListBaseProps &
+  ({ kind: "plugin"; items: PluginDto[] } | { kind: "skill"; items: SkillDto[] });
+
 function applyChip<T>(items: T[], next: Chip, enabled: (item: T) => boolean): T[] {
   if (next === "on") {
     return items.filter((item) => enabled(item));
@@ -43,9 +42,64 @@ function applyChip<T>(items: T[], next: Chip, enabled: (item: T) => boolean): T[
   return items;
 }
 
+type SkillCardProps = {
+  skill: SkillDto;
+  live: boolean;
+  busy: boolean;
+  onToggleSkill: (skill: SkillDto, enabled: boolean) => void;
+};
+
+const SkillCard = memo(function SkillCard({ skill, live, busy, onToggleSkill }: SkillCardProps) {
+  const lockedNote = isProjectOrigin(skill.origin) ? copy.skillProject : copy.skillLocked;
+  return (
+    <article className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
+      <div className="flex items-start gap-3 px-3 py-[11px]">
+        <span
+          className={`mt-2 size-2 shrink-0 rounded-full ${
+            live ? "bg-[var(--live)] shadow-[0_0_7px_var(--live)]" : "bg-[var(--mute)]"
+          }`}
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="text-[16px]/[1.15] font-semibold break-words">{skill.name}</span>
+            <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+              {isProjectOrigin(skill.origin) ? "Project skill" : skill.pluginId ? "Plugin skill" : "User skill"}
+            </span>
+          </div>
+          <div className="mt-0.5 line-clamp-3 text-[11.5px] leading-snug break-words text-[var(--mute)]">
+            {skill.description || skill.id}
+          </div>
+        </div>
+        {skill.togglable ? (
+          <div className="mt-0.5 shrink-0">
+            <Rocker
+              size="plugin"
+              on={skill.enabled}
+              busy={busy}
+              ariaLabel={`${skill.name} ${skill.enabled ? "on" : "off"}`}
+              onToggle={() => onToggleSkill(skill, !skill.enabled)}
+            />
+          </div>
+        ) : (
+          <span
+            className="mt-1 flex min-w-[88px] shrink-0 items-center gap-[7px] font-mono text-[10.5px] text-[var(--mute)]"
+            title={lockedNote}
+          >
+            <span className="size-2 shrink-0 rounded-full bg-[var(--mute)]" aria-hidden="true" />
+            {isProjectOrigin(skill.origin) ? "project" : "with plugin"}
+            <span className="sr-only">{lockedNote}</span>
+          </span>
+        )}
+      </div>
+    </article>
+  );
+});
+
 export function ItemList({
   kind,
   tab,
+  items,
   filterQuery = "",
   expandedIds,
   cliOk,
@@ -59,11 +113,12 @@ export function ItemList({
 }: ItemListProps) {
   const [chip, setChip] = useState<Chip>("all");
 
+  const pluginPool = kind === "plugin" ? items : [];
   const plugins =
     chip === "behind"
-      ? sortPlugins(tab.plugins).filter((plugin) => pluginOutOfSync(plugin))
-      : applyChip(sortPlugins(tab.plugins), chip, (plugin) => plugin.enabled);
-  const skillPool = filterSkillList(tab, filterQuery);
+      ? pluginPool.filter((plugin) => pluginOutOfSync(plugin))
+      : applyChip(pluginPool, chip, (plugin) => plugin.enabled);
+  const skillPool = kind === "skill" ? items : [];
   const skills = applyChip(skillPool, chip, (skill) => skillIsLive(skill, tab));
 
   const title = kind === "plugin" ? "Installed plugins" : "Skills library";
@@ -97,7 +152,7 @@ export function ItemList({
       </header>
 
       {kind === "plugin" ? (
-        tab.plugins.length === 0 ? (
+        pluginPool.length === 0 ? (
           <p className="text-[13px] text-[var(--mute)]">
             {filterQuery.trim() ? copy.filterMiss(filterQuery) : copy.emptyPlugins}
           </p>
@@ -222,59 +277,19 @@ export function ItemList({
         <p className="text-[13px] text-[var(--mute)]">{chip === "on" ? "No skills on." : "No skills off."}</p>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {skills.map((skill) => {
-            const live = skill.togglable
-              ? skill.enabled
-              : (tab.plugins.find((plugin) => plugin.id === skill.pluginId)?.enabled ?? false);
-            const lockedNote = isProjectOrigin(skill.origin) ? copy.skillProject : copy.skillLocked;
-            return (
-              <article key={skill.id} className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
-                <div className="flex items-start gap-3 px-3 py-[11px]">
-                  <span
-                    className={`mt-2 size-2 shrink-0 rounded-full ${
-                      live ? "bg-[var(--live)] shadow-[0_0_7px_var(--live)]" : "bg-[var(--mute)]"
-                    }`}
-                    aria-hidden="true"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="text-[16px]/[1.15] font-semibold break-words">{skill.name}</span>
-                      <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
-                        {isProjectOrigin(skill.origin)
-                          ? "Project skill"
-                          : skill.pluginId
-                            ? "Plugin skill"
-                            : "User skill"}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 line-clamp-3 text-[11.5px] leading-snug break-words text-[var(--mute)]">
-                      {skill.description || skill.id}
-                    </div>
-                  </div>
-                  {skill.togglable ? (
-                    <div className="mt-0.5 shrink-0">
-                      <Rocker
-                        size="plugin"
-                        on={skill.enabled}
-                        busy={busy}
-                        ariaLabel={`${skill.name} ${skill.enabled ? "on" : "off"}`}
-                        onToggle={() => onToggleSkill(skill, !skill.enabled)}
-                      />
-                    </div>
-                  ) : (
-                    <span
-                      className="mt-1 flex min-w-[88px] shrink-0 items-center gap-[7px] font-mono text-[10.5px] text-[var(--mute)]"
-                      title={lockedNote}
-                    >
-                      <span className="size-2 shrink-0 rounded-full bg-[var(--mute)]" aria-hidden="true" />
-                      {isProjectOrigin(skill.origin) ? "project" : "with plugin"}
-                      <span className="sr-only">{lockedNote}</span>
-                    </span>
-                  )}
-                </div>
-              </article>
-            );
-          })}
+          {skills.map((skill) => (
+            <SkillCard
+              key={skill.id}
+              skill={skill}
+              live={
+                skill.togglable
+                  ? skill.enabled
+                  : (tab.plugins.find((plugin) => plugin.id === skill.pluginId)?.enabled ?? false)
+              }
+              busy={busy}
+              onToggleSkill={onToggleSkill}
+            />
+          ))}
         </div>
       )}
     </div>

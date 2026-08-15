@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateController } from "./updaterController";
 import type { UpdaterClient, UpdateResource } from "./updaterClient";
 
@@ -33,6 +33,10 @@ function client(overrides: Partial<UpdaterClient> = {}): UpdaterClient {
 }
 
 describe("UpdateController", () => {
+  beforeEach(() => {
+    Object.defineProperty(performance, "mark", { configurable: true, value: vi.fn() });
+  });
+
   it("waits for a manual check when automatic updates are disabled", async () => {
     let checks = 0;
     const controller = new UpdateController(
@@ -71,6 +75,7 @@ describe("UpdateController", () => {
     await controller.initialize(true);
 
     expect(controller.getSnapshot().state.status).toBe("ready");
+    expect(performance.mark).toHaveBeenCalledWith("on-n-off:updater-check-start");
   });
 
   it("deduplicates concurrent checks", async () => {
@@ -123,5 +128,48 @@ describe("UpdateController", () => {
       operation: "install",
       message: "installer refused",
     });
+  });
+
+  it("installs and relaunches a downloaded update", async () => {
+    let installs = 0;
+    let relaunches = 0;
+    const controller = new UpdateController(
+      client({
+        check: async () =>
+          resource({
+            install: async () => {
+              installs += 1;
+            },
+          }),
+        relaunch: async () => {
+          relaunches += 1;
+        },
+      }),
+    );
+
+    await controller.initialize(true);
+    await controller.install();
+
+    expect(installs).toBe(1);
+    expect(relaunches).toBe(1);
+  });
+
+  it("closes a downloaded native update during cleanup", async () => {
+    let closes = 0;
+    const controller = new UpdateController(
+      client({
+        check: async () =>
+          resource({
+            close: async () => {
+              closes += 1;
+            },
+          }),
+      }),
+    );
+
+    await controller.initialize(true);
+    await controller.dispose();
+
+    expect(closes).toBe(1);
   });
 });

@@ -1,13 +1,14 @@
-import { getVersion } from "@tauri-apps/api/app";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
 import * as api from "$lib/api";
 import type { UpdateResource, UpdaterClient } from "./updaterClient";
 
 export const tauriUpdaterClient: UpdaterClient = {
   buildInfo: () => api.updaterBuildInfo(),
-  currentVersion: () => getVersion(),
+  currentVersion: async () => {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    return getVersion();
+  },
   check: async (target) => {
+    const { check } = await import("@tauri-apps/plugin-updater");
     const update = await check({ target });
     if (!update) {
       return null;
@@ -22,5 +23,8 @@ export const tauriUpdaterClient: UpdaterClient = {
     };
     return resource;
   },
-  relaunch: () => relaunch(),
+  relaunch: async () => {
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  },
 };

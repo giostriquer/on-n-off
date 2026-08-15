@@ -2,16 +2,10 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   redirect,
 } from "@tanstack/react-router";
 import { AppShell } from "@/features/shell/AppShell";
-import { ConfigRoute } from "@/routes/config";
-import { McpRoute } from "@/routes/mcp";
-import { OverviewRoute } from "@/routes/overview";
-import { PluginsRoute } from "@/routes/plugins";
-import { SkillsRoute } from "@/routes/skills";
-import { SettingsRoute } from "@/routes/settings";
-import { UsageRoute } from "@/routes/usage";
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -28,43 +22,43 @@ const indexRoute = createRoute({
 const overviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/overview",
-  component: OverviewRoute,
+  component: lazyRouteComponent(() => import("@/routes/overview"), "OverviewRoute"),
 });
 
 const pluginsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/plugins",
-  component: PluginsRoute,
+  component: lazyRouteComponent(() => import("@/routes/plugins"), "PluginsRoute"),
 });
 
 const skillsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/skills",
-  component: SkillsRoute,
+  component: lazyRouteComponent(() => import("@/routes/skills"), "SkillsRoute"),
 });
 
 const mcpRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/mcp",
-  component: McpRoute,
+  component: lazyRouteComponent(() => import("@/routes/mcp"), "McpRoute"),
 });
 
 const usageRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/usage",
-  component: UsageRoute,
+  component: lazyRouteComponent(() => import("@/routes/usage"), "UsageRoute"),
 });
 
 const configRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/config",
-  component: ConfigRoute,
+  component: lazyRouteComponent(() => import("@/routes/config"), "ConfigRoute"),
 });
 
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
-  component: SettingsRoute,
+  component: lazyRouteComponent(() => import("@/routes/settings"), "SettingsRoute"),
 });
 
 const routeTree = rootRoute.addChildren([

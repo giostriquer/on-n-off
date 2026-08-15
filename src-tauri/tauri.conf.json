@@ -24,6 +24,17 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyQTREQjA5RkYwQkQ3ODIKUldTQzF3di9DZHVrRXIwdEZ2Z1FHV1NVVHlvZWM5YXBMUlRsQ0pRUDM5SFZZY2VmanB5LzhFMEQK",
+      "endpoints": [
+        "https://github.com/giostriquer/on-n-off/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

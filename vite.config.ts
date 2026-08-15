@@ -33,5 +33,6 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "ui/dist"),
     emptyOutDir: true,
+    manifest: true,
   },
 });

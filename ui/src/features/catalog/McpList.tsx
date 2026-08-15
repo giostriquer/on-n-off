@@ -2,21 +2,20 @@ import { useState } from "react";
 import { Rocker } from "@/features/agents/Rocker";
 import { copy } from "$lib/copy";
 import { isProjectOrigin } from "$lib/project";
-import { filterMcpList } from "$lib/filterTab";
 import type { AgentTabDto, McpServerDto } from "$lib/types";
 
 type Chip = "all" | "on" | "off";
 
 type McpListProps = {
   tab: AgentTabDto;
+  servers: McpServerDto[];
   filterQuery?: string;
   busy?: boolean;
   onToggle: (server: McpServerDto, enabled: boolean) => void;
 };
 
-export function McpList({ tab, filterQuery = "", busy = false, onToggle }: McpListProps) {
+export function McpList({ tab, servers: pool, filterQuery = "", busy = false, onToggle }: McpListProps) {
   const [chip, setChip] = useState<Chip>("all");
-  const pool = filterMcpList(tab, filterQuery);
   const servers =
     chip === "on" ? pool.filter((server) => server.enabled) : chip === "off" ? pool.filter((server) => !server.enabled) : pool;
   const live = tab.mcpServers.filter((server) => server.enabled).length;
@@ -47,12 +46,10 @@ export function McpList({ tab, filterQuery = "", busy = false, onToggle }: McpLi
         </div>
       </header>
 
-      {tab.mcpServers.length === 0 ? (
+      {pool.length === 0 ? (
         <p className="text-[13px] text-[var(--mute)]">
           {filterQuery.trim() ? copy.filterMiss(filterQuery) : copy.emptyMcps}
         </p>
-      ) : pool.length === 0 ? (
-        <p className="text-[13px] text-[var(--mute)]">{copy.filterMiss(filterQuery)}</p>
       ) : servers.length === 0 ? (
         <p className="text-[13px] text-[var(--mute)]">
           {chip === "on" ? "No MCP servers on." : "No MCP servers off."}

@@ -172,14 +172,8 @@ impl CodexAdapter {
             .join(name);
         newest_dir(&cache)
     }
-}
 
-impl AgentAdapter for CodexAdapter {
-    fn info(&self) -> AgentInfo {
-        agent_info(AgentId::Codex, "codex")
-    }
-
-    fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
+    fn build_tab(&self, enrich_remote: bool) -> Result<AgentTabDto, AdapterError> {
         let config = self.config()?;
         let enable_by_path = skill_enable_map(&config);
         let catalogs: HashMap<String, HashMap<String, crate::plugin_meta::VersionHint>> = self
@@ -187,7 +181,11 @@ impl AgentAdapter for CodexAdapter {
             .into_iter()
             .map(|(name, (path, origin))| {
                 let mut hints = crate::plugin_meta::catalog_hints(&path);
-                crate::plugin_meta::apply_remote_marketplace_versions(&mut hints, &origin, &path);
+                if enrich_remote {
+                    crate::plugin_meta::apply_remote_marketplace_versions(
+                        &mut hints, &origin, &path,
+                    );
+                }
                 (name, hints)
             })
             .collect();
@@ -205,8 +203,10 @@ impl AgentAdapter for CodexAdapter {
                 .get(&source)
                 .and_then(|hints| hints.get(&name))
                 .cloned();
-            if let Some(hint) = catalog.as_mut() {
-                crate::plugin_meta::fill_remote_version(hint);
+            if enrich_remote {
+                if let Some(hint) = catalog.as_mut() {
+                    crate::plugin_meta::fill_remote_version(hint);
+                }
             }
             let (version, upstream, out_of_sync) =
                 crate::plugin_meta::resolve_versions(&installed, catalog.as_ref());
@@ -276,6 +276,20 @@ impl AgentAdapter for CodexAdapter {
         };
         sort_tab(&mut tab);
         Ok(tab)
+    }
+}
+
+impl AgentAdapter for CodexAdapter {
+    fn info(&self) -> AgentInfo {
+        agent_info(AgentId::Codex, "codex")
+    }
+
+    fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
+        self.build_tab(true)
+    }
+
+    fn list_local_tab(&self) -> Result<AgentTabDto, AdapterError> {
+        self.build_tab(false)
     }
 
     fn list_projects(&self) -> Vec<crate::dto::ProjectDto> {
@@ -524,6 +538,48 @@ mod tests {
         assert_eq!(tab.mcp_servers[0].system, "http");
         assert!(tab.mcp_servers[1].enabled);
         assert!(tab.mcp_servers[1].togglable);
+        let _ = fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn local_tab_skips_remote_marketplace_enrichment() {
+        let (root, agents_skills) = fixture();
+        let config_path = root.join("config.toml");
+        let config = fs::read_to_string(&config_path)
+            .unwrap()
+            .replace("https://example.invalid/workshop.git", "example/workshop");
+        fs::write(&config_path, config).unwrap();
+        let adapter = CodexAdapter::at(root.clone(), agents_skills);
+
+        let local = crate::plugin_meta::with_fetch_text(
+            |_| panic!("local inventory must not fetch remote metadata"),
+            || adapter.list_local_tab().expect("local list"),
+        );
+        let local_plugin = local
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "workbench@workshop")
+            .unwrap();
+        assert_eq!(local_plugin.upstream, "0.23.0");
+
+        let enriched = crate::plugin_meta::with_fetch_text(
+            |_| {
+                Some(
+                    r#"{"plugins":[{"name":"workbench","version":"0.24.0","source":"./plugins/workbench"}]}"#
+                        .into(),
+                )
+            },
+            || adapter.list_tab().expect("enriched list"),
+        );
+        let enriched_plugin = enriched
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "workbench@workshop")
+            .unwrap();
+        assert_eq!(enriched_plugin.upstream, "0.24.0");
+        assert_eq!(enriched_plugin.enabled, local_plugin.enabled);
+        assert_eq!(enriched_plugin.skills, local_plugin.skills);
+
         let _ = fs::remove_dir_all(root.parent().unwrap());
     }
 

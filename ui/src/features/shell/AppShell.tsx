@@ -13,6 +13,7 @@ import {
 } from "@/features/session/SessionProvider";
 import { LeftRail } from "@/features/shell/LeftRail";
 import { UpdateStrip } from "@/features/updater/UpdateStrip";
+import { preloadUsageChart } from "@/features/usage/LazyUsageChart";
 import { globalItemCount, tallyLine, type Screen } from "$lib/catalog";
 import { copy } from "$lib/copy";
 import type { AgentInfo } from "$lib/types";
@@ -91,6 +92,9 @@ export function AppShell() {
   }
 
   function goScreen(next: Screen) {
+    if (next === "usage") {
+      void preloadUsageChart();
+    }
     void navigate({ to: SCREEN_PATH[next] });
   }
 
@@ -204,6 +208,7 @@ export function AppShell() {
           showMasterCut={showMasterCut}
           busy={currentTab.inFlight}
           masterDisabled={!currentTab.dto || currentTab.inFlight}
+          onUsageIntent={() => void preloadUsageChart()}
           onScreen={goScreen}
           onThemeChange={setTheme}
           onMaster={(enabled) => void masterCut(enabled)}

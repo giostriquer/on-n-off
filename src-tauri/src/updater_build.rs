@@ -64,4 +64,40 @@ mod tests {
         assert_eq!(InstallerKind::Msi.name(), Some("msi"));
         assert_eq!(InstallerKind::Msi.target(), Some("windows-x86_64-msi"));
     }
+
+    #[test]
+    fn base_config_keeps_the_updater_plugin_runnable_in_development_builds() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let updater = &config["plugins"]["updater"];
+
+        assert!(
+            updater.is_object(),
+            "plugins.updater must not serialize as null"
+        );
+        assert!(
+            updater["pubkey"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty()),
+            "plugins.updater.pubkey must be configured"
+        );
+        assert!(
+            updater["endpoints"]
+                .as_array()
+                .is_some_and(|values| !values.is_empty()),
+            "plugins.updater.endpoints must be configured"
+        );
+    }
+
+    #[test]
+    fn updater_overlay_only_enables_release_artifacts() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.updater.conf.json")).unwrap();
+
+        assert_eq!(config["bundle"]["createUpdaterArtifacts"], true);
+        assert!(
+            config.get("plugins").is_none(),
+            "the base config must be the single source of updater runtime settings"
+        );
+    }
 }
