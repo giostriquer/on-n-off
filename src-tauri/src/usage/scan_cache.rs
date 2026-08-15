@@ -2,20 +2,22 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 use super::transcripts::{TokenTotals, UsageProvider, UsageRecord};
 
-pub const USAGE_SCAN_CACHE_VERSION: u32 = 2;
+pub const USAGE_SCAN_CACHE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct CachedFile {
     pub size: u64,
     pub mtime_ms: i64,
     pub provider: UsageProvider,
-    pub records: Vec<UsageRecord>,
+    pub records: Arc<Vec<UsageRecord>>,
 }
 
 pub type ScanCache = HashMap<String, CachedFile>;
@@ -23,6 +25,7 @@ pub type ScanCache = HashMap<String, CachedFile>;
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedCache {
     version: u32,
+    parser_version: u32,
     models: Vec<String>,
     sessions: Vec<String>,
     files: HashMap<String, SerializedFile>,
@@ -89,6 +92,7 @@ pub fn encode_scan_cache(cache: &ScanCache) -> Value {
 
     serde_json::to_value(SerializedCache {
         version: USAGE_SCAN_CACHE_VERSION,
+        parser_version: USAGE_TRANSCRIPT_PARSER_VERSION,
         models,
         sessions,
         files,
@@ -101,7 +105,9 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
     let Ok(root) = serde_json::from_value::<SerializedCache>(document.clone()) else {
         return cache;
     };
-    if root.version != USAGE_SCAN_CACHE_VERSION {
+    if root.version != USAGE_SCAN_CACHE_VERSION
+        || root.parser_version != USAGE_TRANSCRIPT_PARSER_VERSION
+    {
         return cache;
     }
 
@@ -197,7 +203,7 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
                 size: entry.s,
                 mtime_ms: entry.m,
                 provider,
-                records,
+                records: Arc::new(records),
             },
         );
     }
@@ -283,7 +289,7 @@ mod tests {
                 size: 100,
                 mtime_ms: 50,
                 provider: UsageProvider::Claude,
-                records: vec![sample_record()],
+                records: Arc::new(vec![sample_record()]),
             },
         );
         let encoded = encode_scan_cache(&cache);
@@ -298,11 +304,32 @@ mod tests {
     fn wrong_version_yields_empty() {
         let doc = serde_json::json!({
             "version": 999,
+            "parser_version": USAGE_TRANSCRIPT_PARSER_VERSION,
             "models": [],
             "sessions": [],
             "files": {}
         });
         assert!(decode_scan_cache(&doc).is_empty());
+    }
+
+    #[test]
+    fn parser_incompatible_cache_drops_stale_records() {
+        let mut stale_record = sample_record();
+        stale_record.totals.output_tokens = 999;
+        let mut cache = ScanCache::new();
+        cache.insert(
+            "/a.jsonl".into(),
+            CachedFile {
+                size: 100,
+                mtime_ms: 50,
+                provider: UsageProvider::Claude,
+                records: Arc::new(vec![stale_record]),
+            },
+        );
+        let mut encoded = encode_scan_cache(&cache);
+        encoded["parser_version"] = serde_json::json!(USAGE_TRANSCRIPT_PARSER_VERSION + 1);
+
+        assert!(decode_scan_cache(&encoded).is_empty());
     }
 
     #[test]
@@ -324,7 +351,7 @@ mod tests {
                 size: 1,
                 mtime_ms: 100,
                 provider: UsageProvider::Claude,
-                records: vec![],
+                records: Arc::new(vec![]),
             },
         );
         cache.insert(
@@ -333,7 +360,7 @@ mod tests {
                 size: 1,
                 mtime_ms: 5_000,
                 provider: UsageProvider::Claude,
-                records: vec![],
+                records: Arc::new(vec![]),
             },
         );
         cache.insert(
@@ -342,7 +369,7 @@ mod tests {
                 size: 1,
                 mtime_ms: 5_000,
                 provider: UsageProvider::Claude,
-                records: vec![],
+                records: Arc::new(vec![]),
             },
         );
         let live = HashSet::from(["/root/live.jsonl".to_string()]);
