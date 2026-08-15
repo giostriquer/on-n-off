@@ -1,6 +1,6 @@
 {
   "name": "on-n-off",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration",
   "type": "module",
