@@ -94,7 +94,7 @@ vi.mock("$lib/api", () => ({
   loadAppSettings: () => Promise.resolve({ hiddenAgents: [], binaryPaths: {} }),
   listAgents: () => Promise.resolve(AGENTS),
   listProjects: (agentId: AgentId) => Promise.resolve(state.projectResults[agentId] ?? []),
-  refresh: (agentId: AgentId) => {
+  listLocalPlugins: (agentId: AgentId) => {
     state.refreshOrder.push(agentId);
     if (agentId === "codex") {
       return new Promise<AgentTabDto>((resolve) => {
@@ -103,6 +103,7 @@ vi.mock("$lib/api", () => ({
     }
     return Promise.resolve(state.refreshResults[agentId] ?? EMPTY_TAB);
   },
+  refresh: (agentId: AgentId) => Promise.resolve(state.refreshResults[agentId] ?? EMPTY_TAB),
 }));
 
 function SessionProbe() {

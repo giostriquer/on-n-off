@@ -22,7 +22,15 @@ import { flagOn, mergeFlags } from "$lib/flags";
 import { DEFAULT_APP_SETTINGS, mergeAppSettings, setAgentHidden, visibleAgentIds } from "$lib/appSettings";
 import type { FilteredTab } from "$lib/filterTab";
 import { mergeProjects, projectFromPath, projectLabel, sameProjectPath } from "$lib/project";
-import { LOCKED_AGENTS, emptyTab, openIds, overlayAgents, type TabState } from "$lib/session";
+import { markStartup } from "$lib/startupTiming";
+import {
+  LOCKED_AGENTS,
+  emptyTab,
+  mergeEnrichedPluginMetadata,
+  openIds,
+  overlayAgents,
+  type TabState,
+} from "$lib/session";
 import { prependTrip, type TripEntry } from "$lib/tripLog";
 import type {
   AgentId,
@@ -228,6 +236,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     codex: false,
     antigravity: false,
   });
+  const loadGenerationRef = useRef<Record<AgentId, number>>({
+    claude: 0,
+    codex: 0,
+    antigravity: 0,
+  });
+  const pendingLoadRef = useRef<Record<AgentId, boolean | null>>({
+    claude: null,
+    codex: null,
+    antigravity: null,
+  });
+  const loadLoopRef = useRef<Record<AgentId, boolean>>({
+    claude: false,
+    codex: false,
+    antigravity: false,
+  });
+  const loadTabRef = useRef<(agentId: AgentId, probe?: boolean) => Promise<void>>(async () => {});
   const bootStartedRef = useRef(false);
 
   tabsRef.current = tabs;
@@ -286,16 +310,31 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadProjects = useCallback(
-    async (agentId: AgentId) => {
+    async (agentId: AgentId, generation: number) => {
       try {
         const next = await api.listProjects(agentId);
+        if (loadGenerationRef.current[agentId] !== generation) {
+          return;
+        }
         setProjects((prev) => ({ ...prev, [agentId]: next }));
       } catch {
+        if (loadGenerationRef.current[agentId] !== generation) {
+          return;
+        }
         setProjects((prev) => ({ ...prev, [agentId]: [] }));
       }
+    },
+    [],
+  );
+
+  const loadRememberedScope = useCallback(
+    async (agentId: AgentId) => {
       const saved = selectedScopeRef.current[agentId];
       if (saved) {
         await rememberExtra(agentId, saved);
+        if (agentId === selectedRef.current) {
+          markStartup("remembered-scope-ready");
+        }
       }
     },
     [rememberExtra],
@@ -321,43 +360,116 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } finally {
       inFlightRef.current[agentId] = false;
       setTabs((prev) => patchTab(prev, agentId, { inFlight: false }));
+      const pendingProbe = pendingLoadRef.current[agentId];
+      if (!loadLoopRef.current[agentId] && pendingProbe !== null) {
+        pendingLoadRef.current[agentId] = null;
+        void loadTabRef.current(agentId, pendingProbe);
+      }
     }
   }, []);
 
+  const enrichTab = useCallback(
+    async (agentId: AgentId, projectPath: string | null, generation: number) => {
+      try {
+        const enriched = await api.refresh(agentId, projectPath);
+        if (loadGenerationRef.current[agentId] !== generation) {
+          return;
+        }
+        setTabs((prev) => {
+          const local = prev[agentId].dto;
+          return patchTab(prev, agentId, {
+            dto: local ? mergeEnrichedPluginMetadata(local, enriched) : enriched,
+          });
+        });
+      } catch (error) {
+        if (loadGenerationRef.current[agentId] !== generation) {
+          return;
+        }
+        const message = displayError(parseInvokeError(error), agentLabel(agentId));
+        setTabs((prev) => patchTab(prev, agentId, { error: message }));
+        note("TRIP", `${agentLabel(agentId)} enrichment failed`);
+      }
+    },
+    [agentLabel, note],
+  );
+
   const loadTab = useCallback(
     async (agentId: AgentId, probe = false) => {
-      await withLock(agentId, async () => {
-        if (probe) {
-          try {
-            setAgents(overlayAgents(await api.listAgents()));
-          } catch {
-            setAgents(overlayAgents([]));
+      if (inFlightRef.current[agentId]) {
+        loadGenerationRef.current[agentId] += 1;
+        pendingLoadRef.current[agentId] = pendingLoadRef.current[agentId] === true || probe;
+        return;
+      }
+      loadLoopRef.current[agentId] = true;
+      try {
+        let requestedProbe = probe;
+        while (true) {
+          pendingLoadRef.current[agentId] = null;
+          const generation = loadGenerationRef.current[agentId] + 1;
+          loadGenerationRef.current[agentId] = generation;
+          const projectPath = selectedScopeRef.current[agentId];
+          let localReady = false;
+          await withLock(agentId, async () => {
+            if (requestedProbe) {
+              try {
+                setAgents(overlayAgents(await api.listAgents()));
+              } catch {
+                setAgents(overlayAgents([]));
+              }
+            }
+            setTabs((prev) => patchTab(prev, agentId, { loading: true }));
+            const projects = loadProjects(agentId, generation);
+            const rememberedScope = loadRememberedScope(agentId);
+            try {
+              const dto = requestedProbe
+                ? await api.refresh(agentId, projectPath)
+                : await api.listLocalPlugins(agentId, projectPath);
+              await rememberedScope;
+              if (requestedProbe) {
+                await projects;
+              }
+              if (loadGenerationRef.current[agentId] !== generation) {
+                return;
+              }
+              setTabs((prev) => patchTab(prev, agentId, { dto, error: null }));
+              const itemCount = (dto?.plugins.length ?? 0) + (dto?.userSkills.length ?? 0);
+              if (requestedProbe || agentId === selectedRef.current) {
+                note("SYNC", `scanned ${agentLabel(agentId)} config · ${itemCount} items`);
+              }
+              localReady = !requestedProbe;
+            } catch (error) {
+              if (loadGenerationRef.current[agentId] !== generation) {
+                return;
+              }
+              setTabs((prev) =>
+                patchTab(prev, agentId, {
+                  dto: null,
+                  error: displayError(parseInvokeError(error), agentLabel(agentId)),
+                }),
+              );
+              note("TRIP", `${agentLabel(agentId)} refresh failed`);
+            } finally {
+              if (loadGenerationRef.current[agentId] === generation) {
+                setTabs((prev) => patchTab(prev, agentId, { loading: false }));
+              }
+            }
+          });
+          if (localReady && loadGenerationRef.current[agentId] === generation) {
+            void enrichTab(agentId, projectPath, generation);
           }
-        }
-        setTabs((prev) => patchTab(prev, agentId, { loading: true }));
-        try {
-          await loadProjects(agentId);
-          const dto = await api.refresh(agentId, selectedScopeRef.current[agentId]);
-          setTabs((prev) => patchTab(prev, agentId, { dto, error: null }));
-          const itemCount = (dto?.plugins.length ?? 0) + (dto?.userSkills.length ?? 0);
-          if (probe || agentId === selectedRef.current) {
-            note("SYNC", `scanned ${agentLabel(agentId)} config · ${itemCount} items`);
+          const pendingProbe = pendingLoadRef.current[agentId];
+          if (pendingProbe === null) {
+            return;
           }
-        } catch (error) {
-          setTabs((prev) =>
-            patchTab(prev, agentId, {
-              dto: null,
-              error: displayError(parseInvokeError(error), agentLabel(agentId)),
-            }),
-          );
-          note("TRIP", `${agentLabel(agentId)} refresh failed`);
-        } finally {
-          setTabs((prev) => patchTab(prev, agentId, { loading: false }));
+          requestedProbe = pendingProbe;
         }
-      });
+      } finally {
+        loadLoopRef.current[agentId] = false;
+      }
     },
-    [agentLabel, loadProjects, note, withLock],
+    [agentLabel, enrichTab, loadProjects, loadRememberedScope, note, withLock],
   );
+  loadTabRef.current = loadTab;
 
   useEffect(() => {
     if (bootStartedRef.current) {
@@ -387,8 +499,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
       const primary = selectedRef.current;
       await loadTab(primary);
+      markStartup("selected-local-ready");
       setInitialProviderReady(true);
       const background = (["claude", "codex", "antigravity"] as const).filter((id) => id !== primary);
+      markStartup("background-providers-start");
       void Promise.all(background.map((id) => loadTab(id)));
     })();
   }, [loadTab]);
@@ -413,7 +527,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const selectScope = useCallback(
     async (path: string | null) => {
       const agentId = selectedRef.current;
-      setSelectedScope((prev) => ({ ...prev, [agentId]: path }));
+      selectedScopeRef.current = { ...selectedScopeRef.current, [agentId]: path };
+      setSelectedScope(selectedScopeRef.current);
       localStorage.setItem(`${SCOPE_KEY}.${agentId}`, path ?? "");
       await loadTab(agentId);
     },

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { displayError, parseInvokeError } from "$lib/error";
 import { ProviderIcon } from "$lib/ProviderIcon";
+import { markStartup } from "$lib/startupTiming";
 import { foldUsage, providerLabel } from "$lib/usageMerge";
 import { formatDayRange, formatPercent, formatTokens, formatUsd, makeWindow } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
@@ -29,7 +30,10 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
 
   const query = useQuery({
     queryKey: ["usage", 30, 0],
-    queryFn: () => loadUsageWindow(30),
+    queryFn: () => {
+      markStartup("usage-start");
+      return loadUsageWindow(30);
+    },
     enabled: ready,
   });
 

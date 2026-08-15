@@ -22,6 +22,7 @@ vi.mock("./LazyUsageChart", () => ({
 }));
 
 beforeEach(() => {
+  Object.defineProperty(performance, "mark", { configurable: true, value: vi.fn() });
   usageSummary.mockReset();
   usageSummary.mockImplementation(() => new Promise(() => undefined));
   preloadUsageChart.mockClear();
@@ -76,6 +77,7 @@ describe("OverviewUsageCard", () => {
 
     await Promise.resolve();
     expect(usageSummary).not.toHaveBeenCalled();
+    expect(performance.mark).not.toHaveBeenCalledWith("on-n-off:usage-start");
 
     view.rerender(
       <QueryClientProvider client={client}>
@@ -83,6 +85,7 @@ describe("OverviewUsageCard", () => {
       </QueryClientProvider>,
     );
     await waitFor(() => expect(usageSummary).toHaveBeenCalledTimes(1));
+    expect(performance.mark).toHaveBeenCalledWith("on-n-off:usage-start");
   });
 
   it("preloads the chart when the Usage link receives intent", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateController } from "./updaterController";
 import type { UpdaterClient, UpdateResource } from "./updaterClient";
 
@@ -33,6 +33,10 @@ function client(overrides: Partial<UpdaterClient> = {}): UpdaterClient {
 }
 
 describe("UpdateController", () => {
+  beforeEach(() => {
+    Object.defineProperty(performance, "mark", { configurable: true, value: vi.fn() });
+  });
+
   it("waits for a manual check when automatic updates are disabled", async () => {
     let checks = 0;
     const controller = new UpdateController(
@@ -71,6 +75,7 @@ describe("UpdateController", () => {
     await controller.initialize(true);
 
     expect(controller.getSnapshot().state.status).toBe("ready");
+    expect(performance.mark).toHaveBeenCalledWith("on-n-off:updater-check-start");
   });
 
   it("deduplicates concurrent checks", async () => {
