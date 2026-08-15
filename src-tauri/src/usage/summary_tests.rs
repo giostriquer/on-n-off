@@ -583,60 +583,97 @@ fn invalid_window_errors() {
     assert!(err.message.contains("after untilDay"));
 }
 
-/// Claim-check harness: time real-home 30d summary (warm cache if present).
-/// `cargo test -p on-n-off bench_real_home_usage_summary -- --ignored --nocapture`
+/// Claim-check harness: time real-home common windows and reusable Full time.
+/// `cargo test --release --manifest-path src-tauri/Cargo.toml bench_real_home_usage_summary -- --ignored --nocapture`
 #[test]
 #[ignore = "real-home performance probe; not part of CI"]
 fn bench_real_home_usage_summary() {
     let until = chrono::Local::now().date_naive();
-    let since = until - chrono::Duration::days(29);
-    let input = UsageSummaryInput {
-        since_day: since.format("%Y-%m-%d").to_string(),
+    let mut output = Vec::new();
+    let windows = [("7d", 7), ("30d", 30), ("90d", 90)];
+    for (label, days) in windows {
+        let since = until - chrono::Duration::days(days - 1);
+        let input = UsageSummaryInput {
+            since_day: since.format("%Y-%m-%d").to_string(),
+            until_day: until.format("%Y-%m-%d").to_string(),
+            time_zone: "America/Sao_Paulo".into(),
+            resolution: Some("day".into()),
+            since_time: None,
+            until_time: None,
+            force: false,
+        };
+        output.push(format!(
+            "bench window={label} {} .. {}",
+            input.since_day, input.until_day
+        ));
+        // A live agent may update a source during the forced read, which correctly prevents
+        // publication. Report the follow-up result instead of requiring a cache hit.
+        let measurements = [("forced", true), ("cache-attempt", false)].map(|(pass, force)| {
+            let wall = Instant::now();
+            let dto = read_summary(UsageSummaryInput {
+                force,
+                ..input.clone()
+            })
+            .expect("read_summary");
+            (pass, force, wall.elapsed().as_millis(), dto)
+        });
+        for (pass, force, wall_ms, dto) in measurements {
+            let scanned: u64 = dto.sources.iter().map(|source| source.scanned_files).sum();
+            let skipped: u64 = dto.sources.iter().map(|source| source.skipped_files).sum();
+            let sessions: u64 = dto
+                .sources
+                .iter()
+                .map(|source| source.distinct_sessions)
+                .sum();
+            output.push(format!(
+                "window={label} pass={pass} wall_ms={wall_ms} scan_duration_ms={} cache_hit={} buckets={} scanned_files={} skipped_files={} sessions={sessions}",
+                dto.scan_duration_ms,
+                dto.cache_hit,
+                dto.buckets.len(),
+                scanned,
+                skipped,
+            ));
+            if force {
+                assert!(!dto.cache_hit);
+            }
+        }
+    }
+
+    let full_time = UsageSummaryInput {
+        since_day: "2020-01-01".into(),
         until_day: until.format("%Y-%m-%d").to_string(),
         time_zone: "America/Sao_Paulo".into(),
         resolution: Some("day".into()),
         since_time: None,
         until_time: None,
-        force: false,
+        force: true,
     };
-    eprintln!(
-        "bench window {} .. {} (UI default 30d)",
-        input.since_day, input.until_day
-    );
-    for pass in 1..=2 {
-        let wall = Instant::now();
-        let dto = read_summary(UsageSummaryInput {
-            since_day: input.since_day.clone(),
-            until_day: input.until_day.clone(),
-            time_zone: input.time_zone.clone(),
-            resolution: input.resolution.clone(),
-            since_time: None,
-            until_time: None,
-            force: pass == 1,
+    let measurements = (1..=2)
+        .map(|pass| {
+            let wall = Instant::now();
+            let dto = read_summary(full_time.clone()).expect("read_summary");
+            (pass, wall.elapsed().as_millis(), dto)
         })
-        .expect("read_summary");
-        let wall_ms = wall.elapsed().as_millis();
-        let scanned: u64 = dto.sources.iter().map(|s| s.scanned_files).sum();
-        let skipped: u64 = dto.sources.iter().map(|s| s.skipped_files).sum();
-        let sessions: u64 = dto.sources.iter().map(|s| s.distinct_sessions).sum();
-        eprintln!(
-            "pass={pass} wall_ms={wall_ms} scan_duration_ms={} cache_hit={} buckets={} scanned_files={} skipped_files={} sessions={}",
+        .collect::<Vec<_>>();
+    for (pass, wall_ms, dto) in measurements {
+        let scanned: u64 = dto.sources.iter().map(|source| source.scanned_files).sum();
+        let skipped: u64 = dto.sources.iter().map(|source| source.skipped_files).sum();
+        let sessions: u64 = dto
+            .sources
+            .iter()
+            .map(|source| source.distinct_sessions)
+            .sum();
+        output.push(format!(
+            "window=full pass={pass} wall_ms={wall_ms} scan_duration_ms={} cache_hit={} buckets={} scanned_files={} skipped_files={} sessions={sessions}",
             dto.scan_duration_ms,
             dto.cache_hit,
             dto.buckets.len(),
             scanned,
             skipped,
-            sessions
-        );
-        for source in &dto.sources {
-            eprintln!(
-                "  {:?} status={:?} scanned={} skipped={} sessions={}",
-                source.provider,
-                source.status,
-                source.scanned_files,
-                source.skipped_files,
-                source.distinct_sessions
-            );
-        }
+        ));
+        assert!(!dto.cache_hit);
+    }
+    for line in output {
+        eprintln!("{line}");
     }
 }
