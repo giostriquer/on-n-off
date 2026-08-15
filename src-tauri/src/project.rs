@@ -242,13 +242,14 @@ fn project_skill_dirs(project: &Path, agent: AgentId) -> Vec<PathBuf> {
             project.join(".agents").join("skills"),
         ],
         AgentId::Antigravity => vec![project.join(".agents").join("skills")],
+        AgentId::Cursor => vec![project.join(".cursor").join("skills")],
     }
 }
 
 fn scan_project_skills(dir: &Path, agent: AgentId) -> Vec<crate::scanner::ScannedSkill> {
     match agent {
         AgentId::Antigravity => crate::scanner::scan_antigravity_skills(dir),
-        AgentId::Claude | AgentId::Codex => scan_user_skills(dir),
+        AgentId::Claude | AgentId::Codex | AgentId::Cursor => scan_user_skills(dir),
     }
 }
 
@@ -276,6 +277,12 @@ fn project_mcp_servers(project: &Path, agent: AgentId) -> Vec<McpServerDto> {
         }
         AgentId::Antigravity => {
             let config = project.join(".agents").join("mcp_config.json");
+            if let Ok(text) = fs::read_to_string(&config) {
+                servers.extend(as_project_mcp(parse_antigravity_json(&text)));
+            }
+        }
+        AgentId::Cursor => {
+            let config = project.join(".cursor").join("mcp.json");
             if let Ok(text) = fs::read_to_string(&config) {
                 servers.extend(as_project_mcp(parse_antigravity_json(&text)));
             }

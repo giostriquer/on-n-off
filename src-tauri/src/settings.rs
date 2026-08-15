@@ -7,7 +7,12 @@ use serde::{Deserialize, Serialize};
 use crate::dto::{AdapterError, AgentId};
 use crate::paths::{self, well_known_cli_dirs};
 
-const ALL_AGENTS: [AgentId; 3] = [AgentId::Claude, AgentId::Codex, AgentId::Antigravity];
+const ALL_AGENTS: [AgentId; 4] = [
+    AgentId::Claude,
+    AgentId::Codex,
+    AgentId::Antigravity,
+    AgentId::Cursor,
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,6 +82,7 @@ pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterEr
         AgentId::Claude => 0,
         AgentId::Codex => 1,
         AgentId::Antigravity => 2,
+        AgentId::Cursor => 3,
     });
     settings.hidden_agents.dedup();
     if hidden_covers_all(&settings.hidden_agents) {
@@ -132,6 +138,7 @@ fn binary_name(id: AgentId) -> &'static str {
         AgentId::Claude => "claude",
         AgentId::Codex => "codex",
         AgentId::Antigravity => "agy",
+        AgentId::Cursor => "cursor-agent",
     }
 }
 
@@ -140,6 +147,7 @@ fn home_for(id: AgentId) -> Result<PathBuf, AdapterError> {
         AgentId::Claude => paths::claude_root(),
         AgentId::Codex => paths::codex_root(),
         AgentId::Antigravity => paths::gemini_root(),
+        AgentId::Cursor => paths::cursor_root(),
     }
 }
 
@@ -294,7 +302,12 @@ mod tests {
     #[test]
     fn refuses_hiding_every_provider() {
         let err = save_settings(AppSettings {
-            hidden_agents: vec![AgentId::Claude, AgentId::Codex, AgentId::Antigravity],
+            hidden_agents: vec![
+                AgentId::Claude,
+                AgentId::Codex,
+                AgentId::Antigravity,
+                AgentId::Cursor,
+            ],
             binary_paths: HashMap::new(),
             automatic_updates: true,
         })

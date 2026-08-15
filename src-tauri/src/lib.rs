@@ -2,11 +2,11 @@ mod adapter;
 mod antigravity;
 mod backup;
 mod claude;
-mod cursor;
 mod cli;
 mod codex;
 mod commands;
 mod config_io;
+mod cursor;
 mod dto;
 #[cfg(test)]
 mod fake;

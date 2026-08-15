@@ -1,4 +1,4 @@
-export type AgentId = "claude" | "codex" | "antigravity";
+export type AgentId = "claude" | "codex" | "antigravity" | "cursor";
 
 export type ErrorKind = "cli_missing" | "cli_too_old" | "parse" | "write" | "message";
 

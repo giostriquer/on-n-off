@@ -26,7 +26,7 @@ import { flagOn, mergeFlags } from "$lib/flags";
 import { DEFAULT_APP_SETTINGS, mergeAppSettings, setAgentHidden, visibleAgentIds } from "$lib/appSettings";
 import { filterTab } from "$lib/filterTab";
 import { mergeProjects, projectFromPath, projectLabel, sameProjectPath } from "$lib/project";
-import { LOCKED_AGENTS, emptyTab, openIds, overlayAgents, type TabState } from "$lib/session";
+import { LOCKED_AGENTS, emptyAgentRecord, emptyTab, openIds, overlayAgents, type TabState } from "$lib/session";
 import { prependTrip, type TripEntry } from "$lib/tripLog";
 import type {
   AgentId,
@@ -68,7 +68,7 @@ export function readTheme(): Theme {
 
 export function readAgent(): AgentId {
   const value = localStorage.getItem(AGENT_KEY);
-  if (value === "codex" || value === "antigravity") {
+  if (value === "codex" || value === "antigravity" || value === "cursor") {
     return value;
   }
   return "claude";
@@ -96,11 +96,7 @@ function readScope(agentId: AgentId): string | null {
 }
 
 function emptyTabs(): Record<AgentId, TabState> {
-  return {
-    claude: emptyTab(),
-    codex: emptyTab(),
-    antigravity: emptyTab(),
-  };
+  return emptyAgentRecord(emptyTab);
 }
 
 type SessionContextValue = {
@@ -204,20 +200,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [installOpen, setInstallOpen] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<PluginDto | null>(null);
-  const [projects, setProjects] = useState<Record<AgentId, ProjectDto[]>>({
-    claude: [],
-    codex: [],
-    antigravity: [],
-  });
-  const [extraProjects, setExtraProjects] = useState<Record<AgentId, ProjectDto[]>>({
-    claude: [],
-    codex: [],
-    antigravity: [],
-  });
+  const [projects, setProjects] = useState<Record<AgentId, ProjectDto[]>>(() => emptyAgentRecord(() => []));
+  const [extraProjects, setExtraProjects] = useState<Record<AgentId, ProjectDto[]>>(() =>
+    emptyAgentRecord(() => []),
+  );
   const [selectedScope, setSelectedScope] = useState<Record<AgentId, string | null>>({
     claude: readScope("claude"),
     codex: readScope("codex"),
     antigravity: readScope("antigravity"),
+    cursor: readScope("cursor"),
   });
 
   const tabsRef = useRef(tabs);
@@ -226,11 +217,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const selectedScopeRef = useRef(selectedScope);
   const projectsRef = useRef(projects);
   const extraProjectsRef = useRef(extraProjects);
-  const inFlightRef = useRef<Record<AgentId, boolean>>({
-    claude: false,
-    codex: false,
-    antigravity: false,
-  });
+  const inFlightRef = useRef<Record<AgentId, boolean>>(emptyAgentRecord(() => false));
   const bootStartedRef = useRef(false);
 
   tabsRef.current = tabs;
@@ -391,7 +378,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const primary = selectedRef.current;
       await loadTab(primary);
       setInitialProviderReady(true);
-      const background = (["claude", "codex", "antigravity"] as const).filter((id) => id !== primary);
+      const background = (["claude", "codex", "antigravity", "cursor"] as const).filter((id) => id !== primary);
       void Promise.all(background.map((id) => loadTab(id)));
     })();
   }, [loadTab]);

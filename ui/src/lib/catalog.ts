@@ -279,6 +279,8 @@ export function agentRoot(agentId: AgentId): string {
       return "~/.codex";
     case "antigravity":
       return "~/.gemini";
+    case "cursor":
+      return "~/.cursor";
   }
 }
 
@@ -290,6 +292,8 @@ export function mcpConfigPath(agentId: AgentId): string {
       return "~/.codex/config.toml";
     case "antigravity":
       return "~/.gemini/config/mcp_config.json";
+    case "cursor":
+      return "~/.cursor/mcp.json";
   }
 }
 
@@ -301,6 +305,8 @@ export function scopeConfigPath(agentId: AgentId): string {
       return "~/.codex/config.toml";
     case "antigravity":
       return "~/.gemini/antigravity-cli/";
+    case "cursor":
+      return "~/.cursor/";
   }
 }
 

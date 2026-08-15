@@ -33,6 +33,7 @@ const PROVIDER_DOT: Record<AgentId, string> = {
   codex: "var(--silkscreen)",
   claude: "#e8944a",
   antigravity: "var(--mute)",
+  cursor: "#7aa2ff",
 };
 
 function Segmented<T extends string>({

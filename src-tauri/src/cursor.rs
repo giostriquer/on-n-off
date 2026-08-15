@@ -1,11 +1,25 @@
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
 use crate::config_io::ConfigIo;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto};
-use crate::paths::{agent_info, cursor_root};
+use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
+use crate::mcp::parse_antigravity_json;
+use crate::paths::{agent_info, cursor_root, normalize_skill_path};
+use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
+
+const SOURCE_LOCAL: &str = "local";
+
+#[derive(Debug, Clone)]
+struct DiscoveredPlugin {
+    id: String,
+    name: String,
+    source: String,
+    path: PathBuf,
+}
 
 pub struct CursorAdapter {
     root: Option<PathBuf>,
@@ -31,6 +45,59 @@ impl CursorAdapter {
             write: Mutex::new(()),
         }
     }
+
+    fn root(&self) -> Result<&Path, AdapterError> {
+        self.root
+            .as_deref()
+            .ok_or_else(|| AdapterError::message("home directory not found"))
+    }
+
+    fn mcp_path(&self) -> Result<PathBuf, AdapterError> {
+        Ok(self.root()?.join("mcp.json"))
+    }
+
+    fn mcp_servers(&self) -> Vec<crate::dto::McpServerDto> {
+        let Ok(path) = self.mcp_path() else {
+            return Vec::new();
+        };
+        let Ok(text) = fs::read_to_string(path) else {
+            return Vec::new();
+        };
+        parse_antigravity_json(&text)
+    }
+
+    fn discover_plugins(&self) -> Vec<DiscoveredPlugin> {
+        let Ok(root) = self.root() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        let plugins = root.join("plugins");
+        for plugin in scan_plugin_children(&plugins.join("local"), SOURCE_LOCAL) {
+            if seen.insert(plugin.id.clone()) {
+                out.push(plugin);
+            }
+        }
+        let cache = plugins.join("cache");
+        if let Ok(entries) = fs::read_dir(&cache) {
+            for entry in entries.flatten() {
+                let marketplace = entry.path();
+                if !marketplace.is_dir() {
+                    continue;
+                }
+                let source = marketplace
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("cache");
+                for plugin in scan_plugin_children(&marketplace, source) {
+                    if seen.insert(plugin.id.clone()) {
+                        out.push(plugin);
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 impl AgentAdapter for CursorAdapter {
@@ -43,27 +110,131 @@ impl AgentAdapter for CursorAdapter {
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
+        let mut plugins = Vec::new();
+        let mut plugin_skill_paths = HashSet::new();
+        for discovered in self.discover_plugins() {
+            let version = crate::plugin_meta::installed_hint(&discovered.path, None).version;
+            let skills: Vec<SkillDto> = scan_plugin_skills(&discovered.path)
+                .into_iter()
+                .map(|skill| {
+                    plugin_skill_paths
+                        .insert(normalize_skill_path(&skill.skill_md.to_string_lossy()));
+                    cursor_skill(Some(&discovered.id), skill)
+                })
+                .collect();
+            plugins.push(PluginDto {
+                id: discovered.id,
+                name: discovered.name,
+                source: discovered.source,
+                version,
+                upstream: String::new(),
+                out_of_sync: false,
+                enabled: true,
+                togglable: false,
+                skills,
+            });
+        }
+
+        let mut user_skills = Vec::new();
+        if let Ok(root) = self.root() {
+            for skill in scan_user_skills(&root.join("skills")) {
+                let key = normalize_skill_path(&skill.skill_md.to_string_lossy());
+                if plugin_skill_paths.contains(&key) {
+                    continue;
+                }
+                user_skills.push(cursor_skill(None, skill));
+            }
+        }
+
         let mut tab = AgentTabDto {
-            plugins: Vec::new(),
-            user_skills: Vec::new(),
-            mcp_servers: Vec::new(),
+            plugins,
+            user_skills,
+            mcp_servers: self.mcp_servers(),
         };
         sort_tab(&mut tab);
-        let _ = &self.root;
         Ok(tab)
     }
 
     fn set_mcp_enabled(&self, mcp_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        let _ = (mcp_id, enabled, &self.io, &self.write);
-        Err(AdapterError::message("mcp toggle is not implemented yet"))
+        let _guard = self
+            .write
+            .lock()
+            .map_err(|_| AdapterError::message("write lock poisoned"))?;
+        self.list_tab()?.ensure_mcp_togglable(mcp_id)?;
+        let path = self.mcp_path()?;
+        self.io
+            .patch_antigravity_mcp_enabled(AgentId::Cursor, &path, mcp_id, enabled)?;
+        self.list_tab()
     }
+}
+
+fn cursor_skill(plugin_id: Option<&str>, skill: ScannedSkill) -> SkillDto {
+    SkillDto {
+        id: normalize_skill_path(&skill.skill_md.to_string_lossy()),
+        plugin_id: plugin_id.map(str::to_string),
+        name: skill.name,
+        description: skill.description,
+        enabled: true,
+        togglable: false,
+        origin: String::new(),
+    }
+}
+
+fn plugin_manifest(dir: &Path) -> Option<PathBuf> {
+    let cursor = dir.join(".cursor-plugin").join("plugin.json");
+    if cursor.is_file() {
+        return Some(cursor);
+    }
+    let root = dir.join("plugin.json");
+    if root.is_file() {
+        return Some(root);
+    }
+    None
+}
+
+fn read_plugin_name(manifest: &Path) -> Option<String> {
+    let text = fs::read_to_string(manifest).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn scan_plugin_children(parent: &Path, source: &str) -> Vec<DiscoveredPlugin> {
+    let Ok(entries) = fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(manifest) = plugin_manifest(&path) else {
+            continue;
+        };
+        let folder = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("plugin")
+            .to_string();
+        let name = read_plugin_name(&manifest).unwrap_or_else(|| folder.clone());
+        out.push(DiscoveredPlugin {
+            id: format!("{name}@{source}"),
+            name,
+            source: source.to_string(),
+            path,
+        });
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::path::Path;
 
     fn write_skill(dir: &Path, name: &str, description: &str) {
         fs::create_dir_all(dir.join(name)).unwrap();

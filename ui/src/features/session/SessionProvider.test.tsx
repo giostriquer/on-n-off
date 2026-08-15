@@ -38,6 +38,15 @@ const AGENTS: AgentInfo[] = [
     installFolder: true,
     pluginToggle: true,
   },
+  {
+    id: "cursor",
+    displayName: "Cursor",
+    cliOk: true,
+    cliError: null,
+    installGit: false,
+    installFolder: false,
+    pluginToggle: false,
+  },
 ];
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -95,7 +104,7 @@ describe("SessionProvider startup", () => {
 
     state.resolveSelected?.(EMPTY_TAB);
     await waitFor(() =>
-      expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity"]),
+      expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor"]),
     );
   });
 });
