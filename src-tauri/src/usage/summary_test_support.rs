@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 
 use super::*;
 
@@ -103,10 +104,27 @@ pub(super) fn write_single_claude_record(
     path
 }
 
+pub(super) fn age_file(path: &Path, days: u64) {
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    let modified = SystemTime::now()
+        .checked_sub(Duration::from_secs(days * 24 * 60 * 60))
+        .unwrap();
+    file.set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+}
+
+pub(super) fn full_time_input(force: bool) -> UsageSummaryInput {
+    day_input("2020-01-01", "2026-08-31", force)
+}
+
 pub(super) fn output_tokens(summary: &UsageSummaryDto) -> u64 {
     summary
         .buckets
         .iter()
         .map(|bucket| bucket.totals.output_tokens)
         .sum()
+}
+
+pub(super) fn record_count(summary: &UsageSummaryDto) -> u64 {
+    summary.buckets.iter().map(|bucket| bucket.records).sum()
 }

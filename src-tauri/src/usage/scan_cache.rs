@@ -4,6 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -11,6 +14,21 @@ use super::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 use super::transcripts::{TokenTotals, UsageProvider, UsageRecord};
 
 pub const USAGE_SCAN_CACHE_VERSION: u32 = 3;
+
+#[cfg(test)]
+thread_local! {
+    static SCAN_CACHE_DECODE_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_scan_cache_decode_count() {
+    SCAN_CACHE_DECODE_COUNT.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn scan_cache_decode_count() -> usize {
+    SCAN_CACHE_DECODE_COUNT.get()
+}
 
 #[derive(Debug, Clone)]
 pub struct CachedFile {
@@ -101,6 +119,8 @@ pub fn encode_scan_cache(cache: &ScanCache) -> Value {
 }
 
 pub fn decode_scan_cache(document: &Value) -> ScanCache {
+    #[cfg(test)]
+    SCAN_CACHE_DECODE_COUNT.set(SCAN_CACHE_DECODE_COUNT.get() + 1);
     let mut cache = ScanCache::new();
     let Ok(root) = serde_json::from_value::<SerializedCache>(document.clone()) else {
         return cache;
@@ -212,27 +232,24 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
 
 pub struct PruneOptions<'a> {
     pub live_paths: &'a HashSet<String>,
+    pub active_roots: &'a [String],
     pub walked_roots: &'a [String],
-    pub window_start_ms: i64,
-    pub retention_cutoff_ms: i64,
 }
 
 pub fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usize {
     let mut removed = 0;
     let keys: Vec<String> = cache.keys().cloned().collect();
     for path in keys {
-        let Some(entry) = cache.get(&path) else {
-            continue;
-        };
-        let aged_out = entry.mtime_ms < options.retention_cutoff_ms;
+        let under_active = options
+            .active_roots
+            .iter()
+            .any(|root| path_under_root(&path, root));
         let under_walked = options
             .walked_roots
             .iter()
             .any(|root| path_under_root(&path, root));
-        let deleted = under_walked
-            && entry.mtime_ms >= options.window_start_ms
-            && !options.live_paths.contains(&path);
-        if aged_out || deleted {
+        let deleted = under_walked && !options.live_paths.contains(&path);
+        if !under_active || deleted {
             cache.remove(&path);
             removed += 1;
         }
@@ -343,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_drops_aged_and_deleted_in_window() {
+    fn prune_keeps_live_history_and_incomplete_roots() {
         let mut cache = ScanCache::new();
         cache.insert(
             "/root/old.jsonl".into(),
@@ -372,18 +389,41 @@ mod tests {
                 records: Arc::new(vec![]),
             },
         );
-        let live = HashSet::from(["/root/live.jsonl".to_string()]);
-        let roots = vec!["/root".to_string()];
+        cache.insert(
+            "/pending/unknown.jsonl".into(),
+            CachedFile {
+                size: 1,
+                mtime_ms: 100,
+                provider: UsageProvider::Claude,
+                records: Arc::new(vec![]),
+            },
+        );
+        cache.insert(
+            "/outside/stale.jsonl".into(),
+            CachedFile {
+                size: 1,
+                mtime_ms: 100,
+                provider: UsageProvider::Claude,
+                records: Arc::new(vec![]),
+            },
+        );
+        let live = HashSet::from([
+            "/root/old.jsonl".to_string(),
+            "/root/live.jsonl".to_string(),
+        ]);
+        let active_roots = vec!["/root".to_string(), "/pending".to_string()];
+        let walked_roots = vec!["/root".to_string()];
         let removed = prune_scan_cache(
             &mut cache,
             PruneOptions {
                 live_paths: &live,
-                walked_roots: &roots,
-                window_start_ms: 1_000,
-                retention_cutoff_ms: 1_000,
+                active_roots: &active_roots,
+                walked_roots: &walked_roots,
             },
         );
         assert_eq!(removed, 2);
+        assert!(cache.contains_key("/root/old.jsonl"));
         assert!(cache.contains_key("/root/live.jsonl"));
+        assert!(cache.contains_key("/pending/unknown.jsonl"));
     }
 }
