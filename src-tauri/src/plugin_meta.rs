@@ -519,10 +519,11 @@ fn test_fetch_text(url: &str) -> Option<Option<String>> {
 }
 
 #[cfg(test)]
-fn with_fetch_text<F: FnOnce()>(fetch: TextFetch, run: F) {
+pub(crate) fn with_fetch_text<T>(fetch: TextFetch, run: impl FnOnce() -> T) -> T {
     TEST_FETCH.with(|slot| *slot.borrow_mut() = Some(fetch));
-    run();
+    let result = run();
     TEST_FETCH.with(|slot| *slot.borrow_mut() = None);
+    result
 }
 
 #[cfg(test)]

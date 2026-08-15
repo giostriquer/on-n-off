@@ -66,4 +66,30 @@ describe("LeftRail", () => {
     await user.click(screen.getByRole("button", { name: /Light/i }));
     expect(onThemeChange).toHaveBeenCalledWith("light");
   });
+
+  it("signals Usage intent before navigation", async () => {
+    const user = userEvent.setup();
+    const onUsageIntent = vi.fn();
+    render(
+      <LeftRail
+        screen="overview"
+        counts={counts}
+        theme="dark"
+        masterOn={false}
+        masterNote=""
+        onScreen={() => undefined}
+        onThemeChange={() => undefined}
+        onMaster={() => undefined}
+        onUsageIntent={onUsageIntent}
+      />,
+    );
+
+    const usage = screen.getByRole("button", { name: /^Usage$/i });
+    await user.hover(usage);
+    await user.tab();
+    while (document.activeElement !== usage) {
+      await user.tab();
+    }
+    expect(onUsageIntent).toHaveBeenCalledTimes(2);
+  });
 });

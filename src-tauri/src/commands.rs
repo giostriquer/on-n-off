@@ -139,6 +139,19 @@ pub async fn list_plugins(
 }
 
 #[tauri::command]
+pub async fn list_local_plugins(
+    agent_id: AgentId,
+    project_path: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<AgentTabDto, AdapterError> {
+    let adapter = state.adapter(agent_id);
+    blocking("local catalog scan", move || {
+        adapter.list_local_scope(project_path.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn set_plugin_enabled(
     agent_id: AgentId,
     plugin_id: String,

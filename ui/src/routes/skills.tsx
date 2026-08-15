@@ -7,6 +7,7 @@ export function SkillsRoute() {
     <ItemList
       kind="skill"
       tab={session.currentTab.dto ?? session.emptyTabDto()}
+      items={session.filtered?.skills ?? []}
       filterQuery={session.currentTab.filter}
       expandedIds={session.expandedIds}
       cliOk={session.currentAgent.cliOk}

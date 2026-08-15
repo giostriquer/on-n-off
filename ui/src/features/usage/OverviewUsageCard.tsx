@@ -1,42 +1,56 @@
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
 import { ProviderIcon } from "$lib/ProviderIcon";
+import { markStartup } from "$lib/startupTiming";
 import { foldUsage, providerLabel } from "$lib/usageMerge";
 import { formatDayRange, formatPercent, formatTokens, formatUsd, makeWindow } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
-import { LazyUsageChart } from "@/features/usage/LazyUsageChart";
+import { LazyUsageChart, preloadUsageChart } from "@/features/usage/LazyUsageChart";
+import { loadUsageWindow } from "./usageQuery";
+
+function OpenUsageLink({ className }: { className: string }) {
+  return (
+    <Link
+      to="/usage"
+      className={className}
+      onMouseEnter={() => void preloadUsageChart()}
+      onFocus={() => void preloadUsageChart()}
+    >
+      Open usage
+    </Link>
+  );
+}
 
 /** Compact Overview panel — links through to the full Usage screen. */
-export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
+function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
-  const window = makeWindow(30);
+  const window = useMemo(() => makeWindow(30), []);
 
   const query = useQuery({
     queryKey: ["usage", 30, 0],
-    queryFn: () =>
-      api.usageSummary({
-        sinceDay: window.sinceDay,
-        untilDay: window.untilDay,
-        timeZone: window.timeZone,
-        resolution: window.resolution,
-        sinceTime: window.sinceTime,
-        untilTime: window.untilTime,
-      }),
+    queryFn: () => {
+      markStartup("usage-start");
+      return loadUsageWindow(30);
+    },
     enabled: ready,
   });
 
-  const summary = query.data ?? null;
+  const summary = query.data?.summary ?? null;
+  const displayedWindow = query.data?.window ?? window;
   const loading = query.isFetching;
   const error = query.error ? displayError(parseInvokeError(query.error), "Usage") : null;
-  const folded = foldUsage(summary);
+  const folded = useMemo(() => foldUsage(summary), [summary]);
   const bothMissing = !!summary && summary.sources.every((s) => s.status === "missing");
 
-  const models = [...folded.models]
-    .sort((a, b) => (metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens))
-    .slice(0, 4);
+  const models = useMemo(
+    () =>
+      [...folded.models]
+        .sort((a, b) => (metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens))
+        .slice(0, 4),
+    [folded.models, metric],
+  );
 
   const pricingNote = !summary
     ? ""
@@ -52,16 +66,11 @@ export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
       <header className="flex items-center gap-2.5 border-b border-[var(--hair)] px-3.5 py-2.5">
         <span className="text-[11.5px] font-semibold tracking-[0.03em] uppercase">Usage</span>
         <span className="font-mono text-[11px] text-[var(--mute)]">
-          {formatDayRange(window.sinceDay, window.untilDay)}
+          {formatDayRange(displayedWindow.sinceDay, displayedWindow.untilDay)}
           {loading ? " · scanning…" : null}
         </span>
         <div className="flex-1" />
-        <Link
-          to="/usage"
-          className="text-[11px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase no-underline hover:text-[var(--silkscreen)]"
-        >
-          Open usage
-        </Link>
+        <OpenUsageLink className="text-[11px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase no-underline hover:text-[var(--silkscreen)]" />
       </header>
 
       {loading && !summary ? (
@@ -71,9 +80,7 @@ export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
       ) : bothMissing ? (
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">
           No Claude or Codex session transcripts found on this machine.{" "}
-          <Link to="/usage" className="text-[var(--silkscreen)] underline-offset-2 hover:underline">
-            Open usage
-          </Link>
+          <OpenUsageLink className="text-[var(--silkscreen)] underline-offset-2 hover:underline" />
         </p>
       ) : (
         <>
@@ -114,10 +121,10 @@ export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
                 folded={folded}
                 metric={metric}
                 onMetricChange={setMetric}
-                sinceDay={window.sinceDay}
-                untilDay={window.untilDay}
-                sinceTime={window.sinceTime}
-                untilTime={window.untilTime}
+                sinceDay={displayedWindow.sinceDay}
+                untilDay={displayedWindow.untilDay}
+                sinceTime={displayedWindow.sinceTime}
+                untilTime={displayedWindow.untilTime}
               />
             </div>
           </div>
@@ -161,3 +168,5 @@ export function OverviewUsageCard({ ready = true }: { ready?: boolean }) {
     </section>
   );
 }
+
+export const OverviewUsageCard = memo(OverviewUsageCardView);

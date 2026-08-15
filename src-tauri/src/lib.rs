@@ -40,6 +40,7 @@ pub fn run() {
             commands::list_projects,
             commands::inspect_project,
             commands::list_plugins,
+            commands::list_local_plugins,
             commands::set_plugin_enabled,
             commands::set_skill_enabled,
             commands::set_mcp_enabled,

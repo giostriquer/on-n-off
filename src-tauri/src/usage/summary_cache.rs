@@ -1,22 +1,16 @@
-//! Aggregated UsageSummaryDto cache keyed by window + scan-cache identity.
+//! Aggregated UsageSummaryDto cache keyed by window + transcript-source signature.
 //! Avoids reloading/re-aggregating ~100k+ per-file records on every open.
 
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{UsageSummaryDto, UsageSummaryInput};
 
-pub const USAGE_SUMMARY_CACHE_VERSION: u32 = 1;
-const MAX_ENTRIES: usize = 8;
+use super::cache_io::atomic_write;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ScanCacheIdentity {
-    pub size: u64,
-    pub mtime_ms: i64,
-}
+pub const USAGE_SUMMARY_CACHE_VERSION: u32 = 2;
+const MAX_ENTRIES: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +23,7 @@ struct SummaryCacheFile {
 #[serde(rename_all = "camelCase")]
 struct SummaryCacheEntry {
     key: String,
-    scan_cache: ScanCacheIdentity,
+    source_signature: String,
     dto: UsageSummaryDto,
 }
 
@@ -49,32 +43,14 @@ pub fn window_key(input: &UsageSummaryInput) -> String {
     )
 }
 
-pub fn scan_cache_identity(path: &Path) -> Option<ScanCacheIdentity> {
-    let meta = std::fs::metadata(path).ok()?;
-    let mtime_ms = meta
-        .modified()
-        .ok()?
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_millis() as i64;
-    Some(ScanCacheIdentity {
-        size: meta.len(),
-        mtime_ms,
-    })
-}
-
-pub fn load_summary_hit(
-    path: &Path,
-    key: &str,
-    identity: &ScanCacheIdentity,
-) -> Option<UsageSummaryDto> {
+pub fn load_summary_hit(path: &Path, key: &str, source_signature: &str) -> Option<UsageSummaryDto> {
     let raw = std::fs::read_to_string(path).ok()?;
     let file: SummaryCacheFile = serde_json::from_str(&raw).ok()?;
     if file.version != USAGE_SUMMARY_CACHE_VERSION {
         return None;
     }
     let entry = file.entries.into_iter().find(|entry| entry.key == key)?;
-    if &entry.scan_cache != identity {
+    if entry.source_signature != source_signature {
         return None;
     }
     let mut dto = entry.dto;
@@ -83,7 +59,7 @@ pub fn load_summary_hit(
     Some(dto)
 }
 
-pub fn store_summary(path: &Path, key: &str, identity: &ScanCacheIdentity, dto: &UsageSummaryDto) {
+pub fn store_summary(path: &Path, key: &str, source_signature: &str, dto: &UsageSummaryDto) {
     let mut entries = load_entries(path);
     entries.retain(|entry| entry.key != key);
     let mut stored = dto.clone();
@@ -92,7 +68,7 @@ pub fn store_summary(path: &Path, key: &str, identity: &ScanCacheIdentity, dto: 
         0,
         SummaryCacheEntry {
             key: key.to_string(),
-            scan_cache: identity.clone(),
+            source_signature: source_signature.to_string(),
             dto: stored,
         },
     );
@@ -101,11 +77,8 @@ pub fn store_summary(path: &Path, key: &str, identity: &ScanCacheIdentity, dto: 
         version: USAGE_SUMMARY_CACHE_VERSION,
         entries,
     };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     if let Ok(raw) = serde_json::to_string(&file) {
-        let _ = std::fs::write(path, raw);
+        let _ = atomic_write(path, &raw);
     }
 }
 
@@ -148,7 +121,7 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_hit_requires_matching_identity() {
+    fn round_trip_hit_requires_matching_source_signature() {
         let home = scratch_dir("usage-summary-cache");
         let path = summary_cache_path_for(&home);
         let input = UsageSummaryInput {
@@ -161,23 +134,12 @@ mod tests {
             force: false,
         };
         let key = window_key(&input);
-        let identity = ScanCacheIdentity {
-            size: 100,
-            mtime_ms: 1000,
-        };
-        store_summary(&path, &key, &identity, &sample_dto());
-        let hit = load_summary_hit(&path, &key, &identity).expect("hit");
+        let signature = "v1-a";
+        store_summary(&path, &key, signature, &sample_dto());
+        let hit = load_summary_hit(&path, &key, signature).expect("hit");
         assert!(hit.cache_hit);
         assert_eq!(hit.scan_duration_ms, 0);
-        assert!(load_summary_hit(
-            &path,
-            &key,
-            &ScanCacheIdentity {
-                size: 100,
-                mtime_ms: 999
-            }
-        )
-        .is_none());
+        assert!(load_summary_hit(&path, &key, "v1-b").is_none());
         let _ = std::fs::remove_dir_all(home);
     }
 

@@ -6,11 +6,8 @@ export function PluginsRoute() {
   return (
     <ItemList
       kind="plugin"
-      tab={{
-        plugins: session.filtered?.plugins ?? [],
-        userSkills: [],
-        mcpServers: session.filtered?.mcpServers ?? [],
-      }}
+      tab={session.currentTab.dto ?? session.emptyTabDto()}
+      items={session.filtered?.plugins ?? []}
       filterQuery={session.currentTab.filter}
       expandedIds={session.expandedIds}
       cliOk={session.currentAgent.cliOk}

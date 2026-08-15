@@ -1,8 +1,17 @@
 import { lazy, Suspense } from "react";
 import type { UsageChartProps } from "./UsageChart";
 
+type UsageChartModule = typeof import("./UsageChart");
+
+let usageChartPromise: Promise<UsageChartModule> | undefined;
+
+export function preloadUsageChart(): Promise<UsageChartModule> {
+  usageChartPromise ??= import("./UsageChart");
+  return usageChartPromise;
+}
+
 const UsageChart = lazy(() =>
-  import("./UsageChart").then((module) => ({ default: module.UsageChart })),
+  preloadUsageChart().then((module) => ({ default: module.UsageChart })),
 );
 
 export function LazyUsageChart(props: UsageChartProps) {
