@@ -1,5 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentId, AgentInfo, AgentTabDto, AppSettings, FeatureFlags, ProjectDto, ProviderDiagnose } from "./types";
+import type {
+  AgentId,
+  AgentInfo,
+  AgentTabDto,
+  AppSettings,
+  FeatureFlags,
+  ProjectDto,
+  ProviderDiagnose,
+  UpdaterBuildInfo,
+} from "./types";
 import type { UsageSummary, UsageSummaryInput } from "./usageTypes";
 
 export function listAgents(): Promise<AgentInfo[]> {
@@ -8,6 +17,10 @@ export function listAgents(): Promise<AgentInfo[]> {
 
 export function featureFlags(): Promise<FeatureFlags> {
   return invoke("feature_flags");
+}
+
+export function updaterBuildInfo(): Promise<UpdaterBuildInfo> {
+  return invoke("updater_build_info");
 }
 
 export function listProjects(agentId: AgentId): Promise<ProjectDto[]> {

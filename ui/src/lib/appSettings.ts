@@ -5,12 +5,14 @@ export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity"]
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   hiddenAgents: [],
   binaryPaths: {},
+  automaticUpdates: true,
 };
 
 export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefined): AppSettings {
   return {
     hiddenAgents: overlay?.hiddenAgents ?? [],
     binaryPaths: overlay?.binaryPaths ?? {},
+    automaticUpdates: overlay?.automaticUpdates ?? true,
   };
 }
 

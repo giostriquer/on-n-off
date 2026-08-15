@@ -38,7 +38,20 @@ bun run tauri build
 ```
 
 NSIS and MSI installers are written under `src-tauri/target/release/bundle/`.
-Current local builds are unsigned and can trigger a Windows SmartScreen warning.
+Ordinary local builds are unsigned and can trigger a Windows SmartScreen warning.
+
+## Application updates
+
+Published stable releases provide separate signed update paths for NSIS and MSI
+installations. After the initially selected provider is ready, an installed
+release checks the stable GitHub Releases feed. Automatic download is enabled by
+default and can be disabled in Settings. Installation and restart always require
+an explicit user action.
+
+Tauri updater signatures verify release integrity but are not Windows
+Authenticode signatures. Windows can still show an unknown-publisher warning.
+Release publication remains manual; the tag workflow prepares a draft with both
+installers, signatures, checksums, attestations, and `latest.json`.
 
 ## Acknowledgements
 

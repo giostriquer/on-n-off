@@ -69,9 +69,16 @@ export type FeatureFlags = {
   masterCut: boolean;
 };
 
+export type UpdaterBuildInfo = {
+  enabled: boolean;
+  installerKind: "nsis" | "msi" | null;
+  target: string | null;
+};
+
 export type AppSettings = {
   hiddenAgents: AgentId[];
   binaryPaths: Partial<Record<AgentId, string>>;
+  automaticUpdates: boolean;
 };
 
 export type DiagnoseCheck = {

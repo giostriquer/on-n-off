@@ -9,13 +9,29 @@ use crate::paths::{self, well_known_cli_dirs};
 
 const ALL_AGENTS: [AgentId; 3] = [AgentId::Claude, AgentId::Codex, AgentId::Antigravity];
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     #[serde(default)]
     pub hidden_agents: Vec<AgentId>,
     #[serde(default)]
     pub binary_paths: HashMap<AgentId, String>,
+    #[serde(default = "automatic_updates_default")]
+    pub automatic_updates: bool,
+}
+
+const fn automatic_updates_default() -> bool {
+    true
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            hidden_agents: Vec::new(),
+            binary_paths: HashMap::new(),
+            automatic_updates: automatic_updates_default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -247,10 +263,39 @@ mod tests {
     }
 
     #[test]
+    fn existing_settings_default_automatic_updates_to_enabled() {
+        let new_settings = serde_json::to_value(parse_settings(None)).unwrap();
+        let settings = parse_settings(Some(
+            r#"{ "hiddenAgents": ["antigravity"], "binaryPaths": { "claude": "C:\\bin\\claude.cmd" } }"#,
+        ));
+        let serialized = serde_json::to_value(settings).unwrap();
+
+        assert_eq!(new_settings["automaticUpdates"], true);
+        assert_eq!(serialized["automaticUpdates"], true);
+        assert_eq!(
+            serialized["hiddenAgents"],
+            serde_json::json!(["antigravity"])
+        );
+        assert_eq!(
+            serialized["binaryPaths"]["claude"],
+            serde_json::json!(r"C:\bin\claude.cmd")
+        );
+    }
+
+    #[test]
+    fn existing_automatic_update_opt_out_is_preserved() {
+        let settings = parse_settings(Some(r#"{ "automaticUpdates": false }"#));
+        let serialized = serde_json::to_value(settings).unwrap();
+
+        assert_eq!(serialized["automaticUpdates"], false);
+    }
+
+    #[test]
     fn refuses_hiding_every_provider() {
         let err = save_settings(AppSettings {
             hidden_agents: vec![AgentId::Claude, AgentId::Codex, AgentId::Antigravity],
             binary_paths: HashMap::new(),
+            automatic_updates: true,
         })
         .unwrap_err();
         assert!(err.message.contains("at least one provider"));
