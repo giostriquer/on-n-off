@@ -3,7 +3,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Settings } from "./Settings";
+import { UpdateProvider } from "@/features/updater/UpdateProvider";
 import type { AgentInfo } from "$lib/types";
+import type { UpdaterClient } from "@/features/updater/updaterClient";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: () => Promise.resolve(null),
@@ -53,6 +55,13 @@ const agents: AgentInfo[] = [
   },
 ];
 
+const updaterClient: UpdaterClient = {
+  buildInfo: async () => ({ enabled: false, installerKind: null, target: null }),
+  currentVersion: async () => "0.1.0",
+  check: async () => null,
+  relaunch: async () => undefined,
+};
+
 describe("Settings", () => {
   it("renders provider cards and can hide one from tabs", async () => {
     const user = userEvent.setup();
@@ -60,12 +69,15 @@ describe("Settings", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <Settings
-          agents={agents}
-          settings={{ hiddenAgents: [], binaryPaths: {} }}
-          onToggleVisible={onToggleVisible}
-          onSaveBinary={() => undefined}
-        />
+        <UpdateProvider initialProviderReady automaticUpdates client={updaterClient}>
+          <Settings
+            agents={agents}
+            settings={{ hiddenAgents: [], binaryPaths: {}, automaticUpdates: true }}
+            onToggleVisible={onToggleVisible}
+            onSaveBinary={() => undefined}
+            onAutomaticUpdatesChange={() => undefined}
+          />
+        </UpdateProvider>
       </QueryClientProvider>,
     );
     expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);

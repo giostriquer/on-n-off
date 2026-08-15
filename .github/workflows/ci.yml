@@ -42,6 +42,12 @@ jobs:
       - name: Test release version contract
         run: ./scripts/check-release-version.test.ps1
 
+      - name: Test Windows flavor helper
+        run: ./scripts/build-windows-flavor.test.ps1
+
+      - name: Test updater feed generator
+        run: ./scripts/new-update-feed.test.ps1
+
       - name: Test frontend
         run: bun run test
 
@@ -94,23 +100,9 @@ jobs:
 
           "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Build Windows installers
-        run: bun run tauri build
-
-      - name: Verify Windows installers
+      - name: Build and verify Windows installer flavors
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $expectedArtifacts = [ordered]@{
-            'src-tauri/target/release/bundle/nsis' = "on-n-off_$env:RELEASE_VERSION`_x64-setup.exe"
-            'src-tauri/target/release/bundle/msi' = "on-n-off_$env:RELEASE_VERSION`_x64_en-US.msi"
-          }
-
-          foreach ($bundleDirectory in $expectedArtifacts.Keys) {
-            $installers = @(Get-ChildItem -LiteralPath $bundleDirectory -File)
-            $expectedName = $expectedArtifacts[$bundleDirectory]
-            if ($installers.Count -ne 1 -or $installers[0].Name -ne $expectedName) {
-              $actualNames = $installers.Name -join ', '
-              throw "Expected only '$expectedName' in '$bundleDirectory'; found: $actualNames"
-            }
-          }
+          ./scripts/build-windows-flavor.ps1 -InstallerKind nsis -ReleaseVersion $env:RELEASE_VERSION
+          ./scripts/build-windows-flavor.ps1 -InstallerKind msi -ReleaseVersion $env:RELEASE_VERSION

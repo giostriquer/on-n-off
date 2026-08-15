@@ -12,7 +12,8 @@ Early prerelease build of **on-n-off**: desktop switchboard for Claude / Codex /
 ## What you get
 
 - Windows installer: `on-n-off_0.1.0_x64-setup.exe` (NSIS), or the MSI next to it
-- Unsigned → Windows SmartScreen may warn; choose “More info” → “Run anyway” if you trust the sender
+- Not Authenticode-signed → Windows SmartScreen may warn; choose “More info” → “Run anyway” if you trust the sender
+- Stable releases include mandatory Tauri updater signatures for in-app update integrity
 
 ## Prerequisites (Windows, not WSL)
 
@@ -33,6 +34,7 @@ If a CLI works in a terminal but the app says **os error 193** / “not a valid 
 1. Run the setup exe (or MSI)
 2. Launch **on-n-off**
 3. Confirm agent tabs show CLI status (green = found on PATH)
+4. Open **Settings → Application updates** and confirm the installed version and installer format are correct
 
 ## Suggested smoke order
 
@@ -58,13 +60,18 @@ bun run tauri dev
 
 Needs Bun + Rust toolchain + WebView2.
 
-Release build:
+Ordinary local release build (no signed updater artifacts):
 
 ```bash
 bun run tauri build
 ```
 
 Installers land under `src-tauri/target/release/bundle/nsis/` and `…/msi/` (or your `CARGO_TARGET_DIR` if set).
+
+The GitHub release workflow builds NSIS and MSI separately with the production
+updater configuration and signing secrets. Do not publish its draft until both
+formats, both `.sig` files, `latest.json`, checksums, and attestations have been
+inspected.
 
 ## Out of scope for this smoke
 

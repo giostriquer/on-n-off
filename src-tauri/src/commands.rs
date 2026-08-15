@@ -7,6 +7,14 @@ use crate::dto::{
 use crate::flags::FeatureFlags;
 use crate::settings::{AppSettings, ProviderDiagnose};
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdaterBuildInfo {
+    enabled: bool,
+    installer_kind: Option<&'static str>,
+    target: Option<&'static str>,
+}
+
 pub struct AppState {
     claude: Arc<dyn AgentAdapter>,
     codex: Arc<dyn AgentAdapter>,
@@ -59,6 +67,17 @@ pub async fn list_agents(
 #[tauri::command]
 pub async fn feature_flags() -> Result<FeatureFlags, AdapterError> {
     blocking("feature flags", || Ok(crate::flags::load_flags())).await
+}
+
+#[tauri::command]
+pub fn updater_build_info() -> UpdaterBuildInfo {
+    let installer_kind = option_env!("ON_N_OFF_UPDATER_KIND");
+    let target = option_env!("ON_N_OFF_UPDATER_TARGET");
+    UpdaterBuildInfo {
+        enabled: installer_kind.is_some() && target.is_some(),
+        installer_kind,
+        target,
+    }
 }
 
 #[tauri::command]
