@@ -29,6 +29,7 @@ ui/dist
 .workbench/
 .tmp/
 .worktrees/
+/tmp/
 
 # Local release artifacts for handoff (not committed)
 artifacts/
