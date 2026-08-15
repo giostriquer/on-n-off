@@ -203,6 +203,7 @@ fn read_marketplace_file(root: &Path) -> Option<MarketplaceFile> {
 
 fn manifest_version(install_path: &Path) -> Option<String> {
     for relative in [
+        ".cursor-plugin/plugin.json",
         ".codex-plugin/plugin.json",
         ".claude-plugin/plugin.json",
         "plugin.json",

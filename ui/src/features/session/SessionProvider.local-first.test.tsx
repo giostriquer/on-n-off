@@ -116,6 +116,15 @@ const AGENTS: AgentInfo[] = [
     installFolder: true,
     pluginToggle: true,
   },
+  {
+    id: "cursor",
+    displayName: "Cursor",
+    cliOk: true,
+    cliError: null,
+    installGit: false,
+    installFolder: false,
+    pluginToggle: false,
+  },
 ];
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -247,6 +256,7 @@ describe("SessionProvider local-first startup", () => {
     await waitFor(() => {
       expect(state.events).toContain("local:claude:global");
       expect(state.events).toContain("local:antigravity:global");
+      expect(state.events).toContain("local:cursor:global");
     });
     expect(state.events.indexOf("local:codex:global")).toBeLessThan(
       state.events.indexOf("local:claude:global"),

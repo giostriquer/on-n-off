@@ -1,6 +1,6 @@
 import type { AgentId, AppSettings } from "./types";
 
-export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity"];
+export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity", "cursor"];
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   hiddenAgents: [],

@@ -29,6 +29,10 @@ pub fn gemini_root() -> Result<PathBuf, AdapterError> {
     Ok(user_home()?.join(".gemini"))
 }
 
+pub fn cursor_root() -> Result<PathBuf, AdapterError> {
+    Ok(user_home()?.join(".cursor"))
+}
+
 pub fn antigravity_cli_root() -> Result<PathBuf, AdapterError> {
     Ok(gemini_root()?.join("antigravity-cli"))
 }
@@ -178,6 +182,7 @@ pub fn agent_info(id: AgentId, binary: &str) -> AgentInfo {
             AgentId::Claude => cli_ok,
             AgentId::Codex => true,
             AgentId::Antigravity => cli_ok,
+            AgentId::Cursor => false,
         },
     }
 }

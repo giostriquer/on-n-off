@@ -37,6 +37,7 @@ describe("buildChartSeries", () => {
             claude: { costUsd: 1, totalTokens: 100 },
             codex: { costUsd: 0, totalTokens: 0 },
             antigravity: { costUsd: 0, totalTokens: 0 },
+            cursor: { costUsd: 0, totalTokens: 0 },
           },
         },
         {
@@ -47,6 +48,7 @@ describe("buildChartSeries", () => {
             claude: { costUsd: 0, totalTokens: 0 },
             codex: { costUsd: 2, totalTokens: 200 },
             antigravity: { costUsd: 0, totalTokens: 0 },
+            cursor: { costUsd: 0, totalTokens: 0 },
           },
         },
       ],

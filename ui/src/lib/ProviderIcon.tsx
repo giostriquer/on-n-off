@@ -25,6 +25,16 @@ export function ChatGptIcon({ title = "ChatGPT", ...props }: IconProps) {
   );
 }
 
+/** Cursor mark — simplified pointer. */
+export function CursorIcon({ title = "Cursor", ...props }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden={title ? undefined : true} role={title ? "img" : undefined} {...props}>
+      {title ? <title>{title}</title> : null}
+      <path d="M4.2 3.1 19.6 12l-6.4 1.5 3.7 7.2-3.4 1.7-3.7-7.2L4.2 20.8z" />
+    </svg>
+  );
+}
+
 export function ProviderIcon({
   provider,
   className = "size-3.5 shrink-0",
@@ -39,6 +49,8 @@ export function ProviderIcon({
       return <ClaudeIcon className={className} title={title ?? "Claude"} style={{ color: "#e8944a" }} />;
     case "codex":
       return <ChatGptIcon className={className} title={title ?? "ChatGPT"} style={{ color: "var(--silkscreen)" }} />;
+    case "cursor":
+      return <CursorIcon className={className} title={title ?? "Cursor"} style={{ color: "#7aa2ff" }} />;
     default:
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true">

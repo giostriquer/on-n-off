@@ -37,7 +37,25 @@ export const LOCKED_AGENTS: AgentInfo[] = [
     installFolder: false,
     pluginToggle: false,
   },
+  {
+    id: "cursor",
+    displayName: "Cursor",
+    cliOk: false,
+    cliError: null,
+    installGit: false,
+    installFolder: false,
+    pluginToggle: false,
+  },
 ];
+
+export function emptyAgentRecord<T>(value: () => T): Record<AgentId, T> {
+  return {
+    claude: value(),
+    codex: value(),
+    antigravity: value(),
+    cursor: value(),
+  };
+}
 
 export function emptyTab(): TabState {
   return {

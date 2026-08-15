@@ -67,6 +67,7 @@ function emptyByProvider(): Record<AgentId, PeriodProviderSlice> {
     claude: { costUsd: 0, totalTokens: 0 },
     codex: { costUsd: 0, totalTokens: 0 },
     antigravity: { costUsd: 0, totalTokens: 0 },
+    cursor: { costUsd: 0, totalTokens: 0 },
   };
 }
 
@@ -238,6 +239,8 @@ export function providerLabel(provider: AgentId): string {
       return "Codex";
     case "antigravity":
       return "Antigravity";
+    case "cursor":
+      return "Cursor";
   }
 }
 

@@ -80,6 +80,7 @@ fn agent_dir(agent: AgentId) -> &'static str {
         AgentId::Claude => "claude",
         AgentId::Codex => "codex",
         AgentId::Antigravity => "antigravity",
+        AgentId::Cursor => "cursor",
     }
 }
 

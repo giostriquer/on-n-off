@@ -6,6 +6,7 @@ pub enum AgentId {
     Claude,
     Codex,
     Antigravity,
+    Cursor,
 }
 
 impl AgentId {
@@ -14,6 +15,7 @@ impl AgentId {
             Self::Claude => "Claude",
             Self::Codex => "Codex",
             Self::Antigravity => "Antigravity",
+            Self::Cursor => "Cursor",
         }
     }
 }
