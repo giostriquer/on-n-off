@@ -12,6 +12,7 @@ import {
   useAgentSession,
 } from "@/features/session/SessionProvider";
 import { LeftRail } from "@/features/shell/LeftRail";
+import { UpdateStrip } from "@/features/updater/UpdateStrip";
 import { globalItemCount, tallyLine, type Screen } from "$lib/catalog";
 import { copy } from "$lib/copy";
 import type { AgentInfo } from "$lib/types";
@@ -178,6 +179,8 @@ export function AppShell() {
           + INSTALL
         </button>
       </header>
+
+      <UpdateStrip />
 
       <ScopeBar
         agentId={selected}

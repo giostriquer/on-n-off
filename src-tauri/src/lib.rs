@@ -18,16 +18,21 @@ mod project;
 mod scanner;
 mod settings;
 mod sort;
+#[cfg(test)]
+mod updater_build;
 mod usage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(commands::AppState::production())
         .invoke_handler(tauri::generate_handler![
             commands::list_agents,
             commands::feature_flags,
+            commands::updater_build_info,
             commands::load_app_settings,
             commands::save_app_settings,
             commands::diagnose_providers,

@@ -13,6 +13,9 @@ export function SettingsRoute() {
       onSaveBinary={(id, path) => {
         void session.setProviderBinary(id, path);
       }}
+      onAutomaticUpdatesChange={(enabled) => {
+        void session.persistAppSettings({ ...session.appSettings, automaticUpdates: enabled });
+      }}
     />
   );
 }

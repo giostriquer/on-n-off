@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { visibleAgentIds, setAgentHidden, ALL_AGENTS } from "./appSettings";
+import { visibleAgentIds, setAgentHidden, ALL_AGENTS, mergeAppSettings } from "./appSettings";
 
 describe("appSettings", () => {
   it("defaults to every provider visible", () => {
@@ -18,5 +18,13 @@ describe("appSettings", () => {
 
   it("can show a hidden provider again", () => {
     expect(setAgentHidden(["antigravity"], "antigravity", false)).toEqual([]);
+  });
+
+  it("enables automatic updates by default and preserves an opt-out", () => {
+    expect((mergeAppSettings(null) as unknown as Record<string, unknown>).automaticUpdates).toBe(true);
+    expect(
+      (mergeAppSettings(JSON.parse('{"automaticUpdates":false}')) as unknown as Record<string, unknown>)
+        .automaticUpdates,
+    ).toBe(false);
   });
 });
