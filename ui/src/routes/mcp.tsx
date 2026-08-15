@@ -6,6 +6,7 @@ export function McpRoute() {
   return (
     <McpList
       tab={session.currentTab.dto ?? session.emptyTabDto()}
+      servers={session.filtered?.mcpServers ?? []}
       filterQuery={session.currentTab.filter}
       busy={session.currentTab.inFlight}
       onToggle={session.toggleMcp}

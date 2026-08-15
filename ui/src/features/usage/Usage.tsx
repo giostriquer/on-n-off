@@ -1,7 +1,6 @@
-import { useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
 import { PROVIDERS, foldUsage, providerLabel } from "$lib/usageMerge";
 import {
@@ -17,7 +16,8 @@ import {
 import type { UsageMetric } from "$lib/usageTypes";
 import type { AgentId } from "$lib/types";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { LazyUsageChart } from "./LazyUsageChart";
+import { LazyUsageChart, preloadUsageChart } from "./LazyUsageChart";
+import { loadUsageWindow, type UsageQueryResult } from "./usageQuery";
 
 const WINDOWS = [
   { days: 1, label: "Past 24h" },
@@ -77,32 +77,41 @@ export function Usage() {
   const [breakdown, setBreakdown] = useState<BreakdownMode>("model");
   const [forceRevision, setForceRevision] = useState(0);
   const forceRef = useRef(false);
+  const lastCompleteRef = useRef<UsageQueryResult | null>(null);
   const activeWindow = makeWindow(windowDays);
 
   const query = useQuery({
     queryKey: ["usage", windowDays, forceRevision],
     queryFn: async () => {
-      const window = makeWindow(windowDays);
       const force = forceRef.current;
       forceRef.current = false;
-      return api.usageSummary({
-        sinceDay: window.sinceDay,
-        untilDay: window.untilDay,
-        timeZone: window.timeZone,
-        resolution: window.resolution,
-        sinceTime: window.sinceTime,
-        untilTime: window.untilTime,
-        force,
-      });
+      return loadUsageWindow(windowDays, force);
     },
+    placeholderData: keepPreviousData,
   });
 
-  const summary = query.data ?? null;
+  useEffect(() => {
+    void preloadUsageChart();
+  }, []);
+
+  useEffect(() => {
+    if (!query.data || query.isPlaceholderData) {
+      return;
+    }
+    lastCompleteRef.current = query.data;
+  }, [query.data, query.isPlaceholderData]);
+
+  const displayed = query.data
+    ? query.data
+    : query.isError
+      ? lastCompleteRef.current
+      : null;
+  const summary = displayed?.summary ?? null;
+  const displayedWindow = displayed?.window ?? activeWindow;
   const loading = query.isFetching;
   const error = query.error ? displayError(parseInvokeError(query.error), "Usage") : null;
   const folded = foldUsage(summary);
   const bothMissing = !!summary && summary.sources.every((s) => s.status === "missing");
-  const showBody = !loading || !!summary;
 
   const inputTokens =
     folded.tokens.uncachedInputTokens + folded.tokens.cachedInputTokens + folded.tokens.cacheCreationTokens;
@@ -145,11 +154,27 @@ export function Usage() {
     .map((period) => period.day)
     .sort();
   const rangeSince =
-    windowDays === FULL_TIME_DAYS && activityDays.length > 0 ? activityDays[0]! : activeWindow.sinceDay;
+    displayedWindow.fullTime && activityDays.length > 0 ? activityDays[0]! : displayedWindow.sinceDay;
   const rangeUntil =
-    windowDays === FULL_TIME_DAYS && activityDays.length > 0
+    displayedWindow.fullTime && activityDays.length > 0
       ? activityDays[activityDays.length - 1]!
-      : activeWindow.untilDay;
+      : displayedWindow.untilDay;
+  const displayedRange = formatDayRange(rangeSince, rangeUntil);
+  const requestedRange = activeWindow.fullTime
+    ? "Full time"
+    : formatDayRange(activeWindow.sinceDay, activeWindow.untilDay);
+  const isWindowChange =
+    query.isPlaceholderData &&
+    (displayedWindow.sinceDay !== activeWindow.sinceDay ||
+      displayedWindow.untilDay !== activeWindow.untilDay ||
+      displayedWindow.resolution !== activeWindow.resolution ||
+      displayedWindow.sinceTime !== activeWindow.sinceTime ||
+      displayedWindow.untilTime !== activeWindow.untilTime);
+  const loadingLabel = !summary
+    ? `Scanning ${requestedRange}…`
+    : isWindowChange
+      ? `Updating to ${requestedRange}…`
+      : `Refreshing ${displayedWindow.fullTime ? "Full time · " : ""}${displayedRange}…`;
 
   function refresh() {
     forceRef.current = true;
@@ -157,12 +182,20 @@ export function Usage() {
   }
 
   return (
-    <div className="flex flex-col gap-7 px-5 pt-[18px] pb-[28px]">
+    <div
+      className="flex flex-col gap-7 px-5 pt-[18px] pb-[28px]"
+      data-testid="usage-screen"
+      aria-busy={loading}
+    >
       <header className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1 font-mono text-[12px] text-[var(--mute)]">
-          {windowDays === FULL_TIME_DAYS ? "Full time · " : null}
-          {formatDayRange(rangeSince, rangeUntil)}
-          {loading ? <span className="ml-2">· scanning…</span> : null}
+          {displayedWindow.fullTime ? "Full time · " : null}
+          {displayedRange}
+          {loading ? (
+            <span className="ml-2" role="status" aria-live="polite">
+              · {loadingLabel}
+            </span>
+          ) : null}
           {!loading && summary?.cacheHit ? <span className="ml-2">· cached</span> : null}
         </div>
         <Segmented
@@ -182,13 +215,16 @@ export function Usage() {
         </button>
       </header>
 
-      {loading && !summary ? (
+      {!summary && loading ? (
         <p className="text-[13px] text-[var(--mute)]">Scanning transcripts…</p>
-      ) : error && !summary ? (
+      ) : !summary && error ? (
         <p className="text-[13px] text-[var(--trip)]">{error}</p>
       ) : bothMissing ? (
-        <p className="text-[13px] text-[var(--mute)]">No Claude or Codex session transcripts found on this machine.</p>
-      ) : showBody ? (
+        <>
+          {error ? <p className="text-[13px] text-[var(--trip)]">{error}</p> : null}
+          <p className="text-[13px] text-[var(--mute)]">No Claude or Codex session transcripts found on this machine.</p>
+        </>
+      ) : summary ? (
         <>
           {error ? <p className="text-[13px] text-[var(--trip)]">{error}</p> : null}
 
@@ -237,12 +273,12 @@ export function Usage() {
             folded={folded}
             metric={metric}
             onMetricChange={setMetric}
-            sinceDay={activeWindow.sinceDay}
-            untilDay={activeWindow.untilDay}
-            sinceTime={activeWindow.sinceTime}
-            untilTime={activeWindow.untilTime}
-            hourly={windowDays === 1}
-            sparse={windowDays === FULL_TIME_DAYS}
+            sinceDay={displayedWindow.sinceDay}
+            untilDay={displayedWindow.untilDay}
+            sinceTime={displayedWindow.sinceTime}
+            untilTime={displayedWindow.untilTime}
+            hourly={displayedWindow.resolution === "hour"}
+            sparse={displayedWindow.fullTime}
           />
 
           <section

@@ -49,9 +49,9 @@ const tab: AgentTabDto = {
 describe("filterTab", () => {
   it("returns the full tab when the query is empty", () => {
     const filtered = filterTab(tab, "  ");
-    expect(filtered.plugins).toHaveLength(1);
-    expect(filtered.userSkills).toHaveLength(1);
-    expect(filtered.emptyBecauseFilter).toBe(false);
+    expect(filtered.plugins.map((plugin) => plugin.id)).toEqual(["workbench@workshop"]);
+    expect(filtered.skills.map((skill) => skill.name)).toEqual(["statusline", "brainstorming"]);
+    expect(filtered.mcpServers.map((server) => server.id)).toEqual(["github"]);
   });
 
   it("expands a plugin when a nested skill matches", () => {

@@ -35,6 +35,10 @@ export function listPlugins(agentId: AgentId, projectPath?: string | null): Prom
   return invoke("list_plugins", { agentId, projectPath: projectPath || null });
 }
 
+export function listLocalPlugins(agentId: AgentId, projectPath?: string | null): Promise<AgentTabDto> {
+  return invoke("list_local_plugins", { agentId, projectPath: projectPath || null });
+}
+
 export function setPluginEnabled(
   agentId: AgentId,
   pluginId: string,

@@ -5,6 +5,9 @@
 
 use serde_json::Value;
 
+/// Increment whenever transcript parsing semantics change.
+pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UsageProvider {

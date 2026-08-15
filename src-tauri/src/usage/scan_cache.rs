@@ -2,20 +2,40 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
+
+#[cfg(test)]
+use std::cell::Cell;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 use super::transcripts::{TokenTotals, UsageProvider, UsageRecord};
 
-pub const USAGE_SCAN_CACHE_VERSION: u32 = 2;
+pub const USAGE_SCAN_CACHE_VERSION: u32 = 3;
+
+#[cfg(test)]
+thread_local! {
+    static SCAN_CACHE_DECODE_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_scan_cache_decode_count() {
+    SCAN_CACHE_DECODE_COUNT.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn scan_cache_decode_count() -> usize {
+    SCAN_CACHE_DECODE_COUNT.get()
+}
 
 #[derive(Debug, Clone)]
 pub struct CachedFile {
     pub size: u64,
     pub mtime_ms: i64,
     pub provider: UsageProvider,
-    pub records: Vec<UsageRecord>,
+    pub records: Arc<Vec<UsageRecord>>,
 }
 
 pub type ScanCache = HashMap<String, CachedFile>;
@@ -23,6 +43,7 @@ pub type ScanCache = HashMap<String, CachedFile>;
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedCache {
     version: u32,
+    parser_version: u32,
     models: Vec<String>,
     sessions: Vec<String>,
     files: HashMap<String, SerializedFile>,
@@ -89,6 +110,7 @@ pub fn encode_scan_cache(cache: &ScanCache) -> Value {
 
     serde_json::to_value(SerializedCache {
         version: USAGE_SCAN_CACHE_VERSION,
+        parser_version: USAGE_TRANSCRIPT_PARSER_VERSION,
         models,
         sessions,
         files,
@@ -97,11 +119,15 @@ pub fn encode_scan_cache(cache: &ScanCache) -> Value {
 }
 
 pub fn decode_scan_cache(document: &Value) -> ScanCache {
+    #[cfg(test)]
+    SCAN_CACHE_DECODE_COUNT.set(SCAN_CACHE_DECODE_COUNT.get() + 1);
     let mut cache = ScanCache::new();
     let Ok(root) = serde_json::from_value::<SerializedCache>(document.clone()) else {
         return cache;
     };
-    if root.version != USAGE_SCAN_CACHE_VERSION {
+    if root.version != USAGE_SCAN_CACHE_VERSION
+        || root.parser_version != USAGE_TRANSCRIPT_PARSER_VERSION
+    {
         return cache;
     }
 
@@ -197,7 +223,7 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
                 size: entry.s,
                 mtime_ms: entry.m,
                 provider,
-                records,
+                records: Arc::new(records),
             },
         );
     }
@@ -206,27 +232,24 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
 
 pub struct PruneOptions<'a> {
     pub live_paths: &'a HashSet<String>,
+    pub active_roots: &'a [String],
     pub walked_roots: &'a [String],
-    pub window_start_ms: i64,
-    pub retention_cutoff_ms: i64,
 }
 
 pub fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usize {
     let mut removed = 0;
     let keys: Vec<String> = cache.keys().cloned().collect();
     for path in keys {
-        let Some(entry) = cache.get(&path) else {
-            continue;
-        };
-        let aged_out = entry.mtime_ms < options.retention_cutoff_ms;
+        let under_active = options
+            .active_roots
+            .iter()
+            .any(|root| path_under_root(&path, root));
         let under_walked = options
             .walked_roots
             .iter()
             .any(|root| path_under_root(&path, root));
-        let deleted = under_walked
-            && entry.mtime_ms >= options.window_start_ms
-            && !options.live_paths.contains(&path);
-        if aged_out || deleted {
+        let deleted = under_walked && !options.live_paths.contains(&path);
+        if !under_active || deleted {
             cache.remove(&path);
             removed += 1;
         }
@@ -283,7 +306,7 @@ mod tests {
                 size: 100,
                 mtime_ms: 50,
                 provider: UsageProvider::Claude,
-                records: vec![sample_record()],
+                records: Arc::new(vec![sample_record()]),
             },
         );
         let encoded = encode_scan_cache(&cache);
@@ -298,11 +321,32 @@ mod tests {
     fn wrong_version_yields_empty() {
         let doc = serde_json::json!({
             "version": 999,
+            "parser_version": USAGE_TRANSCRIPT_PARSER_VERSION,
             "models": [],
             "sessions": [],
             "files": {}
         });
         assert!(decode_scan_cache(&doc).is_empty());
+    }
+
+    #[test]
+    fn parser_incompatible_cache_drops_stale_records() {
+        let mut stale_record = sample_record();
+        stale_record.totals.output_tokens = 999;
+        let mut cache = ScanCache::new();
+        cache.insert(
+            "/a.jsonl".into(),
+            CachedFile {
+                size: 100,
+                mtime_ms: 50,
+                provider: UsageProvider::Claude,
+                records: Arc::new(vec![stale_record]),
+            },
+        );
+        let mut encoded = encode_scan_cache(&cache);
+        encoded["parser_version"] = serde_json::json!(USAGE_TRANSCRIPT_PARSER_VERSION + 1);
+
+        assert!(decode_scan_cache(&encoded).is_empty());
     }
 
     #[test]
@@ -316,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_drops_aged_and_deleted_in_window() {
+    fn prune_keeps_live_history_and_incomplete_roots() {
         let mut cache = ScanCache::new();
         cache.insert(
             "/root/old.jsonl".into(),
@@ -324,7 +368,7 @@ mod tests {
                 size: 1,
                 mtime_ms: 100,
                 provider: UsageProvider::Claude,
-                records: vec![],
+                records: Arc::new(vec![]),
             },
         );
         cache.insert(
@@ -333,7 +377,7 @@ mod tests {
                 size: 1,
                 mtime_ms: 5_000,
                 provider: UsageProvider::Claude,
-                records: vec![],
+                records: Arc::new(vec![]),
             },
         );
         cache.insert(
@@ -342,21 +386,44 @@ mod tests {
                 size: 1,
                 mtime_ms: 5_000,
                 provider: UsageProvider::Claude,
-                records: vec![],
+                records: Arc::new(vec![]),
             },
         );
-        let live = HashSet::from(["/root/live.jsonl".to_string()]);
-        let roots = vec!["/root".to_string()];
+        cache.insert(
+            "/pending/unknown.jsonl".into(),
+            CachedFile {
+                size: 1,
+                mtime_ms: 100,
+                provider: UsageProvider::Claude,
+                records: Arc::new(vec![]),
+            },
+        );
+        cache.insert(
+            "/outside/stale.jsonl".into(),
+            CachedFile {
+                size: 1,
+                mtime_ms: 100,
+                provider: UsageProvider::Claude,
+                records: Arc::new(vec![]),
+            },
+        );
+        let live = HashSet::from([
+            "/root/old.jsonl".to_string(),
+            "/root/live.jsonl".to_string(),
+        ]);
+        let active_roots = vec!["/root".to_string(), "/pending".to_string()];
+        let walked_roots = vec!["/root".to_string()];
         let removed = prune_scan_cache(
             &mut cache,
             PruneOptions {
                 live_paths: &live,
-                walked_roots: &roots,
-                window_start_ms: 1_000,
-                retention_cutoff_ms: 1_000,
+                active_roots: &active_roots,
+                walked_roots: &walked_roots,
             },
         );
         assert_eq!(removed, 2);
+        assert!(cache.contains_key("/root/old.jsonl"));
         assert!(cache.contains_key("/root/live.jsonl"));
+        assert!(cache.contains_key("/pending/unknown.jsonl"));
     }
 }

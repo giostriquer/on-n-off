@@ -79,6 +79,28 @@ export function openIds(userExpanded: Set<string>, filterExpand: string[]): Set<
   return next;
 }
 
+export function mergeEnrichedPluginMetadata(
+  local: AgentTabDto,
+  enriched: AgentTabDto,
+): AgentTabDto {
+  const enrichedById = new Map(enriched.plugins.map((plugin) => [plugin.id, plugin]));
+  return {
+    ...local,
+    plugins: local.plugins.map((plugin) => {
+      const metadata = enrichedById.get(plugin.id);
+      if (!metadata) {
+        return plugin;
+      }
+      return {
+        ...plugin,
+        version: metadata.version,
+        upstream: metadata.upstream,
+        outOfSync: metadata.outOfSync,
+      };
+    }),
+  };
+}
+
 export async function withAgentLock<T>(
   tabs: Record<AgentId, TabState>,
   agentId: AgentId,
