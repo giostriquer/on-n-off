@@ -33,6 +33,7 @@ import {
   type TabState,
 } from "$lib/session";
 import { prependTrip, type TripEntry } from "$lib/tripLog";
+import { applyTheme, readTheme, type Theme } from "$lib/theme";
 import type {
   AgentId,
   AgentInfo,
@@ -46,12 +47,11 @@ import type {
 } from "$lib/types";
 import { deriveCatalogFilterView, deriveCatalogInventory, deriveProjectView } from "./sessionView";
 
-export const THEME_KEY = "on-n-off.theme";
 export const AGENT_KEY = "on-n-off.agent";
 export const SCREEN_KEY = "on-n-off.screen";
 export const SCOPE_KEY = "on-n-off.scope";
 
-export type Theme = "dark" | "light";
+export { readTheme, THEME_KEY, type Theme } from "$lib/theme";
 
 export const SCREEN_PATH: Record<Screen, string> = {
   overview: "/overview",
@@ -67,10 +67,6 @@ export const SCREEN_PATH: Record<Screen, string> = {
 export function pathToScreen(pathname: string): Screen {
   const hit = (Object.entries(SCREEN_PATH) as [Screen, string][]).find(([, path]) => path === pathname);
   return hit?.[0] ?? "overview";
-}
-
-export function readTheme(): Theme {
-  return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
 }
 
 export function readAgent(): AgentId {
@@ -240,11 +236,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   extraProjectsRef.current = extraProjects;
 
   useEffect(() => {
-    const root = document.documentElement;
-    root.dataset.theme = "onnoff";
-    root.classList.toggle("dark", theme === "dark");
-    root.style.colorScheme = theme;
-    localStorage.setItem(THEME_KEY, theme);
+    applyTheme(theme);
   }, [theme]);
 
   useEffect(() => {

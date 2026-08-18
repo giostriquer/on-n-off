@@ -16,6 +16,7 @@ import { UpdateStrip } from "@/features/updater/UpdateStrip";
 import { preloadUsageChart } from "@/features/usage/LazyUsageChart";
 import { globalItemCount, tallyLine, type Screen } from "$lib/catalog";
 import { copy } from "$lib/copy";
+import * as api from "$lib/api";
 import type { AgentInfo } from "$lib/types";
 import markUrl from "../../../../src-tauri/icons/128x128.png";
 
@@ -66,6 +67,26 @@ export function AppShell() {
   useEffect(() => {
     localStorage.setItem("on-n-off.screen", screen);
   }, [screen]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void api
+      .onOpenLimitsWindow(() => {
+        void navigate({ to: SCREEN_PATH.limits });
+      })
+      .then((stop) => {
+        if (disposed) {
+          stop();
+        } else {
+          unlisten = stop;
+        }
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [navigate]);
 
   useEffect(() => {
     if (sessionStorage.getItem("on-n-off.routed")) {

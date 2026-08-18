@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { keepPreviousData, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
@@ -18,8 +18,7 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { providerColor } from "$lib/providerStyle";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-
-const STALE_MS = 60_000;
+import { useLimitsProviders } from "./useLimitsProviders";
 
 /** Percent text picks up the warning tone; the bar itself stays in the provider colour. */
 const TONE_COLOR: Record<UsageTone, string | undefined> = {
@@ -28,52 +27,9 @@ const TONE_COLOR: Record<UsageTone, string | undefined> = {
   trip: "var(--trip)",
 };
 
-type ProviderQuery = { provider: AgentId; query: UseQueryResult<ProviderLimits[]>; refresh: () => void };
-
-/**
- * One query per provider. The backend answers with the signed-in account first (any status)
- * followed by remembered snapshots of other accounts. Only `refresh()` (the button) sets `force`,
- * which makes the backend re-read the macOS Keychain instead of its in-process memo; background
- * refetches never do, so an "Allow"-once user is not re-prompted on every focus.
- */
-function useProviderLimits(provider: AgentId): ProviderQuery {
-  const forceRef = useRef(false);
-  const query = useQuery({
-    queryKey: ["limits", provider],
-    queryFn: () => {
-      const force = forceRef.current;
-      forceRef.current = false;
-      return api.readLimits(provider, force);
-    },
-    staleTime: STALE_MS,
-    refetchOnWindowFocus: true,
-    placeholderData: keepPreviousData,
-  });
-  function refresh() {
-    forceRef.current = true;
-    void query.refetch();
-  }
-  return { provider, query, refresh };
-}
-
 export function Limits() {
   // Only Claude and Codex carry a subscription the backend can read; the rest report `unsupported`.
-  const claude = useProviderLimits("claude");
-  const codex = useProviderLimits("codex");
-  const providers = [claude, codex];
-  const loading = providers.some(({ query }) => query.isFetching);
-  const asOf = providers
-    .map(({ query }) => query.data?.find((entry) => entry.live && entry.status === "ok")?.fetchedAt ?? "")
-    .filter(Boolean)
-    .sort()
-    .at(-1);
-  const now = Date.now();
-
-  function refresh() {
-    for (const provider of providers) {
-      provider.refresh();
-    }
-  }
+  const { providers, loading, asOf, now, refresh } = useLimitsProviders();
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="limits-screen" aria-busy={loading}>
@@ -114,13 +70,15 @@ export function Limits() {
 }
 
 /** The live card for a provider plus one card per remembered account. */
-function ProviderColumn({
+export function ProviderColumn({
   provider,
   query,
+  allowForget = true,
   now,
 }: {
   provider: AgentId;
   query: UseQueryResult<ProviderLimits[]>;
+  allowForget?: boolean;
   now: number;
 }) {
   const queryClient = useQueryClient();
@@ -165,7 +123,7 @@ function ProviderColumn({
           entry={entry}
           now={now}
           error={index === 0 ? error : null}
-          onForget={forget}
+          onForget={allowForget ? forget : undefined}
         />
       ))}
     </div>
@@ -207,7 +165,7 @@ function AccountCard({
   entry: ProviderLimits;
   now: number;
   error: string | null;
-  onForget: (accountId: string) => void;
+  onForget?: (accountId: string) => void;
 }) {
   const name = providerLabel(entry.provider);
   const account = entry.account ?? null;
@@ -231,7 +189,7 @@ function AccountCard({
             as of {formatResetAt(entry.fetchedAt)}
             {label ? ` · sign in as ${label} to refresh` : " · sign in again to refresh"}
           </span>
-          {account ? (
+          {account && onForget ? (
             <button
               type="button"
               className="shrink-0 border-0 bg-transparent p-0 text-[11px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase hover:text-[var(--silkscreen)]"

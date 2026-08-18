@@ -24,13 +24,14 @@ mod project;
 mod scanner;
 mod settings;
 mod sort;
+mod tray;
 #[cfg(test)]
 mod updater_build;
 mod usage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -41,6 +42,8 @@ pub fn run() {
             std::thread::spawn(|| {
                 let _ = cli_locate::cli_search_path();
             });
+            #[cfg(target_os = "macos")]
+            tray::setup(_app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -64,7 +67,24 @@ pub fn run() {
             commands::usage_summary,
             commands::read_limits,
             commands::forget_limits_snapshot,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+            commands::hide_limits_popover,
+            commands::open_limits_window,
+            commands::quit_app,
+        ]);
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_window_event(tray::handle_window_event);
+
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_app, _event| {
+        #[cfg(target_os = "macos")]
+        if matches!(_event, tauri::RunEvent::Reopen { .. }) {
+            if let Err(error) = tray::show_main_window(_app) {
+                eprintln!("failed to reopen the main window: {error}");
+            }
+        }
+    });
 }

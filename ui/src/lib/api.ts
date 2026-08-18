@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentId,
   AgentInfo,
@@ -91,6 +92,26 @@ export function readLimits(agentId: AgentId, force = false): Promise<ProviderLim
 
 export function forgetLimitsSnapshot(agentId: AgentId, accountId: string): Promise<void> {
   return invoke("forget_limits_snapshot", { agentId, accountId });
+}
+
+export function hideLimitsPopover(): Promise<void> {
+  return invoke("hide_limits_popover");
+}
+
+export function openLimitsWindow(): Promise<void> {
+  return invoke("open_limits_window");
+}
+
+export function quitApp(): Promise<void> {
+  return invoke("quit_app");
+}
+
+export function onLimitsPopoverOpened(handler: () => void): Promise<UnlistenFn> {
+  return listen("limits-popover-opened", () => handler());
+}
+
+export function onOpenLimitsWindow(handler: () => void): Promise<UnlistenFn> {
+  return listen("open-limits-window", () => handler());
 }
 
 export function loadAppSettings(): Promise<AppSettings> {
