@@ -14,8 +14,8 @@ import {
   makeWindow,
 } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
-import type { AgentId } from "$lib/types";
 import { ProviderIcon } from "$lib/ProviderIcon";
+import { providerColor } from "$lib/providerStyle";
 import { LazyUsageChart, preloadUsageChart } from "./LazyUsageChart";
 import { loadUsageWindow, type UsageQueryResult } from "./usageQuery";
 
@@ -28,13 +28,6 @@ const WINDOWS = [
 ] as const;
 
 type BreakdownMode = "model" | "day";
-
-const PROVIDER_DOT: Record<AgentId, string> = {
-  codex: "var(--silkscreen)",
-  claude: "#e8944a",
-  antigravity: "var(--mute)",
-  cursor: "#7aa2ff",
-};
 
 function Segmented<T extends string>({
   value,
@@ -260,7 +253,7 @@ export function Usage() {
                         className="h-full rounded-full"
                         style={{
                           width: `${Math.max(0, Math.min(100, share * 100))}%`,
-                          background: PROVIDER_DOT[row.provider],
+                          background: providerColor(row.provider),
                         }}
                       />
                     </div>

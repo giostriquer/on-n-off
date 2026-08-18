@@ -7,6 +7,7 @@ const featurePaths = [
   "/skills",
   "/mcp",
   "/usage",
+  "/limits",
   "/config",
   "/settings",
 ] as const;
@@ -16,6 +17,7 @@ describe("router bundle boundaries", () => {
     expect(Object.keys(router.routesByPath).sort()).toEqual([
       "/",
       "/config",
+      "/limits",
       "/mcp",
       "/overview",
       "/plugins",

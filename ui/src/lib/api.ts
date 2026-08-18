@@ -9,6 +9,7 @@ import type {
   ProviderDiagnose,
   UpdaterBuildInfo,
 } from "./types";
+import type { ProviderLimits } from "./limitsTypes";
 import type { UsageSummary, UsageSummaryInput } from "./usageTypes";
 
 export function listAgents(): Promise<AgentInfo[]> {
@@ -81,6 +82,15 @@ export function refresh(agentId: AgentId, projectPath?: string | null): Promise<
 
 export function usageSummary(input: UsageSummaryInput): Promise<UsageSummary> {
   return invoke("usage_summary", { input });
+}
+
+/** Live limits for the signed-in account first, then remembered snapshots of other accounts. */
+export function readLimits(agentId: AgentId, force = false): Promise<ProviderLimits[]> {
+  return invoke("read_limits", { agentId, force });
+}
+
+export function forgetLimitsSnapshot(agentId: AgentId, accountId: string): Promise<void> {
+  return invoke("forget_limits_snapshot", { agentId, accountId });
 }
 
 export function loadAppSettings(): Promise<AppSettings> {
