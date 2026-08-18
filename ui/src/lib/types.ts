@@ -124,7 +124,7 @@ export type MarketplaceInspect = {
   hint: string | null;
 };
 
-export type ItemPick = { pluginName: string; kind: ItemKind; path: string; source?: ItemSource | null };
+export type ItemPick = { pluginName: string; kind: ItemKind; path: string; source: ItemSource | null };
 
 export type ItemTarget = { provider: AgentId; scope: ItemScope };
 
@@ -142,6 +142,9 @@ export type ItemOutcome = {
   provider: AgentId;
   kind: ItemKind;
   name: string;
+  /** The pick this outcome answers. */
+  pluginName: string;
+  path: string;
   targetPath: string;
   status: ItemOutcomeStatus;
   reason: string | null;

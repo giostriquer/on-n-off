@@ -1,13 +1,12 @@
 import { agentRoot } from "./catalog";
 import type {
   AgentId,
-  InstallItemsResult,
   ItemKind,
-  ItemOutcome,
   ItemPick,
   ItemScope,
   ItemTarget,
   MarketplaceInspect,
+  MarketplacePlugin,
 } from "./types";
 
 export type MarketplaceAction = "plugin" | "all" | "selected";
@@ -20,39 +19,28 @@ export function entryKey(pluginName: string, kind: ItemKind, path: string): stri
 
 /** Every installable entry (agents included) of every supported plugin, in display order. */
 export function allKeys(inspect: MarketplaceInspect): string[] {
-  const keys: string[] = [];
-  for (const plugin of inspect.plugins) {
-    if (!plugin.supported) {
-      continue;
-    }
-    for (const skill of plugin.skills) {
-      keys.push(entryKey(plugin.name, "skill", skill.path));
-    }
-    for (const agent of plugin.agents) {
-      keys.push(entryKey(plugin.name, "agent", agent.path));
-    }
-  }
-  return keys;
+  return inspect.plugins.flatMap((plugin) => [
+    ...groupKeys(plugin, "skill"),
+    ...groupKeys(plugin, "agent"),
+  ]);
 }
 
-export function groupKeys(inspect: MarketplaceInspect, pluginName: string, kind: ItemKind): string[] {
-  const plugin = inspect.plugins.find((p) => p.name === pluginName);
-  if (!plugin?.supported) {
+export function groupKeys(plugin: MarketplacePlugin, kind: ItemKind): string[] {
+  if (!plugin.supported) {
     return [];
   }
   const entries = kind === "skill" ? plugin.skills : plugin.agents;
-  return entries.map((entry) => entryKey(pluginName, kind, entry.path));
+  return entries.map((entry) => entryKey(plugin.name, kind, entry.path));
 }
 
 export function toggleGroup(
   keys: ReadonlySet<string>,
-  inspect: MarketplaceInspect,
-  pluginName: string,
+  plugin: MarketplacePlugin,
   kind: ItemKind,
   on: boolean,
 ): Set<string> {
   const next = new Set(keys);
-  for (const key of groupKeys(inspect, pluginName, kind)) {
+  for (const key of groupKeys(plugin, kind)) {
     if (on) {
       next.add(key);
     } else {
@@ -91,7 +79,7 @@ export function targetsFor(providers: readonly AgentId[], scope: ItemScope): Ite
   return providers.map((provider) => ({ provider, scope }));
 }
 
-/** Where a provider's skills land for a scope — mirrors `AgentAdapter::item_roots`. */
+/** Where a provider's skills land for a scope — a preview of `AgentAdapter::item_roots`. */
 export function previewPath(provider: AgentId, scope: ItemScope): string {
   if (scope.kind === "project") {
     const base = scope.projectPath.replace(/[\\/]+$/, "");
@@ -107,45 +95,4 @@ export function previewPath(provider: AgentId, scope: ItemScope): string {
     }
   }
   return provider === "antigravity" ? "~/.gemini/antigravity-cli/skills" : `${agentRoot(provider)}/skills`;
-}
-
-export type OutcomeSummary = {
-  installed: number;
-  skipped: number;
-  conflicts: ItemOutcome[];
-  failed: ItemOutcome[];
-  touchedProviders: AgentId[];
-};
-
-export function summarizeOutcomes(result: InstallItemsResult): OutcomeSummary {
-  const touched = new Set<AgentId>();
-  let installed = 0;
-  let skipped = 0;
-  const conflicts: ItemOutcome[] = [];
-  const failed: ItemOutcome[] = [];
-  for (const outcome of result.outcomes) {
-    switch (outcome.status) {
-      case "installed":
-      case "replaced":
-        installed += 1;
-        touched.add(outcome.provider);
-        break;
-      case "skipped":
-        skipped += 1;
-        break;
-      case "conflict":
-        conflicts.push(outcome);
-        break;
-      case "failed":
-        failed.push(outcome);
-        break;
-    }
-  }
-  return { installed, skipped, conflicts, failed, touchedProviders: [...touched] };
-}
-
-/** True when nothing is left for the user to decide: no conflicts, no failures. */
-export function installOutcomeClean(result: InstallItemsResult): boolean {
-  const summary = summarizeOutcomes(result);
-  return summary.conflicts.length === 0 && summary.failed.length === 0;
 }

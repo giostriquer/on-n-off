@@ -2,14 +2,9 @@ import { lazy, Suspense, type ComponentProps } from "react";
 
 type InstallSheetModule = typeof import("./InstallSheet");
 
-let sheetPromise: Promise<InstallSheetModule> | undefined;
-
-export function preloadInstallSheet(): Promise<InstallSheetModule> {
-  sheetPromise ??= import("./InstallSheet");
-  return sheetPromise;
-}
-
-const InstallSheet = lazy(() => preloadInstallSheet().then((module) => ({ default: module.InstallSheet })));
+const InstallSheet = lazy(() =>
+  import("./InstallSheet").then((module) => ({ default: module.InstallSheet })),
+);
 
 export type InstallSheetProps = ComponentProps<InstallSheetModule["InstallSheet"]>;
 

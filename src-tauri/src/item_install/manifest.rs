@@ -1,5 +1,6 @@
 //! Reads a marketplace snapshot: which plugins it lists and which skills/agents each carries.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::fetch::Tarball;
@@ -8,8 +9,8 @@ use crate::dto::{
     AdapterError, ItemSourceDto, MarketplaceEntryDto, MarketplaceInspectDto, MarketplacePluginDto,
 };
 use crate::plugin_meta::{
-    parse_marketplace_text, parse_plugin_manifest, PluginManifest, MARKETPLACE_MANIFESTS,
-    PLUGIN_MANIFESTS,
+    parse_marketplace_text, parse_plugin_manifest, MarketplaceFile, PluginManifest,
+    MARKETPLACE_MANIFESTS, PLUGIN_MANIFESTS,
 };
 use crate::scanner::parse_frontmatter;
 
@@ -20,16 +21,35 @@ pub const NOT_A_MARKETPLACE: &str =
 pub type SecondFetch<'a> =
     &'a mut dyn FnMut(&str, &str, Option<&str>) -> Result<Arc<Tarball>, AdapterError>;
 
+/// The first marketplace manifest present in a snapshot.
+pub fn marketplace_file(tarball: &Tarball) -> Option<MarketplaceFile> {
+    MARKETPLACE_MANIFESTS
+        .iter()
+        .find_map(|relative| tarball.text(relative))
+        .and_then(|text| parse_marketplace_text(&text))
+}
+
+/// Plugin name -> plugin folder inside the marketplace repository (`""` = repository root).
+pub fn plugin_roots(tarball: &Tarball) -> HashMap<String, String> {
+    let mut roots = HashMap::new();
+    if let Some(manifest) = marketplace_file(tarball) {
+        for plugin in &manifest.plugins {
+            if let Some(local) = plugin.local_source_path() {
+                if let Ok(root) = normalize_upstream_path(local) {
+                    roots.insert(plugin.name.clone(), root);
+                }
+            }
+        }
+    }
+    roots
+}
+
 pub fn inspect(
     tarball: &Tarball,
     fallback_name: &str,
     second: SecondFetch<'_>,
 ) -> MarketplaceInspectDto {
-    let manifest = MARKETPLACE_MANIFESTS
-        .iter()
-        .find_map(|relative| tarball.text(relative))
-        .and_then(|text| parse_marketplace_text(&text));
-    let Some(manifest) = manifest else {
+    let Some(manifest) = marketplace_file(tarball) else {
         return MarketplaceInspectDto {
             is_marketplace: false,
             commit_sha: tarball.commit_sha.clone(),

@@ -58,6 +58,7 @@ function Probe() {
   return (
     <>
       <span data-testid="install-open">{String(session.installOpen)}</span>
+      <span data-testid="install-busy">{String(session.installBusy)}</span>
       <span data-testid="install-error">{session.installError ?? ""}</span>
       <button type="button" onClick={() => session.setInstallOpen(true)}>
         Open
@@ -70,7 +71,16 @@ function Probe() {
 }
 
 function outcome(provider: AgentId, status: InstallItemsResult["outcomes"][number]["status"]) {
-  return { provider, kind: "skill" as const, name: "tdd", targetPath: "x", status, reason: null };
+  return {
+    provider,
+    kind: "skill" as const,
+    name: "tdd",
+    pluginName: "p",
+    path: "skills/tdd",
+    targetPath: "x",
+    status,
+    reason: null,
+  };
 }
 
 describe("SessionProvider.installItems", () => {
@@ -133,7 +143,8 @@ describe("SessionProvider.installItems", () => {
     await waitFor(() => expect(state.listCalls.length).toBeGreaterThanOrEqual(4));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     fireEvent.click(screen.getByRole("button", { name: "Install items" }));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitFor(() => expect(screen.getByTestId("install-busy").textContent).toBe("true"));
+    await waitFor(() => expect(screen.getByTestId("install-busy").textContent).toBe("false"));
     expect(screen.getByTestId("install-open").textContent).toBe("true");
 
     state.installError = { kind: "message", message: "boom", path: null };

@@ -8,38 +8,37 @@ import {
   resolvedInstallSource,
 } from "$lib/installSource";
 import type { AgentId, AgentInfo, InstallItemsRequest, InstallItemsResult, ProjectDto } from "$lib/types";
-import { LazyMarketplaceInstall } from "./LazyMarketplaceInstall";
+import { MarketplaceInstall } from "./MarketplaceInstall";
+import { SheetError, SheetFooter } from "./SheetChrome";
 
 type InstallSheetProps = {
   agentName: string;
-  busy?: boolean;
-  itemsBusy?: boolean;
-  error?: string | null;
-  installFolder?: boolean;
-  visibleAgents?: AgentInfo[];
-  currentAgentId?: AgentId;
-  projects?: ProjectDto[];
-  currentScopePath?: string | null;
+  busy: boolean;
+  error: string | null;
+  installFolder: boolean;
+  visibleAgents: AgentInfo[];
+  currentAgentId: AgentId;
+  projects: ProjectDto[];
+  currentScopePath: string | null;
   onCancel: () => void;
   onInstall: (source: string) => void;
-  onInstallItems?: (request: InstallItemsRequest) => Promise<InstallItemsResult | null>;
-  onPickFolder?: () => Promise<string | null>;
+  onInstallItems: (request: InstallItemsRequest) => Promise<InstallItemsResult | null>;
+  onPickFolder: () => Promise<string | null>;
 };
 
 export function InstallSheet({
   agentName,
-  busy = false,
-  itemsBusy = false,
-  error = null,
-  installFolder = false,
-  visibleAgents = [],
+  busy,
+  error,
+  installFolder,
+  visibleAgents,
   currentAgentId,
-  projects = [],
-  currentScopePath = null,
+  projects,
+  currentScopePath,
   onCancel,
   onInstall,
-  onInstallItems = async () => null,
-  onPickFolder = async () => null,
+  onInstallItems,
+  onPickFolder,
 }: InstallSheetProps) {
   const [text, setText] = useState("");
   const parsed = parseInstallSource(text);
@@ -47,18 +46,17 @@ export function InstallSheet({
   const inlineError = text.trim() && "error" in parsed ? parsed.error : null;
   const hint = installHint(parsed);
   const repo = githubRepoFromSource(parsed);
-  const anyBusy = busy || itemsBusy;
 
   function submitPlugin() {
     const source = resolvedInstallSource(text);
-    if (!source || anyBusy) {
+    if (!source || busy) {
       return;
     }
     onInstall(source);
   }
 
   async function pickFolder() {
-    if (!installFolder || anyBusy) {
+    if (!installFolder || busy) {
       return;
     }
     const dir = await onPickFolder();
@@ -96,19 +94,18 @@ export function InstallSheet({
               className="w-full rounded-lg border border-[var(--hair)] bg-[var(--well)] px-2.5 py-[9px] font-mono text-[13px] text-[var(--silkscreen)]"
               type="text"
               value={text}
-              disabled={anyBusy}
+              disabled={busy}
               aria-label="Install source"
               placeholder="name@marketplace, owner/repo, or npx skills add …"
               onChange={(event) => setText(event.target.value)}
             />
             {repo ? (
-              <LazyMarketplaceInstall
+              <MarketplaceInstall
                 key={`${repo.owner}/${repo.repo}@${repo.ref ?? ""}`}
                 repo={repo}
                 agentName={agentName}
                 hint={hint}
                 busy={busy}
-                itemsBusy={itemsBusy}
                 error={error}
                 visibleAgents={visibleAgents}
                 currentAgentId={currentAgentId}
@@ -126,7 +123,7 @@ export function InstallSheet({
                   <button
                     type="button"
                     className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3 text-[12.5px] text-[var(--silkscreen)] disabled:opacity-45"
-                    disabled={!installFolder || anyBusy}
+                    disabled={!installFolder || busy}
                     onClick={() => void pickFolder()}
                   >
                     {copy.folder}
@@ -140,31 +137,13 @@ export function InstallSheet({
                     {inlineError}
                   </p>
                 ) : null}
-                {error ? (
-                  <p
-                    className="border-l-[3px] border-[var(--trip)] bg-[var(--well)] px-2.5 py-2 font-mono text-xs text-[var(--silkscreen)]"
-                    role="alert"
-                  >
-                    {error}
-                  </p>
-                ) : null}
-                <footer className="mt-1 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)]"
-                    onClick={onCancel}
-                  >
-                    {copy.cancel}
-                  </button>
-                  <button
-                    type="button"
-                    className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-4 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
-                    disabled={!valid || anyBusy}
-                    onClick={submitPlugin}
-                  >
-                    {busy ? copy.installing : copy.install}
-                  </button>
-                </footer>
+                <SheetError message={error} />
+                <SheetFooter
+                  submitLabel={busy ? copy.installing : copy.install}
+                  submitDisabled={!valid || busy}
+                  onCancel={onCancel}
+                  onSubmit={submitPlugin}
+                />
               </>
             )}
           </div>

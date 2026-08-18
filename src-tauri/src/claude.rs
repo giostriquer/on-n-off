@@ -5,13 +5,12 @@ use std::sync::Mutex;
 
 use serde::Deserialize;
 
-use crate::adapter::AgentAdapter;
+use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
 use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
 use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemRoots, ItemScope, PluginDto,
-    SkillDto,
+    AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto,
 };
 use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::parse_claude_json;

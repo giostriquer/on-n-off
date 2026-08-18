@@ -1,13 +1,6 @@
 import { copy } from "$lib/copy";
-import {
-  agentsAllowed,
-  entryKey,
-  groupKeys,
-  previewPath,
-  summarizeOutcomes,
-  toggleGroup,
-  type MarketplaceAction,
-} from "$lib/marketplaceSelection";
+import { summarizeOutcomes } from "$lib/itemOutcomes";
+import { agentsAllowed, entryKey, groupKeys, toggleGroup, type MarketplaceAction } from "$lib/marketplaceSelection";
 import type {
   AgentId,
   AgentInfo,
@@ -20,19 +13,21 @@ import type {
   MarketplacePlugin,
   ProjectDto,
 } from "$lib/types";
+import { ProviderChips, ScopePicker } from "./InstallTargets";
+
+/** Everything the user chooses in the marketplace step, owned by `MarketplaceInstall`. */
+export type MarketplaceSelection = {
+  action: MarketplaceAction;
+  keys: ReadonlySet<string>;
+  filter: string;
+  providers: AgentId[];
+  scope: ItemScope;
+};
 
 export type MarketplaceBrowserProps = {
   inspect: MarketplaceInspect;
-  action: MarketplaceAction;
-  onAction: (action: MarketplaceAction) => void;
-  keys: ReadonlySet<string>;
-  onKeysChange: (keys: Set<string>) => void;
-  filter: string;
-  onFilterChange: (value: string) => void;
-  providers: readonly AgentId[];
-  onProvidersChange: (providers: AgentId[]) => void;
-  scope: ItemScope;
-  onScopeChange: (scope: ItemScope) => void;
+  selection: MarketplaceSelection;
+  onChange: (patch: Partial<MarketplaceSelection>) => void;
   visibleAgents: AgentInfo[];
   projects: ProjectDto[];
   onPickFolder: () => Promise<string | null>;
@@ -47,20 +42,10 @@ const ACTIONS: { id: MarketplaceAction; label: string; hint: string }[] = [
   { id: "selected", label: copy.actionSelected, hint: copy.actionSelectedHint },
 ];
 
-const RADIO_NAME = "marketplace-action";
-
 export function MarketplaceBrowser({
   inspect,
-  action,
-  onAction,
-  keys,
-  onKeysChange,
-  filter,
-  onFilterChange,
-  providers,
-  onProvidersChange,
-  scope,
-  onScopeChange,
+  selection,
+  onChange,
   visibleAgents,
   projects,
   onPickFolder,
@@ -68,15 +53,10 @@ export function MarketplaceBrowser({
   busy,
   onOverwriteConflicts,
 }: MarketplaceBrowserProps) {
+  const { action, keys, filter, providers, scope } = selection;
   const local = action !== "plugin";
   const canAgents = agentsAllowed(providers);
   const wantsAgents = inspect.plugins.some((plugin) => plugin.supported && plugin.agents.length > 0);
-
-  function toggleProvider(id: AgentId) {
-    onProvidersChange(
-      providers.includes(id) ? providers.filter((p) => p !== id) : [...providers, id],
-    );
-  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -90,11 +70,11 @@ export function MarketplaceBrowser({
           >
             <input
               type="radio"
-              name={RADIO_NAME}
+              name="marketplace-action"
               className="mt-[3px]"
               checked={action === entry.id}
               disabled={busy}
-              onChange={() => onAction(entry.id)}
+              onChange={() => onChange({ action: entry.id })}
             />
             <span className="flex flex-col">
               <span className="text-[12.5px] font-medium text-[var(--silkscreen)]">{entry.label}</span>
@@ -114,7 +94,7 @@ export function MarketplaceBrowser({
                 aria-label="Filter marketplace items"
                 placeholder="filter skills and agents…"
                 value={filter}
-                onChange={(event) => onFilterChange(event.target.value)}
+                onChange={(event) => onChange({ filter: event.target.value })}
               />
             ) : null}
             <div className="sheet-tree flex flex-col gap-2.5 pr-1">
@@ -122,135 +102,31 @@ export function MarketplaceBrowser({
                 <PluginGroup
                   key={plugin.name}
                   plugin={plugin}
-                  inspect={inspect}
-                  action={action}
+                  readOnly={action === "all"}
                   keys={keys}
                   filter={filter}
                   canAgents={canAgents}
                   busy={busy}
-                  onKeysChange={onKeysChange}
+                  onKeysChange={(next) => onChange({ keys: next })}
                 />
               ))}
             </div>
           </div>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)]">
-              {copy.targetsProviders}
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {visibleAgents.map((agent) => (
-                <label
-                  key={agent.id}
-                  className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] ${
-                    providers.includes(agent.id)
-                      ? "border-[var(--fill)] bg-[var(--well)] text-[var(--silkscreen)]"
-                      : "border-[var(--hair)] text-[var(--mute)]"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={agent.displayName}
-                    checked={providers.includes(agent.id)}
-                    disabled={busy}
-                    onChange={() => toggleProvider(agent.id)}
-                  />
-                  {agent.displayName}
-                </label>
-              ))}
-            </div>
-            {wantsAgents && !canAgents ? (
-              <p className="text-[11px] text-[var(--warn)]">{copy.agentsNeedClaude}</p>
-            ) : null}
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)]">
-              {copy.targetsScope}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <div className="inline-flex overflow-hidden rounded-md border border-[var(--hair)]" role="group" aria-label="Install scope">
-                <button
-                  type="button"
-                  className={`h-7 px-2.5 text-[12px] ${
-                    scope.kind === "global" ? "bg-[var(--fill)] text-[var(--fill-ink)]" : "text-[var(--silkscreen)]"
-                  }`}
-                  aria-pressed={scope.kind === "global"}
-                  disabled={busy}
-                  onClick={() => onScopeChange({ kind: "global" })}
-                >
-                  {copy.scopeGlobal}
-                </button>
-                <button
-                  type="button"
-                  className={`h-7 border-l border-[var(--hair)] px-2.5 text-[12px] ${
-                    scope.kind === "project" ? "bg-[var(--fill)] text-[var(--fill-ink)]" : "text-[var(--silkscreen)]"
-                  }`}
-                  aria-pressed={scope.kind === "project"}
-                  disabled={busy}
-                  onClick={() => {
-                    if (scope.kind === "project") {
-                      return;
-                    }
-                    const first = projects[0]?.path;
-                    if (first) {
-                      onScopeChange({ kind: "project", projectPath: first });
-                    } else {
-                      void onPickFolder().then((dir) => {
-                        if (dir) {
-                          onScopeChange({ kind: "project", projectPath: dir });
-                        }
-                      });
-                    }
-                  }}
-                >
-                  {copy.scopeProject}
-                </button>
-              </div>
-              {scope.kind === "project" ? (
-                <>
-                  <select
-                    className="h-7 min-w-0 flex-1 rounded-md border border-[var(--hair)] bg-[var(--well)] px-1.5 font-mono text-[11.5px] text-[var(--silkscreen)]"
-                    aria-label="Project"
-                    value={scope.projectPath}
-                    disabled={busy}
-                    onChange={(event) => onScopeChange({ kind: "project", projectPath: event.target.value })}
-                  >
-                    {projects.some((project) => project.path === scope.projectPath) ? null : (
-                      <option value={scope.projectPath}>{scope.projectPath}</option>
-                    )}
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.path}>
-                        {project.label} — {project.path}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="h-7 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 text-[11.5px] text-[var(--silkscreen)]"
-                    disabled={busy}
-                    onClick={() => {
-                      void onPickFolder().then((dir) => {
-                        if (dir) {
-                          onScopeChange({ kind: "project", projectPath: dir });
-                        }
-                      });
-                    }}
-                  >
-                    {copy.folder}
-                  </button>
-                </>
-              ) : null}
-            </div>
-            {providers.length > 0 ? (
-              <ul className="flex flex-col gap-0.5 font-mono text-[10.5px] text-[var(--mute)]">
-                {providers.map((provider) => (
-                  <li key={provider}>{previewPath(provider, scope)}</li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-
+          <ProviderChips
+            visibleAgents={visibleAgents}
+            providers={providers}
+            onChange={(next) => onChange({ providers: next })}
+            disabled={busy}
+            warning={wantsAgents && !canAgents ? copy.agentsNeedClaude : null}
+          />
+          <ScopePicker
+            scope={scope}
+            onChange={(next) => onChange({ scope: next })}
+            projects={projects}
+            providers={providers}
+            onPickFolder={onPickFolder}
+            disabled={busy}
+          />
           {result ? <OutcomeList result={result} busy={busy} onOverwriteConflicts={onOverwriteConflicts} /> : null}
         </>
       ) : null}
@@ -260,8 +136,7 @@ export function MarketplaceBrowser({
 
 type PluginGroupProps = {
   plugin: MarketplacePlugin;
-  inspect: MarketplaceInspect;
-  action: MarketplaceAction;
+  readOnly: boolean;
   keys: ReadonlySet<string>;
   filter: string;
   canAgents: boolean;
@@ -269,13 +144,10 @@ type PluginGroupProps = {
   onKeysChange: (keys: Set<string>) => void;
 };
 
-function PluginGroup({ plugin, inspect, action, keys, filter, canAgents, busy, onKeysChange }: PluginGroupProps) {
+function PluginGroup({ plugin, readOnly, keys, filter, canAgents, busy, onKeysChange }: PluginGroupProps) {
   const query = filter.trim().toLowerCase();
   const matches = (entry: MarketplaceEntry) =>
     !query || entry.name.toLowerCase().includes(query) || entry.description.toLowerCase().includes(query);
-  const skills = plugin.skills.filter(matches);
-  const agents = plugin.agents.filter(matches);
-  const readOnly = action === "all";
   return (
     <section role="group" aria-label={plugin.name} className="flex flex-col gap-1">
       <header className="flex items-baseline gap-2">
@@ -291,28 +163,24 @@ function PluginGroup({ plugin, inspect, action, keys, filter, canAgents, busy, o
           <EntryList
             title="Skills"
             kind="skill"
-            entries={skills}
+            entries={plugin.skills.filter(matches)}
             plugin={plugin}
-            inspect={inspect}
             keys={keys}
             readOnly={readOnly}
             disabled={busy}
             onKeysChange={onKeysChange}
           />
-          {plugin.agents.length > 0 ? (
-            <EntryList
-              title="Subagents"
-              tag={copy.claudeOnly}
-              kind="agent"
-              entries={agents}
-              plugin={plugin}
-              inspect={inspect}
-              keys={keys}
-              readOnly={readOnly}
-              disabled={busy || !canAgents}
-              onKeysChange={onKeysChange}
-            />
-          ) : null}
+          <EntryList
+            title="Subagents"
+            tag={copy.claudeOnly}
+            kind="agent"
+            entries={plugin.agents.filter(matches)}
+            plugin={plugin}
+            keys={keys}
+            readOnly={readOnly}
+            disabled={busy || !canAgents}
+            onKeysChange={onKeysChange}
+          />
         </>
       )}
     </section>
@@ -325,19 +193,19 @@ type EntryListProps = {
   kind: ItemKind;
   entries: MarketplaceEntry[];
   plugin: MarketplacePlugin;
-  inspect: MarketplaceInspect;
   keys: ReadonlySet<string>;
   readOnly: boolean;
   disabled: boolean;
   onKeysChange: (keys: Set<string>) => void;
 };
 
-function EntryList({ title, tag, kind, entries, plugin, inspect, keys, readOnly, disabled, onKeysChange }: EntryListProps) {
+function EntryList({ title, tag, kind, entries, plugin, keys, readOnly, disabled, onKeysChange }: EntryListProps) {
   if (entries.length === 0) {
     return null;
   }
-  const group = groupKeys(inspect, plugin.name, kind);
+  const group = groupKeys(plugin, kind);
   const allOn = group.length > 0 && group.every((key) => keys.has(key));
+  const linkClass = "underline disabled:no-underline disabled:opacity-45";
   return (
     <div className="flex flex-col gap-0.5 pl-1">
       <div className="flex items-center gap-2 text-[10.5px] tracking-[0.04em] text-[var(--mute)] uppercase">
@@ -347,18 +215,18 @@ function EntryList({ title, tag, kind, entries, plugin, inspect, keys, readOnly,
           <span className="ml-auto flex gap-1 normal-case">
             <button
               type="button"
-              className="underline disabled:no-underline disabled:opacity-45"
+              className={linkClass}
               disabled={disabled || allOn}
-              onClick={() => onKeysChange(toggleGroup(keys, inspect, plugin.name, kind, true))}
+              onClick={() => onKeysChange(toggleGroup(keys, plugin, kind, true))}
             >
               {copy.selectAll}
             </button>
             <span aria-hidden="true">·</span>
             <button
               type="button"
-              className="underline disabled:no-underline disabled:opacity-45"
+              className={linkClass}
               disabled={disabled || !group.some((key) => keys.has(key))}
-              onClick={() => onKeysChange(toggleGroup(keys, inspect, plugin.name, kind, false))}
+              onClick={() => onKeysChange(toggleGroup(keys, plugin, kind, false))}
             >
               {copy.selectNone}
             </button>
@@ -429,7 +297,7 @@ function OutcomeList({
       {rows.length > 0 ? (
         <ul className="flex flex-col gap-0.5 font-mono text-[11px]">
           {rows.map((outcome) => (
-            <li key={`${outcome.provider}:${outcome.kind}:${outcome.name}:${outcome.status}`} className="flex gap-2">
+            <li key={`${outcome.provider}:${entryKey(outcome.pluginName, outcome.kind, outcome.path)}`} className="flex gap-2">
               <span className={outcomeTone(outcome)}>{outcomeLabel(outcome)}</span>
               <span className="text-[var(--silkscreen)]">
                 {outcome.name} · {outcome.provider}

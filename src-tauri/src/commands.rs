@@ -3,11 +3,11 @@ use std::sync::Arc;
 use crate::adapter::AgentAdapter;
 use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, InstallItemsRequest, InstallItemsResultDto,
-    ItemOutcomeDto, ItemOutcomeStatus, ItemStatusDto, MarketplaceInspectDto, ProjectDto,
-    ProviderLimitsDto, UpdateItemMode, UsageSummaryDto, UsageSummaryInput,
+    ItemStatusDto, MarketplaceInspectDto, ProjectDto, ProviderLimitsDto, UpdateItemMode,
+    UsageSummaryDto, UsageSummaryInput,
 };
 use crate::flags::FeatureFlags;
-use crate::item_install::{ItemService, ResolvedTarget};
+use crate::item_install::ItemService;
 use crate::settings::{AppSettings, ProviderDiagnose};
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -82,43 +82,20 @@ pub async fn install_items(
     state: tauri::State<'_, AppState>,
 ) -> Result<InstallItemsResultDto, AdapterError> {
     let items = state.items()?;
-    let adapters: Vec<(crate::dto::ItemTarget, Arc<dyn AgentAdapter>)> = request
+    let adapters: Vec<(AgentId, Arc<dyn AgentAdapter>)> = request
         .targets
         .iter()
-        .map(|target| (target.clone(), state.adapter(target.provider)))
+        .map(|target| (target.provider, state.adapter(target.provider)))
         .collect();
     blocking("item install", move || {
-        let mut resolved = Vec::new();
-        let mut unresolved: Vec<ItemOutcomeDto> = Vec::new();
-        for (target, adapter) in adapters {
-            match adapter.item_roots(&target.scope) {
-                Ok(roots) => resolved.push(ResolvedTarget {
-                    provider: target.provider,
-                    scope: target.scope,
-                    roots,
-                }),
-                Err(error) => {
-                    for item in &request.items {
-                        unresolved.push(ItemOutcomeDto {
-                            provider: target.provider,
-                            kind: item.kind,
-                            name: item
-                                .path
-                                .rsplit(['/', '\\'])
-                                .next()
-                                .unwrap_or("")
-                                .to_string(),
-                            target_path: String::new(),
-                            status: ItemOutcomeStatus::Failed,
-                            reason: Some(error.message.clone()),
-                        });
-                    }
-                }
-            }
-        }
-        let mut result = items.install_items(request, resolved)?;
-        result.outcomes.extend(unresolved);
-        Ok(result)
+        let resolve = |target: &crate::dto::ItemTarget| {
+            adapters
+                .iter()
+                .find(|(provider, _)| *provider == target.provider)
+                .ok_or_else(|| AdapterError::message("unknown provider"))
+                .and_then(|(_, adapter)| adapter.item_roots(&target.scope))
+        };
+        items.install_items(request, &resolve)
     })
     .await
 }

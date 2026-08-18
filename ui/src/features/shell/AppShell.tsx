@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { AgentBanner } from "@/features/agents/AgentBanner";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import { LazyInstallSheet } from "@/features/catalog/LazyInstallSheet";
+import { installOutcomeClean } from "$lib/itemOutcomes";
 import { ScopeBar } from "@/features/scope/ScopeBar";
 import {
   SCREEN_PATH,
@@ -257,8 +258,7 @@ export function AppShell() {
       {installOpen ? (
         <LazyInstallSheet
           agentName={currentAgent.displayName}
-          busy={currentTab.inFlight}
-          itemsBusy={installBusy}
+          busy={currentTab.inFlight || installBusy}
           error={installError}
           installFolder={currentAgent.installFolder}
           visibleAgents={visibleAgents}
@@ -278,7 +278,7 @@ export function AppShell() {
           }}
           onInstallItems={async (request) => {
             const result = await installItems(request);
-            if (result?.outcomes.every((outcome) => outcome.status !== "conflict" && outcome.status !== "failed")) {
+            if (result && installOutcomeClean(result)) {
               goScreen("skills");
             }
             return result;

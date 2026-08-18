@@ -2,11 +2,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::adapter::AgentAdapter;
+use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::cli_locate::agent_info;
-use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ItemRoots, ItemScope, PluginDto, SkillDto,
-};
+use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ItemScope, PluginDto, SkillDto};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{cursor_root, normalize_skill_path};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};

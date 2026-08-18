@@ -1,12 +1,10 @@
 import { keepPreviousData, useQueries, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import * as api from "$lib/api";
-import type { ItemStatusSets } from "$lib/itemStatus";
+import { ITEM_STATUS_KEY, type ItemStatusSets } from "$lib/itemStatus";
 import type { AgentId, ItemStatus, UpdateItemMode } from "$lib/types";
 
 const ITEM_STATUS_STALE_MS = 5 * 60_000;
-
-export const ITEM_STATUS_KEY = "item-status";
 
 /**
  * Managed-item statuses for a provider: always the global set, plus the project set when a
@@ -28,16 +26,13 @@ export function useItemStatus(provider: AgentId, projectPath: string | null) {
       retry: false,
     })),
   });
-  const sets: ItemStatusSets = {
-    global: queries[0]?.data ?? [],
-    project: queries[1]?.data ?? [],
-  };
-  const fetching = queries.some((query) => query.isFetching);
-
-  const invalidate = useCallback(
-    () => client.invalidateQueries({ queryKey: [ITEM_STATUS_KEY, provider] }),
-    [client, provider],
+  const globalData = queries[0]?.data;
+  const projectData = queries[1]?.data;
+  const sets: ItemStatusSets = useMemo(
+    () => ({ global: globalData ?? [], project: projectData ?? [] }),
+    [globalData, projectData],
   );
+  const fetching = queries.some((query) => query.isFetching);
 
   const refresh = useCallback(async () => {
     forceRef.current = true;
@@ -48,7 +43,7 @@ export function useItemStatus(provider: AgentId, projectPath: string | null) {
     }
   }, [client, provider]);
 
-  return { sets, fetching, refresh, invalidate };
+  return { sets, fetching, refresh };
 }
 
 /** Update / dismiss / remove one managed item, then refresh statuses and the provider's tab. */

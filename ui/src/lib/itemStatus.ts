@@ -4,6 +4,9 @@ import type { ItemStatus, SkillDto } from "./types";
 
 export type ItemStatusSets = { global: ItemStatus[]; project: ItemStatus[] };
 
+/** TanStack Query key prefix for managed-item statuses: `[ITEM_STATUS_KEY, provider, path]`. */
+export const ITEM_STATUS_KEY = "item-status";
+
 /** The managed-item record behind a listed skill, if on-n-off installed it. */
 export function statusForSkill(skill: SkillDto, sets: ItemStatusSets): ItemStatus | undefined {
   if (skill.pluginId) {

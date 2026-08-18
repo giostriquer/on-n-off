@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillsRoute } from "./skills";
 import type { AgentId, ItemStatus } from "$lib/types";
@@ -102,7 +102,7 @@ describe("SkillsRoute managed items", () => {
     await waitFor(() => expect(api.updateItem).toHaveBeenCalledWith("claude:skill:/x/tdd", "overwrite"));
 
     fireEvent.click(screen.getByRole("button", { name: "Remove reviewer" }));
-    fireEvent.click(screen.getByRole("alertdialog").querySelector("footer button:last-child") as HTMLElement);
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(api.removeItem).toHaveBeenCalledWith("claude:agent:/x/reviewer.md"));
   });
 
@@ -114,9 +114,12 @@ describe("SkillsRoute managed items", () => {
     await waitFor(() => expect(api.itemUpdateStatus).toHaveBeenLastCalledWith("claude", null, true));
   });
 
-  it("hides the Subagents section for other providers", async () => {
+  it("hides the Subagents section for other providers even when agent rows exist", async () => {
     session.provider = "codex";
-    api.itemUpdateStatus.mockResolvedValue([status({ provider: "codex" })]);
+    api.itemUpdateStatus.mockResolvedValue([
+      status({ provider: "codex" }),
+      status({ id: "codex:agent:x", provider: "codex", kind: "agent", name: "reviewer", displayName: "reviewer", upstream: { state: "current" } }),
+    ]);
     renderRoute();
     await screen.findByText("update available → v1.3.0");
     expect(screen.queryByRole("region", { name: "Subagents" })).toBeNull();

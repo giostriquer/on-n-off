@@ -1,26 +1,21 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { copy } from "$lib/copy";
 import { displayError, parseInvokeError } from "$lib/error";
 import type { GithubRepo } from "$lib/installSource";
-import {
-  agentsAllowed,
-  allKeys,
-  installOutcomeClean,
-  selectedItems,
-  summarizeOutcomes,
-  targetsFor,
-  type MarketplaceAction,
-} from "$lib/marketplaceSelection";
+import { summarizeOutcomes } from "$lib/itemOutcomes";
+import { ITEM_STATUS_KEY } from "$lib/itemStatus";
+import { agentsAllowed, allKeys, entryKey, selectedItems, targetsFor } from "$lib/marketplaceSelection";
 import type {
   AgentId,
   AgentInfo,
   InstallItemsRequest,
   InstallItemsResult,
   ItemPick,
-  ItemScope,
   ProjectDto,
 } from "$lib/types";
-import { MarketplaceBrowser } from "./MarketplaceBrowser";
+import { MarketplaceBrowser, type MarketplaceSelection } from "./MarketplaceBrowser";
+import { SheetError, SheetFooter } from "./SheetChrome";
 import { useMarketplaceInspect } from "./useMarketplaceInspect";
 
 export type MarketplaceInstallProps = {
@@ -28,10 +23,9 @@ export type MarketplaceInstallProps = {
   agentName: string;
   hint: string;
   busy: boolean;
-  itemsBusy: boolean;
   error: string | null;
   visibleAgents: AgentInfo[];
-  currentAgentId?: AgentId;
+  currentAgentId: AgentId;
   projects: ProjectDto[];
   currentScopePath: string | null;
   onCancel: () => void;
@@ -42,14 +36,13 @@ export type MarketplaceInstallProps = {
 
 /**
  * The GitHub branch of the Install sheet: reads the marketplace, offers the three actions, and
- * owns the selection, targets, result, and footer. Lazy-loaded so the entry chunk stays small.
+ * owns the selection, targets, result, and footer.
  */
 export function MarketplaceInstall({
   repo,
   agentName,
   hint,
   busy,
-  itemsBusy,
   error,
   visibleAgents,
   currentAgentId,
@@ -62,31 +55,38 @@ export function MarketplaceInstall({
 }: MarketplaceInstallProps) {
   const inspectQuery = useMarketplaceInspect(repo);
   const inspect = inspectQuery.data?.isMarketplace ? inspectQuery.data : null;
+  const queryClient = useQueryClient();
 
-  const [action, setAction] = useState<MarketplaceAction>("plugin");
-  const [keys, setKeys] = useState<Set<string>>(() => new Set());
-  const [filter, setFilter] = useState("");
-  const [providers, setProviders] = useState<AgentId[]>(() => (currentAgentId ? [currentAgentId] : []));
-  const [scope, setScope] = useState<ItemScope>(() =>
-    currentScopePath ? { kind: "project", projectPath: currentScopePath } : { kind: "global" },
-  );
+  const [selection, setSelection] = useState<MarketplaceSelection>(() => ({
+    action: "plugin",
+    keys: new Set(),
+    filter: "",
+    providers: [currentAgentId],
+    scope: currentScopePath ? { kind: "project", projectPath: currentScopePath } : { kind: "global" },
+  }));
   const [result, setResult] = useState<InstallItemsResult | null>(null);
   const [itemsError, setItemsError] = useState<string | null>(null);
 
-  const local = inspect !== null && action !== "plugin";
-  const canAgents = agentsAllowed(providers);
+  const local = inspect !== null && selection.action !== "plugin";
   const picks: ItemPick[] = useMemo(() => {
     if (!inspect || !local) {
       return [];
     }
-    const effective = action === "all" ? new Set(allKeys(inspect)) : keys;
+    const effective = selection.action === "all" ? new Set(allKeys(inspect)) : selection.keys;
+    const canAgents = agentsAllowed(selection.providers);
     return selectedItems(inspect, effective).filter((pick) => pick.kind !== "agent" || canAgents);
-  }, [action, canAgents, inspect, keys, local]);
-  const anyBusy = busy || itemsBusy;
-  const canSubmitItems = local && picks.length > 0 && providers.length > 0 && !anyBusy;
+  }, [inspect, local, selection.action, selection.keys, selection.providers]);
+  const canSubmitItems = local && picks.length > 0 && selection.providers.length > 0 && !busy;
+
+  function patchSelection(patch: Partial<MarketplaceSelection>) {
+    setSelection((prev) => ({ ...prev, ...patch }));
+    if (patch.action !== undefined) {
+      setResult(null);
+    }
+  }
 
   async function submitItems(items: ItemPick[], overwriteUnmanaged: boolean) {
-    if (!inspect || items.length === 0 || anyBusy) {
+    if (!inspect || items.length === 0 || busy) {
       return;
     }
     setItemsError(null);
@@ -94,13 +94,17 @@ export function MarketplaceInstall({
       source: { owner: repo.owner, repo: repo.repo, ref: repo.ref ?? "HEAD" },
       commitSha: inspect.commitSha,
       items,
-      targets: targetsFor(providers, scope),
+      targets: targetsFor(selection.providers, selection.scope),
       overwriteUnmanaged,
     };
     try {
       const next = await onInstallItems(request);
       if (next) {
         setResult(next);
+        // Newly installed items must show their badges at once, not after the status staleTime.
+        for (const provider of summarizeOutcomes(next).touchedProviders) {
+          void queryClient.invalidateQueries({ queryKey: [ITEM_STATUS_KEY, provider] });
+        }
       }
     } catch (caught) {
       setItemsError(displayError(parseInvokeError(caught), agentName));
@@ -111,9 +115,11 @@ export function MarketplaceInstall({
     if (!result) {
       return;
     }
-    const wanted = new Set(summarizeOutcomes(result).conflicts.map((outcome) => `${outcome.kind}:${outcome.name}`));
+    const wanted = new Set(
+      summarizeOutcomes(result).conflicts.map((outcome) => entryKey(outcome.pluginName, outcome.kind, outcome.path)),
+    );
     void submitItems(
-      picks.filter((pick) => wanted.has(`${pick.kind}:${itemName(pick)}`)),
+      picks.filter((pick) => wanted.has(entryKey(pick.pluginName, pick.kind, pick.path))),
       true,
     );
   }
@@ -134,16 +140,7 @@ export function MarketplaceInstall({
     return null;
   })();
 
-  const submitLabel = local
-    ? itemsBusy
-      ? copy.installing
-      : copy.installItemsButton(picks.length)
-    : busy
-      ? copy.installing
-      : copy.install;
-  const submitDisabled = local ? !canSubmitItems : anyBusy;
-  const done = result !== null && installOutcomeClean(result);
-  const shownError = itemsError ?? error;
+  const submitLabel = busy ? copy.installing : local ? copy.installItemsButton(picks.length) : copy.install;
 
   return (
     <>
@@ -159,64 +156,29 @@ export function MarketplaceInstall({
       {inspect ? (
         <MarketplaceBrowser
           inspect={inspect}
-          action={action}
-          onAction={(next) => {
-            setAction(next);
-            setResult(null);
-          }}
-          keys={keys}
-          onKeysChange={setKeys}
-          filter={filter}
-          onFilterChange={setFilter}
-          providers={providers}
-          onProvidersChange={setProviders}
-          scope={scope}
-          onScopeChange={setScope}
+          selection={selection}
+          onChange={patchSelection}
           visibleAgents={visibleAgents}
           projects={projects}
           onPickFolder={onPickFolder}
           result={result}
-          busy={anyBusy}
+          busy={busy}
           onOverwriteConflicts={overwriteConflicts}
         />
       ) : null}
-      {shownError ? (
-        <p
-          className="border-l-[3px] border-[var(--trip)] bg-[var(--well)] px-2.5 py-2 font-mono text-xs text-[var(--silkscreen)]"
-          role="alert"
-        >
-          {shownError}
-        </p>
-      ) : null}
-      <footer className="mt-1 flex justify-end gap-2">
-        <button
-          type="button"
-          className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)]"
-          onClick={onCancel}
-        >
-          {done ? "Close" : copy.cancel}
-        </button>
-        <button
-          type="button"
-          className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-4 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
-          disabled={submitDisabled}
-          onClick={() => {
-            if (local) {
-              void submitItems(picks, false);
-            } else {
-              onInstallPlugin();
-            }
-          }}
-        >
-          {submitLabel}
-        </button>
-      </footer>
+      <SheetError message={itemsError ?? error} />
+      <SheetFooter
+        submitLabel={submitLabel}
+        submitDisabled={local ? !canSubmitItems : busy}
+        onCancel={onCancel}
+        onSubmit={() => {
+          if (local) {
+            void submitItems(picks, false);
+          } else {
+            onInstallPlugin();
+          }
+        }}
+      />
     </>
   );
-}
-
-/** Folder or file stem the backend will use as the item name — mirrors `item_name` in Rust. */
-function itemName(pick: ItemPick): string {
-  const last = pick.path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() ?? "";
-  return pick.kind === "agent" ? last.replace(/\.md$/i, "") : last;
 }

@@ -34,6 +34,7 @@ import {
 } from "$lib/session";
 import { prependTrip, type TripEntry } from "$lib/tripLog";
 import { applyTheme, readTheme, type Theme } from "$lib/theme";
+import { installOutcomeClean, summarizeOutcomes } from "$lib/itemOutcomes";
 import type {
   AgentId,
   AgentInfo,
@@ -706,31 +707,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setInstallBusy(true);
       try {
         const result = await api.installItems(request);
-        const touched = new Set<AgentId>();
-        let installed = 0;
-        let unresolved = 0;
-        for (const outcome of result.outcomes) {
-          if (outcome.status === "installed" || outcome.status === "replaced") {
-            installed += 1;
-            touched.add(outcome.provider);
-          } else if (outcome.status === "conflict" || outcome.status === "failed") {
-            unresolved += 1;
-          }
-        }
+        const summary = summarizeOutcomes(result);
         // loadTab queues a reload when a provider is mid-flight; withLock would drop it.
-        for (const provider of touched) {
+        for (const provider of summary.touchedProviders) {
           void loadTabRef.current(provider);
         }
-        if (installed > 0) {
+        if (summary.installed > 0) {
           note(
             "INST",
-            `${installed} item${installed === 1 ? "" : "s"} from ${request.source.owner}/${request.source.repo} · ${[...touched].map(agentLabel).join(", ")}`,
+            `${summary.installed} item${summary.installed === 1 ? "" : "s"} from ${request.source.owner}/${request.source.repo} · ${summary.touchedProviders.map(agentLabel).join(", ")}`,
           );
         }
-        if (unresolved > 0) {
-          note("TRIP", `${unresolved} item${unresolved === 1 ? "" : "s"} need attention (conflict or failure)`);
-        } else {
+        if (installOutcomeClean(result)) {
           setInstallOpen(false);
+        } else {
+          const pending = summary.conflicts.length + summary.failed.length;
+          note("TRIP", `${pending} item${pending === 1 ? "" : "s"} need attention (conflict or failure)`);
         }
         return result;
       } catch (error) {

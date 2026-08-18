@@ -1,15 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  agentsAllowed,
-  allKeys,
-  entryKey,
-  installOutcomeClean,
-  previewPath,
-  selectedItems,
-  summarizeOutcomes,
-  toggleGroup,
-} from "./marketplaceSelection";
-import type { InstallItemsResult, MarketplaceInspect } from "./types";
+import { agentsAllowed, allKeys, entryKey, previewPath, selectedItems, toggleGroup } from "./marketplaceSelection";
+import type { MarketplaceInspect } from "./types";
 
 const inspect: MarketplaceInspect = {
   isMarketplace: true,
@@ -65,9 +56,10 @@ describe("marketplaceSelection", () => {
 
   it("toggles a plugin group on and off without touching other groups", () => {
     const one = new Set([entryKey("gh", "skill", "skills/gamma")]);
-    const on = toggleGroup(one, inspect, "mattpocock-skills", "skill", true);
+    const matt = inspect.plugins[0];
+    const on = toggleGroup(one, matt, "skill", true);
     expect(on.size).toBe(3);
-    const off = toggleGroup(on, inspect, "mattpocock-skills", "skill", false);
+    const off = toggleGroup(on, matt, "skill", false);
     expect([...off]).toEqual([entryKey("gh", "skill", "skills/gamma")]);
   });
 
@@ -80,25 +72,5 @@ describe("marketplaceSelection", () => {
     expect(previewPath("cursor", { kind: "project", projectPath: "/home/me/app" })).toBe(
       "/home/me/app/.cursor/skills",
     );
-  });
-
-  it("summarises outcomes and knows when the sheet can close", () => {
-    const result: InstallItemsResult = {
-      commitSha: "b".repeat(40),
-      shaMoved: false,
-      outcomes: [
-        { provider: "claude", kind: "skill", name: "tdd", targetPath: "x", status: "installed", reason: null },
-        { provider: "codex", kind: "skill", name: "tdd", targetPath: "y", status: "replaced", reason: null },
-        { provider: "codex", kind: "agent", name: "reviewer", targetPath: "", status: "skipped", reason: "n/a" },
-        { provider: "claude", kind: "skill", name: "grilling", targetPath: "z", status: "conflict", reason: "exists" },
-      ],
-    };
-    const summary = summarizeOutcomes(result);
-    expect(summary.installed).toBe(2);
-    expect(summary.conflicts.map((o) => o.name)).toEqual(["grilling"]);
-    expect(summary.failed).toEqual([]);
-    expect(summary.touchedProviders).toEqual(["claude", "codex"]);
-    expect(installOutcomeClean(result)).toBe(false);
-    expect(installOutcomeClean({ ...result, outcomes: result.outcomes.slice(0, 3) })).toBe(true);
   });
 });

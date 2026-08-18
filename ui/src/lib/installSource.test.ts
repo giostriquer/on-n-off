@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidInstallInput, parseInstallSource } from "./installSource";
+import { githubRepoFromSource, isValidInstallInput, parseInstallSource } from "./installSource";
 
 const INVALID = "Use an HTTPS git URL, owner/repo, name@marketplace, or npx skills add.";
 
@@ -53,8 +53,7 @@ describe("parseInstallSource", () => {
 });
 
 describe("githubRepoFromSource", () => {
-  it("resolves shorthand and github.com urls, and nothing else", async () => {
-    const { githubRepoFromSource } = await import("./installSource");
+  it("resolves shorthand and github.com urls, and nothing else", () => {
     expect(githubRepoFromSource(parseInstallSource("mattpocock/skills"))).toEqual({
       owner: "mattpocock",
       repo: "skills",
@@ -75,6 +74,17 @@ describe("githubRepoFromSource", () => {
       repo: "tools",
       ref: undefined,
     });
+    expect(githubRepoFromSource(parseInstallSource("https://www.github.com/acme/tools/"))).toEqual({
+      owner: "acme",
+      repo: "tools",
+      ref: undefined,
+    });
+    expect(githubRepoFromSource(parseInstallSource("HTTPS://GITHUB.COM/acme/tools"))).toEqual({
+      owner: "acme",
+      repo: "tools",
+      ref: undefined,
+    });
+    expect(githubRepoFromSource(parseInstallSource("https://github.com/acme"))).toBeNull();
     expect(githubRepoFromSource(parseInstallSource("https://gitlab.com/acme/tools.git"))).toBeNull();
     expect(githubRepoFromSource(parseInstallSource("name@marketplace"))).toBeNull();
     expect(githubRepoFromSource(parseInstallSource("npx skills add acme/tools"))).toBeNull();

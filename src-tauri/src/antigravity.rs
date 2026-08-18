@@ -3,13 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::adapter::AgentAdapter;
+use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
 use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
-use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ItemRoots, ItemScope, PluginDto, SkillDto,
-};
+use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ItemScope, PluginDto, SkillDto};
 use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{

@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
-import { ItemList, ManagedItemStrip } from "@/features/catalog/ItemList";
+import { ItemList } from "@/features/catalog/ItemList";
+import { AgentCard } from "@/features/catalog/ManagedItemStrip";
 import { useItemActions, useItemStatus } from "@/features/catalog/useItemStatus";
 import { useAgentSession } from "@/features/session/SessionProvider";
 import { copy } from "$lib/copy";
@@ -75,23 +76,13 @@ export function SkillsRoute() {
           </h3>
           <div className="flex flex-col gap-1.5">
             {agents.map((status) => (
-              <article key={status.id} className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
-                <div className="flex items-start gap-3 px-3 py-[11px]">
-                  <span className="mt-2 size-2 shrink-0 rounded-full bg-[var(--live)]" aria-hidden="true" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[16px]/[1.15] font-semibold break-words">{status.displayName}</div>
-                    <div className="mt-0.5 truncate font-mono text-[11px]/[1.4] text-[var(--mute)]" title={status.targetPath}>
-                      {status.targetPath}
-                    </div>
-                  </div>
-                </div>
-                <ManagedItemStrip
-                  status={status}
-                  busy={acting}
-                  onUpdateItem={(next) => setPending({ kind: "update", status: next })}
-                  onRemoveItem={(next) => setPending({ kind: "remove", status: next })}
-                />
-              </article>
+              <AgentCard
+                key={status.id}
+                status={status}
+                busy={acting}
+                onUpdateItem={(next) => setPending({ kind: "update", status: next })}
+                onRemoveItem={(next) => setPending({ kind: "remove", status: next })}
+              />
             ))}
           </div>
         </section>

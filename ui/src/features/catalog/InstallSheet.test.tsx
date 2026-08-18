@@ -58,6 +58,8 @@ function renderSheet(overrides: Partial<Parameters<typeof InstallSheet>[0]> = {}
     <Providers>
       <InstallSheet
         agentName="Claude"
+        busy={false}
+        error={null}
         installFolder
         visibleAgents={AGENTS}
         currentAgentId="claude"
@@ -134,8 +136,26 @@ describe("InstallSheet marketplace browsing", () => {
       commitSha: "a".repeat(40),
       shaMoved: false,
       outcomes: [
-        { provider: "claude", kind: "skill", name: "tdd", targetPath: "x", status: "installed", reason: null },
-        { provider: "claude", kind: "skill", name: "grilling", targetPath: "y", status: "conflict", reason: "exists" },
+        {
+          provider: "claude",
+          kind: "skill",
+          name: "tdd",
+          pluginName: "mattpocock-skills",
+          path: "skills/engineering/tdd",
+          targetPath: "x",
+          status: "installed",
+          reason: null,
+        },
+        {
+          provider: "claude",
+          kind: "skill",
+          name: "grilling",
+          pluginName: "mattpocock-skills",
+          path: "skills/productivity/grilling",
+          targetPath: "y",
+          status: "conflict",
+          reason: "exists",
+        },
       ],
     };
     const { onInstallItems } = renderSheet();
@@ -150,6 +170,29 @@ describe("InstallSheet marketplace browsing", () => {
     const retry = onInstallItems.mock.calls[1][0];
     expect(retry.overwriteUnmanaged).toBe(true);
     expect(retry.items.map((i) => i.path)).toEqual(["skills/productivity/grilling"]);
+  });
+
+  it("carries the requested ref and the chosen scope into the request", async () => {
+    const { onInstallItems } = renderSheet({ currentScopePath: "E:/dev/app" });
+    typeSource("mattpocock/skills@v1");
+    fireEvent.click(await screen.findByRole("radio", { name: /Install selected/ }));
+    expect(api.inspectMarketplace).toHaveBeenCalledWith("mattpocock", "skills", "v1");
+    // Scope defaults to the Scope bar's project and can be switched back to Global.
+    expect(screen.getByRole("button", { name: "Project" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("E:/dev/app/.claude/skills")).toBeTruthy();
+    const tree = screen.getByRole("group", { name: "mattpocock-skills" });
+    fireEvent.click(within(tree).getByRole("checkbox", { name: /tdd/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Install 1 item/ }));
+    await waitFor(() => expect(onInstallItems).toHaveBeenCalledTimes(1));
+    const first = onInstallItems.mock.calls[0][0];
+    expect(first.source).toEqual({ owner: "mattpocock", repo: "skills", ref: "v1" });
+    expect(first.targets).toEqual([{ provider: "claude", scope: { kind: "project", projectPath: "E:/dev/app" } }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Global" }));
+    expect(screen.getByText("~/.claude/skills")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Install 1 item/ }));
+    await waitFor(() => expect(onInstallItems).toHaveBeenCalledTimes(2));
+    expect(onInstallItems.mock.calls[1][0].targets).toEqual([{ provider: "claude", scope: { kind: "global" } }]);
   });
 
   it("tells a non-marketplace repo apart from a download failure", async () => {

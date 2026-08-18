@@ -1,6 +1,13 @@
 use std::path::Path;
 
-use crate::dto::{AdapterError, AgentInfo, AgentTabDto, ItemRoots, ItemScope, ProjectDto};
+use crate::dto::{AdapterError, AgentInfo, AgentTabDto, ItemScope, ProjectDto};
+
+/// Where a provider keeps user-level skills and (Claude only) subagents for a scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemRoots {
+    pub skills: std::path::PathBuf,
+    pub agents: Option<std::path::PathBuf>,
+}
 
 pub trait AgentAdapter: Send + Sync {
     fn info(&self) -> AgentInfo;

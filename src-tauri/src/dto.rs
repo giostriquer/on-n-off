@@ -421,13 +421,6 @@ pub enum ItemScope {
     },
 }
 
-/// Where a provider keeps user-level skills and (Claude only) subagents for a scope.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ItemRoots {
-    pub skills: std::path::PathBuf,
-    pub agents: Option<std::path::PathBuf>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceEntryDto {
@@ -515,6 +508,9 @@ pub struct ItemOutcomeDto {
     pub provider: AgentId,
     pub kind: ItemKind,
     pub name: String,
+    /// The pick this outcome answers, so the UI can map conflicts back without guessing names.
+    pub plugin_name: String,
+    pub path: String,
     pub target_path: String,
     pub status: ItemOutcomeStatus,
     pub reason: Option<String>,
