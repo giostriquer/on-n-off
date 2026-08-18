@@ -336,6 +336,7 @@ pub fn agent_info(id: AgentId, binary: &str) -> AgentInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::cli_stub::CliStub;
     use crate::paths::scratch_dir;
 

@@ -215,20 +215,20 @@ mod tests {
             .run(&[])
             .expect("path-echo");
         let printed_dirs: Vec<PathBuf> = std::env::split_paths(printed.trim()).collect();
-        for dir in crate::cli_locate::cli_search_path() {
+        let search_path = crate::cli_locate::cli_search_path();
+        for dir in search_path {
             assert!(
                 printed_dirs.contains(dir),
                 "child PATH lacks {dir:?}: {printed}"
             );
         }
+        // The well-known tier (not just the process PATH) must reach the child. Compared by
+        // suffix because other tests re-point ON_N_OFF_HOME while this process runs.
         assert!(
-            printed_dirs.contains(
-                &crate::paths::user_home()
-                    .unwrap()
-                    .join(".local")
-                    .join("bin")
-            ),
-            "well-known dir missing from child PATH: {printed}"
+            search_path
+                .iter()
+                .any(|dir| dir.ends_with(std::path::Path::new(".local").join("bin"))),
+            "well-known dirs missing from the search path: {search_path:?}"
         );
     }
 
