@@ -269,7 +269,7 @@ impl ClaudeAdapter {
 
 impl AgentAdapter for ClaudeAdapter {
     fn info(&self) -> AgentInfo {
-        agent_info(AgentId::Claude, "claude")
+        agent_info(AgentId::Claude)
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {

@@ -1,11 +1,9 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
 use crate::cli_locate::agent_info;
-use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{cursor_root, normalize_skill_path};
@@ -13,6 +11,11 @@ use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
 
 const SOURCE_LOCAL: &str = "local";
+
+/// Cursor keeps MCP on/off in its own state (the IDE's settings; the CLI's per-project
+/// `~/.cursor/projects/<slug>/mcp-{approvals,disabled}.json`) and does not read a `disabled`
+/// key from `mcp.json`, so on-n-off lists Cursor's servers but never switches them.
+pub const MCP_READ_ONLY: &str = "Cursor manages MCP servers itself: switch them in the Cursor app or with `agent mcp enable <name>` / `agent mcp disable <name>`; on-n-off only lists them.";
 
 #[derive(Debug, Clone)]
 struct DiscoveredPlugin {
@@ -22,29 +25,21 @@ struct DiscoveredPlugin {
     path: PathBuf,
 }
 
+/// Read-only view of `~/.cursor`: plugins, skills, and MCP servers are listed, never written.
 pub struct CursorAdapter {
     root: Option<PathBuf>,
-    io: ConfigIo,
-    write: Mutex<()>,
 }
 
 impl CursorAdapter {
     pub fn new() -> Self {
         Self {
             root: cursor_root().ok(),
-            io: ConfigIo::production(),
-            write: Mutex::new(()),
         }
     }
 
     #[cfg(test)]
     pub fn at(root: PathBuf) -> Self {
-        let io = ConfigIo::at(root.join("_backups"));
-        Self {
-            root: Some(root),
-            io,
-            write: Mutex::new(()),
-        }
+        Self { root: Some(root) }
     }
 
     fn root(&self) -> Result<&Path, AdapterError> {
@@ -65,6 +60,14 @@ impl CursorAdapter {
             return Vec::new();
         };
         parse_antigravity_json(&text)
+            .into_iter()
+            .map(|mut server| {
+                // Every configured server is live as far as Cursor's config file can tell.
+                server.enabled = true;
+                server.togglable = false;
+                server
+            })
+            .collect()
     }
 
     fn discover_plugins(&self) -> Vec<DiscoveredPlugin> {
@@ -103,7 +106,7 @@ impl CursorAdapter {
 
 impl AgentAdapter for CursorAdapter {
     fn info(&self) -> AgentInfo {
-        let mut info = agent_info(AgentId::Cursor, "cursor-agent");
+        let mut info = agent_info(AgentId::Cursor);
         info.install_git = false;
         info.install_folder = false;
         info.plugin_toggle = false;
@@ -156,16 +159,8 @@ impl AgentAdapter for CursorAdapter {
         Ok(tab)
     }
 
-    fn set_mcp_enabled(&self, mcp_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_mcp_togglable(mcp_id)?;
-        let path = self.mcp_path()?;
-        self.io
-            .patch_antigravity_mcp_enabled(AgentId::Cursor, &path, mcp_id, enabled)?;
-        self.list_tab()
+    fn set_mcp_enabled(&self, _mcp_id: &str, _enabled: bool) -> Result<AgentTabDto, AdapterError> {
+        Err(AdapterError::message(MCP_READ_ONLY))
     }
 }
 
@@ -204,20 +199,54 @@ fn read_plugin_name(manifest: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Marker Cursor writes once a marketplace checkout finished downloading.
+const CACHE_COMPLETE: &str = ".cache-complete";
+
+/// The directory holding a plugin's files: `dir` itself when it carries a manifest (local
+/// plugins, symlinked repos), else the best of its per-version checkouts — Cursor stores
+/// marketplace installs as `cache/<marketplace>/<plugin>/<commit>/` and keeps old commits.
+fn plugin_install_dir(dir: &Path) -> Option<(PathBuf, PathBuf)> {
+    if let Some(manifest) = plugin_manifest(dir) {
+        return Some((dir.to_path_buf(), manifest));
+    }
+    let checkouts = fs::read_dir(dir).ok()?;
+    checkouts
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter_map(|path| plugin_manifest(&path).map(|manifest| (path, manifest)))
+        .max_by_key(|(path, manifest)| checkout_rank(path, manifest))
+}
+
+/// Complete checkouts beat partial ones, then the highest manifest version, then the most
+/// recently written manifest.
+fn checkout_rank(checkout: &Path, manifest: &Path) -> (bool, Vec<u64>, std::time::SystemTime) {
+    let complete = checkout.join(CACHE_COMPLETE).is_file();
+    let version = crate::plugin_meta::installed_hint(checkout, None).version;
+    let version_key = version
+        .split(['.', '-', '+'])
+        .map(|part| part.parse::<u64>().unwrap_or(0))
+        .collect();
+    let written = fs::metadata(manifest)
+        .and_then(|meta| meta.modified())
+        .unwrap_or(std::time::UNIX_EPOCH);
+    (complete, version_key, written)
+}
+
 fn scan_plugin_children(parent: &Path, source: &str) -> Vec<DiscoveredPlugin> {
     let Ok(entries) = fs::read_dir(parent) else {
         return Vec::new();
     };
     let mut out = Vec::new();
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+        let plugin_dir = entry.path();
+        if !plugin_dir.is_dir() {
             continue;
         }
-        let Some(manifest) = plugin_manifest(&path) else {
+        let Some((path, manifest)) = plugin_install_dir(&plugin_dir) else {
             continue;
         };
-        let folder = path
+        let folder = plugin_dir
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("plugin")
@@ -338,45 +367,68 @@ mod tests {
         assert!(!tab.user_skills[0].togglable);
         assert!(!tab.user_skills.iter().any(|skill| skill.name == "builtin"));
         assert_eq!(tab.mcp_servers.len(), 2);
-        let docs = tab
-            .mcp_servers
-            .iter()
-            .find(|server| server.id == "docs")
-            .unwrap();
-        assert!(docs.enabled);
-        assert!(docs.togglable);
-        let github = tab
-            .mcp_servers
-            .iter()
-            .find(|server| server.id == "github")
-            .unwrap();
-        assert!(!github.enabled);
+        // Cursor keeps on/off in its own state and never reads a `disabled` key, so every
+        // configured server is listed as on and none can be switched from here.
+        for server in &tab.mcp_servers {
+            assert!(server.enabled, "{} should read as configured/on", server.id);
+            assert!(!server.togglable, "{} must not be togglable", server.id);
+        }
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn mcp_toggle_patches_disabled_and_backs_up() {
+    fn versioned_cache_lists_the_newest_complete_version_once() {
+        // Cursor installs marketplace plugins as cache/<marketplace>/<plugin>/<commit>/, keeping
+        // older checkouts around and marking finished downloads with `.cache-complete`.
+        let root = crate::paths::scratch_dir("on-n-off-cursor-versioned");
+        let plugin = root
+            .join("plugins")
+            .join("cache")
+            .join("workshop")
+            .join("workbench");
+        for (sha, version, skill, complete) in [
+            ("1111111", "0.20.0", "old-skill", true),
+            ("2222222", "0.22.1", "review", true),
+            ("3333333", "0.23.0", "half-downloaded", false),
+        ] {
+            let checkout = plugin.join(sha);
+            let manifest_dir = checkout.join(".cursor-plugin");
+            fs::create_dir_all(&manifest_dir).unwrap();
+            fs::write(
+                manifest_dir.join("plugin.json"),
+                format!(r#"{{"name":"workbench","version":"{version}"}}"#),
+            )
+            .unwrap();
+            write_skill(&checkout.join("skills"), skill, "From plugin");
+            if complete {
+                fs::write(checkout.join(".cache-complete"), "").unwrap();
+            }
+        }
+        let tab = CursorAdapter::at(root.clone()).list_tab().expect("list");
+        assert_eq!(tab.plugins.len(), 1, "{:?}", tab.plugins);
+        let workbench = &tab.plugins[0];
+        assert_eq!(workbench.id, "workbench@workshop");
+        assert_eq!(workbench.version, "0.22.1");
+        assert_eq!(workbench.skills.len(), 1);
+        assert_eq!(workbench.skills[0].name, "review");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn mcp_toggle_is_refused_and_leaves_the_file_alone() {
         let root = crate::paths::scratch_dir("on-n-off-cursor-mcp-toggle");
-        fs::write(
-            root.join("mcp.json"),
-            r#"{"mcpServers":{"github":{"command":"npx","args":["-y","gh"]}}}"#,
-        )
-        .unwrap();
+        let original = r#"{"mcpServers":{"github":{"command":"npx","args":["-y","gh"]}}}"#;
+        fs::write(root.join("mcp.json"), original).unwrap();
         let adapter = CursorAdapter::at(root.clone());
-        let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
-        assert!(!tab.mcp_servers[0].enabled);
-        let text = fs::read_to_string(root.join("mcp.json")).unwrap();
-        assert!(text.contains("\"disabled\": true") || text.contains("\"disabled\":true"));
-        let backups = root.join("_backups").join("cursor");
-        let count = fs::read_dir(&backups)
-            .map(|entries| entries.count())
-            .unwrap_or(0);
-        assert!(count >= 1, "expected a cursor mcp.json backup");
         let err = adapter
-            .set_mcp_enabled("missing", false)
-            .expect_err("missing");
+            .set_mcp_enabled("github", false)
+            .expect_err("Cursor MCP servers are read-only here");
+        assert!(err.message.contains("Cursor"), "{}", err.message);
+        assert!(err.message.contains("agent mcp"), "{}", err.message);
+        assert_eq!(fs::read_to_string(root.join("mcp.json")).unwrap(), original);
         assert!(
-            err.message.contains("mcp server not found") || err.message.contains("not togglable")
+            !root.join("_backups").exists(),
+            "no backup for a refused write"
         );
         let _ = fs::remove_dir_all(root);
     }

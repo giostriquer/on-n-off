@@ -53,6 +53,15 @@ const agents: AgentInfo[] = [
     installFolder: false,
     pluginToggle: false,
   },
+  {
+    id: "cursor",
+    displayName: "Cursor",
+    cliOk: false,
+    cliError: null,
+    installGit: false,
+    installFolder: false,
+    pluginToggle: false,
+  },
 ];
 
 const updaterClient: UpdaterClient = {
@@ -85,5 +94,25 @@ describe("Settings", () => {
     expect(screen.getByRole("button", { name: /Show Claude in agent tabs/i })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /Show Antigravity in agent tabs/i }));
     expect(onToggleVisible).toHaveBeenCalledWith("antigravity", true);
+  });
+
+  it("uses Cursor's `agent` command as the binary placeholder", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <UpdateProvider initialProviderReady automaticUpdates client={updaterClient}>
+          <Settings
+            agents={agents}
+            settings={{ hiddenAgents: [], binaryPaths: {}, automaticUpdates: true }}
+            onToggleVisible={() => undefined}
+            onSaveBinary={() => undefined}
+            onAutomaticUpdatesChange={() => undefined}
+          />
+        </UpdateProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByPlaceholderText("agent")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("cursor-agent")).toBeNull();
   });
 });
