@@ -32,6 +32,25 @@ adapter assumes today (change the adapter and this file together).
   `~/.on-n-off/backups/<provider>/items/`. Update checks call
   `api.github.com/repos/{o}/{r}/commits/{ref}` (sha only) and re-download the tarball only when
   the sha moved. Public repositories only.
+- Item dependencies (`item_install/deps.rs`): skills name the sibling skills they drive only in
+  prose — neither `SKILL.md` nor `plugin.json` has a dependency field — so `inspect_marketplace`
+  scans every text file of each entry for the names (frontmatter name and folder/file name) of
+  the other entries in the marketplace and reports `dependsOn` per entry with a confidence:
+  **high** when the name is used like a command or identifier (`` `/N` ``, `` `N` ``, `/N` in
+  prose, `Skill(N)`, a quoted `"N"` shortly after the word "skill", `skill: N`, `--skill N`, or a
+  path into the sibling's folder such as `skills/…/N/` or `../N/`); **medium** when it appears in
+  a phrase (`N skill`, `the N`, `run N`, `use N`). Names shorter than three characters are
+  ignored, self-mentions are dropped, a same-plugin sibling wins over a same-named entry in
+  another plugin, and the highest confidence wins per target. The picker auto-adds high
+  confidence dependencies (transitively) when an entry is checked and only hints at medium ones;
+  nothing is forced. Each entry also reports `externalRefs` (`../…` and foreign `skills/…` paths
+  the local copy will not contain) and `usesPluginRoot` (`CLAUDE_PLUGIN_ROOT` appears), and each
+  plugin reports `extras` (`commands`, `hooks`, `mcp` present in the plugin folder or manifest);
+  the picker shows these as an advisory pointing at Install plugin. High confidence edges are
+  recorded per installed item as `source.dependsOn` (`plugin/kind/path`) in
+  `installed-items.json`; older files without the field still load. This is a heuristic tuned
+  on real marketplaces, not a contract: expect false positives on generic names and misses on
+  unusual phrasing.
 
 ## Claude (Claude Code)
 
