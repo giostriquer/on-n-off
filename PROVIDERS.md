@@ -31,7 +31,11 @@ adapter assumes today (change the adapter and this file together).
   comparison. Replacing or removing an item first copies it to
   `~/.on-n-off/backups/<provider>/items/`. Update checks call
   `api.github.com/repos/{o}/{r}/commits/{ref}` (sha only) and re-download the tarball only when
-  the sha moved. Public repositories only.
+  the sha moved. Public repositories only. `item_update_status` also returns each item's
+  `source` (owner/repo/ref), `pluginName`, `upstreamPath`, and an `upstreamUrl` pointing at the
+  installed commit on github.com; the Skills screen shows managed rows as `from owner/repo`
+  with that link, opened through the `open_url` command (github.com HTTPS links only, via
+  `tauri-plugin-opener`).
 - Item dependencies (`item_install/deps.rs`): skills name the sibling skills they drive only in
   prose — neither `SKILL.md` nor `plugin.json` has a dependency field — so `inspect_marketplace`
   scans every text file of each entry for the names (frontmatter name and folder/file name) of

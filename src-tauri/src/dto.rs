@@ -581,6 +581,13 @@ pub struct ItemStatusDto {
     pub modified: bool,
     pub missing: bool,
     pub upstream: ItemUpstream,
+    /// Where the item was copied from, so the UI can say so and link to it.
+    pub source: ItemSourceDto,
+    pub plugin_name: String,
+    /// Skill folder or agent file inside the repository, `/`-separated.
+    pub upstream_path: String,
+    /// GitHub page of the item at the installed commit.
+    pub upstream_url: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

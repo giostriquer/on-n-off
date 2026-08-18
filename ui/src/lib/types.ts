@@ -194,6 +194,12 @@ export type ItemStatus = {
   modified: boolean;
   missing: boolean;
   upstream: ItemUpstream;
+  /** Where the item was copied from, so the UI can say so and link to it. */
+  source: ItemSource;
+  pluginName: string;
+  upstreamPath: string;
+  /** GitHub page of the item at the installed commit. */
+  upstreamUrl: string;
 };
 
 export type UpdateItemMode = "overwrite" | "dismiss";

@@ -558,6 +558,14 @@ impl ItemService {
             modified,
             missing,
             upstream,
+            source: ItemSourceDto {
+                owner: item.source.owner.clone(),
+                repo: item.source.repo.clone(),
+                git_ref: item.source.git_ref.clone(),
+            },
+            plugin_name: item.source.plugin_name.clone(),
+            upstream_path: item.source.upstream_path.clone(),
+            upstream_url: upstream_url(item),
         }
     }
 
@@ -626,6 +634,23 @@ fn failure(target: &ItemTarget, pick: &ItemPick, reason: String) -> ItemOutcomeD
         status: ItemOutcomeStatus::Failed,
         reason: Some(reason),
     }
+}
+
+/// GitHub page of an installed item at the commit it was copied from.
+pub fn upstream_url(item: &InstalledItem) -> String {
+    let view = match item.kind {
+        ItemKind::Skill => "tree",
+        ItemKind::Agent => "blob",
+    };
+    format!(
+        "https://github.com/{}/{}/{view}/{}/{}",
+        item.source.owner, item.source.repo, item.installed.commit_sha, item.source.upstream_path
+    )
+}
+
+/// The only links the app opens in the browser: pages on github.com over HTTPS.
+pub fn is_openable_url(url: &str) -> bool {
+    url.starts_with("https://github.com/")
 }
 
 fn scope_for(project_path: Option<&str>) -> ItemScope {
