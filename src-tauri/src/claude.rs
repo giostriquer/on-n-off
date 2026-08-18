@@ -5,11 +5,13 @@ use std::sync::Mutex;
 
 use serde::Deserialize;
 
-use crate::adapter::AgentAdapter;
+use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
 use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, PluginDto, SkillDto};
+use crate::dto::{
+    AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto,
+};
 use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::parse_claude_json;
 use crate::paths::{claude_root, plugin_id_parts};
@@ -270,6 +272,22 @@ impl ClaudeAdapter {
 impl AgentAdapter for ClaudeAdapter {
     fn info(&self) -> AgentInfo {
         agent_info(AgentId::Claude)
+    }
+
+    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
+        match scope {
+            ItemScope::Global => {
+                let root = self.root()?;
+                Ok(ItemRoots {
+                    skills: root.join("skills"),
+                    agents: Some(root.join("agents")),
+                })
+            }
+            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
+                Path::new(project_path),
+                AgentId::Claude,
+            )),
+        }
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {

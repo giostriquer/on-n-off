@@ -1,6 +1,7 @@
-import { memo, useState } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { Rocker } from "@/features/agents/Rocker";
+import { ManagedItemStrip } from "./ManagedItemStrip";
 import { SkillRow } from "./SkillRow";
 import { copy } from "$lib/copy";
 import {
@@ -11,9 +12,11 @@ import {
   skillIsLive,
 } from "$lib/catalog";
 import { isProjectOrigin } from "$lib/project";
-import type { AgentTabDto, PluginDto, SkillDto } from "$lib/types";
+import type { AgentTabDto, ItemStatus, PluginDto, SkillDto } from "$lib/types";
 
 type Chip = "all" | "on" | "off" | "behind";
+
+const noop = () => {};
 
 type ItemListBaseProps = {
   tab: AgentTabDto;
@@ -27,6 +30,11 @@ type ItemListBaseProps = {
   onToggleSkill: (skill: SkillDto, enabled: boolean) => void;
   onUninstall: (plugin: PluginDto) => void;
   onUpdate?: (plugin: PluginDto) => void;
+  /** Managed-item record for a skill on-n-off installed from a marketplace, if any. */
+  statusFor?: (skill: SkillDto) => ItemStatus | undefined;
+  onUpdateItem?: (status: ItemStatus) => void;
+  onRemoveItem?: (status: ItemStatus) => void;
+  headerActions?: ReactNode;
 };
 
 type ItemListProps = ItemListBaseProps &
@@ -46,10 +54,21 @@ type SkillCardProps = {
   skill: SkillDto;
   live: boolean;
   busy: boolean;
+  status?: ItemStatus;
   onToggleSkill: (skill: SkillDto, enabled: boolean) => void;
+  onUpdateItem?: (status: ItemStatus) => void;
+  onRemoveItem?: (status: ItemStatus) => void;
 };
 
-const SkillCard = memo(function SkillCard({ skill, live, busy, onToggleSkill }: SkillCardProps) {
+const SkillCard = memo(function SkillCard({
+  skill,
+  live,
+  busy,
+  status,
+  onToggleSkill,
+  onUpdateItem,
+  onRemoveItem,
+}: SkillCardProps) {
   const lockedNote = isProjectOrigin(skill.origin) ? copy.skillProject : copy.skillLocked;
   return (
     <article className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
@@ -92,6 +111,14 @@ const SkillCard = memo(function SkillCard({ skill, live, busy, onToggleSkill }: 
           </span>
         )}
       </div>
+      {status ? (
+        <ManagedItemStrip
+          status={status}
+          busy={busy}
+          onUpdateItem={onUpdateItem ?? noop}
+          onRemoveItem={onRemoveItem ?? noop}
+        />
+      ) : null}
     </article>
   );
 });
@@ -110,6 +137,10 @@ export function ItemList({
   onToggleSkill,
   onUninstall,
   onUpdate,
+  statusFor,
+  onUpdateItem,
+  onRemoveItem,
+  headerActions,
 }: ItemListProps) {
   const [chip, setChip] = useState<Chip>("all");
 
@@ -134,6 +165,7 @@ export function ItemList({
         <h2 className="m-0 text-[17px] font-semibold tracking-[0.05em] uppercase">{title}</h2>
         <span className="font-mono text-[12px]/[1.3] text-[var(--mute)]">{subtitle}</span>
         <div className="flex-1" />
+        {headerActions}
         <div className="flex border border-[var(--hair)]" role="group" aria-label="Filter list">
           {chips.map((next) => (
             <button
@@ -287,7 +319,10 @@ export function ItemList({
                   : (tab.plugins.find((plugin) => plugin.id === skill.pluginId)?.enabled ?? false)
               }
               busy={busy}
+              status={statusFor?.(skill)}
               onToggleSkill={onToggleSkill}
+              onUpdateItem={onUpdateItem}
+              onRemoveItem={onRemoveItem}
             />
           ))}
         </div>

@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::adapter::AgentAdapter;
+use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::cli_locate::agent_info;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
+use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ItemScope, PluginDto, SkillDto};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{cursor_root, normalize_skill_path};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
@@ -111,6 +111,19 @@ impl AgentAdapter for CursorAdapter {
         info.install_folder = false;
         info.plugin_toggle = false;
         info
+    }
+
+    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
+        match scope {
+            ItemScope::Global => Ok(ItemRoots {
+                skills: self.root()?.join("skills"),
+                agents: None,
+            }),
+            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
+                Path::new(project_path),
+                AgentId::Cursor,
+            )),
+        }
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {

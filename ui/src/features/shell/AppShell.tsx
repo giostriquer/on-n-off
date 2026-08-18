@@ -3,7 +3,8 @@ import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
 import { AgentBanner } from "@/features/agents/AgentBanner";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
-import { InstallSheet } from "@/features/catalog/InstallSheet";
+import { LazyInstallSheet } from "@/features/catalog/LazyInstallSheet";
+import { installOutcomeClean } from "$lib/itemOutcomes";
 import { ScopeBar } from "@/features/scope/ScopeBar";
 import {
   SCREEN_PATH,
@@ -61,6 +62,8 @@ export function AppShell() {
     masterCut,
     pickFolder,
     install,
+    installItems,
+    installBusy,
     confirmUninstall,
   } = session;
 
@@ -253,11 +256,15 @@ export function AppShell() {
       </div>
 
       {installOpen ? (
-        <InstallSheet
+        <LazyInstallSheet
           agentName={currentAgent.displayName}
-          busy={currentTab.inFlight}
+          busy={currentTab.inFlight || installBusy}
           error={installError}
           installFolder={currentAgent.installFolder}
+          visibleAgents={visibleAgents}
+          currentAgentId={currentAgent.id}
+          projects={currentProjects}
+          currentScopePath={currentScopePath}
           onCancel={() => {
             setInstallOpen(false);
             clearInstallError();
@@ -268,6 +275,13 @@ export function AppShell() {
                 goScreen("plugins");
               }
             });
+          }}
+          onInstallItems={async (request) => {
+            const result = await installItems(request);
+            if (result && installOutcomeClean(result)) {
+              goScreen("skills");
+            }
+            return result;
           }}
           onPickFolder={pickFolder}
         />
