@@ -19,6 +19,9 @@ import { copy } from "$lib/copy";
 import type { AgentInfo } from "$lib/types";
 import markUrl from "../../../../src-tauri/icons/128x128.png";
 
+/** Screens that read no per-provider tab data, so they stay mounted while a provider tab loads. */
+const PROVIDER_INDEPENDENT_SCREENS: ReadonlySet<Screen> = new Set<Screen>(["usage", "limits", "settings"]);
+
 export function AppShell() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -220,7 +223,7 @@ export function AppShell() {
           aria-labelledby={`agent-tab-${selected}`}
         >
           {banner && screen !== "settings" ? <AgentBanner message={banner} /> : null}
-          {currentTab.loading && !currentTab.dto && screen !== "usage" && screen !== "settings" ? (
+          {currentTab.loading && !currentTab.dto && !PROVIDER_INDEPENDENT_SCREENS.has(screen) ? (
             <p className="m-5 text-[13px] text-[var(--mute)]">Loading {currentAgent.displayName}…</p>
           ) : (
             <Outlet />

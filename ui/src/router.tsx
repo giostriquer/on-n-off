@@ -49,6 +49,12 @@ const usageRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/usage"), "UsageRoute"),
 });
 
+const limitsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/limits",
+  component: lazyRouteComponent(() => import("@/routes/limits"), "LimitsRoute"),
+});
+
 const configRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/config",
@@ -68,6 +74,7 @@ const routeTree = rootRoute.addChildren([
   skillsRoute,
   mcpRoute,
   usageRoute,
+  limitsRoute,
   configRoute,
   settingsRoute,
 ]);

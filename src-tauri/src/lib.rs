@@ -15,6 +15,7 @@ mod dto;
 mod fake;
 mod flags;
 mod install_source;
+mod limits;
 mod mcp;
 mod paths;
 mod plugin_meta;
@@ -61,6 +62,8 @@ pub fn run() {
             commands::update_plugin,
             commands::refresh,
             commands::usage_summary,
+            commands::read_limits,
+            commands::forget_limits_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

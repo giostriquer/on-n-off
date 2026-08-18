@@ -92,4 +92,34 @@ describe("LeftRail", () => {
     }
     expect(onUsageIntent).toHaveBeenCalledTimes(2);
   });
+
+  it("renders Limits between Usage and Settings and navigates to it", async () => {
+    const user = userEvent.setup();
+    const onScreen = vi.fn();
+    render(
+      <LeftRail
+        screen="limits"
+        counts={counts}
+        theme="dark"
+        masterOn={false}
+        masterNote=""
+        onScreen={onScreen}
+        onThemeChange={() => undefined}
+        onMaster={() => undefined}
+      />,
+    );
+    const names = screen
+      .getAllByRole("button")
+      .map((button) => button.textContent?.trim() ?? "");
+    const usageIndex = names.indexOf("Usage");
+    const limitsIndex = names.indexOf("Limits");
+    const settingsIndex = names.indexOf("Settings");
+    expect(usageIndex).toBeGreaterThan(-1);
+    expect(limitsIndex).toBe(usageIndex + 1);
+    expect(settingsIndex).toBe(limitsIndex + 1);
+    const limits = screen.getByRole("button", { name: /^Limits$/i });
+    expect(limits.getAttribute("aria-current")).toBe("page");
+    await user.click(limits);
+    expect(onScreen).toHaveBeenCalledWith("limits");
+  });
 });

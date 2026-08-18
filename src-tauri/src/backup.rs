@@ -29,7 +29,7 @@ impl BackupStore {
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| AdapterError::message("backup target has no file name"))?;
-        let dir = self.root.join(agent_dir(agent));
+        let dir = self.root.join(agent.key());
         fs::create_dir_all(&dir).map_err(|error| {
             AdapterError::write(error.to_string(), Some(dir.display().to_string()))
         })?;
@@ -72,15 +72,6 @@ impl BackupStore {
             let _ = fs::remove_file(old);
         }
         Ok(())
-    }
-}
-
-fn agent_dir(agent: AgentId) -> &'static str {
-    match agent {
-        AgentId::Claude => "claude",
-        AgentId::Codex => "codex",
-        AgentId::Antigravity => "antigravity",
-        AgentId::Cursor => "cursor",
     }
 }
 
