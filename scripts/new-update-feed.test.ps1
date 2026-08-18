@@ -65,6 +65,8 @@ try {
     "nsis-signature-value" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64-setup.exe.sig") -Encoding UTF8
     "msi installer" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64_en-US.msi") -Encoding UTF8
     "msi-signature-value" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64_en-US.msi.sig") -Encoding UTF8
+    "mac updater bundle" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_aarch64.app.tar.gz") -Encoding UTF8
+    "mac-signature-value" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_aarch64.app.tar.gz.sig") -Encoding UTF8
     "## Highlights`n`n- Safer updates." | Set-Content -LiteralPath $notesPath -Encoding UTF8
 
     $valid = Invoke-FeedGenerator
@@ -80,6 +82,16 @@ try {
     Assert-Equal $feed.platforms.'windows-x86_64-msi'.signature "msi-signature-value" "MSI signature"
     Assert-Equal $feed.platforms.'windows-x86_64-nsis'.url "https://github.com/giostriquer/on-n-off/releases/download/v0.2.0/on-n-off_0.2.0_x64-setup.exe" "NSIS URL"
     Assert-Equal $feed.platforms.'windows-x86_64-msi'.url "https://github.com/giostriquer/on-n-off/releases/download/v0.2.0/on-n-off_0.2.0_x64_en-US.msi" "MSI URL"
+    Assert-Equal $feed.platforms.'darwin-aarch64'.signature "mac-signature-value" "macOS signature"
+    Assert-Equal $feed.platforms.'darwin-aarch64'.url "https://github.com/giostriquer/on-n-off/releases/download/v0.2.0/on-n-off_0.2.0_aarch64.app.tar.gz" "macOS URL"
+
+    Remove-Item -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_aarch64.app.tar.gz.sig")
+    $missingMacSignature = Invoke-FeedGenerator
+    Assert-Equal $missingMacSignature.ExitCode 1 "missing macOS signature"
+    if ($missingMacSignature.Output -notmatch [regex]::Escape("on-n-off_0.2.0_aarch64.app.tar.gz.sig")) {
+        throw "missing macOS signature error did not identify the missing file: $($missingMacSignature.Output)"
+    }
+    "mac-signature-value" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_aarch64.app.tar.gz.sig") -Encoding UTF8
 
     Remove-Item -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64_en-US.msi.sig")
     $missingSignature = Invoke-FeedGenerator
@@ -103,8 +115,9 @@ catch {
 finally {
     if (Test-Path -LiteralPath $fixtureRoot) {
         $resolvedFixture = (Resolve-Path -LiteralPath $fixtureRoot).Path
-        $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
-        if (-not $resolvedFixture.StartsWith($tempRoot + '\', [System.StringComparison]::OrdinalIgnoreCase) -or
+        $separator = [System.IO.Path]::DirectorySeparatorChar
+        $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd($separator)
+        if (-not $resolvedFixture.StartsWith($tempRoot + $separator, [System.StringComparison]::OrdinalIgnoreCase) -or
             -not ([System.IO.Path]::GetFileName($resolvedFixture)).StartsWith("on-n-off-update-feed-test-")) {
             throw "Refusing to remove unexpected fixture path: $resolvedFixture"
         }
