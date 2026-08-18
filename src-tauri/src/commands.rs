@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use crate::adapter::AgentAdapter;
 use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ProjectDto, ProviderLimitsDto, UsageSummaryDto,
-    UsageSummaryInput,
+    AdapterError, AgentId, AgentInfo, AgentTabDto, InstallItemsRequest, InstallItemsResultDto,
+    ItemStatusDto, MarketplaceInspectDto, ProjectDto, ProviderLimitsDto, UpdateItemMode,
+    UsageSummaryDto, UsageSummaryInput,
 };
 use crate::flags::FeatureFlags;
+use crate::item_install::ItemService;
 use crate::settings::{AppSettings, ProviderDiagnose};
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -21,6 +23,8 @@ pub struct AppState {
     codex: Arc<dyn AgentAdapter>,
     antigravity: Arc<dyn AgentAdapter>,
     cursor: Arc<dyn AgentAdapter>,
+    /// Local skill/agent installs; `Err` only when no home directory could be resolved.
+    items: Result<Arc<ItemService>, AdapterError>,
 }
 
 impl AppState {
@@ -30,6 +34,7 @@ impl AppState {
             codex: Arc::new(crate::codex::CodexAdapter::new()),
             antigravity: Arc::new(crate::antigravity::AntigravityAdapter::new()),
             cursor: Arc::new(crate::cursor::CursorAdapter::new()),
+            items: ItemService::production().map(Arc::new),
         }
     }
 
@@ -41,6 +46,10 @@ impl AppState {
             AgentId::Cursor => Arc::clone(&self.cursor),
         }
     }
+
+    fn items(&self) -> Result<Arc<ItemService>, AdapterError> {
+        self.items.clone()
+    }
 }
 
 async fn blocking<T, F>(operation: &'static str, run: F) -> Result<T, AdapterError>
@@ -51,6 +60,77 @@ where
     tauri::async_runtime::spawn_blocking(run)
         .await
         .map_err(|error| AdapterError::message(format!("{operation} worker failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn inspect_marketplace(
+    owner: String,
+    repo: String,
+    git_ref: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<MarketplaceInspectDto, AdapterError> {
+    let items = state.items()?;
+    blocking("marketplace inspect", move || {
+        items.inspect_marketplace(&owner, &repo, git_ref.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn install_items(
+    request: InstallItemsRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<InstallItemsResultDto, AdapterError> {
+    let items = state.items()?;
+    let adapters: Vec<(AgentId, Arc<dyn AgentAdapter>)> = request
+        .targets
+        .iter()
+        .map(|target| (target.provider, state.adapter(target.provider)))
+        .collect();
+    blocking("item install", move || {
+        let resolve = |target: &crate::dto::ItemTarget| {
+            adapters
+                .iter()
+                .find(|(provider, _)| *provider == target.provider)
+                .ok_or_else(|| AdapterError::message("unknown provider"))
+                .and_then(|(_, adapter)| adapter.item_roots(&target.scope))
+        };
+        items.install_items(request, &resolve)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn item_update_status(
+    provider: AgentId,
+    project_path: Option<String>,
+    force: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ItemStatusDto>, AdapterError> {
+    let items = state.items()?;
+    blocking("item status", move || {
+        items.item_update_status(provider, project_path.as_deref(), force)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn update_item(
+    id: String,
+    mode: UpdateItemMode,
+    state: tauri::State<'_, AppState>,
+) -> Result<ItemStatusDto, AdapterError> {
+    let items = state.items()?;
+    blocking("item update", move || items.update_item(&id, mode)).await
+}
+
+#[tauri::command]
+pub async fn remove_item(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AdapterError> {
+    let items = state.items()?;
+    blocking("item remove", move || items.remove_item(&id)).await
 }
 
 #[tauri::command]

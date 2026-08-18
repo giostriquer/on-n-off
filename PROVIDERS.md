@@ -20,6 +20,18 @@ adapter assumes today (change the adapter and this file together).
   `AgentAdapter::set_mcp_enabled`.
 - Project scope: `project.rs` reads `.claude/`, `.codex/`, `.cursor/` inside a project for skills
   and `.cursor/mcp.json` for project MCP.
+- Local items (`item_install/`): on-n-off can copy individual skills (and, for Claude, subagents)
+  out of a GitHub marketplace repository without the provider CLI. It downloads one
+  `codeload.github.com` tarball, writes the item under `AgentAdapter::item_roots(scope)` (skills:
+  `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity-cli/skills`, `~/.cursor/skills`;
+  project scope: the first dir of `project_skill_dirs`; agents: `~/.claude/agents` /
+  `.claude/agents`, Claude only), and records provenance (repo, ref, commit sha, plugin version,
+  per-file sha256) in `~/.on-n-off/installed-items.json`. Item folders stay byte-identical to
+  upstream — no sidecar files, no frontmatter edits — so "modified locally" is a pure hash
+  comparison. Replacing or removing an item first copies it to
+  `~/.on-n-off/backups/<provider>/items/`. Update checks call
+  `api.github.com/repos/{o}/{r}/commits/{ref}` (sha only) and re-download the tarball only when
+  the sha moved. Public repositories only.
 
 ## Claude (Claude Code)
 

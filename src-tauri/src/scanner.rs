@@ -108,7 +108,7 @@ fn skill_from_file(skill_md: &Path, folder: &Path) -> Option<ScannedSkill> {
     })
 }
 
-fn parse_frontmatter(contents: &str, fallback_name: &str) -> (String, String) {
+pub(crate) fn parse_frontmatter(contents: &str, fallback_name: &str) -> (String, String) {
     let Some(rest) = contents.strip_prefix("---") else {
         return (fallback_name.to_string(), String::new());
     };

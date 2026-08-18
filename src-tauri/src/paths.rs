@@ -80,6 +80,14 @@ pub fn settings_path() -> Result<PathBuf, AdapterError> {
     Ok(settings_path_for(&user_home()?))
 }
 
+pub fn installed_items_path_for(home: &std::path::Path) -> PathBuf {
+    home.join(".on-n-off").join("installed-items.json")
+}
+
+pub fn installed_items_path() -> Result<PathBuf, AdapterError> {
+    Ok(installed_items_path_for(&user_home()?))
+}
+
 pub fn normalize_skill_path(path: &str) -> String {
     let mut normalized = path.replace('/', "\\").to_lowercase();
     if !normalized.ends_with("\\skill.md") {

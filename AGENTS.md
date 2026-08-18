@@ -13,6 +13,7 @@ on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon).
 - `src-tauri/src/cli_stub.rs`: test-only builder that writes a fake CLI as `.cmd` on Windows or an executable `sh` script elsewhere; use it instead of hand-written batch stubs.
 - `scripts/build-bundle.ps1`: builds, validates, and stages one installer format (`nsis`, `msi`, `dmg`); CI runs it on both Windows and macOS runners.
 - `src-tauri/src/config_io.rs` and `backup.rs`: guarded configuration writes and rollback support.
+- `src-tauri/src/item_install/`: selective install of skills/subagents from a GitHub marketplace (tarball fetch, manifest inspection, atomic placement, `~/.on-n-off/installed-items.json` provenance registry, upstream update checks). Never shells out to a provider CLI; write roots come from `AgentAdapter::item_roots`.
 - `src-tauri/src/usage/`: read-only transcript aggregation plus caches under `.on-n-off`.
 - `src-tauri/src/limits/`: the Limits screen's live subscription rate limits. Reads the CLIs' stored logins (macOS Keychain via `/usr/bin/security`, else `~/.claude/.credentials.json`; `~/.codex/auth.json`) and calls the vendors' usage endpoints over HTTPS. Never writes to or refreshes those logins (the Claude access token is memoised in-process only); the only writes are per-account snapshots of the numbers under `~/.on-n-off/limits/`, so accounts the user has signed out of stay visible. Provider problems come back as a `status` on the DTO, not an error.
 - `HANDOFF.md`: Windows and macOS runtime and smoke-test expectations.

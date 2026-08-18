@@ -15,31 +15,44 @@ pub struct VersionHint {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct PluginManifest {
+pub(crate) struct PluginManifest {
     #[serde(default)]
-    version: Option<String>,
+    pub(crate) version: Option<String>,
+    #[serde(default)]
+    pub(crate) description: Option<String>,
+    /// Explicit skill folders (or `SKILL.md` files) relative to the plugin root.
+    #[serde(default)]
+    pub(crate) skills: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct MarketplaceFile {
+pub(crate) struct MarketplaceFile {
     #[serde(default)]
-    plugins: Vec<MarketplacePlugin>,
+    pub(crate) name: Option<String>,
+    #[serde(default)]
+    pub(crate) plugins: Vec<MarketplacePlugin>,
 }
 
 #[derive(Debug, Deserialize)]
-struct MarketplacePlugin {
-    name: String,
+pub(crate) struct MarketplacePlugin {
+    pub(crate) name: String,
     #[serde(default)]
-    version: Option<String>,
+    pub(crate) version: Option<String>,
     #[serde(default)]
-    source: Option<MarketplaceSource>,
+    pub(crate) description: Option<String>,
+    #[serde(default)]
+    pub(crate) source: Option<MarketplaceSource>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-enum MarketplaceSource {
+pub(crate) enum MarketplaceSource {
     Path(String),
     Object {
+        #[serde(default)]
+        source: Option<String>,
+        #[serde(default)]
+        repo: Option<String>,
         #[serde(default)]
         url: Option<String>,
         #[serde(default)]
@@ -50,6 +63,30 @@ enum MarketplaceSource {
         #[serde(default)]
         sha: Option<String>,
     },
+}
+
+/// Marketplace manifest locations, in the order providers look them up.
+pub(crate) const MARKETPLACE_MANIFESTS: &[&str] = &[
+    ".claude-plugin/marketplace.json",
+    ".codex-plugin/marketplace.json",
+    ".agents/plugins/marketplace.json",
+    ".cursor-plugin/marketplace.json",
+];
+
+/// Plugin manifest locations, in lookup order.
+pub(crate) const PLUGIN_MANIFESTS: &[&str] = &[
+    ".cursor-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    "plugin.json",
+];
+
+pub(crate) fn parse_marketplace_text(text: &str) -> Option<MarketplaceFile> {
+    serde_json::from_str::<MarketplaceFile>(text).ok()
+}
+
+pub(crate) fn parse_plugin_manifest(text: &str) -> Option<PluginManifest> {
+    serde_json::from_str::<PluginManifest>(text).ok()
 }
 
 #[cfg(test)]
@@ -184,17 +221,11 @@ fn catalog_plugin_hint(root: &Path, plugin: &MarketplacePlugin) -> VersionHint {
 }
 
 fn read_marketplace_file(root: &Path) -> Option<MarketplaceFile> {
-    const RELATIVE: &[&str] = &[
-        ".claude-plugin/marketplace.json",
-        ".codex-plugin/marketplace.json",
-        ".agents/plugins/marketplace.json",
-        ".cursor-plugin/marketplace.json",
-    ];
-    for relative in RELATIVE {
+    for relative in MARKETPLACE_MANIFESTS {
         let Some(text) = fs::read_to_string(root.join(relative)).ok() else {
             continue;
         };
-        if let Ok(file) = serde_json::from_str::<MarketplaceFile>(&text) {
+        if let Some(file) = parse_marketplace_text(&text) {
             return Some(file);
         }
     }
@@ -202,12 +233,7 @@ fn read_marketplace_file(root: &Path) -> Option<MarketplaceFile> {
 }
 
 fn manifest_version(install_path: &Path) -> Option<String> {
-    for relative in [
-        ".cursor-plugin/plugin.json",
-        ".codex-plugin/plugin.json",
-        ".claude-plugin/plugin.json",
-        "plugin.json",
-    ] {
+    for relative in PLUGIN_MANIFESTS {
         if let Ok(text) = fs::read_to_string(install_path.join(relative)) {
             if let Some(version) = parse_manifest_text(Some(&text)) {
                 return Some(version);
@@ -219,7 +245,7 @@ fn manifest_version(install_path: &Path) -> Option<String> {
 
 fn parse_manifest_text(text: Option<&str>) -> Option<String> {
     let text = text?;
-    let manifest = serde_json::from_str::<PluginManifest>(text).ok()?;
+    let manifest = parse_plugin_manifest(text)?;
     usable(manifest.version.as_deref()).filter(|value| !is_sha(value))
 }
 
@@ -360,18 +386,12 @@ fn merge_marketplace_versions(hints: &mut HashMap<String, VersionHint>, file: Ma
 }
 
 fn fetch_remote_marketplace(owner: &str, repo: &str, branch: &str) -> Option<MarketplaceFile> {
-    const RELATIVE: &[&str] = &[
-        ".claude-plugin/marketplace.json",
-        ".codex-plugin/marketplace.json",
-        ".agents/plugins/marketplace.json",
-        ".cursor-plugin/marketplace.json",
-    ];
-    for relative in RELATIVE {
+    for relative in MARKETPLACE_MANIFESTS {
         let url = format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{relative}");
         let Some(text) = fetch_text(&url) else {
             continue;
         };
-        if let Ok(file) = serde_json::from_str::<MarketplaceFile>(&text) {
+        if let Some(file) = parse_marketplace_text(&text) {
             if !file.plugins.is_empty() {
                 return Some(file);
             }
@@ -429,16 +449,42 @@ fn git_remote_branches(root: &Path) -> Vec<String> {
 }
 
 impl MarketplacePlugin {
-    fn local_source_path(&self) -> Option<&str> {
+    pub(crate) fn local_source_path(&self) -> Option<&str> {
         match &self.source {
             Some(MarketplaceSource::Path(path)) => Some(path.as_str()),
-            Some(MarketplaceSource::Object { path, url, .. })
-                if url.as_deref().unwrap_or("").is_empty() =>
+            Some(MarketplaceSource::Object {
+                path, url, source, ..
+            }) if url.as_deref().unwrap_or("").is_empty()
+                && source
+                    .as_deref()
+                    .is_none_or(|kind| kind.is_empty() || kind == "local") =>
             {
                 path.as_deref()
             }
             _ => None,
         }
+    }
+
+    /// `{ "source": "github", "repo": "owner/name", "ref"?: ... }` -> `(owner, name, ref)`.
+    pub(crate) fn github_source(&self) -> Option<(String, String, Option<String>)> {
+        let Some(MarketplaceSource::Object {
+            source,
+            repo,
+            git_ref,
+            ..
+        }) = &self.source
+        else {
+            return None;
+        };
+        if source.as_deref() != Some("github") {
+            return None;
+        }
+        let repo = repo.as_deref()?.trim().trim_end_matches(".git");
+        let (owner, name) = repo.split_once('/')?;
+        if owner.is_empty() || name.is_empty() || name.contains('/') {
+            return None;
+        }
+        Some((owner.to_string(), name.to_string(), git_ref.clone()))
     }
 
     fn git_ref(&self) -> Option<String> {

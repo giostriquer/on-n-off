@@ -134,3 +134,60 @@ describe("ItemList", () => {
     expect(sortPluginsCall).not.toHaveBeenCalled();
   });
 });
+
+describe("ItemList managed items", () => {
+  const tab: AgentTabDto = {
+    plugins: [],
+    userSkills: [
+      { id: "user:tdd", pluginId: null, name: "tdd", description: "TDD", enabled: true, togglable: true, origin: "user" },
+      { id: "user:mine", pluginId: null, name: "mine", description: "Own", enabled: true, togglable: true, origin: "user" },
+    ],
+    mcpServers: [],
+  };
+  const managed = {
+    id: "claude:skill:x",
+    provider: "claude" as const,
+    kind: "skill" as const,
+    name: "tdd",
+    displayName: "tdd",
+    targetPath: "/x/tdd",
+    installedVersion: "1.2.3",
+    installedSha: "a".repeat(40),
+    modified: true,
+    missing: false,
+    upstream: { state: "updateAvailable" as const, commitSha: "b".repeat(40), pluginVersion: "1.3.0" },
+  };
+
+  it("shows badges and update/remove only on skills on-n-off installed", async () => {
+    const user = userEvent.setup();
+    const onUpdateItem = vi.fn();
+    const onRemoveItem = vi.fn();
+    render(
+      <ItemList
+        kind="skill"
+        tab={tab}
+        items={tab.userSkills}
+        expandedIds={new Set()}
+        cliOk
+        pluginToggle
+        onToggleExpand={vi.fn()}
+        onTogglePlugin={vi.fn()}
+        onToggleSkill={vi.fn()}
+        onUninstall={vi.fn()}
+        statusFor={(skill) => (skill.name === "tdd" ? managed : undefined)}
+        onUpdateItem={onUpdateItem}
+        onRemoveItem={onRemoveItem}
+        headerActions={<button type="button">Check for updates</button>}
+      />,
+    );
+    expect(screen.getByText("v1.2.3")).toBeTruthy();
+    expect(screen.getByText("update available → v1.3.0")).toBeTruthy();
+    expect(screen.getByText("modified locally")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove mine" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Update tdd" }));
+    expect(onUpdateItem).toHaveBeenCalledWith(managed);
+    await user.click(screen.getByRole("button", { name: "Remove tdd" }));
+    expect(onRemoveItem).toHaveBeenCalledWith(managed);
+  });
+});

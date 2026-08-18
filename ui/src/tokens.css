@@ -121,7 +121,8 @@ body {
 /*
   Viewport lock. The document never scrolls.
   Only `.app-scroll` is the page scroller. Nested overflow-y:auto on routes
-  recreates the double scrollbar. Dropdowns may scroll internally (.scope-list).
+  recreates the double scrollbar. Dropdowns may scroll internally (.scope-list),
+  and modal sheets use .sheet-scroll / .sheet-tree.
 */
 .app-frame {
   display: flex;
@@ -150,6 +151,22 @@ body {
 
 /* The standalone menu-bar window has its own viewport and cannot use AppShell's page scroller. */
 .limits-popover-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Modal sheets sit above the page scroller: the sheet body scrolls when it outgrows the
+   viewport, and the marketplace item tree scrolls inside its own box. */
+.sheet-scroll {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sheet-tree {
+  max-height: 220px;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;

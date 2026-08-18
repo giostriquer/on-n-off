@@ -4,6 +4,8 @@ type ConfirmDialogProps = {
   title: string;
   body: string;
   confirmLabel?: string;
+  /** A second, non-destructive choice rendered between Cancel and the confirm button. */
+  alternate?: { label: string; onClick: () => void };
   busy?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -13,6 +15,7 @@ export function ConfirmDialog({
   title,
   body,
   confirmLabel = copy.uninstall,
+  alternate,
   busy = false,
   onCancel,
   onConfirm,
@@ -47,6 +50,16 @@ export function ConfirmDialog({
             >
               {copy.cancel}
             </button>
+            {alternate ? (
+              <button
+                type="button"
+                className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)] disabled:opacity-45"
+                disabled={busy}
+                onClick={alternate.onClick}
+              >
+                {alternate.label}
+              </button>
+            ) : null}
             <button
               type="button"
               className="h-8 rounded-lg border border-[var(--trip)] bg-[var(--trip)] px-3.5 text-[12.5px] text-[#f7f1ea] disabled:opacity-45"
