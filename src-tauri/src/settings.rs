@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::cli_locate::{cli_search_path, login_shell_path_dirs, resolve_cli_binary};
 use crate::dto::{AdapterError, AgentId};
-use crate::paths::{self, well_known_cli_dirs};
+use crate::paths;
 
 const ALL_AGENTS: [AgentId; 4] = [
     AgentId::Claude,
@@ -151,6 +152,43 @@ fn home_for(id: AgentId) -> Result<PathBuf, AdapterError> {
     }
 }
 
+/// Why a CLI check may fail and what to do about it, per platform.
+fn cli_hint(binary: &str, resolved: Option<&Path>) -> Option<String> {
+    match resolved {
+        None if cfg!(windows) => Some(format!(
+            "If `{binary}` works in a terminal, point Binary at the .cmd/.exe next to it (nvm shims are not Win32 programs), or install the Windows CLI — not WSL-only."
+        )),
+        None => Some(format!(
+            "If `{binary}` works in a terminal, run `which {binary}` there and paste that path into Binary."
+        )),
+        Some(path) if cfg!(windows) && path.extension().is_none() => Some(
+            "This path has no .cmd/.exe. Windows will fail with os error 193. Pick the .cmd launcher.".into(),
+        ),
+        Some(_) => None,
+    }
+}
+
+fn home_missing_hint() -> &'static str {
+    if cfg!(windows) {
+        "Expected under your Windows user profile, not inside WSL."
+    } else {
+        "Expected in your home folder (~). Run the CLI once so it creates its config."
+    }
+}
+
+/// One line describing where CLIs are looked for, including what the login shell contributed.
+fn search_detail() -> String {
+    let searched = cli_search_path().len();
+    let from_shell = login_shell_path_dirs().len();
+    if cfg!(windows) {
+        format!("searched {searched} folders (PATH and well-known install folders)")
+    } else if from_shell == 0 {
+        format!("searched {searched} folders · login shell PATH unavailable, using well-known install folders")
+    } else {
+        format!("searched {searched} folders · {from_shell} from your login shell PATH")
+    }
+}
+
 pub fn diagnose_provider(id: AgentId) -> ProviderDiagnose {
     let settings = load_settings();
     let binary = binary_name(id);
@@ -160,41 +198,17 @@ pub fn diagnose_provider(id: AgentId) -> ProviderDiagnose {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
-    let resolved = paths::resolve_cli_binary(binary);
+    let resolved = resolve_cli_binary(binary);
     let home = home_for(id).ok();
     let home_exists = home.as_ref().is_some_and(|path| path.is_dir());
-    let extra = well_known_cli_dirs();
 
     let cli_detail = match (&override_path, &resolved) {
         (Some(_), Some(found)) => format!("using {}", found.display()),
         (Some(path), None) => format!("override missing · {}", path.display()),
         (None, Some(found)) => found.display().to_string(),
-        (None, None) => format!("{binary} is not on PATH"),
+        (None, None) => format!("{binary} is not on the CLI search path"),
     };
-    let cli_hint = if resolved.is_none() {
-        Some(format!(
-            "If `{binary}` works in a terminal, point Binary at the .cmd/.exe next to it (nvm shims are not Win32 programs), or install the Windows CLI — not WSL-only."
-        ))
-    } else if cfg!(windows)
-        && resolved
-            .as_ref()
-            .is_some_and(|path| path.extension().is_none())
-    {
-        Some("This path has no .cmd/.exe. Windows will fail with os error 193. Pick the .cmd launcher.".into())
-    } else {
-        None
-    };
-
-    let extra_hit = paths::find_in_dirs(binary, &extra).is_some();
-    let search_detail = if extra.is_empty() {
-        "no extra install dirs".into()
-    } else {
-        format!(
-            "checked {} well-known install folders{}",
-            extra.len(),
-            if extra_hit { " · found a copy" } else { "" }
-        )
-    };
+    let cli_hint = cli_hint(binary, resolved.as_deref());
 
     ProviderDiagnose {
         agent_id: id,
@@ -228,14 +242,14 @@ pub fn diagnose_provider(id: AgentId) -> ProviderDiagnose {
                 hint: if home_exists {
                     None
                 } else {
-                    Some("Expected under your Windows user profile, not inside WSL.".into())
+                    Some(home_missing_hint().into())
                 },
             },
             DiagnoseCheck {
                 id: "search".into(),
                 label: "Install search".into(),
-                ok: resolved.is_some() || extra_hit,
-                detail: search_detail,
+                ok: resolved.is_some(),
+                detail: search_detail(),
                 hint: None,
             },
         ],
@@ -249,6 +263,27 @@ pub fn diagnose_all() -> Vec<ProviderDiagnose> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_diagnostic_hints_do_not_talk_about_windows() {
+        let hint = cli_hint("codex", None).expect("missing CLI gets a hint");
+        for forbidden in ["Windows", "WSL", ".cmd", "Win32"] {
+            assert!(!hint.contains(forbidden), "{hint}");
+        }
+        assert!(hint.contains("which codex"), "{hint}");
+        assert_eq!(
+            cli_hint("codex", Some(Path::new("/usr/local/bin/codex"))),
+            None
+        );
+        assert!(!home_missing_hint().contains("Windows"));
+        assert!(!home_missing_hint().contains("WSL"));
+        assert!(
+            search_detail().starts_with("searched "),
+            "{}",
+            search_detail()
+        );
+    }
 
     #[test]
     fn parse_defaults_when_missing_or_malformed() {

@@ -70,8 +70,8 @@ jobs:
       - name: Test release version contract
         run: ./scripts/check-release-version.test.ps1
 
-      - name: Test Windows flavor helper
-        run: ./scripts/build-windows-flavor.test.ps1
+      - name: Test bundle helper
+        run: ./scripts/build-bundle.test.ps1
 
       - name: Test updater feed generator
         run: ./scripts/new-update-feed.test.ps1
@@ -94,11 +94,21 @@ jobs:
       - name: Test Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 
-  build-windows:
-    name: build-windows
+  build:
+    name: build-${{ matrix.platform }}
     needs: validate
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            kinds: nsis msi
+          - platform: macos
+            os: macos-latest
+            kinds: dmg
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -127,9 +137,10 @@ jobs:
 
           "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Build signed Windows updater flavors
+      - name: Build and stage signed updater bundles
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          INSTALLER_KINDS: ${{ matrix.kinds }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
@@ -137,51 +148,38 @@ jobs:
               [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) {
             throw 'Updater signing secrets are not configured.'
           }
-          ./scripts/build-windows-flavor.ps1 -InstallerKind nsis -ReleaseVersion $env:RELEASE_VERSION -SignedUpdater
-          ./scripts/build-windows-flavor.ps1 -InstallerKind msi -ReleaseVersion $env:RELEASE_VERSION -SignedUpdater
-
-      - name: Stage release assets
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: |
           $assetDirectory = Join-Path $env:RUNNER_TEMP 'release-assets'
-          New-Item -ItemType Directory -Path $assetDirectory -Force | Out-Null
-
-          $sourceFiles = @(
-            "src-tauri/target/release/bundle/nsis/on-n-off_$env:RELEASE_VERSION`_x64-setup.exe",
-            "src-tauri/target/release/bundle/nsis/on-n-off_$env:RELEASE_VERSION`_x64-setup.exe.sig",
-            "src-tauri/target/release/bundle/msi/on-n-off_$env:RELEASE_VERSION`_x64_en-US.msi",
-            "src-tauri/target/release/bundle/msi/on-n-off_$env:RELEASE_VERSION`_x64_en-US.msi.sig",
-            'LICENSE',
-            'THIRD_PARTY_NOTICES.md'
-          )
-
-          foreach ($sourceFile in $sourceFiles) {
-            if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) {
-              throw "Expected release asset was not produced: $sourceFile"
-            }
-
-            Copy-Item -LiteralPath $sourceFile -Destination $assetDirectory
+          foreach ($kind in ($env:INSTALLER_KINDS -split ' ')) {
+            ./scripts/build-bundle.ps1 -InstallerKind $kind -ReleaseVersion $env:RELEASE_VERSION -SignedUpdater -StageDirectory $assetDirectory
           }
 
-          $checksumLines = Get-ChildItem -LiteralPath $assetDirectory -File |
+      - name: Record staged asset checksums
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          $assetDirectory = Join-Path $env:RUNNER_TEMP 'release-assets'
+          $checksumLines = @(Get-ChildItem -LiteralPath $assetDirectory -File |
             Sort-Object Name |
             ForEach-Object {
               $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
               "$hash  $($_.Name)"
-            }
+            })
 
-          $checksumPath = Join-Path $assetDirectory 'STAGED_SHA256SUMS.txt'
+          if ($checksumLines.Count -eq 0) {
+            throw 'No release assets were staged.'
+          }
+          $checksumPath = Join-Path $assetDirectory "STAGED_SHA256SUMS.$env:PLATFORM.txt"
           [System.IO.File]::WriteAllLines(
             $checksumPath,
             $checksumLines,
             [System.Text.UTF8Encoding]::new($false)
           )
+          Get-Content -LiteralPath $checksumPath
 
       - name: Upload release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-assets-${{ github.ref_name }}
+          name: release-assets-${{ matrix.platform }}-${{ github.ref_name }}
           path: ${{ runner.temp }}/release-assets/*
           if-no-files-found: error
           retention-days: 1
@@ -189,7 +187,7 @@ jobs:
 
   publish-draft:
     name: publish-draft
-    needs: build-windows
+    needs: build
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
@@ -203,8 +201,9 @@ jobs:
       - name: Download release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: release-assets-${{ github.ref_name }}
+          pattern: release-assets-*-${{ github.ref_name }}
           path: ${{ runner.temp }}/release-assets
+          merge-multiple: true
 
       - name: Verify staged asset checksums
         run: |
@@ -215,40 +214,48 @@ jobs:
             "on-n-off_$version`_x64-setup.exe.sig",
             "on-n-off_$version`_x64_en-US.msi",
             "on-n-off_$version`_x64_en-US.msi.sig",
-            'LICENSE',
-            'THIRD_PARTY_NOTICES.md'
+            "on-n-off_$version`_aarch64.dmg",
+            "on-n-off_$version`_aarch64.app.tar.gz",
+            "on-n-off_$version`_aarch64.app.tar.gz.sig"
           ) | Sort-Object
 
-          $checksumPath = Join-Path $assetDirectory 'STAGED_SHA256SUMS.txt'
-          if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
-            throw 'STAGED_SHA256SUMS.txt is missing.'
+          $checksumFiles = @(Get-ChildItem -LiteralPath $assetDirectory -File -Filter 'STAGED_SHA256SUMS.*.txt')
+          if ($checksumFiles.Count -ne 2) {
+            throw "Expected staged checksum files for windows and macos, found $($checksumFiles.Count)."
           }
 
           $actualNames = @()
-          foreach ($line in [System.IO.File]::ReadAllLines($checksumPath)) {
-            if ($line -notmatch '^(?<hash>[0-9a-f]{64})  (?<name>[^\\/]+)$') {
-              throw "Invalid checksum entry: $line"
+          foreach ($checksumFile in $checksumFiles) {
+            foreach ($line in [System.IO.File]::ReadAllLines($checksumFile.FullName)) {
+              if ($line -notmatch '^(?<hash>[0-9a-f]{64})  (?<name>[^\\/]+)$') {
+                throw "Invalid checksum entry in $($checksumFile.Name): $line"
+              }
+
+              $name = $Matches.name
+              $assetPath = Join-Path $assetDirectory $name
+              if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+                throw "Checksummed release asset is missing: $name"
+              }
+
+              $actualHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($actualHash -ne $Matches.hash) {
+                throw "Checksum mismatch for release asset: $name"
+              }
+
+              $actualNames += $name
             }
 
-            $name = $Matches.name
-            $assetPath = Join-Path $assetDirectory $name
-            if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
-              throw "Checksummed release asset is missing: $name"
-            }
-
-            $actualHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($actualHash -ne $Matches.hash) {
-              throw "Checksum mismatch for release asset: $name"
-            }
-
-            $actualNames += $name
+            Remove-Item -LiteralPath $checksumFile.FullName
           }
 
           if (Compare-Object $expectedNames ($actualNames | Sort-Object)) {
             throw 'The staged checksum set does not match the expected release assets.'
           }
 
-          Remove-Item -LiteralPath $checksumPath
+      - name: Add license notices to release assets
+        run: |
+          $assetDirectory = Join-Path $env:RUNNER_TEMP 'release-assets'
+          Copy-Item -LiteralPath 'LICENSE', 'THIRD_PARTY_NOTICES.md' -Destination $assetDirectory
 
       - name: Prepare draft release and updater feed
         env:
@@ -267,7 +274,9 @@ jobs:
           } elseif ($releaseJson -match '(?i)HTTP 404|not found') {
             $warning = @(
               '> [!WARNING]',
-              '> These Windows installers are currently unsigned. Windows can show an unrecognized publisher warning. Verify the SHA-256 checksum or GitHub artifact attestation before installation.'
+              '> These Windows installers are currently unsigned. Windows can show an unrecognized publisher warning. Verify the SHA-256 checksum or GitHub artifact attestation before installation.',
+              '>',
+              '> The macOS disk image (Apple Silicon) is ad-hoc signed and not notarized. Gatekeeper blocks the first launch: right-click on-n-off.app and choose Open, or allow it under System Settings → Privacy & Security. Verify the SHA-256 checksum or attestation first.'
             ) -join [Environment]::NewLine
 
             gh release create $tag `
@@ -314,12 +323,14 @@ jobs:
             [System.Text.UTF8Encoding]::new($false)
           )
 
-      - name: Attest Windows installers
+      - name: Attest installers
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             ${{ runner.temp }}/release-assets/*.exe
             ${{ runner.temp }}/release-assets/*.msi
+            ${{ runner.temp }}/release-assets/*.dmg
+            ${{ runner.temp }}/release-assets/*.app.tar.gz
 
       - name: Upload and reconcile draft assets
         env:
@@ -331,8 +342,8 @@ jobs:
           $assets = Get-ChildItem -LiteralPath $assetDirectory -File |
             Sort-Object Name |
             Select-Object -ExpandProperty FullName
-          if ($assets.Count -ne 8) {
-            throw "Expected eight release assets, found $($assets.Count)."
+          if ($assets.Count -ne 11) {
+            throw "Expected eleven release assets, found $($assets.Count)."
           }
 
           $expectedNames = $assets | ForEach-Object { Split-Path -Leaf $_ } | Sort-Object

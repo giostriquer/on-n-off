@@ -7,12 +7,13 @@ use serde::Deserialize;
 
 use crate::adapter::AgentAdapter;
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
+use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, PluginDto, SkillDto};
 use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::{parse_codex_map, CodexMcpEntry};
 use crate::paths::{
-    agent_info, agents_skills_root, codex_root, newest_dir, normalize_skill_path, plugin_id_parts,
+    agents_skills_root, codex_root, newest_dir, normalize_skill_path, plugin_id_parts,
 };
 use crate::scanner::{scan_plugin_skills, scan_skill_md, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
@@ -438,6 +439,7 @@ fn codex_skill(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli_stub::CliStub;
 
     #[test]
     fn uppercase_git_marketplace_source_uses_the_clone_cache() {
@@ -718,31 +720,22 @@ mod tests {
 
     fn codex_argv_stub(root: &Path, exit: i32, stderr: &str) -> AgentCli {
         let dir = root.join("_cli");
-        fs::create_dir_all(&dir).unwrap();
-        let body = if exit == 0 {
-            "@echo off\r\necho %* > \"%~dp0args.txt\"\r\nexit /b 0\r\n".to_string()
+        if exit == 0 {
+            CliStub::new("codex").log_args("args.txt", false).cli(&dir)
         } else {
-            format!("@echo off\r\necho {stderr} 1>&2\r\nexit /b {exit}\r\n")
-        };
-        let bin = dir.join("codex.cmd");
-        fs::write(&bin, body).unwrap();
-        AgentCli::new(bin.to_string_lossy().as_ref())
+            CliStub::new("codex").stderr(stderr).exit(exit).cli(&dir)
+        }
     }
 
     #[test]
     fn update_upgrades_marketplace_then_readds_plugin() {
         let (root, agents_skills) = fixture();
-        let dir = root.join("_cli");
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(
-            dir.join("codex.cmd"),
-            "@echo off\r\necho %* >> \"%~dp0args.txt\"\r\nexit /b 0\r\n",
-        )
-        .unwrap();
         let adapter = CodexAdapter::at_with_cli(
             root.clone(),
             agents_skills,
-            AgentCli::new(dir.join("codex.cmd").to_string_lossy().as_ref()),
+            CliStub::new("codex")
+                .log_args("args.txt", true)
+                .cli(&root.join("_cli")),
         );
         adapter.update_plugin("workbench@workshop").expect("update");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();

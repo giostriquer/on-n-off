@@ -1,11 +1,10 @@
-use std::io::Read;
 use std::process::{Command, Stdio};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use crate::cli_locate::{binary_on_path, cli_search_path_value, resolve_cli_binary};
 use crate::dto::{AdapterError, ErrorKind};
 use crate::install_source::InstallSource;
-use crate::paths::binary_on_path;
+use crate::process::{wait_with_deadline, CommandOutcome};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(45);
 pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -48,64 +47,38 @@ impl AgentCli {
     }
 
     fn run_timed(&self, args: &[&str], timeout: Duration) -> Result<String, AdapterError> {
-        let mut child = Command::new(
-            crate::paths::resolve_cli_binary(&self.binary)
+        let mut command = Command::new(
+            resolve_cli_binary(&self.binary)
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_else(|| self.binary.clone()),
-        )
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| spawn_error(&self.binary, error))?;
-        let stdout = child.stdout.take().map(read_pipe);
-        let stderr = child.stderr.take().map(read_pipe);
-        let started = Instant::now();
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    let stdout = join_pipe(stdout);
-                    let stderr = join_pipe(stderr);
-                    if status.success() {
-                        return Ok(stdout);
-                    }
-                    return Err(AdapterError::message(trim_cli(&stderr, &stdout)));
-                }
-                Ok(None) if started.elapsed() >= timeout => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    // A spawned descendant may still own inherited pipe handles after the
-                    // direct child is killed. Detach the drainers so the timeout remains a
-                    // hard deadline; they exit when those handles eventually close.
-                    drop(stdout);
-                    drop(stderr);
-                    return Err(AdapterError::message(format!("{} timed out.", self.binary)));
-                }
-                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    drop(stdout);
-                    drop(stderr);
-                    return Err(AdapterError::message(error.to_string()));
-                }
+        );
+        // Node-based CLIs are `#!/usr/bin/env node` shims: the child needs the same PATH the
+        // CLI was found on, not the (possibly minimal) PATH a GUI app inherited.
+        if let Some(path) = cli_search_path_value() {
+            command.env("PATH", path);
+        }
+        let child = command
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| spawn_error(&self.binary, error))?;
+        match wait_with_deadline(child, timeout)
+            .map_err(|error| AdapterError::message(error.to_string()))?
+        {
+            CommandOutcome::Exited {
+                success: true,
+                stdout,
+                ..
+            } => Ok(stdout),
+            CommandOutcome::Exited { stdout, stderr, .. } => {
+                Err(AdapterError::message(trim_cli(&stderr, &stdout)))
+            }
+            CommandOutcome::TimedOut => {
+                Err(AdapterError::message(format!("{} timed out.", self.binary)))
             }
         }
     }
-}
-
-fn read_pipe<R: Read + Send + 'static>(mut pipe: R) -> JoinHandle<String> {
-    std::thread::spawn(move || {
-        let mut output = String::new();
-        let _ = pipe.read_to_string(&mut output);
-        output
-    })
-}
-
-fn join_pipe(reader: Option<JoinHandle<String>>) -> String {
-    reader
-        .and_then(|thread| thread.join().ok())
-        .unwrap_or_default()
 }
 
 pub fn run_npx_skills(source: &InstallSource, agent: &str) -> Result<String, AdapterError> {
@@ -127,6 +100,11 @@ fn spawn_error(binary: &str, error: std::io::Error) -> AdapterError {
             message: format!("{binary} CLI not found."),
             path: None,
         };
+    }
+    if cfg!(unix) && error.kind() == std::io::ErrorKind::PermissionDenied {
+        return AdapterError::message(format!(
+            "{binary} is not executable (permission denied). Run `chmod +x` on it or point Binary at the real launcher."
+        ));
     }
     if error.raw_os_error() == Some(193) {
         return AdapterError::message(format!(
@@ -155,19 +133,19 @@ fn trim_cli(stderr: &str, stdout: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use crate::cli_stub::CliStub;
+    use std::path::PathBuf;
+    use std::time::Instant;
 
-    fn stub(name: &str, body: &str) -> std::path::PathBuf {
-        let dir = crate::paths::scratch_dir("on-n-off-cli");
-        let path = dir.join(name);
-        fs::write(&path, body).unwrap();
-        path
+    fn stub_dir() -> std::path::PathBuf {
+        crate::paths::scratch_dir("on-n-off-cli")
     }
 
     #[test]
     fn success_returns_stdout() {
-        let bin = stub("ok.cmd", "@echo off\r\necho {\"ok\":true}\r\nexit /b 0\r\n");
-        let out = AgentCli::new(bin.to_string_lossy().as_ref())
+        let out = CliStub::new("ok")
+            .stdout("{\"ok\":true}")
+            .cli(&stub_dir())
             .run(&["plugin", "list"])
             .expect("ok");
         assert!(out.contains("ok"));
@@ -175,8 +153,10 @@ mod tests {
 
     #[test]
     fn non_zero_returns_stderr() {
-        let bin = stub("fail.cmd", "@echo off\r\necho boom 1>&2\r\nexit /b 2\r\n");
-        let err = AgentCli::new(bin.to_string_lossy().as_ref())
+        let err = CliStub::new("fail")
+            .stderr("boom")
+            .exit(2)
+            .cli(&stub_dir())
             .run(&["plugin", "enable", "x"])
             .expect_err("fail");
         assert_eq!(err.kind, ErrorKind::Message);
@@ -185,12 +165,9 @@ mod tests {
 
     #[test]
     fn timeout_kills_the_process() {
-        let bin = stub(
-            "slow.cmd",
-            "@echo off\r\nping -n 8 127.0.0.1 >nul\r\nexit /b 0\r\n",
-        );
+        let cli = CliStub::new("slow").sleep(7).cli(&stub_dir());
         let started = Instant::now();
-        let err = AgentCli::new(bin.to_string_lossy().as_ref())
+        let err = cli
             .with_timeout(Duration::from_millis(200))
             .run(&["plugin", "enable", "x"])
             .expect_err("timeout");
@@ -204,15 +181,55 @@ mod tests {
 
     #[test]
     fn drains_chatty_stdout_and_stderr_while_the_process_runs() {
-        let bin = stub(
-            "chatty.cmd",
-            "@echo off\r\nfor /L %%i in (1,1,5000) do @(echo stdout-%%i-abcdefghijklmnopqrstuvwxyz0123456789& echo stderr-%%i-abcdefghijklmnopqrstuvwxyz0123456789 1>&2)\r\necho complete\r\nexit /b 0\r\n",
-        );
-        let out = AgentCli::new(bin.to_string_lossy().as_ref())
+        let out = CliStub::new("chatty")
+            .chatty(5000)
+            .stdout("complete")
+            .cli(&stub_dir())
             .with_timeout(Duration::from_secs(5))
             .run(&[])
             .expect("chatty child must not block on full output pipes");
         assert!(out.contains("complete"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_executable_launcher_gets_a_permission_hint() {
+        // Not an agent name: agent-named binaries fall through to the user's settings overrides.
+        let path = stub_dir().join("noexec-tool");
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        let err = AgentCli::new(path.to_string_lossy().as_ref())
+            .run(&["--version"])
+            .expect_err("permission denied");
+        assert!(
+            err.message.contains("not executable") && err.message.contains("noexec-tool"),
+            "unexpected message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn children_get_the_cli_search_path() {
+        let printed = CliStub::new("path-echo")
+            .print_env("PATH")
+            .cli(&stub_dir())
+            .run(&[])
+            .expect("path-echo");
+        let printed_dirs: Vec<PathBuf> = std::env::split_paths(printed.trim()).collect();
+        for dir in crate::cli_locate::cli_search_path() {
+            assert!(
+                printed_dirs.contains(dir),
+                "child PATH lacks {dir:?}: {printed}"
+            );
+        }
+        assert!(
+            printed_dirs.contains(
+                &crate::paths::user_home()
+                    .unwrap()
+                    .join(".local")
+                    .join("bin")
+            ),
+            "well-known dir missing from child PATH: {printed}"
+        );
     }
 
     #[test]

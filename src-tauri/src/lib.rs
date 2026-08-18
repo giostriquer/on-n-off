@@ -3,6 +3,9 @@ mod antigravity;
 mod backup;
 mod claude;
 mod cli;
+mod cli_locate;
+#[cfg(test)]
+mod cli_stub;
 mod codex;
 mod commands;
 mod config_io;
@@ -15,6 +18,7 @@ mod install_source;
 mod mcp;
 mod paths;
 mod plugin_meta;
+mod process;
 mod project;
 mod scanner;
 mod settings;
@@ -30,6 +34,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(commands::AppState::production())
+        .setup(|_app| {
+            // Warm the CLI search path (login-shell PATH probe) off the UI thread so the
+            // first provider load does not pay for it.
+            std::thread::spawn(|| {
+                let _ = cli_locate::cli_search_path();
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::list_agents,
             commands::feature_flags,
