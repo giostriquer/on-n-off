@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
+use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
 use crate::mcp::parse_antigravity_json;
-use crate::paths::{agent_info, cursor_root, normalize_skill_path};
+use crate::paths::{cursor_root, normalize_skill_path};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
 

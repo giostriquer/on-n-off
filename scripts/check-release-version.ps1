@@ -75,8 +75,8 @@ function Invoke-CargoMetadata {
 try {
     $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
     $packagePath = Join-Path $root "package.json"
-    $tauriPath = Join-Path $root "src-tauri\tauri.conf.json"
-    $cargoPath = Join-Path $root "src-tauri\Cargo.toml"
+    $tauriPath = Join-Path $root "src-tauri" "tauri.conf.json"
+    $cargoPath = Join-Path $root "src-tauri" "Cargo.toml"
 
     $packageVersion = Read-JsonVersion -Path $packagePath -SourceName "package.json"
     $tauriVersion = Read-JsonVersion -Path $tauriPath -SourceName "src-tauri/tauri.conf.json"

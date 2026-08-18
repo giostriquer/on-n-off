@@ -7,11 +7,12 @@ use serde::Deserialize;
 
 use crate::adapter::AgentAdapter;
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
+use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, PluginDto, SkillDto};
 use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::parse_claude_json;
-use crate::paths::{agent_info, claude_root, plugin_id_parts};
+use crate::paths::{claude_root, plugin_id_parts};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
 
@@ -431,6 +432,7 @@ fn claude_user_skill(skill: ScannedSkill, overrides: &HashMap<String, String>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli_stub::CliStub;
 
     fn fixture() -> PathBuf {
         let root = crate::paths::scratch_dir("on-n-off-claude");
@@ -716,14 +718,14 @@ mod tests {
         let dir = root.join("_cli");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("after.json"), after_settings).unwrap();
-        let body = if exit == 0 {
-            "@echo off\r\ncopy /Y \"%~dp0after.json\" \"%~dp0..\\settings.json\" >nul\r\necho %* > \"%~dp0args.txt\"\r\nexit /b 0\r\n".to_string()
+        if exit == 0 {
+            CliStub::new("claude")
+                .copy("after.json", "../settings.json")
+                .log_args("args.txt", false)
+                .cli(&dir)
         } else {
-            format!("@echo off\r\necho {stderr} 1>&2\r\nexit /b {exit}\r\n")
-        };
-        let bin = dir.join("claude.cmd");
-        fs::write(&bin, body).unwrap();
-        AgentCli::new(bin.to_string_lossy().as_ref())
+            CliStub::new("claude").stderr(stderr).exit(exit).cli(&dir)
+        }
     }
 
     #[test]
@@ -779,15 +781,11 @@ mod tests {
 
     fn claude_argv_stub(root: &Path, exit: i32, stderr: &str) -> AgentCli {
         let dir = root.join("_cli");
-        fs::create_dir_all(&dir).unwrap();
-        let body = if exit == 0 {
-            "@echo off\r\necho %* > \"%~dp0args.txt\"\r\nexit /b 0\r\n".to_string()
+        if exit == 0 {
+            CliStub::new("claude").log_args("args.txt", false).cli(&dir)
         } else {
-            format!("@echo off\r\necho {stderr} 1>&2\r\nexit /b {exit}\r\n")
-        };
-        let bin = dir.join("claude.cmd");
-        fs::write(&bin, body).unwrap();
-        AgentCli::new(bin.to_string_lossy().as_ref())
+            CliStub::new("claude").stderr(stderr).exit(exit).cli(&dir)
+        }
     }
 
     #[test]
@@ -829,16 +827,11 @@ mod tests {
     #[test]
     fn update_refreshes_marketplace_then_plugin() {
         let root = fixture();
-        let dir = root.join("_cli");
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(
-            dir.join("claude.cmd"),
-            "@echo off\r\necho %* >> \"%~dp0args.txt\"\r\nexit /b 0\r\n",
-        )
-        .unwrap();
         let adapter = ClaudeAdapter::at_with_cli(
             root.clone(),
-            AgentCli::new(dir.join("claude.cmd").to_string_lossy().as_ref()),
+            CliStub::new("claude")
+                .log_args("args.txt", true)
+                .cli(&root.join("_cli")),
         );
         adapter.update_plugin("workbench@workshop").expect("update");
         let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();

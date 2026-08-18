@@ -5,12 +5,13 @@ use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
+use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
 use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{
-    agent_info, antigravity_cli_plugins, antigravity_cli_root, antigravity_cli_skills,
+    antigravity_cli_plugins, antigravity_cli_root, antigravity_cli_skills,
     antigravity_config_plugins, antigravity_mcp_config, normalize_skill_path, plugin_id_parts,
 };
 use crate::scanner::{scan_antigravity_skills, scan_plugin_skills, ScannedSkill};
@@ -408,6 +409,7 @@ pub fn scan_workspace_plugins(project: &Path) -> Vec<PluginDto> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli_stub::CliStub;
 
     fn write_plugin(root: &Path, name: &str, skill: Option<&str>) {
         let dir = root.join(name);
@@ -479,34 +481,7 @@ mod tests {
         );
         write_plugin(&gemini.join("config").join("plugins"), "beta", None);
         let argv = gemini.join("argv.txt");
-
-        #[cfg(windows)]
-        let cli = {
-            let path = gemini.join("agy.cmd");
-            fs::write(
-                &path,
-                format!(
-                    "@echo off\r\necho %*>\"{}\"\r\nexit /b 0\r\n",
-                    argv.display()
-                ),
-            )
-            .unwrap();
-            AgentCli::new(path.to_string_lossy().as_ref())
-        };
-        #[cfg(not(windows))]
-        let cli = {
-            let path = gemini.join("agy.sh");
-            fs::write(
-                &path,
-                format!("#!/bin/sh\necho \"$@\" > \"{}\"\n", argv.display()),
-            )
-            .unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&path, perms).unwrap();
-            AgentCli::new(path.to_string_lossy().as_ref())
-        };
+        let cli = CliStub::new("agy").log_args("argv.txt", false).cli(&gemini);
 
         let adapter = AntigravityAdapter::at_with_cli(gemini.clone(), cli);
         adapter

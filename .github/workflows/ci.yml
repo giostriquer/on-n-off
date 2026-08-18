@@ -21,9 +21,17 @@ defaults:
 
 jobs:
   verify:
-    name: verify
-    runs-on: windows-latest
+    name: verify-${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+          - platform: macos
+            os: macos-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,8 +50,8 @@ jobs:
       - name: Test release version contract
         run: ./scripts/check-release-version.test.ps1
 
-      - name: Test Windows flavor helper
-        run: ./scripts/build-windows-flavor.test.ps1
+      - name: Test bundle helper
+        run: ./scripts/build-bundle.test.ps1
 
       - name: Test updater feed generator
         run: ./scripts/new-update-feed.test.ps1
@@ -66,12 +74,22 @@ jobs:
       - name: Test Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 
-  bundle-windows:
-    name: bundle-windows
+  bundle:
+    name: bundle-${{ matrix.platform }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: verify
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            kinds: nsis msi
+          - platform: macos
+            os: macos-latest
+            kinds: dmg
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -100,9 +118,11 @@ jobs:
 
           "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Build and verify Windows installer flavors
+      - name: Build and verify installer bundles
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          INSTALLER_KINDS: ${{ matrix.kinds }}
         run: |
-          ./scripts/build-windows-flavor.ps1 -InstallerKind nsis -ReleaseVersion $env:RELEASE_VERSION
-          ./scripts/build-windows-flavor.ps1 -InstallerKind msi -ReleaseVersion $env:RELEASE_VERSION
+          foreach ($kind in ($env:INSTALLER_KINDS -split ' ')) {
+            ./scripts/build-bundle.ps1 -InstallerKind $kind -ReleaseVersion $env:RELEASE_VERSION
+          }

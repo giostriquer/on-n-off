@@ -71,7 +71,7 @@ export type FeatureFlags = {
 
 export type UpdaterBuildInfo = {
   enabled: boolean;
-  installerKind: "nsis" | "msi" | null;
+  installerKind: "nsis" | "msi" | "dmg" | null;
   target: string | null;
 };
 

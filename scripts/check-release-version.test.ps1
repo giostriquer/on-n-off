@@ -26,14 +26,14 @@ function Set-FixtureVersion {
 
     @{ version = $TauriVersion } |
         ConvertTo-Json |
-        Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri\tauri.conf.json") -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri" "tauri.conf.json") -Encoding UTF8
 
     @"
 [package]
 name = "release-version-fixture"
 version = "$CargoVersion"
 edition = "2021"
-"@ | Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri\Cargo.toml") -Encoding UTF8
+"@ | Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri" "Cargo.toml") -Encoding UTF8
 }
 
 function Invoke-Checker {
@@ -108,8 +108,8 @@ function Assert-OutputContains {
 }
 
 try {
-    New-Item -ItemType Directory -Path (Join-Path $fixtureRoot "src-tauri\src") -Force | Out-Null
-    "fn main() {}" | Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri\src\main.rs") -Encoding UTF8
+    New-Item -ItemType Directory -Path (Join-Path $fixtureRoot "src-tauri" "src") -Force | Out-Null
+    "fn main() {}" | Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri" "src" "main.rs") -Encoding UTF8
 
     Set-FixtureVersion -PackageVersion "0.1.0" -TauriVersion "0.1.0" -CargoVersion "0.1.0"
     $matching = Invoke-Checker -ExpectedTag "v0.1.0"
@@ -148,8 +148,9 @@ catch {
 finally {
     if (Test-Path -LiteralPath $fixtureRoot) {
         $resolvedFixture = (Resolve-Path -LiteralPath $fixtureRoot).Path
-        $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
-        if (-not $resolvedFixture.StartsWith($tempRoot + '\', [System.StringComparison]::OrdinalIgnoreCase) -or
+        $separator = [System.IO.Path]::DirectorySeparatorChar
+        $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd($separator)
+        if (-not $resolvedFixture.StartsWith($tempRoot + $separator, [System.StringComparison]::OrdinalIgnoreCase) -or
             -not ([System.IO.Path]::GetFileName($resolvedFixture)).StartsWith("on-n-off-release-version-test-")) {
             throw "Refusing to remove unexpected fixture path: $resolvedFixture"
         }

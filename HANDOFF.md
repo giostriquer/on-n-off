@@ -1,6 +1,8 @@
-# Windows prerelease smoke test
+# Prerelease smoke test (Windows and macOS)
 
-Early prerelease build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity plugins, skills, MCP, and local usage estimates.
+Early prerelease build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity / Cursor plugins, skills, MCP, and local usage estimates.
+
+The Windows notes come first; macOS-specific notes are in [macOS](#macos) below. The smoke order and safety notes apply to both.
 
 ## What’s new (Studio v2 chrome)
 
@@ -73,10 +75,40 @@ updater configuration and signing secrets. Do not publish its draft until both
 formats, both `.sig` files, `latest.json`, checksums, and attestations have been
 inspected.
 
+## macOS
+
+### What you get
+
+- Disk image for Apple Silicon: `on-n-off_<version>_aarch64.dmg` (drag `on-n-off.app` to Applications)
+- The app is ad-hoc signed and **not notarized** → Gatekeeper blocks the first launch. Right-click `on-n-off.app` → **Open**, or allow it under **System Settings → Privacy & Security**. Verify the SHA-256 checksum or GitHub attestation first.
+- Stable releases ship a signed `on-n-off_<version>_aarch64.app.tar.gz` for in-app updates (`darwin-aarch64`)
+
+### Prerequisites
+
+1. macOS on Apple Silicon (Intel Macs are not built yet)
+2. Agent CLIs installed any usual way (`claude` native installer, `npm`/`nvm`/`volta`/`bun` for `codex`, Homebrew…). Finder launches apps with a minimal `PATH`; the app asks your login shell (`$SHELL -i -l`) for its `PATH` once at startup and also checks well-known folders (`~/.local/bin`, `/opt/homebrew/bin`, `~/.nvm/versions/node/*/bin`, `~/.volta/bin`, `~/.bun/bin`, …). If a CLI still shows missing, run `which <cli>` in Terminal and paste that path into **Settings → Binary**.
+3. Optional: Node/`npx` for `npx skills add …`
+
+The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, and `~/.on-n-off`. Because it inspects project folders (for project-scoped MCP/skills and transcripts), macOS may ask for access to **Documents** or **Desktop** the first time; declining only hides those project-scoped entries.
+
+### From source on macOS
+
+```sh
+xcode-select --install          # once
+curl https://sh.rustup.rs -sSf | sh   # once
+bun install
+bun run test
+bun run tauri dev
+bun run tauri build --bundles app,dmg   # .app + .dmg under src-tauri/target/release/bundle/
+```
+
+The `.dmg` step styles the Finder window through AppleScript, so a local build needs Automation permission for your terminal (System Settings → Privacy & Security → Automation → Finder). Without it the `.app` is still produced under `src-tauri/target/release/bundle/macos/`; the release workflow builds the `.dmg` on GitHub's macOS runners.
+
 ## Out of scope for this smoke
 
 - WSL-only agent installs
-- Signed/notarized installer
+- Signed/notarized installers (Windows Authenticode, Apple notarization)
+- Intel (x86_64) macOS builds
 - Project-level write/disable
 - Antigravity usage transcripts
 - Subscription billing accuracy (Usage is API-equivalent estimate)

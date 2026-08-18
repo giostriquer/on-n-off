@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use crate::dto::{AdapterError, AgentId, AgentInfo};
+use crate::dto::AdapterError;
 
 pub fn user_home() -> Result<PathBuf, AdapterError> {
     if let Ok(root) = env::var("ON_N_OFF_HOME") {
@@ -53,137 +53,10 @@ pub fn antigravity_cli_skills() -> Result<PathBuf, AdapterError> {
     Ok(antigravity_cli_root()?.join("skills"))
 }
 
-pub fn binary_on_path(name: &str) -> bool {
-    resolve_cli_binary(name).is_some()
-}
-
-/// First existing CLI file: explicit path, settings override, PATH, then well-known dirs.
-/// On Windows, PATHEXT launchers (`.cmd` / `.exe`) win over extensionless npm/nvm shims.
-pub fn resolve_cli_binary(name: &str) -> Option<PathBuf> {
-    let candidate = PathBuf::from(name);
-    if let Some(path) = windows_launchable(&candidate) {
-        return Some(path);
-    }
-    if let Some(override_path) = crate::settings::binary_override_for(name) {
-        if let Some(path) = windows_launchable(&override_path) {
-            return Some(path);
-        }
-    }
-    find_on_path(name).or_else(|| find_in_dirs(name, &well_known_cli_dirs()))
-}
-
-fn find_on_path(name: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
-    find_in_dirs(name, &env::split_paths(&path).collect::<Vec<_>>())
-}
-
-fn pathext() -> Vec<String> {
-    if cfg!(windows) {
-        env::var("PATHEXT")
-            .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into())
-            .split(';')
-            .map(|ext| ext.trim_start_matches('.').to_string())
-            .filter(|ext| !ext.is_empty())
-            .collect()
-    } else {
-        Vec::new()
-    }
-}
-
-fn has_windows_launcher_ext(path: &std::path::Path) -> bool {
-    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
-        return false;
-    };
-    pathext()
-        .iter()
-        .any(|known| known.eq_ignore_ascii_case(ext))
-}
-
-/// Prefer a Win32 launcher next to an extensionless nvm/npm shim.
-fn windows_launchable(path: &std::path::Path) -> Option<PathBuf> {
-    if !path.is_file() {
-        if cfg!(windows) && path.extension().is_none() {
-            for ext in pathext() {
-                let mut with_ext = path.to_path_buf();
-                with_ext.set_extension(ext);
-                if with_ext.is_file() {
-                    return Some(with_ext);
-                }
-            }
-        }
-        return None;
-    }
-    if !cfg!(windows) {
-        return Some(path.to_path_buf());
-    }
-    if has_windows_launcher_ext(path) {
-        return Some(path.to_path_buf());
-    }
-    for ext in pathext() {
-        let mut with_ext = path.to_path_buf();
-        with_ext.set_extension(ext);
-        if with_ext.is_file() {
-            return Some(with_ext);
-        }
-    }
-    None
-}
-
-pub(crate) fn find_in_dirs(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    for dir in dirs {
-        if let Some(path) = windows_launchable(&dir.join(name)) {
-            return Some(path);
-        }
-    }
-    None
-}
-
-pub fn well_known_cli_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Ok(home) = user_home() {
-        dirs.push(home.join(".local").join("bin"));
-        dirs.push(home.join("AppData").join("Roaming").join("npm"));
-        dirs.push(home.join("AppData").join("Local").join("Volta").join("bin"));
-    }
-    if let Ok(appdata) = env::var("APPDATA") {
-        dirs.push(PathBuf::from(appdata).join("npm"));
-    }
-    if let Ok(local) = env::var("LOCALAPPDATA") {
-        dirs.push(PathBuf::from(local).join("Volta").join("bin"));
-    }
-    if cfg!(windows) {
-        dirs.push(PathBuf::from(r"C:\nvm4w\nodejs"));
-    }
-    dirs
-}
-
 pub fn plugin_id_parts(id: &str) -> (String, String) {
     match id.split_once('@') {
         Some((name, source)) => (name.to_string(), source.to_string()),
         None => (id.to_string(), "local".to_string()),
-    }
-}
-
-pub fn agent_info(id: AgentId, binary: &str) -> AgentInfo {
-    let resolved = resolve_cli_binary(binary);
-    let cli_ok = resolved.is_some();
-    AgentInfo {
-        id,
-        display_name: id.display_name().to_string(),
-        cli_ok,
-        cli_error: if cli_ok {
-            None
-        } else {
-            Some(format!("{} CLI not found.", id.display_name()))
-        },
-        install_git: cli_ok,
-        install_folder: cli_ok,
-        plugin_toggle: match id {
-            AgentId::Claude => cli_ok,
-            AgentId::Codex => true,
-            AgentId::Antigravity => cli_ok,
-            AgentId::Cursor => false,
-        },
     }
 }
 
@@ -238,15 +111,20 @@ pub fn newest_dir(parent: &std::path::Path) -> Option<PathBuf> {
     })
 }
 
+/// Fresh per-call fixture directory. The counter keeps parallel tests apart even when the
+/// clock has coarse (microsecond) resolution, as it does on macOS.
 #[cfg(test)]
 pub fn scratch_dir(prefix: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "{prefix}-{}-{}",
+        "{prefix}-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::create_dir_all(&dir);
@@ -256,14 +134,18 @@ pub fn scratch_dir(prefix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn flags_path_lives_under_on_n_off_home() {
-        let path = flags_path_for(&PathBuf::from(r"C:\scratch"));
-        assert_eq!(path, PathBuf::from(r"C:\scratch\.on-n-off\flags.json"));
+        let home = std::env::temp_dir().join("scratch");
         assert_eq!(
-            settings_path_for(&PathBuf::from(r"C:\scratch")),
-            PathBuf::from(r"C:\scratch\.on-n-off\settings.json")
+            flags_path_for(&home).strip_prefix(&home),
+            Ok(Path::new(".on-n-off").join("flags.json").as_path())
+        );
+        assert_eq!(
+            settings_path_for(&home).strip_prefix(&home),
+            Ok(Path::new(".on-n-off").join("settings.json").as_path())
         );
     }
 
@@ -276,20 +158,6 @@ mod tests {
         assert_eq!(
             normalize_skill_path("C:/Users/Me/.agents/skills/loom-feed/SKILL.md"),
             r"c:\users\me\.agents\skills\loom-feed\skill.md"
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_prefers_cmd_over_extensionless_nvm_shim() {
-        let dir = scratch_dir("on-n-off-cli-shim");
-        std::fs::write(dir.join("claude"), "#!/usr/bin/env node\n").unwrap();
-        std::fs::write(dir.join("claude.cmd"), "@echo off\r\n").unwrap();
-        let found = find_in_dirs("claude", std::slice::from_ref(&dir)).expect("cmd launcher");
-        let name = found.file_name().unwrap().to_string_lossy();
-        assert!(
-            name.eq_ignore_ascii_case("claude.cmd"),
-            "expected claude.cmd, got {name}"
         );
     }
 }
