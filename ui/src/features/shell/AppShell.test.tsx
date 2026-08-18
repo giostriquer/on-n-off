@@ -1,10 +1,14 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 
 const setFilter = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
 const routerState = vi.hoisted(() => ({ pathname: "/plugins" }));
+const onOpenLimitsWindow = vi.hoisted(() =>
+  vi.fn((_handler: () => void) => Promise.resolve(() => undefined)),
+);
+let openLimitsHandler: (() => void) | null = null;
 
 const agent = {
   id: "codex" as const,
@@ -79,6 +83,7 @@ vi.mock("@/features/scope/ScopeBar", () => ({ ScopeBar: () => null }));
 vi.mock("@/features/shell/LeftRail", () => ({ LeftRail: () => null }));
 vi.mock("@/features/updater/UpdateStrip", () => ({ UpdateStrip: () => null }));
 vi.mock("@/features/usage/LazyUsageChart", () => ({ preloadUsageChart: vi.fn() }));
+vi.mock("$lib/api", () => ({ onOpenLimitsWindow }));
 
 describe("AppShell filter", () => {
   beforeEach(() => {
@@ -152,5 +157,27 @@ describe("AppShell tab-loading gate", () => {
       session.currentTab = originalTab;
       routerState.pathname = "/plugins";
     }
+  });
+});
+
+describe("AppShell native navigation", () => {
+  beforeEach(() => {
+    navigate.mockClear();
+    openLimitsHandler = null;
+    onOpenLimitsWindow.mockReset();
+    onOpenLimitsWindow.mockImplementation((handler: () => void) => {
+      openLimitsHandler = handler;
+      return Promise.resolve(() => undefined);
+    });
+    sessionStorage.clear();
+  });
+
+  it("opens the Limits route when the retained main window receives the native event", async () => {
+    render(<AppShell />);
+    await waitFor(() => expect(openLimitsHandler).not.toBeNull());
+
+    act(() => openLimitsHandler?.());
+
+    expect(navigate).toHaveBeenCalledWith({ to: "/limits" });
   });
 });
