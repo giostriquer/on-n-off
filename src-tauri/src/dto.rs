@@ -399,3 +399,166 @@ pub struct ProviderLimitsDto {
     pub credits: Option<LimitsCreditsDto>,
     pub fetched_at: String,
 }
+
+// ---------------------------------------------------------------------------
+// Local items: skills and subagents copied out of a marketplace by on-n-off itself and
+// tracked in `~/.on-n-off/installed-items.json` (see `item_install`).
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ItemKind {
+    Skill,
+    Agent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ItemScope {
+    Global,
+    #[serde(rename_all = "camelCase")]
+    Project {
+        project_path: String,
+    },
+}
+
+/// Where a provider keeps user-level skills and (Claude only) subagents for a scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemRoots {
+    pub skills: std::path::PathBuf,
+    pub agents: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceEntryDto {
+    pub name: String,
+    pub description: String,
+    /// Path inside the marketplace repository, `/`-separated (skill folder or agent file).
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplacePluginDto {
+    pub name: String,
+    pub version: Option<String>,
+    pub description: String,
+    /// `false` when the plugin source is something on-n-off cannot fetch (a bare URL, npm…).
+    pub supported: bool,
+    /// Set when the plugin lives in another GitHub repository than the marketplace itself.
+    pub source: Option<ItemSourceDto>,
+    pub skills: Vec<MarketplaceEntryDto>,
+    pub agents: Vec<MarketplaceEntryDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceInspectDto {
+    pub is_marketplace: bool,
+    pub commit_sha: String,
+    pub marketplace_name: String,
+    pub plugins: Vec<MarketplacePluginDto>,
+    pub hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSourceDto {
+    pub owner: String,
+    pub repo: String,
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemPick {
+    pub plugin_name: String,
+    pub kind: ItemKind,
+    pub path: String,
+    /// Overrides the request source for plugins hosted in another repository.
+    #[serde(default)]
+    pub source: Option<ItemSourceDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemTarget {
+    pub provider: AgentId,
+    pub scope: ItemScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallItemsRequest {
+    pub source: ItemSourceDto,
+    pub commit_sha: String,
+    pub items: Vec<ItemPick>,
+    pub targets: Vec<ItemTarget>,
+    #[serde(default)]
+    pub overwrite_unmanaged: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ItemOutcomeStatus {
+    Installed,
+    Replaced,
+    Skipped,
+    Conflict,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemOutcomeDto {
+    pub provider: AgentId,
+    pub kind: ItemKind,
+    pub name: String,
+    pub target_path: String,
+    pub status: ItemOutcomeStatus,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallItemsResultDto {
+    pub commit_sha: String,
+    pub sha_moved: bool,
+    pub outcomes: Vec<ItemOutcomeDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum ItemUpstream {
+    Unknown,
+    Current,
+    #[serde(rename_all = "camelCase")]
+    UpdateAvailable {
+        commit_sha: String,
+        plugin_version: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemStatusDto {
+    pub id: String,
+    pub provider: AgentId,
+    pub kind: ItemKind,
+    pub name: String,
+    pub display_name: String,
+    pub target_path: String,
+    pub installed_version: Option<String>,
+    pub installed_sha: String,
+    pub modified: bool,
+    pub missing: bool,
+    pub upstream: ItemUpstream,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateItemMode {
+    Overwrite,
+    Dismiss,
+}

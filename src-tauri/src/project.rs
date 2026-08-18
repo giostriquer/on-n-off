@@ -246,6 +246,20 @@ fn project_skill_dirs(project: &Path, agent: AgentId) -> Vec<PathBuf> {
     }
 }
 
+/// Where on-n-off writes project-scoped items for a provider: the first of its skill dirs,
+/// plus `.claude/agents` for Claude subagents.
+pub(crate) fn project_item_roots(project: &Path, agent: AgentId) -> crate::dto::ItemRoots {
+    let skills = project_skill_dirs(project, agent)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| project.join(".agents").join("skills"));
+    let agents = match agent {
+        AgentId::Claude => Some(project.join(".claude").join("agents")),
+        AgentId::Codex | AgentId::Antigravity | AgentId::Cursor => None,
+    };
+    crate::dto::ItemRoots { skills, agents }
+}
+
 fn scan_project_skills(dir: &Path, agent: AgentId) -> Vec<crate::scanner::ScannedSkill> {
     match agent {
         AgentId::Antigravity => crate::scanner::scan_antigravity_skills(dir),

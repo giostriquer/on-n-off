@@ -9,7 +9,10 @@ use crate::adapter::AgentAdapter;
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
 use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, PluginDto, SkillDto};
+use crate::dto::{
+    AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemRoots, ItemScope, PluginDto,
+    SkillDto,
+};
 use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::{parse_codex_map, CodexMcpEntry};
 use crate::paths::{
@@ -283,6 +286,19 @@ impl CodexAdapter {
 impl AgentAdapter for CodexAdapter {
     fn info(&self) -> AgentInfo {
         agent_info(AgentId::Codex)
+    }
+
+    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
+        match scope {
+            ItemScope::Global => Ok(ItemRoots {
+                skills: self.root()?.join("skills"),
+                agents: None,
+            }),
+            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
+                Path::new(project_path),
+                AgentId::Codex,
+            )),
+        }
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {

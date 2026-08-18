@@ -7,7 +7,9 @@ use crate::adapter::AgentAdapter;
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
 use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
+use crate::dto::{
+    AdapterError, AgentId, AgentInfo, AgentTabDto, ItemRoots, ItemScope, PluginDto, SkillDto,
+};
 use crate::install_source::{parse_install_source, InstallSource};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{
@@ -140,6 +142,19 @@ impl AntigravityAdapter {
 impl AgentAdapter for AntigravityAdapter {
     fn info(&self) -> AgentInfo {
         agent_info(AgentId::Antigravity)
+    }
+
+    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
+        match scope {
+            ItemScope::Global => Ok(ItemRoots {
+                skills: self.skills_dir()?,
+                agents: None,
+            }),
+            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
+                Path::new(project_path),
+                AgentId::Antigravity,
+            )),
+        }
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {

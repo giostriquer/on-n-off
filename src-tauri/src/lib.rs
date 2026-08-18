@@ -15,6 +15,7 @@ mod dto;
 mod fake;
 mod flags;
 mod install_source;
+mod item_install;
 mod limits;
 mod mcp;
 mod paths;
@@ -63,6 +64,11 @@ pub fn run() {
             commands::install_plugin,
             commands::uninstall_plugin,
             commands::update_plugin,
+            commands::inspect_marketplace,
+            commands::install_items,
+            commands::item_update_status,
+            commands::update_item,
+            commands::remove_item,
             commands::refresh,
             commands::usage_summary,
             commands::read_limits,

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::dto::{AdapterError, AgentInfo, AgentTabDto, ProjectDto};
+use crate::dto::{AdapterError, AgentInfo, AgentTabDto, ItemRoots, ItemScope, ProjectDto};
 
 pub trait AgentAdapter: Send + Sync {
     fn info(&self) -> AgentInfo;
@@ -64,5 +64,14 @@ pub trait AgentAdapter: Send + Sync {
     fn update_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
         let _ = plugin_id;
         Err(AdapterError::message("update is not implemented yet"))
+    }
+
+    /// Where on-n-off writes user skills (and, when supported, subagents) for a scope. Pure
+    /// path computation; the provider CLI is not involved.
+    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
+        let _ = scope;
+        Err(AdapterError::message(
+            "local skill install is not supported for this agent",
+        ))
     }
 }
