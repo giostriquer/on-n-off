@@ -42,8 +42,9 @@ If a CLI works in a terminal but the app says **os error 193** / “not a valid 
 
 1. **Overview / Plugins / Skills / MCP** — browse only first
 2. **Usage** — scan local transcripts (read-only of agent files; may write caches under `%USERPROFILE%\.on-n-off\`)
-3. **Agent config** — check paths and project scope
-4. Only then try a **single toggle** or install on a throwaway plugin if you want write coverage
+3. **Limits** — live Claude / Codex subscription limits via the CLIs' stored logins (never writes to or refreshes them; outbound HTTPS to `api.anthropic.com` and `chatgpt.com`; on macOS, click **Allow** on the one-time Keychain prompt for `security`). Remembers each account's last numbers under `%USERPROFILE%\.on-n-off\limits\` so switching accounts with `codex login` / `claude` keeps the other one listed; **Forget** on a stale card deletes just that file.
+4. **Agent config** — check paths and project scope
+5. Only then try a **single toggle** or install on a throwaway plugin if you want write coverage
 
 ## Safety notes
 
@@ -111,6 +112,6 @@ The `.dmg` step styles the Finder window through AppleScript, so a local build n
 - Intel (x86_64) macOS builds
 - Project-level write/disable
 - Antigravity usage transcripts
-- Subscription billing accuracy (Usage is API-equivalent estimate)
+- Subscription billing accuracy (Usage is API-equivalent estimate; Limits shows the vendors' own percentages)
 
 The product is still taking shape. Open a GitHub issue with reproducible steps if anything breaks on your system. Do not include agent transcripts, credentials, or private configuration in an issue.

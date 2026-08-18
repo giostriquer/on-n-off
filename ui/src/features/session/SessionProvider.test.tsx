@@ -1,7 +1,15 @@
 import { StrictMode, useRef } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AGENT_KEY, SessionProvider, useAgentSession } from "./SessionProvider";
+import {
+  AGENT_KEY,
+  SCREEN_KEY,
+  SCREEN_PATH,
+  SessionProvider,
+  pathToScreen,
+  readScreen,
+  useAgentSession,
+} from "./SessionProvider";
 import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
 
 const state = vi.hoisted(() => ({
@@ -281,5 +289,27 @@ describe("SessionProvider startup", () => {
 
     expect(screen.getByTestId("project-derivations")).toHaveTextContent(baseline ?? "0");
     expect(screen.getByTestId("scope-label")).toHaveTextContent("all projects");
+  });
+});
+
+describe("screen persistence", () => {
+  beforeEach(() => {
+    const values = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        clear: () => values.clear(),
+        getItem: (key: string) => values.get(key) ?? null,
+        removeItem: (key: string) => values.delete(key),
+        setItem: (key: string, value: string) => values.set(key, String(value)),
+      },
+    });
+  });
+
+  it("round-trips the Limits screen through storage and the router path", () => {
+    localStorage.setItem(SCREEN_KEY, "limits");
+    expect(readScreen()).toBe("limits");
+    expect(SCREEN_PATH.limits).toBe("/limits");
+    expect(pathToScreen("/limits")).toBe("limits");
   });
 });

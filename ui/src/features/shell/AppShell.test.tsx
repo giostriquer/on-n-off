@@ -4,6 +4,7 @@ import { AppShell } from "./AppShell";
 
 const setFilter = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
+const routerState = vi.hoisted(() => ({ pathname: "/plugins" }));
 
 const agent = {
   id: "codex" as const,
@@ -60,10 +61,10 @@ const session = {
 };
 
 vi.mock("@tanstack/react-router", () => ({
-  Outlet: () => null,
+  Outlet: () => <div data-testid="outlet" />,
   useNavigate: () => navigate,
   useRouterState: ({ select }: { select: (state: { location: { pathname: string } }) => string }) =>
-    select({ location: { pathname: "/plugins" } }),
+    select({ location: { pathname: routerState.pathname } }),
 }));
 
 vi.mock("@/features/session/SessionProvider", async (importOriginal) => {
@@ -106,5 +107,50 @@ describe("AppShell filter", () => {
 
     fireEvent.keyDown(input, { key: "Escape" });
     expect(setFilter).toHaveBeenLastCalledWith("");
+  });
+});
+
+describe("AppShell tab-loading gate", () => {
+  beforeEach(() => {
+    for (const name of ["localStorage", "sessionStorage"] as const) {
+      const values = new Map<string, string>();
+      Object.defineProperty(window, name, {
+        configurable: true,
+        value: {
+          getItem: (key: string) => values.get(key) ?? null,
+          setItem: (key: string, value: string) => values.set(key, String(value)),
+          removeItem: (key: string) => values.delete(key),
+          clear: () => values.clear(),
+        },
+      });
+    }
+  });
+
+  it("keeps provider-independent screens mounted while the selected provider tab is still loading", () => {
+    const originalTab = session.currentTab;
+    session.currentTab = {
+      dto: null,
+      filter: "",
+      inFlight: false,
+      loading: true,
+    } as unknown as typeof session.currentTab;
+    try {
+      const cases: [string, boolean][] = [
+        ["/plugins", false],
+        ["/usage", true],
+        ["/limits", true],
+        ["/settings", true],
+      ];
+      for (const [pathname, mounted] of cases) {
+        routerState.pathname = pathname;
+        const view = render(<AppShell />);
+        expect(screen.queryByTestId("outlet") !== null, pathname).toBe(mounted);
+        expect(screen.queryByText(/Loading Codex/) !== null, pathname).toBe(!mounted);
+        view.unmount();
+      }
+    } finally {
+      session.currentTab = originalTab;
+      routerState.pathname = "/plugins";
+    }
   });
 });

@@ -18,6 +18,27 @@ impl AgentId {
             Self::Cursor => "Cursor",
         }
     }
+
+    /// Lowercase id used for directory and file names (`claude`, `codex`, ...); matches the
+    /// serde form.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Antigravity => "antigravity",
+            Self::Cursor => "cursor",
+        }
+    }
+
+    /// The CLI executable the user types (and that settings/diagnostics resolve).
+    pub fn binary_name(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Antigravity => "agy",
+            Self::Cursor => "cursor-agent",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,4 +326,75 @@ pub struct UsageSummaryDto {
     /// True when served from the aggregated summary cache (no transcript walk).
     #[serde(default)]
     pub cache_hit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LimitsStatus {
+    Ok,
+    SignedOut,
+    Unauthenticated,
+    Unsupported,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LimitWindowKind {
+    Session,
+    Weekly,
+    Model,
+}
+
+/// One rolling rate-limit window as reported by a provider's subscription endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitWindowDto {
+    pub id: String,
+    pub label: String,
+    pub kind: LimitWindowKind,
+    /// 0..=100.
+    pub used_percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsCreditsDto {
+    pub balance: String,
+    pub unlimited: bool,
+}
+
+/// Which subscription account a limits snapshot belongs to. `id` is the provider's stable account
+/// id (or `default` when the CLI stores none); `label` is the human name (email) when known.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsAccountDto {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// Subscription rate-limit snapshot for one provider account. Provider-side problems are encoded
+/// in `status` + `message` rather than returned as errors so the UI can render each provider
+/// independently. `live: false` marks a remembered snapshot of an account the CLI is no longer
+/// signed into (its numbers are as of `fetched_at`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderLimitsDto {
+    pub provider: AgentId,
+    pub status: LimitsStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<LimitsAccountDto>,
+    #[serde(default = "default_true")]
+    pub live: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    pub windows: Vec<LimitWindowDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credits: Option<LimitsCreditsDto>,
+    pub fetched_at: String,
 }

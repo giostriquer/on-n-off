@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use crate::adapter::AgentAdapter;
 use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ProjectDto, UsageSummaryDto, UsageSummaryInput,
+    AdapterError, AgentId, AgentInfo, AgentTabDto, ProjectDto, ProviderLimitsDto, UsageSummaryDto,
+    UsageSummaryInput,
 };
 use crate::flags::FeatureFlags;
 use crate::settings::{AppSettings, ProviderDiagnose};
@@ -242,4 +243,31 @@ pub async fn refresh(
 #[tauri::command]
 pub async fn usage_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, AdapterError> {
     blocking("usage scan", move || crate::usage::read_summary(input)).await
+}
+
+/// Live subscription rate limits for one provider (Keychain probe + one HTTPS call) followed by
+/// remembered snapshots of its other accounts, off the UI thread. Provider-side problems come
+/// back as a `status` on the DTO, not as an `Err`. `force` = explicit refresh (re-reads the
+/// Keychain instead of the in-process memo).
+#[tauri::command]
+pub async fn read_limits(
+    agent_id: AgentId,
+    force: bool,
+) -> Result<Vec<ProviderLimitsDto>, AdapterError> {
+    blocking("limits read", move || {
+        Ok(crate::limits::read_limits(agent_id, force))
+    })
+    .await
+}
+
+/// Drop one remembered account snapshot (the "Forget" action on a stale card).
+#[tauri::command]
+pub async fn forget_limits_snapshot(
+    agent_id: AgentId,
+    account_id: String,
+) -> Result<(), AdapterError> {
+    blocking("limits forget", move || {
+        crate::limits::forget_snapshot(agent_id, &account_id).map_err(AdapterError::message)
+    })
+    .await
 }

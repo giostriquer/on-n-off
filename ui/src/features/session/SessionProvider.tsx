@@ -59,6 +59,7 @@ export const SCREEN_PATH: Record<Screen, string> = {
   skills: "/skills",
   mcp: "/mcp",
   usage: "/usage",
+  limits: "/limits",
   config: "/config",
   settings: "/settings",
 };
@@ -87,6 +88,7 @@ export function readScreen(): Screen {
     value === "skills" ||
     value === "mcp" ||
     value === "usage" ||
+    value === "limits" ||
     value === "config" ||
     value === "settings" ||
     value === "overview"

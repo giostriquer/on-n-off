@@ -1,7 +1,7 @@
 //! Usage scan: local Claude / Codex transcript analytics.
 
 mod aggregate;
-mod cache_io;
+pub(crate) mod cache_io;
 mod pricing;
 mod reader;
 mod scan_cache;

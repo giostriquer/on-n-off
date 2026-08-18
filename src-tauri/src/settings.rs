@@ -134,15 +134,6 @@ fn agent_for_binary(cli_name: &str) -> Option<AgentId> {
     }
 }
 
-fn binary_name(id: AgentId) -> &'static str {
-    match id {
-        AgentId::Claude => "claude",
-        AgentId::Codex => "codex",
-        AgentId::Antigravity => "agy",
-        AgentId::Cursor => "cursor-agent",
-    }
-}
-
 fn home_for(id: AgentId) -> Result<PathBuf, AdapterError> {
     match id {
         AgentId::Claude => paths::claude_root(),
@@ -191,7 +182,7 @@ fn search_detail() -> String {
 
 pub fn diagnose_provider(id: AgentId) -> ProviderDiagnose {
     let settings = load_settings();
-    let binary = binary_name(id);
+    let binary = id.binary_name();
     let override_path = settings
         .binary_paths
         .get(&id)

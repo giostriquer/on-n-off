@@ -1,5 +1,6 @@
 import {
   Activity,
+  Gauge,
   LayoutDashboard,
   Moon,
   Package,
@@ -133,6 +134,19 @@ export function LeftRail({
           className={`size-[15px] shrink-0 ${screen === "usage" ? "text-[var(--silkscreen)]" : "text-[var(--mute)]"}`}
         />
         <span className="flex-1 text-left">Usage</span>
+      </button>
+      <button
+        type="button"
+        className={`flex h-[34px] w-full items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11.5px] font-semibold tracking-[0.04em] uppercase transition-colors hover:bg-[var(--well)] hover:text-[var(--silkscreen)] ${
+          screen === "limits" ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
+        }`}
+        aria-current={screen === "limits" ? "page" : undefined}
+        onClick={() => onScreen("limits")}
+      >
+        <Gauge
+          className={`size-[15px] shrink-0 ${screen === "limits" ? "text-[var(--silkscreen)]" : "text-[var(--mute)]"}`}
+        />
+        <span className="flex-1 text-left">Limits</span>
       </button>
       <button
         type="button"
