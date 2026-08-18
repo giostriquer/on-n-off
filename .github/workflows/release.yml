@@ -16,8 +16,8 @@ defaults:
   run:
     shell: pwsh
 
-# Keep this block identical to ci.yml: rust-cache hashes CARGO*/RUST* variables into its key, and the
-# build job below restores the cache that CI's bundle job saves.
+# Keep this block identical to ci.yml and bundle.yml: rust-cache hashes CARGO*/RUST* variables into
+# its key, and the build job below restores the cache that the Bundle workflow saves on main.
 env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
