@@ -34,6 +34,7 @@ if (initialJsBytes > INITIAL_JS_LIMIT_BYTES) {
 
 const requiredDynamicEntries = [
   "src/features/usage/UsageChart.tsx",
+  "src/features/catalog/InstallSheet.tsx",
   "src/routes/overview.tsx",
   "src/routes/plugins.tsx",
   "src/routes/skills.tsx",

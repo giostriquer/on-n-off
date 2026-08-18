@@ -40,6 +40,8 @@ import type {
   AgentTabDto,
   AppSettings,
   FeatureFlags,
+  InstallItemsRequest,
+  InstallItemsResult,
   McpServerDto,
   PluginDto,
   ProjectDto,
@@ -156,6 +158,8 @@ type SessionContextValue = {
   masterCut: (enabled: boolean) => Promise<void>;
   pickFolder: () => Promise<string | null>;
   install: (source: string) => Promise<boolean>;
+  installItems: (request: InstallItemsRequest) => Promise<InstallItemsResult | null>;
+  installBusy: boolean;
   updatePlugin: (plugin: PluginDto) => void;
   confirmUninstall: () => Promise<void>;
   emptyTabDto: typeof emptyTabDto;
@@ -203,6 +207,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [initialProviderReady, setInitialProviderReady] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [installBusy, setInstallBusy] = useState(false);
   const [uninstallTarget, setUninstallTarget] = useState<PluginDto | null>(null);
   const [projects, setProjects] = useState<Record<AgentId, ProjectDto[]>>(() => emptyAgentRecord(() => []));
   const [extraProjects, setExtraProjects] = useState<Record<AgentId, ProjectDto[]>>(() =>
@@ -695,6 +700,51 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [agentLabel, applyScopedTab, note, withLock],
   );
 
+  const installItems = useCallback(
+    async (request: InstallItemsRequest): Promise<InstallItemsResult | null> => {
+      setInstallError(null);
+      setInstallBusy(true);
+      try {
+        const result = await api.installItems(request);
+        const touched = new Set<AgentId>();
+        let installed = 0;
+        let unresolved = 0;
+        for (const outcome of result.outcomes) {
+          if (outcome.status === "installed" || outcome.status === "replaced") {
+            installed += 1;
+            touched.add(outcome.provider);
+          } else if (outcome.status === "conflict" || outcome.status === "failed") {
+            unresolved += 1;
+          }
+        }
+        // loadTab queues a reload when a provider is mid-flight; withLock would drop it.
+        for (const provider of touched) {
+          void loadTabRef.current(provider);
+        }
+        if (installed > 0) {
+          note(
+            "INST",
+            `${installed} item${installed === 1 ? "" : "s"} from ${request.source.owner}/${request.source.repo} · ${[...touched].map(agentLabel).join(", ")}`,
+          );
+        }
+        if (unresolved > 0) {
+          note("TRIP", `${unresolved} item${unresolved === 1 ? "" : "s"} need attention (conflict or failure)`);
+        } else {
+          setInstallOpen(false);
+        }
+        return result;
+      } catch (error) {
+        const message = displayError(parseInvokeError(error), agentLabel(selectedRef.current));
+        setInstallError(message);
+        note("TRIP", message);
+        return null;
+      } finally {
+        setInstallBusy(false);
+      }
+    },
+    [agentLabel, note],
+  );
+
   const updatePlugin = useCallback(
     (plugin: PluginDto) => {
       const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
@@ -867,6 +917,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       masterCut,
       pickFolder,
       install,
+      installItems,
+      installBusy,
       updatePlugin,
       confirmUninstall,
       emptyTabDto,
@@ -920,6 +972,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       masterCut,
       pickFolder,
       install,
+      installItems,
+      installBusy,
       updatePlugin,
       confirmUninstall,
     ],

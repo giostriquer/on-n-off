@@ -51,3 +51,33 @@ describe("parseInstallSource", () => {
     });
   });
 });
+
+describe("githubRepoFromSource", () => {
+  it("resolves shorthand and github.com urls, and nothing else", async () => {
+    const { githubRepoFromSource } = await import("./installSource");
+    expect(githubRepoFromSource(parseInstallSource("mattpocock/skills"))).toEqual({
+      owner: "mattpocock",
+      repo: "skills",
+      ref: undefined,
+    });
+    expect(githubRepoFromSource(parseInstallSource("acme/tools@v1"))).toEqual({
+      owner: "acme",
+      repo: "tools",
+      ref: "v1",
+    });
+    expect(githubRepoFromSource(parseInstallSource("https://github.com/acme/tools.git"))).toEqual({
+      owner: "acme",
+      repo: "tools",
+      ref: undefined,
+    });
+    expect(githubRepoFromSource(parseInstallSource("https://github.com/acme/tools/tree/main"))).toEqual({
+      owner: "acme",
+      repo: "tools",
+      ref: undefined,
+    });
+    expect(githubRepoFromSource(parseInstallSource("https://gitlab.com/acme/tools.git"))).toBeNull();
+    expect(githubRepoFromSource(parseInstallSource("name@marketplace"))).toBeNull();
+    expect(githubRepoFromSource(parseInstallSource("npx skills add acme/tools"))).toBeNull();
+    expect(githubRepoFromSource(parseInstallSource(""))).toBeNull();
+  });
+});

@@ -78,7 +78,7 @@ vi.mock("@/features/session/SessionProvider", async (importOriginal) => {
 
 vi.mock("@/features/agents/AgentBanner", () => ({ AgentBanner: () => null }));
 vi.mock("@/features/catalog/ConfirmDialog", () => ({ ConfirmDialog: () => null }));
-vi.mock("@/features/catalog/InstallSheet", () => ({ InstallSheet: () => null }));
+vi.mock("@/features/catalog/LazyInstallSheet", () => ({ LazyInstallSheet: () => null }));
 vi.mock("@/features/scope/ScopeBar", () => ({ ScopeBar: () => null }));
 vi.mock("@/features/shell/LeftRail", () => ({ LeftRail: () => null }));
 vi.mock("@/features/updater/UpdateStrip", () => ({ UpdateStrip: () => null }));

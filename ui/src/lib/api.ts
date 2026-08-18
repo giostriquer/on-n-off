@@ -6,8 +6,13 @@ import type {
   AgentTabDto,
   AppSettings,
   FeatureFlags,
+  InstallItemsRequest,
+  InstallItemsResult,
+  ItemStatus,
+  MarketplaceInspect,
   ProjectDto,
   ProviderDiagnose,
+  UpdateItemMode,
   UpdaterBuildInfo,
 } from "./types";
 import type { ProviderLimits } from "./limitsTypes";
@@ -67,6 +72,34 @@ export function setMcpEnabled(
 
 export function installPlugin(agentId: AgentId, source: string): Promise<AgentTabDto> {
   return invoke("install_plugin", { agentId, source });
+}
+
+export function inspectMarketplace(
+  owner: string,
+  repo: string,
+  gitRef?: string | null,
+): Promise<MarketplaceInspect> {
+  return invoke("inspect_marketplace", { owner, repo, gitRef: gitRef || null });
+}
+
+export function installItems(request: InstallItemsRequest): Promise<InstallItemsResult> {
+  return invoke("install_items", { request });
+}
+
+export function itemUpdateStatus(
+  provider: AgentId,
+  projectPath?: string | null,
+  force = false,
+): Promise<ItemStatus[]> {
+  return invoke("item_update_status", { provider, projectPath: projectPath || null, force });
+}
+
+export function updateItem(id: string, mode: UpdateItemMode): Promise<ItemStatus> {
+  return invoke("update_item", { id, mode });
+}
+
+export function removeItem(id: string): Promise<void> {
+  return invoke("remove_item", { id });
 }
 
 export function uninstallPlugin(agentId: AgentId, pluginId: string): Promise<AgentTabDto> {

@@ -1,24 +1,44 @@
 import { useState } from "react";
 import { copy } from "$lib/copy";
-import { installHint, isValidInstallInput, parseInstallSource, resolvedInstallSource } from "$lib/installSource";
+import {
+  githubRepoFromSource,
+  installHint,
+  isValidInstallInput,
+  parseInstallSource,
+  resolvedInstallSource,
+} from "$lib/installSource";
+import type { AgentId, AgentInfo, InstallItemsRequest, InstallItemsResult, ProjectDto } from "$lib/types";
+import { LazyMarketplaceInstall } from "./LazyMarketplaceInstall";
 
 type InstallSheetProps = {
   agentName: string;
   busy?: boolean;
+  itemsBusy?: boolean;
   error?: string | null;
   installFolder?: boolean;
+  visibleAgents?: AgentInfo[];
+  currentAgentId?: AgentId;
+  projects?: ProjectDto[];
+  currentScopePath?: string | null;
   onCancel: () => void;
   onInstall: (source: string) => void;
+  onInstallItems?: (request: InstallItemsRequest) => Promise<InstallItemsResult | null>;
   onPickFolder?: () => Promise<string | null>;
 };
 
 export function InstallSheet({
   agentName,
   busy = false,
+  itemsBusy = false,
   error = null,
   installFolder = false,
+  visibleAgents = [],
+  currentAgentId,
+  projects = [],
+  currentScopePath = null,
   onCancel,
   onInstall,
+  onInstallItems = async () => null,
   onPickFolder = async () => null,
 }: InstallSheetProps) {
   const [text, setText] = useState("");
@@ -26,17 +46,19 @@ export function InstallSheet({
   const valid = isValidInstallInput(text);
   const inlineError = text.trim() && "error" in parsed ? parsed.error : null;
   const hint = installHint(parsed);
+  const repo = githubRepoFromSource(parsed);
+  const anyBusy = busy || itemsBusy;
 
-  function submit() {
+  function submitPlugin() {
     const source = resolvedInstallSource(text);
-    if (!source || busy) {
+    if (!source || anyBusy) {
       return;
     }
     onInstall(source);
   }
 
   async function pickFolder() {
-    if (!installFolder || busy) {
+    if (!installFolder || anyBusy) {
       return;
     }
     const dir = await onPickFolder();
@@ -58,7 +80,9 @@ export function InstallSheet({
           role="dialog"
           aria-modal="true"
           aria-labelledby="install-sheet-title"
-          className="pointer-events-auto w-[470px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] shadow-[var(--drop)]"
+          className={`pointer-events-auto max-h-[calc(100vh-32px)] max-w-[calc(100vw-32px)] overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] shadow-[var(--drop)] ${
+            repo ? "w-[560px]" : "w-[470px]"
+          }`}
         >
           <header className="flex items-center gap-2.5 border-b border-[var(--hair)] px-4 py-[13px]">
             <span className="size-2 shrink-0 bg-[var(--fill)]" aria-hidden="true" />
@@ -66,61 +90,83 @@ export function InstallSheet({
               Install — {agentName}
             </h2>
           </header>
-          <div className="flex flex-col gap-2.5 p-4">
+          <div className="sheet-scroll flex max-h-[calc(100vh-90px)] flex-col gap-2.5 p-4">
             <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)]">SOURCE</span>
             <input
               className="w-full rounded-lg border border-[var(--hair)] bg-[var(--well)] px-2.5 py-[9px] font-mono text-[13px] text-[var(--silkscreen)]"
               type="text"
               value={text}
-              disabled={busy}
+              disabled={anyBusy}
               aria-label="Install source"
               placeholder="name@marketplace, owner/repo, or npx skills add …"
               onChange={(event) => setText(event.target.value)}
             />
-            <p className="text-[11.5px] text-[var(--mute)]">{hint}</p>
-            <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3 text-[12.5px] text-[var(--silkscreen)] disabled:opacity-45"
-                disabled={!installFolder || busy}
-                onClick={() => void pickFolder()}
-              >
-                {copy.folder}
-              </button>
-              {!installFolder ? (
-                <span className="flex-1 text-[11.5px] text-[var(--mute)]">{copy.folderUnsupported}</span>
-              ) : null}
-            </div>
-            {inlineError ? (
-              <p className="text-[13px] text-[var(--trip)]" role="alert">
-                {inlineError}
-              </p>
-            ) : null}
-            {error ? (
-              <p
-                className="border-l-[3px] border-[var(--trip)] bg-[var(--well)] px-2.5 py-2 font-mono text-xs text-[var(--silkscreen)]"
-                role="alert"
-              >
-                {error}
-              </p>
-            ) : null}
-            <footer className="mt-1 flex justify-end gap-2">
-              <button
-                type="button"
-                className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)]"
-                onClick={onCancel}
-              >
-                {copy.cancel}
-              </button>
-              <button
-                type="button"
-                className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-4 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
-                disabled={!valid || busy}
-                onClick={submit}
-              >
-                {busy ? copy.installing : copy.install}
-              </button>
-            </footer>
+            {repo ? (
+              <LazyMarketplaceInstall
+                key={`${repo.owner}/${repo.repo}@${repo.ref ?? ""}`}
+                repo={repo}
+                agentName={agentName}
+                hint={hint}
+                busy={busy}
+                itemsBusy={itemsBusy}
+                error={error}
+                visibleAgents={visibleAgents}
+                currentAgentId={currentAgentId}
+                projects={projects}
+                currentScopePath={currentScopePath}
+                onCancel={onCancel}
+                onInstallPlugin={submitPlugin}
+                onInstallItems={onInstallItems}
+                onPickFolder={onPickFolder}
+              />
+            ) : (
+              <>
+                <p className="text-[11.5px] text-[var(--mute)]">{hint}</p>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3 text-[12.5px] text-[var(--silkscreen)] disabled:opacity-45"
+                    disabled={!installFolder || anyBusy}
+                    onClick={() => void pickFolder()}
+                  >
+                    {copy.folder}
+                  </button>
+                  {!installFolder ? (
+                    <span className="flex-1 text-[11.5px] text-[var(--mute)]">{copy.folderUnsupported}</span>
+                  ) : null}
+                </div>
+                {inlineError ? (
+                  <p className="text-[13px] text-[var(--trip)]" role="alert">
+                    {inlineError}
+                  </p>
+                ) : null}
+                {error ? (
+                  <p
+                    className="border-l-[3px] border-[var(--trip)] bg-[var(--well)] px-2.5 py-2 font-mono text-xs text-[var(--silkscreen)]"
+                    role="alert"
+                  >
+                    {error}
+                  </p>
+                ) : null}
+                <footer className="mt-1 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)]"
+                    onClick={onCancel}
+                  >
+                    {copy.cancel}
+                  </button>
+                  <button
+                    type="button"
+                    className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-4 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
+                    disabled={!valid || anyBusy}
+                    onClick={submitPlugin}
+                  >
+                    {busy ? copy.installing : copy.install}
+                  </button>
+                </footer>
+              </>
+            )}
           </div>
         </div>
       </div>
