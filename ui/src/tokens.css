@@ -148,6 +148,13 @@ body {
   overscroll-behavior: contain;
 }
 
+/* The standalone menu-bar window has its own viewport and cannot use AppShell's page scroller. */
+.limits-popover-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .app-rail {
   display: flex;
   width: 186px;

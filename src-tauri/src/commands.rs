@@ -271,3 +271,18 @@ pub async fn forget_limits_snapshot(
     })
     .await
 }
+
+#[tauri::command]
+pub fn hide_limits_popover(app: tauri::AppHandle) -> Result<(), AdapterError> {
+    crate::tray::hide_limits_popover(&app).map_err(AdapterError::message)
+}
+
+#[tauri::command]
+pub fn open_limits_window(app: tauri::AppHandle) -> Result<(), AdapterError> {
+    crate::tray::open_limits_window(&app).map_err(AdapterError::message)
+}
+
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) {
+    crate::tray::quit_app(&app);
+}
