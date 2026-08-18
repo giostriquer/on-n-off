@@ -68,7 +68,7 @@ function cliBinaryName(id: AgentId): string {
     case "antigravity":
       return "agy";
     case "cursor":
-      return "cursor-agent";
+      return "agent";
     default:
       return id;
   }

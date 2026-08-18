@@ -103,7 +103,7 @@ impl CursorAdapter {
 
 impl AgentAdapter for CursorAdapter {
     fn info(&self) -> AgentInfo {
-        let mut info = agent_info(AgentId::Cursor, "cursor-agent");
+        let mut info = agent_info(AgentId::Cursor);
         info.install_git = false;
         info.install_folder = false;
         info.plugin_toggle = false;
@@ -204,20 +204,54 @@ fn read_plugin_name(manifest: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Marker Cursor writes once a marketplace checkout finished downloading.
+const CACHE_COMPLETE: &str = ".cache-complete";
+
+/// The directory holding a plugin's files: `dir` itself when it carries a manifest (local
+/// plugins, symlinked repos), else the best of its per-version checkouts — Cursor stores
+/// marketplace installs as `cache/<marketplace>/<plugin>/<commit>/` and keeps old commits.
+fn plugin_install_dir(dir: &Path) -> Option<(PathBuf, PathBuf)> {
+    if let Some(manifest) = plugin_manifest(dir) {
+        return Some((dir.to_path_buf(), manifest));
+    }
+    let checkouts = fs::read_dir(dir).ok()?;
+    checkouts
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter_map(|path| plugin_manifest(&path).map(|manifest| (path, manifest)))
+        .max_by_key(|(path, manifest)| checkout_rank(path, manifest))
+}
+
+/// Complete checkouts beat partial ones, then the highest manifest version, then the most
+/// recently written manifest.
+fn checkout_rank(checkout: &Path, manifest: &Path) -> (bool, Vec<u64>, std::time::SystemTime) {
+    let complete = checkout.join(CACHE_COMPLETE).is_file();
+    let version = crate::plugin_meta::installed_hint(checkout, None).version;
+    let version_key = version
+        .split(['.', '-', '+'])
+        .map(|part| part.parse::<u64>().unwrap_or(0))
+        .collect();
+    let written = fs::metadata(manifest)
+        .and_then(|meta| meta.modified())
+        .unwrap_or(std::time::UNIX_EPOCH);
+    (complete, version_key, written)
+}
+
 fn scan_plugin_children(parent: &Path, source: &str) -> Vec<DiscoveredPlugin> {
     let Ok(entries) = fs::read_dir(parent) else {
         return Vec::new();
     };
     let mut out = Vec::new();
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+        let plugin_dir = entry.path();
+        if !plugin_dir.is_dir() {
             continue;
         }
-        let Some(manifest) = plugin_manifest(&path) else {
+        let Some((path, manifest)) = plugin_install_dir(&plugin_dir) else {
             continue;
         };
-        let folder = path
+        let folder = plugin_dir
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("plugin")
@@ -351,6 +385,44 @@ mod tests {
             .find(|server| server.id == "github")
             .unwrap();
         assert!(!github.enabled);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn versioned_cache_lists_the_newest_complete_version_once() {
+        // Cursor installs marketplace plugins as cache/<marketplace>/<plugin>/<commit>/, keeping
+        // older checkouts around and marking finished downloads with `.cache-complete`.
+        let root = crate::paths::scratch_dir("on-n-off-cursor-versioned");
+        let plugin = root
+            .join("plugins")
+            .join("cache")
+            .join("workshop")
+            .join("workbench");
+        for (sha, version, skill, complete) in [
+            ("1111111", "0.20.0", "old-skill", true),
+            ("2222222", "0.22.1", "review", true),
+            ("3333333", "0.23.0", "half-downloaded", false),
+        ] {
+            let checkout = plugin.join(sha);
+            let manifest_dir = checkout.join(".cursor-plugin");
+            fs::create_dir_all(&manifest_dir).unwrap();
+            fs::write(
+                manifest_dir.join("plugin.json"),
+                format!(r#"{{"name":"workbench","version":"{version}"}}"#),
+            )
+            .unwrap();
+            write_skill(&checkout.join("skills"), skill, "From plugin");
+            if complete {
+                fs::write(checkout.join(".cache-complete"), "").unwrap();
+            }
+        }
+        let tab = CursorAdapter::at(root.clone()).list_tab().expect("list");
+        assert_eq!(tab.plugins.len(), 1, "{:?}", tab.plugins);
+        let workbench = &tab.plugins[0];
+        assert_eq!(workbench.id, "workbench@workshop");
+        assert_eq!(workbench.version, "0.22.1");
+        assert_eq!(workbench.skills.len(), 1);
+        assert_eq!(workbench.skills[0].name, "review");
         let _ = fs::remove_dir_all(root);
     }
 
