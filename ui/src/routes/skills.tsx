@@ -59,7 +59,7 @@ export function SkillsRoute() {
         headerActions={
           <button
             type="button"
-            className="mr-2 flex h-[26px] items-center gap-1.5 border border-[var(--hair)] bg-transparent px-2.5 text-[10.5px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase disabled:opacity-45"
+            className="mr-2 flex h-[26px] items-center gap-1.5 border border-[var(--hair)] bg-transparent px-2.5 whitespace-nowrap text-[10.5px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase disabled:opacity-45"
             disabled={fetching}
             onClick={() => void refresh()}
           >
