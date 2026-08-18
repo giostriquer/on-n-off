@@ -8,7 +8,7 @@ on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon).
 - `src-tauri/src/commands.rs`: the IPC boundary used by `ui/src/lib/api.ts`.
 - `src-tauri/src/{claude,codex,antigravity,cursor}.rs`: provider adapters.
 - `src-tauri/src/paths.rs`: agent homes and app data paths.
-- `src-tauri/src/cli_locate.rs`: CLI discovery. GUI apps on macOS start with a minimal `PATH`, so `cli_search_path()` merges the process `PATH`, the login shell's `PATH` (probed once, off the UI thread), and well-known install folders; `resolve_cli_binary` searches it and `AgentCli` hands the same list to spawned CLIs as their `PATH` (npm shims are `#!/usr/bin/env node`). Route every CLI lookup and spawn through these.
+- `src-tauri/src/cli_locate.rs`: CLI discovery. GUI apps on macOS start with a minimal `PATH`, and on Windows an app started before an installer ran misses the new registry `PATH`, so `cli_search_path()` merges the process `PATH`, the login shell's `PATH` (probed once, off the UI thread) or the registered user/machine `PATH` on Windows, and well-known install folders; `resolve_provider_cli` searches it per provider (Cursor's CLI is `agent`, a name other products also use, so only an `agent` inside a `cursor-agent` install folder or the legacy `cursor-agent` alias counts) and `AgentCli` hands the same list to spawned CLIs as their `PATH` (npm shims are `#!/usr/bin/env node`). Route every CLI lookup and spawn through these.
 - `src-tauri/src/process.rs`: child-process draining with a hard deadline, shared by `cli.rs` and the login-shell probe.
 - `src-tauri/src/cli_stub.rs`: test-only builder that writes a fake CLI as `.cmd` on Windows or an executable `sh` script elsewhere; use it instead of hand-written batch stubs.
 - `scripts/build-bundle.ps1`: builds, validates, and stages one installer format (`nsis`, `msi`, `dmg`); CI runs it on both Windows and macOS runners.
@@ -16,6 +16,8 @@ on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon).
 - `src-tauri/src/usage/`: read-only transcript aggregation plus caches under `.on-n-off`.
 - `src-tauri/src/limits/`: the Limits screen's live subscription rate limits. Reads the CLIs' stored logins (macOS Keychain via `/usr/bin/security`, else `~/.claude/.credentials.json`; `~/.codex/auth.json`) and calls the vendors' usage endpoints over HTTPS. Never writes to or refreshes those logins (the Claude access token is memoised in-process only); the only writes are per-account snapshots of the numbers under `~/.on-n-off/limits/`, so accounts the user has signed out of stay visible. Provider problems come back as a `status` on the DTO, not an error.
 - `HANDOFF.md`: Windows and macOS runtime and smoke-test expectations.
+- `OS.md`: Windows vs macOS differences that affect PATH discovery, launchers, filesystem, WebView2, packaging. Read before touching `cli_locate.rs`, `process.rs`, scripts, or CI.
+- `PROVIDERS.md`: per-provider layout (home, CLI name and install path, plugin cache, skills, MCP file and toggle semantics, what is verified vs assumed). Update it together with the adapter it describes.
 
 Keep provider-specific behavior behind `AgentAdapter`. Keep frontend calls behind `$lib/api`; do not invoke Tauri directly from feature components.
 

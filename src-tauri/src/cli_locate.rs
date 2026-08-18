@@ -1,10 +1,15 @@
 //! Where agent CLIs live.
 //!
 //! GUI apps do not always inherit the PATH a terminal has: on macOS, Finder launches with a
-//! minimal one, so nvm/volta/homebrew shims are invisible. The app therefore searches one
-//! merged list — the process PATH, then the login shell's PATH (probed once), then well-known
-//! install folders — and hands that same list to spawned CLIs as their PATH, so
-//! `#!/usr/bin/env node` launchers keep working wherever they were found.
+//! minimal one, so nvm/volta/homebrew shims are invisible; on Windows, an app started before an
+//! installer appended to the registry PATH never sees the new folder. The app therefore
+//! searches one merged list — the process PATH, then the login shell's PATH (probed once) or the
+//! registered user + machine PATH, then well-known install folders — and hands that same list
+//! to spawned CLIs as their PATH, so `#!/usr/bin/env node` launchers keep working wherever they
+//! were found.
+//!
+//! Resolution is per provider: Cursor's CLI is called `agent`, a name other products use too,
+//! so [`resolve_provider_cli`] only accepts an `agent` that provably belongs to Cursor.
 
 use std::env;
 use std::ffi::OsString;
@@ -28,7 +33,7 @@ pub fn cli_search_path() -> &'static [PathBuf] {
     SEARCH_PATH.get_or_init(|| {
         merge_search_path(
             env::var_os("PATH"),
-            login_shell_path_dirs(),
+            environment_path_dirs(),
             well_known_cli_dirs(),
         )
     })
@@ -41,7 +46,7 @@ pub fn cli_search_path_value() -> Option<OsString> {
 
 fn merge_search_path(
     process_path: Option<OsString>,
-    login_shell_dirs: &[PathBuf],
+    environment_dirs: &[PathBuf],
     well_known: Vec<PathBuf>,
 ) -> Vec<PathBuf> {
     let mut merged: Vec<PathBuf> = Vec::new();
@@ -50,7 +55,7 @@ fn merge_search_path(
         .unwrap_or_default();
     for dir in process_dirs
         .into_iter()
-        .chain(login_shell_dirs.iter().cloned())
+        .chain(environment_dirs.iter().cloned())
         .chain(well_known)
     {
         if !dir.as_os_str().is_empty() && !merged.contains(&dir) {
@@ -87,6 +92,59 @@ fn resolve_cli_binary_in(name: &str, search_path: &[PathBuf]) -> Option<PathBuf>
 
 pub(crate) fn find_in_dirs(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     dirs.iter().find_map(|dir| launchable(&dir.join(name)))
+}
+
+/// [`resolve_cli_binary`] for a specific provider: an explicit path or settings override always
+/// wins; otherwise Cursor is located with [`find_cursor_cli`] and every other provider by name.
+pub fn resolve_provider_cli(id: AgentId, name: &str) -> Option<PathBuf> {
+    resolve_provider_cli_in(id, name, cli_search_path())
+}
+
+fn resolve_provider_cli_in(id: AgentId, name: &str, search_path: &[PathBuf]) -> Option<PathBuf> {
+    let candidate = PathBuf::from(name);
+    if let Some(path) = launchable(&candidate) {
+        return Some(path);
+    }
+    if let Some(override_path) = crate::settings::binary_override_for(name) {
+        if let Some(path) = launchable(&override_path) {
+            return Some(path);
+        }
+    }
+    match id {
+        AgentId::Cursor => find_cursor_cli(search_path),
+        _ => find_in_dirs(name, search_path),
+    }
+}
+
+const CURSOR_INSTALL_DIR: &str = "cursor-agent";
+
+/// The Cursor CLI: `agent` (canonical) or `cursor-agent` (legacy alias), first match in
+/// `dirs` order — but an `agent` only counts when it provably belongs to Cursor, since other
+/// products (Grok, ...) install a launcher of the same name onto PATH.
+///
+/// Cursor's installers keep everything under a `cursor-agent` folder: `%LOCALAPPDATA%\cursor-agent`
+/// on Windows, `~/.local/share/cursor-agent/versions/<v>/` behind a `~/.local/bin/agent` symlink
+/// elsewhere. So an `agent` qualifies when that folder name appears in its path or in the path
+/// the symlink resolves to.
+pub(crate) fn find_cursor_cli(dirs: &[PathBuf]) -> Option<PathBuf> {
+    dirs.iter().find_map(|dir| {
+        launchable(&dir.join("agent"))
+            .filter(|path| belongs_to_cursor(path))
+            .or_else(|| launchable(&dir.join(CURSOR_INSTALL_DIR)))
+    })
+}
+
+fn belongs_to_cursor(launcher: &Path) -> bool {
+    let has_install_dir = |path: &Path| {
+        path.components().any(|component| {
+            component
+                .as_os_str()
+                .to_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case(CURSOR_INSTALL_DIR))
+        })
+    };
+    has_install_dir(launcher)
+        || std::fs::canonicalize(launcher).is_ok_and(|real| has_install_dir(&real))
 }
 
 fn pathext() -> Vec<String> {
@@ -180,7 +238,11 @@ fn windows_cli_dirs(home: &Path) -> Vec<PathBuf> {
         dirs.push(PathBuf::from(appdata).join("npm"));
     }
     if let Ok(local) = env::var("LOCALAPPDATA") {
-        dirs.push(PathBuf::from(local).join("Volta").join("bin"));
+        let local = PathBuf::from(local);
+        dirs.push(local.join("Volta").join("bin"));
+        // Native installers: Antigravity (`agy`) and the Cursor CLI (`agent`).
+        dirs.push(local.join("agy").join("bin"));
+        dirs.push(local.join(CURSOR_INSTALL_DIR));
     }
     dirs.push(PathBuf::from(r"C:\nvm4w\nodejs"));
     dirs
@@ -248,6 +310,99 @@ fn node_version_key(path: &Path) -> Vec<u64> {
         .collect()
 }
 
+/// The second search tier: what the user's environment adds beyond the process PATH.
+///
+/// Unix: the login shell's PATH ([`login_shell_path_dirs`]). Windows: the PATH registered for
+/// the user and the machine ([`registered_path_dirs`]), which a running app misses when an
+/// installer appended to it after the app (or its parent shell) started.
+fn environment_path_dirs() -> &'static [PathBuf] {
+    if cfg!(windows) {
+        registered_path_dirs()
+    } else {
+        login_shell_path_dirs()
+    }
+}
+
+/// PATH entries from the Windows registry (`HKCU\Environment` then the machine-wide
+/// `Session Manager\Environment`), `%VAR%` tokens expanded, read once per process.
+///
+/// Empty off Windows and in tests (which inject directories explicitly instead).
+pub fn registered_path_dirs() -> &'static [PathBuf] {
+    static DIRS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    DIRS.get_or_init(|| {
+        if cfg!(test) {
+            return Vec::new();
+        }
+        registered_path_dirs_from(&registered_path_values(), |name| env::var_os(name))
+    })
+}
+
+#[cfg(windows)]
+fn registered_path_values() -> Vec<OsString> {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
+    [
+        (HKEY_CURRENT_USER, r"Environment"),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(hive, key)| {
+        RegKey::predef(hive)
+            .open_subkey(key)
+            .ok()?
+            .get_value::<String, _>("Path")
+            .ok()
+            .map(OsString::from)
+    })
+    .collect()
+}
+
+#[cfg(not(windows))]
+fn registered_path_values() -> Vec<OsString> {
+    Vec::new()
+}
+
+/// Split registry PATH values into directories, expanding `%NAME%` with `lookup`; entries
+/// that reference an unknown variable are dropped rather than searched literally.
+fn registered_path_dirs_from(
+    values: &[OsString],
+    lookup: impl Fn(&str) -> Option<OsString>,
+) -> Vec<PathBuf> {
+    values
+        .iter()
+        .flat_map(|value| env::split_paths(value).collect::<Vec<_>>())
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .filter_map(|dir| expand_percent_vars(&dir.to_string_lossy(), &lookup))
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn expand_percent_vars(text: &str, lookup: &impl Fn(&str) -> Option<OsString>) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('%') else {
+            out.push_str(&rest[start..]);
+            return Some(out);
+        };
+        let name = &after[..end];
+        if name.is_empty() {
+            out.push('%');
+        } else {
+            out.push_str(&lookup(name)?.to_string_lossy());
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    Some(out)
+}
+
 /// PATH entries as the user's login shell sees them, probed once per process.
 ///
 /// Empty on Windows and in tests (which inject directories explicitly instead).
@@ -311,8 +466,8 @@ fn parse_login_shell_path(output: &str) -> Option<Vec<PathBuf>> {
     (!dirs.is_empty()).then_some(dirs)
 }
 
-pub fn agent_info(id: AgentId, binary: &str) -> AgentInfo {
-    let cli_ok = resolve_cli_binary(binary).is_some();
+pub fn agent_info(id: AgentId) -> AgentInfo {
+    let cli_ok = resolve_provider_cli(id, id.binary_name()).is_some();
     AgentInfo {
         id,
         display_name: id.display_name().to_string(),
@@ -336,9 +491,130 @@ pub fn agent_info(id: AgentId, binary: &str) -> AgentInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
     use crate::cli_stub::CliStub;
     use crate::paths::scratch_dir;
+
+    /// Windows reports launchers with PATHEXT's casing (`.CMD`), so compare case-insensitively there.
+    fn assert_launcher(found: Option<PathBuf>, expected: &Path) {
+        let found = found.expect("launcher found");
+        let same = if cfg!(windows) {
+            found
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&expected.to_string_lossy())
+        } else {
+            found == expected
+        };
+        assert!(
+            same,
+            "expected {}, got {}",
+            expected.display(),
+            found.display()
+        );
+    }
+
+    #[test]
+    fn cursor_ignores_another_products_agent_command() {
+        // `agent` on PATH from an unrelated CLI (e.g. ~/.grok/bin/agent) must not count as Cursor.
+        let grok = scratch_dir("on-n-off-grok").join("bin");
+        CliStub::new("agent").write(&grok);
+        let cursor = scratch_dir("on-n-off-local").join("cursor-agent");
+        let launcher = CliStub::new("agent").write(&cursor);
+
+        assert_launcher(find_cursor_cli(&[grok.clone(), cursor.clone()]), &launcher);
+        assert_eq!(find_cursor_cli(std::slice::from_ref(&grok)), None);
+    }
+
+    #[test]
+    fn cursor_accepts_the_legacy_cursor_agent_launcher_anywhere() {
+        let bin = scratch_dir("on-n-off-legacy-bin");
+        let legacy = CliStub::new("cursor-agent").write(&bin);
+        assert_launcher(find_cursor_cli(std::slice::from_ref(&bin)), &legacy);
+    }
+
+    #[test]
+    fn cursor_prefers_the_canonical_agent_next_to_the_legacy_alias() {
+        let cursor = scratch_dir("on-n-off-cursor-install").join("cursor-agent");
+        let agent = CliStub::new("agent").write(&cursor);
+        CliStub::new("cursor-agent").write(&cursor);
+        assert_launcher(find_cursor_cli(std::slice::from_ref(&cursor)), &agent);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cursor_follows_the_installers_symlink_into_its_versions_folder() {
+        // `~/.local/bin/agent -> ~/.local/share/cursor-agent/versions/<v>/cursor-agent`.
+        let home = scratch_dir("on-n-off-cursor-home");
+        let versions = home
+            .join(".local")
+            .join("share")
+            .join("cursor-agent")
+            .join("versions")
+            .join("2026.08.11");
+        let real = CliStub::new("cursor-agent").write(&versions);
+        let bin = home.join(".local").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let link = bin.join("agent");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(find_cursor_cli(std::slice::from_ref(&bin)), Some(link));
+    }
+
+    #[test]
+    fn provider_resolution_only_special_cases_cursor() {
+        let dir = scratch_dir("on-n-off-provider-bin");
+        let claude = CliStub::new("claude").write(&dir);
+        CliStub::new("agent").write(&dir);
+        assert_launcher(
+            resolve_provider_cli_in(AgentId::Claude, "claude", std::slice::from_ref(&dir)),
+            &claude,
+        );
+        assert_eq!(
+            resolve_provider_cli_in(AgentId::Cursor, "agent", std::slice::from_ref(&dir)),
+            None,
+            "a bare `agent` outside a Cursor install folder is not Cursor"
+        );
+    }
+
+    #[test]
+    fn registered_path_values_expand_variables_and_skip_empties() {
+        let lookup = |name: &str| match name {
+            "SystemRoot" => Some(OsString::from(if cfg!(windows) {
+                r"C:\Windows"
+            } else {
+                "/windows"
+            })),
+            _ => None,
+        };
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        let values = [
+            OsString::from(format!(
+                "%SystemRoot%{sep2}system32{sep}{sep}%Missing%{sep2}bin{sep}plain",
+                sep2 = std::path::MAIN_SEPARATOR
+            )),
+            OsString::from("other"),
+        ];
+        assert_eq!(
+            registered_path_dirs_from(&values, lookup),
+            vec![
+                PathBuf::from(if cfg!(windows) {
+                    r"C:\Windows\system32".to_string()
+                } else {
+                    "/windows/system32".to_string()
+                }),
+                PathBuf::from("plain"),
+                PathBuf::from("other"),
+            ],
+            "unexpandable entries are dropped, empties skipped, order kept"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_well_known_dirs_include_native_provider_installers() {
+        let local = PathBuf::from(env::var("LOCALAPPDATA").expect("LOCALAPPDATA"));
+        let dirs = well_known_cli_dirs();
+        assert!(dirs.contains(&local.join("cursor-agent")), "{dirs:?}");
+        assert!(dirs.contains(&local.join("agy").join("bin")), "{dirs:?}");
+    }
 
     #[test]
     fn search_path_keeps_tier_order_and_dedupes() {

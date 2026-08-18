@@ -11,10 +11,12 @@ type McpListProps = {
   servers: McpServerDto[];
   filterQuery?: string;
   busy?: boolean;
+  /** Shown under the header when this provider's servers can only be listed, not switched. */
+  notice?: string;
   onToggle: (server: McpServerDto, enabled: boolean) => void;
 };
 
-export function McpList({ tab, servers: pool, filterQuery = "", busy = false, onToggle }: McpListProps) {
+export function McpList({ tab, servers: pool, filterQuery = "", busy = false, notice, onToggle }: McpListProps) {
   const [chip, setChip] = useState<Chip>("all");
   const servers =
     chip === "on" ? pool.filter((server) => server.enabled) : chip === "off" ? pool.filter((server) => !server.enabled) : pool;
@@ -45,6 +47,15 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, on
           ))}
         </div>
       </header>
+
+      {notice ? (
+        <p
+          role="note"
+          className="rounded-[9px] border border-[var(--hair)] bg-[var(--well)] px-3 py-2 text-[12.5px]/[1.45] text-[var(--mute)]"
+        >
+          {notice}
+        </p>
+      ) : null}
 
       {pool.length === 0 ? (
         <p className="text-[13px] text-[var(--mute)]">

@@ -139,7 +139,7 @@ impl AntigravityAdapter {
 
 impl AgentAdapter for AntigravityAdapter {
     fn info(&self) -> AgentInfo {
-        agent_info(AgentId::Antigravity, "agy")
+        agent_info(AgentId::Antigravity)
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {

@@ -282,7 +282,7 @@ impl CodexAdapter {
 
 impl AgentAdapter for CodexAdapter {
     fn info(&self) -> AgentInfo {
-        agent_info(AgentId::Codex, "codex")
+        agent_info(AgentId::Codex)
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {

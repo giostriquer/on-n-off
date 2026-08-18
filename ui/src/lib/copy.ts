@@ -5,6 +5,8 @@ export const copy = {
   emptyPlugins: "No plugins on this circuit.",
   emptyUserSkills: "No user skills.",
   emptyMcps: "No MCP servers on this circuit.",
+  cursorMcpReadOnly:
+    "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`.",
   filterMiss: (q: string) => `Nothing matches “${q}”.`,
   skillLocked: "Claude only enables this with the whole plugin.",
   skillProject: "Local to this project. Presence is on; no disable yet.",

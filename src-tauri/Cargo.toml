@@ -30,3 +30,6 @@ chrono = { version = "0.4.45", features = ["clock", "serde"] }
 chrono-tz = "0.10.4"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"

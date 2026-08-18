@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli_locate::{cli_search_path, login_shell_path_dirs, resolve_cli_binary};
+use crate::cli_locate::{
+    cli_search_path, login_shell_path_dirs, registered_path_dirs, resolve_provider_cli,
+};
 use crate::dto::{AdapterError, AgentId};
 use crate::paths;
 
@@ -129,7 +131,7 @@ fn agent_for_binary(cli_name: &str) -> Option<AgentId> {
         "claude" => Some(AgentId::Claude),
         "codex" => Some(AgentId::Codex),
         "agy" => Some(AgentId::Antigravity),
-        "cursor-agent" => Some(AgentId::Cursor),
+        "agent" | "cursor-agent" => Some(AgentId::Cursor),
         _ => None,
     }
 }
@@ -143,9 +145,10 @@ fn home_for(id: AgentId) -> Result<PathBuf, AdapterError> {
     }
 }
 
-/// Why a CLI check may fail and what to do about it, per platform.
-fn cli_hint(binary: &str, resolved: Option<&Path>) -> Option<String> {
+/// Why a CLI check may fail and what to do about it, per platform and provider.
+fn cli_hint(id: AgentId, binary: &str, resolved: Option<&Path>) -> Option<String> {
     match resolved {
+        None if id == AgentId::Cursor => Some(cursor_missing_hint()),
         None if cfg!(windows) => Some(format!(
             "If `{binary}` works in a terminal, point Binary at the .cmd/.exe next to it (nvm shims are not Win32 programs), or install the Windows CLI — not WSL-only."
         )),
@@ -157,6 +160,19 @@ fn cli_hint(binary: &str, resolved: Option<&Path>) -> Option<String> {
         ),
         Some(_) => None,
     }
+}
+
+/// Cursor's CLI shares its `agent` name with other products, so only a launcher inside a
+/// `cursor-agent` install folder (or the legacy `cursor-agent` alias) is accepted.
+fn cursor_missing_hint() -> String {
+    let install = if cfg!(windows) {
+        r"%LOCALAPPDATA%\cursor-agent (irm 'https://cursor.com/install?win32=true' | iex)"
+    } else {
+        "~/.local/bin, linked into ~/.local/share/cursor-agent (curl https://cursor.com/install -fsS | bash)"
+    };
+    format!(
+        "Cursor's CLI installs `agent` under {install}. An `agent` command from another product is not accepted; if Cursor's launcher lives elsewhere, point Binary at it (`cursor-agent` also works)."
+    )
 }
 
 fn home_missing_hint() -> &'static str {
@@ -172,7 +188,10 @@ fn search_detail() -> String {
     let searched = cli_search_path().len();
     let from_shell = login_shell_path_dirs().len();
     if cfg!(windows) {
-        format!("searched {searched} folders (PATH and well-known install folders)")
+        let registered = registered_path_dirs().len();
+        format!(
+            "searched {searched} folders (PATH, {registered} from the registered user/machine PATH, and well-known install folders)"
+        )
     } else if from_shell == 0 {
         format!("searched {searched} folders · login shell PATH unavailable, using well-known install folders")
     } else {
@@ -189,7 +208,7 @@ pub fn diagnose_provider(id: AgentId) -> ProviderDiagnose {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
-    let resolved = resolve_cli_binary(binary);
+    let resolved = resolve_provider_cli(id, binary);
     let home = home_for(id).ok();
     let home_exists = home.as_ref().is_some_and(|path| path.is_dir());
 
@@ -199,7 +218,7 @@ pub fn diagnose_provider(id: AgentId) -> ProviderDiagnose {
         (None, Some(found)) => found.display().to_string(),
         (None, None) => format!("{binary} is not on the CLI search path"),
     };
-    let cli_hint = cli_hint(binary, resolved.as_deref());
+    let cli_hint = cli_hint(id, binary, resolved.as_deref());
 
     ProviderDiagnose {
         agent_id: id,
@@ -258,13 +277,17 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn unix_diagnostic_hints_do_not_talk_about_windows() {
-        let hint = cli_hint("codex", None).expect("missing CLI gets a hint");
+        let hint = cli_hint(AgentId::Codex, "codex", None).expect("missing CLI gets a hint");
         for forbidden in ["Windows", "WSL", ".cmd", "Win32"] {
             assert!(!hint.contains(forbidden), "{hint}");
         }
         assert!(hint.contains("which codex"), "{hint}");
         assert_eq!(
-            cli_hint("codex", Some(Path::new("/usr/local/bin/codex"))),
+            cli_hint(
+                AgentId::Codex,
+                "codex",
+                Some(Path::new("/usr/local/bin/codex"))
+            ),
             None
         );
         assert!(!home_missing_hint().contains("Windows"));
@@ -323,6 +346,28 @@ mod tests {
         let serialized = serde_json::to_value(settings).unwrap();
 
         assert_eq!(serialized["automaticUpdates"], false);
+    }
+
+    #[test]
+    fn cursor_uses_agent_as_its_command_and_keeps_the_legacy_alias() {
+        assert_eq!(AgentId::Cursor.binary_name(), "agent");
+        assert_eq!(agent_for_binary("agent"), Some(AgentId::Cursor));
+        assert_eq!(agent_for_binary("cursor-agent"), Some(AgentId::Cursor));
+        assert_eq!(agent_for_binary("cursor-agent.cmd"), Some(AgentId::Cursor));
+        assert_eq!(
+            agent_for_binary("cursor"),
+            None,
+            "the editor launcher is not the CLI"
+        );
+    }
+
+    #[test]
+    fn missing_cursor_cli_hint_explains_the_agent_name_clash() {
+        let hint = cli_hint(AgentId::Cursor, "agent", None).expect("hint");
+        assert!(hint.contains("cursor-agent"), "{hint}");
+        assert!(hint.contains("another product"), "{hint}");
+        let other = cli_hint(AgentId::Codex, "codex", None).expect("hint");
+        assert!(!other.contains("another product"), "{other}");
     }
 
     #[test]

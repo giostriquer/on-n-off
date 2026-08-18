@@ -30,13 +30,14 @@ impl AgentId {
         }
     }
 
-    /// The CLI executable the user types (and that settings/diagnostics resolve).
+    /// The CLI executable the user types (and that settings/diagnostics resolve). Cursor's is
+    /// `agent`; the legacy `cursor-agent` alias is still accepted as an override.
     pub fn binary_name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Antigravity => "agy",
-            Self::Cursor => "cursor-agent",
+            Self::Cursor => "agent",
         }
     }
 }

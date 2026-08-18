@@ -53,7 +53,7 @@ function mcpToggleValue(id: AgentId): string {
     case "codex":
       return "file patch · [mcp_servers.*.enabled]";
     case "cursor":
-      return "file patch · ~/.cursor/mcp.json disabled";
+      return "managed in Cursor · read-only here";
   }
 }
 
@@ -68,7 +68,7 @@ function cliBinaryName(id: AgentId): string {
     case "antigravity":
       return "agy";
     case "cursor":
-      return "cursor-agent";
+      return "agent";
     default:
       return id;
   }
@@ -391,7 +391,7 @@ export function AgentConfig({
               ok={agent.installFolder}
             />
             <Capability label="Plugin toggle" detail={pluginToggleValue(agent.id)} ok={agent.pluginToggle} />
-            <Capability label="MCP toggle" detail={mcpToggleValue(agent.id)} ok />
+            <Capability label="MCP toggle" detail={mcpToggleValue(agent.id)} ok={agent.id !== "cursor"} />
             <Capability label="Safe writes" detail="backup + rollback on every patch" ok />
           </section>
 
