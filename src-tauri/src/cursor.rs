@@ -1,11 +1,9 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
 use crate::cli_locate::agent_info;
-use crate::config_io::ConfigIo;
 use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, PluginDto, SkillDto};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{cursor_root, normalize_skill_path};
@@ -13,6 +11,11 @@ use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
 
 const SOURCE_LOCAL: &str = "local";
+
+/// Cursor keeps MCP on/off in its own state (the IDE's settings; the CLI's per-project
+/// `~/.cursor/projects/<slug>/mcp-{approvals,disabled}.json`) and does not read a `disabled`
+/// key from `mcp.json`, so on-n-off lists Cursor's servers but never switches them.
+pub const MCP_READ_ONLY: &str = "Cursor manages MCP servers itself: switch them in the Cursor app or with `agent mcp enable <name>` / `agent mcp disable <name>`; on-n-off only lists them.";
 
 #[derive(Debug, Clone)]
 struct DiscoveredPlugin {
@@ -22,29 +25,21 @@ struct DiscoveredPlugin {
     path: PathBuf,
 }
 
+/// Read-only view of `~/.cursor`: plugins, skills, and MCP servers are listed, never written.
 pub struct CursorAdapter {
     root: Option<PathBuf>,
-    io: ConfigIo,
-    write: Mutex<()>,
 }
 
 impl CursorAdapter {
     pub fn new() -> Self {
         Self {
             root: cursor_root().ok(),
-            io: ConfigIo::production(),
-            write: Mutex::new(()),
         }
     }
 
     #[cfg(test)]
     pub fn at(root: PathBuf) -> Self {
-        let io = ConfigIo::at(root.join("_backups"));
-        Self {
-            root: Some(root),
-            io,
-            write: Mutex::new(()),
-        }
+        Self { root: Some(root) }
     }
 
     fn root(&self) -> Result<&Path, AdapterError> {
@@ -65,6 +60,14 @@ impl CursorAdapter {
             return Vec::new();
         };
         parse_antigravity_json(&text)
+            .into_iter()
+            .map(|mut server| {
+                // Every configured server is live as far as Cursor's config file can tell.
+                server.enabled = true;
+                server.togglable = false;
+                server
+            })
+            .collect()
     }
 
     fn discover_plugins(&self) -> Vec<DiscoveredPlugin> {
@@ -156,16 +159,8 @@ impl AgentAdapter for CursorAdapter {
         Ok(tab)
     }
 
-    fn set_mcp_enabled(&self, mcp_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_mcp_togglable(mcp_id)?;
-        let path = self.mcp_path()?;
-        self.io
-            .patch_antigravity_mcp_enabled(AgentId::Cursor, &path, mcp_id, enabled)?;
-        self.list_tab()
+    fn set_mcp_enabled(&self, _mcp_id: &str, _enabled: bool) -> Result<AgentTabDto, AdapterError> {
+        Err(AdapterError::message(MCP_READ_ONLY))
     }
 }
 
@@ -372,19 +367,12 @@ mod tests {
         assert!(!tab.user_skills[0].togglable);
         assert!(!tab.user_skills.iter().any(|skill| skill.name == "builtin"));
         assert_eq!(tab.mcp_servers.len(), 2);
-        let docs = tab
-            .mcp_servers
-            .iter()
-            .find(|server| server.id == "docs")
-            .unwrap();
-        assert!(docs.enabled);
-        assert!(docs.togglable);
-        let github = tab
-            .mcp_servers
-            .iter()
-            .find(|server| server.id == "github")
-            .unwrap();
-        assert!(!github.enabled);
+        // Cursor keeps on/off in its own state and never reads a `disabled` key, so every
+        // configured server is listed as on and none can be switched from here.
+        for server in &tab.mcp_servers {
+            assert!(server.enabled, "{} should read as configured/on", server.id);
+            assert!(!server.togglable, "{} must not be togglable", server.id);
+        }
         let _ = fs::remove_dir_all(root);
     }
 
@@ -427,28 +415,20 @@ mod tests {
     }
 
     #[test]
-    fn mcp_toggle_patches_disabled_and_backs_up() {
+    fn mcp_toggle_is_refused_and_leaves_the_file_alone() {
         let root = crate::paths::scratch_dir("on-n-off-cursor-mcp-toggle");
-        fs::write(
-            root.join("mcp.json"),
-            r#"{"mcpServers":{"github":{"command":"npx","args":["-y","gh"]}}}"#,
-        )
-        .unwrap();
+        let original = r#"{"mcpServers":{"github":{"command":"npx","args":["-y","gh"]}}}"#;
+        fs::write(root.join("mcp.json"), original).unwrap();
         let adapter = CursorAdapter::at(root.clone());
-        let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
-        assert!(!tab.mcp_servers[0].enabled);
-        let text = fs::read_to_string(root.join("mcp.json")).unwrap();
-        assert!(text.contains("\"disabled\": true") || text.contains("\"disabled\":true"));
-        let backups = root.join("_backups").join("cursor");
-        let count = fs::read_dir(&backups)
-            .map(|entries| entries.count())
-            .unwrap_or(0);
-        assert!(count >= 1, "expected a cursor mcp.json backup");
         let err = adapter
-            .set_mcp_enabled("missing", false)
-            .expect_err("missing");
+            .set_mcp_enabled("github", false)
+            .expect_err("Cursor MCP servers are read-only here");
+        assert!(err.message.contains("Cursor"), "{}", err.message);
+        assert!(err.message.contains("agent mcp"), "{}", err.message);
+        assert_eq!(fs::read_to_string(root.join("mcp.json")).unwrap(), original);
         assert!(
-            err.message.contains("mcp server not found") || err.message.contains("not togglable")
+            !root.join("_backups").exists(),
+            "no backup for a refused write"
         );
         let _ = fs::remove_dir_all(root);
     }

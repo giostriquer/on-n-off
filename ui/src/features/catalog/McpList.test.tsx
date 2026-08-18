@@ -39,4 +39,20 @@ describe("McpList", () => {
     expect(screen.getByText("GitHub")).toBeInTheDocument();
     expect(filterMcpListCall).not.toHaveBeenCalled();
   });
+
+  it("shows a provider notice and keeps read-only servers unswitchable", () => {
+    const readOnly = { ...server, togglable: false };
+    const onToggle = vi.fn();
+    render(
+      <McpList
+        tab={{ plugins: [], userSkills: [], mcpServers: [readOnly] }}
+        servers={[readOnly]}
+        notice="Managed in Cursor."
+        onToggle={onToggle}
+      />,
+    );
+
+    expect(screen.getByRole("note")).toHaveTextContent("Managed in Cursor.");
+    expect(screen.getByRole("button", { name: /GitHub on/ })).toBeDisabled();
+  });
 });
