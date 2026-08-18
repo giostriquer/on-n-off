@@ -21,6 +21,47 @@ on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon).
 
 Keep provider-specific behavior behind `AgentAdapter`. Keep frontend calls behind `$lib/api`; do not invoke Tauri directly from feature components.
 
+## Parallel worktree sessions
+
+Reserve the primary checkout—the checkout where `.worktrees/` lives—for worktree creation, inspection, and integration. Do not implement task changes there. Each top-level task session owns one dedicated branch and one worktree under `.worktrees/`. Treat `git worktree list` as the source of truth; never edit another session's checkout.
+
+A worktree isolates working files and its index, but all worktrees share the repository's object database, refs, remotes, and stash. Do not use `git stash` as cross-session storage, delete or rewrite another session's branch, or run repository-wide cleanup without confirming ownership. Worktrees also do not isolate ports, running processes, dependency caches, or the real agent homes described below. Coordinate dev-server and app runs across sessions, and keep runtime QA read-only unless the user authorizes configuration changes.
+
+New branches use `<change-type>/<task-slug>`, and their folders use `.worktrees/<change-type>-<task-slug>`. Allowed change types are `feat`, `fix`, `perf`, `audit`, `refactor`, `docs`, `test`, `chore`, and `release`. Use a lowercase hyphenated task slug. Existing worktrees with older names can remain as-is.
+
+Create a task worktree from the primary checkout in PowerShell. The default base is the latest `origin/main`; use another base only when the task explicitly depends on it.
+
+```powershell
+git worktree list
+git fetch origin main
+
+$WorktreeType = "perf"
+$WorktreeTask = "startup-review"
+$WorktreeBranch = "$WorktreeType/$WorktreeTask"
+$WorktreePath = Join-Path (git rev-parse --show-toplevel) ".worktrees/$WorktreeType-$WorktreeTask"
+$WorktreeBase = "origin/main"
+
+git worktree add --no-track -b $WorktreeBranch $WorktreePath $WorktreeBase
+git -C $WorktreePath rev-parse --show-toplevel
+git -C $WorktreePath branch --show-current
+git -C $WorktreePath status --short --branch
+```
+
+If the path or branch already exists, stop and inspect `git worktree list --porcelain`, `git branch --list $WorktreeBranch`, and the existing directory. Do not delete, prune, reuse, or repair a conflicting worktree until its ownership is confirmed. Resume an existing branch in a new worktree only after the user confirms that it belongs to the same task.
+
+After creation, use the worktree's absolute path as the working directory for every command in that session. Before the first edit and after any resume or handoff, confirm `git rev-parse --show-toplevel`, `git branch --show-current`, and `git status --short --branch`. Run `bun install` inside that worktree when frontend tooling is needed. Do not switch branches inside a task worktree, edit the primary checkout or a sibling worktree, or silently merge or rebase onto a new base.
+
+At handoff, report the absolute worktree path, branch, HEAD commit, clean or dirty status, verification commands and results, and push or pull-request state. Integrate from a clean primary checkout, and update `main` with fast-forward-only operations.
+
+Clean up only after integration is confirmed and the user explicitly requests it. Stop processes that use the worktree, require a clean status, and remove the worktree without `--force`:
+
+```powershell
+git -C $WorktreePath status --short --branch
+git worktree remove $WorktreePath
+```
+
+Deleting the local branch is a separate action. Use `git branch -d $WorktreeBranch` only when the user also requests branch cleanup and Git confirms it is merged. Never use `git branch -D` implicitly.
+
 ## Data safety
 
 - Agent homes are real user data: `%USERPROFILE%\.claude` / `~/.claude`, `.codex`, `.gemini`, `.cursor`, and `.agents`.
