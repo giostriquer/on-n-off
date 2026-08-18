@@ -67,8 +67,8 @@ pub enum CredentialLookup<T> {
 /// `Err(why)` the entry could not be read (access denied, tool failure).
 pub type KeychainProbe = Result<Option<String>, String>;
 
-#[cfg(any(target_os = "macos", test))]
-pub const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+#[cfg(target_os = "macos")]
+const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 /// What one credential source (Keychain entry or file) yielded.
 enum Source {
