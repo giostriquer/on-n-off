@@ -37,8 +37,15 @@ struct WindowObservation {
     resets_at: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LimitEventKind {
+    Reset,
+    Exhausted,
+}
+
 #[derive(Debug, PartialEq)]
-struct ResetEvent {
+struct LimitEvent {
+    kind: LimitEventKind,
     provider: AgentId,
     account_label: Option<String>,
     window_label: String,
@@ -82,7 +89,7 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
         let settings = async_runtime::spawn_blocking(crate::settings::load_settings)
             .await
             .unwrap_or_default();
-        let delay_minutes = if settings.limit_reset_notifications {
+        let delay_minutes = if settings.limit_notifications {
             let failed = match poll_once(&app, &state_path, &mut state).await {
                 Ok(failed) => failed,
                 Err(error) => {
@@ -191,21 +198,9 @@ async fn poll_providers() -> Result<Vec<ProviderLimitsDto>, String> {
     Ok(snapshots)
 }
 
-fn show_notification(app: &AppHandle, event: &ResetEvent) {
-    let account = event
-        .account_label
-        .as_deref()
-        .map(|label| format!(" · {label}"))
-        .unwrap_or_default();
-    let body = format!(
-        "{} reset from {:.0}% to {:.0}% used{}",
-        event.window_label, event.previous_used_percent, event.used_percent, account
-    );
-    if let Err(error) = crate::notifications::show(
-        app,
-        format!("{} limit reset", event.provider.display_name()),
-        body,
-    ) {
+fn show_notification(app: &AppHandle, event: &LimitEvent) {
+    let (title, body) = notification_copy(event);
+    if let Err(error) = crate::notifications::show(app, title, body) {
         eprintln!(
             "limits monitor could not show a notification: {}",
             error.message
@@ -213,7 +208,31 @@ fn show_notification(app: &AppHandle, event: &ResetEvent) {
     }
 }
 
-fn observe(state: &mut MonitorState, snapshots: &[ProviderLimitsDto]) -> Vec<ResetEvent> {
+fn notification_copy(event: &LimitEvent) -> (String, String) {
+    let account = event
+        .account_label
+        .as_deref()
+        .map(|label| format!(" · {label}"))
+        .unwrap_or_default();
+    match event.kind {
+        LimitEventKind::Reset => (
+            format!("{} limit reset", event.provider.display_name()),
+            format!(
+                "{} reset from {:.0}% to {:.0}% used{}",
+                event.window_label, event.previous_used_percent, event.used_percent, account
+            ),
+        ),
+        LimitEventKind::Exhausted => (
+            format!("{} limit reached", event.provider.display_name()),
+            format!(
+                "{} reached {:.0}% usage{}",
+                event.window_label, event.used_percent, account
+            ),
+        ),
+    }
+}
+
+fn observe(state: &mut MonitorState, snapshots: &[ProviderLimitsDto]) -> Vec<LimitEvent> {
     let mut events = Vec::new();
     for snapshot in snapshots {
         if !snapshot.live || snapshot.status != LimitsStatus::Ok {
@@ -244,8 +263,18 @@ fn observe(state: &mut MonitorState, snapshots: &[ProviderLimitsDto]) -> Vec<Res
                     let Some(before) = previous.windows.get(&window.id) else {
                         continue;
                     };
-                    if reset_detected(before, window.used_percent, window.resets_at.as_deref()) {
-                        events.push(ResetEvent {
+                    let kind =
+                        if reset_detected(before, window.used_percent, window.resets_at.as_deref())
+                        {
+                            Some(LimitEventKind::Reset)
+                        } else if exhausted_detected(before, window.used_percent) {
+                            Some(LimitEventKind::Exhausted)
+                        } else {
+                            None
+                        };
+                    if let Some(kind) = kind {
+                        events.push(LimitEvent {
+                            kind,
                             provider: snapshot.provider,
                             account_label: account.label.clone(),
                             window_label: window.label.clone(),
@@ -278,6 +307,10 @@ fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Opti
         drop >= MINIMUM_DROP_POINTS && used_percent <= before.used_percent * RESET_USAGE_FRACTION;
 
     (timestamp_advanced && drop > 0.5) || large_drop
+}
+
+fn exhausted_detected(before: &WindowObservation, used_percent: f64) -> bool {
+    before.used_percent < 100.0 && used_percent >= 100.0
 }
 
 fn poll_delay_minutes(base_minutes: u16, consecutive_failures: u32) -> u16 {
@@ -376,6 +409,106 @@ mod tests {
     }
 
     #[test]
+    fn a_model_limit_crossing_one_hundred_percent_notifies_once() {
+        let mut state = MonitorState::default();
+        let mut before = snapshot(
+            AgentId::Claude,
+            "account-a",
+            "me@example.com",
+            99.0,
+            Some("2026-08-24T12:00:00Z"),
+        );
+        before.windows[0].id = "weekly_fable".into();
+        before.windows[0].label = "Weekly · Fable".into();
+        before.windows[0].kind = LimitWindowKind::Model;
+        let mut exhausted = before.clone();
+        exhausted.windows[0].used_percent = 100.0;
+        assert!(observe(&mut state, &[before]).is_empty());
+
+        let events = observe(&mut state, std::slice::from_ref(&exhausted));
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, LimitEventKind::Exhausted);
+        assert_eq!(events[0].provider, AgentId::Claude);
+        assert_eq!(events[0].window_label, "Weekly · Fable");
+        assert_eq!(events[0].previous_used_percent, 99.0);
+        assert_eq!(events[0].used_percent, 100.0);
+        assert!(observe(&mut state, &[exhausted]).is_empty());
+    }
+
+    #[test]
+    fn an_exhausted_limit_notification_is_not_described_as_a_reset() {
+        let event = LimitEvent {
+            kind: LimitEventKind::Exhausted,
+            provider: AgentId::Claude,
+            account_label: Some("me@example.com".into()),
+            window_label: "Weekly · Fable".into(),
+            previous_used_percent: 99.0,
+            used_percent: 100.0,
+        };
+
+        let (title, body) = notification_copy(&event);
+
+        assert!(title.contains("reached"));
+        assert!(!title.contains("reset"));
+        assert!(body.contains("Weekly · Fable"));
+        assert!(body.contains("100%"));
+        assert!(body.contains("me@example.com"));
+    }
+
+    #[test]
+    fn an_exhausted_first_observation_is_only_a_baseline() {
+        let mut state = MonitorState::default();
+
+        let events = observe(
+            &mut state,
+            &[snapshot(
+                AgentId::Codex,
+                "account-a",
+                "me@example.com",
+                100.0,
+                Some("2026-08-24T12:00:00Z"),
+            )],
+        );
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn a_reset_rearms_the_exhausted_notification() {
+        let mut state = MonitorState::default();
+        let at_limit = snapshot(
+            AgentId::Codex,
+            "account-a",
+            "me@example.com",
+            100.0,
+            Some("2026-08-24T12:00:00Z"),
+        );
+        let reset = snapshot(
+            AgentId::Codex,
+            "account-a",
+            "me@example.com",
+            0.0,
+            Some("2026-08-31T12:00:00Z"),
+        );
+        let exhausted_again = snapshot(
+            AgentId::Codex,
+            "account-a",
+            "me@example.com",
+            100.0,
+            Some("2026-08-31T12:00:00Z"),
+        );
+        assert!(observe(&mut state, std::slice::from_ref(&at_limit)).is_empty());
+        assert_eq!(observe(&mut state, &[reset]).len(), 1);
+
+        let events = observe(&mut state, &[exhausted_again]);
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].previous_used_percent, 0.0);
+        assert_eq!(events[0].used_percent, 100.0);
+    }
+
+    #[test]
     fn advancing_the_reset_timestamp_after_usage_notifies_once() {
         let mut state = MonitorState::default();
         let before = snapshot(
@@ -397,6 +530,7 @@ mod tests {
         let events = observe(&mut state, std::slice::from_ref(&after));
 
         assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, LimitEventKind::Reset);
         assert_eq!(events[0].provider, AgentId::Claude);
         assert_eq!(events[0].account_label.as_deref(), Some("me@example.com"));
         assert_eq!(events[0].window_label, "Weekly · all models");

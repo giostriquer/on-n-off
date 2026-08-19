@@ -27,7 +27,7 @@ pub struct AppSettings {
     #[serde(default = "automatic_updates_default")]
     pub automatic_updates: bool,
     #[serde(default)]
-    pub limit_reset_notifications: bool,
+    pub limit_notifications: bool,
     #[serde(default = "limits_poll_minutes_default")]
     pub limits_poll_minutes: u16,
 }
@@ -46,7 +46,7 @@ impl Default for AppSettings {
             hidden_agents: Vec::new(),
             binary_paths: HashMap::new(),
             automatic_updates: automatic_updates_default(),
-            limit_reset_notifications: false,
+            limit_notifications: false,
             limits_poll_minutes: limits_poll_minutes_default(),
         }
     }
@@ -371,18 +371,18 @@ mod tests {
         let serialized =
             serde_json::to_value(parse_settings(Some(r#"{ "hiddenAgents": ["codex"] }"#))).unwrap();
 
-        assert_eq!(serialized["limitResetNotifications"], false);
+        assert_eq!(serialized["limitNotifications"], false);
         assert_eq!(serialized["limitsPollMinutes"], 10);
     }
 
     #[test]
     fn unsupported_limits_poll_interval_falls_back_to_ten_minutes() {
         let serialized = serde_json::to_value(parse_settings(Some(
-            r#"{ "limitResetNotifications": true, "limitsPollMinutes": 7 }"#,
+            r#"{ "limitNotifications": true, "limitsPollMinutes": 7 }"#,
         )))
         .unwrap();
 
-        assert_eq!(serialized["limitResetNotifications"], true);
+        assert_eq!(serialized["limitNotifications"], true);
         assert_eq!(serialized["limitsPollMinutes"], 10);
     }
 
@@ -419,7 +419,7 @@ mod tests {
             ],
             binary_paths: HashMap::new(),
             automatic_updates: true,
-            limit_reset_notifications: false,
+            limit_notifications: false,
             limits_poll_minutes: 10,
         })
         .unwrap_err();

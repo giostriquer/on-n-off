@@ -21,7 +21,7 @@ type SettingsProps = {
   onToggleVisible: (id: AgentId, hidden: boolean) => void;
   onSaveBinary: (id: AgentId, path: string) => void;
   onAutomaticUpdatesChange: (enabled: boolean) => void;
-  onLimitResetNotificationsChange: (enabled: boolean) => void;
+  onLimitNotificationsChange: (enabled: boolean) => void;
   onLimitsPollMinutesChange: (minutes: LimitsPollMinutes) => void;
 };
 
@@ -38,7 +38,7 @@ export function Settings({
   onToggleVisible,
   onSaveBinary,
   onAutomaticUpdatesChange,
-  onLimitResetNotificationsChange,
+  onLimitNotificationsChange,
   onLimitsPollMinutesChange,
 }: SettingsProps) {
   const diagnose = useQuery({
@@ -74,10 +74,10 @@ export function Settings({
         onAutomaticUpdatesChange={onAutomaticUpdatesChange}
       />
 
-      <LimitResetNotificationsCard
-        enabled={settings.limitResetNotifications}
+      <LimitNotificationsCard
+        enabled={settings.limitNotifications}
         pollMinutes={settings.limitsPollMinutes}
-        onEnabledChange={onLimitResetNotificationsChange}
+        onEnabledChange={onLimitNotificationsChange}
         onPollMinutesChange={onLimitsPollMinutesChange}
       />
 
@@ -101,7 +101,7 @@ export function Settings({
   );
 }
 
-function LimitResetNotificationsCard({
+function LimitNotificationsCard({
   enabled,
   pollMinutes,
   onEnabledChange,
@@ -138,14 +138,14 @@ function LimitResetNotificationsCard({
 
   return (
     <section
-      aria-label="Limit reset notifications"
+      aria-label="Limit notifications"
       className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
     >
       <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[15px] font-semibold">Limit reset notifications</h3>
+          <h3 className="m-0 text-[15px] font-semibold">Limit notifications</h3>
           <p className="mt-1 mb-0 text-[11.5px] text-[var(--mute)]">
-            Checks signed-in Claude and Codex accounts while on-n-off is running.
+            Notifies when usage reaches 100% or a limit resets while on-n-off is running.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -156,14 +156,14 @@ function LimitResetNotificationsCard({
             size="skill"
             on={enabled}
             busy={requestingPermission}
-            ariaLabel="Notify when a limit resets"
+            ariaLabel="Notify about limit changes"
             onToggle={() => void toggle()}
           />
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
         <label htmlFor="limits-poll-minutes" className="min-w-0 flex-1 text-[12px] text-[var(--mute)]">
-          Check for reset changes every
+          Check for limit changes every
         </label>
         <select
           id="limits-poll-minutes"

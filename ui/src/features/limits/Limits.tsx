@@ -10,22 +10,16 @@ import {
   formatUsedPercent,
   hasElapsed,
   planLabel,
+  usageFillColor,
   usageTone,
+  usageToneColor,
   type UsageTone,
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { providerColor } from "$lib/providerStyle";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { useLimitsProviders } from "./useLimitsProviders";
-
-/** Percent text picks up the warning tone; the bar itself stays in the provider colour. */
-const TONE_COLOR: Record<UsageTone, string | undefined> = {
-  calm: undefined,
-  warn: "var(--warn)",
-  trip: "var(--trip)",
-};
 
 export function Limits() {
   // Only Claude and Codex carry a subscription the backend can read; the rest report `unsupported`.
@@ -260,7 +254,10 @@ function Meter({
       aria-valuenow={Math.round(percent)}
       data-tone={tone}
     >
-      <div className="h-full rounded-sm transition-[width]" style={{ width: `${percent}%`, background: providerColor(provider) }} />
+      <div
+        className="h-full rounded-sm transition-[width]"
+        style={{ width: `${percent}%`, background: usageFillColor(provider, tone) }}
+      />
     </div>
   );
 }
@@ -272,7 +269,7 @@ function HeroWindow({ window, provider, now, stale }: { window: LimitWindow; pro
     <div className="flex flex-col gap-2 p-3.5">
       <span className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{window.label}</span>
       <div className="flex items-end gap-2">
-        <span className="text-[34px] leading-none font-semibold tracking-[-0.03em]" style={{ color: TONE_COLOR[tone] }}>
+        <span className="text-[34px] leading-none font-semibold tracking-[-0.03em]" style={{ color: usageToneColor(tone) }}>
           {text}
         </span>
         {note ? <span className="min-w-0 truncate pb-1 font-mono text-[11.5px] text-[var(--mute)]">{note}</span> : null}
@@ -300,7 +297,7 @@ function WindowRow({ window, provider, now, stale }: { window: LimitWindow; prov
         {note ? <span className="font-mono text-[11px] leading-snug text-[var(--mute)]">{note}</span> : null}
       </div>
       <Meter window={window} percent={percent} tone={tone} provider={provider} className="h-1 w-24 shrink-0" />
-      <span className="w-11 shrink-0 text-right font-mono text-[12px]" style={{ color: TONE_COLOR[tone] }}>
+      <span className="w-11 shrink-0 text-right font-mono text-[12px]" style={{ color: usageToneColor(tone) }}>
         {text}
       </span>
     </div>

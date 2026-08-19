@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Settings } from "./Settings";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
-import type { AgentInfo } from "$lib/types";
+import type { AgentInfo, LimitsPollMinutes } from "$lib/types";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -82,6 +82,39 @@ const updaterClient: UpdaterClient = {
   relaunch: async () => undefined,
 };
 
+function renderSettings({
+  onToggleVisible = () => undefined,
+  onLimitNotificationsChange = () => undefined,
+  onLimitsPollMinutesChange = () => undefined,
+}: {
+  onToggleVisible?: (id: AgentInfo["id"], hidden: boolean) => void;
+  onLimitNotificationsChange?: (enabled: boolean) => void;
+  onLimitsPollMinutesChange?: (minutes: LimitsPollMinutes) => void;
+} = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <UpdateProvider initialProviderReady automaticUpdates client={updaterClient}>
+        <Settings
+          agents={agents}
+          settings={{
+            hiddenAgents: [],
+            binaryPaths: {},
+            automaticUpdates: true,
+            limitNotifications: false,
+            limitsPollMinutes: 10,
+          }}
+          onToggleVisible={onToggleVisible}
+          onSaveBinary={() => undefined}
+          onAutomaticUpdatesChange={() => undefined}
+          onLimitNotificationsChange={onLimitNotificationsChange}
+          onLimitsPollMinutesChange={onLimitsPollMinutesChange}
+        />
+      </UpdateProvider>
+    </QueryClientProvider>,
+  );
+}
+
 describe("Settings", () => {
   beforeEach(() => {
     apiMocks.requestNotificationPermission.mockReset();
@@ -91,28 +124,7 @@ describe("Settings", () => {
   it("renders provider cards and can hide one from tabs", async () => {
     const user = userEvent.setup();
     const onToggleVisible = vi.fn();
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <UpdateProvider initialProviderReady automaticUpdates client={updaterClient}>
-          <Settings
-            agents={agents}
-            settings={{
-              hiddenAgents: [],
-              binaryPaths: {},
-              automaticUpdates: true,
-              limitResetNotifications: false,
-              limitsPollMinutes: 10,
-            }}
-            onToggleVisible={onToggleVisible}
-            onSaveBinary={() => undefined}
-            onAutomaticUpdatesChange={() => undefined}
-            onLimitResetNotificationsChange={() => undefined}
-            onLimitsPollMinutesChange={() => undefined}
-          />
-        </UpdateProvider>
-      </QueryClientProvider>,
-    );
+    renderSettings({ onToggleVisible });
     expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Show Claude in agent tabs/i })).toBeTruthy();
@@ -121,64 +133,22 @@ describe("Settings", () => {
   });
 
   it("uses Cursor's `agent` command as the binary placeholder", () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <UpdateProvider initialProviderReady automaticUpdates client={updaterClient}>
-          <Settings
-            agents={agents}
-            settings={{
-              hiddenAgents: [],
-              binaryPaths: {},
-              automaticUpdates: true,
-              limitResetNotifications: false,
-              limitsPollMinutes: 10,
-            }}
-            onToggleVisible={() => undefined}
-            onSaveBinary={() => undefined}
-            onAutomaticUpdatesChange={() => undefined}
-            onLimitResetNotificationsChange={() => undefined}
-            onLimitsPollMinutesChange={() => undefined}
-          />
-        </UpdateProvider>
-      </QueryClientProvider>,
-    );
+    renderSettings();
 
     expect(screen.getByPlaceholderText("agent")).toBeTruthy();
     expect(screen.queryByPlaceholderText("cursor-agent")).toBeNull();
   });
 
-  it("requests notification permission before enabling reset polling and persists the interval", async () => {
+  it("requests notification permission before enabling limit polling and persists the interval", async () => {
     const user = userEvent.setup();
-    const onLimitResetNotificationsChange = vi.fn();
+    const onLimitNotificationsChange = vi.fn();
     const onLimitsPollMinutesChange = vi.fn();
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <UpdateProvider initialProviderReady automaticUpdates client={updaterClient}>
-          <Settings
-            agents={agents}
-            settings={{
-              hiddenAgents: [],
-              binaryPaths: {},
-              automaticUpdates: true,
-              limitResetNotifications: false,
-              limitsPollMinutes: 10,
-            }}
-            onToggleVisible={() => undefined}
-            onSaveBinary={() => undefined}
-            onAutomaticUpdatesChange={() => undefined}
-            onLimitResetNotificationsChange={onLimitResetNotificationsChange}
-            onLimitsPollMinutesChange={onLimitsPollMinutesChange}
-          />
-        </UpdateProvider>
-      </QueryClientProvider>,
-    );
+    renderSettings({ onLimitNotificationsChange, onLimitsPollMinutesChange });
 
-    await user.click(screen.getByRole("button", { name: "Notify when a limit resets" }));
+    await user.click(screen.getByRole("button", { name: "Notify about limit changes" }));
 
     expect(apiMocks.requestNotificationPermission).toHaveBeenCalledTimes(1);
-    expect(onLimitResetNotificationsChange).toHaveBeenCalledWith(true);
+    expect(onLimitNotificationsChange).toHaveBeenCalledWith(true);
 
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Limits polling interval" }),
@@ -187,36 +157,15 @@ describe("Settings", () => {
     expect(onLimitsPollMinutesChange).toHaveBeenCalledWith(15);
   });
 
-  it("keeps reset polling disabled when notification permission is denied", async () => {
+  it("keeps limit polling disabled when notification permission is denied", async () => {
     apiMocks.requestNotificationPermission.mockResolvedValue(false);
     const user = userEvent.setup();
-    const onLimitResetNotificationsChange = vi.fn();
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <UpdateProvider initialProviderReady automaticUpdates client={updaterClient}>
-          <Settings
-            agents={agents}
-            settings={{
-              hiddenAgents: [],
-              binaryPaths: {},
-              automaticUpdates: true,
-              limitResetNotifications: false,
-              limitsPollMinutes: 10,
-            }}
-            onToggleVisible={() => undefined}
-            onSaveBinary={() => undefined}
-            onAutomaticUpdatesChange={() => undefined}
-            onLimitResetNotificationsChange={onLimitResetNotificationsChange}
-            onLimitsPollMinutesChange={() => undefined}
-          />
-        </UpdateProvider>
-      </QueryClientProvider>,
-    );
+    const onLimitNotificationsChange = vi.fn();
+    renderSettings({ onLimitNotificationsChange });
 
-    await user.click(screen.getByRole("button", { name: "Notify when a limit resets" }));
+    await user.click(screen.getByRole("button", { name: "Notify about limit changes" }));
 
-    expect(onLimitResetNotificationsChange).not.toHaveBeenCalled();
+    expect(onLimitNotificationsChange).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent(
       "Notifications are blocked in system settings.",
     );

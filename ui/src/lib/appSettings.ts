@@ -6,7 +6,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   hiddenAgents: [],
   binaryPaths: {},
   automaticUpdates: true,
-  limitResetNotifications: false,
+  limitNotifications: false,
   limitsPollMinutes: 10,
 };
 
@@ -15,7 +15,7 @@ export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefine
     hiddenAgents: overlay?.hiddenAgents ?? [],
     binaryPaths: overlay?.binaryPaths ?? {},
     automaticUpdates: overlay?.automaticUpdates ?? true,
-    limitResetNotifications: overlay?.limitResetNotifications ?? false,
+    limitNotifications: overlay?.limitNotifications ?? false,
     limitsPollMinutes: normalizeLimitsPollMinutes(overlay?.limitsPollMinutes),
   };
 }

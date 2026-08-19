@@ -81,7 +81,7 @@ export type AppSettings = {
   hiddenAgents: AgentId[];
   binaryPaths: Partial<Record<AgentId, string>>;
   automaticUpdates: boolean;
-  limitResetNotifications: boolean;
+  limitNotifications: boolean;
   limitsPollMinutes: LimitsPollMinutes;
 };
 
