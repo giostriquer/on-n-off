@@ -156,12 +156,17 @@ describe("ItemList managed items", () => {
     modified: true,
     missing: false,
     upstream: { state: "updateAvailable" as const, commitSha: "b".repeat(40), pluginVersion: "1.3.0" },
+    source: { owner: "acme", repo: "skills", ref: "HEAD" },
+    pluginName: "acme-skills",
+    upstreamPath: "skills/ops/tdd",
+    upstreamUrl: `https://github.com/acme/skills/tree/${"a".repeat(40)}/skills/ops/tdd`,
   };
 
   it("shows badges and update/remove only on skills on-n-off installed", async () => {
     const user = userEvent.setup();
     const onUpdateItem = vi.fn();
     const onRemoveItem = vi.fn();
+    const onOpenUpstream = vi.fn();
     render(
       <ItemList
         kind="skill"
@@ -177,9 +182,15 @@ describe("ItemList managed items", () => {
         statusFor={(skill) => (skill.name === "tdd" ? managed : undefined)}
         onUpdateItem={onUpdateItem}
         onRemoveItem={onRemoveItem}
+        onOpenUpstream={onOpenUpstream}
         headerActions={<button type="button">Check for updates</button>}
       />,
     );
+    // A copied skill says where it came from and links to the original; own skills stay "User skill".
+    expect(screen.getByText("from acme/skills")).toBeTruthy();
+    expect(screen.getAllByText("User skill")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Open tdd on GitHub" }));
+    expect(onOpenUpstream).toHaveBeenCalledWith(managed);
     expect(screen.getByText("v1.2.3")).toBeTruthy();
     expect(screen.getByText("update available → v1.3.0")).toBeTruthy();
     expect(screen.getByText("modified locally")).toBeTruthy();

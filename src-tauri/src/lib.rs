@@ -36,6 +36,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(commands::AppState::production())
         .setup(|_app| {
             // Warm the CLI search path (login-shell PATH probe) off the UI thread so the
@@ -69,6 +70,7 @@ pub fn run() {
             commands::item_update_status,
             commands::update_item,
             commands::remove_item,
+            commands::open_url,
             commands::refresh,
             commands::usage_summary,
             commands::read_limits,

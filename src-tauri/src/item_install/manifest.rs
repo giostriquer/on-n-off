@@ -3,10 +3,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::deps::{self, EntryRef, SiblingIndex};
 use super::fetch::Tarball;
-use super::write::normalize_upstream_path;
+use super::write::{self, normalize_upstream_path};
 use crate::dto::{
-    AdapterError, ItemSourceDto, MarketplaceEntryDto, MarketplaceInspectDto, MarketplacePluginDto,
+    AdapterError, ItemKind, ItemSourceDto, MarketplaceEntryDto, MarketplaceInspectDto,
+    MarketplacePluginDto,
 };
 use crate::plugin_meta::{
     parse_marketplace_text, parse_plugin_manifest, MarketplaceFile, PluginManifest,
@@ -44,20 +46,43 @@ pub fn plugin_roots(tarball: &Tarball) -> HashMap<String, String> {
     roots
 }
 
+/// A marketplace listing plus, per plugin, the snapshot its entries were read from (`None`
+/// for unsupported plugins).
+pub struct Inspected {
+    pub dto: MarketplaceInspectDto,
+    pub trees: Vec<Option<Arc<Tarball>>>,
+}
+
+/// The full listing: entries, plugin extras, and the dependencies between entries.
 pub fn inspect(
-    tarball: &Tarball,
+    tarball: &Arc<Tarball>,
     fallback_name: &str,
     second: SecondFetch<'_>,
 ) -> MarketplaceInspectDto {
+    let mut inspected = inspect_entries(tarball, fallback_name, second);
+    annotate_dependencies(&mut inspected);
+    inspected.dto
+}
+
+/// Entries and extras only; `annotate_dependencies` fills in the edges between them.
+pub fn inspect_entries(
+    tarball: &Arc<Tarball>,
+    fallback_name: &str,
+    second: SecondFetch<'_>,
+) -> Inspected {
     let Some(manifest) = marketplace_file(tarball) else {
-        return MarketplaceInspectDto {
-            is_marketplace: false,
-            commit_sha: tarball.commit_sha.clone(),
-            marketplace_name: fallback_name.to_string(),
-            plugins: Vec::new(),
-            hint: Some(NOT_A_MARKETPLACE.to_string()),
+        return Inspected {
+            dto: MarketplaceInspectDto {
+                is_marketplace: false,
+                commit_sha: tarball.commit_sha.clone(),
+                marketplace_name: fallback_name.to_string(),
+                plugins: Vec::new(),
+                hint: Some(NOT_A_MARKETPLACE.to_string()),
+            },
+            trees: Vec::new(),
         };
     };
+    let mut trees = Vec::with_capacity(manifest.plugins.len());
     let plugins = manifest
         .plugins
         .iter()
@@ -70,15 +95,19 @@ pub fn inspect(
                 source: None,
                 skills: Vec::new(),
                 agents: Vec::new(),
+                extras: Vec::new(),
             };
             if let Some(local) = plugin.local_source_path() {
                 let Ok(root) = normalize_upstream_path(local) else {
+                    trees.push(None);
                     return base;
                 };
+                trees.push(Some(Arc::clone(tarball)));
                 return describe(tarball, &root, base);
             }
             if let Some((owner, repo, git_ref)) = plugin.github_source() {
                 let Ok(remote) = second(&owner, &repo, git_ref.as_deref()) else {
+                    trees.push(None);
                     return base;
                 };
                 let source = ItemSourceDto {
@@ -86,7 +115,7 @@ pub fn inspect(
                     repo,
                     git_ref: git_ref.unwrap_or_else(|| "HEAD".to_string()),
                 };
-                return describe(
+                let described = describe(
                     &remote,
                     "",
                     MarketplacePluginDto {
@@ -94,19 +123,57 @@ pub fn inspect(
                         ..base
                     },
                 );
+                trees.push(Some(remote));
+                return described;
             }
+            trees.push(None);
             base
         })
         .collect();
-    MarketplaceInspectDto {
-        is_marketplace: true,
-        commit_sha: tarball.commit_sha.clone(),
-        marketplace_name: manifest
-            .name
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| fallback_name.to_string()),
-        plugins,
-        hint: None,
+    Inspected {
+        dto: MarketplaceInspectDto {
+            is_marketplace: true,
+            commit_sha: tarball.commit_sha.clone(),
+            marketplace_name: manifest
+                .name
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| fallback_name.to_string()),
+            plugins,
+            hint: None,
+        },
+        trees,
+    }
+}
+
+/// Runs the dependency scanner over every entry of every supported plugin. Siblings are
+/// indexed marketplace-wide, so an entry can depend on one in another plugin.
+pub fn annotate_dependencies(inspected: &mut Inspected) {
+    let index = SiblingIndex::from_inspect(&inspected.dto);
+    for (plugin, tree) in inspected.dto.plugins.iter_mut().zip(&inspected.trees) {
+        let Some(tree) = tree else {
+            continue;
+        };
+        let plugin_name = plugin.name.clone();
+        for (kind, list) in [
+            (ItemKind::Skill, &mut plugin.skills),
+            (ItemKind::Agent, &mut plugin.agents),
+        ] {
+            for entry in list.iter_mut() {
+                let me = EntryRef {
+                    plugin_name: plugin_name.clone(),
+                    kind,
+                    path: entry.path.clone(),
+                    name: entry.name.clone(),
+                };
+                let Ok(files) = write::item_files(tree, &entry.path, kind) else {
+                    continue;
+                };
+                let found = deps::detect(&files, &me, &index);
+                entry.depends_on = found.depends_on;
+                entry.external_refs = found.external_refs;
+                entry.uses_plugin_root = found.uses_plugin_root;
+            }
+        }
     }
 }
 
@@ -132,8 +199,42 @@ pub fn describe(tree: &Tarball, root: &str, base: MarketplacePluginDto) -> Marke
         supported: true,
         skills,
         agents: agents(tree, root),
+        extras: extras(tree, root, manifest.as_ref()),
         ..base
     }
+}
+
+/// Plugin-level assets a local skill/agent copy never gets: `commands`, `hooks`, `mcp`.
+fn extras(tree: &Tarball, root: &str, manifest: Option<&PluginManifest>) -> Vec<String> {
+    let has_folder = |folder: &str| {
+        let prefix = format!("{}/", join(root, folder));
+        tree.files
+            .range(prefix.clone()..)
+            .next()
+            .is_some_and(|(key, _)| key.starts_with(&prefix))
+    };
+    let declared = |value: Option<&serde_json::Value>| {
+        value.is_some_and(|value| match value {
+            serde_json::Value::Null => false,
+            serde_json::Value::Array(items) => !items.is_empty(),
+            serde_json::Value::Object(map) => !map.is_empty(),
+            serde_json::Value::String(text) => !text.trim().is_empty(),
+            _ => true,
+        })
+    };
+    let mut out = Vec::new();
+    if has_folder("commands") || declared(manifest.and_then(|m| m.commands.as_ref())) {
+        out.push("commands".to_string());
+    }
+    if has_folder("hooks") || declared(manifest.and_then(|m| m.hooks.as_ref())) {
+        out.push("hooks".to_string());
+    }
+    if tree.text(&join(root, ".mcp.json")).is_some()
+        || declared(manifest.and_then(|m| m.mcp_servers.as_ref()))
+    {
+        out.push("mcp".to_string());
+    }
+    out
 }
 
 pub fn plugin_manifest(tree: &Tarball, root: &str) -> Option<PluginManifest> {
@@ -182,6 +283,7 @@ fn scanned_skills(tree: &Tarball, root: &str, plugin_name: &str) -> Vec<Marketpl
                 name,
                 description,
                 path: root.to_string(),
+                ..MarketplaceEntryDto::default()
             });
         }
     }
@@ -196,6 +298,7 @@ fn skill_entry(tree: &Tarball, folder: &str) -> Option<MarketplaceEntryDto> {
         name,
         description,
         path: folder.to_string(),
+        ..MarketplaceEntryDto::default()
     })
 }
 
@@ -217,6 +320,7 @@ fn agents(tree: &Tarball, root: &str) -> Vec<MarketplaceEntryDto> {
                 name,
                 description,
                 path: key.clone(),
+                ..MarketplaceEntryDto::default()
             })
         })
         .collect()

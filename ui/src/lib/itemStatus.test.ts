@@ -15,6 +15,10 @@ function status(overrides: Partial<ItemStatus>): ItemStatus {
     modified: false,
     missing: false,
     upstream: { state: "current" },
+    source: { owner: "acme", repo: "skills", ref: "HEAD" },
+    pluginName: "acme-skills",
+    upstreamPath: "skills/ops/tdd",
+    upstreamUrl: `https://github.com/acme/skills/tree/${"a".repeat(40)}/skills/ops/tdd`,
     ...overrides,
   };
 }

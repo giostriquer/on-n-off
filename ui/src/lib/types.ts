@@ -104,7 +104,31 @@ export type ItemScope = { kind: "global" } | { kind: "project"; projectPath: str
 
 export type ItemSource = { owner: string; repo: string; ref: string };
 
-export type MarketplaceEntry = { name: string; description: string; path: string };
+/** How sure the backend's prose scan is that one entry needs another. */
+export type DepConfidence = "high" | "medium";
+
+/** Another marketplace entry that an entry names in its text. */
+export type ItemDependency = {
+  pluginName: string;
+  kind: ItemKind;
+  path: string;
+  name: string;
+  confidence: DepConfidence;
+};
+
+export type MarketplaceEntry = {
+  name: string;
+  description: string;
+  path: string;
+  dependsOn: ItemDependency[];
+  /** Paths the text refers to that a local copy will not contain. */
+  externalRefs: string[];
+  /** The text mentions `CLAUDE_PLUGIN_ROOT`, so it expects to run inside the plugin. */
+  usesPluginRoot: boolean;
+};
+
+/** Plugin-level assets a local copy never gets. */
+export type PluginExtra = "commands" | "hooks" | "mcp";
 
 export type MarketplacePlugin = {
   name: string;
@@ -114,6 +138,7 @@ export type MarketplacePlugin = {
   source: ItemSource | null;
   skills: MarketplaceEntry[];
   agents: MarketplaceEntry[];
+  extras: PluginExtra[];
 };
 
 export type MarketplaceInspect = {
@@ -169,6 +194,12 @@ export type ItemStatus = {
   modified: boolean;
   missing: boolean;
   upstream: ItemUpstream;
+  /** Where the item was copied from, so the UI can say so and link to it. */
+  source: ItemSource;
+  pluginName: string;
+  upstreamPath: string;
+  /** GitHub page of the item at the installed commit. */
+  upstreamUrl: string;
 };
 
 export type UpdateItemMode = "overwrite" | "dismiss";

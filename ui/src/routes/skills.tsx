@@ -24,6 +24,10 @@ export function SkillsRoute() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const statusFor = useCallback((skill: SkillDto) => statusForSkill(skill, sets), [sets]);
+  const openUpstream = (status: ItemStatus) =>
+    actions.openUpstream(status).catch((error: unknown) => {
+      setActionError(displayError(parseInvokeError(error), session.currentAgent.displayName));
+    });
   const agents = [...sets.global, ...sets.project].filter((status) => status.kind === "agent");
 
   async function run(task: () => Promise<void>) {
@@ -57,6 +61,7 @@ export function SkillsRoute() {
         statusFor={statusFor}
         onUpdateItem={(status) => setPending({ kind: "update", status })}
         onRemoveItem={(status) => setPending({ kind: "remove", status })}
+        onOpenUpstream={(status) => void openUpstream(status)}
         headerActions={
           <button
             type="button"
@@ -82,6 +87,7 @@ export function SkillsRoute() {
                 busy={acting}
                 onUpdateItem={(next) => setPending({ kind: "update", status: next })}
                 onRemoveItem={(next) => setPending({ kind: "remove", status: next })}
+                onOpenUpstream={(next) => void openUpstream(next)}
               />
             ))}
           </div>

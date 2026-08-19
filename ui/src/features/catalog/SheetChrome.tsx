@@ -5,17 +5,21 @@ export function SheetFooter({
   cancelLabel = copy.cancel,
   submitLabel,
   submitDisabled,
+  summary = null,
   onCancel,
   onSubmit,
 }: {
   cancelLabel?: string;
   submitLabel: string;
   submitDisabled: boolean;
+  /** Short note left of the buttons, e.g. how many picks are dependencies. */
+  summary?: string | null;
   onCancel: () => void;
   onSubmit: () => void;
 }) {
   return (
-    <footer className="mt-1 flex justify-end gap-2">
+    <footer className="mt-1 flex items-center justify-end gap-2">
+      {summary ? <span className="mr-auto text-[11px] text-[var(--mute)]">{summary}</span> : null}
       <button
         type="button"
         className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)]"

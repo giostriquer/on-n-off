@@ -133,6 +133,21 @@ pub async fn remove_item(
     blocking("item remove", move || items.remove_item(&id)).await
 }
 
+/// Opens an item's upstream page in the default browser; only github.com links are accepted.
+#[tauri::command]
+pub async fn open_url(url: String, app: tauri::AppHandle) -> Result<(), AdapterError> {
+    use tauri_plugin_opener::OpenerExt;
+    if !crate::item_install::is_openable_url(&url) {
+        return Err(AdapterError::message(format!("refusing to open {url}")));
+    }
+    blocking("open url", move || {
+        app.opener()
+            .open_url(&url, None::<&str>)
+            .map_err(|error| AdapterError::message(error.to_string()))
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn list_agents(
     state: tauri::State<'_, AppState>,

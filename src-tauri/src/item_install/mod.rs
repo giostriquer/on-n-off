@@ -5,6 +5,7 @@
 //! The provider CLIs are never involved; `AgentAdapter::item_roots` only tells us where each
 //! provider keeps user skills (and, for Claude, subagents).
 
+pub mod deps;
 pub mod fetch;
 pub mod manifest;
 pub mod registry;
@@ -17,15 +18,16 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use deps::SiblingIndex;
 use fetch::{Fetcher, HttpFetcher, Tarball};
 use registry::{InstalledItem, InstalledItemsFile};
 
 use crate::adapter::ItemRoots;
 use crate::backup::BackupStore;
 use crate::dto::{
-    AdapterError, AgentId, InstallItemsRequest, InstallItemsResultDto, ItemKind, ItemOutcomeDto,
-    ItemOutcomeStatus, ItemPick, ItemScope, ItemSourceDto, ItemStatusDto, ItemTarget, ItemUpstream,
-    MarketplaceInspectDto, UpdateItemMode,
+    AdapterError, AgentId, DepConfidence, InstallItemsRequest, InstallItemsResultDto, ItemKind,
+    ItemOutcomeDto, ItemOutcomeStatus, ItemPick, ItemScope, ItemSourceDto, ItemStatusDto,
+    ItemTarget, ItemUpstream, MarketplaceInspectDto, UpdateItemMode,
 };
 
 const MAX_MEMO_TARBALLS: usize = 8;
@@ -98,6 +100,13 @@ impl ItemService {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// The snapshot `ref` points at according to the memo, without any network.
+    fn memoized(&self, owner: &str, repo: &str, git_ref: &str) -> Option<Arc<Tarball>> {
+        let memo = self.memo();
+        let sha = memo.shas.get(&key(owner, repo, git_ref))?;
+        memo.tarballs.get(&key(owner, repo, sha)).map(Arc::clone)
+    }
+
     /// The snapshot `ref` points at according to the memo, otherwise one tarball download.
     fn snapshot(
         &self,
@@ -105,13 +114,8 @@ impl ItemService {
         repo: &str,
         git_ref: &str,
     ) -> Result<Arc<Tarball>, AdapterError> {
-        {
-            let memo = self.memo();
-            if let Some(sha) = memo.shas.get(&key(owner, repo, git_ref)) {
-                if let Some(tarball) = memo.tarballs.get(&key(owner, repo, sha)) {
-                    return Ok(Arc::clone(tarball));
-                }
-            }
+        if let Some(tarball) = self.memoized(owner, repo, git_ref) {
+            return Ok(tarball);
         }
         let tarball = Arc::new(fetch::fetch_tarball(
             self.fetcher.as_ref(),
@@ -227,11 +231,21 @@ impl ItemService {
                 });
             }
         }
+        // Dependencies are recorded from what is already in memory: the marketplace listing
+        // and the plugin repositories fetched above (or memoised by the inspect step). Install
+        // never downloads a repository just to describe an unpicked plugin.
+        let mut memo_only = |o: &str, r: &str, rf: Option<&str>| {
+            self.memoized(o, r, rf.unwrap_or("HEAD"))
+                .ok_or_else(|| AdapterError::message("plugin repository not fetched"))
+        };
+        let listing = manifest::inspect_entries(&primary, &src.repo, &mut memo_only);
+        let siblings = SiblingIndex::from_inspect(&listing.dto);
         let batch = Batch {
             request: &request,
             primary: &primary,
             plugin_roots: &plugin_roots,
             snapshots: &snapshots,
+            siblings: &siblings,
         };
 
         let outcomes = self.with_registry(|registry| {
@@ -351,6 +365,19 @@ impl ItemService {
             return done(ItemOutcomeStatus::Failed, &dest, Some(error.message));
         }
         let plugin_root = plugin_root_of(batch, pick);
+        let upstream_path = write::normalize_upstream_path(&pick.path).unwrap_or_default();
+        let depends_on = batch
+            .siblings
+            .find(&pick.plugin_name, pick.kind, &upstream_path)
+            .map(|me| {
+                deps::detect(&files, me, batch.siblings)
+                    .depends_on
+                    .into_iter()
+                    .filter(|dep| dep.confidence == DepConfidence::High)
+                    .map(|dep| registry::dependency_key(&dep.plugin_name, dep.kind, &dep.path))
+                    .collect()
+            })
+            .unwrap_or_default();
         registry.upsert(InstalledItem {
             id: registry::item_id(target.provider, pick.kind, &dest),
             provider: target.provider,
@@ -364,7 +391,8 @@ impl ItemService {
                 git_ref: source.git_ref,
                 plugin_name: pick.plugin_name.clone(),
                 plugin_root: plugin_root.clone(),
-                upstream_path: write::normalize_upstream_path(&pick.path).unwrap_or_default(),
+                upstream_path,
+                depends_on,
             },
             installed: registry::Installed {
                 commit_sha: tarball.commit_sha.clone(),
@@ -530,6 +558,14 @@ impl ItemService {
             modified,
             missing,
             upstream,
+            source: ItemSourceDto {
+                owner: item.source.owner.clone(),
+                repo: item.source.repo.clone(),
+                git_ref: item.source.git_ref.clone(),
+            },
+            plugin_name: item.source.plugin_name.clone(),
+            upstream_path: item.source.upstream_path.clone(),
+            upstream_url: upstream_url(item),
         }
     }
 
@@ -562,6 +598,7 @@ struct Batch<'a> {
     primary: &'a Arc<Tarball>,
     plugin_roots: &'a HashMap<String, String>,
     snapshots: &'a HashMap<ItemSourceDto, Result<Arc<Tarball>, AdapterError>>,
+    siblings: &'a SiblingIndex,
 }
 
 fn plugin_root_of(batch: &Batch<'_>, pick: &ItemPick) -> String {
@@ -597,6 +634,23 @@ fn failure(target: &ItemTarget, pick: &ItemPick, reason: String) -> ItemOutcomeD
         status: ItemOutcomeStatus::Failed,
         reason: Some(reason),
     }
+}
+
+/// GitHub page of an installed item at the commit it was copied from.
+pub fn upstream_url(item: &InstalledItem) -> String {
+    let view = match item.kind {
+        ItemKind::Skill => "tree",
+        ItemKind::Agent => "blob",
+    };
+    format!(
+        "https://github.com/{}/{}/{view}/{}/{}",
+        item.source.owner, item.source.repo, item.installed.commit_sha, item.source.upstream_path
+    )
+}
+
+/// The only links the app opens in the browser: pages on github.com over HTTPS.
+pub fn is_openable_url(url: &str) -> bool {
+    url.starts_with("https://github.com/")
 }
 
 fn scope_for(project_path: Option<&str>) -> ItemScope {
