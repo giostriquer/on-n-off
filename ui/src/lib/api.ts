@@ -102,6 +102,11 @@ export function removeItem(id: string): Promise<void> {
   return invoke("remove_item", { id });
 }
 
+/** Opens a github.com page in the default browser (the backend refuses anything else). */
+export function openUrl(url: string): Promise<void> {
+  return invoke("open_url", { url });
+}
+
 export function uninstallPlugin(agentId: AgentId, pluginId: string): Promise<AgentTabDto> {
   return invoke("uninstall_plugin", { agentId, pluginId });
 }

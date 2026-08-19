@@ -30,6 +30,14 @@ fn status_reports_current_modified_and_missing() {
     assert!(!s.modified);
     assert!(!s.missing);
     assert_eq!(s.upstream, ItemUpstream::Current);
+    // Where it came from, so the Skills screen can say so and link to it.
+    assert_eq!(s.source, source());
+    assert_eq!(s.plugin_name, "mattpocock-skills");
+    assert_eq!(s.upstream_path, "skills/engineering/tdd");
+    assert_eq!(
+        s.upstream_url,
+        format!("https://github.com/mattpocock/skills/tree/{SHA_A}/skills/engineering/tdd")
+    );
 
     let dest = h.home.join(".claude/skills/tdd");
     fs::write(dest.join("SKILL.md"), "---\nname: my-tdd\n---\nedited").unwrap();
@@ -387,4 +395,30 @@ fn a_malformed_registry_blocks_every_mutation_and_writes_nothing() {
     assert!(h.service.remove_item("x").is_err());
     assert_eq!(read(&path), "{ not json");
     h.finish();
+}
+
+#[test]
+fn upstream_url_points_at_the_installed_commit_and_only_github_urls_may_be_opened() {
+    let mut item = sample_item(Path::new("/tmp/home"), "tdd");
+    assert_eq!(
+        super::super::upstream_url(&item),
+        format!("https://github.com/mattpocock/skills/tree/{SHA_A}/skills/engineering/tdd")
+    );
+    item.kind = ItemKind::Agent;
+    item.source.upstream_path = "agents/reviewer.md".into();
+    assert_eq!(
+        super::super::upstream_url(&item),
+        format!("https://github.com/mattpocock/skills/blob/{SHA_A}/agents/reviewer.md")
+    );
+    assert!(super::super::is_openable_url(
+        "https://github.com/mattpocock/skills/tree/abc/skills/x"
+    ));
+    assert!(!super::super::is_openable_url("http://github.com/x/y"));
+    assert!(!super::super::is_openable_url(
+        "https://github.com.evil.example/x"
+    ));
+    assert!(!super::super::is_openable_url(
+        "https://example.com/github.com/x"
+    ));
+    assert!(!super::super::is_openable_url("file:///etc/passwd"));
 }

@@ -23,6 +23,13 @@ pub(crate) struct PluginManifest {
     /// Explicit skill folders (or `SKILL.md` files) relative to the plugin root.
     #[serde(default)]
     pub(crate) skills: Option<Vec<String>>,
+    /// Plugin-level assets declared inline; only their presence matters here.
+    #[serde(default)]
+    pub(crate) commands: Option<serde_json::Value>,
+    #[serde(default)]
+    pub(crate) hooks: Option<serde_json::Value>,
+    #[serde(default, rename = "mcpServers")]
+    pub(crate) mcp_servers: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]

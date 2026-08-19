@@ -25,6 +25,10 @@ pub struct ItemSource {
     pub plugin_root: String,
     /// Skill folder or agent file inside the repository, `/`-separated.
     pub upstream_path: String,
+    /// Marketplace entries this item was detected to need (`plugin/kind/path`), high
+    /// confidence only; recorded so a later removal can warn about dependants.
+    #[serde(default)]
+    pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,12 +129,25 @@ fn normalize(path: &Path) -> String {
     }
 }
 
-pub fn item_id(provider: AgentId, kind: ItemKind, target_path: &Path) -> String {
-    let kind = match kind {
+pub fn kind_key(kind: ItemKind) -> &'static str {
+    match kind {
         ItemKind::Skill => "skill",
         ItemKind::Agent => "agent",
-    };
-    format!("{}:{kind}:{}", provider.key(), normalize(target_path))
+    }
+}
+
+pub fn item_id(provider: AgentId, kind: ItemKind, target_path: &Path) -> String {
+    format!(
+        "{}:{}:{}",
+        provider.key(),
+        kind_key(kind),
+        normalize(target_path)
+    )
+}
+
+/// How `ItemSource::depends_on` names a marketplace entry: `plugin/kind/upstream_path`.
+pub fn dependency_key(plugin_name: &str, kind: ItemKind, upstream_path: &str) -> String {
+    format!("{plugin_name}/{}/{upstream_path}", kind_key(kind))
 }
 
 pub fn load(path: &Path) -> Result<InstalledItemsFile, AdapterError> {
