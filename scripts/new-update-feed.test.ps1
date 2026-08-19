@@ -63,8 +63,6 @@ try {
     New-Item -ItemType Directory -Path $assetDirectory -Force | Out-Null
     "nsis installer" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64-setup.exe") -Encoding UTF8
     "nsis-signature-value" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64-setup.exe.sig") -Encoding UTF8
-    "msi installer" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64_en-US.msi") -Encoding UTF8
-    "msi-signature-value" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64_en-US.msi.sig") -Encoding UTF8
     "mac updater bundle" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_aarch64.app.tar.gz") -Encoding UTF8
     "mac-signature-value" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_aarch64.app.tar.gz.sig") -Encoding UTF8
     "## Highlights`n`n- Safer updates." | Set-Content -LiteralPath $notesPath -Encoding UTF8
@@ -79,9 +77,7 @@ try {
     Assert-Equal $feed.pub_date "2026-08-15T12:34:56Z" "publication date"
     Assert-Equal $feed.notes "## Highlights`n`n- Safer updates.`n" "release notes"
     Assert-Equal $feed.platforms.'windows-x86_64-nsis'.signature "nsis-signature-value" "NSIS signature"
-    Assert-Equal $feed.platforms.'windows-x86_64-msi'.signature "msi-signature-value" "MSI signature"
     Assert-Equal $feed.platforms.'windows-x86_64-nsis'.url "https://github.com/giostriquer/on-n-off/releases/download/v0.2.0/on-n-off_0.2.0_x64-setup.exe" "NSIS URL"
-    Assert-Equal $feed.platforms.'windows-x86_64-msi'.url "https://github.com/giostriquer/on-n-off/releases/download/v0.2.0/on-n-off_0.2.0_x64_en-US.msi" "MSI URL"
     Assert-Equal $feed.platforms.'darwin-aarch64'.signature "mac-signature-value" "macOS signature"
     Assert-Equal $feed.platforms.'darwin-aarch64'.url "https://github.com/giostriquer/on-n-off/releases/download/v0.2.0/on-n-off_0.2.0_aarch64.app.tar.gz" "macOS URL"
 
@@ -93,11 +89,11 @@ try {
     }
     "mac-signature-value" | Set-Content -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_aarch64.app.tar.gz.sig") -Encoding UTF8
 
-    Remove-Item -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64_en-US.msi.sig")
+    Remove-Item -LiteralPath (Join-Path $assetDirectory "on-n-off_0.2.0_x64-setup.exe.sig")
     $missingSignature = Invoke-FeedGenerator
-    Assert-Equal $missingSignature.ExitCode 1 "missing MSI signature"
-    if ($missingSignature.Output -notmatch [regex]::Escape("on-n-off_0.2.0_x64_en-US.msi.sig")) {
-        throw "missing MSI signature error did not identify the missing file: $($missingSignature.Output)"
+    Assert-Equal $missingSignature.ExitCode 1 "missing NSIS signature"
+    if ($missingSignature.Output -notmatch [regex]::Escape("on-n-off_0.2.0_x64-setup.exe.sig")) {
+        throw "missing NSIS signature error did not identify the missing file: $($missingSignature.Output)"
     }
 
     $malformedTag = Invoke-FeedGenerator -Tag "release-0.2.0"

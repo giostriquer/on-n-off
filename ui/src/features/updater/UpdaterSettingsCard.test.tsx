@@ -13,8 +13,8 @@ describe("UpdaterSettingsCard", () => {
     const client: UpdaterClient = {
       buildInfo: async () => ({
         enabled: true,
-        installerKind: "msi",
-        target: "windows-x86_64-msi",
+        installerKind: "nsis",
+        target: "windows-x86_64-nsis",
       }),
       currentVersion: async () => "0.1.0",
       check: async () => {

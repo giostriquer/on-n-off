@@ -13,7 +13,7 @@ The Windows notes come first; macOS-specific notes are in [macOS](#macos) below.
 
 ## What you get
 
-- Windows installer: `on-n-off_0.1.0_x64-setup.exe` (NSIS), or the MSI next to it
+- Windows installer: `on-n-off_0.1.0_x64-setup.exe` (NSIS)
 - Not Authenticode-signed → Windows SmartScreen may warn; choose “More info” → “Run anyway” if you trust the sender
 - Stable releases include mandatory Tauri updater signatures for in-app update integrity
 
@@ -33,7 +33,7 @@ If a CLI works in a terminal but the app says **os error 193** / “not a valid 
 
 ## Install & run
 
-1. Run the setup exe (or MSI)
+1. Run the setup exe
 2. Launch **on-n-off**
 3. Confirm agent tabs show CLI status (green = found on PATH)
 4. Open **Settings → Application updates** and confirm the installed version and installer format are correct
@@ -69,11 +69,11 @@ Ordinary local release build (no signed updater artifacts):
 bun run tauri build
 ```
 
-Installers land under `src-tauri/target/release/bundle/nsis/` and `…/msi/` (or your `CARGO_TARGET_DIR` if set).
+The installer lands under `src-tauri/target/release/bundle/nsis/` (or your `CARGO_TARGET_DIR` if set).
 
-The GitHub release workflow builds NSIS and MSI separately with the production
-updater configuration and signing secrets. Do not publish its draft until both
-formats, both `.sig` files, `latest.json`, checksums, and attestations have been
+The GitHub release workflow builds the NSIS installer with the production
+updater configuration and signing secrets. Do not publish its draft until the
+installer, its `.sig` file, `latest.json`, checksums, and attestations have been
 inspected.
 
 ## macOS
