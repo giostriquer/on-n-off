@@ -68,9 +68,10 @@ an explicit user action.
 Tauri updater signatures verify release integrity but are not Windows
 Authenticode signatures or Apple notarization. Windows can still show an
 unknown-publisher warning and macOS can still show a Gatekeeper warning.
-Release publication remains manual; the tag workflow prepares a draft with the
-Windows installers, the macOS disk image and updater bundle, signatures,
-checksums, attestations, and `latest.json`.
+Release publication remains manual; the tag workflow waits for approval of the
+`release` environment (which holds the updater signing key), then prepares a
+draft with the Windows installer, the macOS disk image and updater bundle,
+signatures, checksums, attestations, and `latest.json`.
 
 ## Acknowledgements
 
