@@ -122,6 +122,29 @@ describe("LimitsPopover", () => {
     expect((meter.firstElementChild as HTMLElement).style.background).toBe("var(--trip)");
   });
 
+  it("keeps the signed-in account's saved numbers under a failed live status", async () => {
+    readLimits.mockImplementation((provider: AgentId) =>
+      Promise.resolve(
+        provider === "claude"
+          ? [
+              {
+                ...limits("claude", "claude-live", "live@claude.example", true),
+                status: "unauthenticated" as const,
+                message: "Access token expired — run any `claude` command to renew it, then refresh here.",
+              },
+            ]
+          : [limits("codex", "codex-live", "live@codex.example", true)],
+      ),
+    );
+    renderPopover();
+
+    const claude = await screen.findByRole("region", { name: "Claude accounts" });
+    const account = await within(claude).findByRole("article", { name: "Claude limits · live@claude.example" });
+    expect(within(account).getByText(/^Access token expired/)).toBeTruthy();
+    expect(within(account).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("24");
+    expect(within(account).getByText("Saved snapshot")).toBeTruthy();
+  });
+
   it("forces both provider reads when Refresh is selected", async () => {
     renderPopover();
     await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(4));

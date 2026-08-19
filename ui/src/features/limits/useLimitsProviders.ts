@@ -6,6 +6,16 @@ import type { AgentId } from "$lib/types";
 
 export const LIMITS_STALE_MS = 60_000;
 
+/**
+ * How long one provider's answer stays fresh. A live read that did not come back `ok` is worth
+ * re-reading at the next chance: the CLIs renew their own access tokens, so such a failure heals
+ * by itself and the screen should notice it without the user pressing refresh.
+ */
+export function limitsStaleMs(entries: ProviderLimits[] | undefined): number {
+  const live = entries?.find((entry) => entry.live);
+  return live && live.status !== "ok" ? 0 : LIMITS_STALE_MS;
+}
+
 export type ProviderQuery = {
   provider: AgentId;
   query: UseQueryResult<ProviderLimits[]>;
@@ -27,7 +37,7 @@ function useProviderLimits(provider: AgentId): ProviderQuery {
       forceRef.current = false;
       return api.readLimits(provider, force);
     },
-    staleTime: LIMITS_STALE_MS,
+    staleTime: (query) => limitsStaleMs(query.state.data),
     refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   });

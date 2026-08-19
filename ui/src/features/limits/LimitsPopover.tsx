@@ -19,7 +19,7 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { LIMITS_STALE_MS, useLimitsProviders } from "./useLimitsProviders";
+import { limitsStaleMs, useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
   const queryClient = useQueryClient();
@@ -51,7 +51,9 @@ export function LimitsPopover() {
           queryKey: ["limits"],
           type: "active",
           predicate: (query) =>
-            query.state.dataUpdatedAt > 0 && Date.now() - query.state.dataUpdatedAt >= LIMITS_STALE_MS,
+            query.state.dataUpdatedAt > 0 &&
+            Date.now() - query.state.dataUpdatedAt >=
+              limitsStaleMs(query.state.data as ProviderLimits[] | undefined),
         });
       })
       .then((stop) => {
@@ -185,7 +187,10 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
   const name = providerLabel(entry.provider);
   const label = entry.account?.label ?? name;
   const plan = planLabel(entry.plan);
-  const stale = !entry.live;
+  // Numbers that are not from this read: another account's saved snapshot, or the signed-in
+  // account's last read kept under a live status that failed.
+  const stale = !entry.live || entry.status !== "ok";
+  const message = entry.status === "ok" ? null : (entry.message ?? `${name} limits are unavailable.`);
 
   return (
     <article
@@ -204,19 +209,21 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
         {plan ? <span className="shrink-0 text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
       </header>
 
-      {entry.status !== "ok" ? (
+      {message ? (
         <p className={`m-0 text-[12px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
-          {entry.message ?? `${name} limits are unavailable.`}
+          {message}
         </p>
-      ) : entry.windows.length === 0 ? (
-        <p className="m-0 text-[12px] text-[var(--mute)]">No rate-limit windows.</p>
-      ) : (
-        <div className="flex flex-col gap-1.5">
+      ) : null}
+
+      {entry.windows.length > 0 ? (
+        <div className={`flex flex-col gap-1.5 ${message ? "mt-1.5" : ""}`}>
           {entry.windows.map((window) => (
             <PopoverWindow key={window.id} window={window} provider={entry.provider} now={now} stale={stale} />
           ))}
         </div>
-      )}
+      ) : entry.status === "ok" ? (
+        <p className="m-0 text-[12px] text-[var(--mute)]">No rate-limit windows.</p>
+      ) : null}
     </article>
   );
 }

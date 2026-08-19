@@ -197,6 +197,55 @@ describe("Limits", () => {
     expect(screen.getByText(/^Subscription limits · as of/)).toBeTruthy();
   });
 
+  it("keeps the signed-in account's last numbers under the live status, in one card", async () => {
+    // What the backend sends when the CLI's access token has gone stale: the live read failed, so
+    // the account's last remembered numbers ride along on the same entry.
+    answer(
+      [
+        okClaude({
+          status: "unauthenticated",
+          message: "Access token expired — run any `claude` command to renew it, then refresh here.",
+          fetchedAt: "2026-08-16T21:40:00.000Z",
+          windows: [
+            { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z" },
+            { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-17T04:59:59Z" },
+          ],
+        }),
+      ],
+      [okCodex()],
+    );
+    renderLimits();
+    await waitFor(() => expect(card("Claude limits · me@claude.example")).toBeTruthy());
+
+    const claude = card("Claude limits · me@claude.example");
+    expect(screen.getAllByRole("region", { name: /^Claude limits/ })).toHaveLength(1);
+    expect(within(claude).getByText(/^Access token expired/)).toBeTruthy();
+    expect(within(claude).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("12");
+    expect(within(claude).getByText(/^as of /)).toBeTruthy();
+    // A window that has reset since that read shows nothing usable, and asks for nothing either.
+    expect(within(claude).getByText(/^reset since /)).toBeTruthy();
+    // It is still the signed-in account: nothing to sign into, nothing to forget.
+    expect(within(claude).queryByText(/sign in/)).toBeNull();
+    expect(within(claude).queryByRole("button", { name: /^Forget/ })).toBeNull();
+    // The stamp still comes from live ok reads only.
+    expect(screen.getByText(/^Subscription limits · as of/)).toBeTruthy();
+  });
+
+  it("re-reads a provider whose live read failed on the next window focus, and leaves a good one cached", async () => {
+    answer([statusOnly("claude", "unauthenticated", "Access token expired")], [okCodex()]);
+    renderLimits();
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("visibilitychange"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    // The CLI renews its own token, so the failed provider is worth reading again at once; Codex
+    // answered fine and stays cached for its stale time.
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(3));
+    expect(readLimits.mock.calls[2]).toEqual(["claude", false]);
+  });
+
   it("forgets a remembered account on request and drops its card without a refetch", async () => {
     const pending = deferred<void>();
     forgetLimitsSnapshot.mockReturnValue(pending.promise);

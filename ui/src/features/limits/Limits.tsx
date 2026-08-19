@@ -165,8 +165,11 @@ function AccountCard({
   const account = entry.account ?? null;
   const label = account?.label ?? null;
   const title = label ? `${name} limits · ${label}` : `${name} limits`;
-  const stale = !entry.live;
+  // Numbers that are not from this read: another account's remembered card, or the signed-in
+  // account's last read kept under a live status that failed.
+  const stale = !entry.live || entry.status !== "ok";
   const [hero, ...rest] = entry.windows;
+  const message = entry.status === "ok" ? null : (entry.message ?? `${name} limits are unavailable.`);
 
   return (
     <section
@@ -177,13 +180,13 @@ function AccountCard({
     >
       <CardHeader entry={entry} provider={entry.provider} />
 
-      {stale ? (
+      {stale && hero ? (
         <div className="flex items-center gap-2.5 border-b border-[var(--hair)] bg-[var(--well)] px-3.5 py-[7px]">
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--mute)]">
             as of {formatResetAt(entry.fetchedAt)}
-            {label ? ` · sign in as ${label} to refresh` : " · sign in again to refresh"}
+            {entry.live ? "" : label ? ` · sign in as ${label} to refresh` : " · sign in again to refresh"}
           </span>
-          {account && onForget ? (
+          {account && onForget && !entry.live ? (
             <button
               type="button"
               className="shrink-0 border-0 bg-transparent p-0 text-[11px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase hover:text-[var(--silkscreen)]"
@@ -198,33 +201,48 @@ function AccountCard({
 
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 
-      {entry.status !== "ok" ? (
-        <p className={`px-3.5 py-4 text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
-          {entry.message ?? `${name} limits are unavailable.`}
+      {message ? (
+        <p
+          className={`px-3.5 ${hero ? "pt-3" : "py-4"} text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
+        >
+          {message}
         </p>
-      ) : !hero ? (
-        <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{name} reported no rate-limit windows.</p>
-      ) : (
+      ) : null}
+
+      {hero ? (
         <>
-          <HeroWindow window={hero} provider={entry.provider} now={now} stale={stale} />
+          <HeroWindow window={hero} provider={entry.provider} now={now} stale={stale} signedIn={entry.live} />
           {rest.map((window) => (
-            <WindowRow key={window.id} window={window} provider={entry.provider} now={now} stale={stale} />
+            <WindowRow
+              key={window.id}
+              window={window}
+              provider={entry.provider}
+              now={now}
+              stale={stale}
+              signedIn={entry.live}
+            />
           ))}
         </>
-      )}
+      ) : entry.status === "ok" ? (
+        <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{name} reported no rate-limit windows.</p>
+      ) : null}
     </section>
   );
 }
 
-/** What one window says right now; a remembered window past its reset says nothing usable. */
-function readWindow(window: LimitWindow, now: number, stale: boolean) {
+/**
+ * What one window says right now; a remembered window past its reset says nothing usable. Only
+ * another account's card asks for a sign-in — the signed-in account's card already carries its own
+ * status message, and signing in again is not what it needs.
+ */
+function readWindow(window: LimitWindow, now: number, stale: boolean, signedIn: boolean) {
   const resetSince = stale && hasElapsed(window.resetsAt, now);
   const percent = resetSince ? 0 : window.usedPercent;
   const tone = usageTone(percent);
   const resetAt = formatResetAt(window.resetsAt);
   const resetIn = formatResetIn(window.resetsAt, now);
   const note = resetSince
-    ? `reset since ${resetAt || "then"} · sign in to refresh`
+    ? `reset since ${resetAt || "then"}${signedIn ? "" : " · sign in to refresh"}`
     : resetIn
       ? `resets in ${resetIn}${resetAt ? ` · ${resetAt}` : ""}`
       : "";
@@ -263,8 +281,20 @@ function Meter({
 }
 
 /** The first (weekly) window as the card's headline, in the Overview's big-number idiom. */
-function HeroWindow({ window, provider, now, stale }: { window: LimitWindow; provider: AgentId; now: number; stale: boolean }) {
-  const { percent, tone, note, text } = readWindow(window, now, stale);
+function HeroWindow({
+  window,
+  provider,
+  now,
+  stale,
+  signedIn,
+}: {
+  window: LimitWindow;
+  provider: AgentId;
+  now: number;
+  stale: boolean;
+  signedIn: boolean;
+}) {
+  const { percent, tone, note, text } = readWindow(window, now, stale, signedIn);
   return (
     <div className="flex flex-col gap-2 p-3.5">
       <span className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{window.label}</span>
@@ -283,8 +313,20 @@ function HeroWindow({ window, provider, now, stale }: { window: LimitWindow; pro
  * Remaining windows as compact rows: small-caps label with its reset note underneath (never
  * truncated), bar and percent on the right — the same idiom as the Overview's list rows.
  */
-function WindowRow({ window, provider, now, stale }: { window: LimitWindow; provider: AgentId; now: number; stale: boolean }) {
-  const { percent, tone, note, text } = readWindow(window, now, stale);
+function WindowRow({
+  window,
+  provider,
+  now,
+  stale,
+  signedIn,
+}: {
+  window: LimitWindow;
+  provider: AgentId;
+  now: number;
+  stale: boolean;
+  signedIn: boolean;
+}) {
+  const { percent, tone, note, text } = readWindow(window, now, stale, signedIn);
   const model = window.kind === "model";
   return (
     <div className="flex items-center gap-2.5 border-t border-[var(--hair)] px-3.5 py-2">
