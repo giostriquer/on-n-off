@@ -35,6 +35,8 @@ struct ProviderObservation {
 struct WindowObservation {
     used_percent: f64,
     resets_at: Option<String>,
+    #[serde(default)]
+    exhausted: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -241,53 +243,69 @@ fn observe(state: &mut MonitorState, snapshots: &[ProviderLimitsDto]) -> Vec<Lim
         let Some(account) = snapshot.account.as_ref() else {
             continue;
         };
-        let next = ProviderObservation {
-            account_id: account.id.clone(),
-            windows: snapshot
-                .windows
-                .iter()
-                .map(|window| {
-                    (
-                        window.id.clone(),
-                        WindowObservation {
-                            used_percent: window.used_percent,
-                            resets_at: window.resets_at.clone(),
-                        },
-                    )
-                })
-                .collect(),
-        };
-        if let Some(previous) = state.providers.get(&snapshot.provider) {
-            if previous.account_id == account.id {
-                for window in &snapshot.windows {
-                    let Some(before) = previous.windows.get(&window.id) else {
-                        continue;
-                    };
-                    let kind =
-                        if reset_detected(before, window.used_percent, window.resets_at.as_deref())
-                        {
-                            Some(LimitEventKind::Reset)
-                        } else if exhausted_detected(before, window.used_percent) {
-                            Some(LimitEventKind::Exhausted)
-                        } else {
-                            None
-                        };
-                    if let Some(kind) = kind {
-                        events.push(LimitEvent {
-                            kind,
-                            provider: snapshot.provider,
-                            account_label: account.label.clone(),
-                            window_label: window.label.clone(),
-                            previous_used_percent: before.used_percent,
-                            used_percent: window.used_percent,
-                        });
-                    }
-                }
+        let previous = state
+            .providers
+            .get(&snapshot.provider)
+            .filter(|previous| previous.account_id == account.id);
+        let mut windows = HashMap::new();
+        for window in &snapshot.windows {
+            let before = previous.and_then(|previous| previous.windows.get(&window.id));
+            let (observation, kind) =
+                observe_window(before, window.used_percent, window.resets_at.as_deref());
+            windows.insert(window.id.clone(), observation);
+            if let (Some(before), Some(kind)) = (before, kind) {
+                events.push(LimitEvent {
+                    kind,
+                    provider: snapshot.provider,
+                    account_label: account.label.clone(),
+                    window_label: window.label.clone(),
+                    previous_used_percent: before.used_percent,
+                    used_percent: window.used_percent,
+                });
             }
         }
-        state.providers.insert(snapshot.provider, next);
+        state.providers.insert(
+            snapshot.provider,
+            ProviderObservation {
+                account_id: account.id.clone(),
+                windows,
+            },
+        );
     }
     events
+}
+
+fn observe_window(
+    before: Option<&WindowObservation>,
+    used_percent: f64,
+    resets_at: Option<&str>,
+) -> (WindowObservation, Option<LimitEventKind>) {
+    let reset = before.is_some_and(|before| reset_detected(before, used_percent, resets_at));
+    let was_exhausted =
+        before.is_some_and(|before| before.exhausted || before.used_percent >= 100.0);
+    let kind = if before.is_none() {
+        None
+    } else if reset {
+        Some(LimitEventKind::Reset)
+    } else if !was_exhausted && used_percent >= 100.0 {
+        Some(LimitEventKind::Exhausted)
+    } else {
+        None
+    };
+    let exhausted = if reset {
+        used_percent >= 100.0
+    } else {
+        was_exhausted || used_percent >= 100.0
+    };
+
+    (
+        WindowObservation {
+            used_percent,
+            resets_at: resets_at.map(str::to_string),
+            exhausted,
+        },
+        kind,
+    )
 }
 
 fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Option<&str>) -> bool {
@@ -307,10 +325,6 @@ fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Opti
         drop >= MINIMUM_DROP_POINTS && used_percent <= before.used_percent * RESET_USAGE_FRACTION;
 
     (timestamp_advanced && drop > 0.5) || large_drop
-}
-
-fn exhausted_detected(before: &WindowObservation, used_percent: f64) -> bool {
-    before.used_percent < 100.0 && used_percent >= 100.0
 }
 
 fn poll_delay_minutes(base_minutes: u16, consecutive_failures: u32) -> u16 {
@@ -434,6 +448,33 @@ mod tests {
         assert_eq!(events[0].previous_used_percent, 99.0);
         assert_eq!(events[0].used_percent, 100.0);
         assert!(observe(&mut state, &[exhausted]).is_empty());
+    }
+
+    #[test]
+    fn a_usage_correction_does_not_rearm_an_exhausted_limit() {
+        let mut state = MonitorState::default();
+        let below_limit = snapshot(
+            AgentId::Claude,
+            "account-a",
+            "me@example.com",
+            99.0,
+            Some("2026-08-24T12:00:00Z"),
+        );
+        let at_limit = snapshot(
+            AgentId::Claude,
+            "account-a",
+            "me@example.com",
+            100.0,
+            Some("2026-08-24T12:00:00Z"),
+        );
+        assert!(observe(&mut state, std::slice::from_ref(&below_limit)).is_empty());
+        assert_eq!(
+            observe(&mut state, std::slice::from_ref(&at_limit)).len(),
+            1
+        );
+
+        assert!(observe(&mut state, &[below_limit]).is_empty());
+        assert!(observe(&mut state, &[at_limit]).is_empty());
     }
 
     #[test]

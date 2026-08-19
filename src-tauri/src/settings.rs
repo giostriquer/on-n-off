@@ -105,17 +105,15 @@ pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterEr
         ));
     }
     let path = paths::settings_path()?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            AdapterError::write(error.to_string(), Some(path.display().to_string()))
-        })?;
-    }
     let body = serde_json::to_string_pretty(&settings)
         .map_err(|error| AdapterError::message(error.to_string()))?;
-    fs::write(&path, body).map_err(|error| {
-        AdapterError::write(error.to_string(), Some(path.display().to_string()))
-    })?;
+    write_settings_document(&path, &body)?;
     Ok(settings)
+}
+
+fn write_settings_document(path: &Path, body: &str) -> Result<(), AdapterError> {
+    crate::usage::cache_io::atomic_write(path, body)
+        .map_err(|error| AdapterError::write(error.to_string(), Some(path.display().to_string())))
 }
 
 fn normalize_settings(mut settings: AppSettings) -> AppSettings {
@@ -321,6 +319,24 @@ mod tests {
     fn parse_defaults_when_missing_or_malformed() {
         assert_eq!(parse_settings(None), AppSettings::default());
         assert_eq!(parse_settings(Some("{nope")), AppSettings::default());
+    }
+
+    #[test]
+    fn saving_settings_replaces_the_complete_document() {
+        let root = crate::paths::scratch_dir("settings-atomic-replace");
+        let path = root.join("settings.json");
+        let open_reader = root.join("open-reader.json");
+        write_settings_document(&path, r#"{"generation":1}"#).unwrap();
+        fs::hard_link(&path, &open_reader).unwrap();
+
+        write_settings_document(&path, r#"{"generation":2}"#).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&open_reader).unwrap(),
+            r#"{"generation":1}"#
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), r#"{"generation":2}"#);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
