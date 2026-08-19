@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
@@ -92,22 +92,26 @@ afterEach(() => {
 });
 
 describe("LimitsPopover", () => {
-  it("shows every live and remembered account grouped in provider order", async () => {
+  it("groups live and saved accounts under compact provider sections", async () => {
     renderPopover();
 
-    await waitFor(() => expect(screen.getAllByRole("region")).toHaveLength(4));
-    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual([
+    const claude = await screen.findByRole("region", { name: "Claude accounts" });
+    const codex = screen.getByRole("region", { name: "Codex accounts" });
+    expect((await within(claude).findAllByRole("article")).map((entry) => entry.getAttribute("aria-label"))).toEqual([
       "Claude limits · live@claude.example",
       "Claude limits · kept@claude.example",
+    ]);
+    expect(within(codex).getAllByRole("article").map((entry) => entry.getAttribute("aria-label"))).toEqual([
       "Codex limits · live@codex.example",
       "Codex limits · kept@codex.example",
     ]);
+    expect(screen.getAllByText("Saved snapshot")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
   });
 
   it("forces both provider reads when Refresh is selected", async () => {
     renderPopover();
-    await waitFor(() => expect(screen.getAllByRole("region")).toHaveLength(4));
+    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(4));
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh limits" }));
 
@@ -116,7 +120,20 @@ describe("LimitsPopover", () => {
       ["claude", true],
       ["codex", true],
     ]);
-    expect(screen.getAllByRole("region")).toHaveLength(4);
+    expect(screen.getAllByRole("article")).toHaveLength(4);
+  });
+
+  it("keeps cached accounts visible and shows a provider refresh error", async () => {
+    renderPopover();
+    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(4));
+    readLimits.mockRejectedValueOnce({ kind: "message", message: "Claude refresh failed" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh limits" }));
+
+    expect(await screen.findByRole("alert", { name: "Claude refresh error" })).toHaveTextContent(
+      "Claude refresh failed",
+    );
+    expect(screen.getAllByRole("article")).toHaveLength(4);
   });
 
   it("hides the popover when Escape is pressed", async () => {
