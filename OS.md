@@ -55,8 +55,8 @@ Spawned CLIs get the merged list as their `PATH` so `#!/usr/bin/env node` shims 
 
 ## Packaging and updates
 
-- Windows: NSIS + MSI (built as separate `tauri build` passes because `ON_N_OFF_INSTALLER_KIND` is a
-  `rerun-if-env-changed` build input); unsigned → SmartScreen warning; verify SHA-256 / attestation.
+- Windows: NSIS only (`ON_N_OFF_INSTALLER_KIND=nsis` is a `rerun-if-env-changed` build input, so each
+  installer kind is its own `tauri build` pass); unsigned → SmartScreen warning; verify SHA-256 / attestation.
 - macOS: `.app` + `.dmg` (Apple Silicon), ad-hoc signed, not notarised → right-click → Open on first
   launch. The dmg step needs Automation permission for the terminal locally.
 - Icons: `icon.icns` carries macOS margins + drop shadow; Windows `icon.ico` / PNGs must be full-bleed

@@ -38,9 +38,6 @@ jobs:
           - installer: nsis
             platform: windows
             os: windows-latest
-          - installer: msi
-            platform: windows
-            os: windows-latest
           - installer: dmg
             platform: macos
             os: macos-latest

@@ -42,9 +42,8 @@ if (-not (Test-Path -LiteralPath $ReleaseNotesPath -PathType Leaf)) {
 }
 
 $nsisName = "on-n-off_$version`_x64-setup.exe"
-$msiName = "on-n-off_$version`_x64_en-US.msi"
 $macName = "on-n-off_$version`_aarch64.app.tar.gz"
-$expectedNames = @($nsisName, "$nsisName.sig", $msiName, "$msiName.sig", $macName, "$macName.sig")
+$expectedNames = @($nsisName, "$nsisName.sig", $macName, "$macName.sig")
 foreach ($name in $expectedNames) {
     $path = Join-Path $AssetDirectory $name
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -53,13 +52,9 @@ foreach ($name in $expectedNames) {
 }
 
 $nsisSignature = [System.IO.File]::ReadAllText((Join-Path $AssetDirectory "$nsisName.sig")).Trim()
-$msiSignature = [System.IO.File]::ReadAllText((Join-Path $AssetDirectory "$msiName.sig")).Trim()
 $macSignature = [System.IO.File]::ReadAllText((Join-Path $AssetDirectory "$macName.sig")).Trim()
 if ([string]::IsNullOrWhiteSpace($nsisSignature)) {
     throw "Updater signature is empty: $nsisName.sig"
-}
-if ([string]::IsNullOrWhiteSpace($msiSignature)) {
-    throw "Updater signature is empty: $msiName.sig"
 }
 if ([string]::IsNullOrWhiteSpace($macSignature)) {
     throw "Updater signature is empty: $macName.sig"
@@ -75,10 +70,6 @@ $feed = [ordered]@{
         'windows-x86_64-nsis' = [ordered]@{
             url = "$downloadRoot/$nsisName"
             signature = $nsisSignature
-        }
-        'windows-x86_64-msi' = [ordered]@{
-            url = "$downloadRoot/$msiName"
-            signature = $msiSignature
         }
         'darwin-aarch64' = [ordered]@{
             url = "$downloadRoot/$macName"
