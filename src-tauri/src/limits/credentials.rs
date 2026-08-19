@@ -19,8 +19,22 @@ pub struct ClaudeCredential {
     pub token: String,
     /// `expiresAt` from Claude Code's credential JSON, epoch milliseconds.
     pub expires_at_ms: Option<i64>,
+    /// A `refreshToken` is stored alongside the access token. Only its presence is read; the
+    /// token itself is never loaded, and nothing here ever redeems it.
+    pub has_refresh_token: bool,
+    /// `refreshTokenExpiresAt`, epoch milliseconds, when the login states one.
+    pub refresh_expires_at_ms: Option<i64>,
     /// `subscriptionType` ("pro", "max", ...), used as the plan label.
     pub subscription_type: Option<String>,
+}
+
+impl ClaudeCredential {
+    /// Whether Claude Code can renew this login by itself: it holds a refresh token that has not
+    /// passed its own expiry. An access token past `expiresAt` is then only stale, not a lost
+    /// login — the next `claude` run mints a new one without any sign-in.
+    fn renewable(&self, now_ms: i64) -> bool {
+        self.has_refresh_token && self.refresh_expires_at_ms.is_none_or(|at| at > now_ms)
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -35,6 +49,8 @@ impl fmt::Debug for ClaudeCredential {
         f.debug_struct("ClaudeCredential")
             .field("token", &"<redacted>")
             .field("expires_at_ms", &self.expires_at_ms)
+            .field("has_refresh_token", &self.has_refresh_token)
+            .field("refresh_expires_at_ms", &self.refresh_expires_at_ms)
             .field("subscription_type", &self.subscription_type)
             .finish()
     }
@@ -55,8 +71,11 @@ pub enum CredentialLookup<T> {
     Found(T),
     /// No stored login for this provider.
     Missing,
-    /// A stored login whose access token has passed its own expiry.
-    Expired,
+    /// A stored login whose access token has passed its own expiry. `renewable` says the CLI can
+    /// mint a new one from its refresh token, so no new sign-in is needed.
+    Expired {
+        renewable: bool,
+    },
     /// A login exists but cannot carry subscription limits (API-key auth).
     Unsupported(String),
     /// A login may exist but could not be read (Keychain denied, unreadable file).
@@ -80,7 +99,8 @@ enum Source {
 }
 
 /// Keychain entry first (macOS), then `<home>/.claude/.credentials.json` (all platforms). A token
-/// past its own `expiresAt` is reported as `Expired` without any network call.
+/// past its own `expiresAt` is reported as `Expired` without any network call, tagged with whether
+/// the login can still renew itself.
 pub fn read_claude_credential(
     home: &Path,
     keychain: KeychainProbe,
@@ -95,7 +115,9 @@ pub fn read_claude_credential(
         match source {
             Source::Found(credential) => {
                 return if credential.expires_at_ms.is_some_and(|at| at <= now_ms) {
-                    CredentialLookup::Expired
+                    CredentialLookup::Expired {
+                        renewable: credential.renewable(now_ms),
+                    }
                 } else {
                     CredentialLookup::Found(credential)
                 };
@@ -131,13 +153,15 @@ fn claude_from_file(path: &Path) -> Source {
     }
 }
 
-/// `{"claudeAiOauth": {"accessToken", "expiresAt", "subscriptionType", ...}}`.
+/// `{"claudeAiOauth": {"accessToken", "expiresAt", "refreshTokenExpiresAt", "subscriptionType", ...}}`.
 fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential> {
     let oauth = value.get("claudeAiOauth")?;
     let token = optional_string(oauth.get("accessToken"))?;
     Some(ClaudeCredential {
         token,
         expires_at_ms: oauth.get("expiresAt").and_then(Value::as_i64),
+        has_refresh_token: optional_string(oauth.get("refreshToken")).is_some(),
+        refresh_expires_at_ms: oauth.get("refreshTokenExpiresAt").and_then(Value::as_i64),
         subscription_type: optional_string(oauth.get("subscriptionType")),
     })
 }
@@ -359,12 +383,12 @@ mod tests {
         let after = 1787022473402 + 1;
         assert_eq!(
             read_claude_credential(&home, Ok(Some(CLAUDE_JSON.to_string())), after),
-            CredentialLookup::Expired
+            CredentialLookup::Expired { renewable: true }
         );
         write(&home, ".claude/.credentials.json", CLAUDE_JSON);
         assert_eq!(
             read_claude_credential(&home, Ok(None), after),
-            CredentialLookup::Expired
+            CredentialLookup::Expired { renewable: true }
         );
         // A credential without `expiresAt` is trusted; the endpoint decides.
         let no_expiry = CLAUDE_JSON.replace(r#""expiresAt":1787022473402,"#, "");
@@ -372,6 +396,28 @@ mod tests {
             read_claude_credential(&home, Ok(Some(no_expiry)), after),
             CredentialLookup::Found(_)
         ));
+    }
+
+    /// The refresh token decides whether an expired access token needs a new sign-in: still
+    /// valid, the CLI renews it; gone or itself expired, only signing in again helps.
+    #[test]
+    fn an_expired_claude_token_is_renewable_only_while_its_refresh_token_lives() {
+        let home = scratch_dir("limits-cred");
+        let after = 1787022473402 + 1;
+        let dated = CLAUDE_JSON.replace(
+            r#""refreshToken":"r","#,
+            &format!(r#""refreshToken":"r","refreshTokenExpiresAt":{after},"#),
+        );
+        assert_eq!(
+            read_claude_credential(&home, Ok(Some(dated)), after),
+            CredentialLookup::Expired { renewable: false },
+            "a refresh token at its own expiry cannot renew anything"
+        );
+        let no_refresh = CLAUDE_JSON.replace(r#""refreshToken":"r","#, "");
+        assert_eq!(
+            read_claude_credential(&home, Ok(Some(no_refresh)), after),
+            CredentialLookup::Expired { renewable: false }
+        );
     }
 
     #[test]
@@ -449,6 +495,8 @@ mod tests {
         ClaudeCredential {
             token: token.to_string(),
             expires_at_ms,
+            has_refresh_token: true,
+            refresh_expires_at_ms: None,
             subscription_type: Some("max".to_string()),
         }
     }
@@ -491,8 +539,10 @@ mod tests {
         );
         // A forced miss evicts the memo instead of serving the old token next time.
         assert_eq!(
-            memo.lookup(true, "acct", 0, || CredentialLookup::Expired),
-            CredentialLookup::Expired
+            memo.lookup(true, "acct", 0, || CredentialLookup::Expired {
+                renewable: true
+            }),
+            CredentialLookup::Expired { renewable: true }
         );
         assert_eq!(
             memo.lookup(false, "acct", 0, || CredentialLookup::Missing),
@@ -505,6 +555,8 @@ mod tests {
         let claude = ClaudeCredential {
             token: "secret-claude".to_string(),
             expires_at_ms: None,
+            has_refresh_token: true,
+            refresh_expires_at_ms: None,
             subscription_type: Some("max".to_string()),
         };
         let codex = CodexCredential {
