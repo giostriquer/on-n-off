@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 #[cfg(target_os = "macos")]
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    window::{Effect, EffectState, EffectsBuilder},
     PhysicalPosition, PhysicalSize, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
     WindowEvent,
 };
@@ -23,9 +24,9 @@ const FOCUS_LOSS_GUARD: Duration = Duration::from_millis(250);
 const POPOVER_LABEL: &str = "limits-popover";
 const MAIN_WINDOW_LABEL: &str = "main";
 #[cfg(target_os = "macos")]
-const POPOVER_WIDTH: f64 = 420.0;
+const POPOVER_WIDTH: f64 = 350.0;
 #[cfg(target_os = "macos")]
-const POPOVER_HEIGHT: f64 = 620.0;
+const POPOVER_HEIGHT: f64 = 480.0;
 
 #[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -270,6 +271,14 @@ fn popover_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .minimizable(false)
     .closable(false)
     .decorations(false)
+    .transparent(true)
+    .effects(
+        EffectsBuilder::new()
+            .effect(Effect::Popover)
+            .state(EffectState::Active)
+            .radius(16.0)
+            .build(),
+    )
     .always_on_top(true)
     .visible_on_all_workspaces(true)
     .shadow(true)
