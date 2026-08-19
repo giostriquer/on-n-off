@@ -142,9 +142,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
                     key={`${row.provider}-${row.model}`}
                     className="flex items-center gap-2.5 border-b border-[var(--hair)] px-3.5 py-2 last:border-b-0"
                   >
-                    <span className="w-[52px] shrink-0 text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
-                      {providerLabel(row.provider)}
-                    </span>
+                    <ProviderIcon provider={row.provider} className="size-3.5 shrink-0" title={providerLabel(row.provider)} />
                     <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{row.model}</span>
                     <span className="h-1 w-24 shrink-0 overflow-hidden rounded-sm bg-[var(--well)]">
                       <span

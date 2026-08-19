@@ -65,7 +65,58 @@ const availableSummary: UsageSummary = {
   sources: missingSummary.sources.map((source) => ({ ...source, status: "ok" })),
 };
 
+const modelSummary: UsageSummary = {
+  ...availableSummary,
+  buckets: [
+    {
+      day: "2026-08-15",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      totals: { uncachedInputTokens: 100, cachedInputTokens: 0, cacheCreationTokens: 0, outputTokens: 50, reasoningTokens: 0 },
+      costUsd: 1,
+      cacheSavingsUsd: 0,
+      costSource: "modelPriced",
+      records: 1,
+      unpricedRecords: 0,
+      sessions: 1,
+    },
+    {
+      day: "2026-08-15",
+      provider: "claude",
+      model: "claude-fable-5",
+      totals: { uncachedInputTokens: 100, cachedInputTokens: 0, cacheCreationTokens: 0, outputTokens: 50, reasoningTokens: 0 },
+      costUsd: 1,
+      cacheSavingsUsd: 0,
+      costSource: "modelPriced",
+      records: 1,
+      unpricedRecords: 0,
+      sessions: 1,
+    },
+  ],
+};
+
 describe("OverviewUsageCard", () => {
+  it("labels model rows with the provider logo instead of a text tag", async () => {
+    usageSummary.mockResolvedValue(modelSummary);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <div data-agent="codex">
+          <OverviewUsageCard />
+        </div>
+      </QueryClientProvider>,
+    );
+
+    const codexRow = (await screen.findByText("gpt-5.6-sol")).closest("div");
+    const claudeRow = screen.getByText("claude-fable-5").closest("div");
+    expect(codexRow?.querySelector("svg title")?.textContent).toBe("Codex");
+    expect(claudeRow?.querySelector("svg title")?.textContent).toBe("Claude");
+    const textTags = (row: Element | null | undefined) =>
+      [...(row?.querySelectorAll("span") ?? [])].filter((span) => /^(Codex|Claude)$/.test(span.textContent ?? ""));
+    expect(textTags(codexRow)).toHaveLength(0);
+    expect(textTags(claudeRow)).toHaveLength(0);
+  });
+
   it("waits for the selected provider before scanning transcripts", async () => {
     usageSummary.mockClear();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

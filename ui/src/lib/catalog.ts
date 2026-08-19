@@ -122,7 +122,7 @@ export function driftRows(tab: AgentTabDto): DriftRow[] {
 }
 
 export function driftLine(count: number): string {
-  return count === 1 ? "1 plugin behind catalog" : `${count} plugins behind catalog`;
+  return count === 1 ? "1 plugin outdated" : `${count} plugins outdated`;
 }
 
 export function sortPlugins(plugins: PluginDto[]): PluginDto[] {

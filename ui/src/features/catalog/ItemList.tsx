@@ -14,7 +14,7 @@ import {
 import { isProjectOrigin } from "$lib/project";
 import type { AgentTabDto, ItemStatus, PluginDto, SkillDto } from "$lib/types";
 
-type Chip = "all" | "on" | "off" | "behind";
+type Chip = "all" | "on" | "off" | "outdated";
 
 const noop = () => {};
 
@@ -155,7 +155,7 @@ export function ItemList({
 
   const pluginPool = kind === "plugin" ? items : [];
   const plugins =
-    chip === "behind"
+    chip === "outdated"
       ? pluginPool.filter((plugin) => pluginOutOfSync(plugin))
       : applyChip(pluginPool, chip, (plugin) => plugin.enabled);
   const skillPool = kind === "skill" ? items : [];
@@ -166,7 +166,7 @@ export function ItemList({
     kind === "plugin"
       ? `${tab.plugins.filter((plugin) => plugin.enabled).length} live · installed from git, marketplace or folder`
       : "plugin skills follow their plugin · user skills toggle · project skills stay with the repo";
-  const chips: Chip[] = kind === "plugin" ? ["all", "on", "off", "behind"] : ["all", "on", "off"];
+  const chips: Chip[] = kind === "plugin" ? ["all", "on", "off", "outdated"] : ["all", "on", "off"];
 
   return (
     <div className="flex flex-col gap-3.5 px-5 pt-[18px] pb-[26px]">
@@ -199,7 +199,7 @@ export function ItemList({
           </p>
         ) : plugins.length === 0 ? (
           <p className="text-[13px] text-[var(--mute)]">
-            {chip === "behind" ? "No plugins behind." : chip === "on" ? "No plugins on." : "No plugins off."}
+            {chip === "outdated" ? "No plugins outdated." : chip === "on" ? "No plugins on." : "No plugins off."}
           </p>
         ) : (
           <div className="flex flex-col gap-1.5">

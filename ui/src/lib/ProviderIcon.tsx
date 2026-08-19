@@ -35,6 +35,16 @@ export function CursorIcon({ title = "Cursor", ...props }: IconProps) {
   );
 }
 
+/** Antigravity arch — the monochrome mark silhouette from Google's Antigravity wordmark. */
+export function AntigravityIcon({ title = "Antigravity", ...props }: IconProps) {
+  return (
+    <svg viewBox="13 14.5 85 85" fill="currentColor" aria-hidden={title ? undefined : true} role={title ? "img" : undefined} {...props}>
+      {title ? <title>{title}</title> : null}
+      <path d="M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z" />
+    </svg>
+  );
+}
+
 export function ProviderIcon({
   provider,
   className = "size-3.5 shrink-0",
@@ -51,6 +61,8 @@ export function ProviderIcon({
       return <ChatGptIcon className={className} title={title ?? "ChatGPT"} style={{ color: "var(--silkscreen)" }} />;
     case "cursor":
       return <CursorIcon className={className} title={title ?? "Cursor"} style={{ color: "var(--silkscreen)" }} />;
+    case "antigravity":
+      return <AntigravityIcon className={className} title={title ?? "Antigravity"} style={{ color: "#3186ff" }} />;
     default:
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
