@@ -87,7 +87,7 @@ export function LimitsPopover() {
       <header className="flex shrink-0 items-center gap-3 border-b border-[var(--popover-hair)] px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
           <h1 className="m-0 text-[16px] leading-tight font-semibold tracking-[-0.01em]">Limits</h1>
-          <p className="mt-0.5 mb-0 font-mono text-[11px] text-[var(--mute)]">
+          <p className="mt-0.5 mb-0 text-[11px] text-[var(--mute)] tabular-nums">
             {loading ? "Updating…" : asOf ? `Updated ${formatClock(asOf)}` : "Subscription usage"}
           </p>
         </div>
@@ -158,7 +158,7 @@ function PopoverProviderSection({
         <ProviderIcon provider={provider} className="size-3.5 shrink-0" title="" />
         <h2 className="m-0 text-[11.5px] font-semibold tracking-[0.045em] uppercase">{name}</h2>
         {entries ? (
-          <span className="ml-auto font-mono text-[10.5px] text-[var(--mute)]">
+          <span className="ml-auto text-[10.5px] text-[var(--mute)]">
             {entries.length} {entries.length === 1 ? "account" : "accounts"}
           </span>
         ) : null}
@@ -207,7 +207,7 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
             Saved snapshot
           </span>
         ) : null}
-        {plan ? <span className="shrink-0 font-mono text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
+        {plan ? <span className="shrink-0 text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
       </header>
 
       {entry.status !== "ok" ? (
@@ -252,9 +252,9 @@ function PopoverWindow({
         <span className="truncate text-[10.5px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
           {window.label}
         </span>
-        <span className="shrink-0 font-mono text-[9.5px] text-[var(--mute)]">{note}</span>
+        <span className="shrink-0 text-[10px] text-[var(--mute)] tabular-nums">{note}</span>
       </div>
-      <span className="font-mono text-[13px] font-semibold tabular-nums" style={{ color: TONE_COLOR[tone] }}>
+      <span className="text-[13px] font-semibold tabular-nums" style={{ color: TONE_COLOR[tone] }}>
         {text}
       </span>
       <div
