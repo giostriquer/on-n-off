@@ -459,9 +459,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         api.listAgents(),
       ]);
       setFlags(mergeFlags(nextFlags.status === "fulfilled" ? nextFlags.value : null));
-      setAppSettings(
-        nextSettings.status === "fulfilled" ? mergeAppSettings(nextSettings.value) : DEFAULT_APP_SETTINGS,
-      );
+      const settings =
+        nextSettings.status === "fulfilled" ? mergeAppSettings(nextSettings.value) : DEFAULT_APP_SETTINGS;
+      setAppSettings(settings);
+      // The remembered provider may have been hidden since (Settings → Providers): boot on the
+      // first visible one instead of loading a tab the user cannot reach.
+      const visible = visibleAgentIds(settings.hiddenAgents);
+      if (!visible.includes(selectedRef.current) && visible[0]) {
+        selectedRef.current = visible[0];
+        setSelectedState(visible[0]);
+      }
       if (nextAgents.status === "fulfilled") {
         setAgents(overlayAgents(nextAgents.value));
       } else {

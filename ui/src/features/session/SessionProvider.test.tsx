@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   resolveSelected: null as null | ((value: AgentTabDto) => void),
   refreshResults: {} as Record<AgentId, AgentTabDto>,
   projectResults: {} as Record<AgentId, ProjectDto[]>,
+  hiddenAgents: [] as AgentId[],
 }));
 
 const EMPTY_TAB: AgentTabDto = { plugins: [], userSkills: [], mcpServers: [] };
@@ -108,7 +109,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
-  loadAppSettings: () => Promise.resolve({ hiddenAgents: [], binaryPaths: {} }),
+  loadAppSettings: () => Promise.resolve({ hiddenAgents: state.hiddenAgents, binaryPaths: {} }),
   listAgents: () => Promise.resolve(AGENTS),
   listProjects: (agentId: AgentId) => Promise.resolve(state.projectResults[agentId] ?? []),
   listLocalPlugins: (agentId: AgentId) => {
@@ -193,6 +194,22 @@ describe("SessionProvider startup", () => {
       cursor: EMPTY_TAB,
     };
     state.projectResults = { claude: [], codex: [], antigravity: [], cursor: [] };
+    state.hiddenAgents = [];
+  });
+
+  it("boots on the first visible provider when the remembered one is hidden", async () => {
+    localStorage.setItem(AGENT_KEY, "antigravity");
+    state.hiddenAgents = ["antigravity"];
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("selected-provider")).toHaveTextContent("claude"));
+    // The hidden provider is never the primary load, and the remembered choice is corrected.
+    await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
+    expect(state.refreshOrder[0]).toBe("claude");
+    expect(localStorage.getItem(AGENT_KEY)).toBe("claude");
   });
 
   it("finishes the selected provider before starting background providers", async () => {
