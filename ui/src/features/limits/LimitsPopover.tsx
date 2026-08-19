@@ -86,8 +86,8 @@ export function LimitsPopover() {
     <main className="limits-popover-shell flex h-full min-h-0 flex-col overflow-hidden rounded-[16px] border border-[var(--popover-hair)] text-[var(--silkscreen)]">
       <header className="flex shrink-0 items-center gap-3 border-b border-[var(--popover-hair)] px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
-          <h1 className="m-0 text-[14.5px] leading-tight font-semibold tracking-[-0.01em]">Limits</h1>
-          <p className="mt-0.5 mb-0 font-mono text-[10px] text-[var(--mute)]">
+          <h1 className="m-0 text-[16px] leading-tight font-semibold tracking-[-0.01em]">Limits</h1>
+          <p className="mt-0.5 mb-0 font-mono text-[11px] text-[var(--mute)]">
             {loading ? "Updating…" : asOf ? `Updated ${formatClock(asOf)}` : "Subscription usage"}
           </p>
         </div>
@@ -113,14 +113,14 @@ export function LimitsPopover() {
       <footer className="flex shrink-0 items-center justify-between border-t border-[var(--popover-hair)] px-3 py-2">
         <button
           type="button"
-          className="rounded-md border-0 bg-transparent px-1.5 py-1 text-[11px] font-medium text-[var(--mute)] hover:bg-[var(--popover-control)] hover:text-[var(--silkscreen)]"
+          className="rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] font-medium text-[var(--mute)] hover:bg-[var(--popover-control)] hover:text-[var(--silkscreen)]"
           onClick={() => void runAction("quit on-n-off", api.quitApp)}
         >
           Quit
         </button>
         <button
           type="button"
-          className="rounded-md border-0 bg-[var(--fill)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--fill-ink)] shadow-sm"
+          className="rounded-md border-0 bg-[var(--fill)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--fill-ink)] shadow-sm"
           onClick={() => void runAction("open on-n-off", api.openLimitsWindow)}
         >
           Open on-n-off
@@ -144,7 +144,7 @@ function PopoverProviderSection({
   const error = query.error ? displayError(parseInvokeError(query.error), name) : null;
   const errorBanner = error ? (
     <p
-      className={`m-0 px-3 py-2 text-[11px] text-[var(--trip)] ${entries ? "border-b border-[var(--popover-hair)]" : ""}`}
+      className={`m-0 px-3 py-2 text-[12px] text-[var(--trip)] ${entries ? "border-b border-[var(--popover-hair)]" : ""}`}
       role="alert"
       aria-label={`${name} refresh error`}
     >
@@ -155,10 +155,10 @@ function PopoverProviderSection({
   return (
     <section aria-label={`${name} accounts`} className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5 px-1">
-        <ProviderIcon provider={provider} className="size-3 shrink-0" title="" />
-        <h2 className="m-0 text-[10.5px] font-semibold tracking-[0.045em] uppercase">{name}</h2>
+        <ProviderIcon provider={provider} className="size-3.5 shrink-0" title="" />
+        <h2 className="m-0 text-[11.5px] font-semibold tracking-[0.045em] uppercase">{name}</h2>
         {entries ? (
-          <span className="ml-auto font-mono text-[9.5px] text-[var(--mute)]">
+          <span className="ml-auto font-mono text-[10.5px] text-[var(--mute)]">
             {entries.length} {entries.length === 1 ? "account" : "accounts"}
           </span>
         ) : null}
@@ -167,11 +167,11 @@ function PopoverProviderSection({
       <div className="overflow-hidden rounded-[11px] border border-[var(--popover-hair)] bg-[var(--popover-card)]">
         {errorBanner}
         {!entries ? (
-          <p className="m-0 px-3 py-3 text-[11.5px] text-[var(--mute)]">
+          <p className="m-0 px-3 py-3 text-[12px] text-[var(--mute)]">
             {query.isFetching ? "Checking limits…" : "No data yet."}
           </p>
         ) : entries.length === 0 ? (
-          <p className="m-0 px-3 py-3 text-[11.5px] text-[var(--mute)]">No saved accounts.</p>
+          <p className="m-0 px-3 py-3 text-[12px] text-[var(--mute)]">No saved accounts.</p>
         ) : (
           entries.map((entry, index) => (
             <PopoverAccount
@@ -201,21 +201,21 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
       data-status={entry.status}
     >
       <header className="mb-1.5 flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium">{label}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
         {stale ? (
-          <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[8.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
+          <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
             Saved snapshot
           </span>
         ) : null}
-        {plan ? <span className="shrink-0 font-mono text-[9px] text-[var(--mute)] uppercase">{plan}</span> : null}
+        {plan ? <span className="shrink-0 font-mono text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
       </header>
 
       {entry.status !== "ok" ? (
-        <p className={`m-0 text-[11px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
+        <p className={`m-0 text-[12px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
           {entry.message ?? `${name} limits are unavailable.`}
         </p>
       ) : entry.windows.length === 0 ? (
-        <p className="m-0 text-[11px] text-[var(--mute)]">No rate-limit windows.</p>
+        <p className="m-0 text-[12px] text-[var(--mute)]">No rate-limit windows.</p>
       ) : (
         <div className="flex flex-col gap-1.5">
           {entry.windows.map((window) => (
@@ -249,16 +249,16 @@ function PopoverWindow({
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
       <div className="flex min-w-0 items-baseline gap-1.5">
-        <span className="truncate text-[9.5px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
+        <span className="truncate text-[10.5px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
           {window.label}
         </span>
-        <span className="shrink-0 font-mono text-[8.5px] text-[var(--mute)]">{note}</span>
+        <span className="shrink-0 font-mono text-[9.5px] text-[var(--mute)]">{note}</span>
       </div>
-      <span className="font-mono text-[11px] font-medium tabular-nums" style={{ color: TONE_COLOR[tone] }}>
+      <span className="font-mono text-[13px] font-semibold tabular-nums" style={{ color: TONE_COLOR[tone] }}>
         {text}
       </span>
       <div
-        className="col-span-2 h-[3px] overflow-hidden rounded-full bg-[var(--popover-track)]"
+        className="col-span-2 h-1 overflow-hidden rounded-full bg-[var(--popover-track)]"
         role="meter"
         aria-label={window.label}
         aria-valuemin={0}
