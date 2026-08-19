@@ -61,14 +61,11 @@ function Assert-Match {
 try {
     $bundleRoot = Join-Path $fixtureRoot "src-tauri" "target" "release" "bundle"
     $nsisDirectory = Join-Path $bundleRoot "nsis"
-    $msiDirectory = Join-Path $bundleRoot "msi"
     $dmgDirectory = Join-Path $bundleRoot "dmg"
     $macosDirectory = Join-Path $bundleRoot "macos"
-    New-Item -ItemType Directory -Path $nsisDirectory, $msiDirectory, $dmgDirectory, $macosDirectory -Force | Out-Null
+    New-Item -ItemType Directory -Path $nsisDirectory, $dmgDirectory, $macosDirectory -Force | Out-Null
     "installer" | Set-Content -LiteralPath (Join-Path $nsisDirectory "on-n-off_0.2.0_x64-setup.exe") -Encoding UTF8
     "signature" | Set-Content -LiteralPath (Join-Path $nsisDirectory "on-n-off_0.2.0_x64-setup.exe.sig") -Encoding UTF8
-    "installer" | Set-Content -LiteralPath (Join-Path $msiDirectory "on-n-off_0.2.0_x64_en-US.msi") -Encoding UTF8
-    "signature" | Set-Content -LiteralPath (Join-Path $msiDirectory "on-n-off_0.2.0_x64_en-US.msi.sig") -Encoding UTF8
     "disk image" | Set-Content -LiteralPath (Join-Path $dmgDirectory "on-n-off_0.2.0_aarch64.dmg") -Encoding UTF8
     "updater bundle" | Set-Content -LiteralPath (Join-Path $macosDirectory "on-n-off.app.tar.gz") -Encoding UTF8
     "signature" | Set-Content -LiteralPath (Join-Path $macosDirectory "on-n-off.app.tar.gz.sig") -Encoding UTF8
@@ -100,10 +97,10 @@ try {
         throw "staged asset set mismatch: $($stagedNames -join ', ')"
     }
 
-    Remove-Item -LiteralPath (Join-Path $msiDirectory "on-n-off_0.2.0_x64_en-US.msi.sig")
-    $missingSignature = Invoke-Validator -Kind "msi" -Signed
-    Assert-Equal $missingSignature.ExitCode 1 "missing MSI signature"
-    Assert-Match $missingSignature.Output "\.sig" "missing MSI signature"
+    Remove-Item -LiteralPath (Join-Path $nsisDirectory "on-n-off_0.2.0_x64-setup.exe.sig")
+    $missingSignature = Invoke-Validator -Kind "nsis" -Signed
+    Assert-Equal $missingSignature.ExitCode 1 "missing NSIS signature"
+    Assert-Match $missingSignature.Output "\.sig" "missing NSIS signature"
 
     Remove-Item -LiteralPath (Join-Path $macosDirectory "on-n-off.app.tar.gz")
     $missingUpdater = Invoke-Validator -Kind "dmg" -Signed

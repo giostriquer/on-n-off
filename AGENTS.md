@@ -11,7 +11,7 @@ on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon).
 - `src-tauri/src/cli_locate.rs`: CLI discovery. GUI apps on macOS start with a minimal `PATH`, and on Windows an app started before an installer ran misses the new registry `PATH`, so `cli_search_path()` merges the process `PATH`, the login shell's `PATH` (probed once, off the UI thread) or the registered user/machine `PATH` on Windows, and well-known install folders; `resolve_provider_cli` searches it per provider (Cursor's CLI is `agent`, a name other products also use, so only an `agent` inside a `cursor-agent` install folder or the legacy `cursor-agent` alias counts) and `AgentCli` hands the same list to spawned CLIs as their `PATH` (npm shims are `#!/usr/bin/env node`). Route every CLI lookup and spawn through these.
 - `src-tauri/src/process.rs`: child-process draining with a hard deadline, shared by `cli.rs` and the login-shell probe.
 - `src-tauri/src/cli_stub.rs`: test-only builder that writes a fake CLI as `.cmd` on Windows or an executable `sh` script elsewhere; use it instead of hand-written batch stubs.
-- `scripts/build-bundle.ps1`: builds, validates, and stages one installer format (`nsis`, `msi`, `dmg`); CI runs it on both Windows and macOS runners.
+- `scripts/build-bundle.ps1`: builds, validates, and stages one installer format (`nsis`, `dmg`); CI runs it on both Windows and macOS runners.
 - `src-tauri/src/config_io.rs` and `backup.rs`: guarded configuration writes and rollback support.
 - `src-tauri/src/item_install/`: selective install of skills/subagents from a GitHub marketplace (tarball fetch, manifest inspection, atomic placement, `~/.on-n-off/installed-items.json` provenance registry, upstream update checks). Never shells out to a provider CLI; write roots come from `AgentAdapter::item_roots`.
 - `src-tauri/src/usage/`: read-only transcript aggregation plus caches under `.on-n-off`.
@@ -106,7 +106,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 
-bun run tauri build                        # Windows: NSIS + MSI
+bun run tauri build                        # Windows: NSIS
 bun run tauri build --bundles app,dmg      # macOS: .app + .dmg
 
 ./scripts/check-release-version.test.ps1   # PowerShell 7 on either platform

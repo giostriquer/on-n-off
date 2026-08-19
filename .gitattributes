@@ -34,8 +34,6 @@
 *.dmg binary
 *.exe binary
 *.gz binary
-*.msi binary
-*.msix binary
 *.tar binary
 *.tgz binary
 *.zip binary

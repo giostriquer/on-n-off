@@ -2,7 +2,6 @@
 pub enum InstallerKind {
     Development,
     Nsis,
-    Msi,
     Dmg,
 }
 
@@ -11,7 +10,6 @@ impl InstallerKind {
         match self {
             Self::Development => None,
             Self::Nsis => Some("nsis"),
-            Self::Msi => Some("msi"),
             Self::Dmg => Some("dmg"),
         }
     }
@@ -21,7 +19,6 @@ impl InstallerKind {
         match self {
             Self::Development => None,
             Self::Nsis => Some("windows-x86_64-nsis"),
-            Self::Msi => Some("windows-x86_64-msi"),
             Self::Dmg => Some("darwin-aarch64"),
         }
     }
@@ -31,10 +28,9 @@ pub fn parse_installer_kind(value: Option<&str>) -> Result<InstallerKind, String
     match value {
         None => Ok(InstallerKind::Development),
         Some("nsis") => Ok(InstallerKind::Nsis),
-        Some("msi") => Ok(InstallerKind::Msi),
         Some("dmg") => Ok(InstallerKind::Dmg),
         Some(other) => Err(format!(
-            "ON_N_OFF_INSTALLER_KIND must be 'nsis', 'msi', or 'dmg'; got '{other}'"
+            "ON_N_OFF_INSTALLER_KIND must be 'nsis' or 'dmg'; got '{other}'"
         )),
     }
 }
@@ -47,7 +43,6 @@ mod tests {
     fn parses_supported_installer_kinds_and_development_fallback() {
         assert_eq!(parse_installer_kind(None), Ok(InstallerKind::Development));
         assert_eq!(parse_installer_kind(Some("nsis")), Ok(InstallerKind::Nsis));
-        assert_eq!(parse_installer_kind(Some("msi")), Ok(InstallerKind::Msi));
         assert_eq!(parse_installer_kind(Some("dmg")), Ok(InstallerKind::Dmg));
     }
 
@@ -57,7 +52,7 @@ mod tests {
 
         assert_eq!(
             error,
-            "ON_N_OFF_INSTALLER_KIND must be 'nsis', 'msi', or 'dmg'; got 'portable'"
+            "ON_N_OFF_INSTALLER_KIND must be 'nsis' or 'dmg'; got 'portable'"
         );
     }
 
@@ -67,8 +62,6 @@ mod tests {
         assert_eq!(InstallerKind::Development.target(), None);
         assert_eq!(InstallerKind::Nsis.name(), Some("nsis"));
         assert_eq!(InstallerKind::Nsis.target(), Some("windows-x86_64-nsis"));
-        assert_eq!(InstallerKind::Msi.name(), Some("msi"));
-        assert_eq!(InstallerKind::Msi.target(), Some("windows-x86_64-msi"));
         assert_eq!(InstallerKind::Dmg.name(), Some("dmg"));
         assert_eq!(InstallerKind::Dmg.target(), Some("darwin-aarch64"));
     }

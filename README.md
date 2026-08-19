@@ -35,7 +35,7 @@ bun run tauri dev
 
 ## Release builds
 
-Windows (NSIS and MSI installers under `src-tauri/target/release/bundle/`):
+Windows (NSIS installer under `src-tauri/target/release/bundle/nsis/`):
 
 ```powershell
 bun run tauri build
@@ -48,7 +48,7 @@ macOS (an ad-hoc-signed `on-n-off.app` under `bundle/macos/` and a `.dmg` under
 bun run tauri build --bundles app,dmg
 ```
 
-CI drives both platforms through `scripts/build-bundle.ps1 -InstallerKind nsis|msi|dmg`,
+CI drives both platforms through `scripts/build-bundle.ps1 -InstallerKind nsis|dmg`,
 which also validates and stages the release assets; it needs PowerShell 7 locally.
 
 Ordinary local builds are unsigned: Windows can show a SmartScreen warning, and
@@ -58,8 +58,8 @@ not notarized.
 
 ## Application updates
 
-Published stable releases provide separate signed update paths for NSIS and MSI
-installations on Windows and for the Apple Silicon app bundle on macOS
+Published stable releases provide signed update paths for the NSIS installer on
+Windows and for the Apple Silicon app bundle on macOS
 (`darwin-aarch64`, delivered as `.app.tar.gz`). After the initially selected
 provider is ready, an installed release checks the stable GitHub Releases feed. Automatic download is enabled by
 default and can be disabled in Settings. Installation and restart always require

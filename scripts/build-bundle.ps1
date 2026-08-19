@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet("nsis", "msi", "dmg")] [string] $InstallerKind,
+    [Parameter(Mandatory)] [ValidateSet("nsis", "dmg")] [string] $InstallerKind,
     [Parameter(Mandatory)] [string] $ReleaseVersion,
     [string] $RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
     [string] $StageDirectory,
@@ -32,15 +32,6 @@ $formats = @{
         UpdaterDirectory = "nsis"
         UpdaterName = "on-n-off_${ReleaseVersion}_x64-setup.exe"
         UpdaterStagedName = "on-n-off_${ReleaseVersion}_x64-setup.exe"
-    }
-    msi = @{
-        Bundles = "msi"
-        InstallerDirectory = "msi"
-        InstallerExtension = ".msi"
-        InstallerName = "on-n-off_${ReleaseVersion}_x64_en-US.msi"
-        UpdaterDirectory = "msi"
-        UpdaterName = "on-n-off_${ReleaseVersion}_x64_en-US.msi"
-        UpdaterStagedName = "on-n-off_${ReleaseVersion}_x64_en-US.msi"
     }
     dmg = @{
         Bundles = "app,dmg"

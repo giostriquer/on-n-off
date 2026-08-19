@@ -81,9 +81,6 @@ jobs:
           - installer: nsis
             platform: windows
             os: windows-latest
-          - installer: msi
-            platform: windows
-            os: windows-latest
           - installer: dmg
             platform: macos
             os: macos-latest
@@ -197,16 +194,14 @@ jobs:
           $expectedNames = @(
             "on-n-off_$version`_x64-setup.exe",
             "on-n-off_$version`_x64-setup.exe.sig",
-            "on-n-off_$version`_x64_en-US.msi",
-            "on-n-off_$version`_x64_en-US.msi.sig",
             "on-n-off_$version`_aarch64.dmg",
             "on-n-off_$version`_aarch64.app.tar.gz",
             "on-n-off_$version`_aarch64.app.tar.gz.sig"
           ) | Sort-Object
 
           $checksumFiles = @(Get-ChildItem -LiteralPath $assetDirectory -File -Filter 'STAGED_SHA256SUMS.*.txt')
-          if ($checksumFiles.Count -ne 3) {
-            throw "Expected staged checksum files for nsis, msi, and dmg, found $($checksumFiles.Count)."
+          if ($checksumFiles.Count -ne 2) {
+            throw "Expected staged checksum files for nsis and dmg, found $($checksumFiles.Count)."
           }
 
           $actualNames = @()
@@ -313,7 +308,6 @@ jobs:
         with:
           subject-path: |
             ${{ runner.temp }}/release-assets/*.exe
-            ${{ runner.temp }}/release-assets/*.msi
             ${{ runner.temp }}/release-assets/*.dmg
             ${{ runner.temp }}/release-assets/*.app.tar.gz
 
