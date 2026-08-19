@@ -324,8 +324,8 @@ jobs:
           $assets = Get-ChildItem -LiteralPath $assetDirectory -File |
             Sort-Object Name |
             Select-Object -ExpandProperty FullName
-          if ($assets.Count -ne 11) {
-            throw "Expected eleven release assets, found $($assets.Count)."
+          if ($assets.Count -ne 9) {
+            throw "Expected nine release assets, found $($assets.Count)."
           }
 
           $expectedNames = $assets | ForEach-Object { Split-Path -Leaf $_ } | Sort-Object
