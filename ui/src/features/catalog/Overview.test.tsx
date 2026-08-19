@@ -82,7 +82,7 @@ describe("Overview", () => {
     expect(screen.getAllByText("1")).toHaveLength(2);
     expect(screen.getAllByText("on / 2 installed")).toHaveLength(2);
     expect(screen.getByText("Out of sync with upstream")).toBeTruthy();
-    expect(screen.getByText("1 plugin behind catalog")).toBeTruthy();
+    expect(screen.getByText("1 plugin outdated")).toBeTruthy();
     expect(screen.getByText("v0.22.1")).toBeTruthy();
     expect(screen.getByText("v0.23.0")).toBeTruthy();
     expect(screen.getByText("Update")).toBeTruthy();

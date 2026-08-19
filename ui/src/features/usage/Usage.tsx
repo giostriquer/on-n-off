@@ -237,7 +237,7 @@ export function Usage() {
                 return (
                   <div key={row.provider} className="grid gap-1.5">
                     <div className="flex items-center gap-2">
-                      <ProviderIcon provider={row.provider} className="size-3.5 shrink-0" />
+                      <ProviderIcon provider={row.provider} className="size-3.5 shrink-0 translate-y-px" />
                       <span className="text-[13px] font-semibold">{providerLabel(row.provider)}</span>
                       <span className="font-mono text-[13px] font-medium">
                         {metric === "cost" ? formatUsd(row.costUsd) : formatTokens(row.totalTokens)}
@@ -346,7 +346,7 @@ export function Usage() {
                     className="grid grid-cols-[minmax(0,1.4fr)_88px_64px_88px] items-center gap-2 border-b border-[var(--hair)] py-2.5 last:border-b-0"
                   >
                     <div className="flex min-w-0 items-center gap-2">
-                      <ProviderIcon provider={row.provider} className="size-3.5 shrink-0" />
+                      <ProviderIcon provider={row.provider} className="size-3.5 shrink-0 translate-y-px" />
                       <span className="truncate text-[13.5px] font-medium">{row.model}</span>
                     </div>
                     <span className="font-mono text-right text-[12.5px]">{formatUsd(row.costUsd)}</span>
