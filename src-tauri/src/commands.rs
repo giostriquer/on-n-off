@@ -186,11 +186,21 @@ pub async fn load_app_settings() -> Result<AppSettings, AdapterError> {
 }
 
 #[tauri::command]
-pub async fn save_app_settings(settings: AppSettings) -> Result<AppSettings, AdapterError> {
-    blocking("save app settings", move || {
+pub async fn save_app_settings(
+    settings: AppSettings,
+    app: tauri::AppHandle,
+) -> Result<AppSettings, AdapterError> {
+    let saved = blocking("save app settings", move || {
         crate::settings::save_settings(settings)
     })
-    .await
+    .await?;
+    crate::limits_monitor::wake(&app);
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn request_notification_permission(app: tauri::AppHandle) -> Result<bool, AdapterError> {
+    crate::notifications::request_permission(app).await
 }
 
 #[tauri::command]

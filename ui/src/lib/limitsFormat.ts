@@ -1,5 +1,8 @@
 /** Display formatting for the Limits screen (pure). */
 
+import { providerColor } from "./providerStyle";
+import type { AgentId } from "./types";
+
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
@@ -66,6 +69,16 @@ export function usageTone(usedPercent: number): UsageTone {
   if (usedPercent >= 90) return "trip";
   if (usedPercent >= 70) return "warn";
   return "calm";
+}
+
+export function usageToneColor(tone: UsageTone): string | undefined {
+  if (tone === "warn") return "var(--warn)";
+  if (tone === "trip") return "var(--trip)";
+  return undefined;
+}
+
+export function usageFillColor(provider: AgentId, tone: UsageTone): string {
+  return usageToneColor(tone) ?? providerColor(provider);
 }
 
 export function formatUsedPercent(usedPercent: number): string {

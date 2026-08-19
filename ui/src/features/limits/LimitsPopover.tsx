@@ -10,22 +10,16 @@ import {
   formatUsedPercent,
   hasElapsed,
   planLabel,
+  usageFillColor,
   usageTone,
-  type UsageTone,
+  usageToneColor,
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { providerColor } from "$lib/providerStyle";
 import { applyStoredTheme } from "$lib/theme";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { LIMITS_STALE_MS, useLimitsProviders } from "./useLimitsProviders";
-
-const TONE_COLOR: Record<UsageTone, string | undefined> = {
-  calm: undefined,
-  warn: "var(--warn)",
-  trip: "var(--trip)",
-};
 
 export function LimitsPopover() {
   const queryClient = useQueryClient();
@@ -254,7 +248,7 @@ function PopoverWindow({
         </span>
         <span className="shrink-0 text-[10px] text-[var(--mute)] tabular-nums">{note}</span>
       </div>
-      <span className="text-[13px] font-semibold tabular-nums" style={{ color: TONE_COLOR[tone] }}>
+      <span className="text-[13px] font-semibold tabular-nums" style={{ color: usageToneColor(tone) }}>
         {text}
       </span>
       <div
@@ -267,7 +261,7 @@ function PopoverWindow({
       >
         <div
           className="h-full rounded-full transition-[width]"
-          style={{ width: `${percent}%`, background: providerColor(provider) }}
+          style={{ width: `${percent}%`, background: usageFillColor(provider, tone) }}
         />
       </div>
     </div>

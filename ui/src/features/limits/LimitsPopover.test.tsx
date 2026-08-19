@@ -109,6 +109,19 @@ describe("LimitsPopover", () => {
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
   });
 
+  it("uses the critical tone for a nearly exhausted meter fill", async () => {
+    const claude = limits("claude", "claude-live", "live@claude.example", true);
+    claude.windows[0].usedPercent = 90;
+    readLimits.mockImplementation((provider: AgentId) =>
+      Promise.resolve(provider === "claude" ? [claude] : []),
+    );
+    renderPopover();
+
+    const meter = await screen.findByRole("meter", { name: "Weekly · all models" });
+
+    expect((meter.firstElementChild as HTMLElement).style.background).toBe("var(--trip)");
+  });
+
   it("forces both provider reads when Refresh is selected", async () => {
     renderPopover();
     await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(4));

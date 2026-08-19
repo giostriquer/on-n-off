@@ -80,6 +80,14 @@ pub fn settings_path() -> Result<PathBuf, AdapterError> {
     Ok(settings_path_for(&user_home()?))
 }
 
+pub fn limits_monitor_state_path_for(home: &std::path::Path) -> PathBuf {
+    home.join(".on-n-off").join("limits-monitor.json")
+}
+
+pub fn limits_monitor_state_path() -> Result<PathBuf, AdapterError> {
+    Ok(limits_monitor_state_path_for(&user_home()?))
+}
+
 pub fn installed_items_path_for(home: &std::path::Path) -> PathBuf {
     home.join(".on-n-off").join("installed-items.json")
 }
@@ -154,6 +162,10 @@ mod tests {
         assert_eq!(
             settings_path_for(&home).strip_prefix(&home),
             Ok(Path::new(".on-n-off").join("settings.json").as_path())
+        );
+        assert_eq!(
+            limits_monitor_state_path_for(&home).strip_prefix(&home),
+            Ok(Path::new(".on-n-off").join("limits-monitor.json").as_path())
         );
     }
 

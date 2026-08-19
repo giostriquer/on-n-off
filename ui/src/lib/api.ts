@@ -160,6 +160,10 @@ export function saveAppSettings(settings: AppSettings): Promise<AppSettings> {
   return invoke("save_app_settings", { settings });
 }
 
+export function requestNotificationPermission(): Promise<boolean> {
+  return invoke("request_notification_permission");
+}
+
 export function diagnoseProviders(): Promise<ProviderDiagnose[]> {
   return invoke("diagnose_providers");
 }

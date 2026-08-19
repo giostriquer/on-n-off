@@ -157,6 +157,19 @@ describe("Limits", () => {
     expect(screen.getByRole("button", { name: "Refresh limits" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it("uses the warning tone for high-usage meter fills", async () => {
+    answer([okClaude()], [okCodex()]);
+    renderLimits();
+
+    const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
+    const opus = within(claude).getByRole("meter", { name: "Weekly · Opus" });
+    const codex = screen.getByRole("region", { name: "Codex limits · work@codex.example" });
+    const weekly = within(codex).getByRole("meter", { name: "Weekly · all models" });
+
+    expect((opus.firstElementChild as HTMLElement).style.background).toBe("var(--trip)");
+    expect((weekly.firstElementChild as HTMLElement).style.background).toBe("var(--warn)");
+  });
+
   it("shows remembered accounts after the live one, as of their last read, with reset windows greyed", async () => {
     answer([okClaude()], [okCodex(), staleCodex()]);
     renderLimits();
