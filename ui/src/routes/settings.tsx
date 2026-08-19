@@ -16,6 +16,15 @@ export function SettingsRoute() {
       onAutomaticUpdatesChange={(enabled) => {
         void session.persistAppSettings({ ...session.appSettings, automaticUpdates: enabled });
       }}
+      onLimitNotificationsChange={(enabled) => {
+        void session.persistAppSettings({
+          ...session.appSettings,
+          limitNotifications: enabled,
+        });
+      }}
+      onLimitsPollMinutesChange={(minutes) => {
+        void session.persistAppSettings({ ...session.appSettings, limitsPollMinutes: minutes });
+      }}
     />
   );
 }

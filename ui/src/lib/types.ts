@@ -75,10 +75,14 @@ export type UpdaterBuildInfo = {
   target: string | null;
 };
 
+export type LimitsPollMinutes = 5 | 10 | 15 | 30;
+
 export type AppSettings = {
   hiddenAgents: AgentId[];
   binaryPaths: Partial<Record<AgentId, string>>;
   automaticUpdates: boolean;
+  limitNotifications: boolean;
+  limitsPollMinutes: LimitsPollMinutes;
 };
 
 export type DiagnoseCheck = {

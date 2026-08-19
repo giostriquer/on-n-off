@@ -7,7 +7,13 @@ import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { visibleAgentIds } from "$lib/appSettings";
 import * as api from "$lib/api";
-import type { AgentId, AgentInfo, AppSettings, ProviderDiagnose } from "$lib/types";
+import type {
+  AgentId,
+  AgentInfo,
+  AppSettings,
+  LimitsPollMinutes,
+  ProviderDiagnose,
+} from "$lib/types";
 
 type SettingsProps = {
   agents: AgentInfo[];
@@ -15,6 +21,8 @@ type SettingsProps = {
   onToggleVisible: (id: AgentId, hidden: boolean) => void;
   onSaveBinary: (id: AgentId, path: string) => void;
   onAutomaticUpdatesChange: (enabled: boolean) => void;
+  onLimitNotificationsChange: (enabled: boolean) => void;
+  onLimitsPollMinutesChange: (minutes: LimitsPollMinutes) => void;
 };
 
 const BINARY_NAME: Record<AgentId, string> = {
@@ -30,6 +38,8 @@ export function Settings({
   onToggleVisible,
   onSaveBinary,
   onAutomaticUpdatesChange,
+  onLimitNotificationsChange,
+  onLimitsPollMinutesChange,
 }: SettingsProps) {
   const diagnose = useQuery({
     queryKey: ["diagnose-providers", settings.binaryPaths],
@@ -64,6 +74,13 @@ export function Settings({
         onAutomaticUpdatesChange={onAutomaticUpdatesChange}
       />
 
+      <LimitNotificationsCard
+        enabled={settings.limitNotifications}
+        pollMinutes={settings.limitsPollMinutes}
+        onEnabledChange={onLimitNotificationsChange}
+        onPollMinutesChange={onLimitsPollMinutesChange}
+      />
+
       <section aria-label="Providers">
         <div className="flex flex-col gap-3">
           {agents.map((agent) => (
@@ -81,6 +98,93 @@ export function Settings({
         </div>
       </section>
     </div>
+  );
+}
+
+function LimitNotificationsCard({
+  enabled,
+  pollMinutes,
+  onEnabledChange,
+  onPollMinutesChange,
+}: {
+  enabled: boolean;
+  pollMinutes: LimitsPollMinutes;
+  onEnabledChange: (enabled: boolean) => void;
+  onPollMinutesChange: (minutes: LimitsPollMinutes) => void;
+}) {
+  const [requestingPermission, setRequestingPermission] = useState(false);
+  const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
+
+  async function toggle() {
+    if (enabled) {
+      setPermissionMessage(null);
+      onEnabledChange(false);
+      return;
+    }
+    setRequestingPermission(true);
+    setPermissionMessage(null);
+    try {
+      if (await api.requestNotificationPermission()) {
+        onEnabledChange(true);
+      } else {
+        setPermissionMessage("Notifications are blocked in system settings.");
+      }
+    } catch {
+      setPermissionMessage("Could not request notification permission.");
+    } finally {
+      setRequestingPermission(false);
+    }
+  }
+
+  return (
+    <section
+      aria-label="Limit notifications"
+      className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
+    >
+      <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="m-0 text-[15px] font-semibold">Limit notifications</h3>
+          <p className="mt-1 mb-0 text-[11.5px] text-[var(--mute)]">
+            Notifies when usage reaches 100% or a limit resets while on-n-off is running.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+            Notify
+          </span>
+          <Rocker
+            size="skill"
+            on={enabled}
+            busy={requestingPermission}
+            ariaLabel="Notify about limit changes"
+            onToggle={() => void toggle()}
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
+        <label htmlFor="limits-poll-minutes" className="min-w-0 flex-1 text-[12px] text-[var(--mute)]">
+          Check for limit changes every
+        </label>
+        <select
+          id="limits-poll-minutes"
+          aria-label="Limits polling interval"
+          className="h-8 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 text-[11px] font-semibold"
+          value={pollMinutes}
+          onChange={(event) => onPollMinutesChange(Number(event.target.value) as LimitsPollMinutes)}
+        >
+          {[5, 10, 15, 30].map((minutes) => (
+            <option key={minutes} value={minutes}>
+              {minutes} minutes
+            </option>
+          ))}
+        </select>
+        {permissionMessage ? (
+          <p className="m-0 basis-full text-[11.5px] text-[var(--trip)]" role="status">
+            {permissionMessage}
+          </p>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

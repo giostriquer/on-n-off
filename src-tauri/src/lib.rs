@@ -17,7 +17,9 @@ mod flags;
 mod install_source;
 mod item_install;
 mod limits;
+mod limits_monitor;
 mod mcp;
+mod notifications;
 mod paths;
 mod plugin_meta;
 mod process;
@@ -37,6 +39,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(commands::AppState::production())
         .setup(|_app| {
             // Warm the CLI search path (login-shell PATH probe) off the UI thread so the
@@ -46,6 +49,7 @@ pub fn run() {
             });
             #[cfg(target_os = "macos")]
             tray::setup(_app)?;
+            limits_monitor::setup(_app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -54,6 +58,7 @@ pub fn run() {
             commands::updater_build_info,
             commands::load_app_settings,
             commands::save_app_settings,
+            commands::request_notification_permission,
             commands::diagnose_providers,
             commands::list_projects,
             commands::inspect_project,
