@@ -24,5 +24,5 @@ vi.mock("$lib/api", () => ({
 it("selects the lightweight Limits surface from the window query", () => {
   render(<Root search="?surface=limits-popover" />);
 
-  expect(screen.getByRole("heading", { name: "Subscription limits" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Limits" })).toBeTruthy();
 });

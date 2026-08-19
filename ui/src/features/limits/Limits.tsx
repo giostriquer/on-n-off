@@ -70,7 +70,7 @@ export function Limits() {
 }
 
 /** The live card for a provider plus one card per remembered account. */
-export function ProviderColumn({
+function ProviderColumn({
   provider,
   query,
   allowForget = true,

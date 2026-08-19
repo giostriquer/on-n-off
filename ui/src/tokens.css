@@ -30,6 +30,11 @@
   --drop: 0 24px 60px rgba(23, 25, 29, 0.16);
   --usage-a: #5c6b78;
   --usage-b: #8a7d5c;
+  --popover-surface: rgba(246, 246, 244, 0.78);
+  --popover-card: rgba(255, 255, 255, 0.58);
+  --popover-control: rgba(23, 25, 29, 0.07);
+  --popover-track: rgba(23, 25, 29, 0.09);
+  --popover-hair: rgba(23, 25, 29, 0.13);
 }
 
 html.dark,
@@ -51,6 +56,11 @@ html.dark,
   --drop: 0 32px 74px rgba(0, 0, 0, 0.72);
   --usage-a: #8b9aa8;
   --usage-b: #c2b48a;
+  --popover-surface: rgba(28, 31, 35, 0.78);
+  --popover-card: rgba(255, 255, 255, 0.055);
+  --popover-control: rgba(255, 255, 255, 0.075);
+  --popover-track: rgba(255, 255, 255, 0.1);
+  --popover-hair: rgba(255, 255, 255, 0.13);
 }
 
 html,
@@ -71,6 +81,21 @@ body {
   font-size: 14px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+}
+
+html[data-surface="limits-popover"],
+html[data-surface="limits-popover"] body,
+html[data-surface="limits-popover"] #root {
+  background: transparent;
+}
+
+.limits-popover-shell {
+  background: var(--popover-surface);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.1),
+    0 18px 44px rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: saturate(1.2) blur(24px);
+  backdrop-filter: saturate(1.2) blur(24px);
 }
 
 @layer base {
