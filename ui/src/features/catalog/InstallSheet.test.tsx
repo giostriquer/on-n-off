@@ -3,7 +3,14 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { InstallSheet } from "./InstallSheet";
-import type { AgentInfo, InstallItemsRequest, InstallItemsResult, MarketplaceInspect } from "$lib/types";
+import type {
+  AgentInfo,
+  InstallItemsRequest,
+  InstallItemsResult,
+  ItemDependency,
+  MarketplaceEntry,
+  MarketplaceInspect,
+} from "$lib/types";
 
 const api = vi.hoisted(() => ({
   inspectMarketplace: vi.fn(),
@@ -23,6 +30,10 @@ const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as con
   pluginToggle: id !== "cursor",
 }));
 
+function entry(name: string, path: string, extra: Partial<MarketplaceEntry> = {}): MarketplaceEntry {
+  return { name, description: "", path, dependsOn: [], externalRefs: [], usesPluginRoot: false, ...extra };
+}
+
 const INSPECT: MarketplaceInspect = {
   isMarketplace: true,
   commitSha: "a".repeat(40),
@@ -36,10 +47,38 @@ const INSPECT: MarketplaceInspect = {
       supported: true,
       source: null,
       skills: [
-        { name: "tdd", description: "Test-driven development", path: "skills/engineering/tdd" },
-        { name: "grilling", description: "Ask hard questions", path: "skills/productivity/grilling" },
+        entry("tdd", "skills/engineering/tdd", { description: "Test-driven development" }),
+        entry("grilling", "skills/productivity/grilling", { description: "Ask hard questions" }),
       ],
-      agents: [{ name: "reviewer", description: "Reviews code", path: "agents/reviewer.md" }],
+      agents: [entry("reviewer", "agents/reviewer.md", { description: "Reviews code" })],
+      extras: [],
+    },
+  ],
+};
+
+/** Invented names: `build` needs `verify` and `review` (high) and mentions `probe` (medium). */
+function needs(name: string, confidence: "high" | "medium" = "high"): ItemDependency {
+  return { pluginName: "acme", kind: "skill", path: `skills/${name}`, name, confidence };
+}
+
+const DEPS: MarketplaceInspect = {
+  ...INSPECT,
+  marketplaceName: "acme",
+  plugins: [
+    {
+      name: "acme",
+      version: "0.1.0",
+      description: "",
+      supported: true,
+      source: null,
+      skills: [
+        entry("build", "skills/build", { dependsOn: [needs("verify"), needs("review"), needs("probe", "medium")] }),
+        entry("verify", "skills/verify"),
+        entry("review", "skills/review"),
+        entry("probe", "skills/probe"),
+      ],
+      agents: [],
+      extras: ["commands", "mcp"],
     },
   ],
 };
@@ -210,5 +249,47 @@ describe("InstallSheet marketplace browsing", () => {
     api.inspectMarketplace.mockRejectedValueOnce({ kind: "message", message: "download failed: boom", path: null });
     typeSource("acme/other");
     expect(await screen.findByText(/Couldn’t download the marketplace/)).toBeTruthy();
+  });
+
+  it("auto-adds required skills, labels them, and respects a decline", async () => {
+    api.inspectMarketplace.mockResolvedValue(DEPS);
+    const { onInstallItems } = renderSheet();
+    typeSource("acme/skills");
+    fireEvent.click(await screen.findByRole("radio", { name: /Install selected/ }));
+    const tree = screen.getByRole("group", { name: "acme" });
+    // The plugin ships more than skills: say so once, up front.
+    expect(within(tree).getByText(/also ships commands and MCP servers/)).toBeTruthy();
+
+    fireEvent.click(within(tree).getByRole("checkbox", { name: /^build$/ }));
+    expect(within(tree).getByRole("checkbox", { name: /^verify$/ })).toBeChecked();
+    expect(within(tree).getByRole("checkbox", { name: /^review$/ })).toBeChecked();
+    expect(within(tree).getByRole("checkbox", { name: /^probe$/ })).not.toBeChecked();
+    expect(within(tree).getAllByText("required by build")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /Install 3 items/ })).toBeTruthy();
+    expect(screen.getByText("1 picked + 2 required · 1 not selected")).toBeTruthy();
+
+    // A medium mention is only a hint, with a one-click add.
+    const buildRow = within(tree).getByRole("checkbox", { name: /^build$/ }).closest("li")!;
+    expect(within(buildRow).getByText(/needs/)).toBeTruthy();
+    expect(within(buildRow).getByText("not selected")).toBeTruthy();
+    fireEvent.click(within(buildRow).getByRole("button", { name: /add probe/ }));
+    expect(within(tree).getByRole("checkbox", { name: /^probe$/ })).toBeChecked();
+    expect(screen.getByRole("button", { name: /Install 4 items/ })).toBeTruthy();
+    expect(screen.getByText("2 picked + 2 required")).toBeTruthy();
+
+    // Declining an auto-added item sticks; the gap becomes visible on the parent.
+    fireEvent.click(within(tree).getByRole("checkbox", { name: /^verify$/ }));
+    expect(within(tree).getByRole("checkbox", { name: /^verify$/ })).not.toBeChecked();
+    expect(within(tree).getAllByText("required by build")).toHaveLength(1);
+    expect(within(buildRow).getByText("not selected")).toBeTruthy();
+    expect(screen.getByText("2 picked + 1 required · 1 not selected")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Install 3 items/ }));
+    await waitFor(() => expect(onInstallItems).toHaveBeenCalledTimes(1));
+    expect(onInstallItems.mock.calls[0][0].items.map((item) => item.path)).toEqual([
+      "skills/build",
+      "skills/review",
+      "skills/probe",
+    ]);
   });
 });

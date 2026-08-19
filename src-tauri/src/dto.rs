@@ -404,7 +404,7 @@ pub struct ProviderLimitsDto {
 // Local items: skills and subagents copied out of a marketplace by on-n-off itself and
 // tracked in `~/.on-n-off/installed-items.json` (see `item_install`).
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ItemKind {
     Skill,
@@ -421,13 +421,41 @@ pub enum ItemScope {
     },
 }
 
+/// How sure the dependency scanner is that one entry needs another (see `item_install::deps`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DepConfidence {
+    Medium,
+    High,
+}
+
+/// Another marketplace entry that this one refers to in its text.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDependencyDto {
+    pub plugin_name: String,
+    pub kind: ItemKind,
+    pub path: String,
+    pub name: String,
+    pub confidence: DepConfidence,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceEntryDto {
     pub name: String,
     pub description: String,
     /// Path inside the marketplace repository, `/`-separated (skill folder or agent file).
     pub path: String,
+    /// Sibling entries this one names in its text, best confidence first per target.
+    #[serde(default)]
+    pub depends_on: Vec<ItemDependencyDto>,
+    /// Paths the text refers to that a local copy of the item will not contain.
+    #[serde(default)]
+    pub external_refs: Vec<String>,
+    /// The text mentions `CLAUDE_PLUGIN_ROOT`, so it expects to run inside the plugin.
+    #[serde(default)]
+    pub uses_plugin_root: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -442,6 +470,9 @@ pub struct MarketplacePluginDto {
     pub source: Option<ItemSourceDto>,
     pub skills: Vec<MarketplaceEntryDto>,
     pub agents: Vec<MarketplaceEntryDto>,
+    /// Plugin-level assets a local copy never gets: `commands`, `hooks`, `mcp`.
+    #[serde(default)]
+    pub extras: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -550,6 +581,13 @@ pub struct ItemStatusDto {
     pub modified: bool,
     pub missing: bool,
     pub upstream: ItemUpstream,
+    /// Where the item was copied from, so the UI can say so and link to it.
+    pub source: ItemSourceDto,
+    pub plugin_name: String,
+    /// Skill folder or agent file inside the repository, `/`-separated.
+    pub upstream_path: String,
+    /// GitHub page of the item at the installed commit.
+    pub upstream_url: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

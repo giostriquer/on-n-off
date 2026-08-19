@@ -31,33 +31,6 @@ fn registry_never_resets_a_malformed_file() {
     let _ = fs::remove_dir_all(home);
 }
 
-fn sample_item(home: &Path, name: &str) -> InstalledItem {
-    let target = home.join(".claude/skills").join(name);
-    InstalledItem {
-        id: registry::item_id(AgentId::Claude, ItemKind::Skill, &target),
-        provider: AgentId::Claude,
-        kind: ItemKind::Skill,
-        name: name.into(),
-        target_path: target.to_string_lossy().into_owned(),
-        scope: ItemScope::Global,
-        source: registry::ItemSource {
-            owner: "mattpocock".into(),
-            repo: "skills".into(),
-            git_ref: "HEAD".into(),
-            plugin_name: "mattpocock-skills".into(),
-            plugin_root: String::new(),
-            upstream_path: format!("skills/engineering/{name}"),
-        },
-        installed: registry::Installed {
-            commit_sha: SHA_A.into(),
-            plugin_version: Some("1.2.3".into()),
-            installed_at: "2026-08-18T00:00:00Z".into(),
-        },
-        files: BTreeMap::new(),
-        dismissed_sha: None,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // write.rs
 

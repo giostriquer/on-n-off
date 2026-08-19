@@ -70,5 +70,7 @@ export function useItemActions(provider: AgentId, afterChange: () => Promise<unk
     [settle],
   );
 
-  return { update, remove };
+  const openUpstream = useCallback((status: ItemStatus) => api.openUrl(status.upstreamUrl), []);
+
+  return { update, remove, openUpstream };
 }
