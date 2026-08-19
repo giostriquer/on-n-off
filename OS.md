@@ -62,6 +62,11 @@ Spawned CLIs get the merged list as their `PATH` so `#!/usr/bin/env node` shims 
 - Icons: `icon.icns` carries macOS margins + drop shadow; Windows `icon.ico` / PNGs must be full-bleed
   with transparent corners (no shadow). Regenerate the Windows set from the icns master, not the
   other way round.
+- Windows taskbar icon: Windows 11 draws a running window's taskbar button from the shell's cached
+  icon for the executable path, not from the window's `WM_SETICON` icon, so an in-place upgrade can keep
+  showing the previous release's icon. `src-tauri/windows/hooks.nsh` (`NSIS_HOOK_POSTINSTALL`) sends
+  `SHChangeNotify(SHCNE_ASSOCCHANGED)` after install to drop the cached icon; on a machine that still
+  shows a stale one, run `ie4uinit.exe -show` and relaunch the app (or restart Explorer).
 
 ## PowerShell vs bash in this repo
 
