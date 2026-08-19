@@ -126,7 +126,7 @@ export function Overview({
             rows.map((row) => (
               <div key={row.id} className="flex items-center gap-2.5 border-b border-[var(--hair)] px-3 py-[7px] last:border-b-0">
                 <span
-                  className="size-2 shrink-0 rounded-full bg-[var(--live)] shadow-[0_0_7px_var(--live)]"
+                  className="size-2 shrink-0 translate-y-px rounded-full bg-[var(--live)] shadow-[0_0_7px_var(--live)]"
                   aria-hidden="true"
                 />
                 <span className="min-w-[132px] text-[13px] font-semibold">{row.name}</span>

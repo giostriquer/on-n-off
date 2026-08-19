@@ -26,7 +26,7 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
   return (
     <div className="flex flex-col gap-3.5 px-5 pt-[18px] pb-[26px]">
       <header className="flex items-baseline gap-3">
-        <h2 className="m-0 text-[17px] font-semibold tracking-[0.05em] uppercase">MCP servers</h2>
+        <h2 className="m-0 shrink-0 text-[17px] font-semibold tracking-[0.05em] uppercase whitespace-nowrap">MCP servers</h2>
         <span className="font-mono text-xs leading-snug text-[var(--mute)]">
           {live} live · {hasProject ? "global + this project" : "user-scope config only"} · handshake not probed
         </span>
@@ -69,15 +69,10 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
         <div className="flex flex-col gap-1.5">
           {servers.map((server) => (
             <article key={server.id} className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
-              <div className="flex items-center gap-3 px-3 py-[11px]">
+              <div className="flex items-start gap-3 px-3 py-[11px]">
+                <span className="min-h-6 min-w-6 shrink-0" aria-hidden="true" />
                 <span
-                  className="flex min-h-6 min-w-6 shrink-0 items-center justify-center text-[var(--mute)]"
-                  aria-hidden="true"
-                >
-                  ·
-                </span>
-                <span
-                  className={`size-2 shrink-0 rounded-full ${
+                  className={`mt-2 size-2 shrink-0 rounded-full ${
                     server.enabled ? "bg-[var(--live)] shadow-[0_0_7px_var(--live)]" : "bg-[var(--mute)]"
                   }`}
                   aria-hidden="true"
@@ -101,7 +96,7 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
                     {server.source}
                   </div>
                 </div>
-                <div className="ml-auto shrink-0">
+                <div className="mt-0.5 ml-auto shrink-0">
                   <Rocker
                     size="plugin"
                     on={server.enabled}

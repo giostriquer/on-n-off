@@ -133,6 +133,41 @@ describe("ItemList", () => {
     expect(screen.getByText("workbench")).toBeInTheDocument();
     expect(sortPluginsCall).not.toHaveBeenCalled();
   });
+
+  it("offers an Outdated chip that keeps only plugins behind their catalog", async () => {
+    const user = userEvent.setup();
+    const current = {
+      id: "workbench@workshop",
+      name: "workbench",
+      source: "workshop",
+      version: "0.23.0",
+      upstream: "0.23.0",
+      enabled: true,
+      togglable: true,
+      skills: [],
+    };
+    const stale = { ...current, id: "toolkit@workshop", name: "toolkit", version: "1.0.0", upstream: "1.1.0" };
+    render(
+      <ItemList
+        kind="plugin"
+        tab={{ plugins: [current, stale], userSkills: [], mcpServers: [] }}
+        items={[current, stale]}
+        expandedIds={new Set()}
+        cliOk
+        pluginToggle
+        onToggleExpand={vi.fn()}
+        onTogglePlugin={vi.fn()}
+        onToggleSkill={vi.fn()}
+        onUninstall={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "behind" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "outdated" }));
+
+    expect(screen.getByText("toolkit")).toBeInTheDocument();
+    expect(screen.queryByText("workbench")).not.toBeInTheDocument();
+  });
 });
 
 describe("ItemList managed items", () => {

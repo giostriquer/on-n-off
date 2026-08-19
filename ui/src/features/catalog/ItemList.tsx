@@ -14,7 +14,7 @@ import {
 import { isProjectOrigin } from "$lib/project";
 import type { AgentTabDto, ItemStatus, PluginDto, SkillDto } from "$lib/types";
 
-type Chip = "all" | "on" | "off" | "behind";
+type Chip = "all" | "on" | "off" | "outdated";
 
 const noop = () => {};
 
@@ -155,7 +155,7 @@ export function ItemList({
 
   const pluginPool = kind === "plugin" ? items : [];
   const plugins =
-    chip === "behind"
+    chip === "outdated"
       ? pluginPool.filter((plugin) => pluginOutOfSync(plugin))
       : applyChip(pluginPool, chip, (plugin) => plugin.enabled);
   const skillPool = kind === "skill" ? items : [];
@@ -166,13 +166,13 @@ export function ItemList({
     kind === "plugin"
       ? `${tab.plugins.filter((plugin) => plugin.enabled).length} live · installed from git, marketplace or folder`
       : "plugin skills follow their plugin · user skills toggle · project skills stay with the repo";
-  const chips: Chip[] = kind === "plugin" ? ["all", "on", "off", "behind"] : ["all", "on", "off"];
+  const chips: Chip[] = kind === "plugin" ? ["all", "on", "off", "outdated"] : ["all", "on", "off"];
 
   return (
     <div className="flex flex-col gap-3.5 px-5 pt-[18px] pb-[26px]">
       <header className="flex items-baseline gap-3">
-        <h2 className="m-0 text-[17px] font-semibold tracking-[0.05em] uppercase">{title}</h2>
-        <span className="font-mono text-[12px]/[1.3] text-[var(--mute)]">{subtitle}</span>
+        <h2 className="m-0 shrink-0 text-[17px] font-semibold tracking-[0.05em] uppercase whitespace-nowrap">{title}</h2>
+        <span className="min-w-0 font-mono text-[12px]/[1.3] text-[var(--mute)]">{subtitle}</span>
         <div className="flex-1" />
         {headerActions}
         <div className="flex border border-[var(--hair)]" role="group" aria-label="Filter list">
@@ -199,7 +199,7 @@ export function ItemList({
           </p>
         ) : plugins.length === 0 ? (
           <p className="text-[13px] text-[var(--mute)]">
-            {chip === "behind" ? "No plugins behind." : chip === "on" ? "No plugins on." : "No plugins off."}
+            {chip === "outdated" ? "No plugins outdated." : chip === "on" ? "No plugins on." : "No plugins off."}
           </p>
         ) : (
           <div className="flex flex-col gap-1.5">
@@ -210,7 +210,7 @@ export function ItemList({
                   <div className="flex items-start gap-3 px-3 py-[11px]">
                     <button
                       type="button"
-                      className="mt-0.5 flex min-h-6 min-w-6 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[var(--silkscreen)]"
+                      className="flex min-h-6 min-w-6 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[var(--silkscreen)]"
                       aria-expanded={open}
                       aria-label={open ? `Collapse ${plugin.name}` : `Expand ${plugin.name}`}
                       onClick={() => onToggleExpand(plugin.id)}
