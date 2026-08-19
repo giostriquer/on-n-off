@@ -51,7 +51,11 @@ Spawned CLIs get the merged list as their `PATH` so `#!/usr/bin/env node` shims 
   context, do not patch code around it.
 - macOS: the built `.app` launched with `open` has the Finder PATH — test CLI resolution that way.
   Reading agent homes may prompt for Documents/Desktop access; `Limits` triggers a one-time Keychain
-  prompt for `/usr/bin/security`.
+  prompt for `/usr/bin/security`. Limit reset notifications use the native notification permission;
+  the monitor detects sleep/wake from a wall-clock heartbeat because desktop Tauri does not emit
+  `RunEvent::Resumed`.
+- Windows: native notifications must be tested from an installed build; a development build can use
+  PowerShell's app name and icon instead of on-n-off's identity.
 
 ## Packaging and updates
 

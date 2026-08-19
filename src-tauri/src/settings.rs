@@ -26,10 +26,18 @@ pub struct AppSettings {
     pub binary_paths: HashMap<AgentId, String>,
     #[serde(default = "automatic_updates_default")]
     pub automatic_updates: bool,
+    #[serde(default)]
+    pub limit_reset_notifications: bool,
+    #[serde(default = "limits_poll_minutes_default")]
+    pub limits_poll_minutes: u16,
 }
 
 const fn automatic_updates_default() -> bool {
     true
+}
+
+const fn limits_poll_minutes_default() -> u16 {
+    10
 }
 
 impl Default for AppSettings {
@@ -38,6 +46,8 @@ impl Default for AppSettings {
             hidden_agents: Vec::new(),
             binary_paths: HashMap::new(),
             automatic_updates: automatic_updates_default(),
+            limit_reset_notifications: false,
+            limits_poll_minutes: limits_poll_minutes_default(),
         }
     }
 }
@@ -66,7 +76,7 @@ pub fn parse_settings(json: Option<&str>) -> AppSettings {
     let Some(text) = json else {
         return AppSettings::default();
     };
-    serde_json::from_str(text).unwrap_or_default()
+    normalize_settings(serde_json::from_str(text).unwrap_or_default())
 }
 
 pub fn load_settings() -> AppSettings {
@@ -77,6 +87,7 @@ pub fn load_settings() -> AppSettings {
 }
 
 pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterError> {
+    settings = normalize_settings(settings);
     settings
         .binary_paths
         .retain(|_, value| !value.trim().is_empty());
@@ -105,6 +116,13 @@ pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterEr
         AdapterError::write(error.to_string(), Some(path.display().to_string()))
     })?;
     Ok(settings)
+}
+
+fn normalize_settings(mut settings: AppSettings) -> AppSettings {
+    if !matches!(settings.limits_poll_minutes, 5 | 10 | 15 | 30) {
+        settings.limits_poll_minutes = limits_poll_minutes_default();
+    }
+    settings
 }
 
 fn hidden_covers_all(hidden: &[AgentId]) -> bool {
@@ -349,6 +367,26 @@ mod tests {
     }
 
     #[test]
+    fn existing_settings_keep_limit_notifications_off_at_ten_minutes() {
+        let serialized =
+            serde_json::to_value(parse_settings(Some(r#"{ "hiddenAgents": ["codex"] }"#))).unwrap();
+
+        assert_eq!(serialized["limitResetNotifications"], false);
+        assert_eq!(serialized["limitsPollMinutes"], 10);
+    }
+
+    #[test]
+    fn unsupported_limits_poll_interval_falls_back_to_ten_minutes() {
+        let serialized = serde_json::to_value(parse_settings(Some(
+            r#"{ "limitResetNotifications": true, "limitsPollMinutes": 7 }"#,
+        )))
+        .unwrap();
+
+        assert_eq!(serialized["limitResetNotifications"], true);
+        assert_eq!(serialized["limitsPollMinutes"], 10);
+    }
+
+    #[test]
     fn cursor_uses_agent_as_its_command_and_keeps_the_legacy_alias() {
         assert_eq!(AgentId::Cursor.binary_name(), "agent");
         assert_eq!(agent_for_binary("agent"), Some(AgentId::Cursor));
@@ -381,6 +419,8 @@ mod tests {
             ],
             binary_paths: HashMap::new(),
             automatic_updates: true,
+            limit_reset_notifications: false,
+            limits_poll_minutes: 10,
         })
         .unwrap_err();
         assert!(err.message.contains("at least one provider"));

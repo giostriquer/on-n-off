@@ -27,4 +27,20 @@ describe("appSettings", () => {
         .automaticUpdates,
     ).toBe(false);
   });
+
+  it("keeps limit reset notifications off at a ten-minute default", () => {
+    const settings = mergeAppSettings(null) as unknown as Record<string, unknown>;
+
+    expect(settings.limitResetNotifications).toBe(false);
+    expect(settings.limitsPollMinutes).toBe(10);
+  });
+
+  it("normalizes unsupported limit polling intervals", () => {
+    const settings = mergeAppSettings(
+      JSON.parse('{"limitResetNotifications":true,"limitsPollMinutes":7}'),
+    ) as unknown as Record<string, unknown>;
+
+    expect(settings.limitResetNotifications).toBe(true);
+    expect(settings.limitsPollMinutes).toBe(10);
+  });
 });

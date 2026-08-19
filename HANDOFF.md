@@ -42,7 +42,7 @@ If a CLI works in a terminal but the app says **os error 193** / “not a valid 
 
 1. **Overview / Plugins / Skills / MCP** — browse only first
 2. **Usage** — scan local transcripts (read-only of agent files; may write caches under `%USERPROFILE%\.on-n-off\`)
-3. **Limits** — live Claude / Codex subscription limits via the CLIs' stored logins (never writes to or refreshes them; outbound HTTPS to `api.anthropic.com` and `chatgpt.com`; on macOS, click **Allow** on the one-time Keychain prompt for `security`). Remembers each account's last numbers under `%USERPROFILE%\.on-n-off\limits\` so switching accounts with `codex login` / `claude` keeps the other one listed; **Forget** on a stale card deletes just that file.
+3. **Limits** — live Claude / Codex subscription limits via the CLIs' stored logins (never writes to or refreshes them; outbound HTTPS to `api.anthropic.com` and `chatgpt.com`; on macOS, click **Allow** on the one-time Keychain prompt for `security`). Remembers each account's last numbers under `%USERPROFILE%\.on-n-off\limits\` so switching accounts with `codex login` / `claude` keeps the other one listed; **Forget** on a stale card deletes just that file. Optional reset notifications are off by default under **Settings → Limit reset notifications**. When enabled, the background monitor checks every 5, 10, 15, or 30 minutes while the app is running, backs off after provider failures, and stores its deduplication baseline in `%USERPROFILE%\.on-n-off\limits-monitor.json`.
 4. **Agent config** — check paths and project scope
 5. Only then try a **single toggle** or install on a throwaway plugin if you want write coverage
 
