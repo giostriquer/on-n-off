@@ -69,9 +69,12 @@ jobs:
       - name: Validate release version contract
         run: ./scripts/check-release-version.ps1 -ExpectedTag $env:GITHUB_REF_NAME
 
+  # The `release` environment holds the updater signing secrets and requires a manual approval, so
+  # a pushed tag alone cannot produce a signed build. Approving one pending job approves the run.
   build:
     name: build-${{ matrix.installer }}
     needs: validate
+    environment: release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
