@@ -72,9 +72,10 @@ bun run tauri build
 The installer lands under `src-tauri/target/release/bundle/nsis/` (or your `CARGO_TARGET_DIR` if set).
 
 The GitHub release workflow builds the NSIS installer with the production
-updater configuration and signing secrets. Do not publish its draft until the
-installer, its `.sig` file, `latest.json`, checksums, and attestations have been
-inspected.
+updater configuration and signing secrets. The signing job runs in the `release`
+environment, so a pushed tag waits for a manual approval before anything is
+signed. Do not publish its draft until the installer, its `.sig` file,
+`latest.json`, checksums, and attestations have been inspected.
 
 ## macOS
 
