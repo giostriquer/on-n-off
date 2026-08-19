@@ -1,7 +1,7 @@
 import { memo, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { Rocker } from "@/features/agents/Rocker";
-import { ManagedItemStrip } from "./ManagedItemStrip";
+import { ManagedItemStrip, OriginTag } from "./ManagedItemStrip";
 import { SkillRow } from "./SkillRow";
 import { copy } from "$lib/copy";
 import {
@@ -34,6 +34,7 @@ type ItemListBaseProps = {
   statusFor?: (skill: SkillDto) => ItemStatus | undefined;
   onUpdateItem?: (status: ItemStatus) => void;
   onRemoveItem?: (status: ItemStatus) => void;
+  onOpenUpstream?: (status: ItemStatus) => void;
   headerActions?: ReactNode;
 };
 
@@ -58,6 +59,7 @@ type SkillCardProps = {
   onToggleSkill: (skill: SkillDto, enabled: boolean) => void;
   onUpdateItem?: (status: ItemStatus) => void;
   onRemoveItem?: (status: ItemStatus) => void;
+  onOpenUpstream?: (status: ItemStatus) => void;
 };
 
 const SkillCard = memo(function SkillCard({
@@ -68,6 +70,7 @@ const SkillCard = memo(function SkillCard({
   onToggleSkill,
   onUpdateItem,
   onRemoveItem,
+  onOpenUpstream,
 }: SkillCardProps) {
   const lockedNote = isProjectOrigin(skill.origin) ? copy.skillProject : copy.skillLocked;
   return (
@@ -82,9 +85,13 @@ const SkillCard = memo(function SkillCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="text-[16px]/[1.15] font-semibold break-words">{skill.name}</span>
-            <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
-              {isProjectOrigin(skill.origin) ? "Project skill" : skill.pluginId ? "Plugin skill" : "User skill"}
-            </span>
+            {status ? (
+              <OriginTag status={status} />
+            ) : (
+              <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+                {isProjectOrigin(skill.origin) ? "Project skill" : skill.pluginId ? "Plugin skill" : "User skill"}
+              </span>
+            )}
           </div>
           <div className="mt-0.5 line-clamp-3 text-[11.5px] leading-snug break-words text-[var(--mute)]">
             {skill.description || skill.id}
@@ -117,6 +124,7 @@ const SkillCard = memo(function SkillCard({
           busy={busy}
           onUpdateItem={onUpdateItem ?? noop}
           onRemoveItem={onRemoveItem ?? noop}
+          onOpenUpstream={onOpenUpstream ?? noop}
         />
       ) : null}
     </article>
@@ -140,6 +148,7 @@ export function ItemList({
   statusFor,
   onUpdateItem,
   onRemoveItem,
+  onOpenUpstream,
   headerActions,
 }: ItemListProps) {
   const [chip, setChip] = useState<Chip>("all");
@@ -323,6 +332,7 @@ export function ItemList({
               onToggleSkill={onToggleSkill}
               onUpdateItem={onUpdateItem}
               onRemoveItem={onRemoveItem}
+              onOpenUpstream={onOpenUpstream}
             />
           ))}
         </div>

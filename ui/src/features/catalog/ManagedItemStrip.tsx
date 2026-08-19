@@ -11,7 +11,18 @@ const BADGE_TONE = {
 export type ManagedItemActions = {
   onUpdateItem: (status: ItemStatus) => void;
   onRemoveItem: (status: ItemStatus) => void;
+  /** Opens the item's upstream page (github.com) in the browser. */
+  onOpenUpstream: (status: ItemStatus) => void;
 };
+
+/** `from owner/repo` — the tag a copied item wears instead of "User skill". */
+export function OriginTag({ status }: { status: ItemStatus }) {
+  return (
+    <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+      {copy.fromRepo(`${status.source.owner}/${status.source.repo}`)}
+    </span>
+  );
+}
 
 /** Version / update / modified badges plus Update and Remove for an item on-n-off installed. */
 export function ManagedItemStrip({
@@ -19,10 +30,20 @@ export function ManagedItemStrip({
   busy,
   onUpdateItem,
   onRemoveItem,
+  onOpenUpstream,
 }: { status: ItemStatus; busy: boolean } & ManagedItemActions) {
   const updatable = status.upstream.state === "updateAvailable" && !status.missing;
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--hair)] px-3 py-[7px] pl-[35px]">
+      <button
+        type="button"
+        className="max-w-full truncate font-mono text-[10px] tracking-[0.02em] text-[var(--mute)] underline decoration-[var(--hair)] underline-offset-2 hover:text-[var(--silkscreen)]"
+        aria-label={copy.openUpstream(status.displayName)}
+        title={status.upstreamUrl}
+        onClick={() => onOpenUpstream(status)}
+      >
+        {"\u2197"} {status.source.owner}/{status.source.repo}/{status.upstreamPath}
+      </button>
       {itemBadges(status).map((badge) => (
         <span
           key={badge.label}
@@ -62,19 +83,29 @@ export function AgentCard({
   busy,
   onUpdateItem,
   onRemoveItem,
+  onOpenUpstream,
 }: { status: ItemStatus; busy: boolean } & ManagedItemActions) {
   return (
     <article className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
       <div className="flex items-start gap-3 px-3 py-[11px]">
         <span className="mt-2 size-2 shrink-0 rounded-full bg-[var(--live)]" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <div className="text-[16px]/[1.15] font-semibold break-words">{status.displayName}</div>
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="text-[16px]/[1.15] font-semibold break-words">{status.displayName}</span>
+            <OriginTag status={status} />
+          </div>
           <div className="mt-0.5 truncate font-mono text-[11px]/[1.4] text-[var(--mute)]" title={status.targetPath}>
             {status.targetPath}
           </div>
         </div>
       </div>
-      <ManagedItemStrip status={status} busy={busy} onUpdateItem={onUpdateItem} onRemoveItem={onRemoveItem} />
+      <ManagedItemStrip
+        status={status}
+        busy={busy}
+        onUpdateItem={onUpdateItem}
+        onRemoveItem={onRemoveItem}
+        onOpenUpstream={onOpenUpstream}
+      />
     </article>
   );
 }

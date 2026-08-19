@@ -1,11 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { copy } from "$lib/copy";
+import { marketplaceCopy } from "$lib/marketplaceCopy";
 import { displayError, parseInvokeError } from "$lib/error";
 import type { GithubRepo } from "$lib/installSource";
 import { summarizeOutcomes } from "$lib/itemOutcomes";
 import { ITEM_STATUS_KEY } from "$lib/itemStatus";
-import { agentsAllowed, allKeys, entryKey, selectedItems, targetsFor } from "$lib/marketplaceSelection";
+import { agentsAllowed, allKeys, dependencyGaps, entryKey, selectedItems, targetsFor } from "$lib/marketplaceSelection";
 import type {
   AgentId,
   AgentInfo,
@@ -60,6 +61,8 @@ export function MarketplaceInstall({
   const [selection, setSelection] = useState<MarketplaceSelection>(() => ({
     action: "plugin",
     keys: new Set(),
+    autoAdded: new Map(),
+    declined: new Set(),
     filter: "",
     providers: [currentAgentId],
     scope: currentScopePath ? { kind: "project", projectPath: currentScopePath } : { kind: "global" },
@@ -77,6 +80,15 @@ export function MarketplaceInstall({
     return selectedItems(inspect, effective).filter((pick) => pick.kind !== "agent" || canAgents);
   }, [inspect, local, selection.action, selection.keys, selection.providers]);
   const canSubmitItems = local && picks.length > 0 && selection.providers.length > 0 && !busy;
+  const required =
+    selection.action === "selected"
+      ? picks.filter((pick) => selection.autoAdded.has(entryKey(pick.pluginName, pick.kind, pick.path))).length
+      : 0;
+  const missing =
+    inspect && selection.action === "selected"
+      ? dependencyGaps(inspect, selection.keys).reduce((sum, gap) => sum + gap.missing.length, 0)
+      : 0;
+  const summary = local && picks.length > 0 ? marketplaceCopy.installSummary(picks.length - required, required, missing) : null;
 
   function patchSelection(patch: Partial<MarketplaceSelection>) {
     setSelection((prev) => ({ ...prev, ...patch }));
@@ -170,6 +182,7 @@ export function MarketplaceInstall({
       <SheetFooter
         submitLabel={submitLabel}
         submitDisabled={local ? !canSubmitItems : busy}
+        summary={summary}
         onCancel={onCancel}
         onSubmit={() => {
           if (local) {

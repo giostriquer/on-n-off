@@ -74,4 +74,6 @@ export const copy = {
   removeItemTitle: (name: string) => `Remove “${name}”?`,
   removeItemBody: "Deletes the local copy (a backup is kept) and stops tracking it.",
   agentsSection: "Subagents",
+  fromRepo: (repo: string) => `from ${repo}`,
+  openUpstream: (name: string) => `Open ${name} on GitHub`,
 } as const;
