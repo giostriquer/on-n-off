@@ -53,6 +53,21 @@ export function formatResetAt(resetsAt: string | null | undefined, timeZone?: st
   }).format(at);
 }
 
+/** "Aug 19, 2026, 02:04" in the given (or viewer's) time zone; empty when unknown. */
+export function formatObservedAt(observedAt: string | null | undefined, timeZone?: string): string {
+  const at = parseInstant(observedAt);
+  if (at === null) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  }).format(at);
+}
+
 /** "14:05" (24h) in the given (or the viewer's) time zone; empty when unknown. */
 export function formatClock(iso: string | null | undefined, timeZone?: string): string {
   const at = parseInstant(iso);

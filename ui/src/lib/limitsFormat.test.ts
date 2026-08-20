@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatClock,
+  formatObservedAt,
   formatResetAt,
   formatResetIn,
   hasElapsed,
@@ -42,6 +43,18 @@ describe("formatResetAt", () => {
   it("is empty for missing or unparsable instants", () => {
     expect(formatResetAt(null, "UTC")).toBe("");
     expect(formatResetAt("nope", "UTC")).toBe("");
+  });
+});
+
+describe("formatObservedAt", () => {
+  it("includes the calendar date so old observations cannot look recent", () => {
+    expect(formatObservedAt("2026-08-19T02:04:00Z", "UTC")).toBe("Aug 19, 2026, 02:04");
+    expect(formatObservedAt("2026-08-19T02:04:00Z", "America/Sao_Paulo")).toBe("Aug 18, 2026, 23:04");
+  });
+
+  it("is empty for missing or unparsable instants", () => {
+    expect(formatObservedAt(null, "UTC")).toBe("");
+    expect(formatObservedAt("nope", "UTC")).toBe("");
   });
 });
 

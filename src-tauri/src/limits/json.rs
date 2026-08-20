@@ -48,5 +48,9 @@ pub(super) fn window(
         kind,
         used_percent,
         resets_at,
+        window_seconds: None,
+        // Provider payload parsers are pure. `finish` stamps the read instant before the DTO is
+        // returned or persisted.
+        observed_at: String::new(),
     }
 }

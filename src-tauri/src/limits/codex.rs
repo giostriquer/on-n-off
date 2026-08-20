@@ -46,12 +46,15 @@ pub(super) fn account_email(payload: &Value) -> Option<String> {
 
 fn plan_window(rate_limit: &Value, key: &str, id: &str) -> Option<LimitWindowDto> {
     let entry = rate_limit.get(key)?;
-    let (kind, used, resets_at) = window_parts(entry)?;
+    let (kind, used, resets_at, seconds) = window_parts(entry)?;
     let label = match kind {
         LimitWindowKind::Session => format!("{} · all models", session_length(entry)),
         _ => "Weekly · all models".to_string(),
     };
-    Some(window(id, label, kind, used, resets_at))
+    Some(LimitWindowDto {
+        window_seconds: seconds,
+        ..window(id, label, kind, used, resets_at)
+    })
 }
 
 /// "5 hour" / "30 minute" from `limit_window_seconds`, for the short rolling window's label.
@@ -72,7 +75,7 @@ fn session_length(entry: &Value) -> String {
 /// Per-model limits render as compact `Model` rows; the window length only picks the prefix.
 fn extra_window(index: usize, entry: &Value) -> Option<LimitWindowDto> {
     let window_entry = entry.get("rate_limit")?.get("primary_window")?;
-    let (kind, used, resets_at) = window_parts(window_entry)?;
+    let (kind, used, resets_at, seconds) = window_parts(window_entry)?;
     let name = optional_string(entry.get("limit_name"));
     let id = optional_string(entry.get("metered_feature"))
         .or_else(|| name.clone())
@@ -82,16 +85,19 @@ fn extra_window(index: usize, entry: &Value) -> Option<LimitWindowDto> {
         _ => "Weekly".to_string(),
     };
     let label = format!("{prefix} · {}", name.as_deref().unwrap_or("extra limit"));
-    Some(window(
-        format!("extra:{id}"),
-        label,
-        LimitWindowKind::Model,
-        used,
-        resets_at,
-    ))
+    Some(LimitWindowDto {
+        window_seconds: seconds,
+        ..window(
+            format!("extra:{id}"),
+            label,
+            LimitWindowKind::Model,
+            used,
+            resets_at,
+        )
+    })
 }
 
-fn window_parts(entry: &Value) -> Option<(LimitWindowKind, f64, Option<String>)> {
+fn window_parts(entry: &Value) -> Option<(LimitWindowKind, f64, Option<String>, Option<u64>)> {
     let used = percent(entry.get("used_percent"))?;
     let seconds = entry.get("limit_window_seconds").and_then(Value::as_u64);
     let kind = match seconds {
@@ -103,7 +109,7 @@ fn window_parts(entry: &Value) -> Option<(LimitWindowKind, f64, Option<String>)>
         .and_then(Value::as_i64)
         .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
         .map(|at| at.to_rfc3339());
-    Some((kind, used, resets_at))
+    Some((kind, used, resets_at, seconds))
 }
 
 fn credits(value: Option<&Value>) -> Option<LimitsCreditsDto> {

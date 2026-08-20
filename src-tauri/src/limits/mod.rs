@@ -1,41 +1,41 @@
-//! Subscription rate limits: live per-provider snapshot from the vendors' usage endpoints,
-//! authenticated with the CLIs' own stored logins (read-only; never refreshed here). When Claude
-//! Code cannot fetch live numbers, Claude Desktop's local usage history can supply a dated
-//! percentage-only snapshot for the same organization.
+//! Subscription rate limits aggregated per account from provider endpoints, remembered snapshots,
+//! and account-correlated local observations. Stored logins are read-only and never refreshed here.
 //!
 //! `read_limits` never fails for provider-side reasons; every outcome is a `ProviderLimitsDto`
 //! whose `status` + `message` tell the UI what to show. Because each CLI stores one login at a
 //! time, successful reads are also remembered per account (numbers only) so accounts the user
-//! has switched away from stay visible as of their last read.
+//! has switched away from stay visible with each window's observation time.
 
 mod claude;
 mod claude_desktop;
-mod codex;
-mod credentials;
 #[cfg(test)]
-mod desktop_fallback_tests;
-mod fallback;
+mod claude_observation_tests;
+mod codex;
+mod codex_sessions;
+mod credentials;
 mod http;
 mod json;
 #[cfg(test)]
 mod memory_tests;
+mod observations;
+mod pipeline;
 mod snapshots;
 
 use std::path::{Path, PathBuf};
 
-use chrono::{SecondsFormat, Utc};
+use chrono::Utc;
 
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsCreditsDto, LimitsStatus,
-    ProviderLimitsDto,
+    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsStatus, ProviderLimitsDto,
 };
 use crate::paths;
 use credentials::{
     read_claude_credential, read_claude_identity, read_codex_credential, ClaudeCredential,
     ClaudeLoginMemo, CredentialLookup, KeychainProbe, CLAUDE_LOGIN,
 };
-use fallback::NumberSnapshot;
-use http::{get_json, HttpError};
+use http::get_json;
+use observations::ObservedWindowSet;
+use pipeline::{finish, resolve};
 use snapshots::SnapshotStore;
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -65,7 +65,7 @@ struct Sources<'a, P: FnOnce() -> KeychainProbe> {
     now_ms: i64,
 }
 
-/// Live subscription limits for one provider, followed by remembered snapshots of its other
+/// Current subscription limits for one provider, followed by remembered observations for its other
 /// accounts. Blocking: runs a Keychain probe (macOS, Claude) and one HTTPS request; call it off
 /// the UI thread. `force` = explicit refresh: re-read the Keychain instead of the in-process memo.
 pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
@@ -99,7 +99,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
     )
 }
 
-/// Drop the remembered snapshot of one account (the user's "Forget" on a stale card).
+/// Drop the remembered snapshot of one account (the user's "Forget" on a remembered card).
 pub fn forget_snapshot(agent: AgentId, account_id: &str) -> Result<(), String> {
     let home = paths::user_home().map_err(|error| error.message)?;
     SnapshotStore::for_home(&home).forget(agent, account_id)
@@ -111,8 +111,10 @@ fn read_limits_in<P: FnOnce() -> KeychainProbe>(
     sources: Sources<'_, P>,
 ) -> Vec<ProviderLimitsDto> {
     let home = sources.home;
-    let (current, fallback) = match agent {
-        AgentId::Claude => claude_live(force, sources),
+    let observed_at =
+        chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
+    let (current, supplemental) = match agent {
+        AgentId::Claude => claude_current(force, sources),
         AgentId::Codex => (codex_limits(home, sources.codex_url), None),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
@@ -126,52 +128,53 @@ fn read_limits_in<P: FnOnce() -> KeychainProbe>(
             )]
         }
     };
-    with_memory(&SnapshotStore::for_home(home), current, fallback)
-}
-
-/// Remember a successful live read (best-effort, like the usage caches), then return it followed
-/// by the other remembered accounts, newest first. A live account is never listed twice: when its
-/// read did not come back `ok`, its last remembered numbers are folded into that one card.
-fn with_memory(
-    store: &SnapshotStore,
-    current: ProviderLimitsDto,
-    fallback: Option<NumberSnapshot>,
-) -> Vec<ProviderLimitsDto> {
-    let _ = store.save(&current);
-    let live_account = current.account.as_ref().map(|account| account.id.clone());
-    let mut remembered = store.load(current.provider);
-    let mut live = current;
-    if live.status != LimitsStatus::Ok {
-        if let Some(id) = live_account.as_deref() {
-            if let Some(at) = remembered
-                .iter()
-                .position(|snapshot| snapshot.account.as_ref().is_some_and(|a| a.id == id))
-            {
-                live = fallback::apply_latest(
-                    live,
-                    fallback,
-                    NumberSnapshot::remembered(remembered.remove(at)),
-                );
-            } else {
-                live = fallback::apply_latest(live, fallback, None);
-            }
-        } else {
-            live = fallback::apply_latest(live, fallback, None);
+    let store = SnapshotStore::for_home(home);
+    let mut accounts = aggregate_accounts(&store, current, supplemental);
+    if agent == AgentId::Codex && codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0
+    {
+        for account in &accounts {
+            let _ = store.save(account);
         }
     }
-    let others = remembered.into_iter().filter(|snapshot| {
-        snapshot.account.as_ref().map(|account| &account.id) != live_account.as_ref()
+    accounts
+}
+
+/// Merge every available observation for the current account, persist the canonical account view,
+/// then return it followed by the other remembered accounts, newest first.
+fn aggregate_accounts(
+    store: &SnapshotStore,
+    current: ProviderLimitsDto,
+    supplemental: Option<ObservedWindowSet>,
+) -> Vec<ProviderLimitsDto> {
+    let current_account = current.account.as_ref().map(|account| account.id.clone());
+    let mut remembered = store.load(current.provider);
+    let prior = current_account.as_deref().and_then(|id| {
+        remembered
+            .iter()
+            .position(|snapshot| {
+                snapshot
+                    .account
+                    .as_ref()
+                    .is_some_and(|account| account.id == id)
+            })
+            .map(|index| remembered.remove(index))
     });
-    std::iter::once(live).chain(others).collect()
+    let current = observations::merge_windows(
+        current,
+        supplemental,
+        prior.and_then(ObservedWindowSet::from_account),
+    );
+    let _ = store.save(&current);
+    std::iter::once(current).chain(remembered).collect()
 }
 
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
 /// login may be reused; otherwise the Keychain (or the credentials file) is read. A rejected token
 /// evicts the memo so the next read goes back to the Keychain.
-fn claude_live<P: FnOnce() -> KeychainProbe>(
+fn claude_current<P: FnOnce() -> KeychainProbe>(
     force: bool,
     sources: Sources<'_, P>,
-) -> (ProviderLimitsDto, Option<NumberSnapshot>) {
+) -> (ProviderLimitsDto, Option<ObservedWindowSet>) {
     let Sources {
         home,
         memo,
@@ -191,17 +194,13 @@ fn claude_live<P: FnOnce() -> KeychainProbe>(
     if dto.status == LimitsStatus::Unauthenticated {
         memo.clear();
     }
-    let fallback = if dto.status != LimitsStatus::Ok {
-        organization_id
-            .as_deref()
-            .and_then(|organization_id| {
-                claude_desktop::read_latest(&claude_desktop_history, organization_id)
-            })
-            .map(|usage| NumberSnapshot::claude_desktop(usage.observed_at, usage.windows))
-    } else {
-        None
-    };
-    (dto, fallback)
+    let local_observations = organization_id
+        .as_deref()
+        .and_then(|organization_id| {
+            claude_desktop::read_latest(&claude_desktop_history, organization_id)
+        })
+        .map(|usage| ObservedWindowSet::local(usage.observed_at, usage.windows));
+    (dto, local_observations)
 }
 
 /// Claude: stored OAuth login → `GET {url}` with the OAuth beta header → normalized windows.
@@ -268,121 +267,12 @@ fn default_account() -> LimitsAccountDto {
     }
 }
 
-/// The provider-neutral pipeline: login state → `load` (fetch + parse) → status. Does no I/O of
-/// its own beyond `load`, so it is unit-tested with closures.
-fn resolve<T>(
-    provider: AgentId,
-    account: Option<LimitsAccountDto>,
-    lookup: CredentialLookup<T>,
-    load: impl FnOnce(&T) -> Result<Parsed, HttpError>,
-) -> ProviderLimitsDto {
-    let cli = provider.binary_name();
-    // Every non-`ok` outcome still names the account it is about, so the UI can put the status on
-    // that account's card instead of an anonymous card beside it.
-    let named = || Parsed {
-        account: account.clone(),
-        ..Parsed::default()
-    };
-    let credential = match lookup {
-        CredentialLookup::Found(credential) => credential,
-        CredentialLookup::Missing => {
-            return finish(
-                provider,
-                LimitsStatus::SignedOut,
-                Some(format!("Sign in with `{cli}` to see subscription limits.")),
-                named(),
-            )
-        }
-        CredentialLookup::Expired { renewable } => {
-            return finish(
-                provider,
-                LimitsStatus::Unauthenticated,
-                Some(token_expired(cli, renewable)),
-                named(),
-            )
-        }
-        CredentialLookup::Unsupported(why) => {
-            return finish(provider, LimitsStatus::Unsupported, Some(why), named())
-        }
-        CredentialLookup::Unreadable(why) => {
-            return finish(
-                provider,
-                LimitsStatus::Failed,
-                Some(format!("Could not read the stored login: {why}")),
-                named(),
-            )
-        }
-    };
-    match load(&credential) {
-        Ok(mut parsed) => {
-            parsed.windows.sort_by_key(|window| kind_rank(window.kind));
-            finish(provider, LimitsStatus::Ok, None, parsed)
-        }
-        Err(HttpError::Unauthorized) => finish(
-            provider,
-            LimitsStatus::Unauthenticated,
-            Some(relogin(cli)),
-            named(),
-        ),
-        Err(error) => finish(
-            provider,
-            LimitsStatus::Failed,
-            Some(format!(
-                "Could not reach the {} usage service ({error}).",
-                provider.display_name()
-            )),
-            named(),
-        ),
-    }
-}
-
-fn finish(
-    provider: AgentId,
-    status: LimitsStatus,
-    message: Option<String>,
-    parsed: Parsed,
-) -> ProviderLimitsDto {
-    ProviderLimitsDto {
-        provider,
-        status,
-        message,
-        account: parsed.account,
-        live: true,
-        plan: parsed.plan,
-        windows: parsed.windows,
-        credits: parsed.credits,
-        fetched_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-    }
-}
-
-fn relogin(cli: &str) -> String {
-    format!("Login expired — run `{cli}` and sign in again to refresh subscription limits.")
-}
-
-/// The stored access token has passed its own expiry. Such a token lasts hours and the CLI mints a
-/// new one from its refresh token the next time it runs, so only a login that can no longer renew
-/// itself needs a new sign-in; asking for one otherwise sends the user through a pointless login.
-fn token_expired(cli: &str, renewable: bool) -> String {
-    if renewable {
-        format!("Access token expired — send a prompt with `{cli}` to renew it, then refresh here.")
-    } else {
-        relogin(cli)
-    }
-}
-
-fn kind_rank(kind: LimitWindowKind) -> u8 {
-    match kind {
-        LimitWindowKind::Weekly => 0,
-        LimitWindowKind::Session => 1,
-        LimitWindowKind::Model => 2,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dto::LimitWindowKind;
     use crate::paths::scratch_dir;
-    use http::{refused_url, serve_once};
+    use http::{refused_url, serve_once, HttpError};
     use json::window;
     use serde_json::json;
     use std::cell::Cell;
@@ -422,7 +312,10 @@ mod tests {
                 credits: None,
             },
         );
-        dto.fetched_at = format!("2026-08-17T{:02}:00:00.000Z", used as u32 % 24);
+        let observed_at = format!("2026-08-17T{:02}:00:00.000Z", used as u32 % 24);
+        for window in &mut dto.windows {
+            window.observed_at.clone_from(&observed_at);
+        }
         dto
     }
 
@@ -562,7 +455,10 @@ mod tests {
         assert_eq!(dto.plan.as_deref(), Some("max"));
         let ids: Vec<&str> = dto.windows.iter().map(|w| w.id.as_str()).collect();
         assert_eq!(ids, ["w", "s", "m", "m2"]);
-        chrono::DateTime::parse_from_rfc3339(&dto.fetched_at).expect("fetched_at is RFC 3339");
+        assert!(dto
+            .windows
+            .iter()
+            .all(|window| { chrono::DateTime::parse_from_rfc3339(&window.observed_at).is_ok() }));
     }
 
     /// Test doubles for `read_limits_in`: a scratch home, a fresh memo, a counting Keychain probe.
@@ -635,7 +531,7 @@ mod tests {
         assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
         assert_eq!(dto.plan.as_deref(), Some("max"));
         assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
-        assert!(dto.live);
+        assert!(dto.current_account);
         let ids: Vec<&str> = dto.windows.iter().map(|w| w.id.as_str()).collect();
         assert_eq!(ids, ["weekly_all", "session"]);
     }
@@ -756,7 +652,7 @@ mod tests {
         assert_eq!(rig.probes.get(), 2);
         let ids: Vec<(String, bool)> = second
             .iter()
-            .map(|dto| (account_of(dto).id, dto.live))
+            .map(|dto| (account_of(dto).id, dto.current_account))
             .collect();
         assert_eq!(
             ids,
@@ -765,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_read_remembers_the_account_and_lists_it_live_first() {
+    fn codex_read_remembers_the_account_and_lists_it_current_first() {
         let rig = Rig::new("limits-codex");
         let store = SnapshotStore::for_home(&rig.home);
         store
@@ -780,7 +676,7 @@ mod tests {
         request.join().unwrap();
         let ids: Vec<(String, bool)> = dtos
             .iter()
-            .map(|dto| (account_of(dto).id, dto.live))
+            .map(|dto| (account_of(dto).id, dto.current_account))
             .collect();
         assert_eq!(
             ids,
@@ -859,20 +755,22 @@ mod tests {
                 id: "acct-1".to_string(),
                 label: Some("me@example.com".to_string()),
             }),
-            live: true,
+            current_account: true,
             plan: Some("pro".to_string()),
-            windows: vec![window(
-                "primary",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                2.5,
-                None,
-            )],
+            windows: vec![LimitWindowDto {
+                observed_at: "2026-08-17T20:00:00.000Z".to_string(),
+                ..window(
+                    "primary",
+                    "Weekly · all models",
+                    LimitWindowKind::Weekly,
+                    2.5,
+                    None,
+                )
+            }],
             credits: Some(LimitsCreditsDto {
                 balance: "3".to_string(),
                 unlimited: false,
             }),
-            fetched_at: "2026-08-17T20:00:00.000Z".to_string(),
         };
         assert_eq!(
             serde_json::to_value(&ok).unwrap(),
@@ -880,11 +778,10 @@ mod tests {
                 "provider": "codex",
                 "status": "ok",
                 "account": {"id": "acct-1", "label": "me@example.com"},
-                "live": true,
+                "currentAccount": true,
                 "plan": "pro",
-                "windows": [{"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5}],
-                "credits": {"balance": "3", "unlimited": false},
-                "fetchedAt": "2026-08-17T20:00:00.000Z"
+                "windows": [{"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5, "observedAt": "2026-08-17T20:00:00.000Z"}],
+                "credits": {"balance": "3", "unlimited": false}
             })
         );
         let signed_out = finish(
@@ -900,7 +797,7 @@ mod tests {
         assert!(value.get("plan").is_none());
         assert!(value.get("credits").is_none());
         assert!(value.get("account").is_none());
-        assert_eq!(value["live"], true);
+        assert_eq!(value["currentAccount"], true);
     }
 
     /// Claude Code's access token lasts 8 hours and the CLI renews it from its refresh token on
@@ -982,13 +879,24 @@ mod tests {
         for provider in [AgentId::Claude, AgentId::Codex] {
             for dto in read_limits(provider, true) {
                 println!(
-                    "{:?}: live={} account={:?} status={:?} plan={:?} message={:?} credits={:?} fetched_at={}",
-                    provider, dto.live, dto.account, dto.status, dto.plan, dto.message, dto.credits, dto.fetched_at
+                    "{:?}: current_account={} account={:?} status={:?} plan={:?} message={:?} credits={:?}",
+                    provider,
+                    dto.current_account,
+                    dto.account,
+                    dto.status,
+                    dto.plan,
+                    dto.message,
+                    dto.credits
                 );
                 for window in &dto.windows {
                     println!(
-                        "  [{:?}] {} ({}) used={}% resets_at={:?}",
-                        window.kind, window.label, window.id, window.used_percent, window.resets_at
+                        "  [{:?}] {} ({}) used={}% resets_at={:?} observed_at={}",
+                        window.kind,
+                        window.label,
+                        window.id,
+                        window.used_percent,
+                        window.resets_at,
+                        window.observed_at
                     );
                 }
             }

@@ -24,24 +24,24 @@ function limits(
   provider: AgentId,
   id: string,
   label: string,
-  live: boolean,
+  currentAccount: boolean,
 ): ProviderLimits {
   return {
     provider,
     status: "ok",
     account: { id, label },
-    live,
+    currentAccount,
     plan: provider === "claude" ? "max" : "pro",
     windows: [
       {
         id: "weekly_all",
         label: "Weekly · all models",
         kind: "weekly",
-        usedPercent: live ? 24 : 52,
+        usedPercent: currentAccount ? 24 : 52,
         resetsAt: "2026-08-25T12:00:00Z",
+        observedAt: currentAccount ? "2026-08-18T12:00:00Z" : "2026-08-17T12:00:00Z",
       },
     ],
-    fetchedAt: live ? "2026-08-18T12:00:00Z" : "2026-08-17T12:00:00Z",
   };
 }
 
@@ -64,11 +64,11 @@ beforeEach(() => {
     Promise.resolve(
       provider === "claude"
         ? [
-            limits("claude", "claude-live", "live@claude.example", true),
+            limits("claude", "claude-current", "current@claude.example", true),
             limits("claude", "claude-kept", "kept@claude.example", false),
           ]
         : [
-            limits("codex", "codex-live", "live@codex.example", true),
+            limits("codex", "codex-current", "current@codex.example", true),
             limits("codex", "codex-kept", "kept@codex.example", false),
           ],
     ),
@@ -92,25 +92,25 @@ afterEach(() => {
 });
 
 describe("LimitsPopover", () => {
-  it("groups live and saved accounts under compact provider sections", async () => {
+  it("groups current and remembered accounts under compact provider sections", async () => {
     renderPopover();
 
     const claude = await screen.findByRole("region", { name: "Claude accounts" });
     const codex = screen.getByRole("region", { name: "Codex accounts" });
     expect((await within(claude).findAllByRole("article")).map((entry) => entry.getAttribute("aria-label"))).toEqual([
-      "Claude limits · live@claude.example",
+      "Claude limits · current@claude.example",
       "Claude limits · kept@claude.example",
     ]);
     expect(within(codex).getAllByRole("article").map((entry) => entry.getAttribute("aria-label"))).toEqual([
-      "Codex limits · live@codex.example",
+      "Codex limits · current@codex.example",
       "Codex limits · kept@codex.example",
     ]);
-    expect(screen.getAllByText("Saved snapshot")).toHaveLength(2);
+    expect(screen.getAllByText("Remembered account")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
   });
 
   it("uses the critical tone for a nearly exhausted meter fill", async () => {
-    const claude = limits("claude", "claude-live", "live@claude.example", true);
+    const claude = limits("claude", "claude-current", "current@claude.example", true);
     claude.windows[0].usedPercent = 90;
     readLimits.mockImplementation((provider: AgentId) =>
       Promise.resolve(provider === "claude" ? [claude] : []),
@@ -122,53 +122,69 @@ describe("LimitsPopover", () => {
     expect((meter.firstElementChild as HTMLElement).style.background).toBe("var(--trip)");
   });
 
-  it("keeps the signed-in account's saved numbers under a failed live status", async () => {
+  it("keeps the current account's observations when refresh is paused", async () => {
     readLimits.mockImplementation((provider: AgentId) =>
       Promise.resolve(
         provider === "claude"
           ? [
               {
-                ...limits("claude", "claude-live", "live@claude.example", true),
+                ...limits("claude", "claude-current", "current@claude.example", true),
                 status: "unauthenticated" as const,
                 message: "Access token expired — send a prompt with `claude` to renew it, then refresh here.",
               },
             ]
-          : [limits("codex", "codex-live", "live@codex.example", true)],
+          : [limits("codex", "codex-current", "current@codex.example", true)],
       ),
     );
     renderPopover();
 
     const claude = await screen.findByRole("region", { name: "Claude accounts" });
-    const account = await within(claude).findByRole("article", { name: "Claude limits · live@claude.example" });
+    const account = await within(claude).findByRole("article", { name: "Claude limits · current@claude.example" });
     expect(within(account).getByText(/^Access token expired/)).toBeTruthy();
     expect(within(account).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("24");
-    expect(within(account).getByText("Saved snapshot")).toBeTruthy();
+    expect(within(account).getByText("Refresh paused")).toBeTruthy();
+    expect(within(account).getByText(/last updated/)).toBeTruthy();
   });
 
-  it("shows the source time for Desktop and remembered fallback numbers", async () => {
-    const desktop = {
-      ...limits("claude", "claude-live", "live@claude.example", true),
+  it("shows source-neutral observation times for paused and remembered numbers", async () => {
+    const paused = {
+      ...limits("claude", "claude-current", "current@claude.example", true),
       status: "unauthenticated" as const,
-      message: "Access token expired. Showing Claude Desktop usage.",
-      fetchedAt: "2026-08-18T12:15:00Z",
-      windows: [{ id: "desktop:sd", label: "Weekly · all models", kind: "weekly" as const, usedPercent: 63 }],
+      message: "Access token expired.",
+      windows: [
+        {
+          id: "weekly_all",
+          label: "Weekly · all models",
+          kind: "weekly" as const,
+          usedPercent: 63,
+          observedAt: "2026-08-18T12:15:00Z",
+        },
+      ],
     };
     const remembered = {
-      ...limits("codex", "codex-live", "live@codex.example", true),
+      ...limits("codex", "codex-current", "current@codex.example", true),
       status: "unauthenticated" as const,
       message: "Login expired.",
-      fetchedAt: "2026-08-17T09:30:00Z",
+      windows: [
+        {
+          id: "primary",
+          label: "Weekly · all models",
+          kind: "weekly" as const,
+          usedPercent: 86,
+          observedAt: "2026-08-17T09:30:00Z",
+        },
+      ],
     };
     readLimits.mockImplementation((provider: AgentId) =>
-      Promise.resolve(provider === "claude" ? [desktop] : [remembered]),
+      Promise.resolve(provider === "claude" ? [paused] : [remembered]),
     );
     renderPopover();
 
-    const claude = await screen.findByRole("article", { name: "Claude limits · live@claude.example" });
-    const codex = await screen.findByRole("article", { name: "Codex limits · live@codex.example" });
-    expect(within(claude).getByText(/^as of /)).toBeTruthy();
-    expect(within(codex).getByText(/^as of /)).toBeTruthy();
-    expect(within(claude).getByText("No reset time")).toBeTruthy();
+    const claude = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
+    const codex = await screen.findByRole("article", { name: "Codex limits · current@codex.example" });
+    expect(within(claude).getByText(/last updated/)).toBeTruthy();
+    expect(within(codex).getByText(/last updated/)).toBeTruthy();
+    expect(within(claude).queryByText(/Claude Desktop/)).toBeNull();
   });
 
   it("forces both provider reads when Refresh is selected", async () => {

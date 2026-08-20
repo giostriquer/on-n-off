@@ -4,14 +4,8 @@ import { RefreshCw } from "lucide-react";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
 import {
-  formatClock,
-  formatResetAt,
-  formatResetIn,
-  formatUsedPercent,
-  hasElapsed,
   planLabel,
   usageFillColor,
-  usageTone,
   usageToneColor,
   type UsageTone,
 } from "$lib/limitsFormat";
@@ -19,18 +13,18 @@ import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
+import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
 import { useLimitsProviders } from "./useLimitsProviders";
 
 export function Limits() {
   // Only Claude and Codex carry a subscription the backend can read; the rest report `unsupported`.
-  const { providers, loading, asOf, now, refresh } = useLimitsProviders();
+  const { providers, loading, now, refresh } = useLimitsProviders();
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="limits-screen" aria-busy={loading}>
       <header className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1 font-mono text-[12px] text-[var(--mute)]">
           Subscription limits
-          {asOf ? ` · as of ${formatClock(asOf)}` : null}
           {loading ? (
             <span className="ml-2" role="status" aria-live="polite">
               · Checking…
@@ -55,15 +49,15 @@ export function Limits() {
       </div>
 
       <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
-        live numbers come from the endpoints the CLIs use, with the login each CLI already stores · when
-        Claude Code cannot fetch live numbers, a dated Claude Desktop usage snapshot can fill the gap ·
-        on-n-off never writes to or refreshes those logins · signed-out accounts remain with their last read
+        quota observations come from read-only sources tied to each subscription account · every window
+        shows when it was last observed · on-n-off never writes to or refreshes provider logins · signed-out
+        accounts remain visible with their last trustworthy observations
       </p>
     </div>
   );
 }
 
-/** The live card for a provider plus one card per remembered account. */
+/** The current account card for a provider plus one card per remembered account. */
 function ProviderColumn({
   provider,
   query,
@@ -87,7 +81,7 @@ function ProviderColumn({
       .forgetLimitsSnapshot(provider, accountId)
       .then(() => {
         queryClient.setQueryData<ProviderLimits[]>(["limits", provider], (current) =>
-          current?.filter((entry) => entry.live || entry.account?.id !== accountId),
+          current?.filter((entry) => entry.currentAccount || entry.account?.id !== accountId),
         );
       })
       .catch((reason: unknown) => {
@@ -113,7 +107,7 @@ function ProviderColumn({
     <div className="flex flex-col gap-3">
       {entries.map((entry, index) => (
         <AccountCard
-          key={`${entry.live ? "live" : "kept"}-${entry.account?.id ?? index}`}
+          key={`${entry.currentAccount ? "current" : "remembered"}-${entry.account?.id ?? index}`}
           entry={entry}
           now={now}
           error={index === 0 ? error : null}
@@ -165,28 +159,24 @@ function AccountCard({
   const account = entry.account ?? null;
   const label = account?.label ?? null;
   const title = label ? `${name} limits · ${label}` : `${name} limits`;
-  // Numbers that are not from this read: another account's remembered card, or the signed-in
-  // account's last read kept under a live status that failed.
-  const stale = !entry.live || entry.status !== "ok";
   const [hero, ...rest] = entry.windows;
-  const message = entry.status === "ok" ? null : (entry.message ?? `${name} limits are unavailable.`);
+  const { message, refreshPaused, remembered } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   return (
     <section
       className="overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
       aria-label={title}
       data-status={entry.status}
-      data-live={entry.live ? "true" : "false"}
+      data-current-account={entry.currentAccount ? "true" : "false"}
     >
       <CardHeader entry={entry} provider={entry.provider} />
 
-      {stale && hero ? (
+      {remembered && hero ? (
         <div className="flex items-center gap-2.5 border-b border-[var(--hair)] bg-[var(--well)] px-3.5 py-[7px]">
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--mute)]">
-            as of {formatResetAt(entry.fetchedAt)}
-            {entry.live ? "" : label ? ` · sign in as ${label} to refresh` : " · sign in again to refresh"}
+            Remembered account{label ? ` · sign in as ${label} to refresh` : " · sign in again to refresh"}
           </span>
-          {account && onForget && !entry.live ? (
+          {account && onForget ? (
             <button
               type="button"
               className="shrink-0 border-0 bg-transparent p-0 text-[11px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase hover:text-[var(--silkscreen)]"
@@ -201,9 +191,13 @@ function AccountCard({
 
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 
+      {refreshPaused ? (
+        <p className="px-3.5 pt-3 text-[13px] font-medium text-[var(--silkscreen)]">Refresh paused.</p>
+      ) : null}
+
       {message ? (
         <p
-          className={`px-3.5 ${hero ? "pt-3" : "py-4"} text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
+          className={`px-3.5 ${hero ? "pt-1.5" : "py-4"} text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
         >
           {message}
         </p>
@@ -211,15 +205,13 @@ function AccountCard({
 
       {hero ? (
         <>
-          <HeroWindow window={hero} provider={entry.provider} now={now} stale={stale} signedIn={entry.live} />
+          <HeroWindow window={hero} provider={entry.provider} now={now} />
           {rest.map((window) => (
             <WindowRow
               key={window.id}
               window={window}
               provider={entry.provider}
               now={now}
-              stale={stale}
-              signedIn={entry.live}
             />
           ))}
         </>
@@ -228,25 +220,6 @@ function AccountCard({
       ) : null}
     </section>
   );
-}
-
-/**
- * What one window says right now; a remembered window past its reset says nothing usable. Only
- * another account's card asks for a sign-in — the signed-in account's card already carries its own
- * status message, and signing in again is not what it needs.
- */
-function readWindow(window: LimitWindow, now: number, stale: boolean, signedIn: boolean) {
-  const resetSince = stale && hasElapsed(window.resetsAt, now);
-  const percent = resetSince ? 0 : window.usedPercent;
-  const tone = usageTone(percent);
-  const resetAt = formatResetAt(window.resetsAt);
-  const resetIn = formatResetIn(window.resetsAt, now);
-  const note = resetSince
-    ? `reset since ${resetAt || "then"}${signedIn ? "" : " · sign in to refresh"}`
-    : resetIn
-      ? `resets in ${resetIn}${resetAt ? ` · ${resetAt}` : ""}`
-      : "";
-  return { percent, tone, note, text: resetSince ? "—" : formatUsedPercent(percent) };
 }
 
 function Meter({
@@ -285,16 +258,12 @@ function HeroWindow({
   window,
   provider,
   now,
-  stale,
-  signedIn,
 }: {
   window: LimitWindow;
   provider: AgentId;
   now: number;
-  stale: boolean;
-  signedIn: boolean;
 }) {
-  const { percent, tone, note, text } = readWindow(window, now, stale, signedIn);
+  const { percent, tone, note, text } = presentLimitWindow(window, now);
   return (
     <div className="flex flex-col gap-2 p-3.5">
       <span className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{window.label}</span>
@@ -302,7 +271,9 @@ function HeroWindow({
         <span className="text-[34px] leading-none font-semibold tracking-[-0.03em]" style={{ color: usageToneColor(tone) }}>
           {text}
         </span>
-        {note ? <span className="min-w-0 truncate pb-1 font-mono text-[11.5px] text-[var(--mute)]">{note}</span> : null}
+        {note ? (
+          <span className="min-w-0 flex-1 pb-0.5 font-mono text-[11.5px] leading-snug text-[var(--mute)]">{note}</span>
+        ) : null}
       </div>
       <Meter window={window} percent={percent} tone={tone} provider={provider} className="h-1.5" />
     </div>
@@ -317,16 +288,12 @@ function WindowRow({
   window,
   provider,
   now,
-  stale,
-  signedIn,
 }: {
   window: LimitWindow;
   provider: AgentId;
   now: number;
-  stale: boolean;
-  signedIn: boolean;
 }) {
-  const { percent, tone, note, text } = readWindow(window, now, stale, signedIn);
+  const { percent, tone, note, text } = presentLimitWindow(window, now);
   const model = window.kind === "model";
   return (
     <div className="flex items-center gap-2.5 border-t border-[var(--hair)] px-3.5 py-2">

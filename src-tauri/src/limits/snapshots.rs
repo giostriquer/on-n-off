@@ -1,14 +1,62 @@
 //! Remembered per-account limit snapshots under `<home>/.on-n-off/limits/`.
 //!
 //! The CLIs store one login at a time, so switching accounts (`codex login`, `claude`) makes the
-//! previous account invisible. Every successful live read is written here (numbers only — never a
-//! token) so the screen can keep showing the other accounts as of their last read.
+//! previous account invisible. Canonical per-window observations are written here (numbers only —
+//! never a token) so the screen can keep showing each account's last observations.
 
+use std::cmp::Reverse;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::dto::{
+    AgentId, LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsCreditsDto, LimitsStatus,
+    ProviderLimitsDto,
+};
 use crate::usage::cache_io::atomic_write;
+
+const SNAPSHOT_SCHEMA_VERSION: u8 = 2;
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSnapshot {
+    schema_version: u8,
+    provider: AgentId,
+    account: LimitsAccountDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plan: Option<String>,
+    windows: Vec<LimitWindowDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    credits: Option<LimitsCreditsDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V1Snapshot {
+    provider: AgentId,
+    status: LimitsStatus,
+    account: Option<LimitsAccountDto>,
+    #[serde(default)]
+    plan: Option<String>,
+    #[serde(default)]
+    windows: Vec<V1Window>,
+    #[serde(default)]
+    credits: Option<LimitsCreditsDto>,
+    fetched_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V1Window {
+    id: String,
+    label: String,
+    kind: LimitWindowKind,
+    used_percent: f64,
+    #[serde(default)]
+    resets_at: Option<String>,
+}
 
 pub struct SnapshotStore {
     dir: PathBuf,
@@ -26,22 +74,22 @@ impl SnapshotStore {
         &self.dir
     }
 
-    /// Persist a live `ok` snapshot for its account; anything else is refused (`Err`).
+    /// Persist canonical account observations. Endpoint status is deliberately irrelevant: local
+    /// or remembered windows can be trustworthy while a provider refresh is unavailable.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let account = dto
             .account
             .as_ref()
             .ok_or_else(|| "snapshot has no account".to_string())?;
-        if dto.status != LimitsStatus::Ok {
-            return Err(format!("not saving a {:?} snapshot", dto.status));
+        if dto.windows.is_empty() && dto.credits.is_none() {
+            return Err("snapshot has no observations".to_string());
         }
         let path = self.dir.join(file_name(dto.provider, &account.id));
-        let json = serde_json::to_string(dto).map_err(|error| error.to_string())?;
-        atomic_write(&path, &json).map_err(|error| format!("{}: {error}", path.display()))
+        write_stored(&path, StoredSnapshot::from_dto(dto))
     }
 
-    /// Every remembered snapshot for `provider`, newest first, marked `live: false`. Unreadable
-    /// files are skipped rather than failing the whole read.
+    /// Every remembered snapshot for `provider`, newest first. Unreadable files are skipped rather
+    /// than failing the whole read. V1 files are rewritten once at this storage boundary.
     pub fn load(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
         let prefix = format!("{}-", provider.key());
         let Ok(entries) = fs::read_dir(&self.dir) else {
@@ -54,15 +102,18 @@ impl SnapshotStore {
                 let name = name.to_string_lossy();
                 name.starts_with(&prefix) && name.ends_with(".json")
             })
-            .filter_map(|entry| fs::read_to_string(entry.path()).ok())
-            .filter_map(|raw| serde_json::from_str::<ProviderLimitsDto>(&raw).ok())
-            .filter(|dto| dto.provider == provider && dto.account.is_some())
-            .map(|mut dto| {
-                dto.live = false;
-                dto
+            .filter_map(|entry| {
+                let path = entry.path();
+                let raw = fs::read_to_string(&path).ok()?;
+                let (stored, migrated) = decode(&raw)?;
+                if migrated {
+                    let _ = write_stored(&path, stored.clone());
+                }
+                Some(stored.into_dto())
             })
+            .filter(|dto| dto.provider == provider)
             .collect();
-        snapshots.sort_by(|a, b| b.fetched_at.cmp(&a.fetched_at));
+        snapshots.sort_by_key(|snapshot| Reverse(latest_observed_at(snapshot)));
         snapshots
     }
 
@@ -75,6 +126,102 @@ impl SnapshotStore {
             Err(error) => Err(format!("{}: {error}", path.display())),
         }
     }
+}
+
+impl StoredSnapshot {
+    fn from_dto(dto: &ProviderLimitsDto) -> Self {
+        Self {
+            schema_version: SNAPSHOT_SCHEMA_VERSION,
+            provider: dto.provider,
+            account: dto.account.clone().expect("caller checked account"),
+            plan: dto.plan.clone(),
+            windows: dto.windows.clone(),
+            credits: dto.credits.clone(),
+        }
+    }
+
+    fn into_dto(self) -> ProviderLimitsDto {
+        ProviderLimitsDto {
+            provider: self.provider,
+            status: LimitsStatus::Ok,
+            message: None,
+            account: Some(self.account),
+            current_account: false,
+            plan: self.plan,
+            windows: self.windows,
+            credits: self.credits,
+        }
+    }
+}
+
+fn decode(raw: &str) -> Option<(StoredSnapshot, bool)> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if value.get("schemaVersion").is_some() {
+        let stored: StoredSnapshot = serde_json::from_value(value).ok()?;
+        return (stored.schema_version == SNAPSHOT_SCHEMA_VERSION).then_some((stored, false));
+    }
+    let legacy: V1Snapshot = serde_json::from_value(value).ok()?;
+    if legacy.status != LimitsStatus::Ok {
+        return None;
+    }
+    let account = legacy.account?;
+    let observed_at = legacy.fetched_at;
+    let windows = legacy
+        .windows
+        .into_iter()
+        .map(|window| {
+            let window_seconds = infer_window_seconds(window.kind, &window.label);
+            LimitWindowDto {
+                id: window.id,
+                label: window.label,
+                kind: window.kind,
+                used_percent: window.used_percent,
+                resets_at: window.resets_at,
+                window_seconds,
+                observed_at: observed_at.clone(),
+            }
+        })
+        .collect();
+    Some((
+        StoredSnapshot {
+            schema_version: SNAPSHOT_SCHEMA_VERSION,
+            provider: legacy.provider,
+            account,
+            plan: legacy.plan,
+            windows,
+            credits: legacy.credits,
+        },
+        true,
+    ))
+}
+
+fn infer_window_seconds(kind: LimitWindowKind, label: &str) -> Option<u64> {
+    match kind {
+        LimitWindowKind::Weekly => Some(7 * 24 * 60 * 60),
+        LimitWindowKind::Session => {
+            let mut parts = label.split_ascii_whitespace();
+            let amount = parts.next()?.parse::<u64>().ok()?;
+            match parts.next()? {
+                "hour" => Some(amount * 60 * 60),
+                "minute" => Some(amount * 60),
+                _ => None,
+            }
+        }
+        LimitWindowKind::Model => None,
+    }
+}
+
+fn write_stored(path: &Path, stored: StoredSnapshot) -> Result<(), String> {
+    let json = serde_json::to_string(&stored).map_err(|error| error.to_string())?;
+    atomic_write(path, &json).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+fn latest_observed_at(dto: &ProviderLimitsDto) -> Option<DateTime<Utc>> {
+    dto.windows
+        .iter()
+        .filter_map(|window| DateTime::parse_from_rfc3339(&window.observed_at).ok())
+        .map(|observed_at| observed_at.with_timezone(&Utc))
+        .max()
 }
 
 /// `<provider>-<account>.json` with the account id reduced to a file-name-safe token; a short
@@ -101,8 +248,8 @@ mod tests {
     use crate::paths::scratch_dir;
     use std::fs;
 
-    fn snapshot(provider: AgentId, id: &str, label: &str, fetched_at: &str) -> ProviderLimitsDto {
-        ProviderLimitsDto {
+    fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> ProviderLimitsDto {
+        let mut dto = ProviderLimitsDto {
             provider,
             status: LimitsStatus::Ok,
             message: None,
@@ -110,7 +257,7 @@ mod tests {
                 id: id.to_string(),
                 label: Some(label.to_string()),
             }),
-            live: true,
+            current_account: true,
             plan: Some("pro".to_string()),
             windows: vec![super::super::json::window(
                 "primary",
@@ -120,12 +267,15 @@ mod tests {
                 Some("2026-08-24T23:34:33+00:00".to_string()),
             )],
             credits: None,
-            fetched_at: fetched_at.to_string(),
+        };
+        for window in &mut dto.windows {
+            window.observed_at = observed_at.to_string();
         }
+        dto
     }
 
     #[test]
-    fn saved_snapshots_load_back_per_provider_newest_first_and_marked_not_live() {
+    fn saved_snapshots_load_back_per_provider_newest_first_and_not_current() {
         let home = scratch_dir("limits-snap");
         let store = SnapshotStore::for_home(&home);
         store
@@ -133,7 +283,7 @@ mod tests {
                 AgentId::Codex,
                 "acct-old",
                 "old@x",
-                "2026-08-16T10:00:00.000Z",
+                "2026-08-17T10:30:00.000+01:00",
             ))
             .unwrap();
         store
@@ -161,7 +311,7 @@ mod tests {
         assert_eq!(ids, ["acct-new", "acct-old"]);
         assert!(codex
             .iter()
-            .all(|dto| !dto.live && dto.status == LimitsStatus::Ok));
+            .all(|dto| !dto.current_account && dto.status == LimitsStatus::Ok));
         assert_eq!(codex[0].windows[0].used_percent, 42.0);
         assert_eq!(codex[0].plan.as_deref(), Some("pro"));
 
@@ -191,20 +341,31 @@ mod tests {
         let loaded = store.load(AgentId::Codex);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].windows[0].used_percent, 7.0);
-        assert_eq!(loaded[0].fetched_at, "2026-08-17T10:00:00.000Z");
+        assert_eq!(loaded[0].windows[0].observed_at, "2026-08-17T10:00:00.000Z");
     }
 
     #[test]
-    fn snapshots_without_an_account_or_not_ok_are_not_saved() {
+    fn snapshots_require_an_account_and_observations_but_not_an_ok_endpoint_status() {
         let home = scratch_dir("limits-snap");
         let store = SnapshotStore::for_home(&home);
         let mut anonymous = snapshot(AgentId::Codex, "x", "x", "2026-08-17T10:00:00.000Z");
         anonymous.account = None;
         assert!(store.save(&anonymous).is_err());
+        let mut empty = snapshot(
+            AgentId::Codex,
+            "acct-empty",
+            "empty@x",
+            "2026-08-17T10:00:00.000Z",
+        );
+        empty.windows.clear();
+        assert!(store.save(&empty).is_err());
         let mut failed = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
         failed.status = LimitsStatus::Failed;
-        assert!(store.save(&failed).is_err());
-        assert!(store.load(AgentId::Codex).is_empty());
+        assert!(store.save(&failed).is_ok());
+        let loaded = store.load(AgentId::Codex);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].account.as_ref().unwrap().id, "acct-1");
+        assert_eq!(loaded[0].windows[0].used_percent, 42.0);
     }
 
     #[test]
@@ -267,20 +428,28 @@ mod tests {
     }
 
     #[test]
-    fn a_minimal_older_snapshot_file_still_loads() {
+    fn a_v1_snapshot_migrates_once_to_the_canonical_v2_model() {
         let home = scratch_dir("limits-snap");
         let store = SnapshotStore::for_home(&home);
         fs::create_dir_all(store.dir()).unwrap();
+        let path = store.dir().join("claude-uuid1-00000000.json");
         fs::write(
-            store.dir().join("claude-uuid1-00000000.json"),
-            r#"{"provider":"claude","status":"ok","account":{"id":"uuid-1"},"windows":[],"fetchedAt":"2026-08-10T10:00:00.000Z"}"#,
+            &path,
+            r#"{"provider":"claude","status":"ok","account":{"id":"uuid-1"},"live":true,"plan":"max","windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":42,"resetsAt":"2026-08-17T10:00:00Z"}],"fetchedAt":"2026-08-10T10:00:00.000Z"}"#,
         )
         .unwrap();
         let loaded = store.load(AgentId::Claude);
         assert_eq!(loaded.len(), 1);
-        assert!(!loaded[0].live);
-        assert_eq!(loaded[0].plan, None);
+        assert!(!loaded[0].current_account);
+        assert_eq!(loaded[0].plan.as_deref(), Some("max"));
         assert_eq!(loaded[0].account.as_ref().unwrap().label, None);
+        assert_eq!(loaded[0].windows[0].observed_at, "2026-08-10T10:00:00.000Z");
+
+        let migrated: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(migrated["schemaVersion"], 2);
+        assert!(migrated.get("fetchedAt").is_none());
+        assert!(migrated.get("live").is_none());
     }
 
     #[test]

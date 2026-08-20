@@ -4,14 +4,8 @@ import { RefreshCw } from "lucide-react";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
 import {
-  formatClock,
-  formatResetAt,
-  formatResetIn,
-  formatUsedPercent,
-  hasElapsed,
   planLabel,
   usageFillColor,
-  usageTone,
   usageToneColor,
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
@@ -19,12 +13,13 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
+import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
 import { limitsStaleMs, useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
-  const { providers, loading, asOf, now, refresh } = useLimitsProviders();
+  const { providers, loading, now, refresh } = useLimitsProviders();
   const [claude, codex] = providers;
 
   useLayoutEffect(() => {
@@ -84,7 +79,7 @@ export function LimitsPopover() {
         <div className="min-w-0 flex-1">
           <h1 className="m-0 text-[16px] leading-tight font-semibold tracking-[-0.01em]">Limits</h1>
           <p className="mt-0.5 mb-0 text-[11px] text-[var(--mute)] tabular-nums">
-            {loading ? "Updating…" : asOf ? `Updated ${formatClock(asOf)}` : "Subscription usage"}
+            {loading ? "Updating…" : "Subscription usage"}
           </p>
         </div>
         <button
@@ -171,7 +166,7 @@ function PopoverProviderSection({
         ) : (
           entries.map((entry, index) => (
             <PopoverAccount
-              key={`${entry.live ? "live" : "saved"}-${entry.account?.id ?? index}`}
+              key={`${entry.currentAccount ? "current" : "remembered"}-${entry.account?.id ?? index}`}
               entry={entry}
               now={now}
               divided={index > 0}
@@ -187,33 +182,28 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
   const name = providerLabel(entry.provider);
   const label = entry.account?.label ?? name;
   const plan = planLabel(entry.plan);
-  // Numbers that are not from this read: another account's saved snapshot, or the signed-in
-  // account's last read kept under a live status that failed.
-  const stale = !entry.live || entry.status !== "ok";
-  const message = entry.status === "ok" ? null : (entry.message ?? `${name} limits are unavailable.`);
+  const { message, refreshPaused, remembered } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   return (
     <article
       aria-label={`${name} limits${entry.account?.label ? ` · ${entry.account.label}` : ""}`}
       className={`${divided ? "border-t border-[var(--popover-hair)]" : ""} px-2.5 py-2`}
-      data-live={entry.live ? "true" : "false"}
+      data-current-account={entry.currentAccount ? "true" : "false"}
       data-status={entry.status}
     >
       <header className="mb-1.5 flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
-        {stale ? (
+        {remembered ? (
           <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
-            Saved snapshot
+            Remembered account
+          </span>
+        ) : refreshPaused ? (
+          <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
+            Refresh paused
           </span>
         ) : null}
         {plan ? <span className="shrink-0 text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
       </header>
-
-      {stale ? (
-        <p className="-mt-0.5 mb-1.5 text-[10px] text-[var(--mute)] tabular-nums">
-          as of {formatResetAt(entry.fetchedAt)}
-        </p>
-      ) : null}
 
       {message ? (
         <p className={`m-0 text-[12px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
@@ -224,7 +214,12 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
       {entry.windows.length > 0 ? (
         <div className={`flex flex-col gap-1.5 ${message ? "mt-1.5" : ""}`}>
           {entry.windows.map((window) => (
-            <PopoverWindow key={window.id} window={window} provider={entry.provider} now={now} stale={stale} />
+            <PopoverWindow
+              key={window.id}
+              window={window}
+              provider={entry.provider}
+              now={now}
+            />
           ))}
         </div>
       ) : entry.status === "ok" ? (
@@ -238,28 +233,20 @@ function PopoverWindow({
   window,
   provider,
   now,
-  stale,
 }: {
   window: LimitWindow;
   provider: AgentId;
   now: number;
-  stale: boolean;
 }) {
-  const resetSince = stale && hasElapsed(window.resetsAt, now);
-  const percent = resetSince ? 0 : window.usedPercent;
-  const tone = usageTone(percent);
-  const resetAt = formatResetAt(window.resetsAt);
-  const resetIn = formatResetIn(window.resetsAt, now);
-  const note = resetSince ? "Expired" : resetIn ? `Resets in ${resetIn}` : resetAt || "No reset time";
-  const text = resetSince ? "—" : formatUsedPercent(percent);
+  const { percent, tone, note, text } = presentLimitWindow(window, now);
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
-      <div className="flex min-w-0 items-baseline gap-1.5">
-        <span className="truncate text-[10.5px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
+      <div className="min-w-0">
+        <span className="block truncate text-[10.5px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
           {window.label}
         </span>
-        <span className="shrink-0 text-[10px] text-[var(--mute)] tabular-nums">{note}</span>
+        <span className="mt-0.5 block text-[10px] leading-tight text-[var(--mute)] tabular-nums">{note}</span>
       </div>
       <span className="text-[13px] font-semibold tabular-nums" style={{ color: usageToneColor(tone) }}>
         {text}

@@ -1,8 +1,8 @@
-//! Read-only fallback for Claude Desktop's local plan-usage history.
+//! Read-only Claude quota observations from Desktop's local plan-usage history.
 //!
 //! Desktop owns its authenticated session. We do not read its cookies or Keychain secret. The
-//! history file contains only sampled percentages and organization ids, so it is safe to use as a
-//! dated snapshot when Claude Code's own usage request cannot run.
+//! history file contains only sampled percentages and organization ids, so it is safe to merge as
+//! another dated observation of the same account and quota windows.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -119,7 +119,7 @@ fn parse_sample(sample: &Value) -> Option<(i64, Vec<LimitWindowDto>)> {
     let mut windows = Vec::new();
     if let Some(used) = percent(usage.get("sd")) {
         windows.push(window(
-            "desktop:sd",
+            "weekly_all",
             "Weekly · all models",
             LimitWindowKind::Weekly,
             used,
@@ -128,7 +128,7 @@ fn parse_sample(sample: &Value) -> Option<(i64, Vec<LimitWindowDto>)> {
     }
     if let Some(used) = percent(usage.get("fh")) {
         windows.push(window(
-            "desktop:fh",
+            "session",
             "5 hour · all models",
             LimitWindowKind::Session,
             used,
@@ -175,7 +175,7 @@ mod tests {
                 .iter()
                 .map(|window| (window.id.as_str(), window.used_percent))
                 .collect::<Vec<_>>(),
-            [("desktop:sd", 4.0), ("desktop:fh", 3.0)]
+            [("weekly_all", 4.0), ("session", 3.0)]
         );
         assert!(usage
             .windows
