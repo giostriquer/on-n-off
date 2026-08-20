@@ -350,10 +350,10 @@ pub async fn usage_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, 
     blocking("usage scan", move || crate::usage::read_summary(input)).await
 }
 
-/// Live subscription rate limits for one provider (Keychain probe + one HTTPS call) followed by
-/// remembered snapshots of its other accounts, off the UI thread. Provider-side problems come
-/// back as a `status` on the DTO, not as an `Err`. `force` = explicit refresh (re-reads the
-/// Keychain instead of the in-process memo).
+/// Live subscription rate limits for one provider (Claude Keychain + HTTPS, or Codex app-server)
+/// followed by remembered snapshots of its other accounts, off the UI thread. Provider-side
+/// problems come back as a `status` on the DTO, not as an `Err`. `force` requests fresh provider
+/// authentication through the provider-owned path.
 #[tauri::command]
 pub async fn read_limits(
     agent_id: AgentId,

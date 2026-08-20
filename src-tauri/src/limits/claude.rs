@@ -6,8 +6,29 @@
 
 use serde_json::Value;
 
+use super::credentials::ClaudeIdentity;
 use super::json::{humanize, optional_string, percent, window};
-use crate::dto::{LimitWindowDto, LimitWindowKind};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto};
+
+pub(super) fn parse_profile(payload: &Value) -> Result<ClaudeIdentity, String> {
+    let account = payload
+        .get("account")
+        .ok_or_else(|| "missing account".to_string())?;
+    let organization = payload
+        .get("organization")
+        .ok_or_else(|| "missing organization".to_string())?;
+    Ok(ClaudeIdentity {
+        account: LimitsAccountDto {
+            id: optional_string(account.get("uuid"))
+                .ok_or_else(|| "missing account uuid".to_string())?,
+            label: optional_string(account.get("email")),
+        },
+        organization_id: Some(
+            optional_string(organization.get("uuid"))
+                .ok_or_else(|| "missing organization uuid".to_string())?,
+        ),
+    })
+}
 
 pub fn parse_claude(payload: &Value) -> Vec<LimitWindowDto> {
     let normalized: Vec<LimitWindowDto> = payload

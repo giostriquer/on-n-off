@@ -2480,7 +2480,7 @@ dependencies = [
 
 [[package]]
 name = "on-n-off"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "block2",
  "chrono",

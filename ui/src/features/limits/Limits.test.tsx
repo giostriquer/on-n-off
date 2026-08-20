@@ -146,7 +146,9 @@ describe("Limits", () => {
     const spark = within(codex).getByRole("meter", { name: "Weekly · GPT-5.3-Codex-Spark" });
     expect(spark.getAttribute("aria-valuenow")).toBe("0");
     expect(within(codex).getByText("—")).toBeTruthy();
-    expect(within(codex).getByText(/Current usage unknown · last updated/)).toBeTruthy();
+    expect(within(codex).getByText("Current usage unknown")).toBeTruthy();
+    expect(within(codex).getAllByText(/Latest observation/)).toHaveLength(1);
+    expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
     expect(within(codex).getAllByText(/resets in/)).toHaveLength(1);
     expect(screen.getByText("Subscription limits")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
@@ -187,9 +189,9 @@ describe("Limits", () => {
     expect(session.getAttribute("aria-valuenow")).toBe("0");
     expect(session.getAttribute("data-tone")).toBe("calm");
     expect(within(stale).getByText("—")).toBeTruthy();
-    expect(within(stale).getByText(/Current usage unknown · last updated/)).toBeTruthy();
+    expect(within(stale).getByText("Current usage unknown")).toBeTruthy();
     expect(within(stale).getByRole("button", { name: "Forget personal@codex.example" })).toBeTruthy();
-    expect(within(stale).getAllByText(/last updated/)).toHaveLength(2);
+    expect(within(stale).getAllByText(/Latest observation/)).toHaveLength(1);
   });
 
   it("keeps one source-neutral Claude account when current refresh is paused", async () => {
@@ -217,7 +219,7 @@ describe("Limits", () => {
     expect(within(claude).getByText(/^Access token expired/)).toBeTruthy();
     expect(within(claude).queryByText(/Claude Desktop usage/)).toBeNull();
     expect(within(claude).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("12");
-    expect(within(claude).getAllByText(/last updated/)).toHaveLength(2);
+    expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
     // A window that has reset since that read shows nothing usable, and asks for nothing either.
     expect(within(claude).getByText(/Current usage unknown/)).toBeTruthy();
     // It is still the signed-in account: nothing to sign into, nothing to forget.
@@ -269,12 +271,12 @@ describe("Limits", () => {
     expect(current.getAttribute("data-status")).toBe("signedOut");
   });
 
-  it("does not invent an account-wide timestamp when no current read is ok", async () => {
+  it("shows one account timestamp for remembered data when no current read is ok", async () => {
     answer([statusOnly("claude", "signedOut", null)], [statusOnly("codex", "signedOut", null), staleCodex()]);
     renderLimits();
     await waitFor(() => expect(card("Codex limits · personal@codex.example")).toBeTruthy());
     expect(screen.queryByText(/^Subscription limits · as of/)).toBeNull();
-    expect(within(card("Codex limits · personal@codex.example")).getAllByText(/last updated/)).toHaveLength(2);
+    expect(within(card("Codex limits · personal@codex.example")).getAllByText(/Latest observation/)).toHaveLength(1);
   });
 
   it("keeps the card and reports the error when Forget fails", async () => {

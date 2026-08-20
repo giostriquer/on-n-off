@@ -156,7 +156,7 @@ fn failed_read_keeps_the_signed_in_accounts_last_numbers_in_one_card() {
 }
 
 #[test]
-fn successful_endpoint_and_local_windows_merge_and_persist_per_observation_time() {
+fn successful_endpoint_windows_persist_without_local_supplementation() {
     let home = scratch_dir("limits-memory-successful-local-merge");
     let store = SnapshotStore::for_home(&home);
     let mut current = ok_snapshot(AgentId::Claude, "uuid-a", "a@x", 50.0);
@@ -177,10 +177,10 @@ fn successful_endpoint_and_local_windows_merge_and_persist_per_observation_time(
 
     let listed = aggregate_accounts(&store, current, Some(supplemental));
 
-    assert_eq!(listed[0].windows.len(), 2);
-    assert_eq!(listed[0].windows[1].id, "session");
-    assert_eq!(listed[0].windows[1].used_percent, 75.0);
+    assert_eq!(listed[0].windows.len(), 1);
+    assert_eq!(listed[0].windows[0].id, "weekly_all");
+    assert_eq!(listed[0].windows[0].used_percent, 50.0);
     let persisted = store.load(AgentId::Claude);
-    assert_eq!(persisted[0].windows.len(), 2);
-    assert_eq!(persisted[0].windows[1].id, "session");
+    assert_eq!(persisted[0].windows.len(), 1);
+    assert_eq!(persisted[0].windows[0].id, "weekly_all");
 }
