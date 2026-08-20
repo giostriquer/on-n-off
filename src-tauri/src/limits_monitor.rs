@@ -12,6 +12,7 @@ use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
 use crate::usage::cache_io::atomic_write;
 
 const DISABLED_WAKE_MINUTES: u16 = 60;
+const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
 const MONITORED_PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 const WAKE_HEARTBEAT: Duration = Duration::from_secs(30);
 const WAKE_DRIFT_TOLERANCE: Duration = Duration::from_secs(5);
@@ -20,9 +21,19 @@ struct LimitsMonitorHandle {
     wake: async_runtime::Sender<()>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct MonitorState {
+    schema_version: u8,
     providers: HashMap<AgentId, ProviderObservation>,
+}
+
+impl Default for MonitorState {
+    fn default() -> Self {
+        Self {
+            schema_version: MONITOR_STATE_SCHEMA_VERSION,
+            providers: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,7 +46,7 @@ struct ProviderObservation {
 struct WindowObservation {
     used_percent: f64,
     resets_at: Option<String>,
-    #[serde(default)]
+    observed_at: String,
     exhausted: bool,
 }
 
@@ -132,7 +143,7 @@ async fn poll_once(
     let snapshots = poll_providers().await?;
     let provider_failed = snapshots
         .iter()
-        .any(|snapshot| snapshot.live && snapshot.status == LimitsStatus::Failed);
+        .any(|snapshot| snapshot.current_account && snapshot.status == LimitsStatus::Failed);
     let previous = state.clone();
     let events = observe(state, &snapshots);
     if let Err(error) = persist_state(state_path, state).await {
@@ -237,7 +248,7 @@ fn notification_copy(event: &LimitEvent) -> (String, String) {
 fn observe(state: &mut MonitorState, snapshots: &[ProviderLimitsDto]) -> Vec<LimitEvent> {
     let mut events = Vec::new();
     for snapshot in snapshots {
-        if !snapshot.live || snapshot.status != LimitsStatus::Ok {
+        if !snapshot.current_account || snapshot.status != LimitsStatus::Ok {
             continue;
         }
         let Some(account) = snapshot.account.as_ref() else {
@@ -250,8 +261,14 @@ fn observe(state: &mut MonitorState, snapshots: &[ProviderLimitsDto]) -> Vec<Lim
         let mut windows = HashMap::new();
         for window in &snapshot.windows {
             let before = previous.and_then(|previous| previous.windows.get(&window.id));
-            let (observation, kind) =
-                observe_window(before, window.used_percent, window.resets_at.as_deref());
+            let Some((observation, kind)) = observe_window(
+                before,
+                window.used_percent,
+                window.resets_at.as_deref(),
+                &window.observed_at,
+            ) else {
+                continue;
+            };
             windows.insert(window.id.clone(), observation);
             if let (Some(before), Some(kind)) = (before, kind) {
                 events.push(LimitEvent {
@@ -279,7 +296,16 @@ fn observe_window(
     before: Option<&WindowObservation>,
     used_percent: f64,
     resets_at: Option<&str>,
-) -> (WindowObservation, Option<LimitEventKind>) {
+    observed_at: &str,
+) -> Option<(WindowObservation, Option<LimitEventKind>)> {
+    let incoming_at = chrono::DateTime::parse_from_rfc3339(observed_at).ok()?;
+    if let Some(before) = before {
+        let is_stale = chrono::DateTime::parse_from_rfc3339(&before.observed_at)
+            .is_ok_and(|previous_at| incoming_at <= previous_at);
+        if is_stale {
+            return Some((before.clone(), None));
+        }
+    }
     let reset = before.is_some_and(|before| reset_detected(before, used_percent, resets_at));
     let was_exhausted =
         before.is_some_and(|before| before.exhausted || before.used_percent >= 100.0);
@@ -298,22 +324,20 @@ fn observe_window(
         was_exhausted || used_percent >= 100.0
     };
 
-    (
+    Some((
         WindowObservation {
             used_percent,
             resets_at: resets_at.map(str::to_string),
+            observed_at: observed_at.to_string(),
             exhausted,
         },
         kind,
-    )
+    ))
 }
 
 fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Option<&str>) -> bool {
-    const MINIMUM_DROP_POINTS: f64 = 5.0;
-    const RESET_USAGE_FRACTION: f64 = 0.5;
-
-    // Provider timestamps give the strongest signal. The drop-only fallback covers providers
-    // that omit or temporarily keep a reset timestamp, while ignoring small data corrections.
+    // A lower percentage alone can be a correction. Only a newer provider reset instant proves a
+    // new cycle and can rearm an exhausted notification.
     let timestamp_advanced = before
         .resets_at
         .as_deref()
@@ -321,10 +345,8 @@ fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Opti
         .zip(resets_at.and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok()))
         .is_some_and(|(previous, current)| current > previous);
     let drop = before.used_percent - used_percent;
-    let large_drop =
-        drop >= MINIMUM_DROP_POINTS && used_percent <= before.used_percent * RESET_USAGE_FRACTION;
 
-    (timestamp_advanced && drop > 0.5) || large_drop
+    timestamp_advanced && drop > 0.5
 }
 
 fn poll_delay_minutes(base_minutes: u16, consecutive_failures: u32) -> u16 {
@@ -336,6 +358,7 @@ fn load_state(path: &Path) -> MonitorState {
     fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
+        .filter(|state: &MonitorState| state.schema_version == MONITOR_STATE_SCHEMA_VERSION)
         .unwrap_or_default()
 }
 
@@ -389,7 +412,7 @@ mod tests {
                 id: account_id.into(),
                 label: Some(account_label.into()),
             }),
-            live: true,
+            current_account: true,
             plan: Some("pro".into()),
             windows: vec![LimitWindowDto {
                 id: "weekly".into(),
@@ -397,10 +420,16 @@ mod tests {
                 kind: LimitWindowKind::Weekly,
                 used_percent,
                 resets_at: resets_at.map(str::to_string),
+                window_seconds: Some(7 * 24 * 60 * 60),
+                observed_at: "2026-08-19T12:00:00Z".into(),
             }],
             credits: None,
-            fetched_at: "2026-08-19T12:00:00Z".into(),
         }
+    }
+
+    fn observed_at(mut snapshot: ProviderLimitsDto, value: &str) -> ProviderLimitsDto {
+        snapshot.windows[0].observed_at = value.to_string();
+        snapshot
     }
 
     #[test]
@@ -437,6 +466,7 @@ mod tests {
         before.windows[0].kind = LimitWindowKind::Model;
         let mut exhausted = before.clone();
         exhausted.windows[0].used_percent = 100.0;
+        exhausted.windows[0].observed_at = "2026-08-19T13:00:00Z".into();
         assert!(observe(&mut state, &[before]).is_empty());
 
         let events = observe(&mut state, std::slice::from_ref(&exhausted));
@@ -460,12 +490,15 @@ mod tests {
             99.0,
             Some("2026-08-24T12:00:00Z"),
         );
-        let at_limit = snapshot(
-            AgentId::Claude,
-            "account-a",
-            "me@example.com",
-            100.0,
-            Some("2026-08-24T12:00:00Z"),
+        let at_limit = observed_at(
+            snapshot(
+                AgentId::Claude,
+                "account-a",
+                "me@example.com",
+                100.0,
+                Some("2026-08-24T12:00:00Z"),
+            ),
+            "2026-08-19T13:00:00Z",
         );
         assert!(observe(&mut state, std::slice::from_ref(&below_limit)).is_empty());
         assert_eq!(
@@ -525,19 +558,25 @@ mod tests {
             100.0,
             Some("2026-08-24T12:00:00Z"),
         );
-        let reset = snapshot(
-            AgentId::Codex,
-            "account-a",
-            "me@example.com",
-            0.0,
-            Some("2026-08-31T12:00:00Z"),
+        let reset = observed_at(
+            snapshot(
+                AgentId::Codex,
+                "account-a",
+                "me@example.com",
+                0.0,
+                Some("2026-08-31T12:00:00Z"),
+            ),
+            "2026-08-19T13:00:00Z",
         );
-        let exhausted_again = snapshot(
-            AgentId::Codex,
-            "account-a",
-            "me@example.com",
-            100.0,
-            Some("2026-08-31T12:00:00Z"),
+        let exhausted_again = observed_at(
+            snapshot(
+                AgentId::Codex,
+                "account-a",
+                "me@example.com",
+                100.0,
+                Some("2026-08-31T12:00:00Z"),
+            ),
+            "2026-08-19T14:00:00Z",
         );
         assert!(observe(&mut state, std::slice::from_ref(&at_limit)).is_empty());
         assert_eq!(observe(&mut state, &[reset]).len(), 1);
@@ -559,12 +598,15 @@ mod tests {
             82.0,
             Some("2026-08-24T12:00:00Z"),
         );
-        let after = snapshot(
-            AgentId::Claude,
-            "account-a",
-            "me@example.com",
-            0.0,
-            Some("2026-08-31T12:00:00Z"),
+        let after = observed_at(
+            snapshot(
+                AgentId::Claude,
+                "account-a",
+                "me@example.com",
+                0.0,
+                Some("2026-08-31T12:00:00Z"),
+            ),
+            "2026-08-19T13:00:00Z",
         );
         assert!(observe(&mut state, &[before]).is_empty());
 
@@ -581,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn a_large_drop_without_a_new_timestamp_is_treated_as_a_reset() {
+    fn a_large_drop_without_a_new_reset_instant_is_not_a_reset() {
         let mut state = MonitorState::default();
         let reset_at = Some("2026-08-24T12:00:00Z");
         assert!(observe(
@@ -598,16 +640,45 @@ mod tests {
 
         let events = observe(
             &mut state,
-            &[snapshot(
-                AgentId::Codex,
-                "account-a",
-                "me@example.com",
-                8.0,
-                reset_at,
+            &[observed_at(
+                snapshot(AgentId::Codex, "account-a", "me@example.com", 8.0, reset_at),
+                "2026-08-19T13:00:00Z",
             )],
         );
 
-        assert_eq!(events.len(), 1);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn an_older_observation_never_notifies_or_replaces_the_baseline() {
+        let mut state = MonitorState::default();
+        let baseline = observed_at(
+            snapshot(
+                AgentId::Codex,
+                "account-a",
+                "me@example.com",
+                80.0,
+                Some("2026-08-24T12:00:00Z"),
+            ),
+            "2026-08-19T13:00:00Z",
+        );
+        let stale = observed_at(
+            snapshot(
+                AgentId::Codex,
+                "account-a",
+                "me@example.com",
+                100.0,
+                Some("2026-08-24T12:00:00Z"),
+            ),
+            "2026-08-19T12:00:00Z",
+        );
+        assert!(observe(&mut state, &[baseline]).is_empty());
+
+        assert!(observe(&mut state, &[stale]).is_empty());
+        assert_eq!(
+            state.providers[&AgentId::Codex].windows["weekly"].used_percent,
+            80.0
+        );
     }
 
     #[test]
@@ -668,12 +739,15 @@ mod tests {
 
         let events = observe(
             &mut state,
-            &[snapshot(
-                AgentId::Claude,
-                "account-b",
-                "second@example.com",
-                0.0,
-                Some("2026-09-01T12:00:00Z"),
+            &[observed_at(
+                snapshot(
+                    AgentId::Claude,
+                    "account-b",
+                    "second@example.com",
+                    0.0,
+                    Some("2026-09-01T12:00:00Z"),
+                ),
+                "2026-08-19T13:00:00Z",
             )],
         );
         assert_eq!(events.len(), 1);
@@ -684,7 +758,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_and_remembered_snapshots_do_not_replace_the_live_baseline() {
+    fn failed_and_remembered_snapshots_do_not_replace_the_notification_baseline() {
         let mut state = MonitorState::default();
         let before = snapshot(
             AgentId::Claude,
@@ -699,18 +773,21 @@ mod tests {
         failed.status = LimitsStatus::Failed;
         failed.windows.clear();
         let mut remembered = before;
-        remembered.live = false;
+        remembered.current_account = false;
         remembered.windows[0].used_percent = 0.0;
         assert!(observe(&mut state, &[failed, remembered]).is_empty());
 
         let events = observe(
             &mut state,
-            &[snapshot(
-                AgentId::Claude,
-                "account-a",
-                "me@example.com",
-                0.0,
-                Some("2026-08-31T12:00:00Z"),
+            &[observed_at(
+                snapshot(
+                    AgentId::Claude,
+                    "account-a",
+                    "me@example.com",
+                    0.0,
+                    Some("2026-08-31T12:00:00Z"),
+                ),
+                "2026-08-19T13:00:00Z",
             )],
         );
         assert_eq!(events.len(), 1);
@@ -737,12 +814,15 @@ mod tests {
             82.0,
             Some("2026-08-24T12:00:00Z"),
         );
-        let after = snapshot(
-            AgentId::Claude,
-            "account-a",
-            "me@example.com",
-            0.0,
-            Some("2026-08-31T12:00:00Z"),
+        let after = observed_at(
+            snapshot(
+                AgentId::Claude,
+                "account-a",
+                "me@example.com",
+                0.0,
+                Some("2026-08-31T12:00:00Z"),
+            ),
+            "2026-08-19T13:00:00Z",
         );
         assert!(observe(&mut state, &[before]).is_empty());
         assert_eq!(observe(&mut state, std::slice::from_ref(&after)).len(), 1);
@@ -759,6 +839,22 @@ mod tests {
         let root = scratch_dir("limits-monitor-malformed");
         let path = root.join("monitor.json");
         fs::write(&path, "{nope").unwrap();
+
+        let state = load_state(&path);
+
+        assert!(state.providers.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn monitor_state_without_observation_times_is_discarded_instead_of_migrated() {
+        let root = scratch_dir("limits-monitor-legacy");
+        let path = root.join("monitor.json");
+        fs::write(
+            &path,
+            r#"{"providers":{"claude":{"account_id":"account-a","windows":{"weekly":{"used_percent":99,"resets_at":"2026-08-24T12:00:00Z","exhausted":false}}}}}"#,
+        )
+        .unwrap();
 
         let state = load_state(&path);
 

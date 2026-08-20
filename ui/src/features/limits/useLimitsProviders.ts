@@ -7,13 +7,13 @@ import type { AgentId } from "$lib/types";
 export const LIMITS_STALE_MS = 60_000;
 
 /**
- * How long one provider's answer stays fresh. A live read that did not come back `ok` is worth
+ * How long one provider's answer stays fresh. A current-account read that did not come back `ok` is worth
  * re-reading at the next chance: the CLIs renew their own access tokens, so such a failure heals
  * by itself and the screen should notice it without the user pressing refresh.
  */
 export function limitsStaleMs(entries: ProviderLimits[] | undefined): number {
-  const live = entries?.find((entry) => entry.live);
-  return live && live.status !== "ok" ? 0 : LIMITS_STALE_MS;
+  const current = entries?.find((entry) => entry.currentAccount);
+  return current && current.status !== "ok" ? 0 : LIMITS_STALE_MS;
 }
 
 export type ProviderQuery = {
@@ -52,11 +52,6 @@ function useProviderLimits(provider: AgentId): ProviderQuery {
 export function useLimitsProviders() {
   const providers = [useProviderLimits("claude"), useProviderLimits("codex")];
   const loading = providers.some(({ query }) => query.isFetching);
-  const asOf = providers
-    .map(({ query }) => query.data?.find((entry) => entry.live && entry.status === "ok")?.fetchedAt ?? "")
-    .filter(Boolean)
-    .sort()
-    .at(-1);
 
   function refresh() {
     for (const provider of providers) {
@@ -64,5 +59,5 @@ export function useLimitsProviders() {
     }
   }
 
-  return { providers, loading, asOf, now: Date.now(), refresh };
+  return { providers, loading, now: Date.now(), refresh };
 }

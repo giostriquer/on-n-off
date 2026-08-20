@@ -33,14 +33,13 @@ function okClaude(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
     provider: "claude",
     status: "ok",
     account: { id: "uuid-1", label: "me@claude.example" },
-    live: true,
+    currentAccount: true,
     plan: "max",
     windows: [
-      { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z" },
-      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-18T04:59:59Z" },
-      { id: "weekly_opus", label: "Weekly · Opus", kind: "model", usedPercent: 91.4, resetsAt: "2026-08-24T13:59:59Z" },
+      { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
+      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-18T04:59:59Z", observedAt: NOW },
+      { id: "weekly_opus", label: "Weekly · Opus", kind: "model", usedPercent: 91.4, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
     ],
-    fetchedAt: "2026-08-17T20:00:00.000Z",
     ...overrides,
   };
 }
@@ -50,14 +49,13 @@ function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
     provider: "codex",
     status: "ok",
     account: { id: "acct-work", label: "work@codex.example" },
-    live: true,
+    currentAccount: true,
     plan: "pro",
     windows: [
-      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 74, resetsAt: "2026-08-24T23:34:33Z" },
-      { id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z" },
+      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 74, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
+      { id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
     ],
     credits: { balance: "12.5", unlimited: false },
-    fetchedAt: "2026-08-17T20:00:00.000Z",
     ...overrides,
   };
 }
@@ -68,18 +66,17 @@ function staleCodex(): ProviderLimits {
     provider: "codex",
     status: "ok",
     account: { id: "acct-personal", label: "personal@codex.example" },
-    live: false,
+    currentAccount: false,
     plan: "plus",
     windows: [
-      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 88, resetsAt: "2026-08-20T10:00:00Z" },
-      { id: "secondary", label: "5 hour · all models", kind: "session", usedPercent: 40, resetsAt: "2026-08-16T22:00:00Z" },
+      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 88, resetsAt: "2026-08-20T10:00:00Z", observedAt: "2026-08-16T21:40:00.000Z" },
+      { id: "secondary", label: "5 hour · all models", kind: "session", usedPercent: 40, resetsAt: "2026-08-16T22:00:00Z", observedAt: "2026-08-16T21:40:00.000Z" },
     ],
-    fetchedAt: "2026-08-16T21:40:00.000Z",
   };
 }
 
 function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): ProviderLimits {
-  return { provider, status, message, live: true, windows: [], fetchedAt: "2026-08-17T20:00:00.000Z" };
+  return { provider, status, message, currentAccount: true, windows: [] };
 }
 
 function answer(
@@ -130,7 +127,7 @@ describe("Limits", () => {
 
     const claude = card("Claude limits · me@claude.example");
     expect(claude.getAttribute("data-status")).toBe("ok");
-    expect(claude.getAttribute("data-live")).toBe("true");
+    expect(claude.getAttribute("data-current-account")).toBe("true");
     const weekly = within(claude).getByRole("meter", { name: "Weekly · all models" });
     expect(weekly.getAttribute("aria-valuenow")).toBe("12");
     expect(weekly.getAttribute("data-tone")).toBe("calm");
@@ -145,14 +142,13 @@ describe("Limits", () => {
     const codex = card("Codex limits · work@codex.example");
     expect(within(codex).getByRole("meter", { name: "Weekly · all models" }).getAttribute("data-tone")).toBe("warn");
     expect(within(codex).getByText(/12\.5 credits/)).toBeTruthy();
-    // A live window whose reset instant just passed is still shown as reported (never "reset since").
+    // A current-account observation is still historical after its own reset instant passes.
     const spark = within(codex).getByRole("meter", { name: "Weekly · GPT-5.3-Codex-Spark" });
-    expect(spark.getAttribute("aria-valuenow")).toBe("3");
-    expect(within(codex).getByText("3%")).toBeTruthy();
-    expect(within(codex).queryByText(/reset since/)).toBeNull();
-    expect(within(codex).getByText(/resets in now/)).toBeTruthy();
-    expect(within(codex).getAllByText(/resets in/)).toHaveLength(2);
-    expect(screen.getByText(/^Subscription limits · as of/)).toBeTruthy();
+    expect(spark.getAttribute("aria-valuenow")).toBe("0");
+    expect(within(codex).getByText("—")).toBeTruthy();
+    expect(within(codex).getByText(/Current usage unknown · last updated/)).toBeTruthy();
+    expect(within(codex).getAllByText(/resets in/)).toHaveLength(1);
+    expect(screen.getByText("Subscription limits")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Refresh limits" }).hasAttribute("disabled")).toBe(false);
   });
@@ -170,7 +166,7 @@ describe("Limits", () => {
     expect((weekly.firstElementChild as HTMLElement).style.background).toBe("var(--warn)");
   });
 
-  it("shows remembered accounts after the live one, as of their last read, with reset windows greyed", async () => {
+  it("shows remembered accounts after the current one with independently dated windows", async () => {
     answer([okClaude()], [okCodex(), staleCodex()]);
     renderLimits();
     await waitFor(() => expect(card("Codex limits · personal@codex.example")).toBeTruthy());
@@ -179,9 +175,9 @@ describe("Limits", () => {
     expect(regions.indexOf("Codex limits · work@codex.example")).toBeLessThan(regions.indexOf("Codex limits · personal@codex.example"));
 
     const stale = card("Codex limits · personal@codex.example");
-    expect(stale.getAttribute("data-live")).toBe("false");
+    expect(stale.getAttribute("data-current-account")).toBe("false");
     expect(within(stale).getByText("Plus")).toBeTruthy();
-    expect(within(stale).getByText(/as of .*· sign in as personal@codex\.example to refresh/)).toBeTruthy();
+    expect(within(stale).getByText(/Remembered account · sign in as personal@codex\.example to refresh/)).toBeTruthy();
     // Weekly window's reset is still ahead: numbers stand, with the countdown.
     const weekly = within(stale).getByRole("meter", { name: "Weekly · all models" });
     expect(weekly.getAttribute("aria-valuenow")).toBe("88");
@@ -191,24 +187,22 @@ describe("Limits", () => {
     expect(session.getAttribute("aria-valuenow")).toBe("0");
     expect(session.getAttribute("data-tone")).toBe("calm");
     expect(within(stale).getByText("—")).toBeTruthy();
-    expect(within(stale).getByText(/reset since/)).toBeTruthy();
+    expect(within(stale).getByText(/Current usage unknown · last updated/)).toBeTruthy();
     expect(within(stale).getByRole("button", { name: "Forget personal@codex.example" })).toBeTruthy();
-    // The header "as of" stamp still comes from the live read only.
-    expect(screen.getByText(/^Subscription limits · as of/)).toBeTruthy();
+    expect(within(stale).getAllByText(/last updated/)).toHaveLength(2);
   });
 
-  it("keeps the signed-in account's last numbers under the live status, in one card", async () => {
-    // What the backend sends when the CLI's access token has gone stale: the live read failed, so
+  it("keeps one source-neutral Claude account when current refresh is paused", async () => {
+    // What the backend sends when the CLI's access token has gone stale: the endpoint read failed, so
     // the account's last remembered numbers ride along on the same entry.
     answer(
       [
         okClaude({
           status: "unauthenticated",
           message: "Access token expired — send a prompt with `claude` to renew it, then refresh here.",
-          fetchedAt: "2026-08-16T21:40:00.000Z",
           windows: [
-            { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z" },
-            { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-17T04:59:59Z" },
+            { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z", observedAt: "2026-08-16T21:40:00.000Z" },
+            { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-17T04:59:59Z", observedAt: "2026-08-16T21:40:00.000Z" },
           ],
         }),
       ],
@@ -219,19 +213,20 @@ describe("Limits", () => {
 
     const claude = card("Claude limits · me@claude.example");
     expect(screen.getAllByRole("region", { name: /^Claude limits/ })).toHaveLength(1);
+    expect(within(claude).getByText("Refresh paused.")).toBeTruthy();
     expect(within(claude).getByText(/^Access token expired/)).toBeTruthy();
+    expect(within(claude).queryByText(/Claude Desktop usage/)).toBeNull();
     expect(within(claude).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("12");
-    expect(within(claude).getByText(/^as of /)).toBeTruthy();
+    expect(within(claude).getAllByText(/last updated/)).toHaveLength(2);
     // A window that has reset since that read shows nothing usable, and asks for nothing either.
-    expect(within(claude).getByText(/^reset since /)).toBeTruthy();
+    expect(within(claude).getByText(/Current usage unknown/)).toBeTruthy();
     // It is still the signed-in account: nothing to sign into, nothing to forget.
     expect(within(claude).queryByText(/sign in/)).toBeNull();
     expect(within(claude).queryByRole("button", { name: /^Forget/ })).toBeNull();
-    // The stamp still comes from live ok reads only.
-    expect(screen.getByText(/^Subscription limits · as of/)).toBeTruthy();
+    expect(screen.getByText("Subscription limits")).toBeTruthy();
   });
 
-  it("re-reads a provider whose live read failed on the next window focus, and leaves a good one cached", async () => {
+  it("re-reads a provider whose current read failed on the next window focus, and leaves a good one cached", async () => {
     answer([statusOnly("claude", "unauthenticated", "Access token expired")], [okCodex()]);
     renderLimits();
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(2));
@@ -265,24 +260,21 @@ describe("Limits", () => {
     expect(readLimits).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps remembered accounts visible when the live login is signed out", async () => {
+  it("keeps remembered accounts visible when the current login is signed out", async () => {
     answer([okClaude()], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits."), staleCodex()]);
     renderLimits();
     await waitFor(() => expect(card("Codex limits · personal@codex.example")).toBeTruthy());
-    const live = card("Codex limits");
-    expect(within(live).getByText("Sign in with `codex` to see subscription limits.")).toBeTruthy();
-    expect(live.getAttribute("data-status")).toBe("signedOut");
-    // Codex's live read is not ok, and Claude's is: the stamp comes from live ok reads only.
-    expect(screen.getByText(/^Subscription limits · as of/)).toBeTruthy();
+    const current = card("Codex limits");
+    expect(within(current).getByText("Sign in with `codex` to see subscription limits.")).toBeTruthy();
+    expect(current.getAttribute("data-status")).toBe("signedOut");
   });
 
-  it("does not stamp 'as of' from remembered snapshots when no live read is ok", async () => {
+  it("does not invent an account-wide timestamp when no current read is ok", async () => {
     answer([statusOnly("claude", "signedOut", null)], [statusOnly("codex", "signedOut", null), staleCodex()]);
     renderLimits();
     await waitFor(() => expect(card("Codex limits · personal@codex.example")).toBeTruthy());
     expect(screen.queryByText(/^Subscription limits · as of/)).toBeNull();
-    // The stale banner still says when that snapshot was taken.
-    expect(within(card("Codex limits · personal@codex.example")).getByText(/^as of /)).toBeTruthy();
+    expect(within(card("Codex limits · personal@codex.example")).getAllByText(/last updated/)).toHaveLength(2);
   });
 
   it("keeps the card and reports the error when Forget fails", async () => {
@@ -306,7 +298,7 @@ describe("Limits", () => {
     await waitFor(() => expect(within(card("Claude limits")).getByText(message)).toBeTruthy());
     expect(card("Claude limits").getAttribute("data-status")).toBe(status);
     expect(within(card("Claude limits")).queryByRole("meter")).toBeNull();
-    expect(screen.getByText(/^Subscription limits · as of/)).toBeTruthy();
+    expect(screen.getByText("Subscription limits")).toBeTruthy();
   });
 
   it("falls back to generic copy when a non-ok status carries no message", async () => {
