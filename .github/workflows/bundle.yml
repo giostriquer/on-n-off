@@ -70,6 +70,15 @@ jobs:
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
 
+      # rust-cache hashes the rustc version of EVERY installed toolchain into its environment
+      # key (it runs `rustup toolchain list`), not just the active one. The runner images carry
+      # their own `stable`, so the pin alone left two toolchains present and the key still moved
+      # whenever the image's stable moved -- which is what rotated it to b6ac5207 on the first
+      # run of this change. Reducing the set to the pin makes the hash depend only on
+      # rust-toolchain.toml.
+      - name: Drop unpinned toolchains
+        run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
+
       # Shared with the release workflow's build job (same key, same release profile).
       # `cache-on-failure` is deliberately off: the store is capped at 10 GB for the whole
       # repository and a failed run's half-built target directory is not worth a slot.
