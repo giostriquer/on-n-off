@@ -130,7 +130,7 @@ describe("LimitsPopover", () => {
               {
                 ...limits("claude", "claude-live", "live@claude.example", true),
                 status: "unauthenticated" as const,
-                message: "Access token expired — run any `claude` command to renew it, then refresh here.",
+                message: "Access token expired — send a prompt with `claude` to renew it, then refresh here.",
               },
             ]
           : [limits("codex", "codex-live", "live@codex.example", true)],
@@ -143,6 +143,32 @@ describe("LimitsPopover", () => {
     expect(within(account).getByText(/^Access token expired/)).toBeTruthy();
     expect(within(account).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("24");
     expect(within(account).getByText("Saved snapshot")).toBeTruthy();
+  });
+
+  it("shows the source time for Desktop and remembered fallback numbers", async () => {
+    const desktop = {
+      ...limits("claude", "claude-live", "live@claude.example", true),
+      status: "unauthenticated" as const,
+      message: "Access token expired. Showing Claude Desktop usage.",
+      fetchedAt: "2026-08-18T12:15:00Z",
+      windows: [{ id: "desktop:sd", label: "Weekly · all models", kind: "weekly" as const, usedPercent: 63 }],
+    };
+    const remembered = {
+      ...limits("codex", "codex-live", "live@codex.example", true),
+      status: "unauthenticated" as const,
+      message: "Login expired.",
+      fetchedAt: "2026-08-17T09:30:00Z",
+    };
+    readLimits.mockImplementation((provider: AgentId) =>
+      Promise.resolve(provider === "claude" ? [desktop] : [remembered]),
+    );
+    renderPopover();
+
+    const claude = await screen.findByRole("article", { name: "Claude limits · live@claude.example" });
+    const codex = await screen.findByRole("article", { name: "Codex limits · live@codex.example" });
+    expect(within(claude).getByText(/^as of /)).toBeTruthy();
+    expect(within(codex).getByText(/^as of /)).toBeTruthy();
+    expect(within(claude).getByText("No reset time")).toBeTruthy();
   });
 
   it("forces both provider reads when Refresh is selected", async () => {

@@ -14,6 +14,12 @@ use serde_json::Value;
 use super::json::optional_string;
 use crate::dto::LimitsAccountDto;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ClaudeIdentity {
+    pub(super) account: LimitsAccountDto,
+    pub(super) organization_id: Option<String>,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct ClaudeCredential {
     pub token: String,
@@ -168,13 +174,21 @@ fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential> {
 
 /// Which Claude account the CLI is signed into, from `<home>/.claude.json`'s `oauthAccount`
 /// (Claude Code rewrites it on every login). `None` when the file or the fields are absent.
-pub fn read_claude_account(home: &Path) -> Option<LimitsAccountDto> {
+pub(super) fn read_claude_identity(home: &Path) -> Option<ClaudeIdentity> {
     let value = read_json_file(&home.join(".claude.json")).ok()??;
     let account = value.get("oauthAccount")?;
-    Some(LimitsAccountDto {
-        id: optional_string(account.get("accountUuid"))?,
-        label: optional_string(account.get("emailAddress")),
+    Some(ClaudeIdentity {
+        account: LimitsAccountDto {
+            id: optional_string(account.get("accountUuid"))?,
+            label: optional_string(account.get("emailAddress")),
+        },
+        organization_id: optional_string(account.get("organizationUuid")),
     })
+}
+
+#[cfg(test)]
+pub fn read_claude_account(home: &Path) -> Option<LimitsAccountDto> {
+    read_claude_identity(home).map(|identity| identity.account)
 }
 
 /// Process-wide memo of the last good Claude login, keyed by the account it belongs to, so a
@@ -472,7 +486,17 @@ mod tests {
         write(
             &home,
             ".claude.json",
-            r#"{"oauthAccount":{"accountUuid":"uuid-1","emailAddress":"me@example.com","organizationName":"Org"},"userID":"x"}"#,
+            r#"{"oauthAccount":{"accountUuid":"uuid-1","emailAddress":"me@example.com","organizationName":"Org","organizationUuid":"org-1"},"userID":"x"}"#,
+        );
+        assert_eq!(
+            read_claude_identity(&home),
+            Some(ClaudeIdentity {
+                account: LimitsAccountDto {
+                    id: "uuid-1".to_string(),
+                    label: Some("me@example.com".to_string())
+                },
+                organization_id: Some("org-1".to_string())
+            })
         );
         assert_eq!(
             read_claude_account(&home),
