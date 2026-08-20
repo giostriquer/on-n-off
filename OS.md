@@ -75,5 +75,12 @@ Spawned CLIs get the merged list as their `PATH` so `#!/usr/bin/env node` shims 
 ## PowerShell vs bash in this repo
 
 - CI and `scripts/*.ps1` run under PowerShell 7 on both runners; scripts must stay path-neutral.
+- CI Rust steps cost far more on the Windows runner than on macOS (4 cores against Apple Silicon,
+  plus Defender scanning every object file cargo writes). The Windows jobs exclude the workspace,
+  `~/.cargo`, and `~/.rustup` from Defender with `Add-MpPreference`; the step is `continue-on-error`
+  because it is a speed measure, not a correctness one, and it is runner-only — never run it on a
+  development machine. Platform-neutral frontend checks (`bun run test`, `bun run check`) run once
+  on `ubuntu-latest` instead of on both native legs; `bun run build` stays native because
+  `tauri-build` needs `ui/dist` before the Rust steps.
 - In this repo's shell tooling, prefer `Join-Path`, `$env:VAR`, `-LiteralPath`; in bash use forward
   slashes and `cygpath -w` when handing paths to Windows programs.
