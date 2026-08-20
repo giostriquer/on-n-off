@@ -206,9 +206,15 @@ impl ProcessTransport {
                 Err(_) => break,
             }
         }
-        if status.is_none() {
+        let detach_drainers = status.is_none();
+        if detach_drainers {
             let _ = self.child.kill();
             status = self.child.wait().ok();
+        }
+        if detach_drainers {
+            self.stdout_thread.take();
+            self.stderr_thread.take();
+            return status;
         }
         if let Some(thread) = self.stdout_thread.take() {
             let _ = thread.join();
