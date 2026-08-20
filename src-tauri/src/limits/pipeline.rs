@@ -7,13 +7,50 @@ use super::http::HttpError;
 use super::Parsed;
 use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ProviderLoadError {
+    Http(HttpError),
+    AccountMismatch,
+}
+
+impl From<HttpError> for ProviderLoadError {
+    fn from(error: HttpError) -> Self {
+        Self::Http(error)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LoadFailureKind {
+    Unauthorized,
+    AccountMismatch,
+    Provider,
+}
+
+pub(super) struct ResolveOutcome {
+    pub(super) dto: ProviderLimitsDto,
+    pub(super) failure: Option<LoadFailureKind>,
+}
+
 /// Map login state and one provider load into the stable Limits DTO status model.
+#[cfg(test)]
 pub(super) fn resolve<T>(
     provider: AgentId,
     account: Option<LimitsAccountDto>,
     lookup: CredentialLookup<T>,
     load: impl FnOnce(&T) -> Result<Parsed, HttpError>,
 ) -> ProviderLimitsDto {
+    resolve_provider(provider, account, lookup, |credential| {
+        load(credential).map_err(ProviderLoadError::Http)
+    })
+    .dto
+}
+
+pub(super) fn resolve_provider<T>(
+    provider: AgentId,
+    account: Option<LimitsAccountDto>,
+    lookup: CredentialLookup<T>,
+    load: impl FnOnce(&T) -> Result<Parsed, ProviderLoadError>,
+) -> ResolveOutcome {
     let cli = provider.binary_name();
     let named = || Parsed {
         account: account.clone(),
@@ -22,53 +59,79 @@ pub(super) fn resolve<T>(
     let credential = match lookup {
         CredentialLookup::Found(credential) => credential,
         CredentialLookup::Missing => {
-            return finish(
-                provider,
-                LimitsStatus::SignedOut,
-                Some(format!("Sign in with `{cli}` to see subscription limits.")),
-                named(),
-            );
+            return ResolveOutcome {
+                dto: finish(
+                    provider,
+                    LimitsStatus::SignedOut,
+                    Some(format!("Sign in with `{cli}` to see subscription limits.")),
+                    named(),
+                ),
+                failure: None,
+            };
         }
         CredentialLookup::Expired { renewable } => {
-            return finish(
-                provider,
-                LimitsStatus::Unauthenticated,
-                Some(token_expired(cli, renewable)),
-                named(),
-            );
-        }
-        CredentialLookup::Unsupported(why) => {
-            return finish(provider, LimitsStatus::Unsupported, Some(why), named());
+            return ResolveOutcome {
+                dto: finish(
+                    provider,
+                    LimitsStatus::Unauthenticated,
+                    Some(token_expired(cli, renewable)),
+                    named(),
+                ),
+                failure: None,
+            };
         }
         CredentialLookup::Unreadable(why) => {
-            return finish(
-                provider,
-                LimitsStatus::Failed,
-                Some(format!("Could not read the stored login: {why}")),
-                named(),
-            );
+            return ResolveOutcome {
+                dto: finish(
+                    provider,
+                    LimitsStatus::Failed,
+                    Some(format!("Could not read the stored login: {why}")),
+                    named(),
+                ),
+                failure: None,
+            };
         }
     };
     match load(&credential) {
         Ok(mut parsed) => {
             parsed.windows.sort_by_key(|window| kind_rank(window.kind));
-            finish(provider, LimitsStatus::Ok, None, parsed)
+            ResolveOutcome {
+                dto: finish(provider, LimitsStatus::Ok, None, parsed),
+                failure: None,
+            }
         }
-        Err(HttpError::Unauthorized) => finish(
-            provider,
-            LimitsStatus::Unauthenticated,
-            Some(relogin(cli)),
-            named(),
-        ),
-        Err(error) => finish(
-            provider,
-            LimitsStatus::Failed,
-            Some(format!(
-                "Could not reach the {} usage service ({error}).",
-                provider.display_name()
-            )),
-            named(),
-        ),
+        Err(ProviderLoadError::Http(HttpError::Unauthorized)) => ResolveOutcome {
+            dto: finish(
+                provider,
+                LimitsStatus::Unauthenticated,
+                Some(relogin(cli)),
+                named(),
+            ),
+            failure: Some(LoadFailureKind::Unauthorized),
+        },
+        Err(ProviderLoadError::AccountMismatch) => ResolveOutcome {
+            dto: finish(
+                provider,
+                LimitsStatus::Failed,
+                Some(format!(
+                    "The stored {cli} login belongs to a different account than the selected {cli} account. Run `{cli}`, select the intended account, send a prompt, then refresh here."
+                )),
+                named(),
+            ),
+            failure: Some(LoadFailureKind::AccountMismatch),
+        },
+        Err(ProviderLoadError::Http(error)) => ResolveOutcome {
+            dto: finish(
+                provider,
+                LimitsStatus::Failed,
+                Some(format!(
+                    "Could not reach the {} usage service ({error}).",
+                    provider.display_name()
+                )),
+                named(),
+            ),
+            failure: Some(LoadFailureKind::Provider),
+        },
     }
 }
 

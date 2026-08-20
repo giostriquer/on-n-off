@@ -143,7 +143,7 @@ describe("LimitsPopover", () => {
     expect(within(account).getByText(/^Access token expired/)).toBeTruthy();
     expect(within(account).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("24");
     expect(within(account).getByText("Refresh paused")).toBeTruthy();
-    expect(within(account).getByText(/last updated/)).toBeTruthy();
+    expect(within(account).getAllByText(/Latest observation/)).toHaveLength(1);
   });
 
   it("shows source-neutral observation times for paused and remembered numbers", async () => {
@@ -182,8 +182,8 @@ describe("LimitsPopover", () => {
 
     const claude = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
     const codex = await screen.findByRole("article", { name: "Codex limits · current@codex.example" });
-    expect(within(claude).getByText(/last updated/)).toBeTruthy();
-    expect(within(codex).getByText(/last updated/)).toBeTruthy();
+    expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
+    expect(within(codex).getAllByText(/Latest observation/)).toHaveLength(1);
     expect(within(claude).queryByText(/Claude Desktop/)).toBeNull();
   });
 

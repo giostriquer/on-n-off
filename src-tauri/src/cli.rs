@@ -46,7 +46,10 @@ impl AgentCli {
         self.run_timed(&refs, timeout)
     }
 
-    fn run_timed(&self, args: &[&str], timeout: Duration) -> Result<String, AdapterError> {
+    /// Build a provider CLI command with the same binary resolution and GUI-safe `PATH` as the
+    /// ordinary bounded runner. Interactive protocols can configure stdio and lifecycle handling
+    /// before spawning it.
+    pub(crate) fn command(&self) -> Command {
         let mut command = Command::new(
             resolve_cli_binary(&self.binary)
                 .map(|path| path.to_string_lossy().into_owned())
@@ -57,7 +60,12 @@ impl AgentCli {
         if let Some(path) = cli_search_path_value() {
             command.env("PATH", path);
         }
-        let child = command
+        command
+    }
+
+    fn run_timed(&self, args: &[&str], timeout: Duration) -> Result<String, AdapterError> {
+        let child = self
+            .command()
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -21,6 +21,7 @@ export type LimitAccountPresentation = {
   message: string | null;
   refreshPaused: boolean;
   remembered: boolean;
+  updatedAt: string | null;
 };
 
 /**
@@ -33,10 +34,8 @@ export function presentLimitWindow(window: LimitWindow, now: number): LimitWindo
   const tone = usageTone(percent);
   const resetAt = formatResetAt(window.resetsAt);
   const resetIn = formatResetIn(window.resetsAt, now);
-  const updatedAt = formatObservedAt(window.observedAt);
-  const updatedNote = `last updated ${updatedAt || "at an unknown time"}`;
   const resetNote = resetIn ? `resets in ${resetIn}${resetAt ? ` · ${resetAt}` : ""}` : "";
-  const note = unavailable ? `Current usage unknown · ${updatedNote}` : [resetNote, updatedNote].filter(Boolean).join(" · ");
+  const note = unavailable ? "Current usage unknown" : resetNote;
 
   return {
     percent,
@@ -49,9 +48,15 @@ export function presentLimitWindow(window: LimitWindow, now: number): LimitWindo
 
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
   const hasObservations = entry.windows.length > 0 || entry.credits != null;
+  const latestObservedAt = entry.windows.reduce<number | null>((latest, window) => {
+    const observedAt = Date.parse(window.observedAt);
+    if (Number.isNaN(observedAt)) return latest;
+    return latest === null ? observedAt : Math.max(latest, observedAt);
+  }, null);
   return {
     message: entry.status === "ok" ? null : (entry.message ?? fallbackMessage),
     refreshPaused: entry.currentAccount && entry.status !== "ok" && hasObservations,
     remembered: !entry.currentAccount && hasObservations,
+    updatedAt: latestObservedAt === null ? null : formatObservedAt(new Date(latestObservedAt).toISOString()),
   };
 }
