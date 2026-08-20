@@ -17,7 +17,7 @@ on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon).
 - `src-tauri/src/config_io.rs` and `backup.rs`: guarded configuration writes and rollback support.
 - `src-tauri/src/item_install/`: selective install of skills/subagents from a GitHub marketplace (tarball fetch, manifest inspection, atomic placement, `~/.on-n-off/installed-items.json` provenance registry, upstream update checks). Never shells out to a provider CLI; write roots come from `AgentAdapter::item_roots`.
 - `src-tauri/src/usage/`: read-only transcript aggregation plus caches under `.on-n-off`.
-- `src-tauri/src/limits/`: the Limits screen's live subscription rate limits. Reads the CLIs' stored logins (macOS Keychain via `/usr/bin/security`, else `~/.claude/.credentials.json`; `~/.codex/auth.json`) and calls the vendors' usage endpoints over HTTPS. Never writes to or refreshes those logins (the Claude access token is memoised in-process only); the only writes are per-account snapshots of the numbers under `~/.on-n-off/limits/`, so accounts the user has signed out of stay visible. Provider problems come back as a `status` on the DTO, not an error.
+- `src-tauri/src/limits/`: the Limits screen's live subscription rate limits. Claude reads its stored access token (macOS Keychain via `/usr/bin/security`, else `~/.claude/.credentials.json`), verifies `/api/oauth/profile`, then reads `/api/oauth/usage`; it never reads/redeems the refresh token or writes Claude auth. Codex launches the official `codex app-server`, calls `account/read` plus `account/rateLimits/read`, and lets Codex own login and refresh; on-n-off reads only `account_id` metadata from the app-server's confirmed home. The only on-n-off writes are per-account number snapshots under `~/.on-n-off/limits/`, so signed-out accounts stay visible. Provider problems come back as a `status` on the DTO, not an error.
 - `HANDOFF.md`: Windows and macOS runtime and smoke-test expectations.
 - `OS.md`: Windows vs macOS differences that affect PATH discovery, launchers, filesystem, WebView2, packaging. Read before touching `cli_locate.rs`, `process.rs`, scripts, or CI.
 - `PROVIDERS.md`: per-provider layout (home, CLI name and install path, plugin cache, skills, MCP file and toggle semantics, what is verified vs assumed). Update it together with the adapter it describes.
@@ -126,7 +126,7 @@ On restricted Windows sandboxes, Vite/esbuild can fail with `spawn EPERM`. Recor
 
 - Run the full frontend and Rust matrices above after relevant changes.
 - Boot the actual app for changes affecting IPC, startup, provider scanning, routing, or visuals. On macOS, also launch the built `.app` bundle with `open` (Finder-like minimal `PATH`) when CLI resolution changes.
-- Smoke Overview, Plugins, Skills, MCP, Usage, Limits, Agent Config, Settings, search/filtering, and every provider switch without mutating live configuration. Limits makes outbound HTTPS calls and, on macOS, triggers a one-time Keychain "allow" prompt for `/usr/bin/security`.
+- Smoke Overview, Plugins, Skills, MCP, Usage, Limits, Agent Config, Settings, search/filtering, and every provider switch without mutating live configuration. Limits makes outbound HTTPS calls, starts `codex app-server`, and, on macOS, triggers a one-time Keychain "allow" prompt for `/usr/bin/security`.
 - Verify the window remains interactive while startup work is still running.
 - Stop all dev-server/app/debugger processes when QA finishes.
 - Report exact commands, failures, and unresolved gates. Do not claim completion from stale or partial evidence.

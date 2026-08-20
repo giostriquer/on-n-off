@@ -69,8 +69,8 @@ impl ClaudeObservationRig {
                 home: &self.home,
                 memo: &self.memo,
                 keychain: || Ok(None),
+                claude_profile_url: &refused_url(),
                 claude_url: &refused_url(),
-                codex_url: &refused_url(),
                 claude_desktop_history: claude_desktop::history_path_for_home(&self.home),
                 now_ms: DESKTOP_TIMESTAMP_MS + 1,
             },
@@ -166,13 +166,17 @@ fn freshness_compares_instants_instead_of_timestamp_text() {
 }
 
 #[test]
-fn a_successful_endpoint_read_still_merges_and_persists_other_local_windows() {
+fn a_successful_endpoint_read_remains_authoritative_over_local_windows() {
     let rig = ClaudeObservationRig::new();
     write(
         &rig.home.join(".claude").join(".credentials.json"),
         r#"{"claudeAiOauth":{"accessToken":"token","expiresAt":1787023473402,"refreshToken":"rt","refreshTokenExpiresAt":1787981634215,"subscriptionType":"max"}}"#,
     );
-    let (url, request) = serve_once(
+    let (profile_url, profile_request) = serve_once(
+        "200 OK",
+        r#"{"account":{"uuid":"uuid-1","email":"me@example.com"},"organization":{"uuid":"org-1"}}"#,
+    );
+    let (usage_url, usage_request) = serve_once(
         "200 OK",
         r#"{"seven_day":{"utilization":50,"resets_at":"2026-08-24T13:59:59Z"}}"#,
     );
@@ -184,21 +188,20 @@ fn a_successful_endpoint_read_still_merges_and_persists_other_local_windows() {
             home: &rig.home,
             memo: &rig.memo,
             keychain: || Ok(None),
-            claude_url: &url,
-            codex_url: &refused_url(),
+            claude_profile_url: &profile_url,
+            claude_url: &usage_url,
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: DESKTOP_TIMESTAMP_MS + 1,
         },
     );
-    request.join().unwrap();
+    profile_request.join().unwrap();
+    usage_request.join().unwrap();
 
     assert_eq!(dtos[0].status, LimitsStatus::Ok);
-    assert_eq!(dtos[0].windows.len(), 2);
+    assert_eq!(dtos[0].windows.len(), 1);
     assert_eq!(dtos[0].windows[0].id, "weekly_all");
     assert_eq!(dtos[0].windows[0].used_percent, 50.0);
-    assert_eq!(dtos[0].windows[1].id, "session");
-    assert_eq!(dtos[0].windows[1].used_percent, 17.0);
     let persisted = SnapshotStore::for_home(&rig.home).load(AgentId::Claude);
-    assert_eq!(persisted[0].windows.len(), 2);
-    assert_eq!(persisted[0].windows[1].id, "session");
+    assert_eq!(persisted[0].windows.len(), 1);
+    assert_eq!(persisted[0].windows[0].used_percent, 50.0);
 }

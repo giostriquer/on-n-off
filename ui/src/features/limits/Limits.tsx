@@ -49,9 +49,9 @@ export function Limits() {
       </div>
 
       <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
-        quota observations come from read-only sources tied to each subscription account · every window
-        shows when it was last observed · on-n-off never writes to or refreshes provider logins · signed-out
-        accounts remain visible with their last trustworthy observations
+        quota observations come from read-only sources tied to each subscription account · each account
+        shows its latest observation · on-n-off does not implement provider login flows ·
+        signed-out accounts remain visible with their last trustworthy observations
       </p>
     </div>
   );
@@ -119,27 +119,30 @@ function ProviderColumn({
 }
 
 /** Same header row as the Overview cards: uppercase title, mono meta, chips on the right. */
-function CardHeader({ entry, provider }: { entry?: ProviderLimits; provider: AgentId }) {
+function CardHeader({ entry, provider, updatedAt }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null }) {
   const name = providerLabel(provider);
   const label = entry?.account?.label ?? null;
   const plan = planLabel(entry?.plan);
   const credits = entry?.credits ?? null;
   return (
-    <header className="flex items-center gap-2.5 border-b border-[var(--hair)] px-3.5 py-2.5">
-      <ProviderIcon provider={provider} className="size-3.5 shrink-0" />
-      <span className="text-[11.5px] font-semibold tracking-[0.03em] uppercase">{name}</span>
-      {label ? <span className="min-w-0 truncate font-mono text-[11px] text-[var(--mute)]">{label}</span> : null}
-      <div className="flex-1" />
-      {credits ? (
-        <span className="font-mono text-[11px] text-[var(--mute)]">
-          {credits.unlimited ? "unlimited credits" : `${credits.balance} credits`}
-        </span>
-      ) : null}
-      {plan ? (
-        <span className="rounded-md border border-[var(--hair)] px-1.5 py-0.5 font-mono text-[10px] uppercase">
-          {plan}
-        </span>
-      ) : null}
+    <header className="border-b border-[var(--hair)] px-3.5 py-2.5">
+      <div className="flex items-center gap-2.5">
+        <ProviderIcon provider={provider} className="size-3.5 shrink-0" />
+        <span className="text-[11.5px] font-semibold tracking-[0.03em] uppercase">{name}</span>
+        {label ? <span className="min-w-0 truncate font-mono text-[11px] text-[var(--mute)]">{label}</span> : null}
+        <div className="flex-1" />
+        {credits ? (
+          <span className="font-mono text-[11px] text-[var(--mute)]">
+            {credits.unlimited ? "unlimited credits" : `${credits.balance} credits`}
+          </span>
+        ) : null}
+        {plan ? (
+          <span className="rounded-md border border-[var(--hair)] px-1.5 py-0.5 font-mono text-[10px] uppercase">
+            {plan}
+          </span>
+        ) : null}
+      </div>
+      {updatedAt ? <p className="mt-1.5 mb-0 font-mono text-[10.5px] text-[var(--mute)]">Latest observation {updatedAt}</p> : null}
     </header>
   );
 }
@@ -160,7 +163,7 @@ function AccountCard({
   const label = account?.label ?? null;
   const title = label ? `${name} limits · ${label}` : `${name} limits`;
   const [hero, ...rest] = entry.windows;
-  const { message, refreshPaused, remembered } = presentLimitAccount(entry, `${name} limits are unavailable.`);
+  const { message, refreshPaused, remembered, updatedAt } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   return (
     <section
@@ -169,7 +172,7 @@ function AccountCard({
       data-status={entry.status}
       data-current-account={entry.currentAccount ? "true" : "false"}
     >
-      <CardHeader entry={entry} provider={entry.provider} />
+      <CardHeader entry={entry} provider={entry.provider} updatedAt={updatedAt} />
 
       {remembered && hero ? (
         <div className="flex items-center gap-2.5 border-b border-[var(--hair)] bg-[var(--well)] px-3.5 py-[7px]">

@@ -182,7 +182,7 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
   const name = providerLabel(entry.provider);
   const label = entry.account?.label ?? name;
   const plan = planLabel(entry.plan);
-  const { message, refreshPaused, remembered } = presentLimitAccount(entry, `${name} limits are unavailable.`);
+  const { message, refreshPaused, remembered, updatedAt } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   return (
     <article
@@ -191,18 +191,21 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
       data-current-account={entry.currentAccount ? "true" : "false"}
       data-status={entry.status}
     >
-      <header className="mb-1.5 flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
-        {remembered ? (
-          <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
-            Remembered account
-          </span>
-        ) : refreshPaused ? (
-          <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
-            Refresh paused
-          </span>
-        ) : null}
-        {plan ? <span className="shrink-0 text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
+      <header className="mb-1.5 min-w-0">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
+          {remembered ? (
+            <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
+              Remembered account
+            </span>
+          ) : refreshPaused ? (
+            <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
+              Refresh paused
+            </span>
+          ) : null}
+          {plan ? <span className="shrink-0 text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
+        </div>
+        {updatedAt ? <p className="mt-0.5 mb-0 text-[10px] text-[var(--mute)] tabular-nums">Latest observation {updatedAt}</p> : null}
       </header>
 
       {message ? (
@@ -246,7 +249,7 @@ function PopoverWindow({
         <span className="block truncate text-[10.5px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
           {window.label}
         </span>
-        <span className="mt-0.5 block text-[10px] leading-tight text-[var(--mute)] tabular-nums">{note}</span>
+        {note ? <span className="mt-0.5 block text-[10px] leading-tight text-[var(--mute)] tabular-nums">{note}</span> : null}
       </div>
       <span className="text-[13px] font-semibold tabular-nums" style={{ color: usageToneColor(tone) }}>
         {text}

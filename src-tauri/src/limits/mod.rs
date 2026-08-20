@@ -1,5 +1,6 @@
-//! Subscription rate limits aggregated per account from provider endpoints, remembered snapshots,
-//! and account-correlated local observations. Stored logins are read-only and never refreshed here.
+//! Subscription rate limits aggregated per account from provider-owned clients/endpoints,
+//! remembered snapshots, and account-correlated local observations. Claude's stored login remains
+//! read-only; Codex owns its authentication and refresh lifecycle through app-server.
 //!
 //! `read_limits` never fails for provider-side reasons; every outcome is a `ProviderLimitsDto`
 //! whose `status` + `message` tell the UI what to show. Because each CLI stores one login at a
@@ -11,6 +12,7 @@ mod claude_desktop;
 #[cfg(test)]
 mod claude_observation_tests;
 mod codex;
+mod codex_app_server;
 mod codex_sessions;
 mod credentials;
 mod http;
@@ -22,6 +24,7 @@ mod pipeline;
 mod snapshots;
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 
@@ -30,18 +33,22 @@ use crate::dto::{
 };
 use crate::paths;
 use credentials::{
-    read_claude_credential, read_claude_identity, read_codex_credential, ClaudeCredential,
+    read_claude_credential, read_claude_identity, ClaudeCredential, ClaudeIdentity,
     ClaudeLoginMemo, CredentialLookup, KeychainProbe, CLAUDE_LOGIN,
 };
-use http::get_json;
+use http::{get_json, HttpError};
 use observations::ObservedWindowSet;
-use pipeline::{finish, resolve};
+#[cfg(test)]
+use pipeline::resolve;
+use pipeline::{finish, resolve_provider, LoadFailureKind, ProviderLoadError, ResolveOutcome};
 use snapshots::SnapshotStore;
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
-const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 /// Account id used when the CLI stores no identity; keeps single-account behaviour intact.
 const DEFAULT_ACCOUNT: &str = "default";
+static CLAUDE_READ_LOCK: Mutex<()> = Mutex::new(());
+static CODEX_READ_LOCK: Mutex<()> = Mutex::new(());
 
 /// Provider-neutral content of a parsed usage payload; `Default` is the empty snapshot that
 /// accompanies every non-`ok` status.
@@ -53,21 +60,21 @@ struct Parsed {
     credits: Option<LimitsCreditsDto>,
 }
 
-/// Everything `read_limits` needs that tests replace: where the homes/snapshots live, the
-/// Keychain probe and its memo, and the endpoints.
+/// Everything `read_limits` needs that tests replace: where the homes/snapshots live, the Claude
+/// Keychain probe and memo, and the Claude endpoint.
 struct Sources<'a, P: FnOnce() -> KeychainProbe> {
     home: &'a Path,
     memo: &'a ClaudeLoginMemo,
     keychain: P,
+    claude_profile_url: &'a str,
     claude_url: &'a str,
-    codex_url: &'a str,
     claude_desktop_history: PathBuf,
     now_ms: i64,
 }
 
 /// Current subscription limits for one provider, followed by remembered observations for its other
-/// accounts. Blocking: runs a Keychain probe (macOS, Claude) and one HTTPS request; call it off
-/// the UI thread. `force` = explicit refresh: re-read the Keychain instead of the in-process memo.
+/// accounts. Blocking: runs a Keychain probe and HTTPS requests for Claude or a bounded Codex
+/// app-server process; call it off the UI thread. `force` requests fresh provider authentication.
 pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
     let home = match paths::user_home() {
         Ok(home) => home,
@@ -91,8 +98,8 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             home: &home,
             memo: &CLAUDE_LOGIN,
             keychain: credentials::keychain_claude_json,
+            claude_profile_url: CLAUDE_PROFILE_URL,
             claude_url: CLAUDE_USAGE_URL,
-            codex_url: CODEX_USAGE_URL,
             claude_desktop_history,
             now_ms: Utc::now().timestamp_millis(),
         },
@@ -110,12 +117,16 @@ fn read_limits_in<P: FnOnce() -> KeychainProbe>(
     force: bool,
     sources: Sources<'_, P>,
 ) -> Vec<ProviderLimitsDto> {
+    let _provider_guard = match agent {
+        AgentId::Claude | AgentId::Codex => Some(provider_read_guard(agent)),
+        AgentId::Antigravity | AgentId::Cursor => None,
+    };
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
     let (current, supplemental) = match agent {
         AgentId::Claude => claude_current(force, sources),
-        AgentId::Codex => (codex_limits(home, sources.codex_url), None),
+        AgentId::Codex => (codex_limits(home, force), None),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
                 agent,
@@ -139,6 +150,22 @@ fn read_limits_in<P: FnOnce() -> KeychainProbe>(
     accounts
 }
 
+fn provider_read_lock(agent: AgentId) -> &'static Mutex<()> {
+    match agent {
+        AgentId::Claude => &CLAUDE_READ_LOCK,
+        AgentId::Codex => &CODEX_READ_LOCK,
+        AgentId::Antigravity | AgentId::Cursor => {
+            unreachable!("unsupported providers do not run a limits read")
+        }
+    }
+}
+
+fn provider_read_guard(agent: AgentId) -> MutexGuard<'static, ()> {
+    provider_read_lock(agent)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Merge every available observation for the current account, persist the canonical account view,
 /// then return it followed by the other remembered accounts, newest first.
 fn aggregate_accounts(
@@ -159,11 +186,15 @@ fn aggregate_accounts(
             })
             .map(|index| remembered.remove(index))
     });
-    let current = observations::merge_windows(
-        current,
-        supplemental,
-        prior.and_then(ObservedWindowSet::from_account),
-    );
+    let current = if current.status == LimitsStatus::Ok {
+        current
+    } else {
+        observations::merge_windows(
+            current,
+            supplemental,
+            prior.and_then(ObservedWindowSet::from_account),
+        )
+    };
     let _ = store.save(&current);
     std::iter::once(current).chain(remembered).collect()
 }
@@ -179,52 +210,85 @@ fn claude_current<P: FnOnce() -> KeychainProbe>(
         home,
         memo,
         keychain,
+        claude_profile_url,
         claude_url,
         claude_desktop_history,
         now_ms,
         ..
     } = sources;
-    let (account, organization_id) = read_claude_identity(home)
-        .map(|identity| (identity.account, identity.organization_id))
-        .unwrap_or_else(|| (default_account(), None));
+    let selected_identity = read_claude_identity(home);
+    let account = selected_identity
+        .as_ref()
+        .map(|identity| identity.account.clone())
+        .unwrap_or_else(default_account);
+    let organization_id = selected_identity
+        .as_ref()
+        .and_then(|identity| identity.organization_id.clone());
     let lookup = memo.lookup(force, &account.id, now_ms, || {
         read_claude_credential(home, keychain(), now_ms)
     });
-    let dto = claude_limits(lookup, account, claude_url);
-    if dto.status == LimitsStatus::Unauthenticated {
+    let loaded = claude_limits(lookup, selected_identity, claude_profile_url, claude_url);
+    if loaded.dto.status == LimitsStatus::Unauthenticated
+        || loaded.failure == Some(LoadFailureKind::AccountMismatch)
+    {
         memo.clear();
     }
-    let local_observations = organization_id
-        .as_deref()
-        .and_then(|organization_id| {
-            claude_desktop::read_latest(&claude_desktop_history, organization_id)
+    let local_observations = (loaded.dto.status != LimitsStatus::Ok)
+        .then(|| {
+            organization_id
+                .as_deref()
+                .and_then(|organization_id| {
+                    claude_desktop::read_latest(&claude_desktop_history, organization_id)
+                })
+                .map(|usage| ObservedWindowSet::local(usage.observed_at, usage.windows))
         })
-        .map(|usage| ObservedWindowSet::local(usage.observed_at, usage.windows));
-    (dto, local_observations)
+        .flatten();
+    (loaded.dto, local_observations)
 }
 
-/// Claude: stored OAuth login → `GET {url}` with the OAuth beta header → normalized windows.
-/// The plan label comes from the login itself (`subscriptionType`).
+/// Claude: verify the stored token's profile, then read usage with the OAuth beta header. The plan
+/// label comes from the login itself (`subscriptionType`).
 fn claude_limits(
     lookup: CredentialLookup<ClaudeCredential>,
-    account: LimitsAccountDto,
-    url: &str,
-) -> ProviderLimitsDto {
-    resolve(
+    selected_identity: Option<ClaudeIdentity>,
+    profile_url: &str,
+    usage_url: &str,
+) -> ResolveOutcome {
+    let selected_account = selected_identity
+        .as_ref()
+        .map(|identity| identity.account.clone())
+        .unwrap_or_else(default_account);
+    resolve_provider(
         AgentId::Claude,
-        Some(account.clone()),
+        Some(selected_account),
         lookup,
-        move |credential| {
+        |credential| {
             let bearer = format!("Bearer {}", credential.token);
+            let profile_payload = get_json(
+                profile_url,
+                &[
+                    ("Authorization", &bearer),
+                    ("Content-Type", "application/json"),
+                    ("Cache-Control", "no-cache"),
+                ],
+            )?;
+            let profile = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
+            if selected_identity.as_ref().is_some_and(|selected| {
+                selected.account.id != profile.account.id
+                    || selected.organization_id != profile.organization_id
+            }) {
+                return Err(ProviderLoadError::AccountMismatch);
+            }
             let payload = get_json(
-                url,
+                usage_url,
                 &[
                     ("Authorization", &bearer),
                     ("anthropic-beta", "oauth-2025-04-20"),
+                    ("Cache-Control", "no-cache"),
                 ],
             )?;
             Ok(Parsed {
-                account: Some(account),
+                account: Some(profile.account),
                 plan: credential.subscription_type.clone(),
                 windows: claude::parse_claude(&payload),
                 credits: None,
@@ -233,31 +297,29 @@ fn claude_limits(
     )
 }
 
-/// Codex: `auth.json` ChatGPT login → `GET {url}` with the account header → plan, windows, credits.
-/// The account id is the login's `account_id`; its label is the payload's email.
-fn codex_limits(home: &Path, url: &str) -> ProviderLimitsDto {
-    resolve(
-        AgentId::Codex,
-        None,
-        read_codex_credential(home),
-        |credential| {
-            let bearer = format!("Bearer {}", credential.token);
-            let mut headers: Vec<(&str, &str)> = vec![("Authorization", &bearer)];
-            if let Some(account) = credential.account_id.as_deref() {
-                headers.push(("ChatGPT-Account-Id", account));
-            }
-            let payload = get_json(url, &headers)?;
-            let mut parsed = codex::parse_codex(&payload);
-            parsed.account = Some(LimitsAccountDto {
-                id: credential
-                    .account_id
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_ACCOUNT.to_string()),
-                label: codex::account_email(&payload),
-            });
-            Ok(parsed)
-        },
-    )
+/// Codex owns login, token refresh and usage requests through its documented app-server APIs.
+fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
+    match codex_app_server::read(home, force) {
+        Ok(parsed) => finish(AgentId::Codex, LimitsStatus::Ok, None, parsed),
+        Err(codex_app_server::AppServerFailure::SignedOut) => finish(
+            AgentId::Codex,
+            LimitsStatus::SignedOut,
+            Some("Sign in with `codex` to see subscription limits.".to_string()),
+            Parsed::default(),
+        ),
+        Err(codex_app_server::AppServerFailure::Unsupported(message)) => finish(
+            AgentId::Codex,
+            LimitsStatus::Unsupported,
+            Some(message),
+            Parsed::default(),
+        ),
+        Err(codex_app_server::AppServerFailure::Failed(message)) => finish(
+            AgentId::Codex,
+            LimitsStatus::Failed,
+            Some(message),
+            Parsed::default(),
+        ),
+    }
 }
 
 fn default_account() -> LimitsAccountDto {
@@ -268,638 +330,5 @@ fn default_account() -> LimitsAccountDto {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::dto::LimitWindowKind;
-    use crate::paths::scratch_dir;
-    use http::{refused_url, serve_once, HttpError};
-    use json::window;
-    use serde_json::json;
-    use std::cell::Cell;
-    use std::fs;
-
-    fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
-        Parsed {
-            account: None,
-            plan: Some("max".to_string()),
-            windows,
-            credits: None,
-        }
-    }
-
-    fn account(id: &str, label: &str) -> LimitsAccountDto {
-        LimitsAccountDto {
-            id: id.to_string(),
-            label: Some(label.to_string()),
-        }
-    }
-
-    fn ok_snapshot(provider: AgentId, id: &str, label: &str, used: f64) -> ProviderLimitsDto {
-        let mut dto = finish(
-            provider,
-            LimitsStatus::Ok,
-            None,
-            Parsed {
-                account: Some(account(id, label)),
-                plan: Some("pro".to_string()),
-                windows: vec![window(
-                    "primary",
-                    "Weekly · all models",
-                    LimitWindowKind::Weekly,
-                    used,
-                    None,
-                )],
-                credits: None,
-            },
-        );
-        let observed_at = format!("2026-08-17T{:02}:00:00.000Z", used as u32 % 24);
-        for window in &mut dto.windows {
-            window.observed_at.clone_from(&observed_at);
-        }
-        dto
-    }
-
-    fn write(home: &Path, rel: &str, body: &str) {
-        let path = home.join(rel);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, body).unwrap();
-    }
-
-    const CLAUDE_CREDENTIALS: &str = r#"{"claudeAiOauth":{"accessToken":"kc-token","expiresAt":1787022473402,"subscriptionType":"max"}}"#;
-    /// The same login as `CLAUDE_CREDENTIALS` with the refresh token Claude Code actually stores:
-    /// the access token lasts 8 hours, the refresh token more than a week.
-    const CLAUDE_RENEWABLE_CREDENTIALS: &str = r#"{"claudeAiOauth":{"accessToken":"kc-token","expiresAt":1787022473402,"refreshToken":"rt","refreshTokenExpiresAt":1787981634215,"subscriptionType":"max"}}"#;
-    const CODEX_AUTH: &str =
-        r#"{"auth_mode":"chatgpt","tokens":{"access_token":"codex-token","account_id":"acct-1"}}"#;
-    /// Well before the Claude fixture's `expiresAt`.
-    const NOW_MS: i64 = 1787000000000;
-
-    #[test]
-    fn missing_login_is_signed_out_and_names_the_cli() {
-        let dto = resolve::<()>(AgentId::Claude, None, CredentialLookup::Missing, |_| {
-            unreachable!("no fetch without a login")
-        });
-        assert_eq!(dto.provider, AgentId::Claude);
-        assert_eq!(dto.status, LimitsStatus::SignedOut);
-        assert!(dto.message.as_deref().unwrap().contains("`claude`"));
-        assert!(dto.windows.is_empty());
-    }
-
-    #[test]
-    fn expired_unsupported_and_unreadable_logins_map_to_their_statuses_without_loading() {
-        let loaded = Cell::new(false);
-        // Captures only `&loaded`, so the closure is `Copy` and can be handed to each call.
-        let load = |_: &&str| {
-            loaded.set(true);
-            Ok(Parsed::default())
-        };
-
-        let expired = resolve(
-            AgentId::Codex,
-            None,
-            CredentialLookup::Expired { renewable: false },
-            load,
-        );
-        assert_eq!(expired.status, LimitsStatus::Unauthenticated);
-        assert!(expired.message.as_deref().unwrap().contains("`codex`"));
-
-        let unsupported = resolve(
-            AgentId::Codex,
-            None,
-            CredentialLookup::Unsupported("API key".to_string()),
-            load,
-        );
-        assert_eq!(unsupported.status, LimitsStatus::Unsupported);
-        assert_eq!(unsupported.message.as_deref(), Some("API key"));
-
-        let unreadable = resolve(
-            AgentId::Claude,
-            Some(account("uuid-1", "me@example.com")),
-            CredentialLookup::Unreadable("Keychain denied".to_string()),
-            load,
-        );
-        assert_eq!(unreadable.status, LimitsStatus::Failed);
-        assert!(unreadable
-            .message
-            .as_deref()
-            .unwrap()
-            .contains("Keychain denied"));
-        assert_eq!(
-            unreadable.account,
-            Some(account("uuid-1", "me@example.com")),
-            "a failure still says which account it is about"
-        );
-
-        assert!(!loaded.get());
-    }
-
-    #[test]
-    fn a_rejected_token_is_unauthenticated_and_other_http_failures_are_failed() {
-        let rejected = resolve(
-            AgentId::Claude,
-            None,
-            CredentialLookup::Found("token"),
-            |_| Err(HttpError::Unauthorized),
-        );
-        assert_eq!(rejected.status, LimitsStatus::Unauthenticated);
-
-        let offline = resolve(
-            AgentId::Claude,
-            None,
-            CredentialLookup::Found("token"),
-            |_| Err(HttpError::Network("dns".to_string())),
-        );
-        assert_eq!(offline.status, LimitsStatus::Failed);
-        assert!(offline.message.as_deref().unwrap().contains("dns"));
-
-        let server = resolve(
-            AgentId::Claude,
-            None,
-            CredentialLookup::Found("token"),
-            |_| Err(HttpError::Status(503)),
-        );
-        assert_eq!(server.status, LimitsStatus::Failed);
-        assert!(server.message.as_deref().unwrap().contains("503"));
-    }
-
-    #[test]
-    fn a_successful_load_is_ok_with_windows_ordered_weekly_session_model() {
-        let dto = resolve(
-            AgentId::Claude,
-            None,
-            CredentialLookup::Found("token"),
-            |token| {
-                assert_eq!(*token, "token");
-                Ok(parsed(vec![
-                    window("m", "Weekly · Opus", LimitWindowKind::Model, 3.0, None),
-                    window(
-                        "s",
-                        "5 hour · all models",
-                        LimitWindowKind::Session,
-                        7.0,
-                        None,
-                    ),
-                    window(
-                        "w",
-                        "Weekly · all models",
-                        LimitWindowKind::Weekly,
-                        12.0,
-                        None,
-                    ),
-                    window("m2", "Weekly · Sonnet", LimitWindowKind::Model, 1.0, None),
-                ]))
-            },
-        );
-        assert_eq!(dto.status, LimitsStatus::Ok);
-        assert_eq!(dto.message, None);
-        assert_eq!(dto.plan.as_deref(), Some("max"));
-        let ids: Vec<&str> = dto.windows.iter().map(|w| w.id.as_str()).collect();
-        assert_eq!(ids, ["w", "s", "m", "m2"]);
-        assert!(dto
-            .windows
-            .iter()
-            .all(|window| { chrono::DateTime::parse_from_rfc3339(&window.observed_at).is_ok() }));
-    }
-
-    /// Test doubles for `read_limits_in`: a scratch home, a fresh memo, a counting Keychain probe.
-    struct Rig {
-        home: std::path::PathBuf,
-        memo: ClaudeLoginMemo,
-        probes: Cell<u32>,
-        keychain_json: Option<String>,
-    }
-
-    impl Rig {
-        fn new(prefix: &str) -> Self {
-            Self {
-                home: scratch_dir(prefix),
-                memo: ClaudeLoginMemo::new(),
-                probes: Cell::new(0),
-                keychain_json: None,
-            }
-        }
-
-        fn read(
-            &self,
-            agent: AgentId,
-            force: bool,
-            claude_url: &str,
-            codex_url: &str,
-        ) -> Vec<ProviderLimitsDto> {
-            read_limits_in(
-                agent,
-                force,
-                Sources {
-                    home: &self.home,
-                    memo: &self.memo,
-                    keychain: || {
-                        self.probes.set(self.probes.get() + 1);
-                        Ok(self.keychain_json.clone())
-                    },
-                    claude_url,
-                    codex_url,
-                    claude_desktop_history: claude_desktop::history_path_for_home(&self.home),
-                    now_ms: NOW_MS,
-                },
-            )
-        }
-    }
-
-    const CLAUDE_PAYLOAD: &str = r#"{"limits":[
-        {"kind":"session","group":"session","percent":7,"resets_at":"2026-08-18T04:59:59+00:00"},
-        {"kind":"weekly_all","group":"weekly","percent":12,"resets_at":"2026-08-24T13:59:59+00:00"}
-    ]}"#;
-
-    fn claude_account_file(id: &str, email: &str) -> String {
-        format!(r#"{{"oauthAccount":{{"accountUuid":"{id}","emailAddress":"{email}"}}}}"#)
-    }
-
-    fn account_of(dto: &ProviderLimitsDto) -> LimitsAccountDto {
-        dto.account.clone().expect("account")
-    }
-
-    #[test]
-    fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
-        let home = scratch_dir("limits-claude");
-        write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
-        let (url, request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-        let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
-        let dto = claude_limits(lookup, account("uuid-1", "me@example.com"), &url);
-        let head = request.join().unwrap();
-        assert!(head.contains("Authorization: Bearer kc-token"), "{head}");
-        assert!(head.contains("anthropic-beta: oauth-2025-04-20"), "{head}");
-        assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
-        assert_eq!(dto.plan.as_deref(), Some("max"));
-        assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
-        assert!(dto.current_account);
-        let ids: Vec<&str> = dto.windows.iter().map(|w| w.id.as_str()).collect();
-        assert_eq!(ids, ["weekly_all", "session"]);
-    }
-
-    #[test]
-    fn claude_read_prefers_the_keychain_login_and_defaults_the_account_without_claude_json() {
-        let mut rig = Rig::new("limits-claude");
-        rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "keychain-token"));
-        write(&rig.home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
-        let (url, request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-        let dtos = rig.read(AgentId::Claude, false, &url, &refused_url());
-        assert!(request
-            .join()
-            .unwrap()
-            .contains("Authorization: Bearer keychain-token"));
-        assert_eq!(dtos[0].status, LimitsStatus::Ok, "{:?}", dtos[0].message);
-        assert_eq!(account_of(&dtos[0]).id, "default");
-        assert_eq!(rig.probes.get(), 1);
-    }
-
-    #[test]
-    fn claude_read_skips_the_network_when_expired_or_signed_out() {
-        let rig = Rig::new("limits-claude");
-        assert_eq!(
-            rig.read(AgentId::Claude, false, &refused_url(), &refused_url())[0].status,
-            LimitsStatus::SignedOut
-        );
-        write(&rig.home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
-        let expired = read_limits_in(
-            AgentId::Claude,
-            false,
-            Sources {
-                home: &rig.home,
-                memo: &rig.memo,
-                keychain: || Ok(None),
-                claude_url: &refused_url(),
-                codex_url: &refused_url(),
-                claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
-                now_ms: 1787022473402 + 1,
-            },
-        );
-        assert_eq!(expired[0].status, LimitsStatus::Unauthenticated);
-        assert!(expired[0].message.as_deref().unwrap().contains("`claude`"));
-    }
-
-    #[test]
-    fn claude_read_memoises_the_keychain_until_forced_and_forgets_it_when_rejected() {
-        let mut rig = Rig::new("limits-claude");
-        rig.keychain_json = Some(CLAUDE_CREDENTIALS.to_string());
-        write(
-            &rig.home,
-            ".claude.json",
-            &claude_account_file("uuid-1", "me@example.com"),
-        );
-
-        let (url, request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-        rig.read(AgentId::Claude, false, &url, &refused_url());
-        request.join().unwrap();
-        let (url, request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-        rig.read(AgentId::Claude, false, &url, &refused_url());
-        request.join().unwrap();
-        assert_eq!(
-            rig.probes.get(),
-            1,
-            "second non-forced read served from the memo"
-        );
-
-        let (url, request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-        rig.read(AgentId::Claude, true, &url, &refused_url());
-        request.join().unwrap();
-        assert_eq!(
-            rig.probes.get(),
-            2,
-            "an explicit refresh re-reads the Keychain"
-        );
-
-        let (url, request) = serve_once("401 Unauthorized", "{}");
-        let rejected = rig.read(AgentId::Claude, false, &url, &refused_url());
-        request.join().unwrap();
-        assert_eq!(rejected[0].status, LimitsStatus::Unauthenticated);
-        assert_eq!(rig.probes.get(), 2);
-        let (url, request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-        rig.read(AgentId::Claude, false, &url, &refused_url());
-        request.join().unwrap();
-        assert_eq!(rig.probes.get(), 3, "a rejected token evicts the memo");
-    }
-
-    #[test]
-    fn switching_the_claude_account_never_reuses_the_previous_accounts_token() {
-        let mut rig = Rig::new("limits-claude");
-        rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-a"));
-        write(
-            &rig.home,
-            ".claude.json",
-            &claude_account_file("uuid-a", "a@example.com"),
-        );
-        let (url, request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-        let first = rig.read(AgentId::Claude, false, &url, &refused_url());
-        assert!(request.join().unwrap().contains("Bearer token-a"));
-        assert_eq!(
-            account_of(&first[0]).label.as_deref(),
-            Some("a@example.com")
-        );
-
-        // The user runs `claude` and signs in as B: Claude Code rewrites both stores.
-        rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-b"));
-        write(
-            &rig.home,
-            ".claude.json",
-            &claude_account_file("uuid-b", "b@example.com"),
-        );
-        let (url, request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-        let second = rig.read(AgentId::Claude, false, &url, &refused_url());
-        assert!(
-            request.join().unwrap().contains("Bearer token-b"),
-            "B's card must be fetched with B's token, not the memoised A token"
-        );
-        assert_eq!(rig.probes.get(), 2);
-        let ids: Vec<(String, bool)> = second
-            .iter()
-            .map(|dto| (account_of(dto).id, dto.current_account))
-            .collect();
-        assert_eq!(
-            ids,
-            [("uuid-b".to_string(), true), ("uuid-a".to_string(), false)]
-        );
-    }
-
-    #[test]
-    fn codex_read_remembers_the_account_and_lists_it_current_first() {
-        let rig = Rig::new("limits-codex");
-        let store = SnapshotStore::for_home(&rig.home);
-        store
-            .save(&ok_snapshot(AgentId::Codex, "acct-old", "old@x", 5.0))
-            .unwrap();
-        write(&rig.home, ".codex/auth.json", CODEX_AUTH);
-        let (url, request) = serve_once(
-            "200 OK",
-            r#"{"email":"me@example.com","plan_type":"pro","rate_limit":{"primary_window":{"used_percent":2,"limit_window_seconds":604800}}}"#,
-        );
-        let dtos = rig.read(AgentId::Codex, false, &refused_url(), &url);
-        request.join().unwrap();
-        let ids: Vec<(String, bool)> = dtos
-            .iter()
-            .map(|dto| (account_of(dto).id, dto.current_account))
-            .collect();
-        assert_eq!(
-            ids,
-            [
-                ("acct-1".to_string(), true),
-                ("acct-old".to_string(), false)
-            ]
-        );
-        assert_eq!(store.load(AgentId::Codex).len(), 2);
-        assert_eq!(rig.probes.get(), 0, "Codex never touches the Keychain");
-
-        store.forget(AgentId::Codex, "acct-old").unwrap();
-        let (url, request) = serve_once("200 OK", r#"{"plan_type":"pro"}"#);
-        let after = rig.read(AgentId::Codex, false, &refused_url(), &url);
-        request.join().unwrap();
-        assert_eq!(after.len(), 1);
-    }
-
-    #[test]
-    fn codex_pipeline_sends_the_account_header_and_maps_the_payload() {
-        let home = scratch_dir("limits-codex");
-        write(&home, ".codex/auth.json", CODEX_AUTH);
-        let (url, request) = serve_once(
-            "200 OK",
-            r#"{"email":"me@example.com","plan_type":"pro","rate_limit":{"primary_window":{"used_percent":2,"limit_window_seconds":604800,"reset_at":1787614473}},
-                "additional_rate_limits":[{"limit_name":"Spark","metered_feature":"codex_bengalfox","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":604800}}}],
-                "credits":{"has_credits":true,"unlimited":false,"balance":"3"}}"#,
-        );
-        let dto = codex_limits(&home, &url);
-        let head = request.join().unwrap();
-        assert!(head.contains("Authorization: Bearer codex-token"), "{head}");
-        assert!(head.contains("ChatGPT-Account-Id: acct-1"), "{head}");
-        assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
-        assert_eq!(dto.plan.as_deref(), Some("pro"));
-        assert_eq!(dto.account, Some(account("acct-1", "me@example.com")));
-        let ids: Vec<&str> = dto.windows.iter().map(|w| w.id.as_str()).collect();
-        assert_eq!(ids, ["primary", "extra:codex_bengalfox"]);
-        assert_eq!(
-            dto.credits,
-            Some(LimitsCreditsDto {
-                balance: "3".to_string(),
-                unlimited: false
-            })
-        );
-    }
-
-    #[test]
-    fn codex_pipeline_maps_a_rejected_token_to_unauthenticated() {
-        let home = scratch_dir("limits-codex");
-        write(&home, ".codex/auth.json", CODEX_AUTH);
-        let (url, request) = serve_once("401 Unauthorized", r#"{"detail":"expired"}"#);
-        let dto = codex_limits(&home, &url);
-        request.join().unwrap();
-        assert_eq!(dto.status, LimitsStatus::Unauthenticated);
-        assert!(dto.message.as_deref().unwrap().contains("`codex`"));
-    }
-
-    #[test]
-    fn providers_without_a_subscription_are_unsupported() {
-        for provider in [AgentId::Cursor, AgentId::Antigravity] {
-            let dtos = read_limits(provider, false);
-            assert_eq!(dtos.len(), 1);
-            assert_eq!(dtos[0].provider, provider);
-            assert_eq!(dtos[0].status, LimitsStatus::Unsupported);
-            assert!(dtos[0].message.is_some());
-        }
-    }
-
-    #[test]
-    fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
-        let ok = ProviderLimitsDto {
-            provider: AgentId::Codex,
-            status: LimitsStatus::Ok,
-            message: None,
-            account: Some(LimitsAccountDto {
-                id: "acct-1".to_string(),
-                label: Some("me@example.com".to_string()),
-            }),
-            current_account: true,
-            plan: Some("pro".to_string()),
-            windows: vec![LimitWindowDto {
-                observed_at: "2026-08-17T20:00:00.000Z".to_string(),
-                ..window(
-                    "primary",
-                    "Weekly · all models",
-                    LimitWindowKind::Weekly,
-                    2.5,
-                    None,
-                )
-            }],
-            credits: Some(LimitsCreditsDto {
-                balance: "3".to_string(),
-                unlimited: false,
-            }),
-        };
-        assert_eq!(
-            serde_json::to_value(&ok).unwrap(),
-            json!({
-                "provider": "codex",
-                "status": "ok",
-                "account": {"id": "acct-1", "label": "me@example.com"},
-                "currentAccount": true,
-                "plan": "pro",
-                "windows": [{"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5, "observedAt": "2026-08-17T20:00:00.000Z"}],
-                "credits": {"balance": "3", "unlimited": false}
-            })
-        );
-        let signed_out = finish(
-            AgentId::Claude,
-            LimitsStatus::SignedOut,
-            Some("Sign in".to_string()),
-            Parsed::default(),
-        );
-        let value = serde_json::to_value(&signed_out).unwrap();
-        assert_eq!(value["status"], "signedOut");
-        assert_eq!(value["message"], "Sign in");
-        assert_eq!(value["windows"], json!([]));
-        assert!(value.get("plan").is_none());
-        assert!(value.get("credits").is_none());
-        assert!(value.get("account").is_none());
-        assert_eq!(value["currentAccount"], true);
-    }
-
-    /// Claude Code's access token lasts 8 hours and the CLI renews it from its refresh token on
-    /// its next run. An expired access token is therefore not an expired login: the card must ask
-    /// for a `claude` run, never for a new sign-in, and must still name the signed-in account.
-    #[test]
-    fn an_expired_access_token_with_a_live_refresh_token_asks_only_for_a_cli_run() {
-        let rig = Rig::new("limits-claude");
-        write(
-            &rig.home,
-            ".claude/.credentials.json",
-            CLAUDE_RENEWABLE_CREDENTIALS,
-        );
-        write(
-            &rig.home,
-            ".claude.json",
-            &claude_account_file("uuid-1", "me@example.com"),
-        );
-        let dtos = read_limits_in(
-            AgentId::Claude,
-            false,
-            Sources {
-                home: &rig.home,
-                memo: &rig.memo,
-                keychain: || Ok(None),
-                claude_url: &refused_url(),
-                codex_url: &refused_url(),
-                claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
-                now_ms: 1787022473402 + 1,
-            },
-        );
-        assert_eq!(dtos[0].status, LimitsStatus::Unauthenticated);
-        let message = dtos[0].message.as_deref().unwrap();
-        assert!(message.contains("`claude`"), "{message}");
-        assert!(message.contains("send a prompt"), "{message}");
-        assert!(!message.contains("any"), "{message}");
-        assert!(!message.contains("sign in"), "{message}");
-        assert_eq!(
-            account_of(&dtos[0]).label.as_deref(),
-            Some("me@example.com")
-        );
-    }
-
-    /// A login whose refresh token has expired too really does need a new sign-in.
-    #[test]
-    fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in() {
-        let rig = Rig::new("limits-claude");
-        write(
-            &rig.home,
-            ".claude/.credentials.json",
-            &CLAUDE_RENEWABLE_CREDENTIALS.replace("1787981634215", "1787022473402"),
-        );
-        let dtos = read_limits_in(
-            AgentId::Claude,
-            false,
-            Sources {
-                home: &rig.home,
-                memo: &rig.memo,
-                keychain: || Ok(None),
-                claude_url: &refused_url(),
-                codex_url: &refused_url(),
-                claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
-                now_ms: 1787022473402 + 1,
-            },
-        );
-        assert_eq!(dtos[0].status, LimitsStatus::Unauthenticated);
-        assert!(dtos[0]
-            .message
-            .as_deref()
-            .unwrap()
-            .contains("sign in again"));
-    }
-
-    /// Live probe against the real home: Keychain read + one GET per provider (read-only).
-    /// `cargo test --manifest-path src-tauri/Cargo.toml probe_real_home_limits -- --ignored --nocapture`
-    #[test]
-    #[ignore = "real-home network probe; not part of CI"]
-    fn probe_real_home_limits() {
-        for provider in [AgentId::Claude, AgentId::Codex] {
-            for dto in read_limits(provider, true) {
-                println!(
-                    "{:?}: current_account={} account={:?} status={:?} plan={:?} message={:?} credits={:?}",
-                    provider,
-                    dto.current_account,
-                    dto.account,
-                    dto.status,
-                    dto.plan,
-                    dto.message,
-                    dto.credits
-                );
-                for window in &dto.windows {
-                    println!(
-                        "  [{:?}] {} ({}) used={}% resets_at={:?} observed_at={}",
-                        window.kind,
-                        window.label,
-                        window.id,
-                        window.used_percent,
-                        window.resets_at,
-                        window.observed_at
-                    );
-                }
-            }
-        }
-    }
-}
+#[path = "provider_tests.rs"]
+mod tests;

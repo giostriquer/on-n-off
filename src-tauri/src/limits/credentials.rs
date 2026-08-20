@@ -43,12 +43,6 @@ impl ClaudeCredential {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct CodexCredential {
-    pub token: String,
-    pub account_id: Option<String>,
-}
-
 // Manual `Debug` so a stray `{:?}` (test panic, log line) can never print a token.
 impl fmt::Debug for ClaudeCredential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -58,15 +52,6 @@ impl fmt::Debug for ClaudeCredential {
             .field("has_refresh_token", &self.has_refresh_token)
             .field("refresh_expires_at_ms", &self.refresh_expires_at_ms)
             .field("subscription_type", &self.subscription_type)
-            .finish()
-    }
-}
-
-impl fmt::Debug for CodexCredential {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CodexCredential")
-            .field("token", &"<redacted>")
-            .field("account_id", &self.account_id)
             .finish()
     }
 }
@@ -82,8 +67,6 @@ pub enum CredentialLookup<T> {
     Expired {
         renewable: bool,
     },
-    /// A login exists but cannot carry subscription limits (API-key auth).
-    Unsupported(String),
     /// A login may exist but could not be read (Keychain denied, unreadable file).
     Unreadable(String),
 }
@@ -239,36 +222,6 @@ impl ClaudeLoginMemo {
 }
 
 pub static CLAUDE_LOGIN: ClaudeLoginMemo = ClaudeLoginMemo::new();
-
-/// `<home>/.codex/auth.json` → `tokens.access_token` + `tokens.account_id`.
-pub fn read_codex_credential(home: &Path) -> CredentialLookup<CodexCredential> {
-    let path = home.join(".codex").join("auth.json");
-    let value = match read_json_file(&path) {
-        Ok(Some(value)) if value.is_object() => value,
-        Ok(Some(_)) => {
-            return CredentialLookup::Unreadable(format!(
-                "{}: expected a JSON object",
-                path.display()
-            ))
-        }
-        Ok(None) => return CredentialLookup::Missing,
-        Err(why) => return CredentialLookup::Unreadable(why),
-    };
-    let tokens = value.get("tokens").filter(|tokens| tokens.is_object());
-    let token = tokens.and_then(|tokens| optional_string(tokens.get("access_token")));
-    match token {
-        Some(token) => CredentialLookup::Found(CodexCredential {
-            token,
-            account_id: tokens.and_then(|tokens| optional_string(tokens.get("account_id"))),
-        }),
-        None if optional_string(value.get("OPENAI_API_KEY")).is_some() => {
-            CredentialLookup::Unsupported(
-                "Codex is signed in with an API key, which has no subscription limits.".to_string(),
-            )
-        }
-        None => CredentialLookup::Missing,
-    }
-}
 
 /// `Ok(None)` when the file does not exist; `Err` for any other I/O or JSON failure.
 fn read_json_file(path: &Path) -> Result<Option<Value>, String> {
@@ -583,14 +536,9 @@ mod tests {
             refresh_expires_at_ms: None,
             subscription_type: Some("max".to_string()),
         };
-        let codex = CodexCredential {
-            token: "secret-codex".to_string(),
-            account_id: Some("acct".to_string()),
-        };
-        let printed = format!("{claude:?} {codex:?}");
+        let printed = format!("{claude:?}");
         assert!(!printed.contains("secret-"), "{printed}");
         assert!(printed.contains("<redacted>"));
-        assert!(printed.contains("acct"));
     }
 
     #[test]
@@ -616,64 +564,5 @@ mod tests {
         .unwrap_err();
         assert!(denied.contains("User canceled"), "{denied}");
         assert!(denied.contains("click Allow"), "{denied}");
-    }
-
-    #[test]
-    fn codex_reads_the_chatgpt_login_from_auth_json() {
-        let home = scratch_dir("limits-cred");
-        write(
-            &home,
-            ".codex/auth.json",
-            r#"{"auth_mode":"chatgpt","OPENAI_API_KEY":null,"tokens":{"id_token":"i","access_token":"codex-token","refresh_token":"r","account_id":"acct-1"},"last_refresh":"2026-08-17T20:34:00Z"}"#,
-        );
-        match read_codex_credential(&home) {
-            CredentialLookup::Found(cred) => {
-                assert_eq!(cred.token, "codex-token");
-                assert_eq!(cred.account_id.as_deref(), Some("acct-1"));
-            }
-            other => panic!("expected Found, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn codex_api_key_login_has_no_subscription_limits() {
-        let home = scratch_dir("limits-cred");
-        write(
-            &home,
-            ".codex/auth.json",
-            r#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-x","tokens":null}"#,
-        );
-        match read_codex_credential(&home) {
-            CredentialLookup::Unsupported(message) => assert!(message.contains("API key")),
-            other => panic!("expected Unsupported, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn codex_without_auth_json_is_missing() {
-        let home = scratch_dir("limits-cred");
-        assert_eq!(read_codex_credential(&home), CredentialLookup::Missing);
-    }
-
-    #[test]
-    fn codex_malformed_or_unreadable_auth_json_is_unreadable() {
-        let home = scratch_dir("limits-cred");
-        write(&home, ".codex/auth.json", "[]");
-        assert!(matches!(
-            read_codex_credential(&home),
-            CredentialLookup::Unreadable(_)
-        ));
-        write(&home, ".codex/auth.json", "{oops");
-        assert!(matches!(
-            read_codex_credential(&home),
-            CredentialLookup::Unreadable(_)
-        ));
-        // A directory where the file should be is an I/O error, not "signed out".
-        fs::remove_file(home.join(".codex").join("auth.json")).unwrap();
-        fs::create_dir_all(home.join(".codex").join("auth.json")).unwrap();
-        assert!(matches!(
-            read_codex_credential(&home),
-            CredentialLookup::Unreadable(_)
-        ));
     }
 }

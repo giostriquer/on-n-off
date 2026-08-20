@@ -1,132 +1,177 @@
-//! Codex subscription limits: parse `GET chatgpt.com/backend-api/wham/usage` (pure).
-//!
-//! `rate_limit.primary_window` / `secondary_window` are the plan-wide windows (weekly vs
-//! session decided by `limit_window_seconds`); `additional_rate_limits[]` are per-model
-//! limits; `credits` is the extra-usage balance. Of the identity fields only `email` is read,
-//! separately, as the account label.
+//! Codex subscription limits: normalize `account/rateLimits/read` from Codex app-server.
 
 use chrono::{DateTime, Utc};
-use serde_json::Value;
+use serde::Deserialize;
+use std::collections::BTreeMap;
 
-use super::json::{optional_string, percent, window};
+use super::json::window;
 use super::Parsed;
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsCreditsDto};
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
-pub(super) fn parse_codex(payload: &Value) -> Parsed {
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RateLimitsResponse {
+    rate_limits: RateLimitBucket,
+    #[serde(default)]
+    rate_limits_by_limit_id: Option<BTreeMap<String, RateLimitBucket>>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitBucket {
+    #[serde(default)]
+    limit_id: Option<String>,
+    #[serde(default)]
+    limit_name: Option<String>,
+    #[serde(default)]
+    primary: Option<RateLimitWindow>,
+    #[serde(default)]
+    secondary: Option<RateLimitWindow>,
+    #[serde(default)]
+    credits: Option<RateLimitCredits>,
+    #[serde(default)]
+    plan_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitWindow {
+    used_percent: f64,
+    #[serde(default)]
+    window_duration_mins: Option<u64>,
+    #[serde(default)]
+    resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitCredits {
+    #[serde(default)]
+    has_credits: bool,
+    #[serde(default)]
+    unlimited: bool,
+    #[serde(default)]
+    balance: Option<String>,
+}
+
+pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
+    let fallback = &payload.rate_limits;
+    let main_id = fallback
+        .limit_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "codex".to_string());
+    let buckets = payload.rate_limits_by_limit_id.as_ref();
+    let main = buckets
+        .and_then(|items| items.get(&main_id))
+        .unwrap_or(fallback);
     let mut windows = Vec::new();
-    if let Some(rate_limit) = payload.get("rate_limit") {
-        windows.extend(plan_window(rate_limit, "primary_window", "primary"));
-        windows.extend(plan_window(rate_limit, "secondary_window", "secondary"));
+    windows.extend(bucket_windows(&main_id, main, true));
+    if let Some(buckets) = buckets {
+        for (id, bucket) in buckets {
+            if id != &main_id {
+                windows.extend(bucket_windows(id, bucket, false));
+            }
+        }
     }
-    if let Some(extra) = payload
-        .get("additional_rate_limits")
-        .and_then(Value::as_array)
-    {
-        windows.extend(
-            extra
-                .iter()
-                .enumerate()
-                .filter_map(|(index, entry)| extra_window(index, entry)),
-        );
-    }
+    windows.sort_by_key(|window| super::pipeline::kind_rank(window.kind));
     Parsed {
         account: None,
-        plan: optional_string(payload.get("plan_type")),
+        plan: main.plan_type.clone(),
         windows,
-        credits: credits(payload.get("credits")),
+        credits: credits(main.credits.as_ref()),
     }
 }
 
-/// The signed-in account's email, used only as the on-screen label for its card.
-pub(super) fn account_email(payload: &Value) -> Option<String> {
-    optional_string(payload.get("email"))
+fn bucket_windows(id: &str, bucket: &RateLimitBucket, main: bool) -> Vec<LimitWindowDto> {
+    [
+        ("primary", bucket.primary.as_ref()),
+        ("secondary", bucket.secondary.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(slot, entry)| rate_limit_window(id, bucket, slot, entry?, main))
+    .collect()
 }
 
-fn plan_window(rate_limit: &Value, key: &str, id: &str) -> Option<LimitWindowDto> {
-    let entry = rate_limit.get(key)?;
-    let (kind, used, resets_at, seconds) = window_parts(entry)?;
-    let label = match kind {
-        LimitWindowKind::Session => format!("{} · all models", session_length(entry)),
-        _ => "Weekly · all models".to_string(),
+fn rate_limit_window(
+    id: &str,
+    bucket: &RateLimitBucket,
+    slot: &str,
+    entry: &RateLimitWindow,
+    main: bool,
+) -> Option<LimitWindowDto> {
+    let used = entry.used_percent.clamp(0.0, 100.0);
+    if !used.is_finite() {
+        return None;
+    }
+    let minutes = entry.window_duration_mins;
+    let seconds = minutes.and_then(|minutes| minutes.checked_mul(60));
+    let duration_kind = match seconds {
+        Some(seconds) if seconds < WEEKLY_THRESHOLD_SECONDS => LimitWindowKind::Session,
+        _ => LimitWindowKind::Weekly,
     };
-    Some(LimitWindowDto {
-        window_seconds: seconds,
-        ..window(id, label, kind, used, resets_at)
-    })
-}
-
-/// "5 hour" / "30 minute" from `limit_window_seconds`, for the short rolling window's label.
-fn session_length(entry: &Value) -> String {
-    let seconds = entry
-        .get("limit_window_seconds")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    if seconds >= 3600 && seconds.is_multiple_of(3600) {
-        format!("{} hour", seconds / 3600)
-    } else if seconds >= 60 {
-        format!("{} minute", seconds / 60)
+    let kind = if main {
+        duration_kind
     } else {
-        "Session".to_string()
-    }
-}
-
-/// Per-model limits render as compact `Model` rows; the window length only picks the prefix.
-fn extra_window(index: usize, entry: &Value) -> Option<LimitWindowDto> {
-    let window_entry = entry.get("rate_limit")?.get("primary_window")?;
-    let (kind, used, resets_at, seconds) = window_parts(window_entry)?;
-    let name = optional_string(entry.get("limit_name"));
-    let id = optional_string(entry.get("metered_feature"))
-        .or_else(|| name.clone())
-        .unwrap_or_else(|| index.to_string());
-    let prefix = match kind {
-        LimitWindowKind::Session => session_length(window_entry),
-        _ => "Weekly".to_string(),
+        LimitWindowKind::Model
     };
-    let label = format!("{prefix} · {}", name.as_deref().unwrap_or("extra limit"));
+    let prefix = match duration_kind {
+        LimitWindowKind::Session => session_length(minutes),
+        LimitWindowKind::Weekly | LimitWindowKind::Model => "Weekly".to_string(),
+    };
+    let target = if main {
+        "all models".to_string()
+    } else {
+        bucket
+            .limit_name
+            .clone()
+            .unwrap_or_else(|| "extra limit".to_string())
+    };
+    let resets_at = entry
+        .resets_at
+        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
+        .map(|at| at.to_rfc3339());
+    let window_id = if main {
+        slot.to_string()
+    } else if slot == "primary" {
+        format!("extra:{id}")
+    } else {
+        format!("extra:{id}:{slot}")
+    };
     Some(LimitWindowDto {
         window_seconds: seconds,
         ..window(
-            format!("extra:{id}"),
-            label,
-            LimitWindowKind::Model,
+            window_id,
+            format!("{prefix} · {target}"),
+            kind,
             used,
             resets_at,
         )
     })
 }
 
-fn window_parts(entry: &Value) -> Option<(LimitWindowKind, f64, Option<String>, Option<u64>)> {
-    let used = percent(entry.get("used_percent"))?;
-    let seconds = entry.get("limit_window_seconds").and_then(Value::as_u64);
-    let kind = match seconds {
-        Some(s) if s < WEEKLY_THRESHOLD_SECONDS => LimitWindowKind::Session,
-        _ => LimitWindowKind::Weekly,
-    };
-    let resets_at = entry
-        .get("reset_at")
-        .and_then(Value::as_i64)
-        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
-        .map(|at| at.to_rfc3339());
-    Some((kind, used, resets_at, seconds))
+fn session_length(minutes: Option<u64>) -> String {
+    match minutes {
+        Some(minutes) if minutes >= 60 && minutes.is_multiple_of(60) => {
+            format!("{} hour", minutes / 60)
+        }
+        Some(minutes) => format!("{minutes} minute"),
+        None => "Session".to_string(),
+    }
 }
 
-fn credits(value: Option<&Value>) -> Option<LimitsCreditsDto> {
+fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
     let credits = value?;
-    if !credits
-        .get("has_credits")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if !credits.has_credits {
         return None;
     }
     Some(LimitsCreditsDto {
-        balance: optional_string(credits.get("balance")).unwrap_or_else(|| "0".to_string()),
-        unlimited: credits
-            .get("unlimited")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        balance: credits.balance.clone().unwrap_or_else(|| "0".to_string()),
+        unlimited: credits.unlimited,
     })
 }
 
@@ -135,144 +180,137 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// Sanitised capture from 2026-08-17 (Pro plan): identity fields removed.
-    const CAPTURED: &str = r#"{
-      "plan_type": "pro",
-      "rate_limit": {
-        "allowed": true, "limit_reached": false,
-        "primary_window": {"used_percent": 1, "limit_window_seconds": 604800,
-                           "reset_after_seconds": 599727, "reset_at": 1787614473},
-        "secondary_window": null
+    /// Sanitised `account/rateLimits/read` result from Codex app-server 0.148.0.
+    const APP_SERVER_CAPTURE: &str = r#"{
+      "rateLimits": {
+        "limitId": "codex", "limitName": null,
+        "primary": {"usedPercent": 14, "windowDurationMins": 10080,
+                    "resetsAt": 1787838960},
+        "secondary": null,
+        "credits": {"hasCredits": false, "unlimited": false, "balance": "0"},
+        "planType": "pro"
       },
-      "code_review_rate_limit": null,
-      "additional_rate_limits": [
-        {"limit_name": "GPT-5.3-Codex-Spark", "metered_feature": "codex_bengalfox",
-         "rate_limit": {"allowed": true, "limit_reached": false,
-                        "primary_window": {"used_percent": 0, "limit_window_seconds": 604800,
-                                           "reset_after_seconds": 604800, "reset_at": 1787619547},
-                        "secondary_window": null}}
-      ],
-      "credits": {"has_credits": false, "unlimited": false, "overage_limit_reached": false,
-                  "balance": "0", "approx_local_messages": [0], "approx_cloud_messages": [0]},
-      "spend_control": {"reached": false, "individual_limit": null},
-      "rate_limit_reached_type": null,
-      "promo": null
+      "rateLimitsByLimitId": {
+        "codex": {
+          "limitId": "codex", "limitName": null,
+          "primary": {"usedPercent": 14, "windowDurationMins": 10080,
+                      "resetsAt": 1787838960},
+          "secondary": null,
+          "credits": {"hasCredits": false, "unlimited": false, "balance": "0"},
+          "planType": "pro"
+        },
+        "codex_bengalfox": {
+          "limitId": "codex_bengalfox", "limitName": "GPT-5.3-Codex-Spark",
+          "primary": {"usedPercent": 0, "windowDurationMins": 300,
+                      "resetsAt": 1787273137},
+          "secondary": {"usedPercent": 6, "windowDurationMins": 10080,
+                        "resetsAt": 1787859937},
+          "credits": null,
+          "planType": "pro"
+        }
+      },
+      "rateLimitResetCredits": {"availableCount": 0, "credits": []}
     }"#;
 
     #[test]
-    fn maps_the_captured_payload_to_plan_windows_and_no_credits() {
-        let payload: serde_json::Value = serde_json::from_str(CAPTURED).unwrap();
+    fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
+        let payload: RateLimitsResponse = serde_json::from_str(APP_SERVER_CAPTURE).unwrap();
         let parsed = parse_codex(&payload);
+
         assert_eq!(parsed.plan.as_deref(), Some("pro"));
-        assert_eq!(parsed.credits, None);
-        assert_eq!(parsed.windows.len(), 2);
-        assert_eq!(parsed.windows[0].id, "primary");
-        assert_eq!(parsed.windows[0].kind, LimitWindowKind::Weekly);
-        assert_eq!(parsed.windows[0].label, "Weekly · all models");
-        assert_eq!(parsed.windows[0].used_percent, 1.0);
-        assert_eq!(
-            parsed.windows[0].resets_at.as_deref(),
-            Some("2026-08-24T23:34:33+00:00")
-        );
-        assert_eq!(parsed.windows[1].id, "extra:codex_bengalfox");
-        assert_eq!(parsed.windows[1].kind, LimitWindowKind::Model);
-        assert_eq!(parsed.windows[1].label, "Weekly · GPT-5.3-Codex-Spark");
-        assert_eq!(parsed.windows[1].used_percent, 0.0);
-    }
-
-    #[test]
-    fn the_account_email_is_read_separately_and_never_lands_in_parsed_output() {
-        let payload = json!({"email": " me@example.com ", "plan_type": "pro"});
-        assert_eq!(account_email(&payload).as_deref(), Some("me@example.com"));
-        assert_eq!(account_email(&json!({})), None);
-        assert_eq!(parse_codex(&payload).account, None);
-    }
-
-    #[test]
-    fn short_windows_are_sessions_and_long_ones_weekly() {
-        let payload = json!({
-            "rate_limit": {
-                "primary_window": {"used_percent": 42, "limit_window_seconds": 18000, "reset_at": 1787020000},
-                "secondary_window": {"used_percent": 9.5, "limit_window_seconds": 604800, "reset_at": 1787600000}
-            }
-        });
-        let parsed = parse_codex(&payload);
-        assert_eq!(parsed.plan, None);
-        assert_eq!(parsed.windows[0].id, "primary");
-        assert_eq!(parsed.windows[0].kind, LimitWindowKind::Session);
-        assert_eq!(parsed.windows[0].label, "5 hour · all models");
-        assert_eq!(parsed.windows[1].id, "secondary");
-        assert_eq!(parsed.windows[1].kind, LimitWindowKind::Weekly);
-        assert_eq!(parsed.windows[1].used_percent, 9.5);
-    }
-
-    #[test]
-    fn session_labels_follow_the_window_length() {
-        for (seconds, label) in [
-            (18000, "5 hour · all models"),
-            (1800, "30 minute · all models"),
-            (5400, "90 minute · all models"),
-            (30, "Session · all models"),
-        ] {
-            let payload = json!({
-                "rate_limit": {"primary_window": {"used_percent": 1, "limit_window_seconds": seconds}}
-            });
-            assert_eq!(parse_codex(&payload).windows[0].label, label, "{seconds}s");
-        }
-    }
-
-    #[test]
-    fn a_full_day_window_or_an_unknown_length_counts_as_weekly() {
-        let payload = json!({
-            "rate_limit": {
-                "primary_window": {"used_percent": 1, "limit_window_seconds": 86400},
-                "secondary_window": {"used_percent": 2}
-            }
-        });
-        let parsed = parse_codex(&payload);
-        assert_eq!(parsed.windows[0].kind, LimitWindowKind::Weekly);
-        assert_eq!(parsed.windows[1].kind, LimitWindowKind::Weekly);
-    }
-
-    #[test]
-    fn credits_are_reported_only_when_the_account_has_some() {
-        let payload = json!({
-            "credits": {"has_credits": true, "unlimited": false, "balance": "12.5"}
-        });
-        let parsed = parse_codex(&payload);
-        assert_eq!(
-            parsed.credits,
-            Some(crate::dto::LimitsCreditsDto {
-                balance: "12.5".to_string(),
-                unlimited: false
-            })
-        );
-        assert!(parsed.windows.is_empty());
-    }
-
-    #[test]
-    fn extra_limits_fall_back_to_the_limit_name_for_ids_and_skip_broken_entries() {
-        let payload = json!({
-            "additional_rate_limits": [
-                {"limit_name": "Spark", "rate_limit": {"primary_window": {"used_percent": 5, "limit_window_seconds": 604800}}},
-                {"limit_name": "Broken", "rate_limit": {"primary_window": {"used_percent": "n/a"}}},
-                {"rate_limit": {"primary_window": {"used_percent": 250, "limit_window_seconds": 100}}},
-                42
-            ]
-        });
-        let parsed = parse_codex(&payload);
-        let summary: Vec<(&str, &str, f64)> = parsed
+        let windows: Vec<(&str, &str, LimitWindowKind, f64, Option<u64>)> = parsed
             .windows
             .iter()
-            .map(|w| (w.id.as_str(), w.label.as_str(), w.used_percent))
+            .map(|window| {
+                (
+                    window.id.as_str(),
+                    window.label.as_str(),
+                    window.kind,
+                    window.used_percent,
+                    window.window_seconds,
+                )
+            })
+            .collect();
+        assert_eq!(
+            windows,
+            [
+                (
+                    "primary",
+                    "Weekly · all models",
+                    LimitWindowKind::Weekly,
+                    14.0,
+                    Some(604_800),
+                ),
+                (
+                    "extra:codex_bengalfox",
+                    "5 hour · GPT-5.3-Codex-Spark",
+                    LimitWindowKind::Model,
+                    0.0,
+                    Some(18_000),
+                ),
+                (
+                    "extra:codex_bengalfox:secondary",
+                    "Weekly · GPT-5.3-Codex-Spark",
+                    LimitWindowKind::Model,
+                    6.0,
+                    Some(604_800),
+                ),
+            ]
+        );
+        assert_eq!(parsed.credits, None);
+    }
+
+    #[test]
+    fn uses_the_single_bucket_fallback_and_maps_credits() {
+        let payload: RateLimitsResponse = serde_json::from_value(json!({
+            "rateLimits": {
+                "limitId": "codex",
+                "primary": {"usedPercent": 140, "windowDurationMins": 30},
+                "secondary": null,
+                "credits": {"hasCredits": true, "unlimited": false, "balance": "3"},
+                "planType": "plus"
+            },
+            "rateLimitsByLimitId": null
+        }))
+        .unwrap();
+        let parsed = parse_codex(&payload);
+
+        assert_eq!(parsed.windows.len(), 1);
+        assert_eq!(parsed.windows[0].used_percent, 100.0);
+        assert_eq!(parsed.windows[0].label, "30 minute · all models");
+        assert_eq!(
+            parsed.credits,
+            Some(LimitsCreditsDto {
+                balance: "3".to_string(),
+                unlimited: false,
+            })
+        );
+    }
+
+    #[test]
+    fn orders_weekly_before_session_even_when_app_server_returns_primary_first() {
+        let payload: RateLimitsResponse = serde_json::from_value(json!({
+            "rateLimits": {
+                "limitId": "codex",
+                "primary": {"usedPercent": 10, "windowDurationMins": 300},
+                "secondary": {"usedPercent": 20, "windowDurationMins": 10080},
+                "planType": "pro"
+            }
+        }))
+        .unwrap();
+        let parsed = parse_codex(&payload);
+
+        let summary: Vec<(&str, LimitWindowKind)> = parsed
+            .windows
+            .iter()
+            .map(|window| (window.id.as_str(), window.kind))
             .collect();
         assert_eq!(
             summary,
             [
-                ("extra:Spark", "Weekly · Spark", 5.0),
-                ("extra:2", "1 minute · extra limit", 100.0)
+                ("secondary", LimitWindowKind::Weekly),
+                ("primary", LimitWindowKind::Session),
             ]
         );
-        assert_eq!(parsed.windows[0].resets_at, None);
     }
 }
