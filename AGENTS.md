@@ -12,6 +12,8 @@ on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon).
 - `src-tauri/src/process.rs`: child-process draining with a hard deadline, shared by `cli.rs` and the login-shell probe.
 - `src-tauri/src/cli_stub.rs`: test-only builder that writes a fake CLI as `.cmd` on Windows or an executable `sh` script elsewhere; use it instead of hand-written batch stubs.
 - `scripts/build-bundle.ps1`: builds, validates, and stages one installer format (`nsis`, `dmg`); CI runs it on both Windows and macOS runners.
+- `rust-toolchain.toml`: pins the compiler. `Swatinem/rust-cache` hashes the rustc version into the environment portion of every cache key, which is also its restore-key fallback, so an unpinned `stable` made each six-week Rust release cold-start every job at once. `scripts/read-rust-toolchain.ps1` feeds `channel` to the workflows so the version lives in one place, and rejects anything that is not an exact version. Bump it on its own pull request; the run after a bump pays one cold build per shared key.
+- `.github/workflows/cache-prune.yml`: keeps the Actions cache store under GitHub's 10 GB per-repository cap by deleting superseded rust-cache generations. Each generation costs roughly 1.9 GB across the four shared keys, and eviction at the cap silently turns warm jobs cold.
 - `src-tauri/src/config_io.rs` and `backup.rs`: guarded configuration writes and rollback support.
 - `src-tauri/src/item_install/`: selective install of skills/subagents from a GitHub marketplace (tarball fetch, manifest inspection, atomic placement, `~/.on-n-off/installed-items.json` provenance registry, upstream update checks). Never shells out to a provider CLI; write roots come from `AgentAdapter::item_roots`.
 - `src-tauri/src/usage/`: read-only transcript aggregation plus caches under `.on-n-off`.
@@ -112,6 +114,7 @@ bun run tauri build --bundles app,dmg      # macOS: .app + .dmg
 ./scripts/check-release-version.test.ps1   # PowerShell 7 on either platform
 ./scripts/build-bundle.test.ps1
 ./scripts/new-update-feed.test.ps1
+./scripts/read-rust-toolchain.test.ps1
 ```
 
 The `scripts/*.ps1` helpers and their tests are path-neutral and run under PowerShell 7 on both CI legs; if `pwsh` is not installed locally, rely on CI for them.
