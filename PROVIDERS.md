@@ -66,7 +66,7 @@ adapter assumes today (change the adapter and this file together).
 | Enable state | `settings.json` → `enabledPlugins { "<id>": bool }` |
 | Skills | plugin `skills/`; user skills `~/.claude/skills/<name>/SKILL.md` |
 | MCP | `~/.claude.json` → `mcpServers`, disabled when `disabled: true` **or** listed in `disabledMcpServers`; app patches that file |
-| Usage / Limits | transcripts under `~/.claude/projects/**/*.jsonl` (falls back to `~/projects`); OAuth token from macOS Keychain (`/usr/bin/security`) else `~/.claude/.credentials.json`; never written |
+| Usage / Limits | transcripts under `~/.claude/projects/**/*.jsonl` (falls back to `~/projects`); OAuth token from macOS Keychain (`/usr/bin/security`) else `~/.claude/.credentials.json`; never written. If Claude Code cannot fetch live limits, the app can read Claude Desktop's version-2 `plan-usage-history.json` (`~/Library/Application Support/Claude/` on macOS; `%APPDATA%/Claude/` on Windows). It matches the sample `org` exactly to `.claude.json`'s `oauthAccount.organizationUuid`, maps `fh` / `sd` to session / weekly percentages, and shows the newer of that sample or on-n-off's remembered snapshot with its `as of` time. It does not infer reset times or reject old samples. The fallback keeps the failed login status, so it cannot trigger limit notifications. It never reads Desktop cookies or `Claude Safe Storage`. |
 | Togglable | plugins (via CLI), user skills, MCP |
 
 ## Codex

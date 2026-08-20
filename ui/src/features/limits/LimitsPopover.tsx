@@ -209,6 +209,12 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
         {plan ? <span className="shrink-0 text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
       </header>
 
+      {stale ? (
+        <p className="-mt-0.5 mb-1.5 text-[10px] text-[var(--mute)] tabular-nums">
+          as of {formatResetAt(entry.fetchedAt)}
+        </p>
+      ) : null}
+
       {message ? (
         <p className={`m-0 text-[12px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
           {message}

@@ -1,5 +1,7 @@
 //! Subscription rate limits: live per-provider snapshot from the vendors' usage endpoints,
-//! authenticated with the CLIs' own stored logins (read-only; never refreshed here).
+//! authenticated with the CLIs' own stored logins (read-only; never refreshed here). When Claude
+//! Code cannot fetch live numbers, Claude Desktop's local usage history can supply a dated
+//! percentage-only snapshot for the same organization.
 //!
 //! `read_limits` never fails for provider-side reasons; every outcome is a `ProviderLimitsDto`
 //! whose `status` + `message` tell the UI what to show. Because each CLI stores one login at a
@@ -7,13 +9,19 @@
 //! has switched away from stay visible as of their last read.
 
 mod claude;
+mod claude_desktop;
 mod codex;
 mod credentials;
+#[cfg(test)]
+mod desktop_fallback_tests;
+mod fallback;
 mod http;
 mod json;
+#[cfg(test)]
+mod memory_tests;
 mod snapshots;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{SecondsFormat, Utc};
 
@@ -23,9 +31,10 @@ use crate::dto::{
 };
 use crate::paths;
 use credentials::{
-    read_claude_account, read_claude_credential, read_codex_credential, ClaudeCredential,
+    read_claude_credential, read_claude_identity, read_codex_credential, ClaudeCredential,
     ClaudeLoginMemo, CredentialLookup, KeychainProbe, CLAUDE_LOGIN,
 };
+use fallback::NumberSnapshot;
 use http::{get_json, HttpError};
 use snapshots::SnapshotStore;
 
@@ -52,6 +61,7 @@ struct Sources<'a, P: FnOnce() -> KeychainProbe> {
     keychain: P,
     claude_url: &'a str,
     codex_url: &'a str,
+    claude_desktop_history: PathBuf,
     now_ms: i64,
 }
 
@@ -73,6 +83,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             )]
         }
     };
+    let claude_desktop_history = claude_desktop::history_path(&home);
     read_limits_in(
         agent,
         force,
@@ -82,6 +93,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             keychain: credentials::keychain_claude_json,
             claude_url: CLAUDE_USAGE_URL,
             codex_url: CODEX_USAGE_URL,
+            claude_desktop_history,
             now_ms: Utc::now().timestamp_millis(),
         },
     )
@@ -99,9 +111,9 @@ fn read_limits_in<P: FnOnce() -> KeychainProbe>(
     sources: Sources<'_, P>,
 ) -> Vec<ProviderLimitsDto> {
     let home = sources.home;
-    let current = match agent {
+    let (current, fallback) = match agent {
         AgentId::Claude => claude_live(force, sources),
-        AgentId::Codex => codex_limits(home, sources.codex_url),
+        AgentId::Codex => (codex_limits(home, sources.codex_url), None),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
                 agent,
@@ -114,13 +126,17 @@ fn read_limits_in<P: FnOnce() -> KeychainProbe>(
             )]
         }
     };
-    with_memory(&SnapshotStore::for_home(home), current)
+    with_memory(&SnapshotStore::for_home(home), current, fallback)
 }
 
 /// Remember a successful live read (best-effort, like the usage caches), then return it followed
 /// by the other remembered accounts, newest first. A live account is never listed twice: when its
 /// read did not come back `ok`, its last remembered numbers are folded into that one card.
-fn with_memory(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<ProviderLimitsDto> {
+fn with_memory(
+    store: &SnapshotStore,
+    current: ProviderLimitsDto,
+    fallback: Option<NumberSnapshot>,
+) -> Vec<ProviderLimitsDto> {
     let _ = store.save(&current);
     let live_account = current.account.as_ref().map(|account| account.id.clone());
     let mut remembered = store.load(current.provider);
@@ -131,8 +147,16 @@ fn with_memory(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<Provide
                 .iter()
                 .position(|snapshot| snapshot.account.as_ref().is_some_and(|a| a.id == id))
             {
-                live = keep_numbers(live, remembered.remove(at));
+                live = fallback::apply_latest(
+                    live,
+                    fallback,
+                    NumberSnapshot::remembered(remembered.remove(at)),
+                );
+            } else {
+                live = fallback::apply_latest(live, fallback, None);
             }
+        } else {
+            live = fallback::apply_latest(live, fallback, None);
         }
     }
     let others = remembered.into_iter().filter(|snapshot| {
@@ -141,35 +165,25 @@ fn with_memory(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<Provide
     std::iter::once(live).chain(others).collect()
 }
 
-/// A live read that failed for an account we already have numbers for keeps those numbers, dated
-/// by the read they came from, under the live status and message. One card per account: never a
-/// blank error card stacked on top of the same account's last good read.
-fn keep_numbers(live: ProviderLimitsDto, remembered: ProviderLimitsDto) -> ProviderLimitsDto {
-    ProviderLimitsDto {
-        plan: remembered.plan,
-        windows: remembered.windows,
-        credits: remembered.credits,
-        fetched_at: remembered.fetched_at,
-        ..live
-    }
-}
-
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
 /// login may be reused; otherwise the Keychain (or the credentials file) is read. A rejected token
 /// evicts the memo so the next read goes back to the Keychain.
 fn claude_live<P: FnOnce() -> KeychainProbe>(
     force: bool,
     sources: Sources<'_, P>,
-) -> ProviderLimitsDto {
+) -> (ProviderLimitsDto, Option<NumberSnapshot>) {
     let Sources {
         home,
         memo,
         keychain,
         claude_url,
+        claude_desktop_history,
         now_ms,
         ..
     } = sources;
-    let account = read_claude_account(home).unwrap_or_else(default_account);
+    let (account, organization_id) = read_claude_identity(home)
+        .map(|identity| (identity.account, identity.organization_id))
+        .unwrap_or_else(|| (default_account(), None));
     let lookup = memo.lookup(force, &account.id, now_ms, || {
         read_claude_credential(home, keychain(), now_ms)
     });
@@ -177,7 +191,17 @@ fn claude_live<P: FnOnce() -> KeychainProbe>(
     if dto.status == LimitsStatus::Unauthenticated {
         memo.clear();
     }
-    dto
+    let fallback = if dto.status != LimitsStatus::Ok {
+        organization_id
+            .as_deref()
+            .and_then(|organization_id| {
+                claude_desktop::read_latest(&claude_desktop_history, organization_id)
+            })
+            .map(|usage| NumberSnapshot::claude_desktop(usage.observed_at, usage.windows))
+    } else {
+        None
+    };
+    (dto, fallback)
 }
 
 /// Claude: stored OAuth login → `GET {url}` with the OAuth beta header → normalized windows.
@@ -340,7 +364,7 @@ fn relogin(cli: &str) -> String {
 /// itself needs a new sign-in; asking for one otherwise sends the user through a pointless login.
 fn token_expired(cli: &str, renewable: bool) -> String {
     if renewable {
-        format!("Access token expired — run any `{cli}` command to renew it, then refresh here.")
+        format!("Access token expired — send a prompt with `{cli}` to renew it, then refresh here.")
     } else {
         relogin(cli)
     }
@@ -578,6 +602,7 @@ mod tests {
                     },
                     claude_url,
                     codex_url,
+                    claude_desktop_history: claude_desktop::history_path_for_home(&self.home),
                     now_ms: NOW_MS,
                 },
             )
@@ -648,6 +673,7 @@ mod tests {
                 keychain: || Ok(None),
                 claude_url: &refused_url(),
                 codex_url: &refused_url(),
+                claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
                 now_ms: 1787022473402 + 1,
             },
         );
@@ -824,82 +850,6 @@ mod tests {
     }
 
     #[test]
-    fn a_live_read_is_remembered_and_listed_once_ahead_of_other_accounts() {
-        let home = scratch_dir("limits-memory");
-        let store = SnapshotStore::for_home(&home);
-        store
-            .save(&ok_snapshot(AgentId::Codex, "acct-a", "a@x", 5.0))
-            .unwrap();
-        store
-            .save(&ok_snapshot(AgentId::Codex, "acct-b", "b@x", 9.0))
-            .unwrap();
-
-        let current = ok_snapshot(AgentId::Codex, "acct-a", "a@x", 50.0);
-        let listed = with_memory(&store, current.clone());
-        let summary: Vec<(&str, bool, f64)> = listed
-            .iter()
-            .map(|dto| {
-                (
-                    dto.account.as_ref().unwrap().id.as_str(),
-                    dto.live,
-                    dto.windows[0].used_percent,
-                )
-            })
-            .collect();
-        assert_eq!(summary, [("acct-a", true, 50.0), ("acct-b", false, 9.0)]);
-        // The live read replaced acct-a's remembered numbers.
-        let remembered_a = store
-            .load(AgentId::Codex)
-            .into_iter()
-            .find(|dto| dto.account.as_ref().unwrap().id == "acct-a")
-            .unwrap();
-        assert_eq!(remembered_a.windows[0].used_percent, 50.0);
-    }
-
-    #[test]
-    fn a_failed_live_read_hides_no_remembered_account_and_remembers_nothing() {
-        let home = scratch_dir("limits-memory");
-        let store = SnapshotStore::for_home(&home);
-        store
-            .save(&ok_snapshot(AgentId::Claude, "uuid-a", "a@x", 5.0))
-            .unwrap();
-        let signed_out = finish(
-            AgentId::Claude,
-            LimitsStatus::SignedOut,
-            Some("Sign in".to_string()),
-            Parsed::default(),
-        );
-        let listed = with_memory(&store, signed_out);
-        assert_eq!(listed.len(), 2);
-        assert_eq!(listed[0].status, LimitsStatus::SignedOut);
-        assert!(listed[0].live);
-        assert_eq!(listed[1].account.as_ref().unwrap().id, "uuid-a");
-        assert!(!listed[1].live);
-        assert_eq!(store.load(AgentId::Claude).len(), 1);
-    }
-
-    #[test]
-    fn a_live_read_without_an_account_is_not_remembered() {
-        let home = scratch_dir("limits-memory");
-        let store = SnapshotStore::for_home(&home);
-        let anonymous = finish(
-            AgentId::Codex,
-            LimitsStatus::Ok,
-            None,
-            parsed(vec![window(
-                "w",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                1.0,
-                None,
-            )]),
-        );
-        let listed = with_memory(&store, anonymous);
-        assert_eq!(listed.len(), 1);
-        assert!(store.load(AgentId::Codex).is_empty());
-    }
-
-    #[test]
     fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
         let ok = ProviderLimitsDto {
             provider: AgentId::Codex,
@@ -978,12 +928,15 @@ mod tests {
                 keychain: || Ok(None),
                 claude_url: &refused_url(),
                 codex_url: &refused_url(),
+                claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
                 now_ms: 1787022473402 + 1,
             },
         );
         assert_eq!(dtos[0].status, LimitsStatus::Unauthenticated);
         let message = dtos[0].message.as_deref().unwrap();
         assert!(message.contains("`claude`"), "{message}");
+        assert!(message.contains("send a prompt"), "{message}");
+        assert!(!message.contains("any"), "{message}");
         assert!(!message.contains("sign in"), "{message}");
         assert_eq!(
             account_of(&dtos[0]).label.as_deref(),
@@ -1009,6 +962,7 @@ mod tests {
                 keychain: || Ok(None),
                 claude_url: &refused_url(),
                 codex_url: &refused_url(),
+                claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
                 now_ms: 1787022473402 + 1,
             },
         );
@@ -1018,41 +972,6 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("sign in again"));
-    }
-
-    #[test]
-    fn a_failed_live_read_keeps_the_signed_in_accounts_last_numbers_in_one_card() {
-        let home = scratch_dir("limits-memory");
-        let store = SnapshotStore::for_home(&home);
-        store
-            .save(&ok_snapshot(AgentId::Claude, "uuid-a", "a@x", 39.0))
-            .unwrap();
-        store
-            .save(&ok_snapshot(AgentId::Claude, "uuid-b", "b@x", 5.0))
-            .unwrap();
-        let stalled = finish(
-            AgentId::Claude,
-            LimitsStatus::Unauthenticated,
-            Some("Access token expired".to_string()),
-            Parsed {
-                account: Some(account("uuid-a", "a@x")),
-                ..Parsed::default()
-            },
-        );
-        let listed = with_memory(&store, stalled);
-
-        assert_eq!(listed.len(), 2, "no blank card above the account's numbers");
-        assert_eq!(listed[0].status, LimitsStatus::Unauthenticated);
-        assert_eq!(listed[0].message.as_deref(), Some("Access token expired"));
-        assert!(listed[0].live, "it is still the signed-in account");
-        assert_eq!(listed[0].windows[0].used_percent, 39.0);
-        assert_eq!(listed[0].plan.as_deref(), Some("pro"));
-        assert_eq!(
-            listed[0].fetched_at, "2026-08-17T15:00:00.000Z",
-            "the card is dated by the numbers it shows"
-        );
-        assert_eq!(listed[1].account.as_ref().unwrap().id, "uuid-b");
-        assert!(!listed[1].live);
     }
 
     /// Live probe against the real home: Keychain read + one GET per provider (read-only).

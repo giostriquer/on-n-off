@@ -55,9 +55,9 @@ export function Limits() {
       </div>
 
       <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
-        read from the endpoints the CLIs use, with the login each CLI already stores · on-n-off never writes
-        to or refreshes those logins · accounts you have signed out of stay listed with the numbers from
-        their last read
+        live numbers come from the endpoints the CLIs use, with the login each CLI already stores · when
+        Claude Code cannot fetch live numbers, a dated Claude Desktop usage snapshot can fill the gap ·
+        on-n-off never writes to or refreshes those logins · signed-out accounts remain with their last read
       </p>
     </div>
   );
