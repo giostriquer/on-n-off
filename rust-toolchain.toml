@@ -1,0 +1,20 @@
+# The single source of truth for the compiler version, in CI and locally.
+#
+# Swatinem/rust-cache hashes the rustc version into the environment portion of
+# every cache key, and that portion is also the restore-key fallback. An
+# unpinned `stable` therefore meant each six-week Rust release rotated all four
+# shared keys at once, with no fallback left to restore from: the 1.97.1 ->
+# 1.98.0 roll on 2026-08-20 turned `bundle-nsis` from 2m50s into 7m42s and cost
+# roughly twelve minutes of Windows wall-clock across CI, Bundle, and Release.
+#
+# Pinning also keeps `cargo clippy -- -D warnings` from going red because a new
+# stable introduced a lint, with no change on our side.
+#
+# Bump this deliberately. The run after a bump pays one cold build per shared
+# key, so prefer bumping on its own pull request rather than inside a release.
+# The workflows read `channel` from this file, so it is the only place to edit.
+
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

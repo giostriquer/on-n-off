@@ -1,0 +1,118 @@
+name: Prune caches
+
+# GitHub caps Actions cache at 10 GB for the whole repository and evicts least-recently-used
+# entries once that is reached. Each Rust key generation costs roughly 1.9 GB across the four
+# shared keys, so a few compiler rolls or lockfile changes are enough to start evicting caches
+# that jobs are still restoring from. On 2026-08-20 the store sat at 9.85 GB across 20 entries.
+#
+# This keeps the newest generations per shared key and deletes the rest. Two are kept, not one:
+# rust-cache falls back to a restore key that drops the lockfile component, so the previous
+# generation still does useful work after a dependency change.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: Generations to keep per shared key
+        required: false
+        default: "2"
+      dry-run:
+        description: List what would be deleted without deleting it
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  actions: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  prune:
+    name: prune
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete superseded Rust cache generations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: ${{ inputs.keep || '2' }}
+          DRY_RUN: ${{ inputs.dry-run || 'false' }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $keep = [int]$env:KEEP
+          if ($keep -lt 1) {
+            throw "Refusing to keep fewer than one generation per shared key."
+          }
+          $dryRun = $env:DRY_RUN -eq 'true'
+          $repository = $env:GITHUB_REPOSITORY
+
+          $caches = @()
+          $page = 1
+          while ($true) {
+            $response = gh api "repos/$repository/actions/caches?per_page=100&page=$page" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not list caches."
+            }
+            if ($response.actions_caches.Count -eq 0) {
+              break
+            }
+            $caches += $response.actions_caches
+            $page++
+          }
+
+          $totalBytes = ($caches | Measure-Object -Property size_in_bytes -Sum).Sum
+          Write-Output ("Store holds {0} entries, {1:N2} GB." -f $caches.Count, ($totalBytes / 1GB))
+
+          # Only rust-cache entries are managed here. Anything else in the store (setup-bun's own
+          # cache, for one) is small and owned by another action, so leave it alone.
+          $managed = @($caches | Where-Object { $_.key -like 'v0-rust-*' })
+          if ($managed.Count -eq 0) {
+            Write-Output "No rust-cache entries found; nothing to prune."
+            exit 0
+          }
+
+          # A key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>. Everything up to
+          # the arch identifies the job; the two trailing hashes are the generation.
+          $doomed = @()
+          foreach ($group in $managed | Group-Object { ($_.key -split '-')[0..4] -join '-' }) {
+            $ordered = @($group.Group | Sort-Object { [datetime]$_.last_accessed_at } -Descending)
+            Write-Output "$($group.Name): $($ordered.Count) generation(s), keeping $([Math]::Min($keep, $ordered.Count))."
+            if ($ordered.Count -gt $keep) {
+              $doomed += $ordered[$keep..($ordered.Count - 1)]
+            }
+          }
+
+          if ($doomed.Count -eq 0) {
+            Write-Output "Nothing to prune."
+            exit 0
+          }
+
+          $freed = ($doomed | Measure-Object -Property size_in_bytes -Sum).Sum
+          Write-Output ("Pruning {0} entries, freeing {1:N2} GB." -f $doomed.Count, ($freed / 1GB))
+
+          foreach ($cache in $doomed) {
+            Write-Output ("  {0,8:N0} MB  {1}" -f ($cache.size_in_bytes / 1MB), $cache.key)
+            if (-not $dryRun) {
+              gh api --method DELETE "repos/$repository/actions/caches/$($cache.id)" --silent
+              if ($LASTEXITCODE -ne 0) {
+                # A cache can disappear between listing and deletion; that is the outcome we
+                # wanted anyway, so do not fail the run over it.
+                Write-Output "    already gone"
+              }
+            }
+          }
+
+          if ($dryRun) {
+            Write-Output "Dry run: nothing was deleted."
+          }
