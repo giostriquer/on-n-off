@@ -204,7 +204,7 @@ describe("Limits", () => {
       [
         okClaude({
           status: "unauthenticated",
-          message: "Access token expired — run any `claude` command to renew it, then refresh here.",
+          message: "Access token expired — send a prompt with `claude` to renew it, then refresh here.",
           fetchedAt: "2026-08-16T21:40:00.000Z",
           windows: [
             { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z" },
