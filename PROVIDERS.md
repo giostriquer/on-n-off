@@ -66,7 +66,7 @@ adapter assumes today (change the adapter and this file together).
 | Enable state | `settings.json` → `enabledPlugins { "<id>": bool }` |
 | Skills | plugin `skills/`; user skills `~/.claude/skills/<name>/SKILL.md` |
 | MCP | `~/.claude.json` → `mcpServers`, disabled when `disabled: true` **or** listed in `disabledMcpServers`; app patches that file |
-| Usage / Limits | transcripts under `~/.claude/projects/**/*.jsonl` (falls back to `~/projects`); OAuth token from macOS Keychain (`/usr/bin/security`) else `~/.claude/.credentials.json`; never written. If Claude Code cannot fetch live limits, the app can read Claude Desktop's version-2 `plan-usage-history.json` (`~/Library/Application Support/Claude/` on macOS; `%APPDATA%/Claude/` on Windows). It matches the sample `org` exactly to `.claude.json`'s `oauthAccount.organizationUuid`, maps `fh` / `sd` to session / weekly percentages, and shows the newer of that sample or on-n-off's remembered snapshot with its `as of` time. It does not infer reset times or reject old samples. The fallback keeps the failed login status, so it cannot trigger limit notifications. It never reads Desktop cookies or `Claude Safe Storage`. |
+| Usage / Limits | transcripts under `~/.claude/projects/**/*.jsonl` (falls back to `~/projects`); OAuth token from macOS Keychain (`/usr/bin/security`) else `~/.claude/.credentials.json`; never written or refreshed. The Limits aggregator treats the endpoint, remembered account data, and Claude Desktop's version-2 `plan-usage-history.json` (`~/Library/Application Support/Claude/` on macOS; `%APPDATA%/Claude/` on Windows) as observations of the same subscription account. Desktop data is accepted only when its `org` exactly matches `.claude.json`'s `oauthAccount.organizationUuid`; `fh` / `sd` map to canonical session / weekly windows. The newest observation wins independently per window, and each window keeps its own observation time. Desktop does not provide reset times. An endpoint authentication failure stays visible as paused refresh status and does not trigger limit notifications. The app never reads Desktop cookies or `Claude Safe Storage`. |
 | Togglable | plugins (via CLI), user skills, MCP |
 
 ## Codex
@@ -79,7 +79,7 @@ adapter assumes today (change the adapter and this file together).
 | Plugins | cache `plugins/cache/<marketplace>/<plugin>/<newest dir>`; marketplaces cloned under `.tmp/marketplaces/<name>` for git sources |
 | Enable state | all in `config.toml`; app patches with `toml_edit` (`patch_toml_*`) |
 | Skills | plugin `skills/`; user skills `~/.codex/skills` and `~/.agents/skills`; per-path enable rows in `[[skills.config]]` |
-| Usage / Limits | transcripts under `~/.codex/sessions/**`; token + account id from `~/.codex/auth.json` (read-only) |
+| Usage / Limits | transcripts under `~/.codex/sessions/**`; token + account id from `~/.codex/auth.json` (read-only and never refreshed). The Limits endpoint response and remembered per-account snapshots use canonical window ids, durations, reset instants, and per-window observation times. Recent session `token_count.rate_limits` events can advance only a remembered account, and only when window id/kind, duration, and reset instant (within two seconds) identify exactly one quota window; ambiguous observations are ignored. |
 | Togglable | plugins, skills, MCP — all file patches |
 
 ## Antigravity (Gemini CLI family)

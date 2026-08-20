@@ -11,6 +11,10 @@ export type LimitWindow = {
   usedPercent: number;
   /** RFC 3339 instant, when the provider reports one. */
   resetsAt?: string | null;
+  /** Canonical window duration when the source reports one. */
+  windowSeconds?: number | null;
+  /** RFC 3339 instant when this window's percentage was observed. */
+  observedAt: string;
 };
 
 export type LimitsCredits = {
@@ -26,16 +30,15 @@ export type LimitsAccount = {
 
 /**
  * Mirrors `ProviderLimitsDto`: provider-side problems arrive as a status, not an error.
- * `live: false` is a remembered snapshot of an account the CLI is no longer signed into.
+ * `currentAccount: false` is an account remembered independently of the CLI's current login.
  */
 export type ProviderLimits = {
   provider: AgentId;
   status: LimitsStatus;
   message?: string | null;
   account?: LimitsAccount | null;
-  live: boolean;
+  currentAccount: boolean;
   plan?: string | null;
   windows: LimitWindow[];
   credits?: LimitsCredits | null;
-  fetchedAt: string;
 };

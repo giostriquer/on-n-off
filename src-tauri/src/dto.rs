@@ -358,6 +358,11 @@ pub struct LimitWindowDto {
     pub used_percent: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<String>,
+    /// Provider window duration used to correlate source-neutral observations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<u64>,
+    /// RFC 3339 instant when this individual window was observed.
+    pub observed_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -379,8 +384,8 @@ pub struct LimitsAccountDto {
 
 /// Subscription rate-limit snapshot for one provider account. Provider-side problems are encoded
 /// in `status` + `message` rather than returned as errors so the UI can render each provider
-/// independently. `live: false` marks a remembered snapshot of an account the CLI is no longer
-/// signed into (its numbers are as of `fetched_at`).
+/// independently. `current_account: false` marks a remembered account the provider is no longer
+/// signed into. Each window carries its own observation time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderLimitsDto {
@@ -390,14 +395,12 @@ pub struct ProviderLimitsDto {
     pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<LimitsAccountDto>,
-    #[serde(default = "default_true")]
-    pub live: bool,
+    pub current_account: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
     pub windows: Vec<LimitWindowDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credits: Option<LimitsCreditsDto>,
-    pub fetched_at: String,
 }
 
 // ---------------------------------------------------------------------------
