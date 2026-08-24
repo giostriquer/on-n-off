@@ -203,10 +203,26 @@ pub(crate) fn serve_sequence(
             )
         })
         .collect();
+    listener.set_nonblocking(true).unwrap();
     let handle = std::thread::spawn(move || {
         let mut captured = Vec::new();
         for (status_line, extra_headers, body) in responses {
-            let (mut stream, _) = listener.accept().unwrap();
+            // A test whose code under test never connects must fail, not hang the whole run.
+            let started = std::time::Instant::now();
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(accepted) => break accepted,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            started.elapsed() < Duration::from_secs(10),
+                            "no request reached the loopback server within 10 s"
+                        );
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("loopback accept failed: {error}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
             let mut request = Vec::new();
             let mut buf = [0u8; 1024];
             let head_end = loop {
@@ -402,6 +418,10 @@ mod tests {
             .unwrap()
             .as_secs() as i64;
         let error = post_json(&url, "t", &serde_json::json!({})).unwrap_err();
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         request.join().unwrap();
         let HttpError::RateLimited {
             reset_epoch_secs: Some(reset),
@@ -410,8 +430,68 @@ mod tests {
             panic!("expected a rate-limit error, got {error:?}");
         };
         assert!(
-            (before + 60..=before + 62).contains(&reset),
-            "reset {reset} is not ~60 s after {before}"
+            (before + 60..=after + 60).contains(&reset),
+            "reset {reset} is not 60 s after the call ({before}..={after})"
+        );
+    }
+
+    #[test]
+    fn post_json_keeps_a_403_with_budget_left_as_a_plain_403() {
+        // Every GitHub reply carries the rate-limit headers; a permission or SSO 403 is not a
+        // rate limit just because the headers are present.
+        let (url, request) = serve_once_capturing(
+            "403 Forbidden",
+            &[
+                "X-RateLimit-Remaining: 4321",
+                "X-RateLimit-Reset: 1787022473",
+            ],
+            r#"{"message":"Resource protected by organization SAML enforcement"}"#,
+        );
+        assert_eq!(
+            post_json(&url, "t", &serde_json::json!({})),
+            Err(HttpError::Status(403))
+        );
+        request.join().unwrap();
+    }
+
+    #[test]
+    fn post_json_reports_an_exhausted_limit_without_a_reset_header_as_instantless() {
+        let (url, request) = serve_once_capturing(
+            "403 Forbidden",
+            &["X-RateLimit-Remaining: 0"],
+            r#"{"message":"API rate limit exceeded"}"#,
+        );
+        assert_eq!(
+            post_json(&url, "t", &serde_json::json!({})),
+            Err(HttpError::RateLimited {
+                reset_epoch_secs: None
+            })
+        );
+        request.join().unwrap();
+    }
+
+    #[test]
+    fn post_json_prefers_retry_after_over_the_primary_reset_header() {
+        let (url, request) = serve_once_capturing(
+            "429 Too Many Requests",
+            &[
+                "Retry-After: 60",
+                "X-RateLimit-Remaining: 0",
+                "X-RateLimit-Reset: 1",
+            ],
+            r#"{"message":"secondary limit"}"#,
+        );
+        let error = post_json(&url, "t", &serde_json::json!({})).unwrap_err();
+        request.join().unwrap();
+        let HttpError::RateLimited {
+            reset_epoch_secs: Some(reset),
+        } = error
+        else {
+            panic!("expected a rate-limit error, got {error:?}");
+        };
+        assert!(
+            reset > 1_000_000,
+            "retry-after should win over the epoch-1 reset: {reset}"
         );
     }
 

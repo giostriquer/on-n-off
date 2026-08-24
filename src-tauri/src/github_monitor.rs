@@ -134,16 +134,32 @@ async fn poll_once(
         .await
         .map_err(|error| format!("github worker failed: {error}"))?;
     let failed = prs.status != GithubStatus::Ok;
-    let previous = state.clone();
-    let events = observe(state, &prs);
-    if let Err(error) = persist_state(state_path, state).await {
-        *state = previous;
-        return Err(format!("could not save state: {error}"));
-    }
+    let current = state.clone();
+    let path = state_path.to_path_buf();
+    let (next, events) = async_runtime::spawn_blocking(move || {
+        advance(&current, &prs, |next| save_state(&path, next))
+    })
+    .await
+    .map_err(|error| format!("state worker failed: {error}"))??;
+    *state = next;
     for event in events {
         show_notification(app, &event);
     }
     Ok(failed)
+}
+
+/// One step of the monitor: the baseline that `prs` implies, persisted through `persist`
+/// before the events it produced are handed back. On a persist failure nothing is returned, so
+/// the caller keeps its old state and never announces a transition it has not recorded.
+fn advance(
+    state: &MonitorState,
+    prs: &GithubPrsDto,
+    persist: impl FnOnce(&MonitorState) -> Result<(), String>,
+) -> Result<(MonitorState, Vec<CiEvent>), String> {
+    let mut next = state.clone();
+    let events = observe(&mut next, prs);
+    persist(&next).map_err(|error| format!("could not save state: {error}"))?;
+    Ok((next, events))
 }
 
 async fn persist_state(path: &Path, state: &MonitorState) -> Result<(), String> {
@@ -417,6 +433,33 @@ mod tests {
         observe(&mut state, &read(vec![draft.clone()]));
         draft.ci = CiState::Success;
         assert_eq!(observe(&mut state, &read(vec![draft])).len(), 1);
+    }
+
+    #[test]
+    fn the_baseline_moves_only_once_the_new_state_is_persisted() {
+        let mut state = MonitorState::default();
+        observe(&mut state, &read(vec![pr("a", CiState::Pending)]));
+        let red = read(vec![pr("a", CiState::Failure)]);
+
+        let (next, events) = advance(&state, &red, |persisted| {
+            assert_eq!(
+                persisted.ci.get("a"),
+                Some(&CiState::Failure),
+                "the persisted state already carries the transition"
+            );
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(next.ci.get("a"), Some(&CiState::Failure));
+        assert_eq!(
+            state.ci.get("a"),
+            Some(&CiState::Pending),
+            "the caller commits `next`"
+        );
+
+        let error = advance(&state, &red, |_| Err("disk full".to_string())).unwrap_err();
+        assert!(error.contains("disk full"), "{error}");
     }
 
     #[test]

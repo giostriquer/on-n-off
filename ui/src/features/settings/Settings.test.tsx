@@ -205,6 +205,14 @@ describe("Settings", () => {
     onGithubScopesChange.mockClear();
     await user.type(input, "   {Enter}");
     expect(onGithubScopesChange).not.toHaveBeenCalled();
+
+    await user.type(input, "org:acme{Enter}");
+    expect(onGithubScopesChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue("");
+
+    await user.type(input, "org:other");
+    await user.tab();
+    expect(onGithubScopesChange).toHaveBeenCalledWith(["org:acme", "repo:me/tool", "org:other"]);
   });
 
   it("requests notification permission before enabling CI notifications and persists the interval", async () => {

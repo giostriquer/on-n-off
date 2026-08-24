@@ -367,12 +367,24 @@ mod tests {
     }
 
     fn reply_with_budget(remaining: u64, reset_epoch_secs: i64) -> String {
+        reply_with_budget_text(remaining, &rfc3339(reset_epoch_secs).unwrap())
+    }
+
+    fn reply_with_budget_text(remaining: u64, reset_at: &str) -> String {
         let mut value: Value = serde_json::from_str(REPLY).unwrap();
-        value["data"]["rateLimit"] = json!({
-            "remaining": remaining,
-            "resetAt": rfc3339(reset_epoch_secs).unwrap(),
-        });
+        value["data"]["rateLimit"] = json!({ "remaining": remaining, "resetAt": reset_at });
         value.to_string()
+    }
+
+    fn assert_no_token(dto: &GithubPrsDto, home: &Path, token: &str) {
+        let json = serde_json::to_string(dto).unwrap();
+        assert!(!json.contains(token), "the DTO carries the token: {json}");
+        if let Ok(raw) = fs::read_to_string(github_prs_path_for(home)) {
+            assert!(
+                !raw.contains(token),
+                "the snapshot carries the token: {raw}"
+            );
+        }
     }
 
     #[test]
@@ -401,10 +413,28 @@ mod tests {
             body["variables"]["mine"],
             "is:pr is:open author:@me org:acme"
         );
+        assert_no_token(&dto, &harness.home, "gho_t");
         assert_eq!(
             snapshot::load(&github_prs_path_for(&harness.home)),
             Some(dto)
         );
+    }
+
+    #[test]
+    fn the_memory_window_ends_five_seconds_before_the_poll_interval() {
+        let harness = Harness::new("gh-read-cache-edge", &[], 60);
+        let gh = gh(&harness.home.join("cli"), "gho_t");
+        let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+        let first = harness.read(&gh, &url, NOW, false);
+        server.join().unwrap();
+
+        assert_eq!(harness.read(&gh, &refused_url(), NOW + 54, false), first);
+        let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+        assert_eq!(
+            harness.read(&gh, &url, NOW + 55, false).status,
+            GithubStatus::Ok
+        );
+        assert_eq!(server.join().unwrap().len(), 1);
     }
 
     #[test]
@@ -536,6 +566,7 @@ mod tests {
         let dto = harness.read(&gh, &url, NOW, false);
 
         assert_eq!(dto.status, GithubStatus::TokenRejected);
+        assert_no_token(&dto, &harness.home, "gho_x");
         assert!(
             dto.hint.as_deref().unwrap().contains("gh auth login"),
             "{:?}",
@@ -587,10 +618,57 @@ mod tests {
             paused.hint
         );
 
+        assert_eq!(
+            harness.read(&gh, &refused_url(), NOW + 299, true).status,
+            GithubStatus::RateLimited,
+            "still paused one second before the reset"
+        );
         let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
-        let resumed = harness.read(&gh, &url, NOW + 301, false);
+        let resumed = harness.read(&gh, &url, NOW + 300, false);
         assert_eq!(resumed.status, GithubStatus::Ok);
         server.join().unwrap();
+    }
+
+    #[test]
+    fn rate_limit_replies_without_a_usable_reset_pause_for_one_minute() {
+        let past_reset = (NOW - 10).to_string();
+        let cases: [(&str, Vec<String>); 2] = [
+            ("429 Too Many Requests", vec![]),
+            (
+                "403 Forbidden",
+                vec![
+                    "X-RateLimit-Remaining: 0".to_string(),
+                    format!("X-RateLimit-Reset: {past_reset}"),
+                ],
+            ),
+        ];
+        for (index, (status_line, headers)) in cases.iter().enumerate() {
+            let harness = Harness::new(&format!("gh-read-fallback-{index}"), &[], 60);
+            let gh = gh(&harness.home.join("cli"), "gho_t");
+            let headers: Vec<&str> = headers.iter().map(String::as_str).collect();
+            let (url, server) = serve_sequence(&[(status_line, &headers, "{}")]);
+
+            let dto = harness.read(&gh, &url, NOW, false);
+            server.join().unwrap();
+            assert_eq!(dto.status, GithubStatus::RateLimited, "{status_line}");
+            assert!(
+                dto.hint.as_deref().unwrap().contains("1 min"),
+                "{:?}",
+                dto.hint
+            );
+            assert_eq!(
+                harness.read(&gh, &refused_url(), NOW + 30, true).status,
+                GithubStatus::RateLimited,
+                "{status_line}: paused for a minute"
+            );
+            let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+            assert_eq!(
+                harness.read(&gh, &url, NOW + 60, false).status,
+                GithubStatus::Ok,
+                "{status_line}: resumes after a minute"
+            );
+            server.join().unwrap();
+        }
     }
 
     #[test]
@@ -613,6 +691,61 @@ mod tests {
             "{:?}",
             paused.hint
         );
+    }
+
+    #[test]
+    fn the_low_budget_pause_starts_below_fifty_points() {
+        let fine = Harness::new("gh-read-budget-50", &[], 60);
+        let gh_fine = gh(&fine.home.join("cli"), "gho_t");
+        let body = reply_with_budget(50, NOW + 600);
+        let (url, server) = serve_sequence(&[("200 OK", &[], &body)]);
+        assert_eq!(
+            fine.read(&gh_fine, &url, NOW, false).status,
+            GithubStatus::Ok
+        );
+        server.join().unwrap();
+        let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+        assert_eq!(
+            fine.read(&gh_fine, &url, NOW + 56, false).status,
+            GithubStatus::Ok,
+            "fifty points left is not a pause"
+        );
+        assert_eq!(server.join().unwrap().len(), 1);
+
+        let low = Harness::new("gh-read-budget-49", &[], 60);
+        let gh_low = gh(&low.home.join("cli"), "gho_t");
+        let body = reply_with_budget(49, NOW + 600);
+        let (url, server) = serve_sequence(&[("200 OK", &[], &body)]);
+        assert_eq!(low.read(&gh_low, &url, NOW, false).status, GithubStatus::Ok);
+        server.join().unwrap();
+        let paused = low.read(&gh_low, &refused_url(), NOW + 56, false);
+        assert_eq!(paused.status, GithubStatus::RateLimited);
+        assert!(paused.stale);
+        assert!(
+            paused.hint.as_deref().unwrap().contains("10 min"),
+            "{:?}",
+            paused.hint
+        );
+    }
+
+    #[test]
+    fn an_unreadable_reset_instant_with_a_low_budget_pauses_for_one_minute() {
+        let harness = Harness::new("gh-read-budget-unreadable", &[], 60);
+        let gh = gh(&harness.home.join("cli"), "gho_t");
+        let body = reply_with_budget_text(3, "soon");
+        let (url, server) = serve_sequence(&[("200 OK", &[], &body)]);
+        assert_eq!(harness.read(&gh, &url, NOW, false).status, GithubStatus::Ok);
+        server.join().unwrap();
+        assert_eq!(
+            harness.read(&gh, &refused_url(), NOW + 30, true).status,
+            GithubStatus::RateLimited
+        );
+        let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+        assert_eq!(
+            harness.read(&gh, &url, NOW + 60, false).status,
+            GithubStatus::Ok
+        );
+        server.join().unwrap();
     }
 
     #[test]

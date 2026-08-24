@@ -232,10 +232,38 @@ describe("Github", () => {
 
     await user.click(screen.getByRole("button", { name: "Refresh pull requests" }));
     await waitFor(() => expect(readGithubPrs).toHaveBeenLastCalledWith(true));
+    expect(readGithubPrs).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       await client.refetchQueries({ queryKey: ["github", "prs"] });
     });
+    expect(readGithubPrs).toHaveBeenCalledTimes(3);
     expect(readGithubPrs).toHaveBeenLastCalledWith(false);
+  });
+
+  it("keeps the previous lists when a later read fails outright", async () => {
+    readGithubPrs.mockResolvedValue(okPrs());
+    const { client } = renderGithub();
+    await screen.findByText("Add the thing");
+
+    readGithubPrs.mockRejectedValue({ kind: "message", message: "github read worker failed", path: null });
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["github", "prs"] });
+    });
+
+    const banner = await screen.findByRole("status");
+    expect(banner.textContent).toContain("GitHub unavailable");
+    expect(banner.textContent).toContain("github read worker failed");
+    expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
+  });
+
+  it("says it is checking until the first read answers", () => {
+    readGithubPrs.mockReturnValue(new Promise(() => undefined));
+    renderGithub();
+
+    expect(screen.getByTestId("github-caption").textContent).toContain("Checking…");
+    expect(within(section("Mine")).getByText("Checking…")).toBeTruthy();
+    expect(within(section("Review requested")).getByText("Checking…")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

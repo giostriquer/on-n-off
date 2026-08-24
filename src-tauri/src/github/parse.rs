@@ -237,6 +237,29 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_search_count_falls_back_to_the_page_and_missing_tagging_means_team() {
+        let mut value = reply();
+        value["data"]["mine"]
+            .as_object_mut()
+            .unwrap()
+            .remove("issueCount");
+        value["data"].as_object_mut().unwrap().remove("direct");
+        value["data"]["mine"]["nodes"][0]["commits"]["nodes"] = json!([]);
+        let parsed = parse(&value).unwrap();
+        assert_eq!(parsed.mine.total, 1);
+        assert_eq!(
+            parsed.mine.items[0].ci,
+            CiState::None,
+            "no commits means no checks"
+        );
+        assert!(parsed
+            .review_requested
+            .items
+            .iter()
+            .all(|item| item.review_request == Some(ReviewRequestKind::Team)));
+    }
+
+    #[test]
     fn a_missing_rate_limit_or_viewer_is_tolerated() {
         let mut value = reply();
         value["data"]["rateLimit"] = json!(null);
