@@ -24,6 +24,7 @@ The Windows notes come first; macOS-specific notes are in [macOS](#macos) below.
    - `claude`
    - `codex`
    - `agy` (Antigravity; optional)
+   - `gh` (GitHub CLI, signed in with `gh auth login`; optional, needed only by **Pull requests**)
 3. Optional: Node/`npx` if you will install skills via `npx skills add …`
 
 This is a **Windows desktop** app. It reads `%USERPROFILE%\.claude`, `.codex`, `.gemini`, and `.on-n-off`.  
@@ -43,8 +44,9 @@ If a CLI works in a terminal but the app says **os error 193** / “not a valid 
 1. **Overview / Plugins / Skills / MCP** — browse only first
 2. **Usage** — scan local transcripts (read-only of agent files; may write caches under `%USERPROFILE%\.on-n-off\`)
 3. **Limits** — live Claude subscription limits from its profile and usage HTTPS endpoints, plus Codex subscription limits through `codex app-server`. on-n-off never refreshes or writes Claude auth; Codex owns its own login and refresh lifecycle. On macOS, click **Allow** on the one-time Keychain prompt for `security`. Remembers each account's last numbers under `%USERPROFILE%\.on-n-off\limits\` so switching accounts with `codex login` / `claude` keeps the other one listed; **Forget** on a stale card deletes just that file. Optional limit notifications are off by default under **Settings → Limit notifications**. When enabled, the background monitor checks every 5, 10, 15, or 30 minutes while the app is running, notifies once when a window reaches 100% or resets, backs off after provider failures, and stores its deduplication baseline in `%USERPROFILE%\.on-n-off\limits-monitor.json`.
-4. **Agent config** — check paths and project scope
-5. Only then try a **single toggle** or install on a throwaway plugin if you want write coverage
+4. **Pull requests** — your open GitHub pull requests (review requested, authored within the configured scope, assigned) with each one's CI rollup; the dot opens the checks tab, the row opens the PR. Needs the GitHub CLI installed and signed in (`gh auth login`): on-n-off runs `gh auth token` once per app run and sends one GraphQL request per refresh to `api.github.com`; it never writes to GitHub. The last good read is kept under `%USERPROFILE%\.on-n-off\github\prs.json` and shown with an amber strip when a refresh fails. **Settings → Pull requests** holds the scope (`org:NAME`, `user:NAME`, `OWNER/REPO`), the refresh interval (30 s to 5 min, only while the window is visible), and the opt-in CI notifications, whose baseline lives in `%USERPROFILE%\.on-n-off\github\monitor.json`.
+5. **Agent config** — check paths and project scope
+6. Only then try a **single toggle** or install on a throwaway plugin if you want write coverage
 
 ## Safety notes
 
@@ -89,7 +91,7 @@ signed. Do not publish its draft until the installer, its `.sig` file,
 
 1. macOS on Apple Silicon (Intel Macs are not built yet)
 2. Agent CLIs installed any usual way (`claude` native installer, `npm`/`nvm`/`volta`/`bun` for `codex`, Homebrew…). Finder launches apps with a minimal `PATH`; the app asks your login shell (`$SHELL -i -l`) for its `PATH` once at startup and also checks well-known folders (`~/.local/bin`, `/opt/homebrew/bin`, `~/.nvm/versions/node/*/bin`, `~/.volta/bin`, `~/.bun/bin`, …). If a CLI still shows missing, run `which <cli>` in Terminal and paste that path into **Settings → Binary**.
-3. Optional: Node/`npx` for `npx skills add …`
+3. Optional: Node/`npx` for `npx skills add …`, and the GitHub CLI (`brew install gh`, then `gh auth login`) for **Pull requests**. `gh auth token` reads `gh`'s own Keychain item, so no Keychain prompt appears for it.
 
 The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, and `~/.on-n-off`. Because it inspects project folders (for project-scoped MCP/skills and transcripts), macOS may ask for access to **Documents** or **Desktop** the first time; declining only hides those project-scoped entries.
 
