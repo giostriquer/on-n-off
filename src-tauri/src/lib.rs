@@ -14,6 +14,7 @@ mod dto;
 #[cfg(test)]
 mod fake;
 mod flags;
+mod github;
 mod http;
 mod install_source;
 mod item_install;
@@ -81,6 +82,7 @@ pub fn run() {
             commands::usage_summary,
             commands::read_limits,
             commands::forget_limits_snapshot,
+            commands::read_github_prs,
             commands::hide_limits_popover,
             commands::open_limits_window,
             commands::quit_app,

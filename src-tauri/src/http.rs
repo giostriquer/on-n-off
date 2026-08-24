@@ -172,58 +172,81 @@ pub(crate) fn serve_once_capturing(
     response_headers: &[&str],
     body: &str,
 ) -> (String, std::thread::JoinHandle<CapturedRequest>) {
+    let (url, handle) = serve_sequence(&[(status_line, response_headers, body)]);
+    (
+        url,
+        std::thread::spawn(move || handle.join().unwrap().remove(0)),
+    )
+}
+
+/// A loopback server answering one connection per entry, in order, capturing each request's
+/// head and body. Lets a test script "401, then 200" or "429, then 200" against one URL.
+#[cfg(test)]
+pub(crate) fn serve_sequence(
+    responses: &[(&str, &[&str], &str)],
+) -> (String, std::thread::JoinHandle<Vec<CapturedRequest>>) {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/graphql", listener.local_addr().unwrap());
-    let body = body.to_string();
-    let status_line = status_line.to_string();
-    let extra_headers = response_headers
+    let responses: Vec<(String, String, String)> = responses
         .iter()
-        .map(|header| format!("{header}\r\n"))
-        .collect::<String>();
+        .map(|(status_line, headers, body)| {
+            (
+                status_line.to_string(),
+                headers
+                    .iter()
+                    .map(|header| format!("{header}\r\n"))
+                    .collect::<String>(),
+                body.to_string(),
+            )
+        })
+        .collect();
     let handle = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = Vec::new();
-        let mut buf = [0u8; 1024];
-        let head_end = loop {
-            let n = stream.read(&mut buf).unwrap();
-            request.extend_from_slice(&buf[..n]);
-            if let Some(at) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                break at + 4;
+        let mut captured = Vec::new();
+        for (status_line, extra_headers, body) in responses {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            let head_end = loop {
+                let n = stream.read(&mut buf).unwrap();
+                request.extend_from_slice(&buf[..n]);
+                if let Some(at) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break at + 4;
+                }
+                if n == 0 {
+                    break request.len();
+                }
+            };
+            let head = String::from_utf8_lossy(&request[..head_end]).to_string();
+            let content_length = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or(0);
+            while request.len() - head_end < content_length {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
             }
-            if n == 0 {
-                break request.len();
-            }
-        };
-        let head = String::from_utf8_lossy(&request[..head_end]).to_string();
-        let content_length = head
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                name.eq_ignore_ascii_case("content-length")
-                    .then(|| value.trim().parse::<usize>().ok())
-                    .flatten()
-            })
-            .unwrap_or(0);
-        while request.len() - head_end < content_length {
-            let n = stream.read(&mut buf).unwrap();
-            if n == 0 {
-                break;
-            }
-            request.extend_from_slice(&buf[..n]);
+            let body_end = (head_end + content_length).min(request.len());
+            captured.push(CapturedRequest {
+                head,
+                body: String::from_utf8_lossy(&request[head_end..body_end]).to_string(),
+            });
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
         }
-        let body_bytes = &request[head_end..(head_end + content_length).min(request.len())];
-        let captured = CapturedRequest {
-            head,
-            body: String::from_utf8_lossy(body_bytes).to_string(),
-        };
-        let response = format!(
-            "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        stream.write_all(response.as_bytes()).unwrap();
         captured
     });
     (url, handle)

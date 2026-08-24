@@ -329,6 +329,111 @@ pub struct UsageSummaryDto {
     pub cache_hit: bool,
 }
 
+/// Why the GitHub screen has no fresh data. Every value except `Ok` comes with a `hint` telling
+/// the user what to do; `stale` says whether the last snapshot is being shown meanwhile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GithubStatus {
+    Ok,
+    /// The `gh` CLI is not on the search path.
+    GhMissing,
+    /// `gh` holds no github.com login (or could not answer).
+    GhNotLoggedIn,
+    /// GitHub rejected the token `gh` handed over, twice.
+    TokenRejected,
+    /// GitHub's rate limit is exhausted; polling pauses until it resets.
+    RateLimited,
+    /// DNS, TLS, timeout, an unexpected status, or an unreadable reply.
+    Network,
+}
+
+/// The head commit's status-check rollup, collapsed to what a list row can show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CiState {
+    /// No checks reported (or a state this version does not know).
+    None,
+    /// `PENDING` or `EXPECTED`.
+    Pending,
+    Success,
+    Failure,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewRequestKind {
+    Direct,
+    Team,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubPrDto {
+    /// GitHub's node id, stable across renames and pushes.
+    pub id: String,
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    /// `owner/name`.
+    pub repo: String,
+    pub author: String,
+    pub is_draft: bool,
+    /// `APPROVED`, `CHANGES_REQUESTED`, or `REVIEW_REQUIRED` when GitHub reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_decision: Option<String>,
+    pub ci: CiState,
+    pub head_ref: String,
+    pub base_ref: String,
+    /// RFC 3339.
+    pub updated_at: String,
+    /// Only on the review-requested list: whether the request named the user or one of their teams.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_request: Option<ReviewRequestKind>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubPrListDto {
+    /// Matches on GitHub, which can exceed `items.len()` (the query reads one page).
+    pub total: u64,
+    pub items: Vec<GithubPrDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRateLimitDto {
+    pub remaining: u64,
+    /// RFC 3339.
+    pub reset_at: String,
+}
+
+/// The GitHub screen's data. Provider-side problems are a `status` + `hint`, never an error;
+/// `stale: true` means the lists come from the last successful read on disk.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubPrsDto {
+    pub status: GithubStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    pub stale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewer: Option<String>,
+    /// RFC 3339 instant of the read that produced the lists (the snapshot's, when stale).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetched_at: Option<String>,
+    /// The scope qualifiers applied to `mine`.
+    pub scope: Vec<String>,
+    pub mine: GithubPrListDto,
+    pub review_requested: GithubPrListDto,
+    pub assigned: GithubPrListDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<GithubRateLimitDto>,
+    /// GraphQL `errors[]` messages that came with usable data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LimitsStatus {

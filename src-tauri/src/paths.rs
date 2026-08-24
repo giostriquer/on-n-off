@@ -88,25 +88,9 @@ pub fn limits_monitor_state_path() -> Result<PathBuf, AdapterError> {
     Ok(limits_monitor_state_path_for(&user_home()?))
 }
 
-fn github_dir_for(home: &std::path::Path) -> PathBuf {
-    home.join(".on-n-off").join("github")
-}
-
 /// Last successful pull-request read, so the GitHub screen has something to show at launch.
 pub fn github_prs_path_for(home: &std::path::Path) -> PathBuf {
-    github_dir_for(home).join("prs.json")
-}
-
-pub fn github_prs_path() -> Result<PathBuf, AdapterError> {
-    Ok(github_prs_path_for(&user_home()?))
-}
-
-pub fn github_monitor_state_path_for(home: &std::path::Path) -> PathBuf {
-    github_dir_for(home).join("monitor.json")
-}
-
-pub fn github_monitor_state_path() -> Result<PathBuf, AdapterError> {
-    Ok(github_monitor_state_path_for(&user_home()?))
+    home.join(".on-n-off").join("github").join("prs.json")
 }
 
 pub fn installed_items_path_for(home: &std::path::Path) -> PathBuf {
@@ -193,13 +177,6 @@ mod tests {
             Ok(Path::new(".on-n-off")
                 .join("github")
                 .join("prs.json")
-                .as_path())
-        );
-        assert_eq!(
-            github_monitor_state_path_for(&home).strip_prefix(&home),
-            Ok(Path::new(".on-n-off")
-                .join("github")
-                .join("monitor.json")
                 .as_path())
         );
     }
