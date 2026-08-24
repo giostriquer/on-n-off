@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FolderOpen, RefreshCw } from "lucide-react";
+import { FolderOpen, RefreshCw, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Rocker } from "@/features/agents/Rocker";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
@@ -11,6 +11,7 @@ import type {
   AgentId,
   AgentInfo,
   AppSettings,
+  GithubPollSeconds,
   LimitsPollMinutes,
   ProviderDiagnose,
 } from "$lib/types";
@@ -23,7 +24,17 @@ type SettingsProps = {
   onAutomaticUpdatesChange: (enabled: boolean) => void;
   onLimitNotificationsChange: (enabled: boolean) => void;
   onLimitsPollMinutesChange: (minutes: LimitsPollMinutes) => void;
+  onGithubScopesChange: (scopes: string[]) => void;
+  onGithubNotificationsChange: (enabled: boolean) => void;
+  onGithubPollSecondsChange: (seconds: GithubPollSeconds) => void;
 };
+
+const GITHUB_POLL_OPTIONS: [GithubPollSeconds, string][] = [
+  [30, "30 seconds"],
+  [60, "1 minute"],
+  [120, "2 minutes"],
+  [300, "5 minutes"],
+];
 
 const BINARY_NAME: Record<AgentId, string> = {
   claude: "claude",
@@ -40,6 +51,9 @@ export function Settings({
   onAutomaticUpdatesChange,
   onLimitNotificationsChange,
   onLimitsPollMinutesChange,
+  onGithubScopesChange,
+  onGithubNotificationsChange,
+  onGithubPollSecondsChange,
 }: SettingsProps) {
   const diagnose = useQuery({
     queryKey: ["diagnose-providers", settings.binaryPaths],
@@ -81,6 +95,15 @@ export function Settings({
         onPollMinutesChange={onLimitsPollMinutesChange}
       />
 
+      <GithubSettingsCard
+        scopes={settings.githubScopes}
+        enabled={settings.githubNotifications}
+        pollSeconds={settings.githubPollSeconds}
+        onScopesChange={onGithubScopesChange}
+        onEnabledChange={onGithubNotificationsChange}
+        onPollSecondsChange={onGithubPollSecondsChange}
+      />
+
       <section aria-label="Providers">
         <div className="flex flex-col gap-3">
           {agents.map((agent) => (
@@ -101,17 +124,11 @@ export function Settings({
   );
 }
 
-function LimitNotificationsCard({
-  enabled,
-  pollMinutes,
-  onEnabledChange,
-  onPollMinutesChange,
-}: {
-  enabled: boolean;
-  pollMinutes: LimitsPollMinutes;
-  onEnabledChange: (enabled: boolean) => void;
-  onPollMinutesChange: (minutes: LimitsPollMinutes) => void;
-}) {
+/**
+ * A notifications toggle that asks the OS for permission before turning on. Turning off never
+ * asks; a denied or failed request leaves the setting off and explains why.
+ */
+function useNotificationGate(enabled: boolean, onEnabledChange: (enabled: boolean) => void) {
   const [requestingPermission, setRequestingPermission] = useState(false);
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
 
@@ -135,6 +152,131 @@ function LimitNotificationsCard({
       setRequestingPermission(false);
     }
   }
+
+  return { requestingPermission, permissionMessage, toggle };
+}
+
+function GithubSettingsCard({
+  scopes,
+  enabled,
+  pollSeconds,
+  onScopesChange,
+  onEnabledChange,
+  onPollSecondsChange,
+}: {
+  scopes: string[];
+  enabled: boolean;
+  pollSeconds: GithubPollSeconds;
+  onScopesChange: (scopes: string[]) => void;
+  onEnabledChange: (enabled: boolean) => void;
+  onPollSecondsChange: (seconds: GithubPollSeconds) => void;
+}) {
+  const { requestingPermission, permissionMessage, toggle } = useNotificationGate(enabled, onEnabledChange);
+  const [draft, setDraft] = useState("");
+
+  function addScope() {
+    const scope = draft.trim();
+    if (!scope) return;
+    setDraft("");
+    if (!scopes.includes(scope)) {
+      onScopesChange([...scopes, scope]);
+    }
+  }
+
+  return (
+    <section aria-label="Pull requests" className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
+      <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="m-0 text-[15px] font-semibold">Pull requests</h3>
+          <p className="mt-1 mb-0 text-[11.5px] text-[var(--mute)]">
+            Reads GitHub through the `gh` CLI's login. Scopes narrow the pull requests you authored:
+            org:NAME, user:NAME or OWNER/REPO. Same-kind scopes combine; mixing kinds narrows.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+            CI notify
+          </span>
+          <Rocker
+            size="skill"
+            on={enabled}
+            busy={requestingPermission}
+            ariaLabel="Notify about CI changes"
+            onToggle={() => void toggle()}
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5">
+        {scopes.map((scope) => (
+          <span
+            key={scope}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--hair)] py-0.5 pr-1 pl-1.5 font-mono text-[10.5px]"
+          >
+            {scope}
+            <button
+              type="button"
+              className="inline-flex size-4 items-center justify-center rounded-sm border-0 bg-transparent p-0 text-[var(--mute)] hover:text-[var(--trip)]"
+              aria-label={`Remove ${scope}`}
+              onClick={() => onScopesChange(scopes.filter((item) => item !== scope))}
+            >
+              <X className="size-3" aria-hidden="true" />
+            </button>
+          </span>
+        ))}
+        <input
+          className="h-8 min-w-[12rem] flex-1 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 font-mono text-[11px] text-[var(--silkscreen)] placeholder:text-[var(--mute)]"
+          aria-label="Add a GitHub scope"
+          placeholder={scopes.length ? "add another scope" : "org:acme · owner/repo · all repositories when empty"}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              addScope();
+            }
+          }}
+          onBlur={addScope}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
+        <label htmlFor="github-poll-seconds" className="min-w-0 flex-1 text-[12px] text-[var(--mute)]">
+          Refresh pull requests every
+        </label>
+        <select
+          id="github-poll-seconds"
+          aria-label="GitHub polling interval"
+          className="h-8 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 text-[11px] font-semibold"
+          value={pollSeconds}
+          onChange={(event) => onPollSecondsChange(Number(event.target.value) as GithubPollSeconds)}
+        >
+          {GITHUB_POLL_OPTIONS.map(([seconds, label]) => (
+            <option key={seconds} value={seconds}>
+              {label}
+            </option>
+          ))}
+        </select>
+        {permissionMessage ? (
+          <p className="m-0 basis-full text-[11.5px] text-[var(--trip)]" role="status">
+            {permissionMessage}
+          </p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function LimitNotificationsCard({
+  enabled,
+  pollMinutes,
+  onEnabledChange,
+  onPollMinutesChange,
+}: {
+  enabled: boolean;
+  pollMinutes: LimitsPollMinutes;
+  onEnabledChange: (enabled: boolean) => void;
+  onPollMinutesChange: (minutes: LimitsPollMinutes) => void;
+}) {
+  const { requestingPermission, permissionMessage, toggle } = useNotificationGate(enabled, onEnabledChange);
 
   return (
     <section

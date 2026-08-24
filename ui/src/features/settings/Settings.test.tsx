@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Settings } from "./Settings";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
-import type { AgentInfo, LimitsPollMinutes } from "$lib/types";
+import type { AgentInfo, GithubPollSeconds, LimitsPollMinutes } from "$lib/types";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -86,10 +86,18 @@ function renderSettings({
   onToggleVisible = () => undefined,
   onLimitNotificationsChange = () => undefined,
   onLimitsPollMinutesChange = () => undefined,
+  onGithubScopesChange = () => undefined,
+  onGithubNotificationsChange = () => undefined,
+  onGithubPollSecondsChange = () => undefined,
+  githubScopes = [],
 }: {
   onToggleVisible?: (id: AgentInfo["id"], hidden: boolean) => void;
   onLimitNotificationsChange?: (enabled: boolean) => void;
   onLimitsPollMinutesChange?: (minutes: LimitsPollMinutes) => void;
+  onGithubScopesChange?: (scopes: string[]) => void;
+  onGithubNotificationsChange?: (enabled: boolean) => void;
+  onGithubPollSecondsChange?: (seconds: GithubPollSeconds) => void;
+  githubScopes?: string[];
 } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -103,7 +111,7 @@ function renderSettings({
             automaticUpdates: true,
             limitNotifications: false,
             limitsPollMinutes: 10,
-            githubScopes: [],
+            githubScopes,
             githubNotifications: false,
             githubPollSeconds: 60,
           }}
@@ -112,6 +120,9 @@ function renderSettings({
           onAutomaticUpdatesChange={() => undefined}
           onLimitNotificationsChange={onLimitNotificationsChange}
           onLimitsPollMinutesChange={onLimitsPollMinutesChange}
+          onGithubScopesChange={onGithubScopesChange}
+          onGithubNotificationsChange={onGithubNotificationsChange}
+          onGithubPollSecondsChange={onGithubPollSecondsChange}
         />
       </UpdateProvider>
     </QueryClientProvider>,
@@ -172,5 +183,54 @@ describe("Settings", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Notifications are blocked in system settings.",
     );
+  });
+
+  it("adds and removes GitHub scopes", async () => {
+    const user = userEvent.setup();
+    const onGithubScopesChange = vi.fn();
+    renderSettings({ onGithubScopesChange, githubScopes: ["org:acme", "repo:me/tool"] });
+
+    const card = screen.getByRole("region", { name: "Pull requests" });
+    expect(card).toHaveTextContent("org:acme");
+    expect(card).toHaveTextContent("repo:me/tool");
+
+    const input = screen.getByRole("textbox", { name: "Add a GitHub scope" });
+    await user.type(input, "  user:me{Enter}");
+    expect(onGithubScopesChange).toHaveBeenCalledWith(["org:acme", "repo:me/tool", "user:me"]);
+    expect(input).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: "Remove org:acme" }));
+    expect(onGithubScopesChange).toHaveBeenCalledWith(["repo:me/tool"]);
+
+    onGithubScopesChange.mockClear();
+    await user.type(input, "   {Enter}");
+    expect(onGithubScopesChange).not.toHaveBeenCalled();
+  });
+
+  it("requests notification permission before enabling CI notifications and persists the interval", async () => {
+    const user = userEvent.setup();
+    const onGithubNotificationsChange = vi.fn();
+    const onGithubPollSecondsChange = vi.fn();
+    renderSettings({ onGithubNotificationsChange, onGithubPollSecondsChange });
+
+    await user.click(screen.getByRole("button", { name: "Notify about CI changes" }));
+
+    expect(apiMocks.requestNotificationPermission).toHaveBeenCalledTimes(1);
+    expect(onGithubNotificationsChange).toHaveBeenCalledWith(true);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "GitHub polling interval" }), "120");
+    expect(onGithubPollSecondsChange).toHaveBeenCalledWith(120);
+  });
+
+  it("keeps CI notifications disabled when notification permission is denied", async () => {
+    apiMocks.requestNotificationPermission.mockResolvedValue(false);
+    const user = userEvent.setup();
+    const onGithubNotificationsChange = vi.fn();
+    renderSettings({ onGithubNotificationsChange });
+
+    await user.click(screen.getByRole("button", { name: "Notify about CI changes" }));
+
+    expect(onGithubNotificationsChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("Notifications are blocked in system settings.");
   });
 });
