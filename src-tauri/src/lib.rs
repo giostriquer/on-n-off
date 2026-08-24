@@ -14,6 +14,7 @@ mod dto;
 #[cfg(test)]
 mod fake;
 mod flags;
+mod http;
 mod install_source;
 mod item_install;
 mod limits;

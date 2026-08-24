@@ -3,9 +3,9 @@
 use chrono::{SecondsFormat, Utc};
 
 use super::credentials::CredentialLookup;
-use super::http::HttpError;
 use super::Parsed;
 use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto};
+use crate::http::HttpError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ProviderLoadError {
