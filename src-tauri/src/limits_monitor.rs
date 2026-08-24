@@ -164,7 +164,8 @@ async fn persist_state(path: &Path, state: &MonitorState) -> Result<(), String> 
         .map_err(|error| format!("state worker failed: {error}"))?
 }
 
-async fn wait_for_wake_or_deadline(
+/// Sleep until `delay` passes or a wake message arrives. Shared with the GitHub CI monitor.
+pub(crate) async fn wait_for_wake_or_deadline(
     wake_receiver: &mut async_runtime::Receiver<()>,
     delay: Duration,
 ) {

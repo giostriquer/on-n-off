@@ -93,6 +93,15 @@ pub fn github_prs_path_for(home: &std::path::Path) -> PathBuf {
     home.join(".on-n-off").join("github").join("prs.json")
 }
 
+/// The CI monitor's last-seen rollup per own pull request, so a restart never re-notifies.
+pub fn github_monitor_state_path_for(home: &std::path::Path) -> PathBuf {
+    home.join(".on-n-off").join("github").join("monitor.json")
+}
+
+pub fn github_monitor_state_path() -> Result<PathBuf, AdapterError> {
+    Ok(github_monitor_state_path_for(&user_home()?))
+}
+
 pub fn installed_items_path_for(home: &std::path::Path) -> PathBuf {
     home.join(".on-n-off").join("installed-items.json")
 }
@@ -177,6 +186,13 @@ mod tests {
             Ok(Path::new(".on-n-off")
                 .join("github")
                 .join("prs.json")
+                .as_path())
+        );
+        assert_eq!(
+            github_monitor_state_path_for(&home).strip_prefix(&home),
+            Ok(Path::new(".on-n-off")
+                .join("github")
+                .join("monitor.json")
                 .as_path())
         );
     }

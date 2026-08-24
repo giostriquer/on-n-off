@@ -15,6 +15,7 @@ mod dto;
 mod fake;
 mod flags;
 mod github;
+mod github_monitor;
 mod http;
 mod install_source;
 mod item_install;
@@ -52,6 +53,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             tray::setup(_app)?;
             limits_monitor::setup(_app);
+            github_monitor::setup(_app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

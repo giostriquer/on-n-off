@@ -195,6 +195,7 @@ pub async fn save_app_settings(
     })
     .await?;
     crate::limits_monitor::wake(&app);
+    crate::github_monitor::wake(&app);
     Ok(saved)
 }
 
