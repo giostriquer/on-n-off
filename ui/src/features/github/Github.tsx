@@ -1,6 +1,7 @@
 import { RefreshCw } from "lucide-react";
+import { FOCUS_RING } from "$lib/a11y";
 import { displayError, parseInvokeError } from "$lib/error";
-import { formatUpdatedAgo, listCountLabel, orderPrs, statusHeadline } from "$lib/githubFormat";
+import { formatUpdatedAgo, listCountLabel, orderPrs, prsSummary, statusHeadline } from "$lib/githubFormat";
 import type { GithubPrList, GithubPrs } from "$lib/githubTypes";
 import type { GithubPollSeconds } from "$lib/types";
 import { PrRow } from "./PrRow";
@@ -42,26 +43,34 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="github-screen" aria-busy={loading}>
-      <header className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1 font-mono text-[12px] text-[var(--mute)]" data-testid="github-caption">
-          Pull requests
-          {prs?.viewer ? ` · ${prs.viewer}` : ""}
-          {updated ? ` · updated ${updated}` : ""}
-          {loading ? (
-            <span className="ml-2" role="status" aria-live="polite">
-              · Checking…
-            </span>
-          ) : null}
+      <header className="flex flex-wrap items-end gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="m-0 text-[17px] font-semibold tracking-[0.05em] uppercase">Pull requests</h2>
+          <p className="mt-1 mb-0 font-mono text-[12px] text-[var(--mute)]" data-testid="github-caption">
+            {prs?.viewer ? `${prs.viewer} · ` : ""}
+            {updated ? `updated ${updated} · ` : ""}
+            every {pollSeconds} s
+            {checking ? (
+              // Only the first load is announced; routine polls stay quiet for screen readers.
+              <span role="status" aria-live="polite">
+                {" "}
+                · Checking…
+              </span>
+            ) : loading ? (
+              <span aria-hidden="true"> · refreshing</span>
+            ) : null}
+          </p>
+          {prs ? <Summary prs={prs} /> : null}
         </div>
         <ScopeChips scope={prs?.scope ?? []} onOpenSettings={onOpenSettings} />
         <button
           type="button"
-          className="inline-flex size-7 items-center justify-center rounded-md border border-[var(--hair)] bg-transparent text-[var(--mute)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--fill)] disabled:opacity-45"
+          className={`inline-flex size-7 items-center justify-center rounded-md border border-[var(--hair)] bg-transparent text-[var(--mute)] disabled:opacity-45 ${FOCUS_RING}`}
           disabled={loading}
           aria-label="Refresh pull requests"
           onClick={refresh}
         >
-          <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
+          <RefreshCw className={`size-3.5 ${loading ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
         </button>
       </header>
 
@@ -85,16 +94,16 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
 
       <div className="flex flex-col gap-3">
         <PrList
-          title="Review requested"
-          list={prs?.reviewRequested ?? EMPTY_LIST}
-          empty="No reviews requested from you."
+          title="Mine"
+          list={prs?.mine ?? EMPTY_LIST}
+          empty="No open pull requests of yours."
           checking={checking}
           now={now}
         />
         <PrList
-          title="Mine"
-          list={prs?.mine ?? EMPTY_LIST}
-          empty="No open pull requests of yours."
+          title="Review requested"
+          list={prs?.reviewRequested ?? EMPTY_LIST}
+          empty="No reviews requested from you."
           checking={checking}
           now={now}
         />
@@ -108,10 +117,31 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
       </div>
 
       <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
-        read-only · signed in through `gh auth login`, nothing is written to GitHub · refreshed every{" "}
-        {pollSeconds}s while this window is visible · the CI dot opens the checks tab
+        read-only · signed in through `gh auth login`, nothing is written to GitHub · refreshed while this
+        window is visible · the CI glyph opens the checks tab, the row opens the pull request
       </p>
     </div>
+  );
+}
+
+/** "1 mine · 1 failing · 15 to review · 0 assigned" — failing only when there is any. */
+function Summary({ prs }: { prs: GithubPrs }) {
+  const summary = prsSummary(prs);
+  const parts: { text: string; tone?: "trip" }[] = [
+    { text: `${summary.mine} mine` },
+    ...(summary.failing ? [{ text: `${summary.failing} failing`, tone: "trip" as const }] : []),
+    { text: `${summary.review} to review` },
+    { text: `${summary.assigned} assigned` },
+  ];
+  return (
+    <p className="mt-1.5 mb-0 text-[12.5px] text-[var(--silkscreen)]" data-testid="github-summary">
+      {parts.map((part, index) => (
+        <span key={part.text}>
+          {index ? " · " : ""}
+          <span className={part.tone ? "font-semibold text-[var(--trip)]" : ""}>{part.text}</span>
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -133,7 +163,7 @@ function ScopeChips({ scope, onOpenSettings }: { scope: string[]; onOpenSettings
       {onOpenSettings ? (
         <button
           type="button"
-          className="border-0 bg-transparent p-0 text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase hover:text-[var(--silkscreen)]"
+          className={`rounded-sm border-0 bg-transparent px-1 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase hover:text-[var(--silkscreen)] ${FOCUS_RING}`}
           onClick={onOpenSettings}
         >
           Scope
@@ -157,15 +187,13 @@ function PrList({
   now: number;
 }) {
   return (
-    <section
-      className="overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
-      aria-label={title}
-    >
-      <header className="border-b border-[var(--hair)] px-3.5 py-2.5">
-        <h2 className="m-0 flex items-center gap-2 text-[11.5px] font-semibold tracking-[0.03em] uppercase">
+    <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={title}>
+      {/* Sticks to the top of the scroll area so a long list keeps its name in view. */}
+      <header className="sticky top-0 z-10 rounded-t-[11px] border-b border-[var(--hair)] bg-[var(--plate)] px-3.5 py-2.5">
+        <h3 className="m-0 flex items-center gap-2 text-[11.5px] font-semibold tracking-[0.03em] uppercase">
           {title}
           <span className="font-mono text-[11px] font-normal text-[var(--mute)]">{listCountLabel(list)}</span>
-        </h2>
+        </h3>
       </header>
       {list.items.length ? (
         <ul className="m-0 list-none p-0" role="list">

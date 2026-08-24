@@ -118,20 +118,35 @@ describe("Github", () => {
     renderGithub();
 
     await screen.findByText("Add the thing");
-    expect(screen.getByTestId("github-caption").textContent).toContain("octocat");
-    expect(screen.getByTestId("github-caption").textContent).toContain("updated just now");
+    expect(screen.getByRole("heading", { level: 2, name: "Pull requests" })).toBeTruthy();
+    const meta = screen.getByTestId("github-caption").textContent ?? "";
+    expect(meta).toContain("octocat");
+    expect(meta).toContain("updated just now");
+    expect(meta).toContain("every 60 s");
+    expect(screen.getByTestId("github-summary").textContent).toBe("1 mine · 1 failing · 2 to review · 0 assigned");
     expect(screen.getByText("org:acme")).toBeTruthy();
 
+    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual([
+      "Mine",
+      "Review requested",
+      "Assigned",
+    ]);
+
     const mine = section("Mine");
-    expect(within(mine).getByRole("heading").textContent).toContain("1");
-    expect(within(mine).getByText("acme/app#41")).toBeTruthy();
+    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toContain("1");
+    expect(within(mine).getByText("#41")).toBeTruthy();
     expect(within(mine).getByText("Add the thing")).toBeTruthy();
+    expect(within(mine).getByText("acme/app")).toBeTruthy();
     expect(within(mine).getByText("feat/thing → main")).toBeTruthy();
-    expect(within(mine).getByText("5m ago")).toBeTruthy();
+    const age = within(mine).getByText("5m ago");
+    expect(age.tagName).toBe("TIME");
+    expect(age.getAttribute("datetime")).toBe("2026-08-24T19:55:00Z");
+    expect(age.getAttribute("title")).toMatch(/2026/);
     expect(within(mine).getByRole("button", { name: /CI failing/ })).toBeTruthy();
+    expect(within(mine).queryByText("Review required")).toBeNull();
 
     const review = section("Review requested");
-    expect(within(review).getByRole("heading").textContent).toContain("2");
+    expect(within(review).getByRole("heading", { level: 3 }).textContent).toContain("2");
     expect(within(review).getByText("Draft")).toBeTruthy();
     expect(within(review).getByText("team")).toBeTruthy();
     expect(within(review).getByText("Approved")).toBeTruthy();
@@ -140,6 +155,7 @@ describe("Github", () => {
 
     expect(within(section("Assigned")).getByText("Nothing assigned to you.")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("opens the pull request and its checks in the browser", async () => {
@@ -148,7 +164,7 @@ describe("Github", () => {
     renderGithub();
     await screen.findByText("Add the thing");
 
-    await user.click(within(section("Mine")).getByRole("button", { name: /acme\/app#41.*Add the thing/ }));
+    await user.click(within(section("Mine")).getByRole("button", { name: /#41.*Add the thing.*acme\/app/ }));
     expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/app/pull/41");
 
     await user.click(within(section("Mine")).getByRole("button", { name: /CI failing/ }));
@@ -172,7 +188,7 @@ describe("Github", () => {
     await screen.findByText("Red");
 
     const mine = section("Mine");
-    expect(within(mine).getByRole("heading").textContent).toContain("3 of 137");
+    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toContain("3 of 137");
     const titles = within(mine)
       .getAllByRole("listitem")
       .map((item) => item.textContent ?? "");
@@ -265,5 +281,6 @@ describe("Github", () => {
     expect(within(section("Mine")).getByText("Checking…")).toBeTruthy();
     expect(within(section("Review requested")).getByText("Checking…")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByTestId("github-summary")).toBeNull();
   });
 });

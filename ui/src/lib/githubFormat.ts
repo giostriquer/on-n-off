@@ -1,6 +1,13 @@
 /** Display formatting for the Pull requests screen (pure). */
 
-import type { CiState, GithubPr, GithubPrList, GithubStatus, ReviewDecision } from "./githubTypes";
+import type {
+  CiState,
+  GithubPr,
+  GithubPrList,
+  GithubPrsData,
+  GithubStatus,
+  ReviewDecision,
+} from "./githubTypes";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -107,15 +114,26 @@ export function reviewDecisionTone(decision: ReviewDecision | null | undefined):
   }
 }
 
+/** "Review required" is every open PR's default state, so only the other two earn a badge. */
 export function reviewDecisionLabel(decision: ReviewDecision | null | undefined): string {
   switch (decision) {
     case "APPROVED":
       return "Approved";
     case "CHANGES_REQUESTED":
       return "Changes requested";
-    case "REVIEW_REQUIRED":
-      return "Review required";
     default:
       return "";
   }
+}
+
+export type PrsSummary = { mine: number; failing: number; review: number; assigned: number };
+
+/** The header's one-line summary; `failing` counts red CI on the user's own pull requests. */
+export function prsSummary(data: GithubPrsData): PrsSummary {
+  return {
+    mine: data.mine.total,
+    failing: data.mine.items.filter((pr) => pr.ci === "failure" || pr.ci === "error").length,
+    review: data.reviewRequested.total,
+    assigned: data.assigned.total,
+  };
 }

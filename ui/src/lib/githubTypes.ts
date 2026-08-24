@@ -43,14 +43,8 @@ export type GithubRateLimit = {
   resetAt: string;
 };
 
-/**
- * Mirrors `GithubPrsDto`: GitHub-side problems arrive as a status plus a hint, not an error.
- * `stale: true` means the lists come from the last successful read on disk.
- */
-export type GithubPrs = {
-  status: GithubStatus;
-  hint?: string | null;
-  stale: boolean;
+/** What one successful read produced (mirrors `GithubPrsData`, flattened into `GithubPrs`). */
+export type GithubPrsData = {
   viewer?: string | null;
   /** RFC 3339 instant of the read that produced the lists (the snapshot's, when stale). */
   fetchedAt?: string | null;
@@ -60,5 +54,15 @@ export type GithubPrs = {
   reviewRequested: GithubPrList;
   assigned: GithubPrList;
   rateLimit?: GithubRateLimit | null;
+};
+
+/**
+ * Mirrors `GithubPrsDto`: GitHub-side problems arrive as a status plus a hint, not an error.
+ * `stale: true` means the lists come from the last successful read on disk.
+ */
+export type GithubPrs = GithubPrsData & {
+  status: GithubStatus;
+  hint?: string | null;
+  stale: boolean;
   warnings?: string[];
 };

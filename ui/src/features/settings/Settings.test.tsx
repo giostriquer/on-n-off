@@ -188,7 +188,8 @@ describe("Settings", () => {
     expect(card).toHaveTextContent("org:acme");
     expect(card).toHaveTextContent("repo:me/tool");
 
-    const input = screen.getByRole("textbox", { name: "Add a GitHub scope" });
+    const input = screen.getByRole("textbox", { name: "Scopes" });
+    expect(input.getAttribute("aria-describedby")).toBeTruthy();
     await user.type(input, "  user:me{Enter}");
     expect(onGithubChange).toHaveBeenCalledWith({ githubScopes: ["org:acme", "repo:me/tool", "user:me"] });
     expect(input).toHaveValue("");

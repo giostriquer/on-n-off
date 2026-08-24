@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GithubPr } from "./githubTypes";
+import type { GithubPr, GithubPrsData } from "./githubTypes";
 import {
   ciLabel,
   ciTone,
@@ -7,6 +7,7 @@ import {
   formatUpdatedAgo,
   listCountLabel,
   orderPrs,
+  prsSummary,
   reviewDecisionLabel,
   reviewDecisionTone,
   statusHeadline,
@@ -91,11 +92,27 @@ describe("githubFormat", () => {
     expect(reviewDecisionTone(null)).toBe("mute");
   });
 
-  it("labels review decisions", () => {
+  it("labels only the review decisions that carry information", () => {
     expect(reviewDecisionLabel("APPROVED")).toBe("Approved");
     expect(reviewDecisionLabel("CHANGES_REQUESTED")).toBe("Changes requested");
-    expect(reviewDecisionLabel("REVIEW_REQUIRED")).toBe("Review required");
+    expect(reviewDecisionLabel("REVIEW_REQUIRED")).toBe("");
     expect(reviewDecisionLabel(null)).toBe("");
     expect(reviewDecisionLabel(undefined)).toBe("");
+  });
+
+  it("summarises the three lists in one line, naming failing CI on own pull requests", () => {
+    const data: GithubPrsData = {
+      scope: [],
+      mine: { total: 3, items: [pr({ ci: "failure" }), pr({ ci: "error" }), pr({ ci: "success" })] },
+      reviewRequested: { total: 15, items: [pr({ ci: "failure" })] },
+      assigned: { total: 0, items: [] },
+    };
+    expect(prsSummary(data)).toEqual({ mine: 3, failing: 2, review: 15, assigned: 0 });
+    expect(prsSummary({ ...data, mine: { total: 0, items: [] } })).toEqual({
+      mine: 0,
+      failing: 0,
+      review: 15,
+      assigned: 0,
+    });
   });
 });
