@@ -63,6 +63,7 @@ export const SCREEN_PATH: Record<Screen, string> = {
   mcp: "/mcp",
   usage: "/usage",
   limits: "/limits",
+  github: "/github",
   config: "/config",
   settings: "/settings",
 };
@@ -88,6 +89,7 @@ export function readScreen(): Screen {
     value === "mcp" ||
     value === "usage" ||
     value === "limits" ||
+    value === "github" ||
     value === "config" ||
     value === "settings" ||
     value === "overview"

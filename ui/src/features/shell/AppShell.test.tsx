@@ -144,6 +144,7 @@ describe("AppShell tab-loading gate", () => {
         ["/plugins", false],
         ["/usage", true],
         ["/limits", true],
+        ["/github", true],
         ["/settings", true],
       ];
       for (const [pathname, mounted] of cases) {

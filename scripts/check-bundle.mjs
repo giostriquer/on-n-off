@@ -40,6 +40,7 @@ const requiredDynamicEntries = [
   "src/routes/skills.tsx",
   "src/routes/mcp.tsx",
   "src/routes/usage.tsx",
+  "src/routes/github.tsx",
   "src/routes/config.tsx",
   "src/routes/settings.tsx",
   "../node_modules/@tauri-apps/api/app.js",
