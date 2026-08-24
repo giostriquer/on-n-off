@@ -139,7 +139,7 @@ describe("Github", () => {
     expect(within(review).getByRole("button", { name: /No checks/ })).toBeTruthy();
 
     expect(within(section("Assigned")).getByText("Nothing assigned to you.")).toBeTruthy();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("opens the pull request and its checks in the browser", async () => {
@@ -148,7 +148,7 @@ describe("Github", () => {
     renderGithub();
     await screen.findByText("Add the thing");
 
-    await user.click(within(section("Mine")).getByRole("button", { name: "Open acme/app#41" }));
+    await user.click(within(section("Mine")).getByRole("button", { name: /acme\/app#41.*Add the thing/ }));
     expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/app/pull/41");
 
     await user.click(within(section("Mine")).getByRole("button", { name: /CI failing/ }));
@@ -191,7 +191,7 @@ describe("Github", () => {
     readGithubPrs.mockResolvedValue(problem(status, hint));
     renderGithub();
 
-    const banner = await screen.findByRole("status");
+    const banner = await screen.findByRole("alert");
     expect(banner.textContent).toContain(headline);
     expect(banner.textContent).toContain(hint);
     expect(within(section("Mine")).getByText("No open pull requests of yours.")).toBeTruthy();
@@ -208,7 +208,7 @@ describe("Github", () => {
     );
     renderGithub();
 
-    const banner = await screen.findByRole("status");
+    const banner = await screen.findByRole("alert");
     expect(banner.textContent).toContain("GitHub unreachable");
     expect(screen.getByText(/Showing the last read from 2h ago/)).toBeTruthy();
     expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
@@ -218,7 +218,7 @@ describe("Github", () => {
     readGithubPrs.mockRejectedValue({ kind: "message", message: "github read worker failed", path: null });
     renderGithub();
 
-    const banner = await screen.findByRole("status");
+    const banner = await screen.findByRole("alert");
     expect(banner.textContent).toContain("github read worker failed");
     expect(section("Mine")).toBeTruthy();
   });
@@ -251,7 +251,7 @@ describe("Github", () => {
       await client.refetchQueries({ queryKey: ["github", "prs"] });
     });
 
-    const banner = await screen.findByRole("status");
+    const banner = await screen.findByRole("alert");
     expect(banner.textContent).toContain("GitHub unavailable");
     expect(banner.textContent).toContain("github read worker failed");
     expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
@@ -261,9 +261,9 @@ describe("Github", () => {
     readGithubPrs.mockReturnValue(new Promise(() => undefined));
     renderGithub();
 
-    expect(screen.getByTestId("github-caption").textContent).toContain("Checking…");
+    expect(screen.getByRole("status").textContent).toContain("Checking…");
     expect(within(section("Mine")).getByText("Checking…")).toBeTruthy();
     expect(within(section("Review requested")).getByText("Checking…")).toBeTruthy();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

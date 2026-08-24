@@ -14,7 +14,7 @@ practice while building on-n-off; keep it factual and add the date or PR when yo
 
 Spawned CLIs get the merged list as their `PATH` so `#!/usr/bin/env node` shims work.
 
-The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; its Windows roots are the MSI / machine-scope winget folder under `%ProgramFiles%` and the user-scope winget folder under `%LOCALAPPDATA%\Programs` (added 2026-08 with the Pull requests screen). On macOS `gh auth token` reads the token from the Keychain item `gh` created, whose ACL names `gh`'s own helper, so no prompt is raised for on-n-off.
+The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; its Windows roots are the MSI / machine-scope winget folder under `%ProgramFiles%` and the user-scope winget folder under `%LOCALAPPDATA%\Programs` (added 2026-08 with the Pull requests screen). On macOS `gh auth token` reads `gh`'s own Keychain item; **observed** (2026-08, release `.app` launched with `open`): the read completes without a Keychain prompt for on-n-off, presumably because the item's ACL names `gh`'s helper rather than the calling app.
 
 ## Launchers and executables
 

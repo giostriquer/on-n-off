@@ -367,6 +367,15 @@ pub enum ReviewRequestKind {
     Team,
 }
 
+/// GitHub's `reviewDecision`, on the wire in GitHub's own spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubPrDto {
@@ -379,9 +388,8 @@ pub struct GithubPrDto {
     pub repo: String,
     pub author: String,
     pub is_draft: bool,
-    /// `APPROVED`, `CHANGES_REQUESTED`, or `REVIEW_REQUIRED` when GitHub reports one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub review_decision: Option<String>,
+    pub review_decision: Option<ReviewDecision>,
     pub ci: CiState,
     pub head_ref: String,
     pub base_ref: String,
@@ -408,18 +416,14 @@ pub struct GithubRateLimitDto {
     pub reset_at: String,
 }
 
-/// The GitHub screen's data. Provider-side problems are a `status` + `hint`, never an error;
-/// `stale: true` means the lists come from the last successful read on disk.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// What one successful read produced: the part that is worth remembering on disk and showing
+/// again while a later read fails.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct GithubPrsDto {
-    pub status: GithubStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hint: Option<String>,
-    pub stale: bool,
+pub struct GithubPrsData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewer: Option<String>,
-    /// RFC 3339 instant of the read that produced the lists (the snapshot's, when stale).
+    /// RFC 3339 instant of the read that produced the lists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fetched_at: Option<String>,
     /// The scope qualifiers applied to `mine`.
@@ -429,6 +433,20 @@ pub struct GithubPrsDto {
     pub assigned: GithubPrListDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<GithubRateLimitDto>,
+}
+
+/// The GitHub screen's answer: an envelope (`status`, `hint`, `stale`, `warnings`) around the
+/// data. Provider-side problems are a `status` + `hint`, never an error; `stale: true` means the
+/// data comes from an earlier successful read.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubPrsDto {
+    pub status: GithubStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    pub stale: bool,
+    #[serde(flatten)]
+    pub data: GithubPrsData,
     /// GraphQL `errors[]` messages that came with usable data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,

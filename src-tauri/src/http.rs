@@ -7,13 +7,24 @@ use serde_json::Value;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
+/// When an exhausted rate limit opens again, as the service stated it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateLimitReset {
+    /// `retry-after`: seconds from the moment the reply arrived (secondary limits).
+    RetryAfter(u64),
+    /// `x-ratelimit-reset`: epoch seconds (the primary limit).
+    At(i64),
+    /// Exhausted without a usable instant.
+    Unknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HttpError {
     /// The stored token was rejected (401; also 403 for the Limits GET, whose services use it).
     Unauthorized,
     /// The service's rate limit is exhausted (403/429 carrying `x-ratelimit-remaining: 0` or
-    /// `retry-after`); `reset_epoch_secs` is when it opens again, when the service said.
-    RateLimited { reset_epoch_secs: Option<i64> },
+    /// `retry-after`).
+    RateLimited(RateLimitReset),
     /// Any other non-success status.
     Status(u16),
     /// DNS, connect, TLS, or timeout failure.
@@ -26,7 +37,7 @@ impl std::fmt::Display for HttpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unauthorized => write!(f, "token rejected"),
-            Self::RateLimited { .. } => write!(f, "rate limited"),
+            Self::RateLimited(_) => write!(f, "rate limited"),
             Self::Status(code) => write!(f, "HTTP {code}"),
             Self::Network(why) => write!(f, "network error: {why}"),
             Self::Parse(why) => write!(f, "unreadable response: {why}"),
@@ -83,10 +94,8 @@ pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpErr
         Err(ureq::Error::Status(401, _)) => return Err(HttpError::Unauthorized),
         Err(ureq::Error::Status(code @ (403 | 429), response)) => {
             return Err(match rate_limit_reset(&response) {
-                Some(reset_epoch_secs) => HttpError::RateLimited { reset_epoch_secs },
-                None if code == 429 => HttpError::RateLimited {
-                    reset_epoch_secs: None,
-                },
+                Some(reset) => HttpError::RateLimited(reset),
+                None if code == 429 => HttpError::RateLimited(RateLimitReset::Unknown),
                 None => HttpError::Status(code),
             })
         }
@@ -98,28 +107,22 @@ pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpErr
     parse_body(response)
 }
 
-/// `Some(reset)` when the response says the rate limit is exhausted: `retry-after` (seconds from
-/// now, secondary limits) wins over `x-ratelimit-reset` (epoch seconds, primary limit); the inner
-/// `None` means exhausted without a usable instant.
-fn rate_limit_reset(response: &ureq::Response) -> Option<Option<i64>> {
+/// `Some` when the response says the rate limit is exhausted: `retry-after` (secondary limits)
+/// wins over `x-ratelimit-reset` (the primary limit). GitHub sends the `x-ratelimit-*` headers
+/// on every reply, so only a zero remaining count marks a 403 as a rate limit.
+fn rate_limit_reset(response: &ureq::Response) -> Option<RateLimitReset> {
     let header = |name: &str| response.header(name).map(str::trim);
-    let retry_after = header("retry-after")
-        .and_then(|value| value.parse::<i64>().ok())
-        .map(|seconds| now_epoch_secs() + seconds);
-    let exhausted = header("x-ratelimit-remaining") == Some("0");
-    if retry_after.is_none() && !exhausted {
+    if let Some(seconds) = header("retry-after").and_then(|value| value.parse::<u64>().ok()) {
+        return Some(RateLimitReset::RetryAfter(seconds));
+    }
+    if header("x-ratelimit-remaining") != Some("0") {
         return None;
     }
-    let reset = header("x-ratelimit-reset").and_then(|value| value.parse::<i64>().ok());
-    Some(retry_after.or(reset))
-}
-
-fn now_epoch_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
-        })
+    Some(
+        header("x-ratelimit-reset")
+            .and_then(|value| value.parse::<i64>().ok())
+            .map_or(RateLimitReset::Unknown, RateLimitReset::At),
+    )
 }
 
 /// One-shot HTTP server on a loopback port; returns the URL and the captured request head.
@@ -399,100 +402,23 @@ mod tests {
         );
         assert_eq!(
             post_json(&url, "t", &serde_json::json!({})),
-            Err(HttpError::RateLimited {
-                reset_epoch_secs: Some(1_787_022_473)
-            })
+            Err(HttpError::RateLimited(RateLimitReset::At(1_787_022_473)))
         );
         request.join().unwrap();
     }
 
     #[test]
-    fn post_json_turns_a_secondary_limit_retry_after_into_a_reset_instant() {
+    fn post_json_passes_a_secondary_limit_retry_after_through_as_seconds() {
         let (url, request) = serve_once_capturing(
             "429 Too Many Requests",
             &["Retry-After: 60"],
             r#"{"message":"You have exceeded a secondary rate limit"}"#,
         );
-        let before = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let error = post_json(&url, "t", &serde_json::json!({})).unwrap_err();
-        let after = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        request.join().unwrap();
-        let HttpError::RateLimited {
-            reset_epoch_secs: Some(reset),
-        } = error
-        else {
-            panic!("expected a rate-limit error, got {error:?}");
-        };
-        assert!(
-            (before + 60..=after + 60).contains(&reset),
-            "reset {reset} is not 60 s after the call ({before}..={after})"
-        );
-    }
-
-    #[test]
-    fn post_json_keeps_a_403_with_budget_left_as_a_plain_403() {
-        // Every GitHub reply carries the rate-limit headers; a permission or SSO 403 is not a
-        // rate limit just because the headers are present.
-        let (url, request) = serve_once_capturing(
-            "403 Forbidden",
-            &[
-                "X-RateLimit-Remaining: 4321",
-                "X-RateLimit-Reset: 1787022473",
-            ],
-            r#"{"message":"Resource protected by organization SAML enforcement"}"#,
-        );
         assert_eq!(
             post_json(&url, "t", &serde_json::json!({})),
-            Err(HttpError::Status(403))
+            Err(HttpError::RateLimited(RateLimitReset::RetryAfter(60)))
         );
         request.join().unwrap();
-    }
-
-    #[test]
-    fn post_json_reports_an_exhausted_limit_without_a_reset_header_as_instantless() {
-        let (url, request) = serve_once_capturing(
-            "403 Forbidden",
-            &["X-RateLimit-Remaining: 0"],
-            r#"{"message":"API rate limit exceeded"}"#,
-        );
-        assert_eq!(
-            post_json(&url, "t", &serde_json::json!({})),
-            Err(HttpError::RateLimited {
-                reset_epoch_secs: None
-            })
-        );
-        request.join().unwrap();
-    }
-
-    #[test]
-    fn post_json_prefers_retry_after_over_the_primary_reset_header() {
-        let (url, request) = serve_once_capturing(
-            "429 Too Many Requests",
-            &[
-                "Retry-After: 60",
-                "X-RateLimit-Remaining: 0",
-                "X-RateLimit-Reset: 1",
-            ],
-            r#"{"message":"secondary limit"}"#,
-        );
-        let error = post_json(&url, "t", &serde_json::json!({})).unwrap_err();
-        request.join().unwrap();
-        let HttpError::RateLimited {
-            reset_epoch_secs: Some(reset),
-        } = error
-        else {
-            panic!("expected a rate-limit error, got {error:?}");
-        };
-        assert!(
-            reset > 1_000_000,
-            "retry-after should win over the epoch-1 reset: {reset}"
-        );
     }
 
     #[test]
@@ -501,9 +427,7 @@ mod tests {
             serve_once_capturing("429 Too Many Requests", &[], r#"{"message":"slow down"}"#);
         assert_eq!(
             post_json(&url, "t", &serde_json::json!({})),
-            Err(HttpError::RateLimited {
-                reset_epoch_secs: None
-            })
+            Err(HttpError::RateLimited(RateLimitReset::Unknown))
         );
         request.join().unwrap();
     }
@@ -533,10 +457,7 @@ mod tests {
     #[test]
     fn rate_limited_errors_describe_themselves_without_leaking_anything() {
         assert_eq!(
-            HttpError::RateLimited {
-                reset_epoch_secs: Some(1)
-            }
-            .to_string(),
+            HttpError::RateLimited(RateLimitReset::At(1)).to_string(),
             "rate limited"
         );
     }

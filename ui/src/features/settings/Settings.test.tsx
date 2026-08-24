@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Settings } from "./Settings";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
-import type { AgentInfo, GithubPollSeconds, LimitsPollMinutes } from "$lib/types";
+import type { AgentInfo, AppSettings, LimitsPollMinutes } from "$lib/types";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -86,17 +86,13 @@ function renderSettings({
   onToggleVisible = () => undefined,
   onLimitNotificationsChange = () => undefined,
   onLimitsPollMinutesChange = () => undefined,
-  onGithubScopesChange = () => undefined,
-  onGithubNotificationsChange = () => undefined,
-  onGithubPollSecondsChange = () => undefined,
+  onGithubChange = () => undefined,
   githubScopes = [],
 }: {
   onToggleVisible?: (id: AgentInfo["id"], hidden: boolean) => void;
   onLimitNotificationsChange?: (enabled: boolean) => void;
   onLimitsPollMinutesChange?: (minutes: LimitsPollMinutes) => void;
-  onGithubScopesChange?: (scopes: string[]) => void;
-  onGithubNotificationsChange?: (enabled: boolean) => void;
-  onGithubPollSecondsChange?: (seconds: GithubPollSeconds) => void;
+  onGithubChange?: (patch: Partial<AppSettings>) => void;
   githubScopes?: string[];
 } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -120,9 +116,7 @@ function renderSettings({
           onAutomaticUpdatesChange={() => undefined}
           onLimitNotificationsChange={onLimitNotificationsChange}
           onLimitsPollMinutesChange={onLimitsPollMinutesChange}
-          onGithubScopesChange={onGithubScopesChange}
-          onGithubNotificationsChange={onGithubNotificationsChange}
-          onGithubPollSecondsChange={onGithubPollSecondsChange}
+          onGithubChange={onGithubChange}
         />
       </UpdateProvider>
     </QueryClientProvider>,
@@ -185,10 +179,10 @@ describe("Settings", () => {
     );
   });
 
-  it("adds and removes GitHub scopes", async () => {
+  it("adds and removes GitHub scopes with Enter and the chip button, never on blur", async () => {
     const user = userEvent.setup();
-    const onGithubScopesChange = vi.fn();
-    renderSettings({ onGithubScopesChange, githubScopes: ["org:acme", "repo:me/tool"] });
+    const onGithubChange = vi.fn();
+    renderSettings({ onGithubChange, githubScopes: ["org:acme", "repo:me/tool"] });
 
     const card = screen.getByRole("region", { name: "Pull requests" });
     expect(card).toHaveTextContent("org:acme");
@@ -196,49 +190,50 @@ describe("Settings", () => {
 
     const input = screen.getByRole("textbox", { name: "Add a GitHub scope" });
     await user.type(input, "  user:me{Enter}");
-    expect(onGithubScopesChange).toHaveBeenCalledWith(["org:acme", "repo:me/tool", "user:me"]);
+    expect(onGithubChange).toHaveBeenCalledWith({ githubScopes: ["org:acme", "repo:me/tool", "user:me"] });
     expect(input).toHaveValue("");
 
     await user.click(screen.getByRole("button", { name: "Remove org:acme" }));
-    expect(onGithubScopesChange).toHaveBeenCalledWith(["repo:me/tool"]);
+    expect(onGithubChange).toHaveBeenCalledWith({ githubScopes: ["repo:me/tool"] });
 
-    onGithubScopesChange.mockClear();
+    onGithubChange.mockClear();
     await user.type(input, "   {Enter}");
-    expect(onGithubScopesChange).not.toHaveBeenCalled();
+    expect(onGithubChange).not.toHaveBeenCalled();
 
     await user.type(input, "org:acme{Enter}");
-    expect(onGithubScopesChange).not.toHaveBeenCalled();
+    expect(onGithubChange).not.toHaveBeenCalled();
     expect(input).toHaveValue("");
 
+    // Leaving the field keeps the draft: a blur-commit would race the chip's Remove click.
     await user.type(input, "org:other");
     await user.tab();
-    expect(onGithubScopesChange).toHaveBeenCalledWith(["org:acme", "repo:me/tool", "org:other"]);
+    expect(onGithubChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue("org:other");
   });
 
   it("requests notification permission before enabling CI notifications and persists the interval", async () => {
     const user = userEvent.setup();
-    const onGithubNotificationsChange = vi.fn();
-    const onGithubPollSecondsChange = vi.fn();
-    renderSettings({ onGithubNotificationsChange, onGithubPollSecondsChange });
+    const onGithubChange = vi.fn();
+    renderSettings({ onGithubChange });
 
     await user.click(screen.getByRole("button", { name: "Notify about CI changes" }));
 
     expect(apiMocks.requestNotificationPermission).toHaveBeenCalledTimes(1);
-    expect(onGithubNotificationsChange).toHaveBeenCalledWith(true);
+    expect(onGithubChange).toHaveBeenCalledWith({ githubNotifications: true });
 
     await user.selectOptions(screen.getByRole("combobox", { name: "GitHub polling interval" }), "120");
-    expect(onGithubPollSecondsChange).toHaveBeenCalledWith(120);
+    expect(onGithubChange).toHaveBeenCalledWith({ githubPollSeconds: 120 });
   });
 
   it("keeps CI notifications disabled when notification permission is denied", async () => {
     apiMocks.requestNotificationPermission.mockResolvedValue(false);
     const user = userEvent.setup();
-    const onGithubNotificationsChange = vi.fn();
-    renderSettings({ onGithubNotificationsChange });
+    const onGithubChange = vi.fn();
+    renderSettings({ onGithubChange });
 
     await user.click(screen.getByRole("button", { name: "Notify about CI changes" }));
 
-    expect(onGithubNotificationsChange).not.toHaveBeenCalled();
+    expect(onGithubChange).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent("Notifications are blocked in system settings.");
   });
 });

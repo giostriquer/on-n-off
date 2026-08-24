@@ -48,7 +48,7 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
           {prs?.viewer ? ` · ${prs.viewer}` : ""}
           {updated ? ` · updated ${updated}` : ""}
           {loading ? (
-            <span className="ml-2" aria-live="polite">
+            <span className="ml-2" role="status" aria-live="polite">
               · Checking…
             </span>
           ) : null}
@@ -67,7 +67,7 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
 
       {banner ? (
         <p
-          role="status"
+          role="alert"
           className={`m-0 rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] px-3.5 py-2.5 text-[13px] ${
             banner.tone === "trip" ? "text-[var(--trip)]" : "text-[var(--warn)]"
           }`}

@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Github } from "@/features/github/Github";
-import { useAgentSession } from "@/features/session/SessionProvider";
+import { SCREEN_PATH, useAgentSession } from "@/features/session/SessionProvider";
 
 export function GithubRoute() {
   const session = useAgentSession();
@@ -8,7 +8,7 @@ export function GithubRoute() {
   return (
     <Github
       pollSeconds={session.appSettings.githubPollSeconds}
-      onOpenSettings={() => void navigate({ to: "/settings" })}
+      onOpenSettings={() => void navigate({ to: SCREEN_PATH.settings })}
     />
   );
 }

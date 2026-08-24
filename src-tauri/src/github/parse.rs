@@ -6,15 +6,16 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use crate::dto::{CiState, GithubPrDto, GithubPrListDto, GithubRateLimitDto, ReviewRequestKind};
+use crate::dto::{
+    CiState, GithubPrDto, GithubPrListDto, GithubPrsData, GithubRateLimitDto, ReviewDecision,
+    ReviewRequestKind,
+};
 
+/// The lists and viewer of one reply (`fetched_at` and `scope` are the reader's to fill in),
+/// plus any error messages GitHub attached to otherwise usable data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ParsedPrs {
-    pub(super) viewer: Option<String>,
-    pub(super) mine: GithubPrListDto,
-    pub(super) review_requested: GithubPrListDto,
-    pub(super) assigned: GithubPrListDto,
-    pub(super) rate_limit: Option<GithubRateLimitDto>,
+    pub(super) data: GithubPrsData,
     pub(super) warnings: Vec<String>,
 }
 
@@ -54,11 +55,15 @@ pub(super) fn parse(reply: &Value) -> Result<ParsedPrs, String> {
         });
     }
     Ok(ParsedPrs {
-        viewer: data["viewer"]["login"].as_str().map(str::to_string),
-        mine: list(&data["mine"]),
-        review_requested,
-        assigned: list(&data["assigned"]),
-        rate_limit: rate_limit(&data["rateLimit"]),
+        data: GithubPrsData {
+            viewer: data["viewer"]["login"].as_str().map(str::to_string),
+            fetched_at: None,
+            scope: Vec::new(),
+            mine: list(&data["mine"]),
+            review_requested,
+            assigned: list(&data["assigned"]),
+            rate_limit: rate_limit(&data["rateLimit"]),
+        },
         warnings,
     })
 }
@@ -90,16 +95,22 @@ fn pull_request(node: &Value) -> Option<GithubPrDto> {
             .unwrap_or_default()
             .to_string(),
         is_draft: node["isDraft"].as_bool().unwrap_or(false),
-        review_decision: node["reviewDecision"]
-            .as_str()
-            .filter(|value| matches!(*value, "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED"))
-            .map(str::to_string),
+        review_decision: review_decision(node["reviewDecision"].as_str()),
         ci: ci_state(node["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["state"].as_str()),
         head_ref: text("headRefName").unwrap_or_default(),
         base_ref: text("baseRefName").unwrap_or_default(),
         updated_at: text("updatedAt").unwrap_or_default(),
         review_request: None,
     })
+}
+
+fn review_decision(value: Option<&str>) -> Option<ReviewDecision> {
+    match value {
+        Some("APPROVED") => Some(ReviewDecision::Approved),
+        Some("CHANGES_REQUESTED") => Some(ReviewDecision::ChangesRequested),
+        Some("REVIEW_REQUIRED") => Some(ReviewDecision::ReviewRequired),
+        _ => None,
+    }
 }
 
 fn ci_state(state: Option<&str>) -> CiState {
@@ -122,7 +133,7 @@ fn rate_limit(value: &Value) -> Option<GithubRateLimitDto> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{CiState, ReviewRequestKind};
+    use crate::dto::{CiState, ReviewDecision, ReviewRequestKind};
     use crate::github::fixtures::REPLY;
     use serde_json::json;
 
@@ -133,16 +144,16 @@ mod tests {
     #[test]
     fn the_fixture_parses_into_the_three_lists() {
         let parsed = parse(&reply()).unwrap();
-        assert_eq!(parsed.viewer.as_deref(), Some("octocat"));
-        assert_eq!(parsed.rate_limit.as_ref().unwrap().remaining, 4998);
+        assert_eq!(parsed.data.viewer.as_deref(), Some("octocat"));
+        assert_eq!(parsed.data.rate_limit.as_ref().unwrap().remaining, 4998);
         assert_eq!(
-            parsed.rate_limit.as_ref().unwrap().reset_at,
+            parsed.data.rate_limit.as_ref().unwrap().reset_at,
             "2026-08-24T23:00:00Z"
         );
         assert!(parsed.warnings.is_empty());
 
-        assert_eq!(parsed.mine.total, 1);
-        let mine = &parsed.mine.items[0];
+        assert_eq!(parsed.data.mine.total, 1);
+        let mine = &parsed.data.mine.items[0];
         assert_eq!(mine.id, "PR_mine1");
         assert_eq!(mine.number, 41);
         assert_eq!(mine.title, "Add the thing");
@@ -150,16 +161,16 @@ mod tests {
         assert_eq!(mine.repo, "acme/app");
         assert_eq!(mine.author, "octocat");
         assert!(!mine.is_draft);
-        assert_eq!(mine.review_decision.as_deref(), Some("REVIEW_REQUIRED"));
+        assert_eq!(mine.review_decision, Some(ReviewDecision::ReviewRequired));
         assert_eq!(mine.ci, CiState::Failure);
         assert_eq!(mine.head_ref, "feat/thing");
         assert_eq!(mine.base_ref, "main");
         assert_eq!(mine.updated_at, "2026-08-24T20:00:00Z");
         assert_eq!(mine.review_request, None);
 
-        assert_eq!(parsed.review_requested.total, 2);
-        let [direct, team] = parsed.review_requested.items.as_slice() else {
-            panic!("{:?}", parsed.review_requested);
+        assert_eq!(parsed.data.review_requested.total, 2);
+        let [direct, team] = parsed.data.review_requested.items.as_slice() else {
+            panic!("{:?}", parsed.data.review_requested);
         };
         assert_eq!(direct.review_request, Some(ReviewRequestKind::Direct));
         assert!(direct.is_draft);
@@ -169,8 +180,8 @@ mod tests {
         assert_eq!(team.ci, CiState::None, "a null rollup means no checks");
         assert_eq!(team.author, "", "a deleted author is not an error");
 
-        assert_eq!(parsed.assigned.total, 0);
-        assert!(parsed.assigned.items.is_empty());
+        assert_eq!(parsed.data.assigned.total, 0);
+        assert!(parsed.data.assigned.items.is_empty());
     }
 
     #[test]
@@ -192,7 +203,7 @@ mod tests {
                 json!({ "state": state })
             };
             let parsed = parse(&value).unwrap();
-            assert_eq!(parsed.mine.items[0].ci, expected, "{state}");
+            assert_eq!(parsed.data.mine.items[0].ci, expected, "{state}");
         }
     }
 
@@ -200,7 +211,10 @@ mod tests {
     fn an_unknown_review_decision_is_dropped_not_fatal() {
         let mut value = reply();
         value["data"]["mine"]["nodes"][0]["reviewDecision"] = json!("BRAND_NEW");
-        assert_eq!(parse(&value).unwrap().mine.items[0].review_decision, None);
+        assert_eq!(
+            parse(&value).unwrap().data.mine.items[0].review_decision,
+            None
+        );
     }
 
     #[test]
@@ -208,15 +222,15 @@ mod tests {
         let mut value = reply();
         value["data"]["mine"]["issueCount"] = json!(137);
         let parsed = parse(&value).unwrap();
-        assert_eq!(parsed.mine.total, 137);
-        assert_eq!(parsed.mine.items.len(), 1);
+        assert_eq!(parsed.data.mine.total, 137);
+        assert_eq!(parsed.data.mine.items.len(), 1);
     }
 
     #[test]
     fn nodes_without_a_pull_request_shape_are_skipped() {
         let mut value = reply();
         value["data"]["assigned"]["nodes"] = json!([null, {}, { "id": "x", "number": "nope" }]);
-        assert!(parse(&value).unwrap().assigned.items.is_empty());
+        assert!(parse(&value).unwrap().data.assigned.items.is_empty());
     }
 
     #[test]
@@ -224,7 +238,7 @@ mod tests {
         let mut value = reply();
         value["errors"] = json!([{ "message": "Field 'x' is deprecated" }]);
         let parsed = parse(&value).unwrap();
-        assert_eq!(parsed.mine.items.len(), 1);
+        assert_eq!(parsed.data.mine.items.len(), 1);
         assert_eq!(parsed.warnings, vec!["Field 'x' is deprecated".to_string()]);
     }
 
@@ -246,13 +260,14 @@ mod tests {
         value["data"].as_object_mut().unwrap().remove("direct");
         value["data"]["mine"]["nodes"][0]["commits"]["nodes"] = json!([]);
         let parsed = parse(&value).unwrap();
-        assert_eq!(parsed.mine.total, 1);
+        assert_eq!(parsed.data.mine.total, 1);
         assert_eq!(
-            parsed.mine.items[0].ci,
+            parsed.data.mine.items[0].ci,
             CiState::None,
             "no commits means no checks"
         );
         assert!(parsed
+            .data
             .review_requested
             .items
             .iter()
@@ -265,7 +280,7 @@ mod tests {
         value["data"]["rateLimit"] = json!(null);
         value["data"]["viewer"] = json!(null);
         let parsed = parse(&value).unwrap();
-        assert_eq!(parsed.rate_limit, None);
-        assert_eq!(parsed.viewer, None);
+        assert_eq!(parsed.data.rate_limit, None);
+        assert_eq!(parsed.data.viewer, None);
     }
 }

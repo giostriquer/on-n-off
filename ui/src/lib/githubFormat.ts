@@ -95,6 +95,18 @@ export function statusHeadline(status: GithubStatus): string {
   }
 }
 
+/** Approved reads like passing CI, changes requested like failing CI; a pending review is quiet. */
+export function reviewDecisionTone(decision: ReviewDecision | null | undefined): CiTone {
+  switch (decision) {
+    case "APPROVED":
+      return "live";
+    case "CHANGES_REQUESTED":
+      return "trip";
+    default:
+      return "mute";
+  }
+}
+
 export function reviewDecisionLabel(decision: ReviewDecision | null | undefined): string {
   switch (decision) {
     case "APPROVED":

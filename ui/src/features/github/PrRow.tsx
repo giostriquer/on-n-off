@@ -1,20 +1,31 @@
 import * as api from "$lib/api";
-import { ciLabel, ciTone, ciToneColor, formatUpdatedAgo, reviewDecisionLabel } from "$lib/githubFormat";
+import {
+  ciLabel,
+  ciTone,
+  ciToneColor,
+  formatUpdatedAgo,
+  reviewDecisionLabel,
+  reviewDecisionTone,
+  type CiTone,
+} from "$lib/githubFormat";
 import type { GithubPr } from "$lib/githubTypes";
 
-function Badge({ children, tone }: { children: string; tone?: "live" | "trip" }) {
-  const color = tone ? `var(--${tone})` : "var(--mute)";
+function Badge({ children, tone = "mute" }: { children: string; tone?: CiTone }) {
+  const color = ciToneColor(tone);
   return (
     <span
       className="shrink-0 rounded-md border px-1.5 py-px font-mono text-[10px] uppercase"
-      style={{ borderColor: tone ? color : "var(--hair)", color }}
+      style={{ borderColor: tone === "mute" ? "var(--hair)" : color, color }}
     >
       {children}
     </span>
   );
 }
 
-/** One pull request: CI dot (opens the checks tab), repo#number, title, badges, branches, age. */
+/**
+ * One pull request: a CI dot that opens the checks tab, then the row itself (repo#number, title,
+ * badges, author, branches, age) as one button whose accessible name is its content.
+ */
 export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
   const tone = ciTone(pr.ci);
   const color = ciToneColor(tone);
@@ -37,7 +48,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
       <button
         type="button"
         className="flex min-w-0 flex-1 flex-col gap-0.5 border-0 bg-transparent p-0 text-left hover:text-[var(--silkscreen)]"
-        aria-label={`Open ${pr.repo}#${pr.number}`}
+        title="Open on GitHub"
         onClick={() => void api.openUrl(pr.url)}
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -46,11 +57,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
           </span>
           <span className="min-w-0 truncate text-[13px] text-[var(--silkscreen)]">{pr.title}</span>
           {pr.isDraft ? <Badge>Draft</Badge> : null}
-          {decision ? (
-            <Badge tone={pr.reviewDecision === "APPROVED" ? "live" : pr.reviewDecision === "CHANGES_REQUESTED" ? "trip" : undefined}>
-              {decision}
-            </Badge>
-          ) : null}
+          {decision ? <Badge tone={reviewDecisionTone(pr.reviewDecision)}>{decision}</Badge> : null}
           {pr.reviewRequest === "team" ? <Badge>team</Badge> : null}
         </span>
         <span className="flex min-w-0 items-center gap-2 font-mono text-[10.5px] text-[var(--mute)]">

@@ -3,14 +3,13 @@
 //! polls on the same interval as the screen and shares its in-memory result, and remembers the
 //! last-seen state on disk so a restart never re-notifies.
 
-use std::{collections::HashMap, fs, path::Path, time::Duration};
+use std::{collections::HashMap, path::Path, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use tauri::{async_runtime, AppHandle, Manager};
+use tauri::{async_runtime, AppHandle};
 
 use crate::dto::{CiState, GithubPrsDto, GithubStatus};
-use crate::limits_monitor::wait_for_wake_or_deadline;
-use crate::usage::cache_io::atomic_write;
+use crate::monitor::{self, wait_for_wake_or_deadline};
 
 const DISABLED_WAKE: Duration = Duration::from_secs(60 * 60);
 /// The Limits monitor, the Keychain probe and the first provider load all run at startup; the
@@ -19,9 +18,8 @@ const FIRST_POLL_DELAY: Duration = Duration::from_secs(20);
 const MAX_BACKOFF: Duration = Duration::from_secs(10 * 60);
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 1;
 
-struct GithubMonitorHandle {
-    wake: async_runtime::Sender<()>,
-}
+/// Marker for this monitor's wake channel.
+pub struct GithubMonitor;
 
 /// Last-seen CI rollup per own pull request, keyed by GitHub node id.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,7 +41,7 @@ impl Default for MonitorState {
 enum CiEventKind {
     /// Checks went red (from pending, no checks, or green).
     Failed,
-    /// Checks went green for the first time on this head.
+    /// Checks went green without having been red since this pull request was last seen.
     Passed,
     /// Checks went green after being red.
     GreenAgain,
@@ -58,18 +56,12 @@ struct CiEvent {
 }
 
 pub fn setup(app: &mut tauri::App) {
-    let (wake, receiver) = async_runtime::channel(1);
-    app.manage(GithubMonitorHandle { wake });
-    let app_handle = app.handle().clone();
-    async_runtime::spawn(run(app_handle, receiver));
+    monitor::spawn::<GithubMonitor, _, _>(app, run);
 }
 
-/// Wake the poll loop after a settings change. A capacity-one channel coalesces repeated changes.
+/// Wake the poll loop after a settings change.
 pub fn wake(app: &AppHandle) {
-    let Some(handle) = app.try_state::<GithubMonitorHandle>() else {
-        return;
-    };
-    let _ = handle.wake.try_send(());
+    monitor::wake::<GithubMonitor>(app);
 }
 
 async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
@@ -112,7 +104,7 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             consecutive_failures = 0;
             if !state.ci.is_empty() {
                 state.ci.clear();
-                if let Err(error) = persist_state(&state_path, &state).await {
+                if let Err(error) = monitor::persist_state(&state_path, &state).await {
                     eprintln!("github monitor could not clear its state: {error}");
                 }
             }
@@ -143,7 +135,8 @@ async fn poll_once(
     .map_err(|error| format!("state worker failed: {error}"))??;
     *state = next;
     for event in events {
-        show_notification(app, &event);
+        let (title, body) = notification_copy(&event);
+        monitor::notify(app, "github monitor", title, body);
     }
     Ok(failed)
 }
@@ -160,24 +153,6 @@ fn advance(
     let events = observe(&mut next, prs);
     persist(&next).map_err(|error| format!("could not save state: {error}"))?;
     Ok((next, events))
-}
-
-async fn persist_state(path: &Path, state: &MonitorState) -> Result<(), String> {
-    let path = path.to_path_buf();
-    let state = state.clone();
-    async_runtime::spawn_blocking(move || save_state(&path, &state))
-        .await
-        .map_err(|error| format!("state worker failed: {error}"))?
-}
-
-fn show_notification(app: &AppHandle, event: &CiEvent) {
-    let (title, body) = notification_copy(event);
-    if let Err(error) = crate::notifications::show(app, title, body) {
-        eprintln!(
-            "github monitor could not show a notification: {}",
-            error.message
-        );
-    }
 }
 
 fn notification_copy(event: &CiEvent) -> (String, String) {
@@ -200,8 +175,8 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<CiEvent> {
         return Vec::new();
     }
     let mut events = Vec::new();
-    let mut next = HashMap::with_capacity(prs.mine.items.len());
-    for pr in &prs.mine.items {
+    let mut next = HashMap::with_capacity(prs.data.mine.items.len());
+    for pr in &prs.data.mine.items {
         if let Some(kind) = state
             .ci
             .get(&pr.id)
@@ -231,27 +206,27 @@ fn transition(before: CiState, after: CiState) -> Option<CiEventKind> {
 }
 
 fn poll_delay(base_seconds: u16, consecutive_failures: u32) -> Duration {
-    let multiplier = 1_u64 << consecutive_failures.min(4);
-    Duration::from_secs(u64::from(base_seconds).saturating_mul(multiplier)).min(MAX_BACKOFF)
+    monitor::backoff(
+        Duration::from_secs(u64::from(base_seconds)),
+        consecutive_failures,
+        MAX_BACKOFF,
+    )
 }
 
 fn load_state(path: &Path) -> MonitorState {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .filter(|state: &MonitorState| state.schema_version == MONITOR_STATE_SCHEMA_VERSION)
-        .unwrap_or_default()
+    monitor::load_state(path, |state: &MonitorState| {
+        state.schema_version == MONITOR_STATE_SCHEMA_VERSION
+    })
 }
 
 fn save_state(path: &Path, state: &MonitorState) -> Result<(), String> {
-    let json = serde_json::to_string(state).map_err(|error| error.to_string())?;
-    atomic_write(path, &json).map_err(|error| error.to_string())
+    monitor::save_state(path, state)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{GithubPrDto, GithubPrListDto, GithubPrsDto, GithubStatus};
+    use crate::dto::{GithubPrDto, GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus};
     use crate::paths::scratch_dir;
     use std::fs;
 
@@ -278,16 +253,15 @@ mod tests {
             status: GithubStatus::Ok,
             hint: None,
             stale: false,
-            viewer: Some("octocat".into()),
-            fetched_at: Some("2026-08-24T20:00:00Z".into()),
-            scope: Vec::new(),
-            mine: GithubPrListDto {
-                total: mine.len() as u64,
-                items: mine,
+            data: GithubPrsData {
+                viewer: Some("octocat".into()),
+                fetched_at: Some("2026-08-24T20:00:00Z".into()),
+                mine: GithubPrListDto {
+                    total: mine.len() as u64,
+                    items: mine,
+                },
+                ..GithubPrsData::default()
             },
-            review_requested: GithubPrListDto::default(),
-            assigned: GithubPrListDto::default(),
-            rate_limit: None,
             warnings: Vec::new(),
         }
     }
@@ -394,12 +368,12 @@ mod tests {
     fn only_the_users_own_pull_requests_are_watched() {
         let mut state = MonitorState::default();
         let mut first = read(Vec::new());
-        first.review_requested.items = vec![pr("r", CiState::Pending)];
-        first.assigned.items = vec![pr("s", CiState::Pending)];
+        first.data.review_requested.items = vec![pr("r", CiState::Pending)];
+        first.data.assigned.items = vec![pr("s", CiState::Pending)];
         observe(&mut state, &first);
         let mut second = read(Vec::new());
-        second.review_requested.items = vec![pr("r", CiState::Failure)];
-        second.assigned.items = vec![pr("s", CiState::Failure)];
+        second.data.review_requested.items = vec![pr("r", CiState::Failure)];
+        second.data.assigned.items = vec![pr("s", CiState::Failure)];
         assert!(observe(&mut state, &second).is_empty());
         assert!(state.ci.is_empty());
     }

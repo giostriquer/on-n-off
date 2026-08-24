@@ -22,6 +22,7 @@ mod item_install;
 mod limits;
 mod limits_monitor;
 mod mcp;
+mod monitor;
 mod notifications;
 mod paths;
 mod plugin_meta;

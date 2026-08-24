@@ -24,10 +24,13 @@ type SettingsProps = {
   onAutomaticUpdatesChange: (enabled: boolean) => void;
   onLimitNotificationsChange: (enabled: boolean) => void;
   onLimitsPollMinutesChange: (minutes: LimitsPollMinutes) => void;
-  onGithubScopesChange: (scopes: string[]) => void;
-  onGithubNotificationsChange: (enabled: boolean) => void;
-  onGithubPollSecondsChange: (seconds: GithubPollSeconds) => void;
+  /** One callback for the Pull requests card; the route merges the patch into the settings. */
+  onGithubChange: (patch: GithubSettingsPatch) => void;
 };
+
+export type GithubSettingsPatch = Partial<
+  Pick<AppSettings, "githubScopes" | "githubNotifications" | "githubPollSeconds">
+>;
 
 const GITHUB_POLL_OPTIONS: [GithubPollSeconds, string][] = [
   [30, "30 seconds"],
@@ -51,9 +54,7 @@ export function Settings({
   onAutomaticUpdatesChange,
   onLimitNotificationsChange,
   onLimitsPollMinutesChange,
-  onGithubScopesChange,
-  onGithubNotificationsChange,
-  onGithubPollSecondsChange,
+  onGithubChange,
 }: SettingsProps) {
   const diagnose = useQuery({
     queryKey: ["diagnose-providers", settings.binaryPaths],
@@ -99,9 +100,7 @@ export function Settings({
         scopes={settings.githubScopes}
         enabled={settings.githubNotifications}
         pollSeconds={settings.githubPollSeconds}
-        onScopesChange={onGithubScopesChange}
-        onEnabledChange={onGithubNotificationsChange}
-        onPollSecondsChange={onGithubPollSecondsChange}
+        onChange={onGithubChange}
       />
 
       <section aria-label="Providers">
@@ -160,26 +159,26 @@ function GithubSettingsCard({
   scopes,
   enabled,
   pollSeconds,
-  onScopesChange,
-  onEnabledChange,
-  onPollSecondsChange,
+  onChange,
 }: {
   scopes: string[];
   enabled: boolean;
   pollSeconds: GithubPollSeconds;
-  onScopesChange: (scopes: string[]) => void;
-  onEnabledChange: (enabled: boolean) => void;
-  onPollSecondsChange: (seconds: GithubPollSeconds) => void;
+  onChange: (patch: GithubSettingsPatch) => void;
 }) {
-  const { requestingPermission, permissionMessage, toggle } = useNotificationGate(enabled, onEnabledChange);
+  const { requestingPermission, permissionMessage, toggle } = useNotificationGate(enabled, (value) =>
+    onChange({ githubNotifications: value }),
+  );
   const [draft, setDraft] = useState("");
 
+  // Enter commits; leaving the field keeps the draft. A blur-commit would race the chip's
+  // Remove click: both would persist from the same stale `scopes`, and one write would win.
   function addScope() {
     const scope = draft.trim();
     if (!scope) return;
     setDraft("");
     if (!scopes.includes(scope)) {
-      onScopesChange([...scopes, scope]);
+      onChange({ githubScopes: [...scopes, scope] });
     }
   }
 
@@ -217,7 +216,7 @@ function GithubSettingsCard({
               type="button"
               className="inline-flex size-4 items-center justify-center rounded-sm border-0 bg-transparent p-0 text-[var(--mute)] hover:text-[var(--trip)]"
               aria-label={`Remove ${scope}`}
-              onClick={() => onScopesChange(scopes.filter((item) => item !== scope))}
+              onClick={() => onChange({ githubScopes: scopes.filter((item) => item !== scope) })}
             >
               <X className="size-3" aria-hidden="true" />
             </button>
@@ -226,7 +225,7 @@ function GithubSettingsCard({
         <input
           className="h-8 min-w-[12rem] flex-1 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 font-mono text-[11px] text-[var(--silkscreen)] placeholder:text-[var(--mute)]"
           aria-label="Add a GitHub scope"
-          placeholder={scopes.length ? "add another scope" : "org:acme · owner/repo · all repositories when empty"}
+          placeholder={scopes.length ? "add another scope, then Enter" : "org:acme · owner/repo · Enter adds · empty means all repositories"}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -235,7 +234,6 @@ function GithubSettingsCard({
               addScope();
             }
           }}
-          onBlur={addScope}
         />
       </div>
       <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
@@ -247,7 +245,7 @@ function GithubSettingsCard({
           aria-label="GitHub polling interval"
           className="h-8 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 text-[11px] font-semibold"
           value={pollSeconds}
-          onChange={(event) => onPollSecondsChange(Number(event.target.value) as GithubPollSeconds)}
+          onChange={(event) => onChange({ githubPollSeconds: Number(event.target.value) as GithubPollSeconds })}
         >
           {GITHUB_POLL_OPTIONS.map(([seconds, label]) => (
             <option key={seconds} value={seconds}>

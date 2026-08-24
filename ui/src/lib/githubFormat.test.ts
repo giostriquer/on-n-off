@@ -8,6 +8,7 @@ import {
   listCountLabel,
   orderPrs,
   reviewDecisionLabel,
+  reviewDecisionTone,
   statusHeadline,
 } from "./githubFormat";
 
@@ -81,6 +82,13 @@ describe("githubFormat", () => {
     expect(statusHeadline("tokenRejected")).toBe("GitHub sign-in rejected");
     expect(statusHeadline("rateLimited")).toBe("GitHub rate limit reached");
     expect(statusHeadline("network")).toBe("GitHub unreachable");
+  });
+
+  it("colours review decisions like CI states", () => {
+    expect(reviewDecisionTone("APPROVED")).toBe("live");
+    expect(reviewDecisionTone("CHANGES_REQUESTED")).toBe("trip");
+    expect(reviewDecisionTone("REVIEW_REQUIRED")).toBe("mute");
+    expect(reviewDecisionTone(null)).toBe("mute");
   });
 
   it("labels review decisions", () => {

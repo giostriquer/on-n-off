@@ -25,14 +25,8 @@ export function SettingsRoute() {
       onLimitsPollMinutesChange={(minutes) => {
         void session.persistAppSettings({ ...session.appSettings, limitsPollMinutes: minutes });
       }}
-      onGithubScopesChange={(scopes) => {
-        void session.persistAppSettings({ ...session.appSettings, githubScopes: scopes });
-      }}
-      onGithubNotificationsChange={(enabled) => {
-        void session.persistAppSettings({ ...session.appSettings, githubNotifications: enabled });
-      }}
-      onGithubPollSecondsChange={(seconds) => {
-        void session.persistAppSettings({ ...session.appSettings, githubPollSeconds: seconds });
+      onGithubChange={(patch) => {
+        void session.persistAppSettings({ ...session.appSettings, ...patch });
       }}
     />
   );

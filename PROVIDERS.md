@@ -66,8 +66,11 @@ adapter assumes today (change the adapter and this file together).
   writes are `~/.on-n-off/github/prs.json` (the last good read, shown as stale when a refresh
   fails) and `~/.on-n-off/github/monitor.json` (the CI monitor's last-seen rollup per own PR).
   Polling pauses until GitHub's reset when a reply is rate limited or fewer than 50 points
-  remain. Public and private repositories the `gh` token can read; github.com only
-  (**verified** on gh 2.97, macOS, 2026-08).
+  remain. The CI monitor watches the authored PRs the screen lists (the scoped first page of
+  fifty), so PRs past that page or outside the scope are not watched. Public and private
+  repositories the `gh` token can read; github.com only. **verified** (gh 2.97, macOS,
+  2026-08): the token hand-over, the GraphQL reply shape, and the ~2 points per read (via
+  `gh api graphql` with `rateLimit { cost }`); **code**: the pause thresholds.
 
 ## Claude (Claude Code)
 
