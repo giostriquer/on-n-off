@@ -103,6 +103,9 @@ function renderSettings({
             automaticUpdates: true,
             limitNotifications: false,
             limitsPollMinutes: 10,
+            githubScopes: [],
+            githubNotifications: false,
+            githubPollSeconds: 60,
           }}
           onToggleVisible={onToggleVisible}
           onSaveBinary={() => undefined}
