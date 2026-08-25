@@ -321,7 +321,8 @@ describe("Github", () => {
     await user.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(within(section("Review requested")).queryByText("Direct ask")).toBeNull();
-    expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toContain("2");
+    // Folded, the title row still says how many and from which owner.
+    expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toBe("Review requested2· acme");
     expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
 
     first.unmount();
@@ -402,6 +403,8 @@ describe("Github", () => {
     expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested3");
     const groups = within(review).getAllByRole("group");
     expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["acme", "octo"]);
+    const controlled = within(review).getByRole("button", { name: /Review requested/ }).getAttribute("aria-controls");
+    expect(document.getElementById(controlled ?? "")?.contains(groups[0])).toBe(true);
     expect(within(groups[0]).getByRole("heading", { level: 4 }).textContent).toBe("acme2");
     expect(within(groups[0]).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
       expect.stringContaining("Direct ask"),

@@ -4,15 +4,14 @@ import { FOCUS_RING } from "$lib/a11y";
 import { displayError, parseInvokeError } from "$lib/error";
 import {
   filterPrs,
-  groupPrsByOrg,
+  groupPrsByOwner,
   formatUpdatedAgo,
   listCountLabel,
   orderPrs,
-  repoName,
   prsSummary,
   statusHeadline,
 } from "$lib/githubFormat";
-import type { GithubListId, GithubPrList, GithubPrs } from "$lib/githubTypes";
+import type { GithubListId, GithubPr, GithubPrList, GithubPrs } from "$lib/githubTypes";
 import type { GithubPollSeconds } from "$lib/types";
 import { readCollapsed, writeCollapsed } from "./collapsed";
 import { PrRow } from "./PrRow";
@@ -25,6 +24,11 @@ type GithubProps = {
 };
 
 const EMPTY_LIST: GithubPrList = { total: 0, items: [] };
+
+// The section header sticks to the top of the scroll area; an owner band sticks right under it,
+// so the band's offset is the header's height. Keep the two in step.
+const SECTION_HEADER_HEIGHT = "h-10";
+const OWNER_BAND_TOP = "top-10";
 
 /** Mine first: the user's own CI is what the screen exists for, and review requests can be many. */
 const SECTIONS: { id: GithubListId; title: string; empty: string }[] = [
@@ -242,6 +246,16 @@ function SearchField({ query, onChange }: { query: string; onChange: (query: str
   );
 }
 
+function PrRows({ items, now }: { items: GithubPr[]; now: number }) {
+  return (
+    <ul className="m-0 list-none p-0" role="list">
+      {items.map((pr) => (
+        <PrRow key={pr.id} pr={pr} now={now} />
+      ))}
+    </ul>
+  );
+}
+
 function PrList({
   id,
   title,
@@ -270,10 +284,10 @@ function PrList({
   // lasts; one without stays folded, its header already saying "0 of N".
   const open = (searching && shown.length > 0) || !collapsed;
   const bodyId = `github-${id}-list`;
-  // Rows are grouped by org so the owner is not repeated on every line. One org describes the
-  // title row instead of earning a sub-heading of its own.
-  const groups = groupPrsByOrg(orderPrs(shown));
-  const soleOrg = groups.length === 1 ? groups[0].org : null;
+  // Rows are grouped by repository owner so it is not repeated on every line. A single owner
+  // describes the title row instead of earning a band of its own.
+  const groups = groupPrsByOwner(orderPrs(shown));
+  const soleOwner = groups.length === 1 ? groups[0].owner : null;
   return (
     <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={title}>
       {/* Sticks to the top of the scroll area so a long list keeps its name in view. */}
@@ -283,7 +297,7 @@ function PrList({
         <h3 className="m-0">
           <button
             type="button"
-            className={`flex h-10 w-full items-center gap-2 rounded-[11px] border-0 bg-transparent px-3.5 text-left text-[11.5px] font-semibold tracking-[0.03em] uppercase hover:bg-[var(--well)] ${FOCUS_RING}`}
+            className={`flex ${SECTION_HEADER_HEIGHT} w-full items-center gap-2 rounded-[11px] border-0 bg-transparent px-3.5 text-left text-[11.5px] font-semibold tracking-[0.03em] uppercase hover:bg-[var(--well)] ${FOCUS_RING}`}
             aria-expanded={open}
             aria-controls={open ? bodyId : undefined}
             onClick={onToggle}
@@ -294,36 +308,37 @@ function PrList({
             />
             {title}
             <span className="font-mono text-[11px] font-normal normal-case text-[var(--mute)]">{count}</span>
-            {open && soleOrg ? (
+            {soleOwner ? (
               <span className="min-w-0 truncate font-mono text-[11px] font-normal normal-case text-[var(--mute)]">
-                · {soleOrg}
+                · {soleOwner}
               </span>
             ) : null}
           </button>
         </h3>
       </header>
-      {!open ? null : soleOrg ? (
-        <ul id={bodyId} className="m-0 list-none p-0" role="list">
-          {groups[0].items.map((pr) => (
-            <PrRow key={pr.id} pr={pr} repoLabel={repoName(pr.repo)} now={now} />
-          ))}
-        </ul>
-      ) : groups.length ? (
+      {!open ? null : groups.length ? (
         <div id={bodyId}>
-          {groups.map((group) => (
-            <div key={group.org} role="group" aria-label={group.org}>
-              {/* Sits under the section header while its rows scroll past. */}
-              <h4 className="sticky top-10 z-[9] m-0 flex items-center gap-2 border-t border-[var(--hair)] bg-[var(--well)] px-3.5 py-1 font-mono text-[10.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase first:border-t-0">
-                {group.org}
-                <span className="font-normal normal-case">{group.items.length}</span>
-              </h4>
-              <ul className="m-0 list-none p-0" role="list">
-                {group.items.map((pr) => (
-                  <PrRow key={pr.id} pr={pr} repoLabel={repoName(pr.repo)} now={now} />
-                ))}
-              </ul>
-            </div>
-          ))}
+          {soleOwner ? (
+            <PrRows items={groups[0].items} now={now} />
+          ) : (
+            groups.map((group) => (
+              <div
+                key={group.owner}
+                role="group"
+                aria-label={group.owner}
+                className="border-t border-[var(--hair)] first:border-t-0"
+              >
+                {/* Sits under the section header while its rows scroll past. */}
+                <h4
+                  className={`sticky ${OWNER_BAND_TOP} m-0 flex items-center gap-2 bg-[var(--well)] px-3.5 py-1 font-mono text-[10.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase`}
+                >
+                  {group.owner}
+                  <span className="font-normal normal-case">{group.items.length}</span>
+                </h4>
+                <PrRows items={group.items} now={now} />
+              </div>
+            ))
+          )}
         </div>
       ) : (
         <p id={bodyId} className="px-3.5 py-4 text-[13px] text-[var(--mute)]">
