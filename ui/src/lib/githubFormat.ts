@@ -96,9 +96,43 @@ export function listCountLabel(list: GithubPrList, matches?: number): string {
   return truncated(list) ? `${list.items.length} of ${list.total}` : String(list.items.length);
 }
 
+export type MergeBadge = { label: string; tone: CiTone };
+
+function hasConflicts(pr: GithubPr): boolean {
+  return pr.mergeable === "conflicting" || pr.mergeState === "dirty";
+}
+
+function readyToMerge(pr: GithubPr): boolean {
+  return pr.mergeState === "clean" && !pr.isDraft;
+}
+
+/**
+ * The one merge-state badge a row shows, most pressing first: conflicts, then the merge queue,
+ * auto-merge, ready to merge, behind the base. "Blocked" appears only when neither the review
+ * badge nor the CI glyph already explains it (approved or unreviewed, and CI green or absent);
+ * everything else (unknown, unstable, draft) says nothing.
+ */
+export function mergeBadge(pr: GithubPr): MergeBadge | null {
+  if (hasConflicts(pr)) return { label: "Conflicts", tone: "trip" };
+  if (pr.mergeQueue) {
+    const position = pr.mergeQueue.position;
+    return { label: position ? `Queued #${position}` : "Queued", tone: "live" };
+  }
+  if (pr.autoMerge) return { label: "Auto-merge", tone: "mute" };
+  if (readyToMerge(pr)) return { label: "Ready to merge", tone: "live" };
+  if (pr.mergeState === "behind") return { label: "Behind base", tone: "warn" };
+  if (pr.mergeState === "blocked") {
+    const reviewExplains = pr.reviewDecision === "REVIEW_REQUIRED" || pr.reviewDecision === "CHANGES_REQUESTED";
+    const ciExplains = pr.ci !== "success" && pr.ci !== "none";
+    if (!reviewExplains && !ciExplains) return { label: "Blocked", tone: "warn" };
+  }
+  return null;
+}
+
 /**
  * Case-insensitive substring match over what a row shows: number, title, repository, author,
- * both branches, its badges (draft, team, the review decision) and its CI state's label.
+ * both branches, its badges (draft, team, the review decision, the merge state) and its CI
+ * state's label.
  */
 export function filterPrs(items: readonly GithubPr[], query: string): GithubPr[] {
   const needle = query.trim().toLowerCase();
@@ -114,6 +148,7 @@ export function filterPrs(items: readonly GithubPr[], query: string): GithubPr[]
       pr.isDraft ? "draft" : "",
       pr.reviewRequest ?? "",
       reviewDecisionLabel(pr.reviewDecision),
+      mergeBadge(pr)?.label ?? "",
       ciLabel(pr.ci),
     ].some((field) => field.toLowerCase().includes(needle)),
   );
@@ -164,7 +199,11 @@ export type PrsSummary = {
   mine: number;
   /** Red CI among the user's own pull requests that were loaded. */
   failing: number;
-  /** True when GitHub holds more own pull requests than were loaded, so `failing` is a floor. */
+  /** Own pull requests (loaded) with merge conflicts. */
+  conflicts: number;
+  /** Own pull requests (loaded) with every merge requirement met. */
+  ready: number;
+  /** True when GitHub holds more own pull requests than were loaded, so the counts are floors. */
   failingIsPartial: boolean;
   review: number;
   assigned: number;
@@ -175,6 +214,8 @@ export function prsSummary(data: GithubPrsData): PrsSummary {
   return {
     mine: data.mine.total,
     failing: data.mine.items.filter((pr) => pr.ci === "failure" || pr.ci === "error").length,
+    conflicts: data.mine.items.filter(hasConflicts).length,
+    ready: data.mine.items.filter(readyToMerge).length,
     failingIsPartial: truncated(data.mine),
     review: data.reviewRequested.total,
     assigned: data.assigned.total,

@@ -145,11 +145,13 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
 }
 
 /**
- * "1 mine · 1 failing · 15 to review · 0 assigned". Failing appears only when there is any, with
- * a "+" when only part of the user's pull requests were loaded.
+ * "1 mine · 1 failing · 1 with conflicts · 2 ready · 15 to review · 0 assigned". Failing,
+ * conflicts and ready appear only when there is any, with a "+" when only part of the user's
+ * pull requests were loaded.
  */
 function Summary({ prs }: { prs: GithubPrs }) {
-  const { mine, failing, failingIsPartial, review, assigned } = prsSummary(prs);
+  const { mine, failing, conflicts, ready, failingIsPartial, review, assigned } = prsSummary(prs);
+  const partial = failingIsPartial ? "+" : "";
   return (
     <p className="mt-1.5 mb-0 text-[12.5px] text-[var(--silkscreen)]" data-testid="github-summary">
       {mine} mine
@@ -158,7 +160,25 @@ function Summary({ prs }: { prs: GithubPrs }) {
           {" · "}
           <span className="font-semibold text-[var(--trip)]">
             {failing}
-            {failingIsPartial ? "+" : ""} failing
+            {partial} failing
+          </span>
+        </>
+      ) : null}
+      {conflicts ? (
+        <>
+          {" · "}
+          <span className="font-semibold text-[var(--trip)]">
+            {conflicts}
+            {partial} with conflicts
+          </span>
+        </>
+      ) : null}
+      {ready ? (
+        <>
+          {" · "}
+          <span className="font-semibold text-[var(--live)]">
+            {ready}
+            {partial} ready
           </span>
         </>
       ) : null}

@@ -6,6 +6,7 @@ import {
   ciTone,
   ciToneColor,
   formatUpdatedAgo,
+  mergeBadge,
   reviewDecisionLabel,
   reviewDecisionTone,
   type CiTone,
@@ -36,14 +37,16 @@ function Badge({ children, tone = "mute" }: { children: string; tone?: CiTone })
 
 /**
  * One pull request: a CI glyph that opens the checks tab, then the row itself as one button whose
- * accessible name is its content — `#number` and title first, repository, author and branches on
- * the second line — and the age with its absolute time in a tooltip.
+ * accessible name is its content — `#number`, title and badges (draft, review decision, merge
+ * state, team) first, repository, author and branches on the second line — and the age with its
+ * absolute time in a tooltip.
  */
 export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
   const tone = ciTone(pr.ci);
   const color = ciToneColor(tone);
   const Glyph = CI_GLYPH[pr.ci];
   const decision = reviewDecisionLabel(pr.reviewDecision);
+  const merge = mergeBadge(pr);
   return (
     <li className="flex items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2 first:border-t-0">
       <button
@@ -67,6 +70,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
           <span className="min-w-0 truncate text-[13px] text-[var(--silkscreen)]">{pr.title}</span>
           {pr.isDraft ? <Badge>Draft</Badge> : null}
           {decision ? <Badge tone={reviewDecisionTone(pr.reviewDecision)}>{decision}</Badge> : null}
+          {merge ? <Badge tone={merge.tone}>{merge.label}</Badge> : null}
           {pr.reviewRequest === "team" ? <Badge>team</Badge> : null}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-[var(--mute)]">

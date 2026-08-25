@@ -7,6 +7,7 @@ import {
   filterPrs,
   formatUpdatedAgo,
   listCountLabel,
+  mergeBadge,
   orderPrs,
   prsSummary,
   reviewDecisionLabel,
@@ -29,6 +30,9 @@ function pr(overrides: Partial<GithubPr>): GithubPr {
     headRef: "h",
     baseRef: "main",
     updatedAt: "2026-08-24T19:00:00Z",
+    mergeable: "mergeable",
+    mergeState: "blocked",
+    autoMerge: false,
     ...overrides,
   };
 }
@@ -93,8 +97,10 @@ describe("githubFormat", () => {
     const items = [
       pr({ id: "draft", isDraft: true, ci: "pending" }),
       pr({ id: "team", reviewRequest: "team", ci: "failure" }),
-      pr({ id: "approved", reviewDecision: "APPROVED", ci: "success" }),
+      pr({ id: "approved", reviewDecision: "APPROVED", ci: "success", mergeState: "clean" }),
       pr({ id: "changes", reviewDecision: "CHANGES_REQUESTED", ci: "error" }),
+      pr({ id: "conflicts", mergeable: "conflicting" }),
+      pr({ id: "queued", mergeQueue: { position: 2 } }),
     ];
     const ids = (query: string) => filterPrs(items, query).map((item) => item.id);
     expect(ids("draft")).toEqual(["draft"]);
@@ -104,6 +110,38 @@ describe("githubFormat", () => {
     expect(ids("failing")).toEqual(["team"]);
     expect(ids("pending")).toEqual(["draft"]);
     expect(ids("errored")).toEqual(["changes"]);
+    expect(ids("conflicts")).toEqual(["conflicts"]);
+    expect(ids("queued #2")).toEqual(["queued"]);
+    expect(ids("ready to merge")).toEqual(["approved"]);
+  });
+
+  it("gives each pull request one merge badge, the most pressing state first", () => {
+    const badge = (overrides: Partial<GithubPr>) => mergeBadge(pr(overrides));
+    // Conflicts beat everything, whichever field reports them.
+    expect(badge({ mergeable: "conflicting", mergeQueue: { position: 1 }, mergeState: "clean" })).toEqual({ label: "Conflicts", tone: "trip" });
+    expect(badge({ mergeState: "dirty" })).toEqual({ label: "Conflicts", tone: "trip" });
+    // The merge queue, with its position when GitHub reports one.
+    expect(badge({ mergeQueue: { position: 3 }, autoMerge: true, mergeState: "clean" })).toEqual({ label: "Queued #3", tone: "live" });
+    expect(badge({ mergeQueue: { position: null } })).toEqual({ label: "Queued", tone: "live" });
+    expect(badge({ mergeQueue: {} })).toEqual({ label: "Queued", tone: "live" });
+    // Auto-merge will merge once the requirements are met.
+    expect(badge({ autoMerge: true, mergeState: "clean" })).toEqual({ label: "Auto-merge", tone: "mute" });
+    expect(badge({ autoMerge: true, mergeState: "blocked", reviewDecision: "REVIEW_REQUIRED" })).toEqual({ label: "Auto-merge", tone: "mute" });
+    // Every requirement met; a draft is never "ready".
+    expect(badge({ mergeState: "clean" })).toEqual({ label: "Ready to merge", tone: "live" });
+    expect(badge({ mergeState: "clean", isDraft: true })).toBeNull();
+    expect(badge({ mergeState: "behind" })).toEqual({ label: "Behind base", tone: "warn" });
+    // "Blocked" only when the review and CI badges do not already say why.
+    expect(badge({ mergeState: "blocked", reviewDecision: "APPROVED", ci: "success" })).toEqual({ label: "Blocked", tone: "warn" });
+    expect(badge({ mergeState: "blocked", reviewDecision: null, ci: "none" })).toEqual({ label: "Blocked", tone: "warn" });
+    expect(badge({ mergeState: "blocked", reviewDecision: "REVIEW_REQUIRED", ci: "success" })).toBeNull();
+    expect(badge({ mergeState: "blocked", reviewDecision: "CHANGES_REQUESTED", ci: "success" })).toBeNull();
+    expect(badge({ mergeState: "blocked", reviewDecision: "APPROVED", ci: "failure" })).toBeNull();
+    expect(badge({ mergeState: "blocked", reviewDecision: "APPROVED", ci: "pending" })).toBeNull();
+    // Nothing to say yet.
+    expect(badge({ mergeState: "unknown", mergeable: "unknown" })).toBeNull();
+    expect(badge({ mergeState: "unstable" })).toBeNull();
+    expect(badge({ mergeState: "draft", isDraft: true })).toBeNull();
   });
 
   it("says how much of a long list is loaded, and how much of it matches a search", () => {
@@ -146,10 +184,12 @@ describe("githubFormat", () => {
       reviewRequested: { total: 15, items: [pr({ ci: "failure" })] },
       assigned: { total: 0, items: [] },
     };
-    expect(prsSummary(data)).toEqual({ mine: 3, failing: 2, failingIsPartial: false, review: 15, assigned: 0 });
+    expect(prsSummary(data)).toEqual({ mine: 3, failing: 2, conflicts: 0, ready: 0, failingIsPartial: false, review: 15, assigned: 0 });
     expect(prsSummary({ ...data, mine: { total: 0, items: [] } })).toEqual({
       mine: 0,
       failing: 0,
+      conflicts: 0,
+      ready: 0,
       failingIsPartial: false,
       review: 15,
       assigned: 0,
@@ -158,9 +198,30 @@ describe("githubFormat", () => {
     expect(prsSummary({ ...data, mine: { total: 137, items: data.mine.items } })).toEqual({
       mine: 137,
       failing: 2,
+      conflicts: 0,
+      ready: 0,
       failingIsPartial: true,
       review: 15,
       assigned: 0,
     });
+  });
+
+  it("counts own pull requests with conflicts and ready to merge", () => {
+    const data: GithubPrsData = {
+      scope: [],
+      mine: {
+        total: 4,
+        items: [
+          pr({ mergeable: "conflicting" }),
+          pr({ mergeState: "dirty" }),
+          pr({ mergeState: "clean", ci: "success" }),
+          pr({ mergeState: "clean", isDraft: true }),
+        ],
+      },
+      // Conflicts on the review list are the author's problem, not the reviewer's.
+      reviewRequested: { total: 1, items: [pr({ mergeable: "conflicting" })] },
+      assigned: { total: 0, items: [] },
+    };
+    expect(prsSummary(data)).toMatchObject({ conflicts: 2, ready: 1 });
   });
 });

@@ -26,6 +26,9 @@ function pr(overrides: Partial<GithubPr> = {}): GithubPr {
     headRef: "feat/thing",
     baseRef: "main",
     updatedAt: "2026-08-24T19:55:00Z",
+    mergeable: "mergeable",
+    mergeState: "blocked",
+    autoMerge: false,
     ...overrides,
   };
 }
@@ -62,6 +65,8 @@ function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
           reviewDecision: "APPROVED",
           ci: "none",
           reviewRequest: "team",
+          mergeable: "conflicting",
+          mergeState: "dirty",
         }),
       ],
     },
@@ -151,6 +156,8 @@ describe("Github", () => {
     expect(within(review).getByText("Draft")).toBeTruthy();
     expect(within(review).getByText("team")).toBeTruthy();
     expect(within(review).getByText("Approved")).toBeTruthy();
+    expect(within(review).getByText("Conflicts")).toBeTruthy();
+    expect(within(mine).queryByText("Blocked")).toBeNull();
     expect(within(review).getByRole("button", { name: /CI pending/ })).toBeTruthy();
     expect(within(review).getByRole("button", { name: /No checks/ })).toBeTruthy();
 
@@ -341,6 +348,32 @@ describe("Github", () => {
     await user.clear(search);
     expect(toggle().getAttribute("aria-expanded")).toBe("false");
     expect(within(section("Review requested")).queryByText("Team ask")).toBeNull();
+  });
+
+  it("names own pull requests with conflicts or ready to merge in the summary, with their badges", async () => {
+    readGithubPrs.mockResolvedValue(
+      okPrs({
+        mine: {
+          total: 4,
+          items: [
+            pr(),
+            pr({ id: "PR_42", number: 42, title: "Conflicted", mergeable: "conflicting", ci: "success" }),
+            pr({ id: "PR_43", number: 43, title: "Green and approved", reviewDecision: "APPROVED", mergeState: "clean", ci: "success" }),
+            pr({ id: "PR_44", number: 44, title: "In the queue", reviewDecision: "APPROVED", mergeQueue: { position: 2 }, ci: "success" }),
+          ],
+        },
+      }),
+    );
+    renderGithub();
+
+    await screen.findByText("Conflicted");
+    expect(screen.getByTestId("github-summary").textContent).toBe(
+      "4 mine · 1 failing · 1 with conflicts · 1 ready · 2 to review · 0 assigned",
+    );
+    const mine = section("Mine");
+    expect(within(mine).getByText("Conflicts")).toBeTruthy();
+    expect(within(mine).getByText("Ready to merge")).toBeTruthy();
+    expect(within(mine).getByText("Queued #2")).toBeTruthy();
   });
 
   it("marks the failing count as partial when GitHub holds more than was loaded", async () => {
