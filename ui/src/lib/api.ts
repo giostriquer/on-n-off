@@ -15,6 +15,7 @@ import type {
   UpdateItemMode,
   UpdaterBuildInfo,
 } from "./types";
+import type { GithubPrs } from "./githubTypes";
 import type { ProviderLimits } from "./limitsTypes";
 import type { UsageSummary, UsageSummaryInput } from "./usageTypes";
 
@@ -130,6 +131,11 @@ export function readLimits(agentId: AgentId, force = false): Promise<ProviderLim
 
 export function forgetLimitsSnapshot(agentId: AgentId, accountId: string): Promise<void> {
   return invoke("forget_limits_snapshot", { agentId, accountId });
+}
+
+/** The GitHub screen's pull requests; `force` skips the backend's in-memory result. */
+export function readGithubPrs(force = false): Promise<GithubPrs> {
+  return invoke("read_github_prs", { force });
 }
 
 export function hideLimitsPopover(): Promise<void> {

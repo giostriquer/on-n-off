@@ -29,6 +29,7 @@ describe("LeftRail", () => {
     expect(screen.getByRole("button", { name: /Skills 4\/6/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /MCP servers 0\/0/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Usage$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Pull requests$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Settings$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Agent config/i })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Theme" })).toBeTruthy();
@@ -93,7 +94,7 @@ describe("LeftRail", () => {
     expect(onUsageIntent).toHaveBeenCalledTimes(2);
   });
 
-  it("renders Limits between Usage and Settings and navigates to it", async () => {
+  it("renders Limits and Pull requests between Usage and Settings and navigates to them", async () => {
     const user = userEvent.setup();
     const onScreen = vi.fn();
     render(
@@ -113,13 +114,17 @@ describe("LeftRail", () => {
       .map((button) => button.textContent?.trim() ?? "");
     const usageIndex = names.indexOf("Usage");
     const limitsIndex = names.indexOf("Limits");
+    const githubIndex = names.indexOf("Pull requests");
     const settingsIndex = names.indexOf("Settings");
     expect(usageIndex).toBeGreaterThan(-1);
     expect(limitsIndex).toBe(usageIndex + 1);
-    expect(settingsIndex).toBe(limitsIndex + 1);
+    expect(githubIndex).toBe(limitsIndex + 1);
+    expect(settingsIndex).toBe(githubIndex + 1);
     const limits = screen.getByRole("button", { name: /^Limits$/i });
     expect(limits.getAttribute("aria-current")).toBe("page");
     await user.click(limits);
     expect(onScreen).toHaveBeenCalledWith("limits");
+    await user.click(screen.getByRole("button", { name: /^Pull requests$/i }));
+    expect(onScreen).toHaveBeenCalledWith("github");
   });
 });

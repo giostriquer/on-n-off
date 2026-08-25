@@ -1,4 +1,4 @@
-import type { AgentId, AppSettings, LimitsPollMinutes } from "./types";
+import type { AgentId, AppSettings, GithubPollSeconds, LimitsPollMinutes } from "./types";
 
 export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity", "cursor"];
 
@@ -8,6 +8,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   automaticUpdates: true,
   limitNotifications: false,
   limitsPollMinutes: 10,
+  githubScopes: [],
+  githubNotifications: false,
+  githubPollSeconds: 60,
 };
 
 export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefined): AppSettings {
@@ -17,11 +20,18 @@ export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefine
     automaticUpdates: overlay?.automaticUpdates ?? true,
     limitNotifications: overlay?.limitNotifications ?? false,
     limitsPollMinutes: normalizeLimitsPollMinutes(overlay?.limitsPollMinutes),
+    githubScopes: overlay?.githubScopes ?? [],
+    githubNotifications: overlay?.githubNotifications ?? false,
+    githubPollSeconds: normalizeGithubPollSeconds(overlay?.githubPollSeconds),
   };
 }
 
 function normalizeLimitsPollMinutes(value: number | undefined): LimitsPollMinutes {
   return value === 5 || value === 10 || value === 15 || value === 30 ? value : 10;
+}
+
+function normalizeGithubPollSeconds(value: number | undefined): GithubPollSeconds {
+  return value === 30 || value === 60 || value === 120 || value === 300 ? value : 60;
 }
 
 export function visibleAgentIds(hidden: readonly AgentId[]): AgentId[] {

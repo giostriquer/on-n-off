@@ -55,6 +55,12 @@ const limitsRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/limits"), "LimitsRoute"),
 });
 
+const githubRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/github",
+  component: lazyRouteComponent(() => import("@/routes/github"), "GithubRoute"),
+});
+
 const configRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/config",
@@ -75,6 +81,7 @@ const routeTree = rootRoute.addChildren([
   mcpRoute,
   usageRoute,
   limitsRoute,
+  githubRoute,
   configRoute,
   settingsRoute,
 ]);

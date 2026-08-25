@@ -76,6 +76,7 @@ export type UpdaterBuildInfo = {
 };
 
 export type LimitsPollMinutes = 5 | 10 | 15 | 30;
+export type GithubPollSeconds = 30 | 60 | 120 | 300;
 
 export type AppSettings = {
   hiddenAgents: AgentId[];
@@ -83,6 +84,10 @@ export type AppSettings = {
   automaticUpdates: boolean;
   limitNotifications: boolean;
   limitsPollMinutes: LimitsPollMinutes;
+  /** GitHub search qualifiers (`org:NAME`, `user:NAME`, `repo:OWNER/NAME`) narrowing "Mine". */
+  githubScopes: string[];
+  githubNotifications: boolean;
+  githubPollSeconds: GithubPollSeconds;
 };
 
 export type DiagnoseCheck = {

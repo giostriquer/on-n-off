@@ -43,4 +43,22 @@ describe("appSettings", () => {
     expect(settings.limitNotifications).toBe(true);
     expect(settings.limitsPollMinutes).toBe(10);
   });
+
+  it("keeps the GitHub screen unscoped, quiet, and polling every sixty seconds by default", () => {
+    const settings = mergeAppSettings(null) as unknown as Record<string, unknown>;
+
+    expect(settings.githubScopes).toEqual([]);
+    expect(settings.githubNotifications).toBe(false);
+    expect(settings.githubPollSeconds).toBe(60);
+  });
+
+  it("normalizes unsupported GitHub polling intervals and keeps the scopes", () => {
+    const settings = mergeAppSettings(
+      JSON.parse('{"githubScopes":["org:acme"],"githubNotifications":true,"githubPollSeconds":45}'),
+    ) as unknown as Record<string, unknown>;
+
+    expect(settings.githubScopes).toEqual(["org:acme"]);
+    expect(settings.githubNotifications).toBe(true);
+    expect(settings.githubPollSeconds).toBe(60);
+  });
 });

@@ -1,6 +1,7 @@
 import {
   Activity,
   Gauge,
+  GitPullRequest,
   LayoutDashboard,
   Moon,
   Package,
@@ -8,6 +9,7 @@ import {
   Settings2,
   Sparkles,
   Sun,
+  type LucideIcon,
 } from "lucide-react";
 import { Rocker } from "@/features/agents/Rocker";
 import type { CatalogCounts, Screen } from "$lib/catalog";
@@ -27,6 +29,38 @@ type LeftRailProps = {
   onThemeChange: (theme: Theme) => void;
   onMaster: (enabled: boolean) => void;
 };
+
+type RailButtonProps = {
+  id: Screen;
+  label: string;
+  Icon: LucideIcon | typeof McpGlyph;
+  screen: Screen;
+  count?: string;
+  className?: string;
+  onScreen: (next: Screen) => void;
+  onIntent?: () => void;
+};
+
+/** One nav entry; `onIntent` fires on hover/focus so a heavy screen can preload its chunk. */
+function RailButton({ id, label, Icon, screen, count, className, onScreen, onIntent }: RailButtonProps) {
+  const active = screen === id;
+  return (
+    <button
+      type="button"
+      className={`flex h-[34px] items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11.5px] font-semibold tracking-[0.04em] uppercase transition-colors hover:bg-[var(--well)] hover:text-[var(--silkscreen)] ${
+        active ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
+      } ${className ?? ""}`}
+      aria-current={active ? "page" : undefined}
+      onMouseEnter={onIntent}
+      onFocus={onIntent}
+      onClick={() => onScreen(id)}
+    >
+      <Icon className={`size-[15px] shrink-0 ${active ? "text-[var(--silkscreen)]" : "text-[var(--mute)]"}`} />
+      <span className="flex-1 text-left">{label}</span>
+      {count ? <span className="font-mono text-[11px] opacity-75">{count}</span> : null}
+    </button>
+  );
+}
 
 function McpGlyph({ className }: { className?: string }) {
   return (
@@ -81,27 +115,17 @@ export function LeftRail({
       className="app-rail gap-0.5 border-r border-[var(--hair)] bg-[var(--plate)] px-2.5 py-3"
       aria-label="Section"
     >
-      {items.map((item) => {
-        const active = screen === item.id;
-        const Icon = item.Icon;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            className={`flex h-[34px] items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11.5px] font-semibold tracking-[0.04em] uppercase transition-colors hover:bg-[var(--well)] hover:text-[var(--silkscreen)] ${
-              active ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
-            }`}
-            aria-current={active ? "page" : undefined}
-            onClick={() => onScreen(item.id)}
-          >
-            <Icon
-              className={`size-[15px] shrink-0 ${active ? "text-[var(--silkscreen)]" : "text-[var(--mute)]"}`}
-            />
-            <span className="flex-1 text-left">{item.label}</span>
-            {item.count ? <span className="font-mono text-[11px] opacity-75">{item.count}</span> : null}
-          </button>
-        );
-      })}
+      {items.map((item) => (
+        <RailButton
+          key={item.id}
+          id={item.id}
+          label={item.label}
+          Icon={item.Icon}
+          screen={screen}
+          count={item.count}
+          onScreen={onScreen}
+        />
+      ))}
       <div className="min-h-3.5 flex-1" />
       {showMasterCut ? (
         <div className="mb-2 flex flex-col gap-1.5 border border-dashed border-[var(--hair)] p-2.5">
@@ -120,47 +144,25 @@ export function LeftRail({
           <span className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">{masterNote}</span>
         </div>
       ) : null}
-      <button
-        type="button"
-        className={`flex h-[34px] w-full items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11.5px] font-semibold tracking-[0.04em] uppercase transition-colors hover:bg-[var(--well)] hover:text-[var(--silkscreen)] ${
-          screen === "usage" ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
-        }`}
-        aria-current={screen === "usage" ? "page" : undefined}
-        onMouseEnter={onUsageIntent}
-        onFocus={onUsageIntent}
-        onClick={() => onScreen("usage")}
-      >
-        <Activity
-          className={`size-[15px] shrink-0 ${screen === "usage" ? "text-[var(--silkscreen)]" : "text-[var(--mute)]"}`}
-        />
-        <span className="flex-1 text-left">Usage</span>
-      </button>
-      <button
-        type="button"
-        className={`flex h-[34px] w-full items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11.5px] font-semibold tracking-[0.04em] uppercase transition-colors hover:bg-[var(--well)] hover:text-[var(--silkscreen)] ${
-          screen === "limits" ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
-        }`}
-        aria-current={screen === "limits" ? "page" : undefined}
-        onClick={() => onScreen("limits")}
-      >
-        <Gauge
-          className={`size-[15px] shrink-0 ${screen === "limits" ? "text-[var(--silkscreen)]" : "text-[var(--mute)]"}`}
-        />
-        <span className="flex-1 text-left">Limits</span>
-      </button>
-      <button
-        type="button"
-        className={`flex h-[34px] w-full items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11.5px] font-semibold tracking-[0.04em] uppercase transition-colors hover:bg-[var(--well)] hover:text-[var(--silkscreen)] ${
-          screen === "settings" ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
-        }`}
-        aria-current={screen === "settings" ? "page" : undefined}
-        onClick={() => onScreen("settings")}
-      >
-        <Settings
-          className={`size-[15px] shrink-0 ${screen === "settings" ? "text-[var(--silkscreen)]" : "text-[var(--mute)]"}`}
-        />
-        <span className="flex-1 text-left">Settings</span>
-      </button>
+      <RailButton
+        id="usage"
+        label="Usage"
+        Icon={Activity}
+        screen={screen}
+        className="w-full"
+        onScreen={onScreen}
+        onIntent={onUsageIntent}
+      />
+      <RailButton id="limits" label="Limits" Icon={Gauge} screen={screen} className="w-full" onScreen={onScreen} />
+      <RailButton
+        id="github"
+        label="Pull requests"
+        Icon={GitPullRequest}
+        screen={screen}
+        className="w-full"
+        onScreen={onScreen}
+      />
+      <RailButton id="settings" label="Settings" Icon={Settings} screen={screen} className="w-full" onScreen={onScreen} />
       <div className="mt-2 flex flex-col gap-1.5 border-t border-[var(--hair)] px-2 pt-2.5 pb-0.5">
         <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
           Appearance
