@@ -26,6 +26,7 @@ function pr(overrides: Partial<GithubPr> = {}): GithubPr {
     headRef: "feat/thing",
     baseRef: "main",
     updatedAt: "2026-08-24T19:55:00Z",
+    mergeKind: null,
     ...overrides,
   };
 }
@@ -62,6 +63,7 @@ function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
           reviewDecision: "APPROVED",
           ci: "none",
           reviewRequest: "team",
+          mergeKind: "conflicts",
         }),
       ],
     },
@@ -134,10 +136,15 @@ describe("Github", () => {
     ]);
 
     const mine = section("Mine");
-    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toContain("1");
+    // Every row of the list lives in one repository, so it describes the title row and the rows
+    // do not repeat it.
+    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toBe("Mine1· acme/app");
+    expect(within(mine).queryByRole("group")).toBeNull();
     expect(within(mine).getByText("#41")).toBeTruthy();
     expect(within(mine).getByText("Add the thing")).toBeTruthy();
-    expect(within(mine).getByText("acme/app")).toBeTruthy();
+    expect(within(mine).queryByText("acme/app")).toBeNull();
+    expect(within(mine).queryByText("app")).toBeNull();
+    expect(within(mine).getByText("octocat")).toBeTruthy();
     expect(within(mine).getByText("feat/thing → main")).toBeTruthy();
     const age = within(mine).getByText("5m ago");
     expect(age.tagName).toBe("TIME");
@@ -147,10 +154,13 @@ describe("Github", () => {
     expect(within(mine).queryByText("Review required")).toBeNull();
 
     const review = section("Review requested");
-    expect(within(review).getByRole("heading", { level: 3 }).textContent).toContain("2");
+    expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested2· acme/lib");
+    expect(within(review).queryByText("acme/lib")).toBeNull();
     expect(within(review).getByText("Draft")).toBeTruthy();
     expect(within(review).getByText("team")).toBeTruthy();
     expect(within(review).getByText("Approved")).toBeTruthy();
+    expect(within(review).getByText("Conflicts")).toBeTruthy();
+    expect(within(mine).queryByText("Blocked")).toBeNull();
     expect(within(review).getByRole("button", { name: /CI pending/ })).toBeTruthy();
     expect(within(review).getByRole("button", { name: /No checks/ })).toBeTruthy();
 
@@ -165,14 +175,14 @@ describe("Github", () => {
     renderGithub();
     await screen.findByText("Add the thing");
 
-    await user.click(within(section("Mine")).getByRole("button", { name: /#41.*Add the thing.*acme\/app/ }));
+    await user.click(within(section("Mine")).getByRole("button", { name: /#41.*Add the thing.*octocat/ }));
     expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/app/pull/41");
 
     await user.click(within(section("Mine")).getByRole("button", { name: /CI failing/ }));
     expect(openUrl).toHaveBeenLastCalledWith("https://github.com/acme/app/pull/41/checks");
   });
 
-  it("puts failing CI first and says how much of a long list is loaded", async () => {
+  it("puts what needs fixing first and says how much of a long list is loaded", async () => {
     readGithubPrs.mockResolvedValue(
       okPrs({
         mine: {
@@ -181,6 +191,7 @@ describe("Github", () => {
             pr({ id: "a", number: 1, title: "Green", ci: "success", updatedAt: "2026-08-24T19:59:00Z" }),
             pr({ id: "b", number: 2, title: "Red", ci: "failure", updatedAt: "2026-08-24T19:00:00Z" }),
             pr({ id: "c", number: 3, title: "Amber", ci: "pending", updatedAt: "2026-08-24T19:30:00Z" }),
+            pr({ id: "d", number: 4, title: "Conflicting", ci: "success", mergeKind: "conflicts", updatedAt: "2026-08-24T19:10:00Z" }),
           ],
         },
       }),
@@ -189,13 +200,14 @@ describe("Github", () => {
     await screen.findByText("Red");
 
     const mine = section("Mine");
-    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toContain("3 of 137");
+    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toContain("4 of 137");
     const titles = within(mine)
       .getAllByRole("listitem")
       .map((item) => item.textContent ?? "");
-    expect(titles[0]).toContain("Red");
-    expect(titles[1]).toContain("Amber");
-    expect(titles[2]).toContain("Green");
+    expect(titles[0]).toContain("Conflicting");
+    expect(titles[1]).toContain("Red");
+    expect(titles[2]).toContain("Amber");
+    expect(titles[3]).toContain("Green");
   });
 
   it.each<[GithubStatus, string, string]>([
@@ -309,7 +321,8 @@ describe("Github", () => {
     await user.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(within(section("Review requested")).queryByText("Direct ask")).toBeNull();
-    expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toContain("2");
+    // Folded, the title row still says how many and from which repository.
+    expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toBe("Review requested2· acme/lib");
     expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
 
     first.unmount();
@@ -343,19 +356,92 @@ describe("Github", () => {
     expect(within(section("Review requested")).queryByText("Team ask")).toBeNull();
   });
 
-  it("marks the failing count as partial when GitHub holds more than was loaded", async () => {
+  it("names own pull requests with conflicts or ready to merge in the summary, with their badges", async () => {
+    readGithubPrs.mockResolvedValue(
+      okPrs({
+        mine: {
+          total: 4,
+          items: [
+            pr(),
+            pr({ id: "PR_42", number: 42, title: "Conflicted", mergeKind: "conflicts", ci: "success" }),
+            pr({ id: "PR_43", number: 43, title: "Green and approved", reviewDecision: "APPROVED", mergeKind: "ready", ci: "success" }),
+            pr({ id: "PR_44", number: 44, title: "In the queue", reviewDecision: "APPROVED", mergeKind: "queued", mergeQueue: { position: 2 }, ci: "success" }),
+          ],
+        },
+      }),
+    );
+    renderGithub();
+
+    await screen.findByText("Conflicted");
+    expect(screen.getByTestId("github-summary").textContent).toBe(
+      "4 mine · 1 failing · 1 with conflicts · 1 ready · 2 to review · 0 assigned",
+    );
+    const mine = section("Mine");
+    expect(within(mine).getByText("Conflicts").style.color).toBe("var(--trip)");
+    expect(within(mine).getByText("Ready to merge").style.color).toBe("var(--live)");
+    expect(within(mine).getByText("Queued #2").style.color).toBe("var(--live)");
+  });
+
+  it("groups a list that spans several repositories under one sub-heading per repository", async () => {
+    readGithubPrs.mockResolvedValue(
+      okPrs({
+        reviewRequested: {
+          total: 3,
+          items: [
+            pr({ id: "PR_t1", number: 305, title: "tools: bump lockfile", url: "https://github.com/octo/tools/pull/305", repo: "octo/tools", author: "sam", ci: "none" }),
+            pr({ id: "PR_7", number: 7, title: "Direct ask", url: "https://github.com/acme/lib/pull/7", repo: "acme/lib", author: "alice", ci: "pending" }),
+            pr({ id: "PR_91", number: 91, title: "api: paginate", url: "https://github.com/acme/api/pull/91", repo: "acme/api", author: "lin", ci: "success" }),
+          ],
+        },
+      }),
+    );
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    renderGithub();
+
+    await screen.findByText("Direct ask");
+    const review = section("Review requested");
+    expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested3");
+    const groups = within(review).getAllByRole("group");
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["acme/api", "acme/lib", "octo/tools"]);
+    const controlled = within(review).getByRole("button", { name: /Review requested/ }).getAttribute("aria-controls");
+    expect(document.getElementById(controlled ?? "")?.contains(groups[0])).toBe(true);
+    expect(within(groups[0]).getByRole("heading", { level: 4 }).textContent).toBe("acme/api1");
+    expect(within(groups[0]).getByRole("listitem").textContent).toContain("api: paginate");
+    expect(within(groups[1]).getByRole("heading", { level: 4 }).textContent).toBe("acme/lib1");
+    expect(within(groups[1]).getByRole("listitem").textContent).toContain("Direct ask");
+    expect(within(groups[2]).getByRole("heading", { level: 4 }).textContent).toBe("octo/tools1");
+    // The repository is said once, by the band, never again on the row.
+    const row = within(groups[2]).getByRole("listitem");
+    expect(within(row).getByText("sam")).toBeTruthy();
+    expect(within(row).queryByText("octo/tools")).toBeNull();
+    expect(within(row).queryByText("tools")).toBeNull();
+    // A search still matches the repository and narrows the groups to the ones with hits.
+    await user.type(screen.getByRole("searchbox"), "octo/");
+    expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested1 of 3· octo/tools");
+    expect(within(review).queryByRole("group")).toBeNull();
+    expect(within(review).getByText("tools: bump lockfile")).toBeTruthy();
+  });
+
+  it("marks every own-list count as partial when GitHub holds more than was loaded", async () => {
     readGithubPrs.mockResolvedValue(
       okPrs({
         mine: {
           total: 137,
-          items: [pr({ id: "a", ci: "failure" }), pr({ id: "b", number: 2, title: "Second thing", ci: "success" })],
+          items: [
+            pr({ id: "a", ci: "failure" }),
+            pr({ id: "b", number: 2, title: "Second thing", ci: "success" }),
+            pr({ id: "c", number: 3, title: "Conflicted", mergeKind: "conflicts", ci: "success" }),
+            pr({ id: "d", number: 4, title: "Ready", mergeKind: "ready", reviewDecision: "APPROVED", ci: "success" }),
+          ],
         },
       }),
     );
     renderGithub();
     await screen.findByText("Second thing");
-    expect(screen.getByTestId("github-summary").textContent).toBe("137 mine · 1+ failing · 2 to review · 0 assigned");
-    expect(within(section("Mine")).getByRole("heading", { level: 3 }).textContent).toContain("2 of 137");
+    expect(screen.getByTestId("github-summary").textContent).toBe(
+      "137 mine · 1+ failing · 1+ with conflicts · 1+ ready · 2 to review · 0 assigned",
+    );
+    expect(within(section("Mine")).getByRole("heading", { level: 3 }).textContent).toContain("4 of 137");
   });
 
   it("says it is checking until the first read answers", () => {

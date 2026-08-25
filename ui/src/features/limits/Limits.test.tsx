@@ -145,8 +145,13 @@ describe("Limits", () => {
     // A current-account observation is still historical after its own reset instant passes.
     const spark = within(codex).getByRole("meter", { name: "Weekly · GPT-5.3-Codex-Spark" });
     expect(spark.getAttribute("aria-valuenow")).toBe("0");
-    expect(within(codex).getByText("—")).toBeTruthy();
-    expect(within(codex).getByText("Current usage unknown")).toBeTruthy();
+    expect(within(codex).getByText("—").style.color).toBe("var(--mute)");
+    // The reset is a fact worth stating: when it happened and what the window last held.
+    expect(within(codex).getByText(/^reset 1m ago · \w{3} \d\d:\d\d · last seen 3%$/)).toBeTruthy();
+    expect(within(codex).queryByText(/Current usage unknown/)).toBeNull();
+    expect(spark.getAttribute("aria-valuetext")).toBe("not observed since the reset");
+    // A live meter speaks its percentage; only the reset one gets the voice-over.
+    expect(weekly.getAttribute("aria-valuetext")).toBeNull();
     expect(within(codex).getAllByText(/Latest observation/)).toHaveLength(1);
     expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
     expect(within(codex).getAllByText(/resets in/)).toHaveLength(1);
@@ -188,10 +193,29 @@ describe("Limits", () => {
     const session = within(stale).getByRole("meter", { name: "5 hour · all models" });
     expect(session.getAttribute("aria-valuenow")).toBe("0");
     expect(session.getAttribute("data-tone")).toBe("calm");
-    expect(within(stale).getByText("—")).toBeTruthy();
-    expect(within(stale).getByText("Current usage unknown")).toBeTruthy();
+    expect(within(stale).getByText("—").style.color).toBe("var(--mute)");
+    expect(within(stale).getByText("88%").style.color).toBe("var(--warn)");
+    expect(within(stale).getByText(/^reset 22h ago · \w{3} \d\d:\d\d · last seen 40%$/)).toBeTruthy();
+    expect(within(stale).queryByText(/Current usage unknown/)).toBeNull();
     expect(within(stale).getByRole("button", { name: "Forget personal@codex.example" })).toBeTruthy();
     expect(within(stale).getAllByText(/Latest observation/)).toHaveLength(1);
+  });
+
+  it("presents an elapsed hero window as reset, never as its old 97% in red", async () => {
+    const renewed = staleCodex();
+    renewed.windows[0] = { ...renewed.windows[0], usedPercent: 97, resetsAt: "2026-08-17T18:35:00Z" };
+    answer([okClaude()], [okCodex(), renewed]);
+    renderLimits();
+
+    const stale = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    const weekly = within(stale).getByRole("meter", { name: "Weekly · all models" });
+    expect(weekly.getAttribute("aria-valuenow")).toBe("0");
+    expect(weekly.getAttribute("data-tone")).toBe("calm");
+    expect(weekly.getAttribute("aria-valuetext")).toBe("not observed since the reset");
+    expect((weekly.firstElementChild as HTMLElement).style.background).not.toBe("var(--trip)");
+    const [hero] = within(stale).getAllByText("—");
+    expect(hero.style.color).toBe("var(--mute)");
+    expect(within(stale).getByText(/^reset 1h ago · \w{3} \d\d:\d\d · last seen 97%$/)).toBeTruthy();
   });
 
   it("keeps one source-neutral Claude account when current refresh is paused", async () => {
@@ -220,8 +244,9 @@ describe("Limits", () => {
     expect(within(claude).queryByText(/Claude Desktop usage/)).toBeNull();
     expect(within(claude).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("12");
     expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
-    // A window that has reset since that read shows nothing usable, and asks for nothing either.
-    expect(within(claude).getByText(/Current usage unknown/)).toBeTruthy();
+    // A window that has reset since that read shows the reset, not a stale percentage.
+    expect(within(claude).getByText(/^reset 15h ago · \w{3} \d\d:\d\d · last seen 7%$/)).toBeTruthy();
+    expect(within(claude).queryByText(/Current usage unknown/)).toBeNull();
     // It is still the signed-in account: nothing to sign into, nothing to forget.
     expect(within(claude).queryByText(/sign in/)).toBeNull();
     expect(within(claude).queryByRole("button", { name: /^Forget/ })).toBeNull();

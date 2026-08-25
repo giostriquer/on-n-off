@@ -1,4 +1,4 @@
-import type { CiState, GithubPr, GithubPrs, GithubStatus, ReviewDecision } from "$lib/githubTypes";
+import type { CiState, GithubPr, GithubPrs, GithubStatus, MergeKind, ReviewDecision } from "$lib/githubTypes";
 
 /** Synthetic pull requests for the UI harness; nothing here is a real repository or person. */
 
@@ -14,6 +14,10 @@ type Seed = {
   decision?: ReviewDecision;
   team?: boolean;
   minutesAgo?: number;
+  /** The backend's merge verdict, as the DTO would carry it; `queued` implies "queued". */
+  merge?: MergeKind;
+  /** In the merge queue: at this position, or `null` when GitHub reports none. */
+  queued?: number | null;
 };
 
 function pr(seed: Seed, kind: "mine" | "review" | "assigned"): GithubPr {
@@ -32,26 +36,29 @@ function pr(seed: Seed, kind: "mine" | "review" | "assigned"): GithubPr {
     baseRef: "main",
     updatedAt: new Date(NOW - (seed.minutesAgo ?? 5) * 60_000).toISOString(),
     ...(kind === "review" ? { reviewRequest: seed.team ? "team" : "direct" } : {}),
+    mergeKind: seed.queued !== undefined ? "queued" : (seed.merge ?? null),
+    ...(seed.queued !== undefined ? { mergeQueue: { position: seed.queued } } : {}),
   };
 }
 
 const MINE: Seed[] = [
   { n: 412, title: "Add retry with jitter to the sync worker", ci: "failure", minutesAgo: 3 },
-  { n: 398, title: "Tighten the CSP for the updater window", ci: "success", decision: "APPROVED", minutesAgo: 41 },
+  { n: 398, title: "Tighten the CSP for the updater window", ci: "success", decision: "APPROVED", merge: "ready", minutesAgo: 41 },
   { n: 401, title: "Migrate the settings store to versioned JSON", ci: "pending", draft: true, minutesAgo: 12 },
+  { n: 388, title: "Rename the tray menu entries", ci: "success", merge: "conflicts", minutesAgo: 900 },
 ];
 
 const REVIEW: Seed[] = [
   { n: 530, title: "Seal the export authority behind a capability port", author: "mara", ci: "failure", minutesAgo: 8 },
   { n: 529, title: "Enforce same-origin on the backend boundary", author: "mara", ci: "pending", minutesAgo: 2 },
-  { n: 527, title: "Prove semantic list scale behaviour at 10k rows", author: "devon", ci: "success", team: true, minutesAgo: 66 },
+  { n: 527, title: "Prove semantic list scale behaviour at 10k rows", author: "devon", ci: "success", team: true, decision: "APPROVED", queued: 2, minutesAgo: 66 },
   { n: 91, title: "api: reject unsigned webhooks", repo: "acme/api", author: "lin", ci: "error", decision: "CHANGES_REQUESTED", minutesAgo: 190 },
-  { n: 88, title: "api: paginate the audit log", repo: "acme/api", author: "lin", ci: "success", minutesAgo: 1440 },
+  { n: 88, title: "api: paginate the audit log", repo: "acme/api", author: "lin", ci: "success", merge: "autoMerge", minutesAgo: 1440 },
   { n: 305, title: "tools: a much longer title than usual so truncation has something to do in a narrow window", repo: "octo/tools", author: "sam", ci: "pending", team: true, minutesAgo: 30 },
   { n: 302, title: "tools: bump lockfile", repo: "octo/tools", author: "sam", ci: "none", minutesAgo: 2880 },
-  { n: 525, title: "Content-addressed state activation", author: "devon", ci: "success", decision: "APPROVED", minutesAgo: 15 },
+  { n: 525, title: "Content-addressed state activation", author: "devon", ci: "success", decision: "APPROVED", merge: "blocked", minutesAgo: 15 },
   { n: 521, title: "Qualify client state ownership", author: "mara", ci: "pending", minutesAgo: 9 },
-  { n: 519, title: "Production QC execution lane", author: "devon", ci: "success", minutesAgo: 75 },
+  { n: 519, title: "Production QC execution lane", author: "devon", ci: "success", merge: "behind", minutesAgo: 75 },
   { n: 518, title: "Frozen dependency authority", author: "mara", ci: "failure", draft: true, minutesAgo: 120 },
   { n: 517, title: "Advisory artifact quality reviewer", author: "devon", ci: "success", minutesAgo: 4 },
 ];
@@ -87,7 +94,17 @@ export function problemPrs(status: GithubStatus, hint: string): GithubPrs {
 
 export function manyPrs(): GithubPrs {
   const items = Array.from({ length: 50 }, (_, index) =>
-    pr({ n: 1000 + index, title: `Batch change ${index + 1}`, ci: (["success", "pending", "failure"] as const)[index % 3], minutesAgo: index * 7 }, "mine"),
+    pr(
+      {
+        n: 1000 + index,
+        title: `Batch change ${index + 1}`,
+        ci: (["success", "pending", "failure"] as const)[index % 3],
+        merge: index % 7 === 0 ? "conflicts" : index % 3 === 0 ? "ready" : undefined,
+        ...(index % 11 === 3 ? { queued: Math.floor(index / 11) + 1 } : {}),
+        minutesAgo: index * 7,
+      },
+      "mine",
+    ),
   );
   return okPrs({ mine: { total: 137, items } });
 }

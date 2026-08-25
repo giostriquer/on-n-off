@@ -21,10 +21,12 @@ describe("formatResetIn", () => {
     expect(formatResetIn("2026-08-17T04:05:30Z", NOW)).toBe("4h 5m");
   });
 
-  it("shows minutes under an hour and 'now' once elapsed", () => {
+  it("shows minutes under an hour, '<1m' inside the last minute, and nothing once elapsed", () => {
     expect(formatResetIn("2026-08-17T00:12:00Z", NOW)).toBe("12m");
-    expect(formatResetIn("2026-08-17T00:00:20Z", NOW)).toBe("now");
-    expect(formatResetIn("2026-08-16T23:00:00Z", NOW)).toBe("now");
+    expect(formatResetIn("2026-08-17T00:01:00Z", NOW)).toBe("1m");
+    expect(formatResetIn("2026-08-17T00:00:20Z", NOW)).toBe("<1m");
+    expect(formatResetIn("2026-08-17T00:00:00Z", NOW)).toBe("");
+    expect(formatResetIn("2026-08-16T23:00:00Z", NOW)).toBe("");
   });
 
   it("is empty for missing or unparsable instants", () => {

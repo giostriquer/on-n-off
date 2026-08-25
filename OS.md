@@ -74,6 +74,15 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   `SHChangeNotify(SHCNE_ASSOCCHANGED)` after install to drop the cached icon; on a machine that still
   shows a stale one, run `ie4uinit.exe -show` and relaunch the app (or restart Explorer).
 
+## Fonts
+
+- The UI uses the platform's own type: `-apple-system`/SF Pro Text and SF Mono on macOS, Segoe UI and
+  Cascadia Mono (Consolas before Windows 11) on Windows, with `system-ui` and the generic families as
+  the last fallbacks (`ui/src/tokens.css`, the `--font-sans`/`--font-mono` tokens; every stylesheet
+  reads those). No webfont is bundled: the previous Instrument Sans / JetBrains Mono rendered fuzzy at
+  the screens' 10–12 px sizes on 1× displays, where native faces are hinted. `-webkit-font-smoothing`
+  is left at its default for the same reason (macOS only; WebView2 ignores it).
+
 ## PowerShell vs bash in this repo
 
 - CI and `scripts/*.ps1` run under PowerShell 7 on both runners; scripts must stay path-neutral.

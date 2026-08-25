@@ -29,16 +29,34 @@ pub(super) fn save(path: &Path, data: &GithubPrsData) -> Result<(), String> {
 }
 
 /// `None` for an absent, unreadable, or differently-versioned file; old versions are ignored
-/// rather than migrated, since the next successful read rewrites the file anyway.
+/// rather than migrated, since the next successful read rewrites the file anyway. The merge
+/// verdict is re-derived from the raw fields, so a file written by another version of the
+/// classification never shows a stale one.
 pub(super) fn load(path: &Path) -> Option<GithubPrsData> {
     let stored: Stored = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    (stored.schema_version == SCHEMA_VERSION).then_some(stored.data)
+    if stored.schema_version != SCHEMA_VERSION {
+        return None;
+    }
+    let mut data = stored.data;
+    for pr in data
+        .mine
+        .items
+        .iter_mut()
+        .chain(data.review_requested.items.iter_mut())
+        .chain(data.assigned.items.iter_mut())
+    {
+        pr.merge_kind = super::merge::classify(pr);
+    }
+    Some(data)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{CiState, GithubPrDto, GithubPrListDto};
+    use crate::dto::{
+        CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, MergeKind, MergeState,
+        Mergeability,
+    };
     use crate::paths::{github_prs_path_for, scratch_dir};
     use std::fs;
 
@@ -63,6 +81,11 @@ mod tests {
                     base_ref: "main".into(),
                     updated_at: "2026-08-24T19:00:00Z".into(),
                     review_request: None,
+                    mergeable: Mergeability::Conflicting,
+                    merge_state: MergeState::Dirty,
+                    merge_queue: Some(GithubMergeQueueDto { position: Some(2) }),
+                    auto_merge: true,
+                    merge_kind: Some(MergeKind::Conflicts),
                 }],
             },
             review_requested: GithubPrListDto::default(),
@@ -86,6 +109,74 @@ mod tests {
         assert!(
             !raw.contains("\"status\""),
             "the envelope is not persisted: {raw}"
+        );
+    }
+
+    /// v0.2.0 wrote schema 1 without the merge-state fields; that file must keep loading.
+    #[test]
+    fn a_snapshot_from_before_the_merge_state_fields_loads_with_defaults() {
+        let home = scratch_dir("gh-snapshot-v0-2-0");
+        let path = github_prs_path_for(&home);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{"schemaVersion":1,"data":{"viewer":"octocat","fetchedAt":"2026-08-24T20:00:00Z","scope":["org:acme"],"mine":{"total":1,"items":[{"id":"PR_1","number":1,"title":"T","url":"https://github.com/acme/app/pull/1","repo":"acme/app","author":"octocat","isDraft":false,"ci":"success","headRef":"h","baseRef":"main","updatedAt":"2026-08-24T19:00:00Z"}]},"reviewRequested":{"total":0,"items":[]},"assigned":{"total":0,"items":[]}}}"#,
+        )
+        .unwrap();
+        let loaded = load(&path).expect("the old snapshot still loads");
+        let pr = &loaded.mine.items[0];
+        assert_eq!(pr.id, "PR_1");
+        assert_eq!(pr.mergeable, Mergeability::Unknown);
+        assert_eq!(pr.merge_state, MergeState::Unknown);
+        assert_eq!(pr.merge_queue, None);
+        assert!(!pr.auto_merge);
+        assert_eq!(pr.merge_kind, None);
+    }
+
+    #[test]
+    fn a_loaded_snapshot_re_derives_the_merge_verdict_from_its_raw_fields() {
+        let home = scratch_dir("gh-snapshot-rederive");
+        let path = github_prs_path_for(&home);
+        let mut stale = data();
+        // A file that says "ready" beside raw fields that mean conflicts (as an older or newer
+        // classification could) loads with the verdict this version draws from the raw fields.
+        stale.mine.items[0].merge_kind = Some(MergeKind::Ready);
+        save(&path, &stale).unwrap();
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains(r#""mergeKind":"ready""#));
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.mine.items[0].merge_kind, Some(MergeKind::Conflicts));
+    }
+
+    /// The raw fields and the verdict are pinned on the wire so a `prs.json` written by this
+    /// version keeps loading in later ones (`mergeKind` is also what the screen reads).
+    #[test]
+    fn the_merge_fields_keep_their_camel_case_wire_names() {
+        let home = scratch_dir("gh-snapshot-wire-names");
+        let path = github_prs_path_for(&home);
+        save(&path, &data()).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        for needle in [
+            r#""mergeable":"conflicting""#,
+            r#""mergeState":"dirty""#,
+            r#""mergeQueue":{"position":2}"#,
+            r#""autoMerge":true"#,
+            r#""mergeKind":"conflicts""#,
+        ] {
+            assert!(raw.contains(needle), "{needle} missing from {raw}");
+        }
+        let pr: GithubPrDto = serde_json::from_str(
+            r#"{"id":"PR_2","number":2,"title":"T","url":"https://github.com/acme/app/pull/2","repo":"acme/app","author":"octocat","isDraft":false,"ci":"success","headRef":"h","baseRef":"main","updatedAt":"2026-08-24T19:00:00Z","mergeable":"mergeable","mergeState":"clean","mergeQueue":{},"autoMerge":false,"mergeKind":"autoMerge"}"#,
+        )
+        .unwrap();
+        assert_eq!(pr.mergeable, Mergeability::Mergeable);
+        assert_eq!(pr.merge_state, MergeState::Clean);
+        assert_eq!(pr.merge_kind, Some(MergeKind::AutoMerge));
+        assert_eq!(
+            pr.merge_queue,
+            Some(GithubMergeQueueDto { position: None }),
+            "queued without a known position"
         );
     }
 

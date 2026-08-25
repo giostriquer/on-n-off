@@ -15,12 +15,16 @@ function parseInstant(value: string | null | undefined): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-/** "2d 2h" / "4h 5m" / "12m" / "now" until the window resets; empty when unknown. */
+/**
+ * "2d 2h" / "4h 5m" / "12m" / "<1m" until the window resets, phrased to follow "resets in";
+ * empty when the instant is unknown or already past (see `hasElapsed`).
+ */
 export function formatResetIn(resetsAt: string | null | undefined, nowMs: number): string {
   const at = parseInstant(resetsAt);
   if (at === null) return "";
   const remaining = at - nowMs;
-  if (remaining < MINUTE_MS) return "now";
+  if (remaining <= 0) return "";
+  if (remaining < MINUTE_MS) return "<1m";
   if (remaining >= DAY_MS) {
     const days = Math.floor(remaining / DAY_MS);
     const hours = Math.floor((remaining % DAY_MS) / HOUR_MS);

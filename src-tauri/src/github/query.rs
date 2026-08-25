@@ -1,6 +1,7 @@
 //! The one GraphQL document the screen needs, and the search strings that feed it. Four searches
 //! ride in a single request; without a `contexts` connection the whole thing costs about two
-//! rate-limit points, so a 60 s poll spends ~120 of the 5 000 points an hour GitHub grants.
+//! rate-limit points, so a 60 s poll spends ~120 of the 5 000 points an hour GitHub grants. The
+//! merge-state fields are scalars and single objects, so they add nothing to that cost.
 
 use serde_json::{json, Value};
 
@@ -19,6 +20,7 @@ query($mine: String!, $review: String!, $direct: String!, $assigned: String!, $f
 }
 fragment pr on PullRequest {
   id number title url isDraft updatedAt headRefName baseRefName reviewDecision
+  mergeable mergeStateStatus mergeQueueEntry { position } autoMergeRequest { enabledAt }
   repository { nameWithOwner }
   author { login }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -102,6 +104,10 @@ mod tests {
             "rateLimit { remaining resetAt }",
             "statusCheckRollup { state }",
             "reviewDecision",
+            "mergeable",
+            "mergeStateStatus",
+            "mergeQueueEntry { position }",
+            "autoMergeRequest { enabledAt }",
             "$first",
         ] {
             assert!(document.contains(needle), "{needle}");

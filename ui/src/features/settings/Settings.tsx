@@ -194,13 +194,13 @@ function GithubSettingsCard({
         </div>
         <div className="flex flex-col items-end gap-1">
           <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
-            CI notify
+            PR notify
           </span>
           <Rocker
             size="skill"
             on={enabled}
             busy={requestingPermission}
-            ariaLabel="Notify about CI changes"
+            ariaLabel="Notify about CI, review and merge changes"
             onToggle={() => void toggle()}
           />
         </div>
