@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatAgo,
   formatClock,
   formatObservedAt,
   formatResetAt,
@@ -55,6 +56,21 @@ describe("formatObservedAt", () => {
   it("is empty for missing or unparsable instants", () => {
     expect(formatObservedAt(null, "UTC")).toBe("");
     expect(formatObservedAt("nope", "UTC")).toBe("");
+  });
+});
+
+describe("formatAgo", () => {
+  it("says how long ago a past instant was, in the coarsest unit that fits", () => {
+    expect(formatAgo("2026-08-16T23:59:30Z", NOW)).toBe("just now");
+    expect(formatAgo("2026-08-16T23:55:00Z", NOW)).toBe("5m ago");
+    expect(formatAgo("2026-08-16T21:10:00Z", NOW)).toBe("2h ago");
+    expect(formatAgo("2026-08-12T23:00:00Z", NOW)).toBe("4d ago");
+  });
+
+  it("treats a future or unreadable instant as nothing to say", () => {
+    expect(formatAgo("2026-08-17T00:00:01Z", NOW)).toBe("");
+    expect(formatAgo(null, NOW)).toBe("");
+    expect(formatAgo("soon", NOW)).toBe("");
   });
 });
 

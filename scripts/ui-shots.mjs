@@ -26,7 +26,7 @@ const PORT = Number(process.env.UI_PORT ?? 1425);
 const BASE = process.env.UI_BASE ?? `http://localhost:${PORT}`;
 const OUT = process.env.UI_SHOTS_DIR ?? ".tmp/ui-shots";
 const VIEWPORT = { width: 1120, height: 760 };
-// Matches NOW in ui/src/dev/githubFixtures.ts, so "updated just now" / "5m ago" hold in captures.
+// Matches NOW in ui/src/dev/githubFixtures.ts and limitsFixtures.ts, so "updated just now" / "5m ago" hold in captures.
 const FIXTURE_CLOCK = "2026-08-24T20:00:00Z";
 // localStorage keys the app reads at boot (ui/src/lib/theme.ts, features/session/SessionProvider.tsx).
 // The saved screen is forced to "overview" because AppShell navigates to it on first route.
@@ -41,6 +41,8 @@ const SCENES = [
   { name: "github-gh-missing", url: "/github?mock=ghMissing" },
   { name: "github-many", url: "/github?mock=many" },
   { name: "settings-github", url: "/settings?mock=ok", steps: [{ wait: "role=region[name='Pull requests']" }] },
+  { name: "limits-ok", url: "/limits?mock=ok", steps: [{ wait: "role=region[name='Codex limits · other@example.com']" }] },
+  { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · other@example.com']" }] },
 ];
 
 function connects(port, host) {

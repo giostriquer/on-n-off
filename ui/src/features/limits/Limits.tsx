@@ -13,7 +13,7 @@ import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
+import { presentLimitAccount, presentLimitWindow, RESET_VALUE_TEXT } from "./limitPresentation";
 import { useLimitsProviders } from "./useLimitsProviders";
 
 export function Limits() {
@@ -229,12 +229,14 @@ function Meter({
   window,
   percent,
   tone,
+  unavailable,
   provider,
   className,
 }: {
   window: LimitWindow;
   percent: number;
   tone: UsageTone;
+  unavailable: boolean;
   provider: AgentId;
   className: string;
 }) {
@@ -246,6 +248,7 @@ function Meter({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(percent)}
+      aria-valuetext={unavailable ? RESET_VALUE_TEXT : undefined}
       data-tone={tone}
     >
       <div
@@ -266,19 +269,22 @@ function HeroWindow({
   provider: AgentId;
   now: number;
 }) {
-  const { percent, tone, note, text } = presentLimitWindow(window, now);
+  const { percent, tone, note, text, unavailable } = presentLimitWindow(window, now);
   return (
     <div className="flex flex-col gap-2 p-3.5">
       <span className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{window.label}</span>
       <div className="flex items-end gap-2">
-        <span className="text-[34px] leading-none font-semibold tracking-[-0.03em]" style={{ color: usageToneColor(tone) }}>
+        <span
+          className="text-[34px] leading-none font-semibold tracking-[-0.03em]"
+          style={{ color: unavailable ? "var(--mute)" : usageToneColor(tone) }}
+        >
           {text}
         </span>
         {note ? (
           <span className="min-w-0 flex-1 pb-0.5 font-mono text-[11.5px] leading-snug text-[var(--mute)]">{note}</span>
         ) : null}
       </div>
-      <Meter window={window} percent={percent} tone={tone} provider={provider} className="h-1.5" />
+      <Meter window={window} percent={percent} tone={tone} unavailable={unavailable} provider={provider} className="h-1.5" />
     </div>
   );
 }
@@ -296,7 +302,7 @@ function WindowRow({
   provider: AgentId;
   now: number;
 }) {
-  const { percent, tone, note, text } = presentLimitWindow(window, now);
+  const { percent, tone, note, text, unavailable } = presentLimitWindow(window, now);
   const model = window.kind === "model";
   return (
     <div className="flex items-center gap-2.5 border-t border-[var(--hair)] px-3.5 py-2">
@@ -308,8 +314,11 @@ function WindowRow({
         </span>
         {note ? <span className="font-mono text-[11px] leading-snug text-[var(--mute)]">{note}</span> : null}
       </div>
-      <Meter window={window} percent={percent} tone={tone} provider={provider} className="h-1 w-24 shrink-0" />
-      <span className="w-11 shrink-0 text-right font-mono text-[12px]" style={{ color: usageToneColor(tone) }}>
+      <Meter window={window} percent={percent} tone={tone} unavailable={unavailable} provider={provider} className="h-1 w-24 shrink-0" />
+      <span
+        className="w-11 shrink-0 text-right font-mono text-[12px]"
+        style={{ color: unavailable ? "var(--mute)" : usageToneColor(tone) }}
+      >
         {text}
       </span>
     </div>

@@ -146,7 +146,10 @@ describe("Limits", () => {
     const spark = within(codex).getByRole("meter", { name: "Weekly · GPT-5.3-Codex-Spark" });
     expect(spark.getAttribute("aria-valuenow")).toBe("0");
     expect(within(codex).getByText("—")).toBeTruthy();
-    expect(within(codex).getByText("Current usage unknown")).toBeTruthy();
+    // The reset is a fact worth stating: when it happened and what the window held before it.
+    expect(within(codex).getByText(/^reset 1m ago · \w{3} \d\d:\d\d · was 3%$/)).toBeTruthy();
+    expect(within(codex).queryByText(/Current usage unknown/)).toBeNull();
+    expect(spark.getAttribute("aria-valuetext")).toBe("not observed since the reset");
     expect(within(codex).getAllByText(/Latest observation/)).toHaveLength(1);
     expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
     expect(within(codex).getAllByText(/resets in/)).toHaveLength(1);
@@ -189,7 +192,8 @@ describe("Limits", () => {
     expect(session.getAttribute("aria-valuenow")).toBe("0");
     expect(session.getAttribute("data-tone")).toBe("calm");
     expect(within(stale).getByText("—")).toBeTruthy();
-    expect(within(stale).getByText("Current usage unknown")).toBeTruthy();
+    expect(within(stale).getByText(/^reset 22h ago · \w{3} \d\d:\d\d · was 40%$/)).toBeTruthy();
+    expect(within(stale).queryByText(/Current usage unknown/)).toBeNull();
     expect(within(stale).getByRole("button", { name: "Forget personal@codex.example" })).toBeTruthy();
     expect(within(stale).getAllByText(/Latest observation/)).toHaveLength(1);
   });
@@ -220,8 +224,9 @@ describe("Limits", () => {
     expect(within(claude).queryByText(/Claude Desktop usage/)).toBeNull();
     expect(within(claude).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("12");
     expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
-    // A window that has reset since that read shows nothing usable, and asks for nothing either.
-    expect(within(claude).getByText(/Current usage unknown/)).toBeTruthy();
+    // A window that has reset since that read shows the reset, not a stale percentage.
+    expect(within(claude).getByText(/^reset 15h ago · \w{3} \d\d:\d\d · was 7%$/)).toBeTruthy();
+    expect(within(claude).queryByText(/Current usage unknown/)).toBeNull();
     // It is still the signed-in account: nothing to sign into, nothing to forget.
     expect(within(claude).queryByText(/sign in/)).toBeNull();
     expect(within(claude).queryByRole("button", { name: /^Forget/ })).toBeNull();
