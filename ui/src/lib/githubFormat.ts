@@ -9,10 +9,6 @@ import type {
   ReviewDecision,
 } from "./githubTypes";
 
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
 /** The app's status tones: `--live` green, `--trip` red, `--warn` amber, `--mute` grey. */
 export type CiTone = "live" | "trip" | "warn" | "mute";
 
@@ -67,17 +63,6 @@ export function orderPrs(items: readonly GithubPr[]): GithubPr[] {
   return [...items].sort(
     (a, b) => ciRank(a.ci) - ciRank(b.ci) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
   );
-}
-
-/** "just now" / "5m ago" / "2h ago" / "3d ago"; empty when the instant is unreadable. */
-export function formatUpdatedAgo(iso: string | null | undefined, nowMs: number): string {
-  const at = iso ? Date.parse(iso) : Number.NaN;
-  if (Number.isNaN(at)) return "";
-  const elapsed = Math.max(0, nowMs - at);
-  if (elapsed < MINUTE_MS) return "just now";
-  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)}m ago`;
-  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)}h ago`;
-  return `${Math.floor(elapsed / DAY_MS)}d ago`;
 }
 
 function truncated(list: GithubPrList): boolean {

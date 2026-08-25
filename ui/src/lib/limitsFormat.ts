@@ -34,17 +34,6 @@ export function formatResetIn(resetsAt: string | null | undefined, nowMs: number
   return `${Math.floor(remaining / MINUTE_MS)}m`;
 }
 
-/** "just now" / "5m ago" / "2h ago" / "4d ago" since a past instant; empty when unknown or ahead. */
-export function formatAgo(iso: string | null | undefined, nowMs: number): string {
-  const at = parseInstant(iso);
-  if (at === null || at > nowMs) return "";
-  const elapsed = nowMs - at;
-  if (elapsed < MINUTE_MS) return "just now";
-  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)}m ago`;
-  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)}h ago`;
-  return `${Math.floor(elapsed / DAY_MS)}d ago`;
-}
-
 /** True when `iso` is a known instant at or before `nowMs` (a window whose reset has passed). */
 export function hasElapsed(iso: string | null | undefined, nowMs: number): boolean {
   const at = parseInstant(iso);

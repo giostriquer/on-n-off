@@ -52,7 +52,7 @@ const CODEX: ProviderLimits[] = [
     plan: "pro",
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 97, resetsAt: at(-85), windowSeconds: 604_800, observedAt: REMEMBERED_OBSERVED },
-      { id: "extra:spark", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(-4 * 24 * 60 - 7 * 60), observedAt: at(-4 * 24 * 60 - 17 * 60) },
+      { id: "extra:spark", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(-4 * 24 * 60 - 7 * 60), windowSeconds: 18_000, observedAt: REMEMBERED_OBSERVED },
     ],
   },
 ];

@@ -6,14 +6,13 @@ import { displayError, parseInvokeError } from "$lib/error";
 import {
   planLabel,
   usageFillColor,
-  usageToneColor,
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { presentLimitAccount, presentLimitWindow, RESET_VALUE_TEXT } from "./limitPresentation";
+import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
 import { limitsStaleMs, useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
@@ -241,7 +240,7 @@ function PopoverWindow({
   provider: AgentId;
   now: number;
 }) {
-  const { percent, tone, note, text, unavailable } = presentLimitWindow(window, now);
+  const { percent, tone, note, text, color, valueText } = presentLimitWindow(window, now);
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
@@ -251,10 +250,7 @@ function PopoverWindow({
         </span>
         {note ? <span className="mt-0.5 block text-[10px] leading-tight text-[var(--mute)] tabular-nums">{note}</span> : null}
       </div>
-      <span
-        className="text-[13px] font-semibold tabular-nums"
-        style={{ color: unavailable ? "var(--mute)" : usageToneColor(tone) }}
-      >
+      <span className="text-[13px] font-semibold tabular-nums" style={{ color }} aria-hidden={valueText ? true : undefined}>
         {text}
       </span>
       <div
@@ -264,7 +260,7 @@ function PopoverWindow({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(percent)}
-        aria-valuetext={unavailable ? RESET_VALUE_TEXT : undefined}
+        aria-valuetext={valueText}
       >
         <div
           className="h-full rounded-full transition-[width]"
