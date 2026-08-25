@@ -6,6 +6,7 @@ import type {
   GithubPrList,
   GithubPrsData,
   GithubStatus,
+  MergeKind,
   ReviewDecision,
 } from "./githubTypes";
 
@@ -45,24 +46,43 @@ export function ciLabel(ci: CiState): string {
   }
 }
 
-function ciRank(ci: CiState): number {
-  switch (ci) {
-    case "failure":
-    case "error":
-      return 0;
-    case "pending":
-      return 1;
-    case "success":
-    case "none":
-      return 2;
-  }
+/** Red needs someone now, amber is waiting; green and grey are calm, ready included. */
+const TONE_RANK: Record<CiTone, number> = { trip: 0, warn: 1, live: 2, mute: 2 };
+
+/** How much a row needs someone: the reddest tone among its CI glyph and badges. */
+function attentionRank(pr: GithubPr): number {
+  return Math.min(
+    TONE_RANK[ciTone(pr.ci)],
+    TONE_RANK[reviewBadge(pr.reviewDecision)?.tone ?? "mute"],
+    TONE_RANK[mergeBadge(pr)?.tone ?? "mute"],
+  );
 }
 
-/** Failing CI first, then pending, then everything else; newest activity first within a group. */
+/** What needs fixing first, then what is waiting, then everything else; newest activity first within a group. */
 export function orderPrs(items: readonly GithubPr[]): GithubPr[] {
   return [...items].sort(
-    (a, b) => ciRank(a.ci) - ciRank(b.ci) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+    (a, b) => attentionRank(a) - attentionRank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
   );
+}
+
+/** One repository's rows; `repo` is GitHub's `owner/name`. */
+export type PrGroup = { repo: string; items: GithubPr[] };
+
+/**
+ * Rows grouped by repository so a list from many repositories reads in sections and no row has
+ * to repeat where it lives; repositories are alphabetical and each group keeps the order it was
+ * given (call after `orderPrs`).
+ */
+export function groupPrsByRepo(items: readonly GithubPr[]): PrGroup[] {
+  const groups = new Map<string, GithubPr[]>();
+  for (const pr of items) {
+    const group = groups.get(pr.repo);
+    if (group) group.push(pr);
+    else groups.set(pr.repo, [pr]);
+  }
+  return [...groups]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([repo, rows]) => ({ repo, items: rows }));
 }
 
 function truncated(list: GithubPrList): boolean {
@@ -81,9 +101,44 @@ export function listCountLabel(list: GithubPrList, matches?: number): string {
   return truncated(list) ? `${list.items.length} of ${list.total}` : String(list.items.length);
 }
 
+/** A small outlined word on a row: the review decision, the merge state. */
+export type RowBadge = { label: string; tone: CiTone };
+
+/** "Review required" is every open PR's default state, so only the other two earn a badge. */
+export function reviewBadge(decision: ReviewDecision | null | undefined): RowBadge | null {
+  switch (decision) {
+    case "APPROVED":
+      return { label: "Approved", tone: "live" };
+    case "CHANGES_REQUESTED":
+      return { label: "Changes requested", tone: "trip" };
+    default:
+      return null;
+  }
+}
+
+/** One badge per merge kind; the classification itself is the backend's (`mergeKind` on the row). */
+const MERGE_BADGES: Record<MergeKind, RowBadge> = {
+  conflicts: { label: "Conflicts", tone: "trip" },
+  queued: { label: "Queued", tone: "live" },
+  autoMerge: { label: "Auto-merge", tone: "mute" },
+  ready: { label: "Ready to merge", tone: "live" },
+  behind: { label: "Behind base", tone: "warn" },
+  blocked: { label: "Blocked", tone: "warn" },
+};
+
+/** The one merge-state badge a row shows; the queue badge carries the position when known. */
+export function mergeBadge(pr: GithubPr): RowBadge | null {
+  const kind = pr.mergeKind;
+  if (!kind) return null;
+  const badge = MERGE_BADGES[kind];
+  const position = kind === "queued" ? pr.mergeQueue?.position : null;
+  return position ? { ...badge, label: `Queued #${position}` } : badge;
+}
+
 /**
  * Case-insensitive substring match over what a row shows: number, title, repository, author,
- * both branches, its badges (draft, team, the review decision) and its CI state's label.
+ * both branches, its badges (draft, team, the review decision, the merge state) and its CI
+ * state's label.
  */
 export function filterPrs(items: readonly GithubPr[], query: string): GithubPr[] {
   const needle = query.trim().toLowerCase();
@@ -98,7 +153,8 @@ export function filterPrs(items: readonly GithubPr[], query: string): GithubPr[]
       pr.baseRef,
       pr.isDraft ? "draft" : "",
       pr.reviewRequest ?? "",
-      reviewDecisionLabel(pr.reviewDecision),
+      reviewBadge(pr.reviewDecision)?.label ?? "",
+      mergeBadge(pr)?.label ?? "",
       ciLabel(pr.ci),
     ].some((field) => field.toLowerCase().includes(needle)),
   );
@@ -121,36 +177,16 @@ export function statusHeadline(status: GithubStatus): string {
   }
 }
 
-/** Approved reads like passing CI, changes requested like failing CI; a pending review is quiet. */
-export function reviewDecisionTone(decision: ReviewDecision | null | undefined): CiTone {
-  switch (decision) {
-    case "APPROVED":
-      return "live";
-    case "CHANGES_REQUESTED":
-      return "trip";
-    default:
-      return "mute";
-  }
-}
-
-/** "Review required" is every open PR's default state, so only the other two earn a badge. */
-export function reviewDecisionLabel(decision: ReviewDecision | null | undefined): string {
-  switch (decision) {
-    case "APPROVED":
-      return "Approved";
-    case "CHANGES_REQUESTED":
-      return "Changes requested";
-    default:
-      return "";
-  }
-}
-
 export type PrsSummary = {
   mine: number;
   /** Red CI among the user's own pull requests that were loaded. */
   failing: number;
-  /** True when GitHub holds more own pull requests than were loaded, so `failing` is a floor. */
-  failingIsPartial: boolean;
+  /** Own pull requests (loaded) with merge conflicts. */
+  conflicts: number;
+  /** Own pull requests (loaded) with every merge requirement met and nothing merging them yet. */
+  ready: number;
+  /** True when GitHub holds more own pull requests than were loaded, so the counts are floors. */
+  countsArePartial: boolean;
   review: number;
   assigned: number;
 };
@@ -160,7 +196,9 @@ export function prsSummary(data: GithubPrsData): PrsSummary {
   return {
     mine: data.mine.total,
     failing: data.mine.items.filter((pr) => pr.ci === "failure" || pr.ci === "error").length,
-    failingIsPartial: truncated(data.mine),
+    conflicts: data.mine.items.filter((pr) => pr.mergeKind === "conflicts").length,
+    ready: data.mine.items.filter((pr) => pr.mergeKind === "ready").length,
+    countsArePartial: truncated(data.mine),
     review: data.reviewRequested.total,
     assigned: data.assigned.total,
   };

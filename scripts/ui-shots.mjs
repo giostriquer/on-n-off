@@ -40,6 +40,8 @@ const SCENES = [
   { name: "github-stale", url: "/github?mock=stale" },
   { name: "github-gh-missing", url: "/github?mock=ghMissing" },
   { name: "github-many", url: "/github?mock=many" },
+  // Scrolled into the review list so an owner band is stuck under its section header.
+  { name: "github-scrolled", url: "/github?mock=ok", steps: [{ click: "role=searchbox[name='Search pull requests']" }, { press: "PageDown" }, { press: "PageDown" }] },
   { name: "settings-github", url: "/settings?mock=ok", steps: [{ wait: "role=region[name='Pull requests']" }] },
   { name: "limits-ok", url: "/limits?mock=ok", steps: [{ wait: "role=region[name='Codex limits · other@example.com']" }] },
   { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · other@example.com']" }] },

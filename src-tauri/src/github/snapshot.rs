@@ -38,7 +38,10 @@ pub(super) fn load(path: &Path) -> Option<GithubPrsData> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{CiState, GithubPrDto, GithubPrListDto};
+    use crate::dto::{
+        CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, MergeKind, MergeState,
+        Mergeability,
+    };
     use crate::paths::{github_prs_path_for, scratch_dir};
     use std::fs;
 
@@ -63,6 +66,11 @@ mod tests {
                     base_ref: "main".into(),
                     updated_at: "2026-08-24T19:00:00Z".into(),
                     review_request: None,
+                    mergeable: Mergeability::Conflicting,
+                    merge_state: MergeState::Dirty,
+                    merge_queue: Some(GithubMergeQueueDto { position: Some(2) }),
+                    auto_merge: true,
+                    merge_kind: Some(MergeKind::Conflicts),
                 }],
             },
             review_requested: GithubPrListDto::default(),
@@ -86,6 +94,58 @@ mod tests {
         assert!(
             !raw.contains("\"status\""),
             "the envelope is not persisted: {raw}"
+        );
+    }
+
+    /// v0.2.0 wrote schema 1 without the merge-state fields; that file must keep loading.
+    #[test]
+    fn a_snapshot_from_before_the_merge_state_fields_loads_with_defaults() {
+        let home = scratch_dir("gh-snapshot-v0-2-0");
+        let path = github_prs_path_for(&home);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{"schemaVersion":1,"data":{"viewer":"octocat","fetchedAt":"2026-08-24T20:00:00Z","scope":["org:acme"],"mine":{"total":1,"items":[{"id":"PR_1","number":1,"title":"T","url":"https://github.com/acme/app/pull/1","repo":"acme/app","author":"octocat","isDraft":false,"ci":"success","headRef":"h","baseRef":"main","updatedAt":"2026-08-24T19:00:00Z"}]},"reviewRequested":{"total":0,"items":[]},"assigned":{"total":0,"items":[]}}}"#,
+        )
+        .unwrap();
+        let loaded = load(&path).expect("the old snapshot still loads");
+        let pr = &loaded.mine.items[0];
+        assert_eq!(pr.id, "PR_1");
+        assert_eq!(pr.mergeable, Mergeability::Unknown);
+        assert_eq!(pr.merge_state, MergeState::Unknown);
+        assert_eq!(pr.merge_queue, None);
+        assert!(!pr.auto_merge);
+        assert_eq!(pr.merge_kind, None);
+    }
+
+    /// The screen's TypeScript unions compare against these exact strings; a rename on either
+    /// side would silently blank every merge badge.
+    #[test]
+    fn the_merge_fields_use_the_camel_case_names_the_screen_reads() {
+        let home = scratch_dir("gh-snapshot-wire-names");
+        let path = github_prs_path_for(&home);
+        save(&path, &data()).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        for needle in [
+            r#""mergeable":"conflicting""#,
+            r#""mergeState":"dirty""#,
+            r#""mergeQueue":{"position":2}"#,
+            r#""autoMerge":true"#,
+            r#""mergeKind":"conflicts""#,
+        ] {
+            assert!(raw.contains(needle), "{needle} missing from {raw}");
+        }
+        let pr: GithubPrDto = serde_json::from_str(
+            r#"{"id":"PR_2","number":2,"title":"T","url":"https://github.com/acme/app/pull/2","repo":"acme/app","author":"octocat","isDraft":false,"ci":"success","headRef":"h","baseRef":"main","updatedAt":"2026-08-24T19:00:00Z","mergeable":"mergeable","mergeState":"clean","mergeQueue":{},"autoMerge":false,"mergeKind":"autoMerge"}"#,
+        )
+        .unwrap();
+        assert_eq!(pr.mergeable, Mergeability::Mergeable);
+        assert_eq!(pr.merge_state, MergeState::Clean);
+        assert_eq!(pr.merge_kind, Some(MergeKind::AutoMerge));
+        assert_eq!(
+            pr.merge_queue,
+            Some(GithubMergeQueueDto { position: None }),
+            "queued without a known position"
         );
     }
 

@@ -376,6 +376,68 @@ pub enum ReviewDecision {
     ReviewRequired,
 }
 
+/// GitHub's `mergeable`: whether the head can be merged into the base without conflicts. It
+/// rides beside `MergeState` because the two diverge on drafts: a draft with conflicts reports
+/// `mergeStateStatus: DRAFT`, and only this field says `CONFLICTING`. `Unknown` also covers a
+/// value GitHub has not computed yet (it computes on demand, so the next poll usually knows) and
+/// one this version does not recognise.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Mergeability {
+    Mergeable,
+    Conflicting,
+    #[default]
+    Unknown,
+}
+
+/// GitHub's `mergeStateStatus`, collapsed to what a list row can act on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeState {
+    /// Every requirement is met (`CLEAN`, or `HAS_HOOKS`: clean with pre-receive hooks).
+    Clean,
+    /// Mergeable, but a non-required check is not passing.
+    Unstable,
+    /// Branch protection stops the merge: a missing review, a failing required check, and so on.
+    Blocked,
+    /// The head is behind the base and the base requires up-to-date branches.
+    Behind,
+    /// Merge conflicts.
+    Dirty,
+    Draft,
+    /// Not computed yet, or a state this version does not know.
+    #[default]
+    Unknown,
+}
+
+/// What a row can say about merging, most pressing first. Classified once, in `github::merge`,
+/// from the raw fields below, so the screen and the monitor read the same verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeKind {
+    /// The head no longer merges cleanly into the base.
+    Conflicts,
+    /// Sitting in the repository's merge queue.
+    Queued,
+    /// Auto-merge is on: GitHub merges once the requirements are met.
+    AutoMerge,
+    /// Every requirement met and nothing merging it yet; only the merge button is left.
+    Ready,
+    /// Behind a base that requires up-to-date branches.
+    Behind,
+    /// Branch protection stops the merge for a reason the row does not otherwise show.
+    Blocked,
+}
+
+/// The pull request's place in its repository's merge queue.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubMergeQueueDto {
+    /// 1-based position when GitHub reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubPrDto {
@@ -398,6 +460,21 @@ pub struct GithubPrDto {
     /// Only on the review-requested list: whether the request named the user or one of their teams.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_request: Option<ReviewRequestKind>,
+    /// Defaults keep a snapshot written before these fields existed loadable.
+    #[serde(default)]
+    pub mergeable: Mergeability,
+    #[serde(default)]
+    pub merge_state: MergeState,
+    /// Present while the pull request sits in a merge queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_queue: Option<GithubMergeQueueDto>,
+    /// Auto-merge is enabled: GitHub merges once the requirements are met.
+    #[serde(default)]
+    pub auto_merge: bool,
+    /// The one reading of the four fields above (`github::merge::classify`); `None` when there
+    /// is nothing to say, and on a snapshot written before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_kind: Option<MergeKind>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
