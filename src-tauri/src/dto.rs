@@ -376,14 +376,14 @@ pub enum ReviewDecision {
     ReviewRequired,
 }
 
-/// GitHub's `mergeable`: whether the head can be merged into the base without conflicts.
-/// `Unknown` also covers a value GitHub has not computed yet (it computes on demand, so the next
-/// poll usually knows) and one this version does not recognise.
+/// GitHub's `mergeable`: whether the head can be merged into the base without conflicts. It
+/// rides beside `MergeState` because the two diverge on drafts: a draft with conflicts reports
+/// `mergeStateStatus: DRAFT`, and only this field says `CONFLICTING`. `Unknown` also covers a
+/// value GitHub has not computed yet (it computes on demand, so the next poll usually knows) and
+/// one this version does not recognise.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-// The variants keep GitHub's own value names, `MERGEABLE` included.
-#[allow(clippy::enum_variant_names)]
-pub enum Mergeable {
+pub enum Mergeability {
     Mergeable,
     Conflicting,
     #[default]
@@ -443,7 +443,7 @@ pub struct GithubPrDto {
     pub review_request: Option<ReviewRequestKind>,
     /// Defaults keep a snapshot written before these fields existed loadable.
     #[serde(default)]
-    pub mergeable: Mergeable,
+    pub mergeable: Mergeability,
     #[serde(default)]
     pub merge_state: MergeState,
     /// Present while the pull request sits in a merge queue.

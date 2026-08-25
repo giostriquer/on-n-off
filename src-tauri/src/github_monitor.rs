@@ -228,7 +228,7 @@ mod tests {
     use super::*;
     use crate::dto::{
         GithubPrDto, GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus, MergeState,
-        Mergeable,
+        Mergeability,
     };
     use crate::paths::scratch_dir;
     use std::fs;
@@ -248,7 +248,7 @@ mod tests {
             base_ref: "main".into(),
             updated_at: "2026-08-24T20:00:00Z".into(),
             review_request: None,
-            mergeable: Mergeable::default(),
+            mergeable: Mergeability::default(),
             merge_state: MergeState::default(),
             merge_queue: None,
             auto_merge: false,

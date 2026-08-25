@@ -1,6 +1,7 @@
 //! Canned GraphQL replies shared by the parser and reader tests.
 
-/// One authored PR with failing CI, two review requests (one direct, one via a team), no
+/// One authored PR with failing CI, two review requests (one direct: a draft that already has
+/// conflicts, which only `mergeable` reports because the state says `DRAFT`; one via a team), no
 /// assignments, and a healthy rate-limit budget.
 pub(super) const REPLY: &str = r#"{
   "data": {
@@ -25,7 +26,7 @@ pub(super) const REPLY: &str = r#"{
           "id": "PR_rev1", "number": 7, "title": "Direct ask", "url": "https://github.com/acme/lib/pull/7",
           "isDraft": true, "updatedAt": "2026-08-24T19:00:00Z", "headRefName": "fix/x", "baseRefName": "main",
           "reviewDecision": null, "repository": { "nameWithOwner": "acme/lib" }, "author": { "login": "alice" },
-          "mergeable": "UNKNOWN", "mergeStateStatus": "DRAFT", "mergeQueueEntry": null, "autoMergeRequest": null,
+          "mergeable": "CONFLICTING", "mergeStateStatus": "DRAFT", "mergeQueueEntry": null, "autoMergeRequest": null,
           "commits": { "nodes": [ { "commit": { "statusCheckRollup": { "state": "PENDING" } } } ] }
         },
         {

@@ -39,7 +39,7 @@ pub(super) fn load(path: &Path) -> Option<GithubPrsData> {
 mod tests {
     use super::*;
     use crate::dto::{
-        CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, MergeState, Mergeable,
+        CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, MergeState, Mergeability,
     };
     use crate::paths::{github_prs_path_for, scratch_dir};
     use std::fs;
@@ -65,7 +65,7 @@ mod tests {
                     base_ref: "main".into(),
                     updated_at: "2026-08-24T19:00:00Z".into(),
                     review_request: None,
-                    mergeable: Mergeable::Conflicting,
+                    mergeable: Mergeability::Conflicting,
                     merge_state: MergeState::Dirty,
                     merge_queue: Some(GithubMergeQueueDto { position: Some(2) }),
                     auto_merge: true,
@@ -109,10 +109,39 @@ mod tests {
         let loaded = load(&path).expect("the old snapshot still loads");
         let pr = &loaded.mine.items[0];
         assert_eq!(pr.id, "PR_1");
-        assert_eq!(pr.mergeable, Mergeable::Unknown);
+        assert_eq!(pr.mergeable, Mergeability::Unknown);
         assert_eq!(pr.merge_state, MergeState::Unknown);
         assert_eq!(pr.merge_queue, None);
         assert!(!pr.auto_merge);
+    }
+
+    /// The screen's TypeScript unions compare against these exact strings; a rename on either
+    /// side would silently blank every merge badge.
+    #[test]
+    fn the_merge_fields_use_the_camel_case_names_the_screen_reads() {
+        let home = scratch_dir("gh-snapshot-wire-names");
+        let path = github_prs_path_for(&home);
+        save(&path, &data()).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        for needle in [
+            r#""mergeable":"conflicting""#,
+            r#""mergeState":"dirty""#,
+            r#""mergeQueue":{"position":2}"#,
+            r#""autoMerge":true"#,
+        ] {
+            assert!(raw.contains(needle), "{needle} missing from {raw}");
+        }
+        let pr: GithubPrDto = serde_json::from_str(
+            r#"{"id":"PR_2","number":2,"title":"T","url":"https://github.com/acme/app/pull/2","repo":"acme/app","author":"octocat","isDraft":false,"ci":"success","headRef":"h","baseRef":"main","updatedAt":"2026-08-24T19:00:00Z","mergeable":"mergeable","mergeState":"clean","mergeQueue":{},"autoMerge":false}"#,
+        )
+        .unwrap();
+        assert_eq!(pr.mergeable, Mergeability::Mergeable);
+        assert_eq!(pr.merge_state, MergeState::Clean);
+        assert_eq!(
+            pr.merge_queue,
+            Some(GithubMergeQueueDto { position: None }),
+            "queued without a known position"
+        );
     }
 
     #[test]

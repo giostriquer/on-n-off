@@ -1,5 +1,6 @@
 //! GraphQL reply → lists. Lenient by design: a node that is not PR-shaped is skipped, an enum
-//! value this version does not know becomes `None` (or `Unknown` for the merge state), and
+//! value this version does not know collapses to the field's "nothing known" value (`None` for
+//! the review decision, `CiState::None` for the rollup, `Unknown` for the merge fields), and
 //! `errors[]` next to usable `data` are warnings rather than a failure.
 
 use std::collections::HashSet;
@@ -8,7 +9,7 @@ use serde_json::Value;
 
 use crate::dto::{
     CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, GithubPrsData, GithubRateLimitDto,
-    MergeState, Mergeable, ReviewDecision, ReviewRequestKind,
+    MergeState, Mergeability, ReviewDecision, ReviewRequestKind,
 };
 
 /// The lists and viewer of one reply (`fetched_at` and `scope` are the reader's to fill in),
@@ -108,11 +109,11 @@ fn pull_request(node: &Value) -> Option<GithubPrDto> {
     })
 }
 
-fn mergeable(value: Option<&str>) -> Mergeable {
+fn mergeable(value: Option<&str>) -> Mergeability {
     match value {
-        Some("MERGEABLE") => Mergeable::Mergeable,
-        Some("CONFLICTING") => Mergeable::Conflicting,
-        _ => Mergeable::Unknown,
+        Some("MERGEABLE") => Mergeability::Mergeable,
+        Some("CONFLICTING") => Mergeability::Conflicting,
+        _ => Mergeability::Unknown,
     }
 }
 
@@ -165,7 +166,7 @@ fn rate_limit(value: &Value) -> Option<GithubRateLimitDto> {
 mod tests {
     use super::*;
     use crate::dto::{
-        CiState, GithubMergeQueueDto, MergeState, Mergeable, ReviewDecision, ReviewRequestKind,
+        CiState, GithubMergeQueueDto, MergeState, Mergeability, ReviewDecision, ReviewRequestKind,
     };
     use crate::github::fixtures::REPLY;
     use serde_json::json;
@@ -200,7 +201,7 @@ mod tests {
         assert_eq!(mine.base_ref, "main");
         assert_eq!(mine.updated_at, "2026-08-24T20:00:00Z");
         assert_eq!(mine.review_request, None);
-        assert_eq!(mine.mergeable, Mergeable::Mergeable);
+        assert_eq!(mine.mergeable, Mergeability::Mergeable);
         assert_eq!(mine.merge_state, MergeState::Blocked);
         assert_eq!(mine.merge_queue, None);
         assert!(!mine.auto_merge);
@@ -213,12 +214,14 @@ mod tests {
         assert!(direct.is_draft);
         assert_eq!(direct.ci, CiState::Pending);
         assert_eq!(direct.review_decision, None);
-        assert_eq!(direct.mergeable, Mergeable::Unknown);
+        // A draft's state is `DRAFT` whatever the merge would do; only `mergeable` carries the
+        // conflicts, which is why both fields ride along.
+        assert_eq!(direct.mergeable, Mergeability::Conflicting);
         assert_eq!(direct.merge_state, MergeState::Draft);
         assert_eq!(team.review_request, Some(ReviewRequestKind::Team));
         assert_eq!(team.ci, CiState::None, "a null rollup means no checks");
         assert_eq!(team.author, "", "a deleted author is not an error");
-        assert_eq!(team.mergeable, Mergeable::Conflicting);
+        assert_eq!(team.mergeable, Mergeability::Conflicting);
         assert_eq!(team.merge_state, MergeState::Dirty);
         assert!(team.auto_merge);
 
@@ -252,11 +255,11 @@ mod tests {
     #[test]
     fn every_mergeable_value_maps_and_unknown_ones_fall_back_to_unknown() {
         for (value, expected) in [
-            (json!("MERGEABLE"), Mergeable::Mergeable),
-            (json!("CONFLICTING"), Mergeable::Conflicting),
-            (json!("UNKNOWN"), Mergeable::Unknown),
-            (json!("SOMETHING_NEW"), Mergeable::Unknown),
-            (json!(null), Mergeable::Unknown),
+            (json!("MERGEABLE"), Mergeability::Mergeable),
+            (json!("CONFLICTING"), Mergeability::Conflicting),
+            (json!("UNKNOWN"), Mergeability::Unknown),
+            (json!("SOMETHING_NEW"), Mergeability::Unknown),
+            (json!(null), Mergeability::Unknown),
         ] {
             let mut reply = reply();
             reply["data"]["mine"]["nodes"][0]["mergeable"] = value.clone();
