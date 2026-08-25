@@ -5,6 +5,8 @@ import {
   ciTone,
   ciToneColor,
   filterPrs,
+  groupPrsByOrg,
+  repoName,
   formatUpdatedAgo,
   listCountLabel,
   mergeBadge,
@@ -145,6 +147,28 @@ describe("githubFormat", () => {
     expect(badge({ mergeState: "unknown", mergeable: "unknown" })).toBeNull();
     expect(badge({ mergeState: "unstable" })).toBeNull();
     expect(badge({ mergeState: "draft", isDraft: true })).toBeNull();
+  });
+
+  it("groups rows by repository owner, owners alphabetically, rows in the order given", () => {
+    const grouped = groupPrsByOrg([
+      pr({ id: "t1", repo: "octo/tools" }),
+      pr({ id: "w1", repo: "acme/web" }),
+      pr({ id: "a1", repo: "acme/api" }),
+      pr({ id: "w2", repo: "acme/web" }),
+      pr({ id: "bare", repo: "loose" }),
+    ]);
+    expect(grouped.map((group) => [group.org, group.items.map((item) => item.id)])).toEqual([
+      ["acme", ["w1", "a1", "w2"]],
+      ["loose", ["bare"]],
+      ["octo", ["t1"]],
+    ]);
+    expect(groupPrsByOrg([])).toEqual([]);
+  });
+
+  it("names a repository without its owner once the owner is shown elsewhere", () => {
+    expect(repoName("acme/web")).toBe("web");
+    expect(repoName("loose")).toBe("loose");
+    expect(repoName("")).toBe("");
   });
 
   it("says how much of a long list is loaded, and how much of it matches a search", () => {

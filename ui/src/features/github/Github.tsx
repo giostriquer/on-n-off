@@ -4,9 +4,11 @@ import { FOCUS_RING } from "$lib/a11y";
 import { displayError, parseInvokeError } from "$lib/error";
 import {
   filterPrs,
+  groupPrsByOrg,
   formatUpdatedAgo,
   listCountLabel,
   orderPrs,
+  repoName,
   prsSummary,
   statusHeadline,
 } from "$lib/githubFormat";
@@ -268,6 +270,10 @@ function PrList({
   // lasts; one without stays folded, its header already saying "0 of N".
   const open = (searching && shown.length > 0) || !collapsed;
   const bodyId = `github-${id}-list`;
+  // Rows are grouped by org so the owner is not repeated on every line. One org describes the
+  // title row instead of earning a sub-heading of its own.
+  const groups = groupPrsByOrg(orderPrs(shown));
+  const soleOrg = groups.length === 1 ? groups[0].org : null;
   return (
     <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={title}>
       {/* Sticks to the top of the scroll area so a long list keeps its name in view. */}
@@ -288,15 +294,37 @@ function PrList({
             />
             {title}
             <span className="font-mono text-[11px] font-normal normal-case text-[var(--mute)]">{count}</span>
+            {open && soleOrg ? (
+              <span className="min-w-0 truncate font-mono text-[11px] font-normal normal-case text-[var(--mute)]">
+                · {soleOrg}
+              </span>
+            ) : null}
           </button>
         </h3>
       </header>
-      {!open ? null : shown.length ? (
+      {!open ? null : soleOrg ? (
         <ul id={bodyId} className="m-0 list-none p-0" role="list">
-          {orderPrs(shown).map((pr) => (
-            <PrRow key={pr.id} pr={pr} now={now} />
+          {groups[0].items.map((pr) => (
+            <PrRow key={pr.id} pr={pr} repoLabel={repoName(pr.repo)} now={now} />
           ))}
         </ul>
+      ) : groups.length ? (
+        <div id={bodyId}>
+          {groups.map((group) => (
+            <div key={group.org} role="group" aria-label={group.org}>
+              {/* Sits under the section header while its rows scroll past. */}
+              <h4 className="sticky top-10 z-[9] m-0 flex items-center gap-2 border-t border-[var(--hair)] bg-[var(--well)] px-3.5 py-1 font-mono text-[10.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase first:border-t-0">
+                {group.org}
+                <span className="font-normal normal-case">{group.items.length}</span>
+              </h4>
+              <ul className="m-0 list-none p-0" role="list">
+                {group.items.map((pr) => (
+                  <PrRow key={pr.id} pr={pr} repoLabel={repoName(pr.repo)} now={now} />
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       ) : (
         <p id={bodyId} className="px-3.5 py-4 text-[13px] text-[var(--mute)]">
           {checking ? "Checking…" : searching ? "No matches." : empty}

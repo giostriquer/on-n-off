@@ -37,10 +37,10 @@ function Badge({ children, tone = "mute" }: { children: string; tone?: CiTone })
 /**
  * One pull request: a CI glyph that opens the checks tab, then the row itself as one button whose
  * accessible name is its content — `#number`, title and badges (draft, review decision, merge
- * state, team) first, repository, author and branches on the second line — and the age with its
- * absolute time in a tooltip.
+ * state, team) first, repository (`repoLabel` when the owner is named by the group around the
+ * row), author and branches on the second line — and the age with its absolute time in a tooltip.
  */
-export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
+export function PrRow({ pr, repoLabel = pr.repo, now }: { pr: GithubPr; repoLabel?: string; now: number }) {
   const tone = ciTone(pr.ci);
   const color = ciToneColor(tone);
   const Glyph = CI_GLYPH[pr.ci];
@@ -77,7 +77,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
           {pr.reviewRequest === "team" ? <Badge>team</Badge> : null}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-[var(--mute)]">
-          <span className="shrink-0">{pr.repo}</span>
+          <span className="shrink-0">{repoLabel}</span>
           <span aria-hidden="true">·</span>
           <span className="shrink-0">{pr.author}</span>
           <span aria-hidden="true">·</span>

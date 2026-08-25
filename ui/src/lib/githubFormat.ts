@@ -80,6 +80,37 @@ export function formatUpdatedAgo(iso: string | null | undefined, nowMs: number):
   return `${Math.floor(elapsed / DAY_MS)}d ago`;
 }
 
+/** "acme/web" → "acme"; a name without an owner is its own group. */
+function repoOwner(repo: string): string {
+  const slash = repo.indexOf("/");
+  return slash === -1 ? repo : repo.slice(0, slash);
+}
+
+/** "acme/web" → "web", for rows whose owner is already named by their group or section. */
+export function repoName(repo: string): string {
+  const slash = repo.indexOf("/");
+  return slash === -1 ? repo : repo.slice(slash + 1);
+}
+
+export type PrGroup = { org: string; items: GithubPr[] };
+
+/**
+ * Rows grouped by repository owner so a list from many orgs reads in sections; owners are
+ * alphabetical and each group keeps the order it was given (call after `orderPrs`).
+ */
+export function groupPrsByOrg(items: readonly GithubPr[]): PrGroup[] {
+  const groups = new Map<string, GithubPr[]>();
+  for (const pr of items) {
+    const org = repoOwner(pr.repo);
+    const group = groups.get(org);
+    if (group) group.push(pr);
+    else groups.set(org, [pr]);
+  }
+  return [...groups]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([org, rows]) => ({ org, items: rows }));
+}
+
 function truncated(list: GithubPrList): boolean {
   return list.total > list.items.length;
 }
