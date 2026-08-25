@@ -29,10 +29,25 @@ pub(super) fn save(path: &Path, data: &GithubPrsData) -> Result<(), String> {
 }
 
 /// `None` for an absent, unreadable, or differently-versioned file; old versions are ignored
-/// rather than migrated, since the next successful read rewrites the file anyway.
+/// rather than migrated, since the next successful read rewrites the file anyway. The merge
+/// verdict is re-derived from the raw fields, so a file written by another version of the
+/// classification never shows a stale one.
 pub(super) fn load(path: &Path) -> Option<GithubPrsData> {
     let stored: Stored = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    (stored.schema_version == SCHEMA_VERSION).then_some(stored.data)
+    if stored.schema_version != SCHEMA_VERSION {
+        return None;
+    }
+    let mut data = stored.data;
+    for pr in data
+        .mine
+        .items
+        .iter_mut()
+        .chain(data.review_requested.items.iter_mut())
+        .chain(data.assigned.items.iter_mut())
+    {
+        pr.merge_kind = super::merge::classify(pr);
+    }
+    Some(data)
 }
 
 #[cfg(test)]
@@ -118,10 +133,26 @@ mod tests {
         assert_eq!(pr.merge_kind, None);
     }
 
-    /// The screen's TypeScript unions compare against these exact strings; a rename on either
-    /// side would silently blank every merge badge.
     #[test]
-    fn the_merge_fields_use_the_camel_case_names_the_screen_reads() {
+    fn a_loaded_snapshot_re_derives_the_merge_verdict_from_its_raw_fields() {
+        let home = scratch_dir("gh-snapshot-rederive");
+        let path = github_prs_path_for(&home);
+        let mut stale = data();
+        // A file that says "ready" beside raw fields that mean conflicts (as an older or newer
+        // classification could) loads with the verdict this version draws from the raw fields.
+        stale.mine.items[0].merge_kind = Some(MergeKind::Ready);
+        save(&path, &stale).unwrap();
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains(r#""mergeKind":"ready""#));
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.mine.items[0].merge_kind, Some(MergeKind::Conflicts));
+    }
+
+    /// The raw fields and the verdict are pinned on the wire so a `prs.json` written by this
+    /// version keeps loading in later ones (`mergeKind` is also what the screen reads).
+    #[test]
+    fn the_merge_fields_keep_their_camel_case_wire_names() {
         let home = scratch_dir("gh-snapshot-wire-names");
         let path = github_prs_path_for(&home);
         save(&path, &data()).unwrap();
