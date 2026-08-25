@@ -226,7 +226,10 @@ fn save_state(path: &Path, state: &MonitorState) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{GithubPrDto, GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus};
+    use crate::dto::{
+        GithubPrDto, GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus, MergeState,
+        Mergeable,
+    };
     use crate::paths::scratch_dir;
     use std::fs;
 
@@ -245,6 +248,10 @@ mod tests {
             base_ref: "main".into(),
             updated_at: "2026-08-24T20:00:00Z".into(),
             review_request: None,
+            mergeable: Mergeable::default(),
+            merge_state: MergeState::default(),
+            merge_queue: None,
+            auto_merge: false,
         }
     }
 

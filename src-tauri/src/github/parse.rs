@@ -1,14 +1,14 @@
 //! GraphQL reply → lists. Lenient by design: a node that is not PR-shaped is skipped, an enum
-//! value this version does not know becomes `None`, and `errors[]` next to usable `data` are
-//! warnings rather than a failure.
+//! value this version does not know becomes `None` (or `Unknown` for the merge state), and
+//! `errors[]` next to usable `data` are warnings rather than a failure.
 
 use std::collections::HashSet;
 
 use serde_json::Value;
 
 use crate::dto::{
-    CiState, GithubPrDto, GithubPrListDto, GithubPrsData, GithubRateLimitDto, ReviewDecision,
-    ReviewRequestKind,
+    CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, GithubPrsData, GithubRateLimitDto,
+    MergeState, Mergeable, ReviewDecision, ReviewRequestKind,
 };
 
 /// The lists and viewer of one reply (`fetched_at` and `scope` are the reader's to fill in),
@@ -101,6 +101,37 @@ fn pull_request(node: &Value) -> Option<GithubPrDto> {
         base_ref: text("baseRefName").unwrap_or_default(),
         updated_at: text("updatedAt").unwrap_or_default(),
         review_request: None,
+        mergeable: mergeable(node["mergeable"].as_str()),
+        merge_state: merge_state(node["mergeStateStatus"].as_str()),
+        merge_queue: merge_queue(&node["mergeQueueEntry"]),
+        auto_merge: node["autoMergeRequest"].is_object(),
+    })
+}
+
+fn mergeable(value: Option<&str>) -> Mergeable {
+    match value {
+        Some("MERGEABLE") => Mergeable::Mergeable,
+        Some("CONFLICTING") => Mergeable::Conflicting,
+        _ => Mergeable::Unknown,
+    }
+}
+
+fn merge_state(value: Option<&str>) -> MergeState {
+    match value {
+        Some("CLEAN" | "HAS_HOOKS") => MergeState::Clean,
+        Some("UNSTABLE") => MergeState::Unstable,
+        Some("BLOCKED") => MergeState::Blocked,
+        Some("BEHIND") => MergeState::Behind,
+        Some("DIRTY") => MergeState::Dirty,
+        Some("DRAFT") => MergeState::Draft,
+        _ => MergeState::Unknown,
+    }
+}
+
+/// A queue entry is an object (even an empty one) while the pull request is queued.
+fn merge_queue(value: &Value) -> Option<GithubMergeQueueDto> {
+    value.is_object().then(|| GithubMergeQueueDto {
+        position: value["position"].as_u64(),
     })
 }
 
@@ -133,7 +164,9 @@ fn rate_limit(value: &Value) -> Option<GithubRateLimitDto> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{CiState, ReviewDecision, ReviewRequestKind};
+    use crate::dto::{
+        CiState, GithubMergeQueueDto, MergeState, Mergeable, ReviewDecision, ReviewRequestKind,
+    };
     use crate::github::fixtures::REPLY;
     use serde_json::json;
 
@@ -167,6 +200,10 @@ mod tests {
         assert_eq!(mine.base_ref, "main");
         assert_eq!(mine.updated_at, "2026-08-24T20:00:00Z");
         assert_eq!(mine.review_request, None);
+        assert_eq!(mine.mergeable, Mergeable::Mergeable);
+        assert_eq!(mine.merge_state, MergeState::Blocked);
+        assert_eq!(mine.merge_queue, None);
+        assert!(!mine.auto_merge);
 
         assert_eq!(parsed.data.review_requested.total, 2);
         let [direct, team] = parsed.data.review_requested.items.as_slice() else {
@@ -176,9 +213,14 @@ mod tests {
         assert!(direct.is_draft);
         assert_eq!(direct.ci, CiState::Pending);
         assert_eq!(direct.review_decision, None);
+        assert_eq!(direct.mergeable, Mergeable::Unknown);
+        assert_eq!(direct.merge_state, MergeState::Draft);
         assert_eq!(team.review_request, Some(ReviewRequestKind::Team));
         assert_eq!(team.ci, CiState::None, "a null rollup means no checks");
         assert_eq!(team.author, "", "a deleted author is not an error");
+        assert_eq!(team.mergeable, Mergeable::Conflicting);
+        assert_eq!(team.merge_state, MergeState::Dirty);
+        assert!(team.auto_merge);
 
         assert_eq!(parsed.data.assigned.total, 0);
         assert!(parsed.data.assigned.items.is_empty());
@@ -205,6 +247,91 @@ mod tests {
             let parsed = parse(&value).unwrap();
             assert_eq!(parsed.data.mine.items[0].ci, expected, "{state}");
         }
+    }
+
+    #[test]
+    fn every_mergeable_value_maps_and_unknown_ones_fall_back_to_unknown() {
+        for (value, expected) in [
+            (json!("MERGEABLE"), Mergeable::Mergeable),
+            (json!("CONFLICTING"), Mergeable::Conflicting),
+            (json!("UNKNOWN"), Mergeable::Unknown),
+            (json!("SOMETHING_NEW"), Mergeable::Unknown),
+            (json!(null), Mergeable::Unknown),
+        ] {
+            let mut reply = reply();
+            reply["data"]["mine"]["nodes"][0]["mergeable"] = value.clone();
+            assert_eq!(
+                parse(&reply).unwrap().data.mine.items[0].mergeable,
+                expected,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_merge_state_maps_and_unknown_ones_fall_back_to_unknown() {
+        for (value, expected) in [
+            (json!("CLEAN"), MergeState::Clean),
+            (json!("HAS_HOOKS"), MergeState::Clean),
+            (json!("UNSTABLE"), MergeState::Unstable),
+            (json!("BLOCKED"), MergeState::Blocked),
+            (json!("BEHIND"), MergeState::Behind),
+            (json!("DIRTY"), MergeState::Dirty),
+            (json!("DRAFT"), MergeState::Draft),
+            (json!("UNKNOWN"), MergeState::Unknown),
+            (json!("SOMETHING_NEW"), MergeState::Unknown),
+            (json!(null), MergeState::Unknown),
+        ] {
+            let mut reply = reply();
+            reply["data"]["mine"]["nodes"][0]["mergeStateStatus"] = value.clone();
+            assert_eq!(
+                parse(&reply).unwrap().data.mine.items[0].merge_state,
+                expected,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_merge_queue_entry_keeps_its_position_when_there_is_one() {
+        for (value, expected) in [
+            (json!(null), None),
+            (
+                json!({ "position": 3 }),
+                Some(GithubMergeQueueDto { position: Some(3) }),
+            ),
+            (
+                json!({ "position": null }),
+                Some(GithubMergeQueueDto { position: None }),
+            ),
+            (json!({}), Some(GithubMergeQueueDto { position: None })),
+        ] {
+            let mut reply = reply();
+            reply["data"]["mine"]["nodes"][0]["mergeQueueEntry"] = value.clone();
+            assert_eq!(
+                parse(&reply).unwrap().data.mine.items[0].merge_queue,
+                expected,
+                "{value}"
+            );
+        }
+        let mut reply = reply();
+        reply["data"]["mine"]["nodes"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("mergeQueueEntry");
+        assert_eq!(parse(&reply).unwrap().data.mine.items[0].merge_queue, None);
+    }
+
+    #[test]
+    fn auto_merge_is_on_exactly_when_github_reports_a_request() {
+        let mut reply = reply();
+        reply["data"]["mine"]["nodes"][0]["autoMergeRequest"] =
+            json!({ "enabledAt": "2026-08-24T17:00:00Z" });
+        assert!(parse(&reply).unwrap().data.mine.items[0].auto_merge);
+        reply["data"]["mine"]["nodes"][0]["autoMergeRequest"] = json!({});
+        assert!(parse(&reply).unwrap().data.mine.items[0].auto_merge);
+        reply["data"]["mine"]["nodes"][0]["autoMergeRequest"] = json!(null);
+        assert!(!parse(&reply).unwrap().data.mine.items[0].auto_merge);
     }
 
     #[test]

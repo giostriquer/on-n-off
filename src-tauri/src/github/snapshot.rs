@@ -38,7 +38,9 @@ pub(super) fn load(path: &Path) -> Option<GithubPrsData> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{CiState, GithubPrDto, GithubPrListDto};
+    use crate::dto::{
+        CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, MergeState, Mergeable,
+    };
     use crate::paths::{github_prs_path_for, scratch_dir};
     use std::fs;
 
@@ -63,6 +65,10 @@ mod tests {
                     base_ref: "main".into(),
                     updated_at: "2026-08-24T19:00:00Z".into(),
                     review_request: None,
+                    mergeable: Mergeable::Conflicting,
+                    merge_state: MergeState::Dirty,
+                    merge_queue: Some(GithubMergeQueueDto { position: Some(2) }),
+                    auto_merge: true,
                 }],
             },
             review_requested: GithubPrListDto::default(),
@@ -87,6 +93,26 @@ mod tests {
             !raw.contains("\"status\""),
             "the envelope is not persisted: {raw}"
         );
+    }
+
+    /// v0.2.0 wrote schema 1 without the merge-state fields; that file must keep loading.
+    #[test]
+    fn a_snapshot_from_before_the_merge_state_fields_loads_with_defaults() {
+        let home = scratch_dir("gh-snapshot-v0-2-0");
+        let path = github_prs_path_for(&home);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{"schemaVersion":1,"data":{"viewer":"octocat","fetchedAt":"2026-08-24T20:00:00Z","scope":["org:acme"],"mine":{"total":1,"items":[{"id":"PR_1","number":1,"title":"T","url":"https://github.com/acme/app/pull/1","repo":"acme/app","author":"octocat","isDraft":false,"ci":"success","headRef":"h","baseRef":"main","updatedAt":"2026-08-24T19:00:00Z"}]},"reviewRequested":{"total":0,"items":[]},"assigned":{"total":0,"items":[]}}}"#,
+        )
+        .unwrap();
+        let loaded = load(&path).expect("the old snapshot still loads");
+        let pr = &loaded.mine.items[0];
+        assert_eq!(pr.id, "PR_1");
+        assert_eq!(pr.mergeable, Mergeable::Unknown);
+        assert_eq!(pr.merge_state, MergeState::Unknown);
+        assert_eq!(pr.merge_queue, None);
+        assert!(!pr.auto_merge);
     }
 
     #[test]

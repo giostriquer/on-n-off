@@ -376,6 +376,49 @@ pub enum ReviewDecision {
     ReviewRequired,
 }
 
+/// GitHub's `mergeable`: whether the head can be merged into the base without conflicts.
+/// `Unknown` also covers a value GitHub has not computed yet (it computes on demand, so the next
+/// poll usually knows) and one this version does not recognise.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// The variants keep GitHub's own value names, `MERGEABLE` included.
+#[allow(clippy::enum_variant_names)]
+pub enum Mergeable {
+    Mergeable,
+    Conflicting,
+    #[default]
+    Unknown,
+}
+
+/// GitHub's `mergeStateStatus`, collapsed to what a list row can act on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeState {
+    /// Every requirement is met (`CLEAN`, or `HAS_HOOKS`: clean with pre-receive hooks).
+    Clean,
+    /// Mergeable, but a non-required check is not passing.
+    Unstable,
+    /// Branch protection stops the merge: a missing review, a failing required check, and so on.
+    Blocked,
+    /// The head is behind the base and the base requires up-to-date branches.
+    Behind,
+    /// Merge conflicts.
+    Dirty,
+    Draft,
+    /// Not computed yet, or a state this version does not know.
+    #[default]
+    Unknown,
+}
+
+/// The pull request's place in its repository's merge queue.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubMergeQueueDto {
+    /// 1-based position when GitHub reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubPrDto {
@@ -398,6 +441,17 @@ pub struct GithubPrDto {
     /// Only on the review-requested list: whether the request named the user or one of their teams.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_request: Option<ReviewRequestKind>,
+    /// Defaults keep a snapshot written before these fields existed loadable.
+    #[serde(default)]
+    pub mergeable: Mergeable,
+    #[serde(default)]
+    pub merge_state: MergeState,
+    /// Present while the pull request sits in a merge queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_queue: Option<GithubMergeQueueDto>,
+    /// Auto-merge is enabled: GitHub merges once the requirements are met.
+    #[serde(default)]
+    pub auto_merge: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
