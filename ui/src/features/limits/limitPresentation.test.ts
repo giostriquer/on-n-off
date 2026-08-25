@@ -41,6 +41,11 @@ describe("presentLimitWindow", () => {
     });
   });
 
+  it("counts down the last minute as '<1m', never 'in now'", () => {
+    const resetsAt = new Date(NOW + 30_000).toISOString();
+    expect(presentLimitWindow({ ...window, resetsAt }, NOW).note).toBe(`resets in <1m · ${formatResetAt(resetsAt)}`);
+  });
+
   it("treats the reset instant itself as already elapsed", () => {
     const presented = presentLimitWindow({ ...window, resetsAt: new Date(NOW).toISOString() }, NOW);
     expect(presented.note).toMatch(/^reset just now · \w{3} \d\d:\d\d · last seen 93%$/);
