@@ -323,6 +323,41 @@ describe("Github", () => {
     expect(within(section("Review requested")).getByText("Direct ask")).toBeTruthy();
   });
 
+  it("opens a folded section while a search matches inside it", async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    readGithubPrs.mockResolvedValue(okPrs());
+    renderGithub();
+    await screen.findByText("Add the thing");
+
+    const toggle = () => within(section("Review requested")).getByRole("button", { name: /Review requested/ });
+    await user.click(toggle());
+    expect(within(section("Review requested")).queryByText("Team ask")).toBeNull();
+
+    const search = screen.getByRole("searchbox", { name: "Search pull requests" });
+    await user.type(search, "team ask");
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    expect(within(section("Review requested")).getByText("Team ask")).toBeTruthy();
+
+    await user.clear(search);
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(within(section("Review requested")).queryByText("Team ask")).toBeNull();
+  });
+
+  it("marks the failing count as partial when GitHub holds more than was loaded", async () => {
+    readGithubPrs.mockResolvedValue(
+      okPrs({
+        mine: {
+          total: 137,
+          items: [pr({ id: "a", ci: "failure" }), pr({ id: "b", number: 2, title: "Second thing", ci: "success" })],
+        },
+      }),
+    );
+    renderGithub();
+    await screen.findByText("Second thing");
+    expect(screen.getByTestId("github-summary").textContent).toBe("137 mine · 1+ failing · 2 to review · 0 assigned");
+    expect(within(section("Mine")).getByRole("heading", { level: 3 }).textContent).toContain("2 of 137");
+  });
+
   it("says it is checking until the first read answers", () => {
     readGithubPrs.mockReturnValue(new Promise(() => undefined));
     renderGithub();

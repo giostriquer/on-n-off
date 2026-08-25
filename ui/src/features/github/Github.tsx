@@ -10,9 +10,9 @@ import {
   prsSummary,
   statusHeadline,
 } from "$lib/githubFormat";
-import type { GithubPrList, GithubPrs } from "$lib/githubTypes";
+import type { GithubListId, GithubPrList, GithubPrs } from "$lib/githubTypes";
 import type { GithubPollSeconds } from "$lib/types";
-import { readCollapsed, writeCollapsed, type SectionId } from "./collapsed";
+import { readCollapsed, writeCollapsed } from "./collapsed";
 import { PrRow } from "./PrRow";
 import { useGithubPrs } from "./useGithubPrs";
 
@@ -23,6 +23,13 @@ type GithubProps = {
 };
 
 const EMPTY_LIST: GithubPrList = { total: 0, items: [] };
+
+/** Mine first: the user's own CI is what the screen exists for, and review requests can be many. */
+const SECTIONS: { id: GithubListId; title: string; empty: string }[] = [
+  { id: "mine", title: "Mine", empty: "No open pull requests of yours." },
+  { id: "reviewRequested", title: "Review requested", empty: "No reviews requested from you." },
+  { id: "assigned", title: "Assigned", empty: "Nothing assigned to you." },
+];
 
 type Banner = { headline: string; hint: string; tone: "trip" | "warn" };
 
@@ -50,28 +57,14 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
   const updated = formatUpdatedAgo(prs?.fetchedAt, now);
   const checking = loading && !prs;
   const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<SectionId>>(readCollapsed);
+  const [collapsed, setCollapsed] = useState<Set<GithubListId>>(readCollapsed);
 
-  function toggle(id: SectionId) {
+  function toggle(id: GithubListId) {
     const next = new Set(collapsed);
     if (!next.delete(id)) next.add(id);
     setCollapsed(next);
     writeCollapsed(next);
   }
-
-  const list = (id: SectionId, title: string, empty: string) => (
-    <PrList
-      id={id}
-      title={title}
-      list={prs?.[id] ?? EMPTY_LIST}
-      query={search}
-      empty={empty}
-      checking={checking}
-      collapsed={collapsed.has(id)}
-      onToggle={() => toggle(id)}
-      now={now}
-    />
-  );
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="github-screen" aria-busy={loading}>
@@ -127,9 +120,20 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
       <SearchField query={search} onChange={setSearch} />
 
       <div className="flex flex-col gap-3">
-        {list("mine", "Mine", "No open pull requests of yours.")}
-        {list("reviewRequested", "Review requested", "No reviews requested from you.")}
-        {list("assigned", "Assigned", "Nothing assigned to you.")}
+        {SECTIONS.map(({ id, title, empty }) => (
+          <PrList
+            key={id}
+            id={id}
+            title={title}
+            list={prs?.[id] ?? EMPTY_LIST}
+            query={search}
+            empty={empty}
+            checking={checking}
+            collapsed={collapsed.has(id)}
+            onToggle={() => toggle(id)}
+            now={now}
+          />
+        ))}
       </div>
 
       <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
@@ -140,23 +144,28 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
   );
 }
 
-/** "1 mine · 1 failing · 15 to review · 0 assigned" — failing only when there is any. */
+/**
+ * "1 mine · 1 failing · 15 to review · 0 assigned". Failing appears only when there is any, with
+ * a "+" when only part of the user's pull requests were loaded.
+ */
 function Summary({ prs }: { prs: GithubPrs }) {
-  const summary = prsSummary(prs);
-  const parts: { text: string; tone?: "trip" }[] = [
-    { text: `${summary.mine} mine` },
-    ...(summary.failing ? [{ text: `${summary.failing} failing`, tone: "trip" as const }] : []),
-    { text: `${summary.review} to review` },
-    { text: `${summary.assigned} assigned` },
-  ];
+  const { mine, failing, failingIsPartial, review, assigned } = prsSummary(prs);
   return (
     <p className="mt-1.5 mb-0 text-[12.5px] text-[var(--silkscreen)]" data-testid="github-summary">
-      {parts.map((part, index) => (
-        <span key={part.text}>
-          {index ? " · " : ""}
-          <span className={part.tone ? "font-semibold text-[var(--trip)]" : ""}>{part.text}</span>
-        </span>
-      ))}
+      {mine} mine
+      {failing ? (
+        <>
+          {" · "}
+          <span className="font-semibold text-[var(--trip)]">
+            {failing}
+            {failingIsPartial ? "+" : ""} failing
+          </span>
+        </>
+      ) : null}
+      {" · "}
+      {review} to review
+      {" · "}
+      {assigned} assigned
     </p>
   );
 }
@@ -233,7 +242,7 @@ function PrList({
   onToggle,
   now,
 }: {
-  id: SectionId;
+  id: GithubListId;
   title: string;
   list: GithubPrList;
   query: string;
@@ -246,23 +255,26 @@ function PrList({
   const searching = query.trim().length > 0;
   const shown = searching ? filterPrs(list.items, query) : list.items;
   const count = listCountLabel(list, searching ? shown.length : undefined);
+  // A search looks everywhere: a folded section with matches opens for as long as the search
+  // lasts; one without stays folded, its header already saying "0 of N".
+  const open = (searching && shown.length > 0) || !collapsed;
   const bodyId = `github-${id}-list`;
   return (
     <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={title}>
       {/* Sticks to the top of the scroll area so a long list keeps its name in view. */}
       <header
-        className={`sticky top-0 z-10 rounded-t-[11px] bg-[var(--plate)] ${collapsed ? "rounded-b-[11px]" : "border-b border-[var(--hair)]"}`}
+        className={`sticky top-0 z-10 rounded-t-[11px] bg-[var(--plate)] ${open ? "border-b border-[var(--hair)]" : "rounded-b-[11px]"}`}
       >
         <h3 className="m-0">
           <button
             type="button"
             className={`flex h-10 w-full items-center gap-2 rounded-[11px] border-0 bg-transparent px-3.5 text-left text-[11.5px] font-semibold tracking-[0.03em] uppercase hover:bg-[var(--well)] ${FOCUS_RING}`}
-            aria-expanded={!collapsed}
-            aria-controls={bodyId}
+            aria-expanded={open}
+            aria-controls={open ? bodyId : undefined}
             onClick={onToggle}
           >
             <ChevronDown
-              className={`size-3.5 shrink-0 text-[var(--mute)] transition-transform motion-reduce:transition-none ${collapsed ? "-rotate-90" : ""}`}
+              className={`size-3.5 shrink-0 text-[var(--mute)] transition-transform motion-reduce:transition-none ${open ? "" : "-rotate-90"}`}
               aria-hidden="true"
             />
             {title}
@@ -270,7 +282,7 @@ function PrList({
           </button>
         </h3>
       </header>
-      {collapsed ? null : shown.length ? (
+      {!open ? null : shown.length ? (
         <ul id={bodyId} className="m-0 list-none p-0" role="list">
           {orderPrs(shown).map((pr) => (
             <PrRow key={pr.id} pr={pr} now={now} />

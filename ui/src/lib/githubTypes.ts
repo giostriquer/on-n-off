@@ -56,6 +56,10 @@ export type GithubPrsData = {
   rateLimit?: GithubRateLimit | null;
 };
 
+/** The three lists, in the order the screen shows them. */
+export type GithubListId = keyof Pick<GithubPrsData, "mine" | "reviewRequested" | "assigned">;
+export const GITHUB_LIST_IDS: readonly GithubListId[] = ["mine", "reviewRequested", "assigned"];
+
 /**
  * Mirrors `GithubPrsDto`: GitHub-side problems arrive as a status plus a hint, not an error.
  * `stale: true` means the lists come from the last successful read on disk.

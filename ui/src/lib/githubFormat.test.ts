@@ -89,12 +89,30 @@ describe("githubFormat", () => {
     expect(ids("nothing here")).toEqual([]);
   });
 
+  it("matches the words a row shows as badges and CI state", () => {
+    const items = [
+      pr({ id: "draft", isDraft: true, ci: "pending" }),
+      pr({ id: "team", reviewRequest: "team", ci: "failure" }),
+      pr({ id: "approved", reviewDecision: "APPROVED", ci: "success" }),
+      pr({ id: "changes", reviewDecision: "CHANGES_REQUESTED", ci: "error" }),
+    ];
+    const ids = (query: string) => filterPrs(items, query).map((item) => item.id);
+    expect(ids("draft")).toEqual(["draft"]);
+    expect(ids("team")).toEqual(["team"]);
+    expect(ids("approved")).toEqual(["approved"]);
+    expect(ids("changes requested")).toEqual(["changes"]);
+    expect(ids("failing")).toEqual(["team"]);
+    expect(ids("pending")).toEqual(["draft"]);
+    expect(ids("errored")).toEqual(["changes"]);
+  });
+
   it("says how much of a long list is loaded, and how much of it matches a search", () => {
     expect(listCountLabel({ total: 3, items: [pr({}), pr({}), pr({})] })).toBe("3");
     expect(listCountLabel({ total: 137, items: [pr({})] })).toBe("1 of 137");
     expect(listCountLabel({ total: 0, items: [] })).toBe("0");
     expect(listCountLabel({ total: 3, items: [pr({}), pr({}), pr({})] }, 1)).toBe("1 of 3");
-    expect(listCountLabel({ total: 137, items: [pr({})] }, 0)).toBe("0 of 137");
+    // Only the loaded page was searched, so the denominator is the page, and says so.
+    expect(listCountLabel({ total: 137, items: [pr({})] }, 0)).toBe("0 of 1 loaded");
   });
 
   it("gives every problem a headline", () => {
@@ -128,10 +146,19 @@ describe("githubFormat", () => {
       reviewRequested: { total: 15, items: [pr({ ci: "failure" })] },
       assigned: { total: 0, items: [] },
     };
-    expect(prsSummary(data)).toEqual({ mine: 3, failing: 2, review: 15, assigned: 0 });
+    expect(prsSummary(data)).toEqual({ mine: 3, failing: 2, failingIsPartial: false, review: 15, assigned: 0 });
     expect(prsSummary({ ...data, mine: { total: 0, items: [] } })).toEqual({
       mine: 0,
       failing: 0,
+      failingIsPartial: false,
+      review: 15,
+      assigned: 0,
+    });
+    // With more on GitHub than was loaded, the failing count covers only the loaded page.
+    expect(prsSummary({ ...data, mine: { total: 137, items: data.mine.items } })).toEqual({
+      mine: 137,
+      failing: 2,
+      failingIsPartial: true,
       review: 15,
       assigned: 0,
     });

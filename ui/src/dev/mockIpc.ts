@@ -26,6 +26,9 @@ declare global {
 const params = new URLSearchParams(window.location.search);
 const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
+if (!Object.hasOwn(SCENARIOS, scenario)) {
+  console.error(`[mock] unknown github scenario "${scenario}"; known: ${Object.keys(SCENARIOS).join(", ")}`);
+}
 
 const AGENTS: AgentInfo[] = [
   { id: "claude", displayName: "Claude", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true },
@@ -64,9 +67,10 @@ const handlers: Record<string, Handler> = {
   refresh: emptyTab,
   read_limits: () => [],
   read_github_prs: () => {
-    const scene = SCENARIOS[scenario];
-    if (!scene) throw { kind: "message", message: `mock: unknown scenario "${scenario}"`, path: null };
-    return scene();
+    if (!Object.hasOwn(SCENARIOS, scenario)) {
+      throw { kind: "message", message: `mock: unknown scenario "${scenario}"`, path: null };
+    }
+    return SCENARIOS[scenario]();
   },
   open_url: (args) => {
     console.info("[mock] open_url", args.url);
@@ -79,12 +83,19 @@ const handlers: Record<string, Handler> = {
 
 window.__TAURI_INTERNALS__ = {
   async invoke(cmd, args = {}) {
-    const handler = handlers[cmd];
+    const handler = Object.hasOwn(handlers, cmd) ? handlers[cmd] : undefined;
     if (!handler) {
+      // Loud on purpose: the screenshot harness fails a scene on console errors.
+      console.error(`[mock] no handler for ${cmd}`);
       throw { kind: "message", message: `mock IPC has no handler for ${cmd}`, path: null };
     }
     await new Promise((resolve) => setTimeout(resolve, latency));
-    return handler(args);
+    try {
+      return await handler(args);
+    } catch (error) {
+      console.error(`[mock] ${cmd} failed:`, error);
+      throw error;
+    }
   },
   transformCallback(callback, once = false) {
     const id = Math.floor(Math.random() * 1_000_000);

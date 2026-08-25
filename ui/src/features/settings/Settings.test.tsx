@@ -189,7 +189,7 @@ describe("Settings", () => {
     expect(card).toHaveTextContent("repo:me/tool");
 
     const input = screen.getByRole("textbox", { name: "Scopes" });
-    expect(input.getAttribute("aria-describedby")).toBeTruthy();
+    expect(input).toHaveAccessibleDescription(/org:NAME, user:NAME or OWNER\/REPO/);
     await user.type(input, "  user:me{Enter}");
     expect(onGithubChange).toHaveBeenCalledWith({ githubScopes: ["org:acme", "repo:me/tool", "user:me"] });
     expect(input).toHaveValue("");

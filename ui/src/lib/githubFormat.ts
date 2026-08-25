@@ -80,23 +80,42 @@ export function formatUpdatedAgo(iso: string | null | undefined, nowMs: number):
   return `${Math.floor(elapsed / DAY_MS)}d ago`;
 }
 
-/**
- * "3", or "50 of 137" when GitHub holds more than the page that was read; with a search on,
- * "2 of 3" — matches of everything GitHub holds.
- */
-export function listCountLabel(list: GithubPrList, matches?: number): string {
-  if (matches !== undefined) return `${matches} of ${list.total}`;
-  return list.total > list.items.length ? `${list.items.length} of ${list.total}` : String(list.items.length);
+function truncated(list: GithubPrList): boolean {
+  return list.total > list.items.length;
 }
 
-/** Case-insensitive substring match over number, title, repository, author and both branches. */
+/**
+ * "3", or "50 of 137" when GitHub holds more than the page that was read. With a search on, the
+ * denominator is what was actually searched — the loaded page — and says so when that is not
+ * everything: "2 of 3", or "2 of 50 loaded".
+ */
+export function listCountLabel(list: GithubPrList, matches?: number): string {
+  if (matches !== undefined) {
+    return `${matches} of ${list.items.length}${truncated(list) ? " loaded" : ""}`;
+  }
+  return truncated(list) ? `${list.items.length} of ${list.total}` : String(list.items.length);
+}
+
+/**
+ * Case-insensitive substring match over what a row shows: number, title, repository, author,
+ * both branches, its badges (draft, team, the review decision) and its CI state's label.
+ */
 export function filterPrs(items: readonly GithubPr[], query: string): GithubPr[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...items];
   return items.filter((pr) =>
-    [`#${pr.number}`, pr.title, pr.repo, pr.author, pr.headRef, pr.baseRef].some((field) =>
-      field.toLowerCase().includes(needle),
-    ),
+    [
+      `#${pr.number}`,
+      pr.title,
+      pr.repo,
+      pr.author,
+      pr.headRef,
+      pr.baseRef,
+      pr.isDraft ? "draft" : "",
+      pr.reviewRequest ?? "",
+      reviewDecisionLabel(pr.reviewDecision),
+      ciLabel(pr.ci),
+    ].some((field) => field.toLowerCase().includes(needle)),
   );
 }
 
@@ -141,13 +160,22 @@ export function reviewDecisionLabel(decision: ReviewDecision | null | undefined)
   }
 }
 
-export type PrsSummary = { mine: number; failing: number; review: number; assigned: number };
+export type PrsSummary = {
+  mine: number;
+  /** Red CI among the user's own pull requests that were loaded. */
+  failing: number;
+  /** True when GitHub holds more own pull requests than were loaded, so `failing` is a floor. */
+  failingIsPartial: boolean;
+  review: number;
+  assigned: number;
+};
 
-/** The header's one-line summary; `failing` counts red CI on the user's own pull requests. */
+/** The header's one-line summary. */
 export function prsSummary(data: GithubPrsData): PrsSummary {
   return {
     mine: data.mine.total,
     failing: data.mine.items.filter((pr) => pr.ci === "failure" || pr.ci === "error").length,
+    failingIsPartial: truncated(data.mine),
     review: data.reviewRequested.total,
     assigned: data.assigned.total,
   };

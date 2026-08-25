@@ -1,20 +1,24 @@
 /** Which Pull requests sections the user folded, remembered across launches in this browser. */
 
+import { GITHUB_LIST_IDS, type GithubListId } from "$lib/githubTypes";
+
 const KEY = "on-n-off.github.collapsed";
 
-export type SectionId = "mine" | "reviewRequested" | "assigned";
+function isListId(value: unknown): value is GithubListId {
+  return typeof value === "string" && (GITHUB_LIST_IDS as readonly string[]).includes(value);
+}
 
-export function readCollapsed(): Set<SectionId> {
+export function readCollapsed(): Set<GithubListId> {
   try {
     const raw = localStorage.getItem(KEY);
-    const ids = raw ? (JSON.parse(raw) as unknown) : [];
-    return new Set(Array.isArray(ids) ? (ids.filter((id) => typeof id === "string") as SectionId[]) : []);
+    const ids: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids.filter(isListId) : []);
   } catch {
     return new Set();
   }
 }
 
-export function writeCollapsed(ids: Set<SectionId>) {
+export function writeCollapsed(ids: Set<GithubListId>) {
   try {
     localStorage.setItem(KEY, JSON.stringify([...ids]));
   } catch {

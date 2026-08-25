@@ -206,11 +206,11 @@ function GithubSettingsCard({
         </div>
       </div>
       <div className="flex flex-col gap-2 border-t border-[var(--hair)] px-3.5 py-2.5">
-        <div className="flex flex-wrap items-center gap-3">
-          <label htmlFor="github-scope" className="min-w-0 flex-1 text-[12px] text-[var(--mute)]">
+        <div className="flex flex-col gap-1">
+          <label htmlFor="github-scope" className="text-[12px] text-[var(--mute)]">
             Scopes
           </label>
-          <span id="github-scope-help" className="basis-full font-mono text-[10.5px] text-[var(--mute)]">
+          <span id="github-scope-help" className="font-mono text-[10.5px] text-[var(--mute)]">
             org:NAME, user:NAME or OWNER/REPO narrow the pull requests you authored · Enter adds · empty
             means all repositories · same-kind scopes combine, mixing kinds narrows
           </span>
