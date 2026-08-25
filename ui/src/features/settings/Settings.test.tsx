@@ -212,12 +212,12 @@ describe("Settings", () => {
     expect(input).toHaveValue("org:other");
   });
 
-  it("requests notification permission before enabling CI notifications and persists the interval", async () => {
+  it("requests notification permission before enabling pull request notifications and persists the interval", async () => {
     const user = userEvent.setup();
     const onGithubChange = vi.fn();
     renderSettings({ onGithubChange });
 
-    await user.click(screen.getByRole("button", { name: "Notify about CI changes" }));
+    await user.click(screen.getByRole("button", { name: "Notify about CI, review and merge changes" }));
 
     expect(apiMocks.requestNotificationPermission).toHaveBeenCalledTimes(1);
     expect(onGithubChange).toHaveBeenCalledWith({ githubNotifications: true });
@@ -226,13 +226,13 @@ describe("Settings", () => {
     expect(onGithubChange).toHaveBeenCalledWith({ githubPollSeconds: 120 });
   });
 
-  it("keeps CI notifications disabled when notification permission is denied", async () => {
+  it("keeps pull request notifications disabled when notification permission is denied", async () => {
     apiMocks.requestNotificationPermission.mockResolvedValue(false);
     const user = userEvent.setup();
     const onGithubChange = vi.fn();
     renderSettings({ onGithubChange });
 
-    await user.click(screen.getByRole("button", { name: "Notify about CI changes" }));
+    await user.click(screen.getByRole("button", { name: "Notify about CI, review and merge changes" }));
 
     expect(onGithubChange).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent("Notifications are blocked in system settings.");

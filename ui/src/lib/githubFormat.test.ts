@@ -55,16 +55,37 @@ describe("githubFormat", () => {
     expect(ciLabel("none")).toBe("No checks");
   });
 
-  it("puts failing CI first, then pending, then the most recently updated", () => {
+  it("puts what needs fixing first, then what is waiting, then the rest, newest first within each", () => {
+    const plain = { mergeState: "unknown" as const };
     const ordered = orderPrs([
-      pr({ id: "ok-old", ci: "success", updatedAt: "2026-08-24T10:00:00Z" }),
-      pr({ id: "pending", ci: "pending", updatedAt: "2026-08-24T12:00:00Z" }),
-      pr({ id: "ok-new", ci: "success", updatedAt: "2026-08-24T19:00:00Z" }),
-      pr({ id: "failing", ci: "failure", updatedAt: "2026-08-24T08:00:00Z" }),
-      pr({ id: "errored", ci: "error", updatedAt: "2026-08-24T09:00:00Z" }),
-      pr({ id: "none", ci: "none", updatedAt: "2026-08-24T18:00:00Z" }),
+      pr({ id: "ok-old", ci: "success", updatedAt: "2026-08-24T10:00:00Z", ...plain }),
+      pr({ id: "pending", ci: "pending", updatedAt: "2026-08-24T12:00:00Z", ...plain }),
+      pr({ id: "ok-new", ci: "success", updatedAt: "2026-08-24T19:00:00Z", ...plain }),
+      pr({ id: "failing", ci: "failure", updatedAt: "2026-08-24T08:00:00Z", ...plain }),
+      pr({ id: "errored", ci: "error", updatedAt: "2026-08-24T09:00:00Z", ...plain }),
+      pr({ id: "none", ci: "none", updatedAt: "2026-08-24T18:00:00Z", ...plain }),
+      // Red for reasons other than CI: conflicts and changes requested need the author too.
+      pr({ id: "conflicts", ci: "success", mergeable: "conflicting", updatedAt: "2026-08-24T07:00:00Z", ...plain }),
+      pr({ id: "changes", ci: "success", reviewDecision: "CHANGES_REQUESTED", updatedAt: "2026-08-24T06:00:00Z", ...plain }),
+      // Amber: waiting on something — a rebase, an unexplained block — sorts with pending CI.
+      pr({ id: "behind", ci: "success", mergeState: "behind", updatedAt: "2026-08-24T11:00:00Z" }),
+      pr({ id: "blocked", ci: "success", mergeState: "blocked", reviewDecision: "APPROVED", updatedAt: "2026-08-24T13:00:00Z" }),
+      // Green is calm: ready to merge sorts with the rest by recency.
+      pr({ id: "ready", ci: "success", mergeState: "clean", updatedAt: "2026-08-24T05:00:00Z" }),
     ]).map((item) => item.id);
-    expect(ordered).toEqual(["errored", "failing", "pending", "ok-new", "none", "ok-old"]);
+    expect(ordered).toEqual([
+      "errored",
+      "failing",
+      "conflicts",
+      "changes",
+      "blocked",
+      "pending",
+      "behind",
+      "ok-new",
+      "none",
+      "ok-old",
+      "ready",
+    ]);
   });
 
   it("describes how long ago a pull request moved", () => {

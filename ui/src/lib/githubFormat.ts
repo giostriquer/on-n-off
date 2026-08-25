@@ -49,23 +49,24 @@ export function ciLabel(ci: CiState): string {
   }
 }
 
-function ciRank(ci: CiState): number {
-  switch (ci) {
-    case "failure":
-    case "error":
-      return 0;
-    case "pending":
-      return 1;
-    case "success":
-    case "none":
-      return 2;
+/**
+ * How much a row needs someone: 0 when something is red (failing CI, conflicts, changes
+ * requested), 1 when it is waiting (pending CI, behind its base, blocked for no visible reason),
+ * 2 otherwise — green included, since ready is not urgent.
+ */
+function attentionRank(pr: GithubPr): number {
+  const kind = mergeKind(pr);
+  if (pr.ci === "failure" || pr.ci === "error" || kind === "conflicts" || pr.reviewDecision === "CHANGES_REQUESTED") {
+    return 0;
   }
+  if (pr.ci === "pending" || kind === "behind" || kind === "blocked") return 1;
+  return 2;
 }
 
-/** Failing CI first, then pending, then everything else; newest activity first within a group. */
+/** What needs fixing first, then what is waiting, then everything else; newest activity first within a group. */
 export function orderPrs(items: readonly GithubPr[]): GithubPr[] {
   return [...items].sort(
-    (a, b) => ciRank(a.ci) - ciRank(b.ci) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+    (a, b) => attentionRank(a) - attentionRank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
   );
 }
 

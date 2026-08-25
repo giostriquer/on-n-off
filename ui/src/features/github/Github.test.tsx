@@ -185,15 +185,17 @@ describe("Github", () => {
     expect(openUrl).toHaveBeenLastCalledWith("https://github.com/acme/app/pull/41/checks");
   });
 
-  it("puts failing CI first and says how much of a long list is loaded", async () => {
+  it("puts what needs fixing first and says how much of a long list is loaded", async () => {
+    const plain = { mergeState: "unknown" as const };
     readGithubPrs.mockResolvedValue(
       okPrs({
         mine: {
           total: 137,
           items: [
-            pr({ id: "a", number: 1, title: "Green", ci: "success", updatedAt: "2026-08-24T19:59:00Z" }),
-            pr({ id: "b", number: 2, title: "Red", ci: "failure", updatedAt: "2026-08-24T19:00:00Z" }),
-            pr({ id: "c", number: 3, title: "Amber", ci: "pending", updatedAt: "2026-08-24T19:30:00Z" }),
+            pr({ id: "a", number: 1, title: "Green", ci: "success", updatedAt: "2026-08-24T19:59:00Z", ...plain }),
+            pr({ id: "b", number: 2, title: "Red", ci: "failure", updatedAt: "2026-08-24T19:00:00Z", ...plain }),
+            pr({ id: "c", number: 3, title: "Amber", ci: "pending", updatedAt: "2026-08-24T19:30:00Z", ...plain }),
+            pr({ id: "d", number: 4, title: "Conflicting", ci: "success", mergeable: "conflicting", updatedAt: "2026-08-24T19:10:00Z", ...plain }),
           ],
         },
       }),
@@ -202,13 +204,14 @@ describe("Github", () => {
     await screen.findByText("Red");
 
     const mine = section("Mine");
-    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toContain("3 of 137");
+    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toContain("4 of 137");
     const titles = within(mine)
       .getAllByRole("listitem")
       .map((item) => item.textContent ?? "");
-    expect(titles[0]).toContain("Red");
-    expect(titles[1]).toContain("Amber");
-    expect(titles[2]).toContain("Green");
+    expect(titles[0]).toContain("Conflicting");
+    expect(titles[1]).toContain("Red");
+    expect(titles[2]).toContain("Amber");
+    expect(titles[3]).toContain("Green");
   });
 
   it.each<[GithubStatus, string, string]>([
