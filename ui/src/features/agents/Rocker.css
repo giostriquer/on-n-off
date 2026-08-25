@@ -9,7 +9,7 @@
   cursor: pointer;
   user-select: none;
   letter-spacing: 0.03em;
-  font-family: "Instrument Sans", sans-serif;
+  font-family: var(--font-sans);
   font-weight: 600;
   overflow: hidden;
   vertical-align: middle;

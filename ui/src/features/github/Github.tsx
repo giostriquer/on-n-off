@@ -4,13 +4,14 @@ import { FOCUS_RING } from "$lib/a11y";
 import { displayError, parseInvokeError } from "$lib/error";
 import {
   filterPrs,
-  formatUpdatedAgo,
+  groupPrsByRepo,
   listCountLabel,
   orderPrs,
   prsSummary,
   statusHeadline,
 } from "$lib/githubFormat";
-import type { GithubListId, GithubPrList, GithubPrs } from "$lib/githubTypes";
+import type { GithubListId, GithubPr, GithubPrList, GithubPrs } from "$lib/githubTypes";
+import { formatAgo } from "$lib/timeFormat";
 import type { GithubPollSeconds } from "$lib/types";
 import { readCollapsed, writeCollapsed } from "./collapsed";
 import { PrRow } from "./PrRow";
@@ -23,6 +24,11 @@ type GithubProps = {
 };
 
 const EMPTY_LIST: GithubPrList = { total: 0, items: [] };
+
+// The section header sticks to the top of the scroll area; a repository band sticks right under
+// it, so the band's offset is the header's height. Keep the two in step.
+const SECTION_HEADER_HEIGHT = "h-10";
+const REPO_BAND_TOP = "top-10";
 
 /** Mine first: the user's own CI is what the screen exists for, and review requests can be many. */
 const SECTIONS: { id: GithubListId; title: string; empty: string }[] = [
@@ -54,7 +60,7 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
   const { query, loading, now, refresh } = useGithubPrs(pollSeconds);
   const prs = query.data ?? null;
   const banner = bannerFor(prs, query.error);
-  const updated = formatUpdatedAgo(prs?.fetchedAt, now);
+  const updated = formatAgo(prs?.fetchedAt, now);
   const checking = loading && !prs;
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<GithubListId>>(readCollapsed);
@@ -145,23 +151,32 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
 }
 
 /**
- * "1 mine · 1 failing · 15 to review · 0 assigned". Failing appears only when there is any, with
- * a "+" when only part of the user's pull requests were loaded.
+ * "1 mine · 1 failing · 1 with conflicts · 2 ready · 15 to review · 0 assigned". Failing,
+ * conflicts and ready appear only when there is any, with a "+" when only part of the user's
+ * pull requests were loaded.
  */
 function Summary({ prs }: { prs: GithubPrs }) {
-  const { mine, failing, failingIsPartial, review, assigned } = prsSummary(prs);
+  const { mine, failing, conflicts, ready, countsArePartial, review, assigned } = prsSummary(prs);
+  const partial = countsArePartial ? "+" : "";
+  const counts = [
+    { count: failing, noun: "failing", color: "var(--trip)" },
+    { count: conflicts, noun: "with conflicts", color: "var(--trip)" },
+    { count: ready, noun: "ready", color: "var(--live)" },
+  ];
   return (
     <p className="mt-1.5 mb-0 text-[12.5px] text-[var(--silkscreen)]" data-testid="github-summary">
       {mine} mine
-      {failing ? (
-        <>
-          {" · "}
-          <span className="font-semibold text-[var(--trip)]">
-            {failing}
-            {failingIsPartial ? "+" : ""} failing
+      {counts.map(({ count, noun, color }) =>
+        count ? (
+          <span key={noun}>
+            {" · "}
+            <span className="font-semibold" style={{ color }}>
+              {count}
+              {partial} {noun}
+            </span>
           </span>
-        </>
-      ) : null}
+        ) : null,
+      )}
       {" · "}
       {review} to review
       {" · "}
@@ -231,6 +246,16 @@ function SearchField({ query, onChange }: { query: string; onChange: (query: str
   );
 }
 
+function PrRows({ items, now }: { items: GithubPr[]; now: number }) {
+  return (
+    <ul className="m-0 list-none p-0" role="list">
+      {items.map((pr) => (
+        <PrRow key={pr.id} pr={pr} now={now} />
+      ))}
+    </ul>
+  );
+}
+
 function PrList({
   id,
   title,
@@ -259,6 +284,10 @@ function PrList({
   // lasts; one without stays folded, its header already saying "0 of N".
   const open = (searching && shown.length > 0) || !collapsed;
   const bodyId = `github-${id}-list`;
+  // Rows are grouped by repository so it is not repeated on every line. A single repository
+  // describes the title row instead of earning a band of its own.
+  const groups = groupPrsByRepo(orderPrs(shown));
+  const soleRepo = groups.length === 1 ? groups[0].repo : null;
   return (
     <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={title}>
       {/* Sticks to the top of the scroll area so a long list keeps its name in view. */}
@@ -268,7 +297,7 @@ function PrList({
         <h3 className="m-0">
           <button
             type="button"
-            className={`flex h-10 w-full items-center gap-2 rounded-[11px] border-0 bg-transparent px-3.5 text-left text-[11.5px] font-semibold tracking-[0.03em] uppercase hover:bg-[var(--well)] ${FOCUS_RING}`}
+            className={`flex ${SECTION_HEADER_HEIGHT} w-full items-center gap-2 rounded-[11px] border-0 bg-transparent px-3.5 text-left text-[11.5px] font-semibold tracking-[0.03em] uppercase hover:bg-[var(--well)] ${FOCUS_RING}`}
             aria-expanded={open}
             aria-controls={open ? bodyId : undefined}
             onClick={onToggle}
@@ -279,15 +308,38 @@ function PrList({
             />
             {title}
             <span className="font-mono text-[11px] font-normal normal-case text-[var(--mute)]">{count}</span>
+            {soleRepo ? (
+              <span className="min-w-0 truncate font-mono text-[11px] font-normal normal-case text-[var(--mute)]">
+                · {soleRepo}
+              </span>
+            ) : null}
           </button>
         </h3>
       </header>
-      {!open ? null : shown.length ? (
-        <ul id={bodyId} className="m-0 list-none p-0" role="list">
-          {orderPrs(shown).map((pr) => (
-            <PrRow key={pr.id} pr={pr} now={now} />
-          ))}
-        </ul>
+      {!open ? null : groups.length ? (
+        <div id={bodyId}>
+          {soleRepo ? (
+            <PrRows items={groups[0].items} now={now} />
+          ) : (
+            groups.map((group) => (
+              <div
+                key={group.repo}
+                role="group"
+                aria-label={group.repo}
+                className="border-t border-[var(--hair)] first:border-t-0"
+              >
+                {/* Sits under the section header while its rows scroll past. */}
+                <h4
+                  className={`sticky ${REPO_BAND_TOP} m-0 flex items-center gap-2 bg-[var(--well)] px-3.5 py-1 font-mono text-[10.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase`}
+                >
+                  {group.repo}
+                  <span className="font-normal normal-case">{group.items.length}</span>
+                </h4>
+                <PrRows items={group.items} now={now} />
+              </div>
+            ))
+          )}
+        </div>
       ) : (
         <p id={bodyId} className="px-3.5 py-4 text-[13px] text-[var(--mute)]">
           {checking ? "Checking…" : searching ? "No matches." : empty}

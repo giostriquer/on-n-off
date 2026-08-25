@@ -5,16 +5,14 @@ import {
   ciTone,
   ciToneColor,
   filterPrs,
-  formatUpdatedAgo,
+  groupPrsByRepo,
   listCountLabel,
+  mergeBadge,
   orderPrs,
   prsSummary,
-  reviewDecisionLabel,
-  reviewDecisionTone,
+  reviewBadge,
   statusHeadline,
 } from "./githubFormat";
-
-const NOW = Date.parse("2026-08-24T20:00:00Z");
 
 function pr(overrides: Partial<GithubPr>): GithubPr {
   return {
@@ -29,6 +27,7 @@ function pr(overrides: Partial<GithubPr>): GithubPr {
     headRef: "h",
     baseRef: "main",
     updatedAt: "2026-08-24T19:00:00Z",
+    mergeKind: null,
     ...overrides,
   };
 }
@@ -51,7 +50,7 @@ describe("githubFormat", () => {
     expect(ciLabel("none")).toBe("No checks");
   });
 
-  it("puts failing CI first, then pending, then the most recently updated", () => {
+  it("puts what needs fixing first, then what is waiting, then the rest, newest first within each", () => {
     const ordered = orderPrs([
       pr({ id: "ok-old", ci: "success", updatedAt: "2026-08-24T10:00:00Z" }),
       pr({ id: "pending", ci: "pending", updatedAt: "2026-08-24T12:00:00Z" }),
@@ -59,16 +58,28 @@ describe("githubFormat", () => {
       pr({ id: "failing", ci: "failure", updatedAt: "2026-08-24T08:00:00Z" }),
       pr({ id: "errored", ci: "error", updatedAt: "2026-08-24T09:00:00Z" }),
       pr({ id: "none", ci: "none", updatedAt: "2026-08-24T18:00:00Z" }),
+      // Red for reasons other than CI: conflicts and changes requested need the author too.
+      pr({ id: "conflicts", ci: "success", mergeKind: "conflicts", updatedAt: "2026-08-24T07:00:00Z" }),
+      pr({ id: "changes", ci: "success", reviewDecision: "CHANGES_REQUESTED", updatedAt: "2026-08-24T06:00:00Z" }),
+      // Amber: waiting on something — a rebase, an unexplained block — sorts with pending CI.
+      pr({ id: "behind", ci: "success", mergeKind: "behind", updatedAt: "2026-08-24T11:00:00Z" }),
+      pr({ id: "blocked", ci: "success", mergeKind: "blocked", reviewDecision: "APPROVED", updatedAt: "2026-08-24T13:00:00Z" }),
+      // Green is calm: ready to merge sorts with the rest by recency.
+      pr({ id: "ready", ci: "success", mergeKind: "ready", updatedAt: "2026-08-24T05:00:00Z" }),
     ]).map((item) => item.id);
-    expect(ordered).toEqual(["errored", "failing", "pending", "ok-new", "none", "ok-old"]);
-  });
-
-  it("describes how long ago a pull request moved", () => {
-    expect(formatUpdatedAgo("2026-08-24T19:59:30Z", NOW)).toBe("just now");
-    expect(formatUpdatedAgo("2026-08-24T19:55:00Z", NOW)).toBe("5m ago");
-    expect(formatUpdatedAgo("2026-08-24T17:10:00Z", NOW)).toBe("2h ago");
-    expect(formatUpdatedAgo("2026-08-21T20:00:00Z", NOW)).toBe("3d ago");
-    expect(formatUpdatedAgo("not a date", NOW)).toBe("");
+    expect(ordered).toEqual([
+      "errored",
+      "failing",
+      "conflicts",
+      "changes",
+      "blocked",
+      "pending",
+      "behind",
+      "ok-new",
+      "none",
+      "ok-old",
+      "ready",
+    ]);
   });
 
   it("matches a search against number, title, repository, author and branches", () => {
@@ -93,8 +104,10 @@ describe("githubFormat", () => {
     const items = [
       pr({ id: "draft", isDraft: true, ci: "pending" }),
       pr({ id: "team", reviewRequest: "team", ci: "failure" }),
-      pr({ id: "approved", reviewDecision: "APPROVED", ci: "success" }),
+      pr({ id: "approved", reviewDecision: "APPROVED", ci: "success", mergeKind: "ready" }),
       pr({ id: "changes", reviewDecision: "CHANGES_REQUESTED", ci: "error" }),
+      pr({ id: "conflicts", mergeKind: "conflicts" }),
+      pr({ id: "queued", mergeKind: "queued", mergeQueue: { position: 2 } }),
     ];
     const ids = (query: string) => filterPrs(items, query).map((item) => item.id);
     expect(ids("draft")).toEqual(["draft"]);
@@ -104,6 +117,39 @@ describe("githubFormat", () => {
     expect(ids("failing")).toEqual(["team"]);
     expect(ids("pending")).toEqual(["draft"]);
     expect(ids("errored")).toEqual(["changes"]);
+    expect(ids("conflicts")).toEqual(["conflicts"]);
+    expect(ids("queued #2")).toEqual(["queued"]);
+    expect(ids("ready to merge")).toEqual(["approved"]);
+  });
+
+  it("maps the backend's merge kind to one badge, the queue's carrying its position when known", () => {
+    const badge = (overrides: Partial<GithubPr>) => mergeBadge(pr(overrides));
+    expect(badge({ mergeKind: "conflicts" })).toEqual({ label: "Conflicts", tone: "trip" });
+    expect(badge({ mergeKind: "queued", mergeQueue: { position: 3 } })).toEqual({ label: "Queued #3", tone: "live" });
+    expect(badge({ mergeKind: "queued", mergeQueue: { position: null } })).toEqual({ label: "Queued", tone: "live" });
+    expect(badge({ mergeKind: "queued", mergeQueue: {} })).toEqual({ label: "Queued", tone: "live" });
+    expect(badge({ mergeKind: "autoMerge" })).toEqual({ label: "Auto-merge", tone: "mute" });
+    expect(badge({ mergeKind: "ready" })).toEqual({ label: "Ready to merge", tone: "live" });
+    expect(badge({ mergeKind: "behind" })).toEqual({ label: "Behind base", tone: "warn" });
+    expect(badge({ mergeKind: "blocked" })).toEqual({ label: "Blocked", tone: "warn" });
+    // A row without a kind, and one from a snapshot written before the field existed.
+    expect(badge({ mergeKind: null })).toBeNull();
+    expect(badge({ mergeKind: undefined })).toBeNull();
+  });
+
+  it("groups rows by repository, repositories alphabetically, rows in the order given", () => {
+    const grouped = groupPrsByRepo([
+      pr({ id: "t1", repo: "octo/tools" }),
+      pr({ id: "w1", repo: "acme/web" }),
+      pr({ id: "a1", repo: "acme/api" }),
+      pr({ id: "w2", repo: "acme/web" }),
+    ]);
+    expect(grouped.map((group) => [group.repo, group.items.map((item) => item.id)])).toEqual([
+      ["acme/api", ["a1"]],
+      ["acme/web", ["w1", "w2"]],
+      ["octo/tools", ["t1"]],
+    ]);
+    expect(groupPrsByRepo([])).toEqual([]);
   });
 
   it("says how much of a long list is loaded, and how much of it matches a search", () => {
@@ -124,19 +170,12 @@ describe("githubFormat", () => {
     expect(statusHeadline("network")).toBe("GitHub unreachable");
   });
 
-  it("colours review decisions like CI states", () => {
-    expect(reviewDecisionTone("APPROVED")).toBe("live");
-    expect(reviewDecisionTone("CHANGES_REQUESTED")).toBe("trip");
-    expect(reviewDecisionTone("REVIEW_REQUIRED")).toBe("mute");
-    expect(reviewDecisionTone(null)).toBe("mute");
-  });
-
-  it("labels only the review decisions that carry information", () => {
-    expect(reviewDecisionLabel("APPROVED")).toBe("Approved");
-    expect(reviewDecisionLabel("CHANGES_REQUESTED")).toBe("Changes requested");
-    expect(reviewDecisionLabel("REVIEW_REQUIRED")).toBe("");
-    expect(reviewDecisionLabel(null)).toBe("");
-    expect(reviewDecisionLabel(undefined)).toBe("");
+  it("gives a badge only to the review decisions that carry information, coloured like CI", () => {
+    expect(reviewBadge("APPROVED")).toEqual({ label: "Approved", tone: "live" });
+    expect(reviewBadge("CHANGES_REQUESTED")).toEqual({ label: "Changes requested", tone: "trip" });
+    expect(reviewBadge("REVIEW_REQUIRED")).toBeNull();
+    expect(reviewBadge(null)).toBeNull();
+    expect(reviewBadge(undefined)).toBeNull();
   });
 
   it("summarises the three lists in one line, naming failing CI on own pull requests", () => {
@@ -146,11 +185,13 @@ describe("githubFormat", () => {
       reviewRequested: { total: 15, items: [pr({ ci: "failure" })] },
       assigned: { total: 0, items: [] },
     };
-    expect(prsSummary(data)).toEqual({ mine: 3, failing: 2, failingIsPartial: false, review: 15, assigned: 0 });
+    expect(prsSummary(data)).toEqual({ mine: 3, failing: 2, conflicts: 0, ready: 0, countsArePartial: false, review: 15, assigned: 0 });
     expect(prsSummary({ ...data, mine: { total: 0, items: [] } })).toEqual({
       mine: 0,
       failing: 0,
-      failingIsPartial: false,
+      conflicts: 0,
+      ready: 0,
+      countsArePartial: false,
       review: 15,
       assigned: 0,
     });
@@ -158,9 +199,33 @@ describe("githubFormat", () => {
     expect(prsSummary({ ...data, mine: { total: 137, items: data.mine.items } })).toEqual({
       mine: 137,
       failing: 2,
-      failingIsPartial: true,
+      conflicts: 0,
+      ready: 0,
+      countsArePartial: true,
       review: 15,
       assigned: 0,
     });
+  });
+
+  it("counts own pull requests with conflicts and ready to merge", () => {
+    const data: GithubPrsData = {
+      scope: [],
+      mine: {
+        total: 6,
+        items: [
+          pr({ mergeKind: "conflicts" }),
+          pr({ mergeKind: "conflicts", isDraft: true }),
+          pr({ mergeKind: "ready", ci: "success" }),
+          pr({ mergeKind: "blocked" }),
+          // Queued and auto-merge rows say so; they are past "ready", not counted as it.
+          pr({ mergeKind: "queued", mergeQueue: { position: 1 } }),
+          pr({ mergeKind: "autoMerge" }),
+        ],
+      },
+      // Conflicts on the review list are the author's problem, not the reviewer's.
+      reviewRequested: { total: 1, items: [pr({ mergeKind: "conflicts" })] },
+      assigned: { total: 0, items: [] },
+    };
+    expect(prsSummary(data)).toMatchObject({ conflicts: 2, ready: 1 });
   });
 });
