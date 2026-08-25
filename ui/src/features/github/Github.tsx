@@ -4,13 +4,13 @@ import { FOCUS_RING } from "$lib/a11y";
 import { displayError, parseInvokeError } from "$lib/error";
 import {
   filterPrs,
-  formatUpdatedAgo,
   listCountLabel,
   orderPrs,
   prsSummary,
   statusHeadline,
 } from "$lib/githubFormat";
 import type { GithubListId, GithubPrList, GithubPrs } from "$lib/githubTypes";
+import { formatAgo } from "$lib/timeFormat";
 import type { GithubPollSeconds } from "$lib/types";
 import { readCollapsed, writeCollapsed } from "./collapsed";
 import { PrRow } from "./PrRow";
@@ -54,7 +54,7 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
   const { query, loading, now, refresh } = useGithubPrs(pollSeconds);
   const prs = query.data ?? null;
   const banner = bannerFor(prs, query.error);
-  const updated = formatUpdatedAgo(prs?.fetchedAt, now);
+  const updated = formatAgo(prs?.fetchedAt, now);
   const checking = loading && !prs;
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<GithubListId>>(readCollapsed);

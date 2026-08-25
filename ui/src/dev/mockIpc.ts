@@ -9,6 +9,7 @@
 
 import type { AppSettings, AgentInfo } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
+import { limitsFor } from "./limitsFixtures";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -65,7 +66,7 @@ const handlers: Record<string, Handler> = {
   list_plugins: emptyTab,
   list_local_plugins: emptyTab,
   refresh: emptyTab,
-  read_limits: () => [],
+  read_limits: (args) => limitsFor(args.agentId),
   read_github_prs: () => {
     if (!Object.hasOwn(SCENARIOS, scenario)) {
       throw { kind: "message", message: `mock: unknown scenario "${scenario}"`, path: null };

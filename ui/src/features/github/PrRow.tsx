@@ -5,13 +5,13 @@ import {
   ciLabel,
   ciTone,
   ciToneColor,
-  formatUpdatedAgo,
   reviewDecisionLabel,
   reviewDecisionTone,
   type CiTone,
 } from "$lib/githubFormat";
 import type { CiState, GithubPr } from "$lib/githubTypes";
 import { formatObservedAt } from "$lib/limitsFormat";
+import { formatAgo } from "$lib/timeFormat";
 
 /** One circular glyph per state with its own distinct mark, so CI is readable without colour. */
 const CI_GLYPH: Record<CiState, LucideIcon> = {
@@ -82,7 +82,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
         title={formatObservedAt(pr.updatedAt)}
         className="shrink-0 font-mono text-[11px] text-[var(--mute)]"
       >
-        {formatUpdatedAgo(pr.updatedAt, now)}
+        {formatAgo(pr.updatedAt, now)}
       </time>
     </li>
   );

@@ -5,7 +5,6 @@ import {
   ciTone,
   ciToneColor,
   filterPrs,
-  formatUpdatedAgo,
   listCountLabel,
   orderPrs,
   prsSummary,
@@ -13,8 +12,6 @@ import {
   reviewDecisionTone,
   statusHeadline,
 } from "./githubFormat";
-
-const NOW = Date.parse("2026-08-24T20:00:00Z");
 
 function pr(overrides: Partial<GithubPr>): GithubPr {
   return {
@@ -61,14 +58,6 @@ describe("githubFormat", () => {
       pr({ id: "none", ci: "none", updatedAt: "2026-08-24T18:00:00Z" }),
     ]).map((item) => item.id);
     expect(ordered).toEqual(["errored", "failing", "pending", "ok-new", "none", "ok-old"]);
-  });
-
-  it("describes how long ago a pull request moved", () => {
-    expect(formatUpdatedAgo("2026-08-24T19:59:30Z", NOW)).toBe("just now");
-    expect(formatUpdatedAgo("2026-08-24T19:55:00Z", NOW)).toBe("5m ago");
-    expect(formatUpdatedAgo("2026-08-24T17:10:00Z", NOW)).toBe("2h ago");
-    expect(formatUpdatedAgo("2026-08-21T20:00:00Z", NOW)).toBe("3d ago");
-    expect(formatUpdatedAgo("not a date", NOW)).toBe("");
   });
 
   it("matches a search against number, title, repository, author and branches", () => {
