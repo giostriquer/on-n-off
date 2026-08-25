@@ -5,8 +5,7 @@ import {
   ciTone,
   ciToneColor,
   filterPrs,
-  groupPrsByOwner,
-  splitRepo,
+  groupPrsByRepo,
   formatUpdatedAgo,
   listCountLabel,
   mergeBadge,
@@ -149,26 +148,19 @@ describe("githubFormat", () => {
     expect(badge({ mergeState: "draft", isDraft: true })).toBeNull();
   });
 
-  it("groups rows by repository owner, owners alphabetically, rows in the order given", () => {
-    const grouped = groupPrsByOwner([
+  it("groups rows by repository, repositories alphabetically, rows in the order given", () => {
+    const grouped = groupPrsByRepo([
       pr({ id: "t1", repo: "octo/tools" }),
       pr({ id: "w1", repo: "acme/web" }),
       pr({ id: "a1", repo: "acme/api" }),
       pr({ id: "w2", repo: "acme/web" }),
-      pr({ id: "bare", repo: "loose" }),
     ]);
-    expect(grouped.map((group) => [group.owner, group.items.map((item) => item.id)])).toEqual([
-      ["acme", ["w1", "a1", "w2"]],
-      ["loose", ["bare"]],
-      ["octo", ["t1"]],
+    expect(grouped.map((group) => [group.repo, group.items.map((item) => item.id)])).toEqual([
+      ["acme/api", ["a1"]],
+      ["acme/web", ["w1", "w2"]],
+      ["octo/tools", ["t1"]],
     ]);
-    expect(groupPrsByOwner([])).toEqual([]);
-  });
-
-  it("splits a repository into its owner and name, a bare name being both", () => {
-    expect(splitRepo("acme/web")).toEqual({ owner: "acme", name: "web" });
-    expect(splitRepo("loose")).toEqual({ owner: "loose", name: "loose" });
-    expect(splitRepo("")).toEqual({ owner: "", name: "" });
+    expect(groupPrsByRepo([])).toEqual([]);
   });
 
   it("says how much of a long list is loaded, and how much of it matches a search", () => {

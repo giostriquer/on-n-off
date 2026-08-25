@@ -8,7 +8,6 @@ import {
   formatUpdatedAgo,
   mergeBadge,
   reviewBadge,
-  splitRepo,
   type CiTone,
 } from "$lib/githubFormat";
 import type { CiState, GithubPr } from "$lib/githubTypes";
@@ -38,9 +37,8 @@ function Badge({ children, tone = "mute" }: { children: string; tone?: CiTone })
 /**
  * One pull request: a CI glyph that opens the checks tab, then the row itself as one button whose
  * accessible name is its content — `#number`, title and badges (draft, review decision, merge
- * state, team) first, repository (its name alone: the owner is named by the list or group around
- * the row), author and branches on the second line — and the age with its absolute time in a
- * tooltip.
+ * state, team) first, author and branches on the second line (the repository is named by the
+ * list or group around the row) — and the age with its absolute time in a tooltip.
  */
 export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
   const tone = ciTone(pr.ci);
@@ -79,8 +77,6 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
           {pr.reviewRequest === "team" ? <Badge>team</Badge> : null}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-[var(--mute)]">
-          <span className="shrink-0">{splitRepo(pr.repo).name}</span>
-          <span aria-hidden="true">·</span>
           <span className="shrink-0">{pr.author}</span>
           <span aria-hidden="true">·</span>
           <span className="min-w-0 truncate">{`${pr.headRef} → ${pr.baseRef}`}</span>

@@ -80,32 +80,24 @@ export function formatUpdatedAgo(iso: string | null | undefined, nowMs: number):
   return `${Math.floor(elapsed / DAY_MS)}d ago`;
 }
 
-/**
- * "acme/web" → owner "acme", name "web". The owner is an org or a user; a bare name without a
- * slash is its own owner so it still lands in a group.
- */
-export function splitRepo(repo: string): { owner: string; name: string } {
-  const slash = repo.indexOf("/");
-  return slash === -1 ? { owner: repo, name: repo } : { owner: repo.slice(0, slash), name: repo.slice(slash + 1) };
-}
-
-export type PrGroup = { owner: string; items: GithubPr[] };
+/** One repository's rows; `repo` is GitHub's `owner/name`. */
+export type PrGroup = { repo: string; items: GithubPr[] };
 
 /**
- * Rows grouped by repository owner so a list from many owners reads in sections; owners are
- * alphabetical and each group keeps the order it was given (call after `orderPrs`).
+ * Rows grouped by repository so a list from many repositories reads in sections and no row has
+ * to repeat where it lives; repositories are alphabetical and each group keeps the order it was
+ * given (call after `orderPrs`).
  */
-export function groupPrsByOwner(items: readonly GithubPr[]): PrGroup[] {
+export function groupPrsByRepo(items: readonly GithubPr[]): PrGroup[] {
   const groups = new Map<string, GithubPr[]>();
   for (const pr of items) {
-    const { owner } = splitRepo(pr.repo);
-    const group = groups.get(owner);
+    const group = groups.get(pr.repo);
     if (group) group.push(pr);
-    else groups.set(owner, [pr]);
+    else groups.set(pr.repo, [pr]);
   }
   return [...groups]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([owner, rows]) => ({ owner, items: rows }));
+    .map(([repo, rows]) => ({ repo, items: rows }));
 }
 
 function truncated(list: GithubPrList): boolean {

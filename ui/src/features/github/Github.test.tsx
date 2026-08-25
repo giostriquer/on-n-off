@@ -139,14 +139,15 @@ describe("Github", () => {
     ]);
 
     const mine = section("Mine");
-    // Every row of the list lives in one org, so the org describes the title row and the rows
-    // name the repository alone.
-    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toBe("Mine1· acme");
+    // Every row of the list lives in one repository, so it describes the title row and the rows
+    // do not repeat it.
+    expect(within(mine).getByRole("heading", { level: 3 }).textContent).toBe("Mine1· acme/app");
     expect(within(mine).queryByRole("group")).toBeNull();
     expect(within(mine).getByText("#41")).toBeTruthy();
     expect(within(mine).getByText("Add the thing")).toBeTruthy();
-    expect(within(mine).getByText("app")).toBeTruthy();
     expect(within(mine).queryByText("acme/app")).toBeNull();
+    expect(within(mine).queryByText("app")).toBeNull();
+    expect(within(mine).getByText("octocat")).toBeTruthy();
     expect(within(mine).getByText("feat/thing → main")).toBeTruthy();
     const age = within(mine).getByText("5m ago");
     expect(age.tagName).toBe("TIME");
@@ -156,8 +157,8 @@ describe("Github", () => {
     expect(within(mine).queryByText("Review required")).toBeNull();
 
     const review = section("Review requested");
-    expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested2· acme");
-    expect(within(review).getAllByText("lib")).toHaveLength(2);
+    expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested2· acme/lib");
+    expect(within(review).queryByText("acme/lib")).toBeNull();
     expect(within(review).getByText("Draft")).toBeTruthy();
     expect(within(review).getByText("team")).toBeTruthy();
     expect(within(review).getByText("Approved")).toBeTruthy();
@@ -177,7 +178,7 @@ describe("Github", () => {
     renderGithub();
     await screen.findByText("Add the thing");
 
-    await user.click(within(section("Mine")).getByRole("button", { name: /#41.*Add the thing.*app/ }));
+    await user.click(within(section("Mine")).getByRole("button", { name: /#41.*Add the thing.*octocat/ }));
     expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/app/pull/41");
 
     await user.click(within(section("Mine")).getByRole("button", { name: /CI failing/ }));
@@ -321,8 +322,8 @@ describe("Github", () => {
     await user.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(within(section("Review requested")).queryByText("Direct ask")).toBeNull();
-    // Folded, the title row still says how many and from which owner.
-    expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toBe("Review requested2· acme");
+    // Folded, the title row still says how many and from which repository.
+    expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toBe("Review requested2· acme/lib");
     expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
 
     first.unmount();
@@ -382,7 +383,7 @@ describe("Github", () => {
     expect(within(mine).getByText("Queued #2").style.color).toBe("var(--live)");
   });
 
-  it("groups a list that spans several orgs under one sub-heading per org", async () => {
+  it("groups a list that spans several repositories under one sub-heading per repository", async () => {
     readGithubPrs.mockResolvedValue(
       okPrs({
         reviewRequested: {
@@ -402,24 +403,24 @@ describe("Github", () => {
     const review = section("Review requested");
     expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested3");
     const groups = within(review).getAllByRole("group");
-    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["acme", "octo"]);
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["acme/api", "acme/lib", "octo/tools"]);
     const controlled = within(review).getByRole("button", { name: /Review requested/ }).getAttribute("aria-controls");
     expect(document.getElementById(controlled ?? "")?.contains(groups[0])).toBe(true);
-    expect(within(groups[0]).getByRole("heading", { level: 4 }).textContent).toBe("acme2");
-    expect(within(groups[0]).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      expect.stringContaining("Direct ask"),
-      expect.stringContaining("api: paginate"),
-    ]);
-    expect(within(groups[0]).getByText("lib")).toBeTruthy();
-    expect(within(groups[0]).getByText("api")).toBeTruthy();
-    expect(within(groups[1]).getByRole("heading", { level: 4 }).textContent).toBe("octo1");
-    expect(within(groups[1]).getByText("tools")).toBeTruthy();
-    expect(within(review).queryByText("acme/lib")).toBeNull();
-    // A search still matches the full owner/name and narrows the groups to the ones with hits.
+    expect(within(groups[0]).getByRole("heading", { level: 4 }).textContent).toBe("acme/api1");
+    expect(within(groups[0]).getByRole("listitem").textContent).toContain("api: paginate");
+    expect(within(groups[1]).getByRole("heading", { level: 4 }).textContent).toBe("acme/lib1");
+    expect(within(groups[1]).getByRole("listitem").textContent).toContain("Direct ask");
+    expect(within(groups[2]).getByRole("heading", { level: 4 }).textContent).toBe("octo/tools1");
+    // The repository is said once, by the band, never again on the row.
+    const row = within(groups[2]).getByRole("listitem");
+    expect(within(row).getByText("sam")).toBeTruthy();
+    expect(within(row).queryByText("octo/tools")).toBeNull();
+    expect(within(row).queryByText("tools")).toBeNull();
+    // A search still matches the repository and narrows the groups to the ones with hits.
     await user.type(screen.getByRole("searchbox"), "octo/");
-    expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested1 of 3· octo");
+    expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested1 of 3· octo/tools");
     expect(within(review).queryByRole("group")).toBeNull();
-    expect(within(review).getByText("tools")).toBeTruthy();
+    expect(within(review).getByText("tools: bump lockfile")).toBeTruthy();
   });
 
   it("marks every own-list count as partial when GitHub holds more than was loaded", async () => {
