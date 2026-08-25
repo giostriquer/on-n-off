@@ -4,8 +4,14 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Instrument Sans", sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
+  /*
+   * Native stacks on purpose: bundled webfonts (Instrument Sans, JetBrains Mono until v0.2.0)
+   * rendered fuzzy at the screens' 10–12 px sizes on 1× displays. SF Pro / SF Mono on macOS and
+   * Segoe UI / Cascadia Mono (Consolas before Windows 11) on Windows are hinted for exactly those
+   * sizes; `system-ui` and the generic families catch anything else.
+   */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, "Cascadia Mono", Consolas, monospace;
 }
 
 /*
@@ -77,10 +83,10 @@ html,
 body {
   background: var(--void);
   color: var(--silkscreen);
-  font-family: "Instrument Sans", sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.45;
-  -webkit-font-smoothing: antialiased;
+  /* Default (subpixel) smoothing: grayscale `antialiased` thins strokes on 1× displays. */
 }
 
 html[data-surface="limits-popover"],
@@ -90,12 +96,10 @@ html[data-surface="limits-popover"] #root {
 }
 
 .limits-popover-shell {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   background: var(--popover-surface);
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.1),
     0 18px 44px rgba(0, 0, 0, 0.28);
-  -webkit-font-smoothing: auto;
   -webkit-backdrop-filter: saturate(1.2) blur(24px);
   backdrop-filter: saturate(1.2) blur(24px);
 }

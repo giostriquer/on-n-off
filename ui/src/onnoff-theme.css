@@ -1,7 +1,7 @@
 [data-theme='onnoff'] {
 	--spacing: 0.25rem; /* 0.22rem; | 0.25rem; | 0.28rem; */
 	--text-scaling: 1; /* 1.067 */
-	--typo-base--font-family: "Instrument Sans", sans-serif;
+	--typo-base--font-family: var(--font-sans);
 	--typo-base--font-size: inherit;
 	--typo-base--color-light: #17191d;
 	--typo-base--color-dark: #eef0f2;
@@ -15,7 +15,7 @@
 	--typo-base--word-spacing: inherit;
 	--typo-base--hyphens: inherit;
 	--typo-base--text-transform: inherit;
-	--typo-heading--font-family: "Instrument Sans", sans-serif;
+	--typo-heading--font-family: var(--font-sans);
 	--typo-heading--color-light: #17191d;
 	--typo-heading--color-dark: #eef0f2;
 	--typo-heading--font-weight: 600;
