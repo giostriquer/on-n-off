@@ -22,11 +22,15 @@ const CI_GLYPH: Record<CiState, LucideIcon> = {
   none: Circle,
 };
 
+/**
+ * A tight box — no inherited line-height, one more pixel above than below — so the mono capitals
+ * sit on the title's optical centre instead of riding high in a box taller than the title itself.
+ */
 function Badge({ children, tone = "mute" }: { children: string; tone?: CiTone }) {
   const color = ciToneColor(tone);
   return (
     <span
-      className="shrink-0 rounded-md border px-1.5 py-px font-mono text-[10px] uppercase"
+      className="shrink-0 rounded-md border px-1.5 pt-[3px] pb-[2px] font-mono text-[10px] leading-none uppercase"
       style={{ borderColor: tone === "mute" ? "var(--hair)" : color, color }}
     >
       {children}
