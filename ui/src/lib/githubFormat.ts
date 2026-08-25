@@ -6,6 +6,7 @@ import type {
   GithubPrList,
   GithubPrsData,
   GithubStatus,
+  MergeKind,
   ReviewDecision,
 } from "./githubTypes";
 
@@ -49,18 +50,16 @@ export function ciLabel(ci: CiState): string {
   }
 }
 
-/**
- * How much a row needs someone: 0 when something is red (failing CI, conflicts, changes
- * requested), 1 when it is waiting (pending CI, behind its base, blocked for no visible reason),
- * 2 otherwise — green included, since ready is not urgent.
- */
+/** Red needs someone now, amber is waiting; green and grey are calm, ready included. */
+const TONE_RANK: Record<CiTone, number> = { trip: 0, warn: 1, live: 2, mute: 2 };
+
+/** How much a row needs someone: the reddest tone among its CI glyph and badges. */
 function attentionRank(pr: GithubPr): number {
-  const kind = mergeKind(pr);
-  if (pr.ci === "failure" || pr.ci === "error" || kind === "conflicts" || pr.reviewDecision === "CHANGES_REQUESTED") {
-    return 0;
-  }
-  if (pr.ci === "pending" || kind === "behind" || kind === "blocked") return 1;
-  return 2;
+  return Math.min(
+    TONE_RANK[ciTone(pr.ci)],
+    TONE_RANK[reviewBadge(pr.reviewDecision)?.tone ?? "mute"],
+    TONE_RANK[mergeBadge(pr)?.tone ?? "mute"],
+  );
 }
 
 /** What needs fixing first, then what is waiting, then everything else; newest activity first within a group. */
@@ -132,39 +131,7 @@ export function reviewBadge(decision: ReviewDecision | null | undefined): RowBad
   }
 }
 
-/** What a row can say about merging, most pressing first; null when there is nothing to say. */
-export type MergeKind = "conflicts" | "queued" | "autoMerge" | "ready" | "behind" | "blocked";
-
-/**
- * Both fields are consulted because they diverge on drafts: GitHub reports `mergeStateStatus:
- * DRAFT` for a draft whatever the merge would do, while `mergeable` still says `CONFLICTING`.
- */
-function hasConflicts(pr: GithubPr): boolean {
-  return pr.mergeable === "conflicting" || pr.mergeState === "dirty";
-}
-
-/**
- * One classification per pull request: conflicts, then the merge queue, auto-merge, ready to
- * merge, behind the base, blocked. "Blocked" is deliberately quiet when the review decision is
- * "review required" — that is every protected PR's default state, and the badge would otherwise
- * sit on nearly every unreviewed row — and when changes were requested or CI is not green (or
- * absent), which do explain it. Unknown, unstable and draft states say nothing.
- */
-export function mergeKind(pr: GithubPr): MergeKind | null {
-  if (hasConflicts(pr)) return "conflicts";
-  if (pr.mergeQueue) return "queued";
-  if (pr.autoMerge) return "autoMerge";
-  // GitHub reports DRAFT rather than CLEAN for a draft; the guard is defensive.
-  if (pr.mergeState === "clean" && !pr.isDraft) return "ready";
-  if (pr.mergeState === "behind") return "behind";
-  if (pr.mergeState === "blocked") {
-    const reviewExplains = pr.reviewDecision === "REVIEW_REQUIRED" || pr.reviewDecision === "CHANGES_REQUESTED";
-    const ciExplains = pr.ci !== "success" && pr.ci !== "none";
-    if (!reviewExplains && !ciExplains) return "blocked";
-  }
-  return null;
-}
-
+/** One badge per merge kind; the classification itself is the backend's (`mergeKind` on the row). */
 const MERGE_BADGES: Record<MergeKind, RowBadge> = {
   conflicts: { label: "Conflicts", tone: "trip" },
   queued: { label: "Queued", tone: "live" },
@@ -176,8 +143,8 @@ const MERGE_BADGES: Record<MergeKind, RowBadge> = {
 
 /** The one merge-state badge a row shows; the queue badge carries the position when known. */
 export function mergeBadge(pr: GithubPr): RowBadge | null {
-  const kind = mergeKind(pr);
-  if (kind === null) return null;
+  const kind = pr.mergeKind;
+  if (!kind) return null;
   const badge = MERGE_BADGES[kind];
   const position = kind === "queued" ? pr.mergeQueue?.position : null;
   return position ? { ...badge, label: `Queued #${position}` } : badge;
@@ -244,8 +211,8 @@ export function prsSummary(data: GithubPrsData): PrsSummary {
   return {
     mine: data.mine.total,
     failing: data.mine.items.filter((pr) => pr.ci === "failure" || pr.ci === "error").length,
-    conflicts: data.mine.items.filter((pr) => mergeKind(pr) === "conflicts").length,
-    ready: data.mine.items.filter((pr) => mergeKind(pr) === "ready").length,
+    conflicts: data.mine.items.filter((pr) => pr.mergeKind === "conflicts").length,
+    ready: data.mine.items.filter((pr) => pr.mergeKind === "ready").length,
     countsArePartial: truncated(data.mine),
     review: data.reviewRequested.total,
     assigned: data.assigned.total,

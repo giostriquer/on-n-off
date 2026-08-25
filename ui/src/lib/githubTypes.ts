@@ -11,16 +11,12 @@ export type CiState = "none" | "pending" | "success" | "failure" | "error";
 
 export type ReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
 
-/** Whether the head merges into the base without conflicts; `unknown` while GitHub computes it. */
-export type Mergeable = "mergeable" | "conflicting" | "unknown";
-
 /**
- * GitHub's merge state, collapsed: `clean` has every requirement met, `blocked` is branch
- * protection (review, required checks), `behind` needs an update from the base, `dirty` is
- * conflicts, `unstable` a non-required check failing; `unknown` also covers states this build
- * does not know.
+ * What a row can say about merging, most pressing first, classified once by the backend
+ * (`src-tauri/src/github/merge.rs`) from GitHub's mergeability, merge state, merge queue and
+ * auto-merge: `blocked` is reserved for a block the row does not otherwise explain.
  */
-export type MergeState = "clean" | "unstable" | "blocked" | "behind" | "dirty" | "draft" | "unknown";
+export type MergeKind = "conflicts" | "queued" | "autoMerge" | "ready" | "behind" | "blocked";
 
 export type GithubPr = {
   /** GitHub's node id, stable across pushes and renames. */
@@ -40,12 +36,14 @@ export type GithubPr = {
   updatedAt: string;
   /** Review-requested list only: whether the request named the user or one of their teams. */
   reviewRequest?: "direct" | "team" | null;
-  mergeable: Mergeable;
-  mergeState: MergeState;
+  /**
+   * The backend's verdict on merging; absent when there is nothing to say. The DTO also carries
+   * the raw fields it was read from (`mergeable`, `mergeState`, `autoMerge`), which the screen
+   * does not consult.
+   */
+  mergeKind?: MergeKind | null;
   /** Present while the pull request sits in a merge queue; `position` is 1-based when known. */
   mergeQueue?: { position?: number | null } | null;
-  /** Auto-merge is on: GitHub merges once the requirements are met. */
-  autoMerge: boolean;
 };
 
 export type GithubPrList = {

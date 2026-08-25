@@ -26,9 +26,7 @@ function pr(overrides: Partial<GithubPr> = {}): GithubPr {
     headRef: "feat/thing",
     baseRef: "main",
     updatedAt: "2026-08-24T19:55:00Z",
-    mergeable: "mergeable",
-    mergeState: "blocked",
-    autoMerge: false,
+    mergeKind: null,
     ...overrides,
   };
 }
@@ -65,8 +63,7 @@ function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
           reviewDecision: "APPROVED",
           ci: "none",
           reviewRequest: "team",
-          mergeable: "conflicting",
-          mergeState: "dirty",
+          mergeKind: "conflicts",
         }),
       ],
     },
@@ -186,16 +183,15 @@ describe("Github", () => {
   });
 
   it("puts what needs fixing first and says how much of a long list is loaded", async () => {
-    const plain = { mergeState: "unknown" as const };
     readGithubPrs.mockResolvedValue(
       okPrs({
         mine: {
           total: 137,
           items: [
-            pr({ id: "a", number: 1, title: "Green", ci: "success", updatedAt: "2026-08-24T19:59:00Z", ...plain }),
-            pr({ id: "b", number: 2, title: "Red", ci: "failure", updatedAt: "2026-08-24T19:00:00Z", ...plain }),
-            pr({ id: "c", number: 3, title: "Amber", ci: "pending", updatedAt: "2026-08-24T19:30:00Z", ...plain }),
-            pr({ id: "d", number: 4, title: "Conflicting", ci: "success", mergeable: "conflicting", updatedAt: "2026-08-24T19:10:00Z", ...plain }),
+            pr({ id: "a", number: 1, title: "Green", ci: "success", updatedAt: "2026-08-24T19:59:00Z" }),
+            pr({ id: "b", number: 2, title: "Red", ci: "failure", updatedAt: "2026-08-24T19:00:00Z" }),
+            pr({ id: "c", number: 3, title: "Amber", ci: "pending", updatedAt: "2026-08-24T19:30:00Z" }),
+            pr({ id: "d", number: 4, title: "Conflicting", ci: "success", mergeKind: "conflicts", updatedAt: "2026-08-24T19:10:00Z" }),
           ],
         },
       }),
@@ -367,9 +363,9 @@ describe("Github", () => {
           total: 4,
           items: [
             pr(),
-            pr({ id: "PR_42", number: 42, title: "Conflicted", mergeable: "conflicting", ci: "success" }),
-            pr({ id: "PR_43", number: 43, title: "Green and approved", reviewDecision: "APPROVED", mergeState: "clean", ci: "success" }),
-            pr({ id: "PR_44", number: 44, title: "In the queue", reviewDecision: "APPROVED", mergeQueue: { position: 2 }, ci: "success" }),
+            pr({ id: "PR_42", number: 42, title: "Conflicted", mergeKind: "conflicts", ci: "success" }),
+            pr({ id: "PR_43", number: 43, title: "Green and approved", reviewDecision: "APPROVED", mergeKind: "ready", ci: "success" }),
+            pr({ id: "PR_44", number: 44, title: "In the queue", reviewDecision: "APPROVED", mergeKind: "queued", mergeQueue: { position: 2 }, ci: "success" }),
           ],
         },
       }),
@@ -434,8 +430,8 @@ describe("Github", () => {
           items: [
             pr({ id: "a", ci: "failure" }),
             pr({ id: "b", number: 2, title: "Second thing", ci: "success" }),
-            pr({ id: "c", number: 3, title: "Conflicted", mergeable: "conflicting", ci: "success" }),
-            pr({ id: "d", number: 4, title: "Ready", mergeState: "clean", reviewDecision: "APPROVED", ci: "success" }),
+            pr({ id: "c", number: 3, title: "Conflicted", mergeKind: "conflicts", ci: "success" }),
+            pr({ id: "d", number: 4, title: "Ready", mergeKind: "ready", reviewDecision: "APPROVED", ci: "success" }),
           ],
         },
       }),

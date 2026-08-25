@@ -30,9 +30,7 @@ function pr(overrides: Partial<GithubPr>): GithubPr {
     headRef: "h",
     baseRef: "main",
     updatedAt: "2026-08-24T19:00:00Z",
-    mergeable: "mergeable",
-    mergeState: "blocked",
-    autoMerge: false,
+    mergeKind: null,
     ...overrides,
   };
 }
@@ -56,22 +54,21 @@ describe("githubFormat", () => {
   });
 
   it("puts what needs fixing first, then what is waiting, then the rest, newest first within each", () => {
-    const plain = { mergeState: "unknown" as const };
     const ordered = orderPrs([
-      pr({ id: "ok-old", ci: "success", updatedAt: "2026-08-24T10:00:00Z", ...plain }),
-      pr({ id: "pending", ci: "pending", updatedAt: "2026-08-24T12:00:00Z", ...plain }),
-      pr({ id: "ok-new", ci: "success", updatedAt: "2026-08-24T19:00:00Z", ...plain }),
-      pr({ id: "failing", ci: "failure", updatedAt: "2026-08-24T08:00:00Z", ...plain }),
-      pr({ id: "errored", ci: "error", updatedAt: "2026-08-24T09:00:00Z", ...plain }),
-      pr({ id: "none", ci: "none", updatedAt: "2026-08-24T18:00:00Z", ...plain }),
+      pr({ id: "ok-old", ci: "success", updatedAt: "2026-08-24T10:00:00Z" }),
+      pr({ id: "pending", ci: "pending", updatedAt: "2026-08-24T12:00:00Z" }),
+      pr({ id: "ok-new", ci: "success", updatedAt: "2026-08-24T19:00:00Z" }),
+      pr({ id: "failing", ci: "failure", updatedAt: "2026-08-24T08:00:00Z" }),
+      pr({ id: "errored", ci: "error", updatedAt: "2026-08-24T09:00:00Z" }),
+      pr({ id: "none", ci: "none", updatedAt: "2026-08-24T18:00:00Z" }),
       // Red for reasons other than CI: conflicts and changes requested need the author too.
-      pr({ id: "conflicts", ci: "success", mergeable: "conflicting", updatedAt: "2026-08-24T07:00:00Z", ...plain }),
-      pr({ id: "changes", ci: "success", reviewDecision: "CHANGES_REQUESTED", updatedAt: "2026-08-24T06:00:00Z", ...plain }),
+      pr({ id: "conflicts", ci: "success", mergeKind: "conflicts", updatedAt: "2026-08-24T07:00:00Z" }),
+      pr({ id: "changes", ci: "success", reviewDecision: "CHANGES_REQUESTED", updatedAt: "2026-08-24T06:00:00Z" }),
       // Amber: waiting on something — a rebase, an unexplained block — sorts with pending CI.
-      pr({ id: "behind", ci: "success", mergeState: "behind", updatedAt: "2026-08-24T11:00:00Z" }),
-      pr({ id: "blocked", ci: "success", mergeState: "blocked", reviewDecision: "APPROVED", updatedAt: "2026-08-24T13:00:00Z" }),
+      pr({ id: "behind", ci: "success", mergeKind: "behind", updatedAt: "2026-08-24T11:00:00Z" }),
+      pr({ id: "blocked", ci: "success", mergeKind: "blocked", reviewDecision: "APPROVED", updatedAt: "2026-08-24T13:00:00Z" }),
       // Green is calm: ready to merge sorts with the rest by recency.
-      pr({ id: "ready", ci: "success", mergeState: "clean", updatedAt: "2026-08-24T05:00:00Z" }),
+      pr({ id: "ready", ci: "success", mergeKind: "ready", updatedAt: "2026-08-24T05:00:00Z" }),
     ]).map((item) => item.id);
     expect(ordered).toEqual([
       "errored",
@@ -118,10 +115,10 @@ describe("githubFormat", () => {
     const items = [
       pr({ id: "draft", isDraft: true, ci: "pending" }),
       pr({ id: "team", reviewRequest: "team", ci: "failure" }),
-      pr({ id: "approved", reviewDecision: "APPROVED", ci: "success", mergeState: "clean" }),
+      pr({ id: "approved", reviewDecision: "APPROVED", ci: "success", mergeKind: "ready" }),
       pr({ id: "changes", reviewDecision: "CHANGES_REQUESTED", ci: "error" }),
-      pr({ id: "conflicts", mergeable: "conflicting" }),
-      pr({ id: "queued", mergeQueue: { position: 2 } }),
+      pr({ id: "conflicts", mergeKind: "conflicts" }),
+      pr({ id: "queued", mergeKind: "queued", mergeQueue: { position: 2 } }),
     ];
     const ids = (query: string) => filterPrs(items, query).map((item) => item.id);
     expect(ids("draft")).toEqual(["draft"]);
@@ -136,37 +133,19 @@ describe("githubFormat", () => {
     expect(ids("ready to merge")).toEqual(["approved"]);
   });
 
-  it("gives each pull request one merge badge, the most pressing state first", () => {
+  it("maps the backend's merge kind to one badge, the queue's carrying its position when known", () => {
     const badge = (overrides: Partial<GithubPr>) => mergeBadge(pr(overrides));
-    // Conflicts beat everything, whichever field reports them.
-    expect(badge({ mergeable: "conflicting", mergeQueue: { position: 1 }, mergeState: "clean" })).toEqual({ label: "Conflicts", tone: "trip" });
-    expect(badge({ mergeState: "dirty" })).toEqual({ label: "Conflicts", tone: "trip" });
-    // A draft with conflicts: GitHub says DRAFT for the state, so only `mergeable` knows.
-    expect(badge({ mergeable: "conflicting", mergeState: "draft", isDraft: true })).toEqual({ label: "Conflicts", tone: "trip" });
-    // The merge queue, with its position when GitHub reports one.
-    expect(badge({ mergeQueue: { position: 3 }, autoMerge: true, mergeState: "clean" })).toEqual({ label: "Queued #3", tone: "live" });
-    expect(badge({ mergeQueue: { position: null } })).toEqual({ label: "Queued", tone: "live" });
-    expect(badge({ mergeQueue: {} })).toEqual({ label: "Queued", tone: "live" });
-    // Auto-merge will merge once the requirements are met.
-    expect(badge({ autoMerge: true, mergeState: "clean" })).toEqual({ label: "Auto-merge", tone: "mute" });
-    expect(badge({ autoMerge: true, mergeState: "blocked", reviewDecision: "REVIEW_REQUIRED" })).toEqual({ label: "Auto-merge", tone: "mute" });
-    // Every requirement met; a draft is never "ready".
-    expect(badge({ mergeState: "clean" })).toEqual({ label: "Ready to merge", tone: "live" });
-    expect(badge({ mergeState: "clean", mergeQueue: null })).toEqual({ label: "Ready to merge", tone: "live" });
-    expect(badge({ mergeState: "clean", isDraft: true })).toBeNull();
-    expect(badge({ mergeState: "behind" })).toEqual({ label: "Behind base", tone: "warn" });
-    // "Blocked" only when the review and CI badges do not already say why.
-    expect(badge({ mergeState: "blocked", reviewDecision: "APPROVED", ci: "success" })).toEqual({ label: "Blocked", tone: "warn" });
-    expect(badge({ mergeState: "blocked", reviewDecision: null, ci: "none" })).toEqual({ label: "Blocked", tone: "warn" });
-    expect(badge({ mergeState: "blocked", reviewDecision: "REVIEW_REQUIRED", ci: "success" })).toBeNull();
-    expect(badge({ mergeState: "blocked", reviewDecision: "CHANGES_REQUESTED", ci: "success" })).toBeNull();
-    expect(badge({ mergeState: "blocked", reviewDecision: "APPROVED", ci: "failure" })).toBeNull();
-    expect(badge({ mergeState: "blocked", reviewDecision: "APPROVED", ci: "pending" })).toBeNull();
-    expect(badge({ mergeState: "blocked", reviewDecision: "APPROVED", ci: "error" })).toBeNull();
-    // Nothing to say yet.
-    expect(badge({ mergeState: "unknown", mergeable: "unknown" })).toBeNull();
-    expect(badge({ mergeState: "unstable" })).toBeNull();
-    expect(badge({ mergeState: "draft", isDraft: true })).toBeNull();
+    expect(badge({ mergeKind: "conflicts" })).toEqual({ label: "Conflicts", tone: "trip" });
+    expect(badge({ mergeKind: "queued", mergeQueue: { position: 3 } })).toEqual({ label: "Queued #3", tone: "live" });
+    expect(badge({ mergeKind: "queued", mergeQueue: { position: null } })).toEqual({ label: "Queued", tone: "live" });
+    expect(badge({ mergeKind: "queued", mergeQueue: {} })).toEqual({ label: "Queued", tone: "live" });
+    expect(badge({ mergeKind: "autoMerge" })).toEqual({ label: "Auto-merge", tone: "mute" });
+    expect(badge({ mergeKind: "ready" })).toEqual({ label: "Ready to merge", tone: "live" });
+    expect(badge({ mergeKind: "behind" })).toEqual({ label: "Behind base", tone: "warn" });
+    expect(badge({ mergeKind: "blocked" })).toEqual({ label: "Blocked", tone: "warn" });
+    // A row without a kind, and one from a snapshot written before the field existed.
+    expect(badge({ mergeKind: null })).toBeNull();
+    expect(badge({ mergeKind: undefined })).toBeNull();
   });
 
   it("groups rows by repository, repositories alphabetically, rows in the order given", () => {
@@ -245,17 +224,17 @@ describe("githubFormat", () => {
       mine: {
         total: 6,
         items: [
-          pr({ mergeable: "conflicting" }),
-          pr({ mergeState: "dirty" }),
-          pr({ mergeState: "clean", ci: "success" }),
-          pr({ mergeState: "clean", isDraft: true }),
+          pr({ mergeKind: "conflicts" }),
+          pr({ mergeKind: "conflicts", isDraft: true }),
+          pr({ mergeKind: "ready", ci: "success" }),
+          pr({ mergeKind: "blocked" }),
           // Queued and auto-merge rows say so; they are past "ready", not counted as it.
-          pr({ mergeState: "clean", mergeQueue: { position: 1 } }),
-          pr({ mergeState: "clean", autoMerge: true }),
+          pr({ mergeKind: "queued", mergeQueue: { position: 1 } }),
+          pr({ mergeKind: "autoMerge" }),
         ],
       },
       // Conflicts on the review list are the author's problem, not the reviewer's.
-      reviewRequested: { total: 1, items: [pr({ mergeable: "conflicting" })] },
+      reviewRequested: { total: 1, items: [pr({ mergeKind: "conflicts" })] },
       assigned: { total: 0, items: [] },
     };
     expect(prsSummary(data)).toMatchObject({ conflicts: 2, ready: 1 });
