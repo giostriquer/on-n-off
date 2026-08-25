@@ -82,7 +82,7 @@ fn list(search: &Value) -> GithubPrListDto {
 
 fn pull_request(node: &Value) -> Option<GithubPrDto> {
     let text = |key: &str| node[key].as_str().map(str::to_string);
-    Some(GithubPrDto {
+    let mut pr = GithubPrDto {
         id: text("id")?,
         number: node["number"].as_u64()?,
         title: text("title")?,
@@ -106,7 +106,10 @@ fn pull_request(node: &Value) -> Option<GithubPrDto> {
         merge_state: merge_state(node["mergeStateStatus"].as_str()),
         merge_queue: merge_queue(&node["mergeQueueEntry"]),
         auto_merge: node["autoMergeRequest"].is_object(),
-    })
+        merge_kind: None,
+    };
+    pr.merge_kind = super::merge::classify(&pr);
+    Some(pr)
 }
 
 fn mergeable(value: Option<&str>) -> Mergeability {
@@ -166,7 +169,8 @@ fn rate_limit(value: &Value) -> Option<GithubRateLimitDto> {
 mod tests {
     use super::*;
     use crate::dto::{
-        CiState, GithubMergeQueueDto, MergeState, Mergeability, ReviewDecision, ReviewRequestKind,
+        CiState, GithubMergeQueueDto, MergeKind, MergeState, Mergeability, ReviewDecision,
+        ReviewRequestKind,
     };
     use crate::github::fixtures::REPLY;
     use serde_json::json;
@@ -205,6 +209,10 @@ mod tests {
         assert_eq!(mine.merge_state, MergeState::Blocked);
         assert_eq!(mine.merge_queue, None);
         assert!(!mine.auto_merge);
+        assert_eq!(
+            mine.merge_kind, None,
+            "blocked with a review required is the default state, not a badge"
+        );
 
         assert_eq!(parsed.data.review_requested.total, 2);
         let [direct, team] = parsed.data.review_requested.items.as_slice() else {
@@ -218,12 +226,14 @@ mod tests {
         // conflicts, which is why both fields ride along.
         assert_eq!(direct.mergeable, Mergeability::Conflicting);
         assert_eq!(direct.merge_state, MergeState::Draft);
+        assert_eq!(direct.merge_kind, Some(MergeKind::Conflicts));
         assert_eq!(team.review_request, Some(ReviewRequestKind::Team));
         assert_eq!(team.ci, CiState::None, "a null rollup means no checks");
         assert_eq!(team.author, "", "a deleted author is not an error");
         assert_eq!(team.mergeable, Mergeability::Conflicting);
         assert_eq!(team.merge_state, MergeState::Dirty);
         assert!(team.auto_merge);
+        assert_eq!(team.merge_kind, Some(MergeKind::Conflicts));
 
         assert_eq!(parsed.data.assigned.total, 0);
         assert!(parsed.data.assigned.items.is_empty());

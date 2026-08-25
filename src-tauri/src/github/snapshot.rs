@@ -39,7 +39,8 @@ pub(super) fn load(path: &Path) -> Option<GithubPrsData> {
 mod tests {
     use super::*;
     use crate::dto::{
-        CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, MergeState, Mergeability,
+        CiState, GithubMergeQueueDto, GithubPrDto, GithubPrListDto, MergeKind, MergeState,
+        Mergeability,
     };
     use crate::paths::{github_prs_path_for, scratch_dir};
     use std::fs;
@@ -69,6 +70,7 @@ mod tests {
                     merge_state: MergeState::Dirty,
                     merge_queue: Some(GithubMergeQueueDto { position: Some(2) }),
                     auto_merge: true,
+                    merge_kind: Some(MergeKind::Conflicts),
                 }],
             },
             review_requested: GithubPrListDto::default(),
@@ -113,6 +115,7 @@ mod tests {
         assert_eq!(pr.merge_state, MergeState::Unknown);
         assert_eq!(pr.merge_queue, None);
         assert!(!pr.auto_merge);
+        assert_eq!(pr.merge_kind, None);
     }
 
     /// The screen's TypeScript unions compare against these exact strings; a rename on either
@@ -128,15 +131,17 @@ mod tests {
             r#""mergeState":"dirty""#,
             r#""mergeQueue":{"position":2}"#,
             r#""autoMerge":true"#,
+            r#""mergeKind":"conflicts""#,
         ] {
             assert!(raw.contains(needle), "{needle} missing from {raw}");
         }
         let pr: GithubPrDto = serde_json::from_str(
-            r#"{"id":"PR_2","number":2,"title":"T","url":"https://github.com/acme/app/pull/2","repo":"acme/app","author":"octocat","isDraft":false,"ci":"success","headRef":"h","baseRef":"main","updatedAt":"2026-08-24T19:00:00Z","mergeable":"mergeable","mergeState":"clean","mergeQueue":{},"autoMerge":false}"#,
+            r#"{"id":"PR_2","number":2,"title":"T","url":"https://github.com/acme/app/pull/2","repo":"acme/app","author":"octocat","isDraft":false,"ci":"success","headRef":"h","baseRef":"main","updatedAt":"2026-08-24T19:00:00Z","mergeable":"mergeable","mergeState":"clean","mergeQueue":{},"autoMerge":false,"mergeKind":"autoMerge"}"#,
         )
         .unwrap();
         assert_eq!(pr.mergeable, Mergeability::Mergeable);
         assert_eq!(pr.merge_state, MergeState::Clean);
+        assert_eq!(pr.merge_kind, Some(MergeKind::AutoMerge));
         assert_eq!(
             pr.merge_queue,
             Some(GithubMergeQueueDto { position: None }),

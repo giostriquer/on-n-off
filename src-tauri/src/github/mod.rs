@@ -6,6 +6,7 @@
 mod auth;
 #[cfg(test)]
 mod fixtures;
+pub(crate) mod merge;
 mod parse;
 mod query;
 mod snapshot;

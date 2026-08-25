@@ -410,6 +410,25 @@ pub enum MergeState {
     Unknown,
 }
 
+/// What a row can say about merging, most pressing first. Classified once, in `github::merge`,
+/// from the raw fields below, so the screen and the monitor read the same verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeKind {
+    /// The head no longer merges cleanly into the base.
+    Conflicts,
+    /// Sitting in the repository's merge queue.
+    Queued,
+    /// Auto-merge is on: GitHub merges once the requirements are met.
+    AutoMerge,
+    /// Every requirement met and nothing merging it yet; only the merge button is left.
+    Ready,
+    /// Behind a base that requires up-to-date branches.
+    Behind,
+    /// Branch protection stops the merge for a reason the row does not otherwise show.
+    Blocked,
+}
+
 /// The pull request's place in its repository's merge queue.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -452,6 +471,10 @@ pub struct GithubPrDto {
     /// Auto-merge is enabled: GitHub merges once the requirements are met.
     #[serde(default)]
     pub auto_merge: bool,
+    /// The one reading of the four fields above (`github::merge::classify`); `None` when there
+    /// is nothing to say, and on a snapshot written before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_kind: Option<MergeKind>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

@@ -2,16 +2,16 @@
 //! commit's CI goes red or green, the review decision lands, conflicts appear or clear, or the
 //! pull request becomes ready to merge, a tray notification says so. Opt-in
 //! (`github_notifications`), polls on the same interval as the screen and shares its in-memory
-//! result, and remembers the last-seen state on disk so a restart never re-notifies.
+//! result, and remembers the last-seen state on disk so a restart never re-notifies. The merge
+//! fields are read through `github::merge`, the same classification the screen shows.
 
 use std::{collections::HashMap, path::Path, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle};
 
-use crate::dto::{
-    CiState, GithubPrDto, GithubPrsDto, GithubStatus, MergeState, Mergeability, ReviewDecision,
-};
+use crate::dto::{CiState, GithubPrDto, GithubPrsDto, GithubStatus, ReviewDecision};
+use crate::github::merge;
 use crate::monitor::{self, wait_for_wake_or_deadline};
 
 const DISABLED_WAKE: Duration = Duration::from_secs(60 * 60);
@@ -42,39 +42,42 @@ impl Default for MonitorState {
     }
 }
 
-/// The facts about one pull request that the monitor compares between reads.
+/// The facts about one pull request that the monitor compares between reads. The two merge
+/// facts are `None` while GitHub has not computed them, and a poll that sees `None` keeps the
+/// last computed answer (`or_last_known`), so the baseline only ever moves on facts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Seen {
     ci: CiState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     review: Option<ReviewDecision>,
-    /// `None` while GitHub has not computed mergeability yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     conflicts: Option<bool>,
-    ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ready: Option<bool>,
 }
 
 impl Seen {
-    /// Mirrors the screen's reading of the same fields (`hasConflicts` and `mergeKind` in
-    /// `ui/src/lib/githubFormat.ts`): `mergeable` and a `DIRTY` state both mean conflicts, and
-    /// "ready" is a clean, non-draft pull request that neither the merge queue nor auto-merge
-    /// already owns.
+    /// The same reading of the merge fields the screen shows (`github::merge`).
     fn of(pr: &GithubPrDto) -> Self {
-        let conflicts = match (pr.mergeable, pr.merge_state) {
-            (Mergeability::Conflicting, _) | (_, MergeState::Dirty) => Some(true),
-            (Mergeability::Mergeable, _) => Some(false),
-            (Mergeability::Unknown, _) => None,
-        };
-        let ready = conflicts != Some(true)
-            && pr.merge_queue.is_none()
-            && !pr.auto_merge
-            && pr.merge_state == MergeState::Clean
-            && !pr.is_draft;
         Self {
             ci: pr.ci,
             review: pr.review_decision,
-            conflicts,
-            ready,
+            conflicts: merge::conflicts_known(pr),
+            ready: merge::ready_known(pr),
+        }
+    }
+
+    /// GitHub recomputes mergeability after every push and answers "unknown" until it is done;
+    /// carrying the previous answer through such a poll keeps "conflicts appeared" and "ready to
+    /// merge" from being lost or repeated around it.
+    fn or_last_known(self, before: Option<&Seen>) -> Self {
+        let Some(before) = before else {
+            return self;
+        };
+        Self {
+            conflicts: self.conflicts.or(before.conflicts),
+            ready: self.ready.or(before.ready),
+            ..self
         }
     }
 }
@@ -244,8 +247,9 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
     let mut events = Vec::new();
     let mut next = HashMap::with_capacity(prs.data.mine.items.len());
     for pr in &prs.data.mine.items {
-        let after = Seen::of(pr);
-        if let Some(before) = state.seen.get(&pr.id) {
+        let before = state.seen.get(&pr.id);
+        let after = Seen::of(pr).or_last_known(before);
+        if let Some(before) = before {
             events.extend(transitions(*before, after).into_iter().map(|kind| Event {
                 kind,
                 repo: pr.repo.clone(),
@@ -259,9 +263,9 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
     events
 }
 
-/// Every transition worth a notification between two sightings of one pull request. Unknown
-/// mergeability on either side says nothing, and "ready to merge" speaks for the good news
-/// that arrived with it.
+/// Every transition worth a notification between two sightings of one pull request. A merge
+/// fact that is unknown on either side says nothing, and "ready to merge" speaks for the good
+/// news that arrived with it.
 fn transitions(before: Seen, after: Seen) -> Vec<EventKind> {
     let mut kinds = Vec::new();
     kinds.extend(ci_transition(before.ci, after.ci));
@@ -277,7 +281,7 @@ fn transitions(before: Seen, after: Seen) -> Vec<EventKind> {
         (Some(true), Some(false)) => kinds.push(EventKind::ConflictsResolved),
         _ => {}
     }
-    if after.ready && !before.ready {
+    if (before.ready, after.ready) == (Some(false), Some(true)) {
         kinds.retain(|kind| !kind.is_subsumed_by_ready());
         kinds.push(EventKind::ReadyToMerge);
     }
@@ -315,7 +319,9 @@ fn save_state(path: &Path, state: &MonitorState) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus};
+    use crate::dto::{
+        GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus, MergeState, Mergeability,
+    };
     use crate::paths::scratch_dir;
     use std::fs;
 
@@ -338,6 +344,7 @@ mod tests {
             merge_state: MergeState::default(),
             merge_queue: None,
             auto_merge: false,
+            merge_kind: None,
         }
     }
 
@@ -725,7 +732,14 @@ mod tests {
     fn bad_news_is_never_hidden_behind_ready_to_merge() {
         // Changes requested on a repository that does not require reviews: CLEAN and red at once.
         let mut state = MonitorState::default();
-        observe(&mut state, &read(vec![pr("a", CiState::Success)]));
+        observe(
+            &mut state,
+            &read(vec![with_merge(
+                "a",
+                Mergeability::Mergeable,
+                MergeState::Blocked,
+            )]),
+        );
         let mut after = pr("a", CiState::Success);
         after.review_decision = Some(ReviewDecision::ChangesRequested);
         after.merge_state = MergeState::Clean;
@@ -733,6 +747,164 @@ mod tests {
             kinds(&observe(&mut state, &read(vec![after]))),
             vec![EventKind::ChangesRequested, EventKind::ReadyToMerge]
         );
+    }
+
+    #[test]
+    fn conflicts_that_appear_across_a_poll_that_saw_unknown_are_still_announced() {
+        use MergeState::{Blocked, Dirty, Unknown as StateUnknown};
+        use Mergeability::{Conflicting, Mergeable, Unknown};
+        let mut state = MonitorState::default();
+        observe(&mut state, &read(vec![with_merge("a", Mergeable, Blocked)]));
+        // GitHub recomputes after a push; this poll lands before it has an answer.
+        assert!(observe(
+            &mut state,
+            &read(vec![with_merge("a", Unknown, StateUnknown)])
+        )
+        .is_empty());
+        let events = observe(&mut state, &read(vec![with_merge("a", Conflicting, Dirty)]));
+        assert_eq!(kinds(&events), vec![EventKind::Conflicts]);
+        // And the other way round: resolved across an unknown poll is still resolved.
+        assert!(observe(
+            &mut state,
+            &read(vec![with_merge("a", Unknown, StateUnknown)])
+        )
+        .is_empty());
+        let events = observe(&mut state, &read(vec![with_merge("a", Mergeable, Blocked)]));
+        assert_eq!(kinds(&events), vec![EventKind::ConflictsResolved]);
+    }
+
+    #[test]
+    fn a_poll_that_saw_unknown_does_not_re_announce_ready_to_merge() {
+        let mut state = MonitorState::default();
+        observe(
+            &mut state,
+            &read(vec![with_merge(
+                "a",
+                Mergeability::Mergeable,
+                MergeState::Blocked,
+            )]),
+        );
+        let clean = with_merge("a", Mergeability::Mergeable, MergeState::Clean);
+        assert_eq!(
+            kinds(&observe(&mut state, &read(vec![clean.clone()]))),
+            vec![EventKind::ReadyToMerge]
+        );
+        // A base-branch push triggers a recompute; nothing else changed.
+        assert!(observe(
+            &mut state,
+            &read(vec![with_merge(
+                "a",
+                Mergeability::Unknown,
+                MergeState::Unknown
+            )])
+        )
+        .is_empty());
+        assert!(observe(&mut state, &read(vec![clean])).is_empty());
+    }
+
+    #[test]
+    fn ready_to_merge_is_not_announced_when_the_baseline_never_knew() {
+        let mut state = MonitorState::default();
+        // Notifications switched on for a pull request GitHub has not computed yet.
+        observe(
+            &mut state,
+            &read(vec![with_merge(
+                "a",
+                Mergeability::Unknown,
+                MergeState::Unknown,
+            )]),
+        );
+        let clean = with_merge("a", Mergeability::Mergeable, MergeState::Clean);
+        assert!(observe(&mut state, &read(vec![clean.clone()])).is_empty());
+        assert!(observe(&mut state, &read(vec![clean])).is_empty());
+    }
+
+    #[test]
+    fn a_draft_reporting_clean_is_not_ready() {
+        let mut state = MonitorState::default();
+        let mut draft = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
+        draft.is_draft = true;
+        observe(&mut state, &read(vec![draft.clone()]));
+        draft.merge_state = MergeState::Clean;
+        assert!(observe(&mut state, &read(vec![draft])).is_empty());
+    }
+
+    #[test]
+    fn several_facts_changing_at_once_are_all_announced_in_order() {
+        let mut state = MonitorState::default();
+        let mut before = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
+        before.ci = CiState::Pending;
+        before.review_decision = Some(ReviewDecision::ReviewRequired);
+        observe(&mut state, &read(vec![before]));
+        let mut after = with_merge("a", Mergeability::Conflicting, MergeState::Dirty);
+        after.ci = CiState::Failure;
+        after.review_decision = Some(ReviewDecision::ChangesRequested);
+        assert_eq!(
+            kinds(&observe(&mut state, &read(vec![after]))),
+            vec![
+                EventKind::CiFailed,
+                EventKind::ChangesRequested,
+                EventKind::Conflicts
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dismissed_and_renewed_approval_is_announced_again() {
+        use ReviewDecision::{Approved, ReviewRequired};
+        let mut state = MonitorState::default();
+        observe(
+            &mut state,
+            &read(vec![with_review("a", Some(ReviewRequired))]),
+        );
+        assert_eq!(
+            kinds(&observe(
+                &mut state,
+                &read(vec![with_review("a", Some(Approved))])
+            )),
+            vec![EventKind::Approved]
+        );
+        assert!(observe(
+            &mut state,
+            &read(vec![with_review("a", Some(ReviewRequired))])
+        )
+        .is_empty());
+        assert_eq!(
+            kinds(&observe(
+                &mut state,
+                &read(vec![with_review("a", Some(Approved))])
+            )),
+            vec![EventKind::Approved]
+        );
+    }
+
+    #[test]
+    fn a_persisted_record_with_every_fact_round_trips() {
+        let root = scratch_dir("github-monitor-full-round-trip");
+        let path = root.join("monitor.json");
+        let mut state = MonitorState::default();
+        let mut seen = with_merge("a", Mergeability::Conflicting, MergeState::Dirty);
+        seen.review_decision = Some(ReviewDecision::Approved);
+        observe(&mut state, &read(vec![seen.clone()]));
+        save_state(&path, &state).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        for needle in [
+            r#""review":"APPROVED""#,
+            r#""conflicts":true"#,
+            r#""ready":false"#,
+        ] {
+            assert!(raw.contains(needle), "{needle} missing from {raw}");
+        }
+
+        let mut reloaded = load_state(&path);
+        assert!(observe(&mut reloaded, &read(vec![seen])).is_empty());
+        let mut resolved = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
+        resolved.review_decision = Some(ReviewDecision::Approved);
+        assert_eq!(
+            kinds(&observe(&mut reloaded, &read(vec![resolved]))),
+            vec![EventKind::ConflictsResolved]
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -744,10 +916,14 @@ mod tests {
             title: "Add the thing".into(),
         };
         let titles: Vec<String> = [
+            EventKind::CiFailed,
+            EventKind::CiPassed,
+            EventKind::CiGreenAgain,
             EventKind::Approved,
             EventKind::ChangesRequested,
             EventKind::Conflicts,
             EventKind::ConflictsResolved,
+            EventKind::ReadyToMerge,
         ]
         .into_iter()
         .map(|kind| {
@@ -761,10 +937,14 @@ mod tests {
         assert_eq!(
             titles,
             [
+                "CI failed",
+                "CI passed",
+                "CI green again",
                 "Approved",
                 "Changes requested",
                 "Merge conflicts",
-                "Conflicts resolved"
+                "Conflicts resolved",
+                "Ready to merge"
             ]
         );
     }
