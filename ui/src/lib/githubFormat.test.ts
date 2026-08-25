@@ -4,6 +4,7 @@ import {
   ciLabel,
   ciTone,
   ciToneColor,
+  filterPrs,
   formatUpdatedAgo,
   listCountLabel,
   orderPrs,
@@ -70,10 +71,30 @@ describe("githubFormat", () => {
     expect(formatUpdatedAgo("not a date", NOW)).toBe("");
   });
 
-  it("says how much of a long list is loaded", () => {
+  it("matches a search against number, title, repository, author and branches", () => {
+    const items = [
+      pr({ id: "a", number: 412, title: "Add retry to the sync worker", repo: "acme/web", author: "you", headRef: "feat/retry" }),
+      pr({ id: "b", number: 91, title: "api: reject unsigned webhooks", repo: "acme/api", author: "lin", headRef: "fix/webhooks", baseRef: "release" }),
+    ];
+    const ids = (query: string) => filterPrs(items, query).map((item) => item.id);
+    expect(ids("")).toEqual(["a", "b"]);
+    expect(ids("   ")).toEqual(["a", "b"]);
+    expect(ids("#412")).toEqual(["a"]);
+    expect(ids("91")).toEqual(["b"]);
+    expect(ids("SYNC")).toEqual(["a"]);
+    expect(ids("acme/api")).toEqual(["b"]);
+    expect(ids("lin")).toEqual(["b"]);
+    expect(ids("fix/web")).toEqual(["b"]);
+    expect(ids("release")).toEqual(["b"]);
+    expect(ids("nothing here")).toEqual([]);
+  });
+
+  it("says how much of a long list is loaded, and how much of it matches a search", () => {
     expect(listCountLabel({ total: 3, items: [pr({}), pr({}), pr({})] })).toBe("3");
     expect(listCountLabel({ total: 137, items: [pr({})] })).toBe("1 of 137");
     expect(listCountLabel({ total: 0, items: [] })).toBe("0");
+    expect(listCountLabel({ total: 3, items: [pr({}), pr({}), pr({})] }, 1)).toBe("1 of 3");
+    expect(listCountLabel({ total: 137, items: [pr({})] }, 0)).toBe("0 of 137");
   });
 
   it("gives every problem a headline", () => {

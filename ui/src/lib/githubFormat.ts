@@ -80,9 +80,24 @@ export function formatUpdatedAgo(iso: string | null | undefined, nowMs: number):
   return `${Math.floor(elapsed / DAY_MS)}d ago`;
 }
 
-/** "3", or "50 of 137" when GitHub holds more than the page that was read. */
-export function listCountLabel(list: GithubPrList): string {
+/**
+ * "3", or "50 of 137" when GitHub holds more than the page that was read; with a search on,
+ * "2 of 3" — matches of everything GitHub holds.
+ */
+export function listCountLabel(list: GithubPrList, matches?: number): string {
+  if (matches !== undefined) return `${matches} of ${list.total}`;
   return list.total > list.items.length ? `${list.items.length} of ${list.total}` : String(list.items.length);
+}
+
+/** Case-insensitive substring match over number, title, repository, author and both branches. */
+export function filterPrs(items: readonly GithubPr[], query: string): GithubPr[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [...items];
+  return items.filter((pr) =>
+    [`#${pr.number}`, pr.title, pr.repo, pr.author, pr.headRef, pr.baseRef].some((field) =>
+      field.toLowerCase().includes(needle),
+    ),
+  );
 }
 
 export function statusHeadline(status: GithubStatus): string {

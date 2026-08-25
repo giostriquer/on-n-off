@@ -1,9 +1,18 @@
-import { RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, RefreshCw, Search, X } from "lucide-react";
 import { FOCUS_RING } from "$lib/a11y";
 import { displayError, parseInvokeError } from "$lib/error";
-import { formatUpdatedAgo, listCountLabel, orderPrs, prsSummary, statusHeadline } from "$lib/githubFormat";
+import {
+  filterPrs,
+  formatUpdatedAgo,
+  listCountLabel,
+  orderPrs,
+  prsSummary,
+  statusHeadline,
+} from "$lib/githubFormat";
 import type { GithubPrList, GithubPrs } from "$lib/githubTypes";
 import type { GithubPollSeconds } from "$lib/types";
+import { readCollapsed, writeCollapsed, type SectionId } from "./collapsed";
 import { PrRow } from "./PrRow";
 import { useGithubPrs } from "./useGithubPrs";
 
@@ -40,6 +49,29 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
   const banner = bannerFor(prs, query.error);
   const updated = formatUpdatedAgo(prs?.fetchedAt, now);
   const checking = loading && !prs;
+  const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState<Set<SectionId>>(readCollapsed);
+
+  function toggle(id: SectionId) {
+    const next = new Set(collapsed);
+    if (!next.delete(id)) next.add(id);
+    setCollapsed(next);
+    writeCollapsed(next);
+  }
+
+  const list = (id: SectionId, title: string, empty: string) => (
+    <PrList
+      id={id}
+      title={title}
+      list={prs?.[id] ?? EMPTY_LIST}
+      query={search}
+      empty={empty}
+      checking={checking}
+      collapsed={collapsed.has(id)}
+      onToggle={() => toggle(id)}
+      now={now}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="github-screen" aria-busy={loading}>
@@ -92,28 +124,12 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
         </p>
       ) : null}
 
+      <SearchField query={search} onChange={setSearch} />
+
       <div className="flex flex-col gap-3">
-        <PrList
-          title="Mine"
-          list={prs?.mine ?? EMPTY_LIST}
-          empty="No open pull requests of yours."
-          checking={checking}
-          now={now}
-        />
-        <PrList
-          title="Review requested"
-          list={prs?.reviewRequested ?? EMPTY_LIST}
-          empty="No reviews requested from you."
-          checking={checking}
-          now={now}
-        />
-        <PrList
-          title="Assigned"
-          list={prs?.assigned ?? EMPTY_LIST}
-          empty="Nothing assigned to you."
-          checking={checking}
-          now={now}
-        />
+        {list("mine", "Mine", "No open pull requests of yours.")}
+        {list("reviewRequested", "Review requested", "No reviews requested from you.")}
+        {list("assigned", "Assigned", "Nothing assigned to you.")}
       </div>
 
       <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
@@ -173,36 +189,97 @@ function ScopeChips({ scope, onOpenSettings }: { scope: string[]; onOpenSettings
   );
 }
 
+/** One field narrows all three lists; Escape clears it. */
+function SearchField({ query, onChange }: { query: string; onChange: (query: string) => void }) {
+  return (
+    <div className="relative">
+      <Search
+        className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-[var(--mute)]"
+        aria-hidden="true"
+      />
+      <input
+        type="search"
+        className={`h-8 w-full rounded-md border border-[var(--hair)] bg-[var(--well)] pr-8 pl-8 font-mono text-[11.5px] text-[var(--silkscreen)] placeholder:text-[var(--mute)] [&::-webkit-search-cancel-button]:hidden ${FOCUS_RING}`}
+        aria-label="Search pull requests"
+        placeholder="title, #number, repository, author, branch"
+        value={query}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onChange("");
+        }}
+      />
+      {query ? (
+        <button
+          type="button"
+          className={`absolute top-1/2 right-1 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-sm border-0 bg-transparent p-0 text-[var(--mute)] hover:text-[var(--silkscreen)] ${FOCUS_RING}`}
+          aria-label="Clear search"
+          onClick={() => onChange("")}
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function PrList({
+  id,
   title,
   list,
+  query,
   empty,
   checking,
+  collapsed,
+  onToggle,
   now,
 }: {
+  id: SectionId;
   title: string;
   list: GithubPrList;
+  query: string;
   empty: string;
   checking: boolean;
+  collapsed: boolean;
+  onToggle: () => void;
   now: number;
 }) {
+  const searching = query.trim().length > 0;
+  const shown = searching ? filterPrs(list.items, query) : list.items;
+  const count = listCountLabel(list, searching ? shown.length : undefined);
+  const bodyId = `github-${id}-list`;
   return (
     <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={title}>
       {/* Sticks to the top of the scroll area so a long list keeps its name in view. */}
-      <header className="sticky top-0 z-10 rounded-t-[11px] border-b border-[var(--hair)] bg-[var(--plate)] px-3.5 py-2.5">
-        <h3 className="m-0 flex items-center gap-2 text-[11.5px] font-semibold tracking-[0.03em] uppercase">
-          {title}
-          <span className="font-mono text-[11px] font-normal text-[var(--mute)]">{listCountLabel(list)}</span>
+      <header
+        className={`sticky top-0 z-10 rounded-t-[11px] bg-[var(--plate)] ${collapsed ? "rounded-b-[11px]" : "border-b border-[var(--hair)]"}`}
+      >
+        <h3 className="m-0">
+          <button
+            type="button"
+            className={`flex h-10 w-full items-center gap-2 rounded-[11px] border-0 bg-transparent px-3.5 text-left text-[11.5px] font-semibold tracking-[0.03em] uppercase hover:bg-[var(--well)] ${FOCUS_RING}`}
+            aria-expanded={!collapsed}
+            aria-controls={bodyId}
+            onClick={onToggle}
+          >
+            <ChevronDown
+              className={`size-3.5 shrink-0 text-[var(--mute)] transition-transform motion-reduce:transition-none ${collapsed ? "-rotate-90" : ""}`}
+              aria-hidden="true"
+            />
+            {title}
+            <span className="font-mono text-[11px] font-normal normal-case text-[var(--mute)]">{count}</span>
+          </button>
         </h3>
       </header>
-      {list.items.length ? (
-        <ul className="m-0 list-none p-0" role="list">
-          {orderPrs(list.items).map((pr) => (
+      {collapsed ? null : shown.length ? (
+        <ul id={bodyId} className="m-0 list-none p-0" role="list">
+          {orderPrs(shown).map((pr) => (
             <PrRow key={pr.id} pr={pr} now={now} />
           ))}
         </ul>
       ) : (
-        <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{checking ? "Checking…" : empty}</p>
+        <p id={bodyId} className="px-3.5 py-4 text-[13px] text-[var(--mute)]">
+          {checking ? "Checking…" : searching ? "No matches." : empty}
+        </p>
       )}
     </section>
   );

@@ -103,6 +103,7 @@ function section(name: string) {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(NOW));
+  localStorage.clear();
   readGithubPrs.mockReset();
   openUrl.mockReset();
   openUrl.mockResolvedValue(undefined);
@@ -271,6 +272,55 @@ describe("Github", () => {
     expect(banner.textContent).toContain("GitHub unavailable");
     expect(banner.textContent).toContain("github read worker failed");
     expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
+  });
+
+  it("filters every list from one search field and says how many matched", async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    readGithubPrs.mockResolvedValue(okPrs());
+    renderGithub();
+    await screen.findByText("Add the thing");
+
+    const search = screen.getByRole("searchbox", { name: "Search pull requests" });
+    await user.type(search, "acme/lib");
+
+    expect(within(section("Mine")).getByRole("heading", { level: 3 }).textContent).toContain("0 of 1");
+    expect(within(section("Mine")).getByText("No matches.")).toBeTruthy();
+    expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toContain("2 of 2");
+    expect(within(section("Mine")).queryByText("Add the thing")).toBeNull();
+
+    await user.clear(search);
+    await user.type(search, "team ask");
+    expect(within(section("Review requested")).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(section("Review requested")).getByText("Team ask")).toBeTruthy();
+
+    await user.keyboard("{Escape}");
+    expect(search).toHaveValue("");
+    expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
+  });
+
+  it("collapses a section from its header and remembers it", async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    readGithubPrs.mockResolvedValue(okPrs());
+    const first = renderGithub();
+    await screen.findByText("Add the thing");
+
+    const toggle = within(section("Review requested")).getByRole("button", { name: /Review requested/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    await user.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(section("Review requested")).queryByText("Direct ask")).toBeNull();
+    expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toContain("2");
+    expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
+
+    first.unmount();
+    renderGithub();
+    await screen.findByText("Add the thing");
+    expect(
+      within(section("Review requested")).getByRole("button", { name: /Review requested/ }).getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(within(section("Review requested")).queryByText("Direct ask")).toBeNull();
+    await user.click(within(section("Review requested")).getByRole("button", { name: /Review requested/ }));
+    expect(within(section("Review requested")).getByText("Direct ask")).toBeTruthy();
   });
 
   it("says it is checking until the first read answers", () => {
