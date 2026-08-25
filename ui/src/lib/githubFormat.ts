@@ -96,37 +96,70 @@ export function listCountLabel(list: GithubPrList, matches?: number): string {
   return truncated(list) ? `${list.items.length} of ${list.total}` : String(list.items.length);
 }
 
-export type MergeBadge = { label: string; tone: CiTone };
+/** A small outlined word on a row: the review decision, the merge state. */
+export type RowBadge = { label: string; tone: CiTone };
 
+/** "Review required" is every open PR's default state, so only the other two earn a badge. */
+export function reviewBadge(decision: ReviewDecision | null | undefined): RowBadge | null {
+  switch (decision) {
+    case "APPROVED":
+      return { label: "Approved", tone: "live" };
+    case "CHANGES_REQUESTED":
+      return { label: "Changes requested", tone: "trip" };
+    default:
+      return null;
+  }
+}
+
+/** What a row can say about merging, most pressing first; null when there is nothing to say. */
+export type MergeKind = "conflicts" | "queued" | "autoMerge" | "ready" | "behind" | "blocked";
+
+/**
+ * Both fields are consulted because they diverge on drafts: GitHub reports `mergeStateStatus:
+ * DRAFT` for a draft whatever the merge would do, while `mergeable` still says `CONFLICTING`.
+ */
 function hasConflicts(pr: GithubPr): boolean {
   return pr.mergeable === "conflicting" || pr.mergeState === "dirty";
 }
 
-function readyToMerge(pr: GithubPr): boolean {
-  return pr.mergeState === "clean" && !pr.isDraft;
-}
-
 /**
- * The one merge-state badge a row shows, most pressing first: conflicts, then the merge queue,
- * auto-merge, ready to merge, behind the base. "Blocked" appears only when neither the review
- * badge nor the CI glyph already explains it (approved or unreviewed, and CI green or absent);
- * everything else (unknown, unstable, draft) says nothing.
+ * One classification per pull request: conflicts, then the merge queue, auto-merge, ready to
+ * merge, behind the base, blocked. "Blocked" is deliberately quiet when the review decision is
+ * "review required" — that is every protected PR's default state, and the badge would otherwise
+ * sit on nearly every unreviewed row — and when changes were requested or CI is not green (or
+ * absent), which do explain it. Unknown, unstable and draft states say nothing.
  */
-export function mergeBadge(pr: GithubPr): MergeBadge | null {
-  if (hasConflicts(pr)) return { label: "Conflicts", tone: "trip" };
-  if (pr.mergeQueue) {
-    const position = pr.mergeQueue.position;
-    return { label: position ? `Queued #${position}` : "Queued", tone: "live" };
-  }
-  if (pr.autoMerge) return { label: "Auto-merge", tone: "mute" };
-  if (readyToMerge(pr)) return { label: "Ready to merge", tone: "live" };
-  if (pr.mergeState === "behind") return { label: "Behind base", tone: "warn" };
+export function mergeKind(pr: GithubPr): MergeKind | null {
+  if (hasConflicts(pr)) return "conflicts";
+  if (pr.mergeQueue) return "queued";
+  if (pr.autoMerge) return "autoMerge";
+  // GitHub reports DRAFT rather than CLEAN for a draft; the guard is defensive.
+  if (pr.mergeState === "clean" && !pr.isDraft) return "ready";
+  if (pr.mergeState === "behind") return "behind";
   if (pr.mergeState === "blocked") {
     const reviewExplains = pr.reviewDecision === "REVIEW_REQUIRED" || pr.reviewDecision === "CHANGES_REQUESTED";
     const ciExplains = pr.ci !== "success" && pr.ci !== "none";
-    if (!reviewExplains && !ciExplains) return { label: "Blocked", tone: "warn" };
+    if (!reviewExplains && !ciExplains) return "blocked";
   }
   return null;
+}
+
+const MERGE_BADGES: Record<MergeKind, RowBadge> = {
+  conflicts: { label: "Conflicts", tone: "trip" },
+  queued: { label: "Queued", tone: "live" },
+  autoMerge: { label: "Auto-merge", tone: "mute" },
+  ready: { label: "Ready to merge", tone: "live" },
+  behind: { label: "Behind base", tone: "warn" },
+  blocked: { label: "Blocked", tone: "warn" },
+};
+
+/** The one merge-state badge a row shows; the queue badge carries the position when known. */
+export function mergeBadge(pr: GithubPr): RowBadge | null {
+  const kind = mergeKind(pr);
+  if (kind === null) return null;
+  const badge = MERGE_BADGES[kind];
+  const position = kind === "queued" ? pr.mergeQueue?.position : null;
+  return position ? { ...badge, label: `Queued #${position}` } : badge;
 }
 
 /**
@@ -147,7 +180,7 @@ export function filterPrs(items: readonly GithubPr[], query: string): GithubPr[]
       pr.baseRef,
       pr.isDraft ? "draft" : "",
       pr.reviewRequest ?? "",
-      reviewDecisionLabel(pr.reviewDecision),
+      reviewBadge(pr.reviewDecision)?.label ?? "",
       mergeBadge(pr)?.label ?? "",
       ciLabel(pr.ci),
     ].some((field) => field.toLowerCase().includes(needle)),
@@ -171,40 +204,16 @@ export function statusHeadline(status: GithubStatus): string {
   }
 }
 
-/** Approved reads like passing CI, changes requested like failing CI; a pending review is quiet. */
-export function reviewDecisionTone(decision: ReviewDecision | null | undefined): CiTone {
-  switch (decision) {
-    case "APPROVED":
-      return "live";
-    case "CHANGES_REQUESTED":
-      return "trip";
-    default:
-      return "mute";
-  }
-}
-
-/** "Review required" is every open PR's default state, so only the other two earn a badge. */
-export function reviewDecisionLabel(decision: ReviewDecision | null | undefined): string {
-  switch (decision) {
-    case "APPROVED":
-      return "Approved";
-    case "CHANGES_REQUESTED":
-      return "Changes requested";
-    default:
-      return "";
-  }
-}
-
 export type PrsSummary = {
   mine: number;
   /** Red CI among the user's own pull requests that were loaded. */
   failing: number;
   /** Own pull requests (loaded) with merge conflicts. */
   conflicts: number;
-  /** Own pull requests (loaded) with every merge requirement met. */
+  /** Own pull requests (loaded) with every merge requirement met and nothing merging them yet. */
   ready: number;
   /** True when GitHub holds more own pull requests than were loaded, so the counts are floors. */
-  failingIsPartial: boolean;
+  countsArePartial: boolean;
   review: number;
   assigned: number;
 };
@@ -214,9 +223,9 @@ export function prsSummary(data: GithubPrsData): PrsSummary {
   return {
     mine: data.mine.total,
     failing: data.mine.items.filter((pr) => pr.ci === "failure" || pr.ci === "error").length,
-    conflicts: data.mine.items.filter(hasConflicts).length,
-    ready: data.mine.items.filter(readyToMerge).length,
-    failingIsPartial: truncated(data.mine),
+    conflicts: data.mine.items.filter((pr) => mergeKind(pr) === "conflicts").length,
+    ready: data.mine.items.filter((pr) => mergeKind(pr) === "ready").length,
+    countsArePartial: truncated(data.mine),
     review: data.reviewRequested.total,
     assigned: data.assigned.total,
   };

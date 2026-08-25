@@ -16,8 +16,8 @@ type Seed = {
   minutesAgo?: number;
   mergeable?: Mergeable;
   mergeState?: MergeState;
-  /** In the merge queue at this position (0 for "queued, position unknown"). */
-  queued?: number;
+  /** In the merge queue: at this position, or `null` when GitHub reports none. */
+  queued?: number | null;
   autoMerge?: boolean;
 };
 
@@ -39,7 +39,7 @@ function pr(seed: Seed, kind: "mine" | "review" | "assigned"): GithubPr {
     ...(kind === "review" ? { reviewRequest: seed.team ? "team" : "direct" } : {}),
     mergeable: seed.mergeable ?? "mergeable",
     mergeState: seed.mergeState ?? (seed.draft ? "draft" : "blocked"),
-    ...(seed.queued !== undefined ? { mergeQueue: { position: seed.queued || null } } : {}),
+    ...(seed.queued !== undefined ? { mergeQueue: { position: seed.queued } } : {}),
     autoMerge: seed.autoMerge ?? false,
   };
 }

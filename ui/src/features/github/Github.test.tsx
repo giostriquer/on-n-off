@@ -371,24 +371,31 @@ describe("Github", () => {
       "4 mine · 1 failing · 1 with conflicts · 1 ready · 2 to review · 0 assigned",
     );
     const mine = section("Mine");
-    expect(within(mine).getByText("Conflicts")).toBeTruthy();
-    expect(within(mine).getByText("Ready to merge")).toBeTruthy();
-    expect(within(mine).getByText("Queued #2")).toBeTruthy();
+    expect(within(mine).getByText("Conflicts").style.color).toBe("var(--trip)");
+    expect(within(mine).getByText("Ready to merge").style.color).toBe("var(--live)");
+    expect(within(mine).getByText("Queued #2").style.color).toBe("var(--live)");
   });
 
-  it("marks the failing count as partial when GitHub holds more than was loaded", async () => {
+  it("marks every own-list count as partial when GitHub holds more than was loaded", async () => {
     readGithubPrs.mockResolvedValue(
       okPrs({
         mine: {
           total: 137,
-          items: [pr({ id: "a", ci: "failure" }), pr({ id: "b", number: 2, title: "Second thing", ci: "success" })],
+          items: [
+            pr({ id: "a", ci: "failure" }),
+            pr({ id: "b", number: 2, title: "Second thing", ci: "success" }),
+            pr({ id: "c", number: 3, title: "Conflicted", mergeable: "conflicting", ci: "success" }),
+            pr({ id: "d", number: 4, title: "Ready", mergeState: "clean", reviewDecision: "APPROVED", ci: "success" }),
+          ],
         },
       }),
     );
     renderGithub();
     await screen.findByText("Second thing");
-    expect(screen.getByTestId("github-summary").textContent).toBe("137 mine · 1+ failing · 2 to review · 0 assigned");
-    expect(within(section("Mine")).getByRole("heading", { level: 3 }).textContent).toContain("2 of 137");
+    expect(screen.getByTestId("github-summary").textContent).toBe(
+      "137 mine · 1+ failing · 1+ with conflicts · 1+ ready · 2 to review · 0 assigned",
+    );
+    expect(within(section("Mine")).getByRole("heading", { level: 3 }).textContent).toContain("4 of 137");
   });
 
   it("says it is checking until the first read answers", () => {

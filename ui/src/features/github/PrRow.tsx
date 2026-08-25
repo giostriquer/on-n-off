@@ -7,8 +7,7 @@ import {
   ciToneColor,
   formatUpdatedAgo,
   mergeBadge,
-  reviewDecisionLabel,
-  reviewDecisionTone,
+  reviewBadge,
   type CiTone,
 } from "$lib/githubFormat";
 import type { CiState, GithubPr } from "$lib/githubTypes";
@@ -45,8 +44,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
   const tone = ciTone(pr.ci);
   const color = ciToneColor(tone);
   const Glyph = CI_GLYPH[pr.ci];
-  const decision = reviewDecisionLabel(pr.reviewDecision);
-  const merge = mergeBadge(pr);
+  const badges = [reviewBadge(pr.reviewDecision), mergeBadge(pr)];
   return (
     <li className="flex items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2 first:border-t-0">
       <button
@@ -69,8 +67,13 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
           <span className="shrink-0 font-mono text-[11.5px] text-[var(--mute)]">#{pr.number}</span>
           <span className="min-w-0 truncate text-[13px] text-[var(--silkscreen)]">{pr.title}</span>
           {pr.isDraft ? <Badge>Draft</Badge> : null}
-          {decision ? <Badge tone={reviewDecisionTone(pr.reviewDecision)}>{decision}</Badge> : null}
-          {merge ? <Badge tone={merge.tone}>{merge.label}</Badge> : null}
+          {badges.map((badge) =>
+            badge ? (
+              <Badge key={badge.label} tone={badge.tone}>
+                {badge.label}
+              </Badge>
+            ) : null,
+          )}
           {pr.reviewRequest === "team" ? <Badge>team</Badge> : null}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-[var(--mute)]">

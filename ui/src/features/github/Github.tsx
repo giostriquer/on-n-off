@@ -150,38 +150,27 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
  * pull requests were loaded.
  */
 function Summary({ prs }: { prs: GithubPrs }) {
-  const { mine, failing, conflicts, ready, failingIsPartial, review, assigned } = prsSummary(prs);
-  const partial = failingIsPartial ? "+" : "";
+  const { mine, failing, conflicts, ready, countsArePartial, review, assigned } = prsSummary(prs);
+  const partial = countsArePartial ? "+" : "";
+  const counts = [
+    { count: failing, noun: "failing", color: "var(--trip)" },
+    { count: conflicts, noun: "with conflicts", color: "var(--trip)" },
+    { count: ready, noun: "ready", color: "var(--live)" },
+  ];
   return (
     <p className="mt-1.5 mb-0 text-[12.5px] text-[var(--silkscreen)]" data-testid="github-summary">
       {mine} mine
-      {failing ? (
-        <>
-          {" · "}
-          <span className="font-semibold text-[var(--trip)]">
-            {failing}
-            {partial} failing
+      {counts.map(({ count, noun, color }) =>
+        count ? (
+          <span key={noun}>
+            {" · "}
+            <span className="font-semibold" style={{ color }}>
+              {count}
+              {partial} {noun}
+            </span>
           </span>
-        </>
-      ) : null}
-      {conflicts ? (
-        <>
-          {" · "}
-          <span className="font-semibold text-[var(--trip)]">
-            {conflicts}
-            {partial} with conflicts
-          </span>
-        </>
-      ) : null}
-      {ready ? (
-        <>
-          {" · "}
-          <span className="font-semibold text-[var(--live)]">
-            {ready}
-            {partial} ready
-          </span>
-        </>
-      ) : null}
+        ) : null,
+      )}
       {" · "}
       {review} to review
       {" · "}
