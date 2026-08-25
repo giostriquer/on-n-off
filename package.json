@@ -1,6 +1,6 @@
 {
   "name": "on-n-off",
-  "version": "0.1.11",
+  "version": "0.2.0",
   "private": true,
   "description": "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration",
   "type": "module",
@@ -19,6 +19,7 @@
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
+    "ui:shots": "bun scripts/ui-shots.mjs",
     "test:watch": "vitest",
     "tauri": "tauri"
   },
@@ -48,6 +49,7 @@
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
     "jsdom": "^26.1.0",
+    "playwright": "1.59.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",

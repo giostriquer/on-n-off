@@ -30,6 +30,14 @@ pub struct AppSettings {
     pub limit_notifications: bool,
     #[serde(default = "limits_poll_minutes_default")]
     pub limits_poll_minutes: u16,
+    /// Search qualifiers (`org:NAME`, `user:NAME`, `repo:OWNER/NAME`) that narrow the GitHub
+    /// screen's "Mine" list; empty means no filter.
+    #[serde(default)]
+    pub github_scopes: Vec<String>,
+    #[serde(default)]
+    pub github_notifications: bool,
+    #[serde(default = "github_poll_seconds_default")]
+    pub github_poll_seconds: u16,
 }
 
 const fn automatic_updates_default() -> bool {
@@ -40,6 +48,10 @@ const fn limits_poll_minutes_default() -> u16 {
     10
 }
 
+const fn github_poll_seconds_default() -> u16 {
+    60
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -48,6 +60,9 @@ impl Default for AppSettings {
             automatic_updates: automatic_updates_default(),
             limit_notifications: false,
             limits_poll_minutes: limits_poll_minutes_default(),
+            github_scopes: Vec::new(),
+            github_notifications: false,
+            github_poll_seconds: github_poll_seconds_default(),
         }
     }
 }
@@ -87,6 +102,15 @@ pub fn load_settings() -> AppSettings {
 }
 
 pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterError> {
+    if let Some(bad) = settings
+        .github_scopes
+        .iter()
+        .find(|scope| normalize_github_scope(scope).is_none())
+    {
+        return Err(AdapterError::message(format!(
+            "Unrecognised GitHub scope {bad:?} — use org:NAME, user:NAME or OWNER/REPO."
+        )));
+    }
     settings = normalize_settings(settings);
     settings
         .binary_paths
@@ -120,7 +144,50 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     if !matches!(settings.limits_poll_minutes, 5 | 10 | 15 | 30) {
         settings.limits_poll_minutes = limits_poll_minutes_default();
     }
+    if !matches!(settings.github_poll_seconds, 30 | 60 | 120 | 300) {
+        settings.github_poll_seconds = github_poll_seconds_default();
+    }
+    let mut scopes: Vec<String> = settings
+        .github_scopes
+        .iter()
+        .filter_map(|scope| normalize_github_scope(scope))
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    scopes.retain(|scope| seen.insert(scope.clone()));
+    settings.github_scopes = scopes;
     settings
+}
+
+/// One GitHub scope as the search qualifier it stands for: `org:NAME`, `user:NAME`,
+/// `repo:OWNER/NAME`, or a bare `OWNER/NAME` (which becomes `repo:`). Anything else is `None`.
+pub fn normalize_github_scope(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let (kind, value) = match raw.split_once(':') {
+        Some((kind, value)) => (kind.to_ascii_lowercase(), value),
+        None => ("repo".to_string(), raw),
+    };
+    let valid = match kind.as_str() {
+        "org" | "user" => is_github_login(value),
+        "repo" => value
+            .split_once('/')
+            .is_some_and(|(owner, name)| is_github_login(owner) && is_github_repo_name(name)),
+        _ => false,
+    };
+    valid.then(|| format!("{kind}:{value}"))
+}
+
+fn is_github_login(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn is_github_repo_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 fn hidden_covers_all(hidden: &[AgentId]) -> bool {
@@ -403,6 +470,87 @@ mod tests {
     }
 
     #[test]
+    fn existing_settings_default_the_github_screen_off_at_sixty_seconds() {
+        let serialized =
+            serde_json::to_value(parse_settings(Some(r#"{ "hiddenAgents": ["codex"] }"#))).unwrap();
+
+        assert_eq!(serialized["githubScopes"], serde_json::json!([]));
+        assert_eq!(serialized["githubNotifications"], false);
+        assert_eq!(serialized["githubPollSeconds"], 60);
+    }
+
+    #[test]
+    fn unsupported_github_poll_interval_falls_back_to_sixty_seconds() {
+        let serialized = serde_json::to_value(parse_settings(Some(
+            r#"{ "githubNotifications": true, "githubPollSeconds": 45 }"#,
+        )))
+        .unwrap();
+
+        assert_eq!(serialized["githubNotifications"], true);
+        assert_eq!(serialized["githubPollSeconds"], 60);
+    }
+
+    #[test]
+    fn github_scopes_are_normalised_to_search_qualifiers() {
+        assert_eq!(
+            normalize_github_scope(" foo/bar "),
+            Some("repo:foo/bar".to_string())
+        );
+        assert_eq!(
+            normalize_github_scope("repo:foo/bar.js"),
+            Some("repo:foo/bar.js".to_string())
+        );
+        assert_eq!(
+            normalize_github_scope("org:acme"),
+            Some("org:acme".to_string())
+        );
+        assert_eq!(
+            normalize_github_scope("user:me-1"),
+            Some("user:me-1".to_string())
+        );
+        assert_eq!(
+            normalize_github_scope("ORG:Acme"),
+            Some("org:Acme".to_string())
+        );
+        for invalid in [
+            "",
+            "   ",
+            "x",
+            "org: x",
+            "repo:o",
+            "repo:o/r/x",
+            "team:acme/core",
+            "org:a b",
+        ] {
+            assert_eq!(normalize_github_scope(invalid), None, "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn loading_settings_drops_malformed_github_scopes_and_normalises_the_rest() {
+        let settings = parse_settings(Some(
+            r#"{ "githubScopes": ["acme/app", "org: broken", "user:me", "user:me"] }"#,
+        ));
+
+        assert_eq!(
+            settings.github_scopes,
+            vec!["repo:acme/app".to_string(), "user:me".to_string()]
+        );
+    }
+
+    #[test]
+    fn saving_settings_refuses_a_malformed_github_scope_and_names_it() {
+        let err = save_settings(AppSettings {
+            github_scopes: vec!["org:acme".into(), "org: broken".into()],
+            ..AppSettings::default()
+        })
+        .unwrap_err();
+
+        assert!(err.message.contains("org: broken"), "{}", err.message);
+        assert!(err.message.contains("org:NAME"), "{}", err.message);
+    }
+
+    #[test]
     fn cursor_uses_agent_as_its_command_and_keeps_the_legacy_alias() {
         assert_eq!(AgentId::Cursor.binary_name(), "agent");
         assert_eq!(agent_for_binary("agent"), Some(AgentId::Cursor));
@@ -433,10 +581,7 @@ mod tests {
                 AgentId::Antigravity,
                 AgentId::Cursor,
             ],
-            binary_paths: HashMap::new(),
-            automatic_updates: true,
-            limit_notifications: false,
-            limits_poll_minutes: 10,
+            ..AppSettings::default()
         })
         .unwrap_err();
         assert!(err.message.contains("at least one provider"));

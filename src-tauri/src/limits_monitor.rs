@@ -1,25 +1,18 @@
-use std::{
-    collections::HashMap,
-    fs,
-    path::Path,
-    time::{Duration, SystemTime},
-};
+use std::{collections::HashMap, path::Path, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use tauri::{async_runtime, AppHandle, Manager};
+use tauri::{async_runtime, AppHandle};
 
 use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
-use crate::usage::cache_io::atomic_write;
+use crate::monitor::{self, wait_for_wake_or_deadline};
 
 const DISABLED_WAKE_MINUTES: u16 = 60;
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
 const MONITORED_PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
-const WAKE_HEARTBEAT: Duration = Duration::from_secs(30);
-const WAKE_DRIFT_TOLERANCE: Duration = Duration::from_secs(5);
+const MAX_BACKOFF_MINUTES: u16 = 60;
 
-struct LimitsMonitorHandle {
-    wake: async_runtime::Sender<()>,
-}
+/// Marker for this monitor's wake channel.
+pub struct LimitsMonitor;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct MonitorState {
@@ -67,18 +60,12 @@ struct LimitEvent {
 }
 
 pub fn setup(app: &mut tauri::App) {
-    let (wake, receiver) = async_runtime::channel(1);
-    app.manage(LimitsMonitorHandle { wake });
-    let app_handle = app.handle().clone();
-    async_runtime::spawn(run(app_handle, receiver));
+    monitor::spawn::<LimitsMonitor, _, _>(app, run);
 }
 
-/// Wake the poll loop after a settings change. A capacity-one channel coalesces repeated changes.
+/// Wake the poll loop after a settings change.
 pub fn wake(app: &AppHandle) {
-    let Some(handle) = app.try_state::<LimitsMonitorHandle>() else {
-        return;
-    };
-    let _ = handle.wake.try_send(());
+    monitor::wake::<LimitsMonitor>(app);
 }
 
 async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
@@ -120,7 +107,7 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             consecutive_failures = 0;
             if !state.providers.is_empty() {
                 state.providers.clear();
-                if let Err(error) = persist_state(&state_path, &state).await {
+                if let Err(error) = monitor::persist_state(&state_path, &state).await {
                     eprintln!("limits monitor could not clear its state: {error}");
                 }
             }
@@ -146,55 +133,15 @@ async fn poll_once(
         .any(|snapshot| snapshot.current_account && snapshot.status == LimitsStatus::Failed);
     let previous = state.clone();
     let events = observe(state, &snapshots);
-    if let Err(error) = persist_state(state_path, state).await {
+    if let Err(error) = monitor::persist_state(state_path, state).await {
         *state = previous;
         return Err(format!("could not save state: {error}"));
     }
     for event in events {
-        show_notification(app, &event);
+        let (title, body) = notification_copy(&event);
+        monitor::notify(app, "limits monitor", title, body);
     }
     Ok(provider_failed)
-}
-
-async fn persist_state(path: &Path, state: &MonitorState) -> Result<(), String> {
-    let path = path.to_path_buf();
-    let state = state.clone();
-    async_runtime::spawn_blocking(move || save_state(&path, &state))
-        .await
-        .map_err(|error| format!("state worker failed: {error}"))?
-}
-
-async fn wait_for_wake_or_deadline(
-    wake_receiver: &mut async_runtime::Receiver<()>,
-    delay: Duration,
-) {
-    // Desktop Tauri does not emit `RunEvent::Resumed`. Compare the wall clock with a cheap
-    // heartbeat instead, so a system-sleep gap causes a poll within one heartbeat of wake.
-    let deadline = SystemTime::now().checked_add(delay);
-    loop {
-        let now = SystemTime::now();
-        let Some(remaining) = deadline.and_then(|deadline| deadline.duration_since(now).ok())
-        else {
-            return;
-        };
-        let heartbeat = remaining.min(WAKE_HEARTBEAT);
-        let started = SystemTime::now();
-        if tokio::time::timeout(heartbeat, wake_receiver.recv())
-            .await
-            .is_ok()
-        {
-            return;
-        }
-        if wake_gap_detected(started, SystemTime::now(), heartbeat) {
-            return;
-        }
-    }
-}
-
-fn wake_gap_detected(started: SystemTime, finished: SystemTime, expected: Duration) -> bool {
-    finished
-        .duration_since(started)
-        .map_or(true, |elapsed| elapsed > expected + WAKE_DRIFT_TOLERANCE)
 }
 
 async fn poll_providers() -> Result<Vec<ProviderLimitsDto>, String> {
@@ -209,16 +156,6 @@ async fn poll_providers() -> Result<Vec<ProviderLimitsDto>, String> {
         );
     }
     Ok(snapshots)
-}
-
-fn show_notification(app: &AppHandle, event: &LimitEvent) {
-    let (title, body) = notification_copy(event);
-    if let Err(error) = crate::notifications::show(app, title, body) {
-        eprintln!(
-            "limits monitor could not show a notification: {}",
-            error.message
-        );
-    }
 }
 
 fn notification_copy(event: &LimitEvent) -> (String, String) {
@@ -350,21 +287,18 @@ fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Opti
 }
 
 fn poll_delay_minutes(base_minutes: u16, consecutive_failures: u32) -> u16 {
-    let multiplier = 1_u32 << consecutive_failures.min(4);
-    u32::from(base_minutes).saturating_mul(multiplier).min(60) as u16
+    let delay = monitor::backoff(
+        Duration::from_secs(u64::from(base_minutes) * 60),
+        consecutive_failures,
+        Duration::from_secs(u64::from(MAX_BACKOFF_MINUTES) * 60),
+    );
+    u16::try_from(delay.as_secs() / 60).unwrap_or(MAX_BACKOFF_MINUTES)
 }
 
 fn load_state(path: &Path) -> MonitorState {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .filter(|state: &MonitorState| state.schema_version == MONITOR_STATE_SCHEMA_VERSION)
-        .unwrap_or_default()
-}
-
-fn save_state(path: &Path, state: &MonitorState) -> Result<(), String> {
-    let json = serde_json::to_string(state).map_err(|error| error.to_string())?;
-    atomic_write(path, &json).map_err(|error| error.to_string())
+    monitor::load_state(path, |state: &MonitorState| {
+        state.schema_version == MONITOR_STATE_SCHEMA_VERSION
+    })
 }
 
 #[cfg(test)]
@@ -375,27 +309,6 @@ mod tests {
     };
     use crate::paths::scratch_dir;
     use std::fs;
-
-    #[test]
-    fn a_wall_clock_gap_larger_than_the_heartbeat_detects_system_wake() {
-        let started = std::time::UNIX_EPOCH + Duration::from_secs(1_000);
-
-        assert!(!wake_gap_detected(
-            started,
-            started + Duration::from_secs(30),
-            Duration::from_secs(30),
-        ));
-        assert!(wake_gap_detected(
-            started,
-            started + Duration::from_secs(40),
-            Duration::from_secs(30),
-        ));
-        assert!(wake_gap_detected(
-            started,
-            started - Duration::from_secs(1),
-            Duration::from_secs(30),
-        ));
-    }
 
     fn snapshot(
         provider: AgentId,
@@ -826,7 +739,7 @@ mod tests {
         );
         assert!(observe(&mut state, &[before]).is_empty());
         assert_eq!(observe(&mut state, std::slice::from_ref(&after)).len(), 1);
-        save_state(&path, &state).unwrap();
+        monitor::save_state(&path, &state).unwrap();
 
         let mut reloaded = load_state(&path);
 

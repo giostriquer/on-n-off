@@ -10,9 +10,11 @@ practice while building on-n-off; keep it factual and add the date or PR when yo
 | Launched from a terminal | inherits the terminal's PATH | inherits the terminal's PATH |
 | Launched from the shell/Finder | the PATH the parent (Explorer) had **when it started**; installers that append to the registry PATH are invisible until Explorer or the machine restarts | a **minimal** PATH (`/usr/bin:/bin:/usr/sbin:/sbin`); nothing from `~/.zshrc`, so nvm/volta/homebrew shims are invisible |
 | Fix in `cli_locate.rs` | second tier = the registered user + machine PATH from `HKCU\Environment` and `HKLM\...\Session Manager\Environment` (`%VAR%` expanded, HKLM values are `REG_EXPAND_SZ`) | second tier = `$SHELL -i -l -c` probed once, off the UI thread, 5 s cap |
-| Third tier | `~/.local/bin`, `%APPDATA%\npm`, `%LOCALAPPDATA%\Volta\bin`, `%LOCALAPPDATA%\agy\bin`, `%LOCALAPPDATA%\cursor-agent`, `C:\nvm4w\nodejs` | `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, nvm versions (newest first), volta, bun, npm-global, fnm, pnpm |
+| Third tier | `~/.local/bin`, `%APPDATA%\npm`, `%LOCALAPPDATA%\Volta\bin`, `%LOCALAPPDATA%\agy\bin`, `%LOCALAPPDATA%\cursor-agent`, `%LOCALAPPDATA%\Programs\GitHub CLI`, `%ProgramFiles%\GitHub CLI`, `C:\nvm4w\nodejs` | `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, nvm versions (newest first), volta, bun, npm-global, fnm, pnpm |
 
 Spawned CLIs get the merged list as their `PATH` so `#!/usr/bin/env node` shims work.
+
+The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; its Windows roots are the MSI / machine-scope winget folder under `%ProgramFiles%` and the user-scope winget folder under `%LOCALAPPDATA%\Programs` (added 2026-08 with the Pull requests screen). On macOS `gh auth token` reads `gh`'s own Keychain item; **observed** (2026-08, release `.app` launched with `open`): the read completes without a Keychain prompt for on-n-off, presumably because the item's ACL names `gh`'s helper rather than the calling app.
 
 ## Launchers and executables
 

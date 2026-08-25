@@ -15,7 +15,6 @@ mod codex;
 mod codex_app_server;
 mod codex_sessions;
 mod credentials;
-mod http;
 mod json;
 #[cfg(test)]
 mod memory_tests;
@@ -31,12 +30,12 @@ use chrono::Utc;
 use crate::dto::{
     AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsStatus, ProviderLimitsDto,
 };
+use crate::http::{get_json, HttpError};
 use crate::paths;
 use credentials::{
     read_claude_credential, read_claude_identity, ClaudeCredential, ClaudeIdentity,
     ClaudeLoginMemo, CredentialLookup, KeychainProbe, CLAUDE_LOGIN,
 };
-use http::{get_json, HttpError};
 use observations::ObservedWindowSet;
 #[cfg(test)]
 use pipeline::resolve;

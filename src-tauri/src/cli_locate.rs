@@ -229,20 +229,31 @@ fn well_known_cli_dirs_for(home: &Path) -> Vec<PathBuf> {
 }
 
 fn windows_cli_dirs(home: &Path) -> Vec<PathBuf> {
+    windows_cli_dirs_from(home, &|name| env::var_os(name))
+}
+
+/// `lookup` stands in for the environment so tests can describe any machine.
+fn windows_cli_dirs_from(home: &Path, lookup: &dyn Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
     let mut dirs = vec![
         home.join(".local").join("bin"),
         home.join("AppData").join("Roaming").join("npm"),
         home.join("AppData").join("Local").join("Volta").join("bin"),
     ];
-    if let Ok(appdata) = env::var("APPDATA") {
+    if let Some(appdata) = lookup("APPDATA") {
         dirs.push(PathBuf::from(appdata).join("npm"));
     }
-    if let Ok(local) = env::var("LOCALAPPDATA") {
+    if let Some(local) = lookup("LOCALAPPDATA") {
         let local = PathBuf::from(local);
         dirs.push(local.join("Volta").join("bin"));
         // Native installers: Antigravity (`agy`) and the Cursor CLI (`agent`).
         dirs.push(local.join("agy").join("bin"));
         dirs.push(local.join(CURSOR_INSTALL_DIR));
+        // `winget install GitHub.cli` in user scope.
+        dirs.push(local.join("Programs").join("GitHub CLI"));
+    }
+    if let Some(program_files) = lookup("ProgramFiles") {
+        // The GitHub CLI MSI and machine-scope winget installs.
+        dirs.push(PathBuf::from(program_files).join("GitHub CLI"));
     }
     dirs.push(PathBuf::from(r"C:\nvm4w\nodejs"));
     dirs
@@ -604,6 +615,32 @@ mod tests {
                 PathBuf::from("other"),
             ],
             "unexpandable entries are dropped, empties skipped, order kept"
+        );
+    }
+
+    #[test]
+    fn windows_well_known_dirs_include_the_github_cli_installers() {
+        let home = PathBuf::from("home");
+        let lookup = |name: &str| -> Option<OsString> {
+            match name {
+                "ProgramFiles" => Some(OsString::from("pf")),
+                "LOCALAPPDATA" => Some(OsString::from("local")),
+                _ => None,
+            }
+        };
+        let dirs = windows_cli_dirs_from(&home, &lookup);
+        assert!(
+            dirs.contains(&PathBuf::from("pf").join("GitHub CLI")),
+            "the MSI / machine-scope winget install: {dirs:?}"
+        );
+        assert!(
+            dirs.contains(&PathBuf::from("local").join("Programs").join("GitHub CLI")),
+            "the user-scope winget install: {dirs:?}"
+        );
+        let without = windows_cli_dirs_from(&home, &|_: &str| None);
+        assert!(
+            !without.iter().any(|dir| dir.ends_with("GitHub CLI")),
+            "no guessed roots when the variables are unset: {without:?}"
         );
     }
 

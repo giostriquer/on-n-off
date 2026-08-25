@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::adapter::AgentAdapter;
 use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, InstallItemsRequest, InstallItemsResultDto,
-    ItemStatusDto, MarketplaceInspectDto, ProjectDto, ProviderLimitsDto, UpdateItemMode,
-    UsageSummaryDto, UsageSummaryInput,
+    AdapterError, AgentId, AgentInfo, AgentTabDto, GithubPrsDto, InstallItemsRequest,
+    InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto, ProjectDto, ProviderLimitsDto,
+    UpdateItemMode, UsageSummaryDto, UsageSummaryInput,
 };
 use crate::flags::FeatureFlags;
 use crate::item_install::ItemService;
@@ -195,6 +195,7 @@ pub async fn save_app_settings(
     })
     .await?;
     crate::limits_monitor::wake(&app);
+    crate::github_monitor::wake(&app);
     Ok(saved)
 }
 
@@ -375,6 +376,14 @@ pub async fn forget_limits_snapshot(
         crate::limits::forget_snapshot(agent_id, &account_id).map_err(AdapterError::message)
     })
     .await
+}
+
+/// The GitHub screen's pull requests (authored, review-requested, assigned) with their CI
+/// rollups, off the UI thread. Auth is borrowed from `gh auth token`; GitHub-side problems come
+/// back as a `status` + `hint` on the DTO, not as an `Err`. `force` skips the in-memory result.
+#[tauri::command]
+pub async fn read_github_prs(force: bool) -> Result<GithubPrsDto, AdapterError> {
+    blocking("github read", move || Ok(crate::github::read_prs(force))).await
 }
 
 #[tauri::command]
