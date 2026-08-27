@@ -12,7 +12,7 @@ import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
+import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
 import { useLimitsProviders } from "./useLimitsProviders";
 
 export function Limits() {
@@ -161,7 +161,7 @@ function AccountCard({
   const account = entry.account ?? null;
   const label = account?.label ?? null;
   const title = label ? `${name} limits · ${label}` : `${name} limits`;
-  const [hero, ...rest] = entry.windows;
+  const [hero, ...rest] = visibleLimitWindows(entry);
   const { message, refreshPaused, remembered, updatedAt } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   return (

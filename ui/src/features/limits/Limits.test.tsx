@@ -53,7 +53,10 @@ function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
     plan: "pro",
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 74, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
+      { id: "extra:base_model_inference", label: "Weekly · GPT-RESERVE", kind: "model", usedPercent: 0, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
       { id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
+      { id: "extra:codex_bengalfox:secondary", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
+      { id: "extra:gpt-5.6-luna", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
     ],
     credits: { balance: "12.5", unlimited: false },
     ...overrides,
@@ -115,7 +118,7 @@ afterEach(() => {
 });
 
 describe("Limits", () => {
-  it("asks for both subscriptions (not forced) and renders every window with percent, tone and reset", async () => {
+  it("asks for both subscriptions (not forced) and renders visible windows with percent, tone and reset", async () => {
     answer([okClaude()], [okCodex()]);
     renderLimits();
 
@@ -143,13 +146,13 @@ describe("Limits", () => {
     expect(within(codex).getByRole("meter", { name: "Weekly · all models" }).getAttribute("data-tone")).toBe("warn");
     expect(within(codex).getByText(/12\.5 credits/)).toBeTruthy();
     // A current-account observation is still historical after its own reset instant passes.
-    const spark = within(codex).getByRole("meter", { name: "Weekly · GPT-5.3-Codex-Spark" });
-    expect(spark.getAttribute("aria-valuenow")).toBe("0");
+    const luna = within(codex).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" });
+    expect(luna.getAttribute("aria-valuenow")).toBe("0");
     expect(within(codex).getByText("—").style.color).toBe("var(--mute)");
     // The reset is a fact worth stating: when it happened and what the window last held.
     expect(within(codex).getByText(/^reset 1m ago · \w{3} \d\d:\d\d · last seen 3%$/)).toBeTruthy();
     expect(within(codex).queryByText(/Current usage unknown/)).toBeNull();
-    expect(spark.getAttribute("aria-valuetext")).toBe("not observed since the reset");
+    expect(luna.getAttribute("aria-valuetext")).toBe("not observed since the reset");
     // A live meter speaks its percentage; only the reset one gets the voice-over.
     expect(weekly.getAttribute("aria-valuetext")).toBeNull();
     expect(within(codex).getAllByText(/Latest observation/)).toHaveLength(1);
@@ -158,6 +161,16 @@ describe("Limits", () => {
     expect(screen.getByText("Subscription limits")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Refresh limits" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("hides internal reserve and Codex Spark windows while keeping other Codex model limits", async () => {
+    answer([okClaude()], [okCodex()]);
+    renderLimits();
+
+    const codex = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+    expect(within(codex).queryByText(/GPT-RESERVE/i)).toBeNull();
+    expect(within(codex).queryByText(/GPT-5\.3-Codex-Spark/i)).toBeNull();
+    expect(within(codex).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" })).toBeTruthy();
   });
 
   it("uses the warning tone for high-usage meter fills", async () => {

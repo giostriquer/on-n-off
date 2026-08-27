@@ -33,6 +33,24 @@ export type LimitAccountPresentation = {
   updatedAt: string | null;
 };
 
+const HIDDEN_CODEX_LIMIT_BUCKETS = ["base_model_inference", "codex_bengalfox"];
+const HIDDEN_CODEX_LIMIT_LABELS = ["gpt-reserve", "gpt-5.3-codex-spark"];
+
+/** Keep provider-owned internal and retired preview buckets out of both Limits surfaces. */
+export function visibleLimitWindows(entry: ProviderLimits): LimitWindow[] {
+  if (entry.provider !== "codex") return entry.windows;
+  return entry.windows.filter((window) => {
+    const label = window.label.split("·").at(-1)?.trim().toLowerCase();
+    return (
+      !HIDDEN_CODEX_LIMIT_LABELS.includes(label ?? "") &&
+      !HIDDEN_CODEX_LIMIT_BUCKETS.some((bucket) => {
+        const id = `extra:${bucket}`;
+        return window.id === id || window.id.startsWith(`${id}:`);
+      })
+    );
+  });
+}
+
 /**
  * Present one independently observed quota window. A value remains usable only until its own
  * known reset passes. Account status cannot make an observation from the prior cycle current.
@@ -75,8 +93,9 @@ function pendingNote(resetIn: string, resetAt: string): string {
 }
 
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
-  const hasObservations = entry.windows.length > 0 || entry.credits != null;
-  const latestObservedAt = entry.windows.reduce<number | null>((latest, window) => {
+  const windows = visibleLimitWindows(entry);
+  const hasObservations = windows.length > 0 || entry.credits != null;
+  const latestObservedAt = windows.reduce<number | null>((latest, window) => {
     const observedAt = Date.parse(window.observedAt);
     if (Number.isNaN(observedAt)) return latest;
     return latest === null ? observedAt : Math.max(latest, observedAt);
