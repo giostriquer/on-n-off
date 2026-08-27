@@ -12,7 +12,7 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
+import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
 import { limitsStaleMs, useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
@@ -181,6 +181,7 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
   const name = providerLabel(entry.provider);
   const label = entry.account?.label ?? name;
   const plan = planLabel(entry.plan);
+  const windows = visibleLimitWindows(entry);
   const { message, refreshPaused, remembered, updatedAt } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   return (
@@ -213,9 +214,9 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
         </p>
       ) : null}
 
-      {entry.windows.length > 0 ? (
+      {windows.length > 0 ? (
         <div className={`flex flex-col gap-1.5 ${message ? "mt-1.5" : ""}`}>
-          {entry.windows.map((window) => (
+          {windows.map((window) => (
             <PopoverWindow
               key={window.id}
               window={window}
