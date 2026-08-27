@@ -146,6 +146,25 @@ describe("LimitsPopover", () => {
     expect((meter.firstElementChild as HTMLElement).style.background).toBe("var(--trip)");
   });
 
+  it("hides internal reserve and Codex Spark windows while keeping other Codex model limits", async () => {
+    const codex = limits("codex", "codex-current", "current@codex.example", true);
+    codex.windows.push(
+      { id: "extra:reserve", label: "Weekly · GPT-RESERVE", kind: "model", usedPercent: 0, observedAt: "2026-08-18T12:00:00Z" },
+      { id: "extra:spark", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, observedAt: "2026-08-18T12:00:00Z" },
+      { id: "extra:spark:secondary", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, observedAt: "2026-08-18T12:00:00Z" },
+      { id: "extra:gpt-5.6-luna", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 6, observedAt: "2026-08-18T12:00:00Z" },
+    );
+    readLimits.mockImplementation((provider: AgentId) =>
+      Promise.resolve(provider === "codex" ? [codex] : []),
+    );
+    renderPopover();
+
+    const account = await screen.findByRole("article", { name: "Codex limits · current@codex.example" });
+    expect(within(account).queryByText(/GPT-RESERVE/i)).toBeNull();
+    expect(within(account).queryByText(/GPT-5\.3-Codex-Spark/i)).toBeNull();
+    expect(within(account).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" })).toBeTruthy();
+  });
+
   it("keeps the current account's observations when refresh is paused", async () => {
     readLimits.mockImplementation((provider: AgentId) =>
       Promise.resolve(

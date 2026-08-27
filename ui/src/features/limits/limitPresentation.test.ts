@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
-import type { LimitWindow } from "$lib/limitsTypes";
-import { presentLimitWindow } from "./limitPresentation";
+import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import { presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -57,5 +57,21 @@ describe("presentLimitWindow", () => {
     expect(presented.note).toBe("");
     expect(presented.valueText).toBeUndefined();
     expect(presentLimitWindow({ ...window, resetsAt: "soon" }, NOW).text).toBe("93%");
+  });
+});
+
+describe("visibleLimitWindows", () => {
+  it("keeps a longer model name that only ends with a hidden Codex model name", () => {
+    const entry: ProviderLimits = {
+      provider: "codex",
+      status: "ok",
+      currentAccount: true,
+      windows: [
+        { ...window, id: "extra:reserve", label: "Weekly · GPT-Reserve" },
+        { ...window, id: "extra:team-reserve", label: "Weekly · Team GPT-Reserve" },
+      ],
+    };
+
+    expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:team-reserve"]);
   });
 });
