@@ -17,7 +17,10 @@ function Set-FixtureVersion {
         [string]$TauriVersion,
 
         [Parameter(Mandatory)]
-        [string]$CargoVersion
+        [string]$CargoVersion,
+
+        [Parameter(Mandatory)]
+        [string]$HelperVersion
     )
 
     @{ version = $PackageVersion } |
@@ -34,6 +37,12 @@ name = "release-version-fixture"
 version = "$CargoVersion"
 edition = "2021"
 "@ | Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri" "Cargo.toml") -Encoding UTF8
+
+    @"
+<plist><dict>
+<key>CFBundleShortVersionString</key><string>$HelperVersion</string>
+</dict></plist>
+"@ | Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri" "macos" "SideNotch" "Info.plist") -Encoding UTF8
 }
 
 function Invoke-Checker {
@@ -108,10 +117,10 @@ function Assert-OutputContains {
 }
 
 try {
-    New-Item -ItemType Directory -Path (Join-Path $fixtureRoot "src-tauri" "src") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $fixtureRoot "src-tauri" "src"), (Join-Path $fixtureRoot "src-tauri" "macos" "SideNotch") -Force | Out-Null
     "fn main() {}" | Set-Content -LiteralPath (Join-Path $fixtureRoot "src-tauri" "src" "main.rs") -Encoding UTF8
 
-    Set-FixtureVersion -PackageVersion "0.1.0" -TauriVersion "0.1.0" -CargoVersion "0.1.0"
+    Set-FixtureVersion -PackageVersion "0.1.0" -TauriVersion "0.1.0" -CargoVersion "0.1.0" -HelperVersion "0.1.0"
     $matching = Invoke-Checker -ExpectedTag "v0.1.0"
     Assert-ExitCode -Result $matching -Expected 0 -Case "matching versions"
     Assert-OutputContains -Result $matching -ExpectedText "version=0.1.0" -Case "matching versions"
@@ -129,10 +138,15 @@ try {
     Assert-ExitCode -Result $wrongTag -Expected 1 -Case "tag mismatch"
     Assert-OutputContains -Result $wrongTag -ExpectedText "does not match" -Case "tag mismatch"
 
-    Set-FixtureVersion -PackageVersion "0.2.0" -TauriVersion "0.1.0" -CargoVersion "0.1.0"
+    Set-FixtureVersion -PackageVersion "0.2.0" -TauriVersion "0.1.0" -CargoVersion "0.1.0" -HelperVersion "0.1.0"
     $manifestMismatch = Invoke-Checker -ExpectedTag "v0.1.0"
     Assert-ExitCode -Result $manifestMismatch -Expected 1 -Case "manifest mismatch"
     Assert-OutputContains -Result $manifestMismatch -ExpectedText "package.json" -Case "manifest mismatch"
+
+    Set-FixtureVersion -PackageVersion "0.1.0" -TauriVersion "0.1.0" -CargoVersion "0.1.0" -HelperVersion "0.0.9"
+    $helperMismatch = Invoke-Checker -ExpectedTag "v0.1.0"
+    Assert-ExitCode -Result $helperMismatch -Expected 1 -Case "helper version mismatch"
+    Assert-OutputContains -Result $helperMismatch -ExpectedText "Info.plist" -Case "helper version mismatch"
 
     '{}' | Set-Content -LiteralPath (Join-Path $fixtureRoot "package.json") -Encoding UTF8
     $missingJsonVersion = Invoke-Checker -ExpectedTag "v0.1.0"

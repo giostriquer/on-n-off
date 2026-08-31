@@ -2480,11 +2480,12 @@ dependencies = [
 
 [[package]]
 name = "on-n-off"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "block2",
  "chrono",
  "chrono-tz",
+ "core-graphics",
  "flate2",
  "objc2",
  "objc2-foundation",

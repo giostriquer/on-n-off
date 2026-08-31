@@ -34,6 +34,26 @@ function Read-JsonVersion {
     return $version
 }
 
+function Read-PlistVersion {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "native helper Info.plist is missing at $Path"
+    }
+    $body = Get-Content -Raw -LiteralPath $Path
+    $match = [regex]::Match(
+        $body,
+        '<key>\s*CFBundleShortVersionString\s*</key>\s*<string>(?<version>[^<]+)</string>'
+    )
+    if (-not $match.Success -or [string]::IsNullOrWhiteSpace($match.Groups['version'].Value)) {
+        throw "native helper Info.plist does not contain CFBundleShortVersionString"
+    }
+    return $match.Groups['version'].Value.Trim()
+}
+
 function Invoke-CargoMetadata {
     param(
         [Parameter(Mandatory)]
@@ -77,6 +97,7 @@ try {
     $packagePath = Join-Path $root "package.json"
     $tauriPath = Join-Path $root "src-tauri" "tauri.conf.json"
     $cargoPath = Join-Path $root "src-tauri" "Cargo.toml"
+    $helperInfoPath = Join-Path $root "src-tauri" "macos" "SideNotch" "Info.plist"
 
     $packageVersion = Read-JsonVersion -Path $packagePath -SourceName "package.json"
     $tauriVersion = Read-JsonVersion -Path $tauriPath -SourceName "src-tauri/tauri.conf.json"
@@ -95,10 +116,12 @@ try {
     }
 
     $cargoVersion = [string]$cargoPackage.version
+    $helperVersion = Read-PlistVersion -Path $helperInfoPath
     $versions = [ordered]@{
         "package.json" = $packageVersion
         "src-tauri/tauri.conf.json" = $tauriVersion
         "src-tauri/Cargo.toml" = $cargoVersion
+        "src-tauri/macos/SideNotch/Info.plist" = $helperVersion
     }
 
     $invalidVersions = @($versions.GetEnumerator() | Where-Object { $_.Value -notmatch '^\d+\.\d+\.\d+$' })

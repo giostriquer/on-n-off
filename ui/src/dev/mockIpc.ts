@@ -10,6 +10,7 @@
 import type { AppSettings, AgentInfo } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { limitsFor } from "./limitsFixtures";
+import type { NotchSnapshot, NotchSettings } from "$lib/notchTypes";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -51,6 +52,17 @@ let settings: AppSettings = {
 
 const emptyTab = () => ({ plugins: [], userSkills: [], mcpServers: [] });
 
+let notch: NotchSnapshot = {
+  revision: 0,
+  supported: true,
+  settings: { enabled: true, displayId: "studio", edge: "right", size: "standard" },
+  displays: [
+    { id: "built-in", name: "Built-in Retina Display", x: -1728, y: 0, width: 1728, height: 1117, workY: 33, workHeight: 1084, scale: 2, mirrored: false },
+    { id: "studio", name: "Studio Display", x: 0, y: 0, width: 2560, height: 1440, workY: 25, workHeight: 1415, scale: 2, mirrored: false },
+  ],
+  error: null,
+};
+
 const handlers: Record<string, Handler> = {
   list_agents: () => AGENTS,
   feature_flags: () => ({ masterCut: false }),
@@ -67,6 +79,11 @@ const handlers: Record<string, Handler> = {
   list_local_plugins: emptyTab,
   refresh: emptyTab,
   read_limits: (args) => limitsFor(args.agentId),
+  read_notch_state: () => notch,
+  save_notch_settings: (args) => { notch = { ...notch, settings: args.settings as NotchSettings }; return notch; },
+  hide_limits_popover: () => undefined,
+  open_limits_window: () => undefined,
+  quit_app: () => undefined,
   read_github_prs: () => {
     if (!Object.hasOwn(SCENARIOS, scenario)) {
       throw { kind: "message", message: `mock: unknown scenario "${scenario}"`, path: null };

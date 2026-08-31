@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import type { GithubPrs } from "./githubTypes";
 import type { ProviderLimits } from "./limitsTypes";
+import type { NotchChanged, NotchSettings, NotchSnapshot } from "./notchTypes";
 import type { UsageSummary, UsageSummaryInput } from "./usageTypes";
 
 export function listAgents(): Promise<AgentInfo[]> {
@@ -140,6 +141,18 @@ export function readGithubPrs(force = false): Promise<GithubPrs> {
 
 export function hideLimitsPopover(): Promise<void> {
   return invoke("hide_limits_popover");
+}
+
+export function readNotchState(): Promise<NotchSnapshot> {
+  return invoke("read_notch_state");
+}
+
+export function saveNotchSettings(settings: NotchSettings): Promise<NotchSnapshot> {
+  return invoke("save_notch_settings", { settings });
+}
+
+export function onNotchChanged(handler: (change: NotchChanged) => void): Promise<UnlistenFn> {
+  return listen<NotchChanged>("side-notch-changed", (event) => handler(event.payload));
 }
 
 export function openLimitsWindow(): Promise<void> {

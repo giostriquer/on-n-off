@@ -33,3 +33,7 @@ ui/dist
 
 # Local release artifacts for handoff (not committed)
 artifacts/
+
+# Native notch build products
+src-tauri/macos/SideNotch/.build/
+src-tauri/binaries/

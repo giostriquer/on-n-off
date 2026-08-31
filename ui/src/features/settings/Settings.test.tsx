@@ -16,6 +16,9 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("$lib/api", () => ({
+  readNotchState: () => Promise.resolve({ revision: 0, supported: false, settings: { enabled: false, displayId: null, edge: "right", size: "standard" }, displays: [], error: null }),
+  onNotchChanged: () => Promise.resolve(() => undefined),
+  saveNotchSettings: vi.fn(),
   diagnoseProviders: () =>
     Promise.resolve([
       {
