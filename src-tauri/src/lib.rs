@@ -30,6 +30,7 @@ mod process;
 mod project;
 mod scanner;
 mod settings;
+mod side_notch;
 mod sort;
 mod tray;
 #[cfg(test)]
@@ -53,6 +54,8 @@ pub fn run() {
             });
             #[cfg(target_os = "macos")]
             tray::setup(_app)?;
+            #[cfg(target_os = "macos")]
+            side_notch::setup(_app);
             limits_monitor::setup(_app);
             github_monitor::setup(_app);
             Ok(())
@@ -89,16 +92,24 @@ pub fn run() {
             commands::hide_limits_popover,
             commands::open_limits_window,
             commands::quit_app,
+            commands::read_notch_state,
+            commands::save_notch_settings,
         ]);
 
     #[cfg(target_os = "macos")]
-    let builder = builder.on_window_event(tray::handle_window_event);
+    let builder = builder.on_window_event(|window, event| {
+        tray::handle_window_event(window, event);
+    });
 
     let app = builder
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
     app.run(|_app, _event| {
+        #[cfg(target_os = "macos")]
+        if matches!(_event, tauri::RunEvent::Exit) {
+            side_notch::shutdown(_app);
+        }
         #[cfg(target_os = "macos")]
         if matches!(_event, tauri::RunEvent::Reopen { .. }) {
             if let Err(error) = tray::show_main_window(_app) {

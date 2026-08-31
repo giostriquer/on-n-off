@@ -1,0 +1,5 @@
+{
+  "bundle": {
+    "macOS": { "files": { "Helpers/on-n-off-notch.app": "binaries/on-n-off-notch.app" } }
+  }
+}

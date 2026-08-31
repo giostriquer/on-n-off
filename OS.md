@@ -95,3 +95,15 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   `tauri-build` needs `ui/dist` before the Rust steps.
 - In this repo's shell tooling, prefer `Join-Path`, `$env:VAR`, `-LiteralPath`; in bash use forward
   slashes and `cygpath -w` when handing paths to Windows programs.
+
+## Native side notch (macOS)
+
+The opt-in side notch is a SwiftUI/AppKit helper bundled under `Contents/Helpers/on-n-off-notch.app`
+with its own native application identity. `src-tauri/native_build.rs` compiles it only for macOS;
+`tauri.macos.conf.json` adds the binary to the macOS bundle. Swift Command Line
+Tools suffice: native model checks use an executable test target, not XCTest.
+The helper has no provider credentials, network listener, or independent login
+item. Rust supervises its bounded stdin/stdout protocol and reaps it on shutdown.
+A closed parent pipe makes the helper exit, including after a parent crash.
+Display UUIDs retain the existing settings format. Screen placement converts
+Core Graphics top-left coordinates into AppKit bottom-left coordinates.

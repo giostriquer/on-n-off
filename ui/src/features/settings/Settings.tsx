@@ -4,6 +4,7 @@ import { FolderOpen, RefreshCw, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Rocker } from "@/features/agents/Rocker";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
+import { NotchSettingsCard } from "@/features/notch/NotchSettingsCard";
 import { FOCUS_RING } from "$lib/a11y";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { visibleAgentIds } from "$lib/appSettings";
@@ -96,6 +97,8 @@ export function Settings({
         onEnabledChange={onLimitNotificationsChange}
         onPollMinutesChange={onLimitsPollMinutesChange}
       />
+
+      <NotchSettingsCard />
 
       <GithubSettingsCard
         scopes={settings.githubScopes}

@@ -1,6 +1,6 @@
 [package]
 name = "on-n-off"
-version = "0.3.1"
+version = "0.4.0"
 description = "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration"
 authors = ["Giovanne Striquer"]
 edition = "2021"
@@ -42,6 +42,7 @@ tokio = { version = "1", features = ["time"] }
 winreg = "0.55"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.25"
 block2 = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSError"] }

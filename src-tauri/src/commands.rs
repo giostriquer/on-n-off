@@ -400,3 +400,35 @@ pub fn open_limits_window(app: tauri::AppHandle) -> Result<(), AdapterError> {
 pub fn quit_app(app: tauri::AppHandle) {
     crate::tray::quit_app(&app);
 }
+
+#[tauri::command]
+pub async fn read_notch_state(
+    app: tauri::AppHandle,
+) -> Result<crate::side_notch::NotchSnapshot, AdapterError> {
+    blocking("notch displays", move || {
+        let snapshot = crate::side_notch::read();
+        #[cfg(target_os = "macos")]
+        let snapshot = {
+            let mut snapshot = snapshot;
+            crate::side_notch::add_runtime_error(&app, &mut snapshot);
+            snapshot
+        };
+        #[cfg(not(target_os = "macos"))]
+        let _ = app;
+        Ok(snapshot)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn save_notch_settings(
+    app: tauri::AppHandle,
+    settings: crate::side_notch::NotchSettings,
+) -> Result<crate::side_notch::NotchSnapshot, AdapterError> {
+    let snapshot = blocking("notch settings", move || {
+        crate::side_notch::save(settings).map_err(AdapterError::message)
+    })
+    .await?;
+    crate::side_notch::apply(&app, snapshot.clone()).map_err(AdapterError::message)?;
+    Ok(snapshot)
+}
