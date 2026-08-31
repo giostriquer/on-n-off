@@ -19,6 +19,26 @@ boundary.
 See [HANDOFF.md](./HANDOFF.md) for per-platform prerequisites and the
 recommended smoke-test order.
 
+### macOS side notch
+
+The notch is a native SwiftUI view in an AppKit panel. A small helper is bundled
+inside the macOS app and runs while the feature is enabled. It closes with the
+parent app; there is no extra installation, login item, or local network service.
+The main application remains Tauri.
+
+In **Settings → Side notch**, choose a display, choose its left or right edge,
+then enable the notch. It shows Claude and Codex usage for the current accounts;
+click a ring for quota windows and reset times, or the arc below for settings.
+Claude's outer ring shows total weekly usage; its lighter orange inner ring shows
+Fable's weekly usage when available. Five-hour usage remains in the details.
+Escape or clicking outside collapses the details. The menu-bar tray stays available.
+
+The selection is saved by display UUID in `~/.on-n-off/side-notch.json`. The
+notch hides when that display disconnects or joins a mirror set, and returns when
+it is available again. It never moves to another display automatically. It is an
+overlay, so choose the edge opposite your Dock. It does not reserve screen space.
+Background usage refreshes every minute without forcing another Keychain read.
+
 ## Run from source
 
 Install [Bun](https://bun.sh/), the Rust toolchain, and the Tauri prerequisites
@@ -83,3 +103,20 @@ snapshot and MIT license notice.
 ## License
 
 on-n-off is available under the [MIT License](./LICENSE).
+
+### Native notch development (macOS)
+
+The Rust build compiles and stages the Swift helper automatically with Xcode
+Command Line Tools (`xcrun swift`). Windows does not build or bundle this helper.
+The helper uses macOS 11-compatible APIs, explicit main-actor UI ownership, and
+sendable value snapshots. Complete concurrency checks are enabled for every Swift
+target, and the Rust build treats Swift warnings as errors. To run its model and protocol/lifetime
+checks after a Rust build:
+
+```sh
+xcrun swift run --package-path src-tauri/macos/SideNotch -Xswiftc -warnings-as-errors NotchCoreChecks
+bun scripts/check-native-notch.mjs src-tauri/target/debug/on-n-off-notch
+```
+
+Native visuals must be inspected in the running app. The browser screenshot
+harness covers the main settings page but cannot render the SwiftUI panel.
