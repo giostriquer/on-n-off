@@ -17,6 +17,7 @@ pub enum NotchSize {
 }
 
 impl NotchSize {
+    #[cfg(any(target_os = "macos", test))]
     fn scale(self) -> f64 {
         match self {
             Self::Compact => 0.875,
