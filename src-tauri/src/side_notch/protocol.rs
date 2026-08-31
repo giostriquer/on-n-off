@@ -1,4 +1,4 @@
-use super::model::{Edge, NotchSettings};
+use super::model::{Edge, NotchSettings, NotchSize};
 use serde::Deserialize;
 
 pub const MAX_MESSAGE: usize = 262_144;
@@ -30,12 +30,14 @@ fn native_settings<'de, D: serde::Deserializer<'de>>(input: D) -> Result<NotchSe
         enabled: bool,
         display_id: Option<String>,
         edge: Edge,
+        size: NotchSize,
     }
     let settings = NativeSettings::deserialize(input)?;
     Ok(NotchSettings {
         enabled: settings.enabled,
         display_id: settings.display_id,
         edge: settings.edge,
+        size: settings.size,
     })
 }
 
@@ -87,7 +89,20 @@ mod tests {
             decode_event(br#"{"version":1,"type":"ack","sequence":42}"#),
             Ok(Action::Ack { sequence: 42 })
         );
-        assert_eq!(decode_event(br#"{"version":1,"type":"save","revision":0,"request":1,"settings":{"enabled":true,"displayId":"external","edge":"left"}}"#), Ok(Action::Save { revision: 0, request: 1, settings: NotchSettings { enabled: true, display_id: Some("external".into()), edge: super::super::model::Edge::Left } }));
+        assert_eq!(
+            decode_event(br#"{"version":1,"type":"save","revision":0,"request":1,"settings":{"enabled":true,"displayId":"external","edge":"left","size":"standard"}}"#),
+            Ok(Action::Save {
+                revision: 0,
+                request: 1,
+                settings: NotchSettings {
+                    enabled: true,
+                    display_id: Some("external".into()),
+                    edge: super::super::model::Edge::Left,
+                    size: super::super::model::NotchSize::Standard,
+                },
+            })
+        );
+        assert!(decode_event(br#"{"version":1,"type":"save","revision":0,"request":1,"settings":{"enabled":true,"displayId":"external","edge":"left","size":"compact"}}"#).is_ok());
     }
 
     #[test]
@@ -98,6 +113,7 @@ mod tests {
             serde_json::json!({"edge": "left"}),
             serde_json::json!({"enabled": true, "edeg": "left"}),
             serde_json::json!({"enabled": true, "edge": "left", "extra": 1}),
+            serde_json::json!({"enabled": true, "displayId": "external", "edge": "left"}),
         ] {
             let message = serde_json::json!({"version":1,"type":"save","revision":0,"request":1,"settings":settings});
             assert!(

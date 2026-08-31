@@ -55,7 +55,7 @@ const emptyTab = () => ({ plugins: [], userSkills: [], mcpServers: [] });
 let notch: NotchSnapshot = {
   revision: 0,
   supported: true,
-  settings: { enabled: true, displayId: "studio", edge: "right" },
+  settings: { enabled: true, displayId: "studio", edge: "right", size: "standard" },
   displays: [
     { id: "built-in", name: "Built-in Retina Display", x: -1728, y: 0, width: 1728, height: 1117, workY: 33, workHeight: 1084, scale: 2, mirrored: false },
     { id: "studio", name: "Studio Display", x: 0, y: 0, width: 2560, height: 1440, workY: 25, workHeight: 1415, scale: 2, mirrored: false },

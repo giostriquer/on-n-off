@@ -68,6 +68,7 @@ mod tests {
             enabled: true,
             display_id: Some("display-two".into()),
             edge: super::super::model::Edge::Left,
+            size: super::super::model::NotchSize::Standard,
         };
         assert_eq!(save_to(&path, &current, None, &counter).unwrap(), 1);
         assert!(save_to(&path, &NotchSettings::default(), Some(0), &counter).is_err());

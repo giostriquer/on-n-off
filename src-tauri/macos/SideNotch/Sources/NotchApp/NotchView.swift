@@ -8,7 +8,16 @@ let codexGreen = Color(red: 60 / 255, green: 230 / 255, blue: 172 / 255)
 struct NotchView: View {
   @ObservedObject var controller: PanelController
   var edge: NotchCore.Edge { controller.message?.snapshot.settings.edge ?? .right }
+  var scale: CGFloat { controller.message?.snapshot.settings.size.scale ?? 1 }
+  var baseWidth: CGFloat { controller.selection == nil ? 76 : 388 }
   var body: some View {
+    content.frame(width: baseWidth, height: 340)
+      .scaleEffect(scale, anchor: edge == .left ? .leading : .trailing)
+      .frame(
+        width: baseWidth * scale, height: 340 * scale,
+        alignment: edge == .left ? .leading : .trailing)
+  }
+  private var content: some View {
     HStack(spacing: 0) {
       if edge == .left { rail }
       if let selection = controller.selection {

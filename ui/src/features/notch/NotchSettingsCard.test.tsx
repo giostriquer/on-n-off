@@ -16,7 +16,7 @@ beforeEach(() => {
   snapshot = {
     revision: 0,
     supported: true,
-    settings: { enabled: false, displayId: null, edge: "right" },
+    settings: { enabled: false, displayId: null, edge: "right", size: "standard" },
     error: null,
     displays: ["first", "second"].map((id, index) => ({
       id,
@@ -64,6 +64,7 @@ it("requires an explicit display and saves its identity even when names match", 
     enabled: true,
     displayId: "second",
     edge: "right",
+    size: "standard",
   });
 });
 
@@ -72,6 +73,7 @@ it("keeps a disconnected display selected and allows the notch to be disabled", 
     enabled: true,
     displayId: "disconnected",
     edge: "left",
+    size: "standard",
   };
   mount();
   expect(
@@ -101,4 +103,27 @@ it("does not offer a mirrored display as a single-display target", async () => {
   expect(
     await screen.findByRole("option", { name: /mirrored/ }),
   ).toBeDisabled();
+});
+
+it("offers three size presets and persists the selected preset", async () => {
+  mount();
+  const sizes = await screen.findByRole("group", { name: "Size" });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Standard" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    ),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Large" }));
+
+  await waitFor(() =>
+    expect(calls.save).toHaveBeenLastCalledWith({
+      enabled: false,
+      displayId: null,
+      edge: "right",
+      size: "large",
+    }),
+  );
+  expect(sizes).toBeTruthy();
 });

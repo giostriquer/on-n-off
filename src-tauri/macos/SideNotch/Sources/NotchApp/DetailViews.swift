@@ -87,6 +87,14 @@ struct NativeSettings: View {
           }
         }.font(.system(size: 12))
         Picker(
+          "Size",
+          selection: Binding(get: { settings.size }, set: { value in change { $0.size = value } })
+        ) {
+          Text("Compact").tag(NotchSize.compact)
+          Text("Standard").tag(NotchSize.standard)
+          Text("Large").tag(NotchSize.large)
+        }.pickerStyle(SegmentedPickerStyle())
+        Picker(
           "Edge",
           selection: Binding(get: { settings.edge }, set: { value in change { $0.edge = value } })
         ) {

@@ -1,8 +1,10 @@
 export type NotchEdge = "left" | "right";
+export type NotchSize = "compact" | "standard" | "large";
 export type NotchSettings = {
   enabled: boolean;
   displayId: string | null;
   edge: NotchEdge;
+  size: NotchSize;
 };
 export type NotchDisplay = {
   id: string;

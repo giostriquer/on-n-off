@@ -9,6 +9,25 @@ pub const HEIGHT: f64 = 340.0;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub enum NotchSize {
+    Compact,
+    #[default]
+    Standard,
+    Large,
+}
+
+impl NotchSize {
+    fn scale(self) -> f64 {
+        match self {
+            Self::Compact => 0.875,
+            Self::Standard => 1.0,
+            Self::Large => 1.125,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum Edge {
     Left,
     #[default]
@@ -21,6 +40,7 @@ pub struct NotchSettings {
     pub enabled: bool,
     pub display_id: Option<String>,
     pub edge: Edge,
+    pub size: NotchSize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -69,9 +89,16 @@ pub fn layout(settings: &NotchSettings, displays: &[Display], expanded: bool) ->
     if matches.next().is_some() || display.mirrored {
         return None;
     }
-    let width = if expanded { EXPANDED_WIDTH } else { RAIL_WIDTH }.min(display.width);
-    let height = HEIGHT.min(display.work_height);
-    if width < RAIL_WIDTH || height < 180.0 {
+    let scale = settings.size.scale();
+    let rail_width = RAIL_WIDTH * scale;
+    let width = if expanded {
+        EXPANDED_WIDTH * scale
+    } else {
+        rail_width
+    }
+    .min(display.width);
+    let height = (HEIGHT * scale).min(display.work_height);
+    if width < rail_width || height < 180.0 * scale {
         return None;
     }
     Some(Layout {
@@ -110,6 +137,7 @@ mod tests {
             enabled: true,
             display_id: Some("retina".into()),
             edge: Edge::Right,
+            size: NotchSize::Standard,
         };
         let displays = vec![
             display("external", 0.0, 1.0),
@@ -142,6 +170,7 @@ mod tests {
             enabled: true,
             display_id: Some("missing".into()),
             edge: Edge::Left,
+            size: NotchSize::Standard,
         };
         let mut displays = vec![display("other", 0.0, 1.0)];
         assert_eq!(layout(&settings, &displays, false), None);
@@ -156,6 +185,7 @@ mod tests {
             enabled: true,
             display_id: Some("left".into()),
             edge: Edge::Left,
+            size: NotchSize::Standard,
         };
         let displays = vec![display("left", -1728.0, 2.0)];
         assert_eq!(layout(&settings, &displays, true).unwrap().x, -1728.0);
@@ -171,5 +201,32 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn missing_size_defaults_to_standard_and_presets_scale_the_whole_panel() {
+        let legacy: NotchSettings =
+            serde_json::from_str(r#"{"enabled":true,"displayId":"main","edge":"right"}"#).unwrap();
+        assert_eq!(legacy.size, NotchSize::Standard);
+
+        let displays = [display("main", 0.0, 1.0)];
+        for (size, scale) in [
+            (NotchSize::Compact, 0.875),
+            (NotchSize::Standard, 1.0),
+            (NotchSize::Large, 1.125),
+        ] {
+            let settings = NotchSettings {
+                enabled: true,
+                display_id: Some("main".into()),
+                edge: Edge::Right,
+                size,
+            };
+            let compact = layout(&settings, &displays, false).unwrap();
+            let expanded = layout(&settings, &displays, true).unwrap();
+            assert_eq!(compact.width, RAIL_WIDTH * scale);
+            assert_eq!(expanded.width, EXPANDED_WIDTH * scale);
+            assert_eq!(compact.height, HEIGHT * scale);
+            assert_eq!(expanded.height, HEIGHT * scale);
+        }
     }
 }

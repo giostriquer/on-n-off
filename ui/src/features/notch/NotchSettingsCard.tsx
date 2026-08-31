@@ -101,6 +101,26 @@ export function NotchSettingsCard() {
             </span>
           ))}
         </div>
+        <div className="notch-size-row">
+          <span id="notch-size-label">Size</span>
+          <div
+            role="group"
+            aria-labelledby="notch-size-label"
+            className="notch-segment"
+          >
+            {(["compact", "standard", "large"] as const).map((size) => (
+              <button
+                key={size}
+                type="button"
+                disabled={!settings || state.saving}
+                aria-pressed={settings?.size === size}
+                onClick={() => change({ size })}
+              >
+                {size[0].toUpperCase() + size.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="notch-edge-row">
           <span id="notch-edge-label">Edge</span>
           <div

@@ -42,6 +42,7 @@
   font-size: 12px;
 }
 .notch-label-row,
+.notch-size-row,
 .notch-edge-row {
   display: flex;
   align-items: center;

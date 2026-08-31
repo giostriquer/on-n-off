@@ -94,14 +94,40 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum Edge: String, Codable, Sendable { case left, right }
+public enum NotchSize: String, Codable, Sendable {
+  case compact, standard, large
+
+  public var scale: Double {
+    switch self {
+    case .compact: 0.875
+    case .standard: 1.0
+    case .large: 1.125
+    }
+  }
+}
 public struct Settings: Codable, Equatable, Sendable {
   public var enabled: Bool
   public var displayId: String?
   public var edge: Edge
-  public init(enabled: Bool = false, displayId: String? = nil, edge: Edge = .right) {
+  public var size: NotchSize
+  public init(
+    enabled: Bool = false, displayId: String? = nil, edge: Edge = .right,
+    size: NotchSize = .standard
+  ) {
     self.enabled = enabled
     self.displayId = displayId
     self.edge = edge
+    self.size = size
+  }
+
+  private enum CodingKeys: String, CodingKey { case enabled, displayId, edge, size }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try values.decode(Bool.self, forKey: .enabled)
+    displayId = try values.decodeIfPresent(String.self, forKey: .displayId)
+    edge = try values.decode(Edge.self, forKey: .edge)
+    size = try values.decodeIfPresent(NotchSize.self, forKey: .size) ?? .standard
   }
 }
 
@@ -208,9 +234,11 @@ public func notchFrame(settings: Settings, displays: [Display], expanded: Bool) 
   guard settings.enabled, let id = settings.displayId else { return nil }
   let matches = displays.filter { $0.id == id }
   guard matches.count == 1, let display = matches.first, !display.mirrored else { return nil }
-  let width = min(expanded ? 388.0 : 76.0, display.width)
-  let height = min(340.0, display.workHeight)
-  guard width >= 76, height >= 180 else { return nil }
+  let scale = settings.size.scale
+  let railWidth = 76.0 * scale
+  let width = min(expanded ? 388.0 * scale : railWidth, display.width)
+  let height = min(340.0 * scale, display.workHeight)
+  guard width >= railWidth, height >= 180 * scale else { return nil }
   return CGRect(
     x: settings.edge == .left ? display.x : display.x + display.width - width,
     y: display.workY + (display.workHeight - height) / 2, width: width, height: height)

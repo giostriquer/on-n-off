@@ -106,6 +106,25 @@ final class NotchTests {
     expectNil(notchFrame(settings: Settings(), displays: [display("chosen")], expanded: false))
   }
 
+  func testLegacySettingsDefaultToStandardAndPresetsScaleTheWholePanel() throws {
+    let legacy = try JSONDecoder().decode(
+      Settings.self,
+      from: Data(#"{"enabled":true,"displayId":"main","edge":"right"}"#.utf8))
+    expectEqual(legacy.size, NotchSize.standard)
+    let displays = [display("main")]
+    for (size, scale) in [
+      (NotchSize.compact, 0.875), (NotchSize.standard, 1.0), (NotchSize.large, 1.125),
+    ] {
+      let settings = Settings(enabled: true, displayId: "main", edge: .right, size: size)
+      let compact = notchFrame(settings: settings, displays: displays, expanded: false)
+      let expanded = notchFrame(settings: settings, displays: displays, expanded: true)
+      expectEqual(compact?.width, 76 * scale)
+      expectEqual(expanded?.width, 388 * scale)
+      expectEqual(compact?.height, 340 * scale)
+      expectEqual(expanded?.height, 340 * scale)
+    }
+  }
+
   func testProtocolRejectsUnsupportedVersionOversizeAndInvalidPercent() throws {
     let valid =
       #"{"version":1,"sequence":1,"snapshot":{"settings":{"enabled":false,"edge":"right"},"displays":[]},"providers":[]}"#
@@ -124,7 +143,7 @@ final class NotchTests {
   }
 
   func testClientActionsEncodeACompleteTypedProtocol() throws {
-    let settings = Settings(enabled: true, displayId: "external", edge: .left)
+    let settings = Settings(enabled: true, displayId: "external", edge: .left, size: .large)
     let cases: [(ClientAction, [String: Any])] = [
       (.ready, ["version": 1, "type": "ready"]),
       (.ack(sequence: 42), ["version": 1, "type": "ack", "sequence": 42]),
@@ -135,7 +154,9 @@ final class NotchTests {
         .save(settings: settings, revision: 7, request: 9),
         [
           "version": 1, "type": "save", "revision": 7, "request": 9,
-          "settings": ["enabled": true, "displayId": "external", "edge": "left"],
+          "settings": [
+            "enabled": true, "displayId": "external", "edge": "left", "size": "large",
+          ],
         ]
       ),
     ]
@@ -178,7 +199,8 @@ checks.testFableExpiresIndependentlyAndUnknownResetRemainsUsable()
 checks.testCodexPrefersSessionAndHidesInternalBuckets()
 checks.testStableUUIDAndNegativeCoordinatesSurviveDisplayReordering()
 checks.testMissingMirroredAmbiguousAndDisabledDisplaysHideWithoutFallback()
+try checks.testLegacySettingsDefaultToStandardAndPresetsScaleTheWholePanel()
 try checks.testProtocolRejectsUnsupportedVersionOversizeAndInvalidPercent()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("9 native check groups; \(failures) failures")
+print("10 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

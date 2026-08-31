@@ -26,9 +26,11 @@ inside the macOS app and runs while the feature is enabled. It closes with the
 parent app; there is no extra installation, login item, or local network service.
 The main application remains Tauri.
 
-In **Settings → Side notch**, choose a display, choose its left or right edge,
-then enable the notch. It shows Claude and Codex usage for the current accounts;
-click a ring for quota windows and reset times, or the arc below for settings.
+In **Settings → Side notch**, choose a display, a Compact, Standard, or Large
+size, and its left or right edge, then enable the notch. Existing settings use
+Standard until another size is selected. It shows Claude and Codex usage for
+the current accounts; click a ring for quota windows and reset times, or the arc
+below for settings.
 Claude's outer ring shows total weekly usage; its lighter orange inner ring shows
 Fable's weekly usage when available. Five-hour usage remains in the details.
 Escape or clicking outside collapses the details. The menu-bar tray stays available.
