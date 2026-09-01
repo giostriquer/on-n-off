@@ -110,6 +110,65 @@ public enum NotchSize: String, Codable, Sendable {
     }
   }
 }
+
+public struct MeterRailLayout: Equatable, Sendable {
+  public let railWidth: Double
+  public let railHeight: Double
+  public let cellWidth: Double
+  public let cellHeight: Double
+  public let cellSpacing: Double
+  public let cellPadding: Double
+  public let contentSpacing: Double
+  public let iconSlotSize: Double
+  public let primarySlotHeight: Double
+  public let auxiliarySlotHeight: Double
+  public let primarySlotWidth: Double
+  public let auxiliarySlotWidth: Double
+  public let ringInset: Double
+  public let columnOffsetX: Double
+  public let primaryOffsetX: Double
+  public let columnOffsetY: Double
+  public let stackInset: Double
+}
+
+public func meterRailLayout(size: NotchSize, displayScale: Double) -> MeterRailLayout {
+  let pixelScale = displayScale.isFinite && displayScale > 0 ? displayScale : 1
+  let scale = size.scale
+  func value(_ points: Double) -> Double {
+    pixelAligned(points * scale, displayScale: pixelScale)
+  }
+
+  let railWidth = value(76)
+  let railHeight = value(340)
+  let cellPadding = value(3)
+  let contentSpacing = value(4)
+  let iconSlotSize = value(48)
+  let primarySlotHeight = value(20)
+  let auxiliarySlotHeight = value(12)
+  let cellHeight =
+    iconSlotSize + primarySlotHeight + auxiliarySlotHeight + (2 * contentSpacing)
+    + (2 * cellPadding)
+  var cellSpacing = value(16)
+  let remainingPixels = Int(
+    ((railHeight - (2 * cellHeight) - cellSpacing) * pixelScale).rounded())
+  if !remainingPixels.isMultiple(of: 2) {
+    cellSpacing += 1 / pixelScale
+  }
+  let stackInset = (railHeight - (2 * cellHeight) - cellSpacing) / 2
+  let columnOffsetY = pixelAligned(
+    (primarySlotHeight + auxiliarySlotHeight + (2 * contentSpacing)) / 2,
+    displayScale: pixelScale)
+
+  return MeterRailLayout(
+    railWidth: railWidth, railHeight: railHeight, cellWidth: value(62),
+    cellHeight: cellHeight, cellSpacing: cellSpacing, cellPadding: cellPadding,
+    contentSpacing: contentSpacing, iconSlotSize: iconSlotSize,
+    primarySlotHeight: primarySlotHeight, auxiliarySlotHeight: auxiliarySlotHeight,
+    primarySlotWidth: value(54), auxiliarySlotWidth: value(58), ringInset: value(2),
+    columnOffsetX: 0, primaryOffsetX: 2 / pixelScale, columnOffsetY: columnOffsetY,
+    stackInset: stackInset)
+}
+
 public struct Settings: Codable, Equatable, Sendable {
   public var enabled: Bool
   public var displayId: String?
