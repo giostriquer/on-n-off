@@ -13,7 +13,8 @@ func limitColor(_ quota: Quota?, at now: Date, base: Color) -> Color {
 struct NotchRailView: View {
   @ObservedObject var controller: PanelController
   private var edge: NotchCore.Edge { controller.message?.snapshot.settings.edge ?? .right }
-  private var scale: CGFloat { controller.message?.snapshot.settings.size.scale ?? 1 }
+  private var size: NotchCore.NotchSize { controller.message?.snapshot.settings.size ?? .standard }
+  private var scale: CGFloat { size.scale }
   private var backingScale: CGFloat {
     guard let snapshot = controller.message?.snapshot,
       let displayId = snapshot.settings.displayId,
@@ -22,21 +23,26 @@ struct NotchRailView: View {
     return CGFloat(display.scale)
   }
   private var metrics: NotchMetrics { NotchMetrics(scale: scale, backingScale: backingScale) }
+  private var layout: MeterRailLayout {
+    meterRailLayout(size: size, displayScale: Double(backingScale))
+  }
 
   var body: some View {
     ZStack {
       NotchSilhouette().fill(Color(white: 0.02)).scaleEffect(x: edge == .left ? -1 : 1, y: 1)
-      VStack(spacing: metrics.value(16)) {
+      VStack(spacing: CGFloat(layout.cellSpacing)) {
         ForEach(["claude", "codex"], id: \.self) { id in
           MeterButton(
             id: id, entry: controller.message?.providers.first { $0.provider == id },
-            now: controller.now, selected: controller.selection == id, metrics: metrics
+            now: controller.now, selected: controller.selection == id, metrics: metrics,
+            layout: layout
           ) { controller.toggle(id) }
         }
       }
-      .offset(x: edge == .right ? metrics.value(2) : metrics.value(-2))
+      .offset(x: CGFloat(layout.columnOffsetX), y: CGFloat(layout.columnOffsetY))
+      .padding(.vertical, CGFloat(layout.stackInset))
     }
-    .frame(width: metrics.value(76), height: metrics.value(340))
+    .frame(width: CGFloat(layout.railWidth), height: CGFloat(layout.railHeight))
     .foregroundColor(.white)
     .preferredColorScheme(.dark)
   }
@@ -116,6 +122,7 @@ private struct MeterButton: View {
   let now: Date
   let selected: Bool
   let metrics: NotchMetrics
+  let layout: MeterRailLayout
   let action: () -> Void
   @State private var hovered = false
   var primary: Quota? { entry?.primary }
@@ -133,9 +140,22 @@ private struct MeterButton: View {
     return "\(id == "claude" ? "Claude" : "Codex"), \(period), \(primary?.text(at: now) ?? "unavailable") used\(primaryReached)"
       + fableDescription
   }
+  @ViewBuilder private var auxiliaryLabel: some View {
+    if let fable = fable {
+      Text("Fable \(fable.text(at: now))")
+        .font(metrics.font(10, weight: .medium).monospacedDigit())
+        .foregroundColor(limitColor(fable, at: now, base: fableOrange))
+        .lineLimit(1).allowsTightening(true).minimumScaleFactor(0.85)
+    } else if primary?.kind != "weekly" {
+      Text(period + (primary == nil ? "" : " used"))
+        .font(metrics.font(9)).foregroundColor(Color(white: 0.67))
+    } else {
+      Color.clear.accessibilityHidden(true)
+    }
+  }
   var body: some View {
     Button(action: action) {
-      VStack(alignment: .center, spacing: metrics.value(4)) {
+      VStack(alignment: .center, spacing: CGFloat(layout.contentSpacing)) {
         ZStack {
           Circle().stroke(Color(white: 0.173), lineWidth: metrics.value(4))
           Circle().trim(from: 0, to: (primary?.percent(at: now) ?? 0) / 100)
@@ -158,24 +178,20 @@ private struct MeterButton: View {
           }
           ProviderMark(provider: id).fill(Color.white).frame(
             width: metrics.value(24), height: metrics.value(24))
-        }.padding(metrics.value(2)).frame(
-          width: metrics.value(48), height: metrics.value(48))
+        }.padding(CGFloat(layout.ringInset)).frame(
+          width: CGFloat(layout.iconSlotSize), height: CGFloat(layout.iconSlotSize))
         Text(primary?.text(at: now) ?? "—").font(
           metrics.font(17, weight: .medium).monospacedDigit()
         ).lineLimit(1).multilineTextAlignment(.center)
-          .frame(width: metrics.value(54), alignment: .center)
-        if primary?.kind != "weekly" {
-          Text(period + (primary == nil ? "" : " used")).font(metrics.font(9)).foregroundColor(
-            Color(white: 0.67))
-        }
-        if let fable = fable {
-          Text("Fable \(fable.text(at: now))")
-            .font(metrics.font(10, weight: .medium).monospacedDigit())
-            .foregroundColor(limitColor(fable, at: now, base: fableOrange))
-            .lineLimit(1).allowsTightening(true).minimumScaleFactor(0.85)
-            .frame(width: metrics.value(58), alignment: .center)
-        }
-      }.padding(metrics.value(3)).frame(width: metrics.value(62))
+          .frame(
+            width: CGFloat(layout.primarySlotWidth), height: CGFloat(layout.primarySlotHeight),
+            alignment: .center
+          ).offset(x: CGFloat(layout.primaryOffsetX))
+        auxiliaryLabel.frame(
+          width: CGFloat(layout.auxiliarySlotWidth), height: CGFloat(layout.auxiliarySlotHeight),
+          alignment: .center)
+      }.padding(CGFloat(layout.cellPadding)).frame(
+        width: CGFloat(layout.cellWidth), height: CGFloat(layout.cellHeight))
         .background(
           RoundedRectangle(cornerRadius: metrics.value(12)).fill(
             Color.white.opacity(hovered || selected ? 0.06 : 0)))

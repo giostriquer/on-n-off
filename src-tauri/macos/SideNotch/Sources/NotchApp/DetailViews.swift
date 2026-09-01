@@ -18,7 +18,7 @@ struct ProviderDetails: View {
         + (entry?.plan.map { " · \($0.replacingOccurrences(of: "_", with: " ").capitalized)" } ?? "")
     )
     .font(metrics.font(11)).foregroundColor(.gray)
-    ScrollView {
+    ScrollView(.vertical, showsIndicators: true) {
       VStack(alignment: .leading, spacing: metrics.value(12)) {
         if entry?.status != "ok", let entry = entry {
           Text(entry.message ?? "Usage unavailable.").font(metrics.font(11)).foregroundColor(.gray)

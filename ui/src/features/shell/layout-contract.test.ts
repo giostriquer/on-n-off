@@ -20,6 +20,19 @@ const PAGE_SCROLL = [
   /overflow:\s*(?:auto|scroll)/,
 ];
 
+const CUSTOM_SCROLL_BEHAVIOR = [
+  /::-webkit-scrollbar/,
+  /scrollbar-(?:color|width)\s*:/,
+  /\bscrollbar(?:Color|Width)\s*:/,
+  /\bscrollbar-(?:hidden|none|thin|thumb-[^\s"'`]+|track-[^\s"'`]+)\b/,
+  /scroll-behavior\s*:/,
+  /\bscrollBehavior\s*:/,
+  /\bscroll-smooth\b/,
+  /overscroll-behavior(?:-[xy])?\s*:/,
+  /\boverscrollBehavior(?:X|Y)?\s*:/,
+  /\boverscroll(?:-[xy])?-(?:contain|none)\b/,
+];
+
 const ALLOWED_SCROLLERS = new Set([
   relative(srcRoot, join(srcRoot, "tokens.css")).replaceAll("\\", "/"),
   relative(srcRoot, join(srcRoot, "features/scope/ScopeBar.css")).replaceAll("\\", "/"),
@@ -45,6 +58,18 @@ function walk(dir: string): string[] {
 }
 
 describe("shell layout contract", () => {
+  it("recognizes CSS, Tailwind, and React scroll overrides", () => {
+    const overrides = [
+      ".panel { overscroll-behavior: contain; }",
+      'className="overscroll-none scroll-smooth scrollbar-thin"',
+      'style={{ overscrollBehavior: "contain", scrollBehavior: "smooth" }}',
+      'style={{ scrollbarColor: "red blue", scrollbarWidth: "thin" }}',
+    ];
+    expect(
+      overrides.filter((source) => CUSTOM_SCROLL_BEHAVIOR.some((pattern) => pattern.test(source))),
+    ).toEqual(overrides);
+  });
+
   it("locks the viewport so html/body/#root cannot scroll", () => {
     const css = read(tokensPath);
     const viewport = css.match(/html,\s*body,\s*#root\s*\{[^}]+\}/);
@@ -97,6 +122,27 @@ describe("shell layout contract", () => {
     expect(
       hits,
       `extra page scrollers recreate the double scrollbar: ${hits.join(", ")}. Put content in .app-scroll.`,
+    ).toEqual([]);
+  });
+
+  it("leaves scrollbar appearance and scrolling behavior to the platform", () => {
+    const hits: string[] = [];
+    for (const file of walk(srcRoot)) {
+      const rel = relative(srcRoot, file).replaceAll("\\", "/");
+      if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) {
+        continue;
+      }
+      const text = read(file);
+      for (const pattern of CUSTOM_SCROLL_BEHAVIOR) {
+        if (pattern.test(text)) {
+          hits.push(rel);
+          break;
+        }
+      }
+    }
+    expect(
+      hits,
+      `custom scroll behavior prevents native platform scrolling: ${hits.join(", ")}`,
     ).toEqual([]);
   });
 });
