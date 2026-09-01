@@ -5,26 +5,13 @@ let claudeOrange = Color(red: 244 / 255, green: 130 / 255, blue: 102 / 255)
 let fableOrange = Color(red: 247 / 255, green: 173 / 255, blue: 113 / 255)
 let codexGreen = Color(red: 60 / 255, green: 230 / 255, blue: 172 / 255)
 
-struct NotchView: View {
+struct NotchRailView: View {
   @ObservedObject var controller: PanelController
-  var edge: NotchCore.Edge { controller.message?.snapshot.settings.edge ?? .right }
-  var scale: CGFloat { controller.message?.snapshot.settings.size.scale ?? 1 }
-  var metrics: NotchMetrics { NotchMetrics(scale: scale) }
-  var baseWidth: CGFloat { controller.selection == nil ? 76 : 388 }
+  private var edge: NotchCore.Edge { controller.message?.snapshot.settings.edge ?? .right }
+  private var scale: CGFloat { controller.message?.snapshot.settings.size.scale ?? 1 }
+  private var metrics: NotchMetrics { NotchMetrics(scale: scale) }
+
   var body: some View {
-    content.frame(width: metrics.value(baseWidth), height: metrics.value(340))
-  }
-  private var content: some View {
-    HStack(spacing: 0) {
-      if edge == .left { rail }
-      if let selection = controller.selection {
-        detailPanel(selection).frame(maxWidth: .infinity, maxHeight: .infinity)
-          .padding(.vertical, metrics.value(18)).padding(.horizontal, metrics.value(8))
-      }
-      if edge == .right { rail }
-    }.foregroundColor(.white).preferredColorScheme(.dark)
-  }
-  private var rail: some View {
     ZStack {
       NotchSilhouette().fill(Color(white: 0.02)).scaleEffect(x: edge == .left ? -1 : 1, y: 1)
       VStack(spacing: metrics.value(16)) {
@@ -34,18 +21,40 @@ struct NotchView: View {
             now: controller.now, selected: controller.selection == id, metrics: metrics
           ) { controller.toggle(id) }
         }
-        SettingsTrigger(selected: controller.selection == "settings", metrics: metrics) {
-          controller.toggle("settings")
-        }
-        .padding(.top, metrics.value(-8))
-      }.padding(.top, metrics.value(11)).offset(
-        x: edge == .right ? metrics.value(2) : metrics.value(-2))
-    }.frame(width: metrics.value(76))
+      }
+      .offset(x: edge == .right ? metrics.value(2) : metrics.value(-2))
+    }
+    .frame(width: metrics.value(76), height: metrics.value(340))
+    .foregroundColor(.white)
+    .preferredColorScheme(.dark)
   }
+}
+
+struct NotchDetailView: View {
+  @ObservedObject var controller: PanelController
+  private var scale: CGFloat { controller.message?.snapshot.settings.size.scale ?? 1 }
+  private var metrics: NotchMetrics { NotchMetrics(scale: scale) }
+
+  var body: some View {
+    Group {
+      if let selection = controller.selection {
+        detailPanel(selection)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .padding(.vertical, metrics.value(18))
+          .padding(.horizontal, metrics.value(8))
+      } else {
+        Color.clear
+      }
+    }
+    .frame(width: metrics.value(312), height: metrics.value(340))
+    .foregroundColor(.white)
+    .preferredColorScheme(.dark)
+  }
+
   private func detailPanel(_ selection: String) -> some View {
     VStack(alignment: .leading, spacing: metrics.value(12)) {
       HStack {
-        Text(selection == "settings" ? "Side notch" : selection == "claude" ? "Claude" : "Codex")
+        Text(selection == "claude" ? "Claude" : "Codex")
           .font(metrics.font(16, weight: .semibold))
         Spacer()
         Button {
@@ -57,31 +66,28 @@ struct NotchView: View {
         .buttonStyle(PlainButtonStyle()).help("Collapse side notch")
         .accessibilityLabel("Collapse side notch").keyboardShortcut(.cancelAction)
       }
-      if selection == "settings" {
-        NativeSettings(controller: controller, metrics: metrics)
-      } else {
-        ProviderDetails(
-          entry: controller.message?.providers.first { $0.provider == selection },
-          now: controller.now, color: selection == "claude" ? claudeOrange : codexGreen,
-          metrics: metrics)
-        Button {
-          controller.emit(.openLimits)
-          controller.select(nil)
-        } label: {
-          Label("Open Limits", systemImage: "arrow.up.right").font(metrics.font(12))
-        }.buttonStyle(PlainButtonStyle())
-      }
+      ProviderDetails(
+        entry: controller.message?.providers.first { $0.provider == selection },
+        now: controller.now, color: selection == "claude" ? claudeOrange : codexGreen,
+        metrics: metrics)
+      Button {
+        controller.emit(.openLimits)
+        controller.select(nil)
+      } label: {
+        Label("Open Limits", systemImage: "arrow.up.right").font(metrics.font(12))
+      }.buttonStyle(PlainButtonStyle())
       if let error = controller.message?.actionError {
         Text(error).font(metrics.font(10)).foregroundColor(.orange)
       }
-    }.padding(metrics.value(16))
-      .background(
-        RoundedRectangle(cornerRadius: metrics.value(20)).fill(
-          Color(red: 0.035, green: 0.035, blue: 0.043))
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: metrics.value(20)).stroke(
-          Color.white.opacity(0.08), lineWidth: metrics.value(1)))
+    }
+    .padding(metrics.value(16))
+    .background(
+      RoundedRectangle(cornerRadius: metrics.value(20)).fill(
+        Color(red: 0.035, green: 0.035, blue: 0.043))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: metrics.value(20)).stroke(
+        Color.white.opacity(0.08), lineWidth: metrics.value(1)))
   }
 }
 
@@ -93,7 +99,6 @@ private struct MeterButton: View {
   let metrics: NotchMetrics
   let action: () -> Void
   @State private var hovered = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var primary: Quota? { entry?.primary }
   var fable: Quota? { entry?.fable }
   var period: String {
@@ -147,42 +152,10 @@ private struct MeterButton: View {
             Color.white.opacity(hovered || selected ? 0.06 : 0)))
     }.buttonStyle(PlainButtonStyle()).onHover { hovered = $0 }
       .accessibilityLabel(description).accessibilityValue(selected ? "Expanded" : "Collapsed")
-      .help(description).animation(reduceMotion ? nil : .easeOut(duration: 0.2))
+      .help(description)
   }
 }
 
-private struct SettingsTrigger: View {
-  let selected: Bool
-  let metrics: NotchMetrics
-  let action: () -> Void
-  @State private var hovered = false
-  var body: some View {
-    Button(action: action) {
-      Group {
-        if hovered || selected {
-          Image(systemName: "gearshape").font(metrics.font(19))
-        } else {
-          SettingsArc(metrics: metrics).stroke(
-            Color(white: 0.65),
-            style: StrokeStyle(lineWidth: metrics.value(2.5), lineCap: .round)
-          ).frame(width: metrics.value(28), height: metrics.value(15))
-        }
-      }.frame(width: metrics.value(44), height: metrics.value(36))
-    }.buttonStyle(PlainButtonStyle()).onHover { hovered = $0 }.help("Side notch settings")
-      .accessibilityLabel("Side notch settings")
-  }
-}
-private struct SettingsArc: Shape {
-  let metrics: NotchMetrics
-  func path(in rect: CGRect) -> Path {
-    var p = Path()
-    p.move(to: CGPoint(x: metrics.value(3), y: metrics.value(3)))
-    p.addQuadCurve(
-      to: CGPoint(x: rect.maxX - metrics.value(3), y: metrics.value(3)),
-      control: CGPoint(x: rect.midX, y: rect.maxY + metrics.value(3)))
-    return p
-  }
-}
 private struct NotchSilhouette: Shape {
   func path(in rect: CGRect) -> Path {
     var p = Path()

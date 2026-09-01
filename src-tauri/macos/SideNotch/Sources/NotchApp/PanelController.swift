@@ -9,7 +9,11 @@ final class NotchPanel: NSPanel {
   override func cancelOperation(_ sender: Any?) { collapse?() }
 }
 
-final class NotchHostingView: NSHostingView<NotchView> {
+final class RailHostingView: NSHostingView<NotchRailView> {
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+final class DetailHostingView: NSHostingView<NotchDetailView> {
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
@@ -18,11 +22,9 @@ final class PanelController: NSObject, NSWindowDelegate, ObservableObject {
   @Published var message: HostMessage?
   @Published var selection: String?
   @Published var now = Date()
-  @Published var pendingRequest: UInt64?
-  @Published var displays: [Display] = []
-  private var request: UInt64 = 0
   private var lastSequence: UInt64 = 0
-  private let panel: NotchPanel
+  private let railPanel: NotchPanel
+  private let detailPanel: NotchPanel
   private var observers: [NSObjectProtocol] = []
   private var workspaceObservers: [NSObjectProtocol] = []
   private var outsideClick: Any?
@@ -30,23 +32,13 @@ final class PanelController: NSObject, NSWindowDelegate, ObservableObject {
   var emit: (ClientAction) -> Void = { _ in }
 
   override init() {
-    panel = NotchPanel(
-      contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
-      defer: false)
+    railPanel = Self.makePanel(title: "on-n-off Side notch")
+    detailPanel = Self.makePanel(title: "on-n-off Side notch details")
     super.init()
-    panel.title = "on-n-off Side notch"
-    panel.isOpaque = false
-    panel.backgroundColor = .clear
-    panel.hasShadow = false
-    panel.level = .floating
-    panel.hidesOnDeactivate = false
-    panel.isReleasedWhenClosed = false
-    panel.collectionBehavior = [
-      .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle,
-    ]
-    panel.delegate = self
-    panel.collapse = { [weak self] in self?.select(nil) }
-    panel.contentView = NotchHostingView(rootView: NotchView(controller: self))
+    detailPanel.delegate = self
+    detailPanel.collapse = { [weak self] in self?.select(nil) }
+    railPanel.contentView = RailHostingView(rootView: NotchRailView(controller: self))
+    detailPanel.contentView = DetailHostingView(rootView: NotchDetailView(controller: self))
     observers.append(
       NotificationCenter.default.addObserver(
         forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -74,6 +66,23 @@ final class PanelController: NSObject, NSWindowDelegate, ObservableObject {
     }
   }
 
+  private static func makePanel(title: String) -> NotchPanel {
+    let panel = NotchPanel(
+      contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
+      defer: false)
+    panel.title = title
+    panel.isOpaque = false
+    panel.backgroundColor = .clear
+    panel.hasShadow = false
+    panel.level = .floating
+    panel.hidesOnDeactivate = false
+    panel.isReleasedWhenClosed = false
+    panel.collectionBehavior = [
+      .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle,
+    ]
+    return panel
+  }
+
   func shutdown() {
     timer?.invalidate()
     timer = nil
@@ -83,8 +92,10 @@ final class PanelController: NSObject, NSWindowDelegate, ObservableObject {
     workspaceObservers.removeAll()
     if let outsideClick = outsideClick { NSEvent.removeMonitor(outsideClick) }
     outsideClick = nil
-    panel.orderOut(nil)
-    panel.contentView = nil
+    for panel in [railPanel, detailPanel] {
+      panel.orderOut(nil)
+      panel.contentView = nil
+    }
   }
 
   func accept(_ next: HostMessage) {
@@ -93,53 +104,51 @@ final class PanelController: NSObject, NSWindowDelegate, ObservableObject {
     let moved =
       message?.snapshot.settings.displayId != next.snapshot.settings.displayId
       || message?.snapshot.settings.edge != next.snapshot.settings.edge
+      || message?.snapshot.settings.size != next.snapshot.settings.size
     message = next
     if moved { selection = nil }
-    if let pending = pendingRequest, next.completedRequest == pending { pendingRequest = nil }
-    updateFrame()
+    updateFrames()
     emit(.ack(sequence: next.sequence))
   }
 
   func select(_ value: String?) {
     guard selection != value else { return }
     selection = value
-    updateFrame()
-    if value != nil, panel.isVisible {
+    updateFrames()
+    if value != nil, detailPanel.isVisible {
       NSApplication.shared.activate(ignoringOtherApps: true)
-      panel.makeKeyAndOrderFront(nil)
+      detailPanel.makeKeyAndOrderFront(nil)
     }
   }
 
   func toggle(_ value: String) { select(selection == value ? nil : value) }
-  func windowDidResignKey(_ notification: Notification) { select(nil) }
+
   func windowShouldClose(_ sender: NSWindow) -> Bool {
     select(nil)
     return false
   }
 
-  func save(_ settings: NotchCore.Settings) {
-    guard pendingRequest == nil, let message = message else { return }
-    request += 1
-    pendingRequest = request
-    emit(.save(settings: settings, revision: message.revision ?? 0, request: request))
-  }
-
   func screensChanged() {
-    updateFrame()
+    updateFrames()
     emit(.screensChanged)
   }
 
-  private func updateFrame() {
-    displays = Screens.read()
+  private func updateFrames() {
     guard let message = message, message.snapshot.error == nil,
-      let frame = notchFrame(
-        settings: message.snapshot.settings, displays: displays, expanded: selection != nil)
+      let frames = notchPanelFrames(settings: message.snapshot.settings, displays: Screens.read())
     else {
       selection = nil
-      panel.orderOut(nil)
+      railPanel.orderOut(nil)
+      detailPanel.orderOut(nil)
       return
     }
-    panel.setFrame(Screens.appKitFrame(frame), display: true)
-    if !panel.isVisible { panel.orderFrontRegardless() }
+    railPanel.setFrame(Screens.appKitFrame(frames.rail), display: true)
+    detailPanel.setFrame(Screens.appKitFrame(frames.detail), display: true)
+    if !railPanel.isVisible { railPanel.orderFrontRegardless() }
+    if selection == nil {
+      detailPanel.orderOut(nil)
+    } else if !detailPanel.isVisible {
+      detailPanel.orderFrontRegardless()
+    }
   }
 }

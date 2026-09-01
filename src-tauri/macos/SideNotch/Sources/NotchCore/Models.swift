@@ -157,12 +157,11 @@ public enum ClientAction: Encodable, Sendable {
   case ready
   case ack(sequence: UInt64)
   case screensChanged
-  case save(settings: Settings, revision: UInt64, request: UInt64)
   case refresh
   case openLimits
 
   private enum CodingKeys: String, CodingKey {
-    case version, type, sequence, settings, revision, request
+    case version, type, sequence
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -176,11 +175,6 @@ public enum ClientAction: Encodable, Sendable {
       try values.encode(sequence, forKey: .sequence)
     case .screensChanged:
       try values.encode("screensChanged", forKey: .type)
-    case .save(let settings, let revision, let request):
-      try values.encode("save", forKey: .type)
-      try values.encode(settings, forKey: .settings)
-      try values.encode(revision, forKey: .revision)
-      try values.encode(request, forKey: .request)
     case .refresh:
       try values.encode("refresh", forKey: .type)
     case .openLimits:
@@ -201,8 +195,6 @@ public struct HostMessage: Decodable, Sendable {
   public let snapshot: Snapshot
   public let providers: [Provider]
   public let actionError: String?
-  public let revision: UInt64?
-  public let completedRequest: UInt64?
 
   public static func decode(_ data: Data) throws -> HostMessage {
     guard data.count <= 262_144 else { throw ProtocolError.invalidMessage }
@@ -242,6 +234,25 @@ public func notchFrame(settings: Settings, displays: [Display], expanded: Bool) 
   return CGRect(
     x: settings.edge == .left ? display.x : display.x + display.width - width,
     y: display.workY + (display.workHeight - height) / 2, width: width, height: height)
+}
+
+public struct NotchPanelFrames: Equatable, Sendable {
+  public let rail: CGRect
+  public let detail: CGRect
+  public let combined: CGRect
+}
+
+public func notchPanelFrames(settings: Settings, displays: [Display]) -> NotchPanelFrames? {
+  guard
+    let rail = notchFrame(settings: settings, displays: displays, expanded: false),
+    let combined = notchFrame(settings: settings, displays: displays, expanded: true)
+  else { return nil }
+  let detailWidth = combined.width - rail.width
+  guard detailWidth > 0 else { return nil }
+  let detail = CGRect(
+    x: settings.edge == .left ? rail.maxX : combined.minX,
+    y: combined.minY, width: detailWidth, height: combined.height)
+  return NotchPanelFrames(rail: rail, detail: detail, combined: combined)
 }
 
 public func parseInstant(_ text: String?) -> Date? {

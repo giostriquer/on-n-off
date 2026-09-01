@@ -53,39 +53,47 @@
   height: 18px;
 }
 .notch-display-map {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  align-items: end;
+  position: relative;
+  height: 72px;
   padding: 9px;
   background: var(--well, #202023);
   border-radius: 9px;
   color: var(--mute);
 }
 .notch-display-map > span {
-  position: relative;
+  position: absolute;
   display: flex;
-  flex-direction: column;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  transform: scale(0.86);
+  transform-origin: center;
+  min-width: 12px;
+  min-height: 10px;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  overflow: visible;
 }
 .notch-display-map small {
   font-size: 9px;
+  line-height: 1;
+  color: currentColor;
 }
 .notch-display-map .selected {
   color: #ab8bdd;
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 .notch-display-map i {
   position: absolute;
-  top: 8px;
-  right: 3px;
+  top: 25%;
+  right: -2px;
   width: 3px;
-  height: 8px;
+  height: 50%;
   border-radius: 4px 0 0 4px;
   background: currentColor;
 }
 .notch-display-map i[data-edge="left"] {
-  left: 3px;
+  left: -2px;
   right: auto;
   border-radius: 0 4px 4px 0;
 }

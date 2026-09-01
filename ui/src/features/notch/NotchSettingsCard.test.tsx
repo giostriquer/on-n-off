@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { NotchSnapshot } from "$lib/notchTypes";
-import { NotchSettingsCard } from "./NotchSettingsCard";
+import { layoutDisplays, NotchSettingsCard } from "./NotchSettingsCard";
 
 const calls = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn() }));
 vi.mock("$lib/api", () => ({
@@ -126,4 +126,20 @@ it("offers three size presets and persists the selected preset", async () => {
     }),
   );
   expect(sizes).toBeTruthy();
+});
+
+it("lays monitors out by physical coordinates instead of API order", () => {
+  const displays = [
+    { ...snapshot.displays[0], id: "right", x: 1920 },
+    { ...snapshot.displays[0], id: "left", x: -1920 },
+    { ...snapshot.displays[0], id: "middle", x: 0 },
+  ];
+
+  const layout = layoutDisplays(displays);
+
+  expect(layout.map(({ id }) => id)).toEqual(["left", "middle", "right"]);
+  expect(layout.find(({ id }) => id === "left")?.left).toBe(0);
+  expect(layout.find(({ id }) => id === "middle")?.left).toBeCloseTo(100 / 3);
+  expect(layout.find(({ id }) => id === "right")?.left).toBeCloseTo(200 / 3);
+  expect(layout.find(({ id }) => id === "middle")?.order).toBe(2);
 });

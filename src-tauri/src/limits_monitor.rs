@@ -146,7 +146,7 @@ async fn poll_once(
 
 async fn poll_providers() -> Result<Vec<ProviderLimitsDto>, String> {
     let tasks = MONITORED_PROVIDERS.map(|provider| {
-        async_runtime::spawn_blocking(move || crate::limits::read_limits(provider, false))
+        async_runtime::spawn_blocking(move || crate::limits_refresh::read_limits(provider, false))
     });
     let mut snapshots = Vec::new();
     for task in tasks {

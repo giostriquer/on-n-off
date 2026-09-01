@@ -98,7 +98,7 @@ export function Settings({
         onPollMinutesChange={onLimitsPollMinutesChange}
       />
 
-      <NotchSettingsCard />
+      <NotchSettingsCard pollMinutes={settings.limitsPollMinutes} />
 
       <GithubSettingsCard
         scopes={settings.githubScopes}
@@ -293,12 +293,12 @@ function LimitNotificationsCard({
 
   return (
     <section
-      aria-label="Limit notifications"
+      aria-label="Usage refresh and limit notifications"
       className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
     >
       <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[15px] font-semibold">Limit notifications</h3>
+          <h3 className="m-0 text-[15px] font-semibold">Usage limits</h3>
           <p className="mt-1 mb-0 text-[11.5px] text-[var(--mute)]">
             Notifies when usage reaches 100% or a limit resets while on-n-off is running.
           </p>
@@ -318,7 +318,7 @@ function LimitNotificationsCard({
       </div>
       <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
         <label htmlFor="limits-poll-minutes" className="min-w-0 flex-1 text-[12px] text-[var(--mute)]">
-          Check for limit changes every
+          Refresh usage across the app every
         </label>
         <select
           id="limits-poll-minutes"

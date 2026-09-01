@@ -31,25 +31,13 @@ pub fn read() -> Result<NotchSettings, String> {
 }
 
 pub fn save(settings: &NotchSettings) -> Result<u64, String> {
-    save_at_revision(settings, None)
-}
-
-pub fn save_at_revision(settings: &NotchSettings, expected: Option<u64>) -> Result<u64, String> {
     let _guard = WRITE_LOCK
         .lock()
         .map_err(|_| "Notch settings are unavailable.")?;
-    save_to(&path()?, settings, expected, &REVISION)
+    save_to(&path()?, settings, &REVISION)
 }
 
-fn save_to(
-    path: &Path,
-    settings: &NotchSettings,
-    expected: Option<u64>,
-    counter: &AtomicU64,
-) -> Result<u64, String> {
-    if expected.is_some_and(|value| value != counter.load(Ordering::SeqCst)) {
-        return Err("Settings changed in another window. Try again.".into());
-    }
+fn save_to(path: &Path, settings: &NotchSettings, counter: &AtomicU64) -> Result<u64, String> {
     let body = serde_json::to_string_pretty(settings).map_err(|error| error.to_string())?;
     crate::usage::cache_io::atomic_write(path, &body)
         .map_err(|error| format!("Cannot save side-notch settings: {error}"))?;
@@ -60,7 +48,7 @@ fn save_to(
 mod tests {
     use super::*;
     #[test]
-    fn stale_native_settings_cannot_overwrite_a_main_window_save() {
+    fn a_saved_document_round_trips_and_advances_the_revision() {
         let dir = crate::paths::scratch_dir("notch-settings");
         let path = dir.join("side-notch.json");
         let counter = AtomicU64::new(0);
@@ -70,8 +58,7 @@ mod tests {
             edge: super::super::model::Edge::Left,
             size: super::super::model::NotchSize::Standard,
         };
-        assert_eq!(save_to(&path, &current, None, &counter).unwrap(), 1);
-        assert!(save_to(&path, &NotchSettings::default(), Some(0), &counter).is_err());
+        assert_eq!(save_to(&path, &current, &counter).unwrap(), 1);
         let persisted: NotchSettings =
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(persisted, current);

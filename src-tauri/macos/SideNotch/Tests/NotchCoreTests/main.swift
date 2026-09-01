@@ -125,6 +125,22 @@ final class NotchTests {
     }
   }
 
+  func testRailFrameNeverMovesWhenDetailsOpen() {
+    let displays = [display("main")]
+    for edge in [NotchCore.Edge.left, .right] {
+      let settings = Settings(enabled: true, displayId: "main", edge: edge)
+      let frames = notchPanelFrames(settings: settings, displays: displays)
+      expectEqual(frames?.rail, notchFrame(settings: settings, displays: displays, expanded: false))
+      expectEqual(frames?.combined, notchFrame(settings: settings, displays: displays, expanded: true))
+      expectEqual(frames?.detail.width, 312)
+      if edge == .left {
+        expectEqual(frames?.detail.minX, frames?.rail.maxX)
+      } else {
+        expectEqual(frames?.detail.maxX, frames?.rail.minX)
+      }
+    }
+  }
+
   func testProtocolRejectsUnsupportedVersionOversizeAndInvalidPercent() throws {
     let valid =
       #"{"version":1,"sequence":1,"snapshot":{"settings":{"enabled":false,"edge":"right"},"displays":[]},"providers":[]}"#
@@ -143,22 +159,12 @@ final class NotchTests {
   }
 
   func testClientActionsEncodeACompleteTypedProtocol() throws {
-    let settings = Settings(enabled: true, displayId: "external", edge: .left, size: .large)
     let cases: [(ClientAction, [String: Any])] = [
       (.ready, ["version": 1, "type": "ready"]),
       (.ack(sequence: 42), ["version": 1, "type": "ack", "sequence": 42]),
       (.screensChanged, ["version": 1, "type": "screensChanged"]),
       (.refresh, ["version": 1, "type": "refresh"]),
       (.openLimits, ["version": 1, "type": "openLimits"]),
-      (
-        .save(settings: settings, revision: 7, request: 9),
-        [
-          "version": 1, "type": "save", "revision": 7, "request": 9,
-          "settings": [
-            "enabled": true, "displayId": "external", "edge": "left", "size": "large",
-          ],
-        ]
-      ),
     ]
     for (action, expected) in cases {
       let encoded = try JSONEncoder().encode(action)
@@ -200,7 +206,8 @@ checks.testCodexPrefersSessionAndHidesInternalBuckets()
 checks.testStableUUIDAndNegativeCoordinatesSurviveDisplayReordering()
 checks.testMissingMirroredAmbiguousAndDisabledDisplaysHideWithoutFallback()
 try checks.testLegacySettingsDefaultToStandardAndPresetsScaleTheWholePanel()
+checks.testRailFrameNeverMovesWhenDetailsOpen()
 try checks.testProtocolRejectsUnsupportedVersionOversizeAndInvalidPercent()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("10 native check groups; \(failures) failures")
+print("11 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

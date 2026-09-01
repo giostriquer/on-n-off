@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
-import type { AgentId } from "$lib/types";
+import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { Limits } from "./Limits";
 
 const readLimits = vi.hoisted(() => vi.fn());
@@ -89,13 +89,13 @@ function answer(
   readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : codex));
 }
 
-function renderLimits() {
+function renderLimits(pollMinutes: LimitsPollMinutes = 5) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <Limits />
+      <Limits pollMinutes={pollMinutes} />
     </QueryClientProvider>,
   );
   return { ...view, client };
@@ -266,7 +266,7 @@ describe("Limits", () => {
     expect(screen.getByText("Subscription limits")).toBeTruthy();
   });
 
-  it("re-reads a provider whose current read failed on the next window focus, and leaves a good one cached", async () => {
+  it("re-reads every provider on focus only after the configured interval", async () => {
     answer([statusOnly("claude", "unauthenticated", "Access token expired")], [okCodex()]);
     renderLimits();
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(2));
@@ -275,10 +275,32 @@ describe("Limits", () => {
       window.dispatchEvent(new Event("visibilitychange"));
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    // The CLI renews its own token, so the failed provider is worth reading again at once; Codex
-    // answered fine and stays cached for its stale time.
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(3));
-    expect(readLimits.mock.calls[2]).toEqual(["claude", false]);
+    expect(readLimits).toHaveBeenCalledTimes(2);
+
+    vi.setSystemTime(new Date("2026-08-17T20:05:01Z"));
+    await act(async () => {
+      window.dispatchEvent(new Event("visibilitychange"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
+    expect(readLimits.mock.calls.slice(2)).toEqual([
+      ["claude", false],
+      ["codex", false],
+    ]);
+  });
+
+  it("uses a longer configured interval without an early focus refresh", async () => {
+    answer([okClaude()], [okCodex()]);
+    renderLimits(10);
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(2));
+
+    vi.setSystemTime(new Date("2026-08-17T20:05:01Z"));
+    await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+    expect(readLimits).toHaveBeenCalledTimes(2);
+
+    vi.setSystemTime(new Date("2026-08-17T20:10:01Z"));
+    await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
   });
 
   it("forgets a remembered account on request and drops its card without a refetch", async () => {
