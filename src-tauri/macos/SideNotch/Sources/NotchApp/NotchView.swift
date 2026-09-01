@@ -89,6 +89,7 @@ struct NotchRailView: View {
   let now: Date
   let active: RailCell?
   let action: (RailCell) -> Void
+  let toggleShow: () -> Void
 
   var body: some View {
     let layout = model.layout
@@ -105,8 +106,27 @@ struct NotchRailView: View {
       }
     }
     .frame(width: model.frame.width, height: model.frame.height)
+    .overlay(pin, alignment: pinAlignment)
     .foregroundColor(.white)
     .preferredColorScheme(.dark)
+  }
+
+  /// The far ear's inner corner, where the silhouette still has room beside the screen edge.
+  private var pinAlignment: Alignment {
+    switch model.edge {
+    case .right: return .bottomTrailing
+    case .left: return .bottomLeading
+    case .top: return .topTrailing
+    case .bottom: return .bottomTrailing
+    }
+  }
+
+  private var pin: some View {
+    let metrics = model.metrics
+    let vertical = model.edge.isVertical
+    return ShowTogglePin(show: model.settings.show, metrics: metrics, action: toggleShow)
+      .padding(vertical ? .horizontal : .vertical, metrics.value(9))
+      .padding(vertical ? .vertical : .horizontal, metrics.value(11))
   }
 
   @ViewBuilder private func cell(_ id: RailCell) -> some View {
@@ -240,6 +260,32 @@ struct PullRequestMark: Shape {
     path.addCurve(to: point(12, 6.5), control1: point(11.4, 4), control2: point(12, 4.6))
     path.addLine(to: point(12, 9.8))
     return path
+  }
+}
+
+/// The pin at the rail's end: filled while the rail always shows, outlined while it waits behind
+/// the hover pill; a click flips the setting.
+private struct ShowTogglePin: View {
+  let show: ShowMode
+  let metrics: NotchMetrics
+  let action: () -> Void
+  @State private var hovered = false
+  private var pinned: Bool { show == .always }
+  private var help: String { pinned ? "Show on hover instead" : "Always show the notch" }
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: pinned ? "pin.fill" : "pin")
+        .font(metrics.font(9, weight: .semibold))
+        .foregroundColor(Color.white.opacity(hovered ? 0.95 : 0.45))
+        .frame(width: metrics.value(16), height: metrics.value(16))
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(PlainButtonStyle())
+    .onHover { hovered = $0 }
+    .accessibilityLabel(pinned ? "Always showing" : "Showing on hover")
+    .accessibilityHint(help)
+    .help(help)
   }
 }
 

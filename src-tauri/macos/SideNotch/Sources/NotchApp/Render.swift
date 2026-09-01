@@ -23,7 +23,7 @@ enum Render {
       try write(
         NotchRailView(
           model: rail, entries: entries, pullRequests: message.pullRequests, now: now, active: nil,
-          action: { _ in }),
+          action: { _ in }, toggleShow: {}),
         size: rail.frame.size, scale: rail.display.scale, to: out.appendingPathComponent("rail.png"))
       if let pill = notchPillFrame(settings: settings, displays: displays) {
         try write(

@@ -263,9 +263,11 @@ public enum ClientAction: Encodable, Sendable {
   case refresh
   case openLimits
   case openPullRequests
+  /// The rail's pin control: always show the rail, or show it on hover.
+  case setShow(ShowMode)
 
   private enum CodingKeys: String, CodingKey {
-    case version, type, sequence
+    case version, type, sequence, show
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -285,6 +287,9 @@ public enum ClientAction: Encodable, Sendable {
       try values.encode("openLimits", forKey: .type)
     case .openPullRequests:
       try values.encode("openPullRequests", forKey: .type)
+    case .setShow(let show):
+      try values.encode("setShow", forKey: .type)
+      try values.encode(show, forKey: .show)
     }
   }
 }

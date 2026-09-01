@@ -452,6 +452,20 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                         action_error = crate::tray::open_github_window(&app).err();
                         delivery.mark_dirty();
                     }
+                    Ok(Ok(Action::SetShow { show })) => {
+                        // The same validated save the Settings card uses; the new revision
+                        // reaches the card through the changed event below.
+                        let mut settings = snapshot.settings.clone();
+                        settings.show = show;
+                        match super::save(settings) {
+                            Ok(next) => {
+                                snapshot = next;
+                                action_error = None;
+                            }
+                            Err(error) => action_error = Some(error),
+                        }
+                        delivery.mark_dirty();
+                    }
                     Ok(Err(error)) => {
                         failure = Some(error);
                         break;

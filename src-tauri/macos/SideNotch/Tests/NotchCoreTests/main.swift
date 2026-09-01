@@ -318,6 +318,8 @@ final class NotchTests {
       (.refresh, ["version": 2, "type": "refresh"]),
       (.openLimits, ["version": 2, "type": "openLimits"]),
       (.openPullRequests, ["version": 2, "type": "openPullRequests"]),
+      (.setShow(.onHover), ["version": 2, "type": "setShow", "show": "onHover"]),
+      (.setShow(.always), ["version": 2, "type": "setShow", "show": "always"]),
     ]
     for (action, expected) in cases {
       let encoded = try JSONEncoder().encode(action)

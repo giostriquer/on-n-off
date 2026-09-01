@@ -29,7 +29,8 @@ The main application remains Tauri.
 In **Settings → Side notch**, choose a display, a Compact, Standard, or Large
 size, and an edge (right, left, top, or bottom), then pick **Always show** or
 **Show on hover**. On hover, a small pill at the screen edge opens the rail when
-the pointer reaches it. The rail is the notch silhouette with one cell per provider:
+the pointer reaches it. A small pin at the rail's end flips between the two
+without opening Settings, for when the rail sits over something you need. The rail is the notch silhouette with one cell per provider:
 a ring around the provider's mark and the percentage beneath. Claude's outer
 ring is its weekly limit, with Fable's weekly limit on a lighter inner ring;
 Codex's ring is its current 5-hour window. Rings use the

@@ -1,3 +1,4 @@
+use super::model::ShowMode;
 use serde::Deserialize;
 
 pub const MAX_MESSAGE: usize = 262_144;
@@ -8,11 +9,17 @@ pub const PROTOCOL_VERSION: u64 = 2;
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Action {
     Ready,
-    Ack { sequence: u64 },
+    Ack {
+        sequence: u64,
+    },
     ScreensChanged,
     Refresh,
     OpenLimits,
     OpenPullRequests,
+    /// The rail's pin control: flips between always showing the rail and showing it on hover.
+    SetShow {
+        show: ShowMode,
+    },
 }
 
 pub fn decode_event(line: &[u8]) -> Result<Action, String> {
@@ -62,6 +69,13 @@ mod tests {
             decode_event(br#"{"version":2,"type":"openPullRequests"}"#),
             Ok(Action::OpenPullRequests)
         );
+        assert_eq!(
+            decode_event(br#"{"version":2,"type":"setShow","show":"onHover"}"#),
+            Ok(Action::SetShow {
+                show: ShowMode::OnHover
+            })
+        );
+        assert!(decode_event(br#"{"version":2,"type":"setShow","show":"sometimes"}"#).is_err());
     }
 
     #[test]

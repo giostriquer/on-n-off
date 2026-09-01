@@ -276,10 +276,11 @@ final class PanelController: NSObject, NSWindowDelegate {
   }
 
   /// One sample of the pointer: tracks the hovered cell, keeps the popover while the pointer is
-  /// on it, and after a short grace closes the popover and (on hover) the rail. A pinned popover
-  /// needs no sampling; `mouseEntered` restarts it.
+  /// on it, and after a short grace closes the popover and (on hover) the rail. While a popover
+  /// is pinned, hovering another cell moves the pin there; leaving keeps it open, and sampling
+  /// stops until `mouseEntered` restarts it.
   private func pollPointer() {
-    guard let rail = rail, pinned == nil else {
+    guard let rail = rail else {
       stopPolling()
       return
     }
@@ -295,15 +296,24 @@ final class PanelController: NSObject, NSWindowDelegate {
       hovered = target
       openWork?.cancel()
       if let target = target {
-        let work = DispatchWorkItem { [weak self] in
-          MainActor.assumeIsolated {
-            guard let self = self, self.pinned == nil, self.hovered == target else { return }
-            self.showPopover(target)
+        if pinned != nil {
+          pinned = target
+          showPopover(target)
+        } else {
+          let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+              guard let self = self, self.pinned == nil, self.hovered == target else { return }
+              self.showPopover(target)
+            }
           }
+          openWork = work
+          DispatchQueue.main.asyncAfter(deadline: .now() + hoverOpenDelay, execute: work)
         }
-        openWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + hoverOpenDelay, execute: work)
       }
+    }
+    if pinned != nil {
+      if !inRail, !inPopover { stopPolling() }
+      return
     }
     let sample = Date()
     if inRail || inPopover { lastInside = sample }
@@ -315,6 +325,12 @@ final class PanelController: NSObject, NSWindowDelegate {
       }
     }
     if !inRail, !inPopover, activeCell == nil, !railOpen { stopPolling() }
+  }
+
+  /// The rail's pin control: asks the host to flip between always showing the rail and showing
+  /// it on hover; the saved setting comes back in the next message.
+  private func toggleShow() {
+    emit(.setShow(rail?.settings.show == .always ? .onHover : .always))
   }
 
   private func tick() {
@@ -395,7 +411,8 @@ final class PanelController: NSObject, NSWindowDelegate {
       model: rail,
       entries: Dictionary(uniqueKeysWithValues: message.providers.map { ($0.provider, $0) }),
       pullRequests: message.pullRequests, now: now, active: activeCell,
-      action: { [weak self] id in self?.toggle(id) })
+      action: { [weak self] id in self?.toggle(id) },
+      toggleShow: { [weak self] in self?.toggleShow() })
   }
 
   /// Rebuilds the popover for the active cell. `.appear` fades a fresh popover in, `.morph`
