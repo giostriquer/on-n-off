@@ -9,7 +9,7 @@ use crate::dto::{UsageSummaryDto, UsageSummaryInput};
 
 use super::cache_io::atomic_write;
 
-pub const USAGE_SUMMARY_CACHE_VERSION: u32 = 2;
+pub const USAGE_SUMMARY_CACHE_VERSION: u32 = 3;
 const MAX_ENTRIES: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 [package]
 name = "on-n-off"
-version = "0.4.1"
+version = "0.4.2"
 description = "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration"
 authors = ["Giovanne Striquer"]
 edition = "2021"

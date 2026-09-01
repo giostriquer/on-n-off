@@ -92,9 +92,22 @@ fn unpriceable_models() -> &'static HashSet<&'static str> {
     })
 }
 
-/// Drop half-priced models; fall back cache rates to input when omitted.
+/// Cache rates omitted from an entry derive the standard discounts (read
+/// 0.1×, write 1.25× input) — ccusage's defaults — never the full input rate.
+/// The multipliers are Anthropic-shaped; OpenAI bills cache writes at the
+/// plain input rate, but its entries publish cache pricing and Codex reports
+/// zero write tokens, so the 1.25× write default has no priced traffic.
+const DERIVED_CACHE_READ_MULTIPLIER: f64 = 0.1;
+const DERIVED_CACHE_CREATION_MULTIPLIER: f64 = 1.25;
+
+/// Drop half-priced models; derive omitted cache rates. Several LiteLLM keys
+/// can normalize to one model name (`claude-fable-5`, `vertex_ai/…`,
+/// `deepinfra/anthropic/…`), and reseller entries often omit cache pricing,
+/// so collisions resolve by rank instead of document order: the canonical
+/// bare key wins, then prefixed entries carrying published cache pricing.
 pub fn parse_rate_table(document: &Value) -> RateTable {
     let mut table = RateTable::new();
+    let mut ranks: HashMap<String, u8> = HashMap::new();
     let Some(obj) = document.as_object() else {
         return table;
     };
@@ -108,16 +121,28 @@ pub fn parse_rate_table(document: &Value) -> RateTable {
         let Some(output) = entry.get("output_cost_per_token").and_then(finite_number) else {
             continue;
         };
-        let cache_read = entry
+        let explicit_cache_read = entry
             .get("cache_read_input_token_cost")
-            .and_then(finite_number)
-            .unwrap_or(input);
+            .and_then(finite_number);
+        let cache_read = explicit_cache_read.unwrap_or(input * DERIVED_CACHE_READ_MULTIPLIER);
         let cache_creation = entry
             .get("cache_creation_input_token_cost")
             .and_then(finite_number)
-            .unwrap_or(input);
+            .unwrap_or(input * DERIVED_CACHE_CREATION_MULTIPLIER);
+        let rank = if !name.contains('/') {
+            2 // canonical bare key
+        } else if explicit_cache_read.is_some() {
+            1 // prefixed, but carries published cache pricing
+        } else {
+            0 // prefixed reseller without cache pricing
+        };
+        let key = normalize_model_name(name);
+        if ranks.get(&key).is_some_and(|&existing| existing >= rank) {
+            continue;
+        }
+        ranks.insert(key.clone(), rank);
         table.insert(
-            normalize_model_name(name),
+            key,
             ModelRate {
                 input_cost_per_token: input,
                 output_cost_per_token: output,
@@ -307,9 +332,95 @@ mod tests {
         assert!(!table.contains_key("half-priced"));
         assert!(!table.contains_key("anthropic/claude-fable-5"));
         let rate = table.get("claude-fable-5").unwrap();
-        // Second insert overwrites — both normalize to same key; either ok as long as present.
         assert!(rate.input_cost_per_token > 0.0);
         assert!(rate.output_cost_per_token > 0.0);
+    }
+
+    #[test]
+    fn bare_entry_wins_collisions_regardless_of_document_order() {
+        // LiteLLM lists the same model under several provider prefixes, and
+        // reseller entries often omit cache pricing (the real
+        // `deepinfra/anthropic/claude-*` rows). The canonical bare key must
+        // win the normalized-key collision in either document order. Every
+        // rate differs between the two entries — and the bare entry's cache
+        // rates are not 0.1×/1.25× of either input — so the assertions
+        // identify the winner rather than pass via derived defaults.
+        let bare = serde_json::json!({
+            "input_cost_per_token": 1e-5,
+            "output_cost_per_token": 5e-5,
+            "cache_read_input_token_cost": 2e-6,
+            "cache_creation_input_token_cost": 1.5e-5
+        });
+        let reseller = serde_json::json!({
+            "input_cost_per_token": 3e-5,
+            "output_cost_per_token": 9e-5
+        });
+        for doc in [
+            serde_json::json!({
+                "claude-x": bare.clone(),
+                "deepinfra/anthropic/claude-x": reseller.clone(),
+            }),
+            serde_json::json!({
+                "deepinfra/anthropic/claude-x": reseller,
+                "claude-x": bare,
+            }),
+        ] {
+            let table = parse_rate_table(&doc);
+            let rate = table.get("claude-x").unwrap();
+            assert_eq!(rate.input_cost_per_token, 1e-5);
+            assert_eq!(rate.output_cost_per_token, 5e-5);
+            assert_eq!(rate.cache_read_cost_per_token, 2e-6);
+            assert_eq!(rate.cache_creation_cost_per_token, 1.5e-5);
+        }
+    }
+
+    #[test]
+    fn explicit_cache_pricing_wins_among_prefixed_entries() {
+        // No bare key: the prefixed entry carrying published cache pricing
+        // must beat the cache-less one in either document order. Distinct
+        // input rates identify the winner independently of cache derivation.
+        let with_cache = serde_json::json!({
+            "input_cost_per_token": 1e-5,
+            "output_cost_per_token": 5e-5,
+            "cache_read_input_token_cost": 2e-6,
+            "cache_creation_input_token_cost": 1.5e-5
+        });
+        let without_cache = serde_json::json!({
+            "input_cost_per_token": 3e-5,
+            "output_cost_per_token": 9e-5
+        });
+        for doc in [
+            serde_json::json!({
+                "aaa/model-y": with_cache.clone(),
+                "zzz/model-y": without_cache.clone(),
+            }),
+            serde_json::json!({
+                "zzz/model-y": without_cache,
+                "aaa/model-y": with_cache,
+            }),
+        ] {
+            let table = parse_rate_table(&doc);
+            let rate = table.get("model-y").unwrap();
+            assert_eq!(rate.input_cost_per_token, 1e-5);
+            assert_eq!(rate.cache_read_cost_per_token, 2e-6);
+        }
+    }
+
+    #[test]
+    fn missing_cache_rates_use_standard_discount_multipliers() {
+        // No published cache pricing → derive the standard discounts
+        // (read 0.1×, write 1.25× input) rather than billing cache reads
+        // at the full input rate.
+        let doc = serde_json::json!({
+            "model-z": {
+                "input_cost_per_token": 1e-5,
+                "output_cost_per_token": 5e-5
+            }
+        });
+        let table = parse_rate_table(&doc);
+        let rate = table.get("model-z").unwrap();
+        assert!((rate.cache_read_cost_per_token - 1e-6).abs() < 1e-18);
+        assert!((rate.cache_creation_cost_per_token - 1.25e-5).abs() < 1e-18);
     }
 
     #[test]
