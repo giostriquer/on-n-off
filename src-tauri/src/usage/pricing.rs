@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -16,6 +17,39 @@ pub const LITELLM_RATES_URL: &str =
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 
 const RATES_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+/// How often the table may be re-fetched because a scan met a model it could not price: a
+/// model released today shows up in LiteLLM within hours, not a day.
+const RATES_EARLY_TTL_MS: i64 = 60 * 60 * 1000;
+
+/// Why a scan is asking for the rate table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RatesRefresh {
+    /// The routine 24-hour cadence.
+    Scheduled,
+    /// The previous scan met a priceable-looking model the table did not know.
+    Early,
+    /// The user asked for a refresh; the on-disk copy is ignored.
+    Forced,
+}
+
+impl RatesRefresh {
+    fn ttl_ms(self) -> i64 {
+        match self {
+            Self::Scheduled => RATES_TTL_MS,
+            Self::Early => RATES_EARLY_TTL_MS,
+            Self::Forced => 0,
+        }
+    }
+}
+
+/// Set when a scan prices a model the table does not carry, so the next scan may re-fetch the
+/// table early instead of waiting out the day.
+static UNPRICED_SEEN: AtomicBool = AtomicBool::new(false);
+
+/// Whether the last scans met an unpriced, priceable-looking model; clears the flag.
+pub fn take_unpriced_seen() -> bool {
+    UNPRICED_SEEN.swap(false, Ordering::AcqRel)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModelRate {
@@ -175,6 +209,10 @@ pub fn price_usage(
         };
     }
     let Some(rate) = lookup_rate(table, model) else {
+        let normalized = normalize_model_name(model);
+        if !normalized.is_empty() && !unpriceable_models().contains(normalized.as_str()) {
+            UNPRICED_SEEN.store(true, Ordering::Release);
+        }
         return PricedUsage {
             cost_usd: 0.0,
             cost_source: CostSource::Unpriced,
@@ -241,8 +279,9 @@ pub fn with_test_fetch<R>(response: Option<Value>, f: impl FnOnce() -> R) -> R {
     result
 }
 
-/// Load rates from disk / network. Never fails the scan — empty table + unavailable.
-pub fn ensure_rates(home: &Path, now_ms: i64) -> RatesSnapshot {
+/// Load rates from disk / network. Never fails the scan — empty table + unavailable. The disk
+/// copy is reused while it is younger than the refresh policy's TTL.
+pub fn ensure_rates(home: &Path, now_ms: i64, refresh: RatesRefresh) -> RatesSnapshot {
     let path = rates_cache_path(home);
     let mut table = RateTable::new();
     let mut fetched_at_ms: Option<i64> = None;
@@ -258,7 +297,7 @@ pub fn ensure_rates(home: &Path, now_ms: i64) -> RatesSnapshot {
                 fetched_at_ms = disk_at;
                 status = PricingStatus::Cached;
                 if let Some(at) = disk_at {
-                    if now_ms - at < RATES_TTL_MS {
+                    if now_ms - at < refresh.ttl_ms() {
                         return RatesSnapshot {
                             table,
                             status,
@@ -468,7 +507,9 @@ mod tests {
     #[test]
     fn unavailable_when_no_cache_and_fetch_fails() {
         let home = scratch_dir("usage-rates-miss");
-        let snap = with_test_fetch(None, || ensure_rates(&home, 1_000_000));
+        let snap = with_test_fetch(None, || {
+            ensure_rates(&home, 1_000_000, RatesRefresh::Scheduled)
+        });
         assert_eq!(snap.status, PricingStatus::Unavailable);
         assert!(snap.table.is_empty());
         let _ = std::fs::remove_dir_all(&home);
@@ -485,7 +526,9 @@ mod tests {
         });
         std::fs::write(&path, payload.to_string()).unwrap();
         // Fetch would fail; still within TTL → cached.
-        let snap = with_test_fetch(None, || ensure_rates(&home, 1_000_000 + 60_000));
+        let snap = with_test_fetch(None, || {
+            ensure_rates(&home, 1_000_000 + 60_000, RatesRefresh::Scheduled)
+        });
         assert_eq!(snap.status, PricingStatus::Cached);
         assert!(!snap.table.is_empty());
         let _ = std::fs::remove_dir_all(&home);
@@ -494,10 +537,68 @@ mod tests {
     #[test]
     fn fresh_fetch_writes_disk() {
         let home = scratch_dir("usage-rates-fresh");
-        let snap = with_test_fetch(Some(sample_doc()), || ensure_rates(&home, 5_000_000));
+        let snap = with_test_fetch(Some(sample_doc()), || {
+            ensure_rates(&home, 5_000_000, RatesRefresh::Scheduled)
+        });
         assert_eq!(snap.status, PricingStatus::Fresh);
         assert!(rates_cache_path(&home).is_file());
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn an_unknown_model_asks_for_an_early_refresh_and_a_forced_one_ignores_the_disk_copy() {
+        let home = crate::paths::scratch_dir("rates-refresh");
+        let fetched_at = 1_000_000;
+        let stale = serde_json::json!({ "fetchedAtMs": fetched_at, "document": sample_doc() });
+        std::fs::create_dir_all(home.join(".on-n-off")).unwrap();
+        std::fs::write(rates_cache_path(&home), stale.to_string()).unwrap();
+        let newer = serde_json::json!({
+            "claude-fable-5-1": {"input_cost_per_token": 1e-5, "output_cost_per_token": 5e-5}
+        });
+
+        // Ten minutes later an early refresh still trusts the disk copy…
+        let early = with_test_fetch(Some(newer.clone()), || {
+            ensure_rates(&home, fetched_at + 10 * 60_000, RatesRefresh::Early)
+        });
+        assert_eq!(early.status, PricingStatus::Cached);
+        assert!(!early.table.contains_key("claude-fable-5-1"));
+        // …two hours later it re-fetches, well inside the scheduled day.
+        let refetched = with_test_fetch(Some(newer.clone()), || {
+            ensure_rates(&home, fetched_at + 2 * 60 * 60_000, RatesRefresh::Early)
+        });
+        assert_eq!(refetched.status, PricingStatus::Fresh);
+        assert!(refetched.table.contains_key("claude-fable-5-1"));
+        // A forced refresh re-fetches straight away.
+        std::fs::write(rates_cache_path(&home), stale.to_string()).unwrap();
+        let forced = with_test_fetch(Some(newer), || {
+            ensure_rates(&home, fetched_at + 1, RatesRefresh::Forced)
+        });
+        assert_eq!(forced.status, PricingStatus::Fresh);
+        let scheduled = with_test_fetch(None, || {
+            ensure_rates(&home, fetched_at + 2 * 60 * 60_000, RatesRefresh::Scheduled)
+        });
+        assert_eq!(
+            scheduled.status,
+            PricingStatus::Cached,
+            "the day is not over"
+        );
+
+        // Pricing an unknown but real-looking model raises the early-refresh flag once.
+        let table = parse_rate_table(&sample_doc());
+        let _ = take_unpriced_seen();
+        let totals = TokenTotals {
+            uncached_input_tokens: 10,
+            ..TokenTotals::default()
+        };
+        price_usage(&table, "<synthetic>", &totals, None);
+        assert!(
+            !take_unpriced_seen(),
+            "placeholders never trigger a refresh"
+        );
+        price_usage(&table, "claude-fable-5-1", &totals, None);
+        assert!(take_unpriced_seen());
+        assert!(!take_unpriced_seen(), "the flag clears once read");
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

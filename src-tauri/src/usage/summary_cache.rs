@@ -31,6 +31,16 @@ pub fn summary_cache_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-summary-cache.json")
 }
 
+/// The cache key for one window priced with one rate table: a re-fetched table (a newly listed
+/// model, a price change) must not serve yesterday's costs.
+pub fn summary_key(input: &UsageSummaryInput, rates_fetched_at_ms: Option<i64>) -> String {
+    format!(
+        "{}|rates:{}",
+        window_key(input),
+        rates_fetched_at_ms.unwrap_or(0)
+    )
+}
+
 pub fn window_key(input: &UsageSummaryInput) -> String {
     format!(
         "{}|{}|{}|{}|{}|{}",
@@ -141,6 +151,22 @@ mod tests {
         assert_eq!(hit.scan_duration_ms, 0);
         assert!(load_summary_hit(&path, &key, "v1-b").is_none());
         let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn summary_key_changes_with_the_rate_table() {
+        let input = UsageSummaryInput {
+            since_day: "2026-08-01".into(),
+            until_day: "2026-08-31".into(),
+            time_zone: "UTC".into(),
+            resolution: None,
+            since_time: None,
+            until_time: None,
+            force: false,
+        };
+        assert_ne!(summary_key(&input, Some(1)), summary_key(&input, Some(2)));
+        assert_ne!(summary_key(&input, None), summary_key(&input, Some(1)));
+        assert!(summary_key(&input, Some(7)).starts_with(&window_key(&input)));
     }
 
     #[test]
