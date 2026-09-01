@@ -165,7 +165,7 @@ public func meterRailLayout(size: NotchSize, displayScale: Double) -> MeterRailL
     contentSpacing: contentSpacing, iconSlotSize: iconSlotSize,
     primarySlotHeight: primarySlotHeight, auxiliarySlotHeight: auxiliarySlotHeight,
     primarySlotWidth: value(54), auxiliarySlotWidth: value(58), ringInset: value(2),
-    columnOffsetX: 0, primaryOffsetX: 1 / pixelScale, columnOffsetY: columnOffsetY,
+    columnOffsetX: 0, primaryOffsetX: 2 / pixelScale, columnOffsetY: columnOffsetY,
     stackInset: stackInset)
 }
 
