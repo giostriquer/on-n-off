@@ -163,6 +163,28 @@ final class NotchTests {
     expectEqual(frames?.detail.maxX, frames?.rail.minX)
   }
 
+  func testMeterRailCentersEqualCellsOnTheDisplayPixelGrid() {
+    for size in [NotchSize.compact, .standard, .large] {
+      for displayScale in [1.0, 2.0] {
+        let layout = meterRailLayout(size: size, displayScale: displayScale)
+        expectEqual(layout.columnOffsetX, 0)
+        expectEqual(
+          layout.cellHeight,
+          layout.iconSlotSize + layout.primarySlotHeight + layout.auxiliarySlotHeight
+            + (2 * layout.contentSpacing) + (2 * layout.cellPadding))
+        expectEqual(
+          (layout.stackInset * displayScale).rounded(), layout.stackInset * displayScale)
+        let firstIconCenter =
+          layout.stackInset + layout.columnOffsetY + layout.cellPadding
+          + (layout.iconSlotSize / 2)
+        let secondIconCenter = firstIconCenter + layout.cellHeight + layout.cellSpacing
+        let iconCenterDelta = abs(
+          ((firstIconCenter + secondIconCenter) / 2) - (layout.railHeight / 2))
+        expectEqual(iconCenterDelta * displayScale <= 0.5, true)
+      }
+    }
+  }
+
   func testProtocolRejectsUnsupportedVersionOversizeAndInvalidPercent() throws {
     let valid =
       #"{"version":1,"sequence":1,"snapshot":{"settings":{"enabled":false,"edge":"right"},"displays":[]},"providers":[]}"#
@@ -230,7 +252,8 @@ checks.testMissingMirroredAmbiguousAndDisabledDisplaysHideWithoutFallback()
 try checks.testLegacySettingsDefaultToStandardAndPresetsScaleTheWholePanel()
 checks.testRailFrameNeverMovesWhenDetailsOpen()
 checks.testReachedLimitsAndOneXCompactFramesArePixelAligned()
+checks.testMeterRailCentersEqualCellsOnTheDisplayPixelGrid()
 try checks.testProtocolRejectsUnsupportedVersionOversizeAndInvalidPercent()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("12 native check groups; \(failures) failures")
+print("13 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)
