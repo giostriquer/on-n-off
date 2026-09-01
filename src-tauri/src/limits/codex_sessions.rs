@@ -1,7 +1,7 @@
 //! Read-only Codex rate-limit observations from local session event streams.
 
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Datelike, Duration, SecondsFormat, Utc};
@@ -10,6 +10,10 @@ use serde::Deserialize;
 use crate::dto::{LimitWindowKind, ProviderLimitsDto};
 
 const LOOKBACK_DAYS: i64 = 8;
+// Codex emits rate-limit samples repeatedly. The newest 256 KiB keeps each session's latest
+// samples, while 512 files cap one reconciliation at 128 MiB even when transcripts span gigabytes.
+const MAX_SESSION_FILES: usize = 512;
+const SESSION_FILE_TAIL_BYTES: u64 = 256 * 1024;
 const RESET_TOLERANCE_SECONDS: i64 = 2;
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
@@ -95,6 +99,7 @@ pub(super) fn merge_recent(
 
 fn read_recent(home: &Path, now: DateTime<Utc>) -> Vec<SessionWindow> {
     let mut observations = Vec::new();
+    let mut scanned_files = 0;
     for offset in 0..=LOOKBACK_DAYS {
         let day = (now - Duration::days(offset)).date_naive();
         let dir = home
@@ -104,12 +109,16 @@ fn read_recent(home: &Path, now: DateTime<Utc>) -> Vec<SessionWindow> {
             .join(format!("{:02}", day.month()))
             .join(format!("{:02}", day.day()));
         for path in jsonl_files(&dir) {
+            if scanned_files == MAX_SESSION_FILES {
+                return observations;
+            }
             read_file(
                 &path,
                 now - Duration::days(LOOKBACK_DAYS),
                 now,
                 &mut observations,
             );
+            scanned_files += 1;
         }
     }
     observations
@@ -119,14 +128,16 @@ fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
-    entries
+    let mut paths: Vec<_> = entries
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension()
                 .is_some_and(|extension| extension == "jsonl")
         })
-        .collect()
+        .collect();
+    paths.sort_unstable_by(|left, right| right.cmp(left));
+    paths
 }
 
 fn read_file(
@@ -138,7 +149,43 @@ fn read_file(
     let Ok(file) = File::open(path) else {
         return;
     };
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
+    let Ok(length) = file.metadata().map(|metadata| metadata.len()) else {
+        return;
+    };
+    let start = length.saturating_sub(SESSION_FILE_TAIL_BYTES);
+    read_file_range(file, start, length - start, cutoff, now, observations);
+}
+
+fn read_file_range(
+    mut file: File,
+    start: u64,
+    length: u64,
+    cutoff: DateTime<Utc>,
+    now: DateTime<Utc>,
+    observations: &mut Vec<SessionWindow>,
+) {
+    let starts_at_line_boundary = if start == 0 {
+        true
+    } else {
+        let mut previous = [0];
+        file.seek(SeekFrom::Start(start - 1)).is_ok()
+            && file.read_exact(&mut previous).is_ok()
+            && previous[0] == b'\n'
+    };
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return;
+    }
+    let mut reader = BufReader::new(file.take(length));
+    if !starts_at_line_boundary {
+        let mut partial = Vec::new();
+        if reader.read_until(b'\n', &mut partial).is_err() {
+            return;
+        }
+    }
+    for line in reader.lines().map_while(Result::ok) {
+        if !line.contains("\"token_count\"") || !line.contains("\"rate_limits\"") {
+            continue;
+        }
         observations.extend(parse_event(&line).into_iter().filter(|observation| {
             observation.observed_at >= cutoff && observation.observed_at <= now
         }));
@@ -238,7 +285,8 @@ mod tests {
         AgentId, LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto,
     };
     use crate::paths::scratch_dir;
-    use std::fs;
+    use std::fs::{self, OpenOptions};
+    use std::io::Write as _;
 
     fn remembered(id: &str, reset_at: &str) -> ProviderLimitsDto {
         ProviderLimitsDto {
@@ -291,6 +339,113 @@ mod tests {
             "2026-08-20T06:58:07.093Z"
         );
         assert_eq!(accounts[1].windows[0].used_percent, 86.0);
+    }
+
+    #[test]
+    fn session_reconciliation_never_reads_an_unbounded_file_prefix() {
+        let home = scratch_dir("limits-codex-session-bounded-tail");
+        let sessions = home.join(".codex/sessions/2026/08/20");
+        fs::create_dir_all(&sessions).unwrap();
+        let mut content = String::from(
+            r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":96.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
+        );
+        content.push('\n');
+        content.push_str(&"x".repeat(300 * 1024));
+        fs::write(sessions.join("rollout.jsonl"), content).unwrap();
+        let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
+        let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let updates = merge_recent(&home, now, &mut accounts);
+
+        assert_eq!(updates, 0);
+        assert_eq!(accounts[0].windows[0].used_percent, 86.0);
+    }
+
+    #[test]
+    fn session_reconciliation_reads_a_limit_event_inside_the_bounded_tail() {
+        let home = scratch_dir("limits-codex-session-tail-event");
+        let sessions = home.join(".codex/sessions/2026/08/20");
+        fs::create_dir_all(&sessions).unwrap();
+        let mut content = "x".repeat(300 * 1024);
+        content.push('\n');
+        content.push_str(
+            r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":96.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
+        );
+        fs::write(sessions.join("rollout.jsonl"), content).unwrap();
+        let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
+        let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let updates = merge_recent(&home, now, &mut accounts);
+
+        assert_eq!(updates, 1);
+        assert_eq!(accounts[0].windows[0].used_percent, 96.0);
+    }
+
+    #[test]
+    fn a_tail_reader_stops_at_the_snapshotted_end_while_preserving_existing_events() {
+        let home = scratch_dir("limits-codex-session-snapshot-range");
+        let path = home.join("rollout.jsonl");
+        let mut content = "x".repeat(300 * 1024);
+        content.push('\n');
+        content.push_str(
+            r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":96.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
+        );
+        content.push('\n');
+        fs::write(&path, content).unwrap();
+        let file = File::open(&path).unwrap();
+        let length = file.metadata().unwrap().len();
+        let start = length.saturating_sub(SESSION_FILE_TAIL_BYTES);
+        let mut append = OpenOptions::new().append(true).open(&path).unwrap();
+        append
+            .write_all(
+                br#"{"timestamp":"2026-08-20T07:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":99.0,"window_minutes":10080,"resets_at":1787614473}}}}
+"#,
+            )
+            .unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut observations = Vec::new();
+
+        read_file_range(
+            file,
+            start,
+            length - start,
+            now - Duration::days(LOOKBACK_DAYS),
+            now,
+            &mut observations,
+        );
+
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].used_percent, 96.0);
+    }
+
+    #[test]
+    fn session_reconciliation_has_a_bounded_file_count() {
+        let home = scratch_dir("limits-codex-session-bounded-files");
+        let sessions = home.join(".codex/sessions/2026/08/20");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(
+            sessions.join("rollout-0000.jsonl"),
+            r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":96.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
+        )
+        .unwrap();
+        for index in 1..=512 {
+            fs::write(sessions.join(format!("rollout-{index:04}.jsonl")), "{}\n").unwrap();
+        }
+        let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
+        let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let updates = merge_recent(&home, now, &mut accounts);
+
+        assert_eq!(updates, 0);
+        assert_eq!(accounts[0].windows[0].used_percent, 86.0);
     }
 
     #[test]

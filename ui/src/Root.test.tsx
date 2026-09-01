@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { Root } from "./Root";
 
 vi.mock("$lib/api", () => ({
+  loadAppSettings: vi.fn(() => Promise.resolve({ limitsPollMinutes: 5 })),
   readLimits: vi.fn((provider: "claude" | "codex") =>
     Promise.resolve([
       {

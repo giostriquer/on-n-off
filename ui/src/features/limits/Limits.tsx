@@ -10,14 +10,14 @@ import {
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import type { AgentId } from "$lib/types";
+import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
 import { useLimitsProviders } from "./useLimitsProviders";
 
-export function Limits() {
+export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
   // Only Claude and Codex carry a subscription the backend can read; the rest report `unsupported`.
-  const { providers, loading, now, refresh } = useLimitsProviders();
+  const { providers, loading, now, refresh } = useLimitsProviders(pollMinutes);
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="limits-screen" aria-busy={loading}>

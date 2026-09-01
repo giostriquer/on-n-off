@@ -44,7 +44,7 @@ let settings: AppSettings = {
   binaryPaths: {},
   automaticUpdates: false,
   limitNotifications: false,
-  limitsPollMinutes: 10,
+  limitsPollMinutes: 5,
   githubScopes: ["org:acme", "repo:octo/tools"],
   githubNotifications: false,
   githubPollSeconds: 60,

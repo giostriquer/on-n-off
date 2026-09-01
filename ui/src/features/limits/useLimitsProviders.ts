@@ -3,17 +3,10 @@ import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react
 import * as api from "$lib/api";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
+import type { LimitsPollMinutes } from "$lib/types";
 
-export const LIMITS_STALE_MS = 60_000;
-
-/**
- * How long one provider's answer stays fresh. A current-account read that did not come back `ok` is worth
- * re-reading at the next chance: the CLIs renew their own access tokens, so such a failure heals
- * by itself and the screen should notice it without the user pressing refresh.
- */
-export function limitsStaleMs(entries: ProviderLimits[] | undefined): number {
-  const current = entries?.find((entry) => entry.currentAccount);
-  return current && current.status !== "ok" ? 0 : LIMITS_STALE_MS;
+export function limitsRefreshMs(pollMinutes: LimitsPollMinutes): number {
+  return pollMinutes * 60_000;
 }
 
 export type ProviderQuery = {
@@ -28,7 +21,7 @@ export type ProviderQuery = {
  * which makes the backend re-read the macOS Keychain instead of its in-process memo; background
  * refetches never do, so an "Allow"-once user is not re-prompted on every focus.
  */
-function useProviderLimits(provider: AgentId): ProviderQuery {
+function useProviderLimits(provider: AgentId, pollMinutes: LimitsPollMinutes): ProviderQuery {
   const forceRef = useRef(false);
   const query = useQuery({
     queryKey: ["limits", provider],
@@ -37,7 +30,9 @@ function useProviderLimits(provider: AgentId): ProviderQuery {
       forceRef.current = false;
       return api.readLimits(provider, force);
     },
-    staleTime: (query) => limitsStaleMs(query.state.data),
+    staleTime: limitsRefreshMs(pollMinutes),
+    refetchInterval: limitsRefreshMs(pollMinutes),
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   });
@@ -49,8 +44,11 @@ function useProviderLimits(provider: AgentId): ProviderQuery {
 }
 
 /** Canonical Claude + Codex query state shared by the full screen and menu-bar surface. */
-export function useLimitsProviders() {
-  const providers = [useProviderLimits("claude"), useProviderLimits("codex")];
+export function useLimitsProviders(pollMinutes: LimitsPollMinutes = 5) {
+  const providers = [
+    useProviderLimits("claude", pollMinutes),
+    useProviderLimits("codex", pollMinutes),
+  ];
   const loading = providers.some(({ query }) => query.isFetching);
 
   function refresh() {

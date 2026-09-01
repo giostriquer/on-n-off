@@ -194,6 +194,7 @@ pub async fn save_app_settings(
         crate::settings::save_settings(settings)
     })
     .await?;
+    crate::limits_refresh::set_poll_minutes(saved.limits_poll_minutes);
     crate::limits_monitor::wake(&app);
     crate::github_monitor::wake(&app);
     Ok(saved)
@@ -361,7 +362,7 @@ pub async fn read_limits(
     force: bool,
 ) -> Result<Vec<ProviderLimitsDto>, AdapterError> {
     blocking("limits read", move || {
-        Ok(crate::limits::read_limits(agent_id, force))
+        Ok(crate::limits_refresh::read_limits(agent_id, force))
     })
     .await
 }
@@ -373,7 +374,7 @@ pub async fn forget_limits_snapshot(
     account_id: String,
 ) -> Result<(), AdapterError> {
     blocking("limits forget", move || {
-        crate::limits::forget_snapshot(agent_id, &account_id).map_err(AdapterError::message)
+        crate::limits_refresh::forget_snapshot(agent_id, &account_id).map_err(AdapterError::message)
     })
     .await
 }

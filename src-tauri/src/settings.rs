@@ -45,7 +45,7 @@ const fn automatic_updates_default() -> bool {
 }
 
 const fn limits_poll_minutes_default() -> u16 {
-    10
+    5
 }
 
 const fn github_poll_seconds_default() -> u16 {
@@ -450,23 +450,23 @@ mod tests {
     }
 
     #[test]
-    fn existing_settings_keep_limit_notifications_off_at_ten_minutes() {
+    fn existing_settings_keep_limit_notifications_off_at_five_minutes() {
         let serialized =
             serde_json::to_value(parse_settings(Some(r#"{ "hiddenAgents": ["codex"] }"#))).unwrap();
 
         assert_eq!(serialized["limitNotifications"], false);
-        assert_eq!(serialized["limitsPollMinutes"], 10);
+        assert_eq!(serialized["limitsPollMinutes"], 5);
     }
 
     #[test]
-    fn unsupported_limits_poll_interval_falls_back_to_ten_minutes() {
+    fn unsupported_limits_poll_interval_falls_back_to_five_minutes() {
         let serialized = serde_json::to_value(parse_settings(Some(
             r#"{ "limitNotifications": true, "limitsPollMinutes": 7 }"#,
         )))
         .unwrap();
 
         assert_eq!(serialized["limitNotifications"], true);
-        assert_eq!(serialized["limitsPollMinutes"], 10);
+        assert_eq!(serialized["limitsPollMinutes"], 5);
     }
 
     #[test]

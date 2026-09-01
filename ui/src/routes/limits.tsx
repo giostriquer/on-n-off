@@ -1,5 +1,7 @@
 import { Limits } from "@/features/limits/Limits";
+import { useAgentSession } from "@/features/session/SessionProvider";
 
 export function LimitsRoute() {
-  return <Limits />;
+  const session = useAgentSession();
+  return <Limits pollMinutes={session.appSettings.limitsPollMinutes} />;
 }

@@ -53,10 +53,8 @@ fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
 struct Message<'a> {
     version: u8,
     sequence: u64,
-    revision: u64,
     snapshot: &'a NotchSnapshot,
     providers: Vec<&'a NativeProvider>,
-    completed_request: Option<u64>,
     action_error: &'a Option<String>,
 }
 
@@ -153,7 +151,6 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
     let mut awaiting_ack: Option<(u64, Instant)> = None;
     let mut next_start = Instant::now();
     let mut retry_delay = 1u64;
-    let mut completed_request = None;
     let mut action_error = None;
     let mut last_emitted = None;
     let mut runtime_error = None;
@@ -185,7 +182,6 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     connection = Some(child);
                     connected_at = Instant::now();
                     delivery.mark_dirty();
-                    completed_request = None;
                     action_error = None;
                 }
                 Err(error) => {
@@ -222,24 +218,6 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                         action_error = crate::tray::open_limits_window(&app).err();
                         delivery.mark_dirty();
                     }
-                    Ok(Ok(Action::Save {
-                        settings,
-                        revision,
-                        request,
-                    })) => {
-                        match super::save_at_revision(settings, revision) {
-                            Ok(next) => {
-                                snapshot = next;
-                                action_error = None;
-                            }
-                            Err(error) => {
-                                action_error = Some(error);
-                                snapshot = super::read();
-                            }
-                        }
-                        completed_request = Some(request);
-                        delivery.mark_dirty();
-                    }
                     Ok(Err(error)) => {
                         failure = Some(error);
                         break;
@@ -259,10 +237,8 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                 let message = Message {
                     version: 1,
                     sequence,
-                    revision: snapshot.revision,
                     snapshot: &snapshot,
                     providers: providers.iter().flatten().collect(),
-                    completed_request,
                     action_error: &action_error,
                 };
                 let result = serde_json::to_vec(&message)
@@ -288,9 +264,12 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
             && layout(&snapshot.settings, &snapshot.displays, false).is_some();
         if connection.is_some() && visible {
             for (index, agent) in [AgentId::Claude, AgentId::Codex].into_iter().enumerate() {
-                let due = force[index]
-                    || last_read[index]
-                        .is_none_or(|time| time.elapsed() >= Duration::from_secs(60));
+                let due = usage_refresh_due(
+                    last_read[index],
+                    Instant::now(),
+                    crate::limits_refresh::poll_interval(),
+                    force[index],
+                );
                 if !loading[index] && due {
                     loading[index] = true;
                     let force = std::mem::take(&mut force[index]);
@@ -298,7 +277,7 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     thread::spawn(move || {
                         let _ = sender.send((
                             index,
-                            current_provider(crate::limits::read_limits(agent, force)),
+                            current_provider(crate::limits_refresh::read_limits(agent, force)),
                         ));
                     });
                 }
@@ -327,6 +306,15 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                 .then_some(Duration::from_millis(100)),
         );
     }
+}
+
+fn usage_refresh_due(
+    last_read: Option<Instant>,
+    now: Instant,
+    interval: Duration,
+    force: bool,
+) -> bool {
+    force || last_read.is_none_or(|last_read| now.saturating_duration_since(last_read) >= interval)
 }
 
 fn initial_snapshot() -> NotchSnapshot {
@@ -381,5 +369,29 @@ mod tests {
         assert!(payload.get("account").is_none());
         assert!(payload.get("credits").is_none());
         assert!(current_provider(Vec::new()).is_none());
+    }
+
+    #[test]
+    fn notch_usage_uses_the_configured_interval_unless_forced() {
+        let last_read = Instant::now();
+        let interval = Duration::from_secs(5 * 60);
+        assert!(!usage_refresh_due(
+            Some(last_read),
+            last_read + Duration::from_secs(299),
+            interval,
+            false
+        ));
+        assert!(usage_refresh_due(
+            Some(last_read),
+            last_read + interval,
+            interval,
+            false
+        ));
+        assert!(usage_refresh_due(
+            Some(last_read),
+            last_read + Duration::from_secs(1),
+            interval,
+            true
+        ));
     }
 }

@@ -1,4 +1,3 @@
-use super::model::{Edge, NotchSettings, NotchSize};
 use serde::Deserialize;
 
 pub const MAX_MESSAGE: usize = 262_144;
@@ -7,38 +6,10 @@ pub const MAX_MESSAGE: usize = 262_144;
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Action {
     Ready,
-    Ack {
-        sequence: u64,
-    },
+    Ack { sequence: u64 },
     ScreensChanged,
-    Save {
-        #[serde(deserialize_with = "native_settings")]
-        settings: NotchSettings,
-        revision: u64,
-        request: u64,
-    },
     Refresh,
     OpenLimits,
-}
-
-// Persistence tolerates omitted fields for older app versions. The helper's
-// write protocol must require a complete, correctly spelled settings message.
-fn native_settings<'de, D: serde::Deserializer<'de>>(input: D) -> Result<NotchSettings, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct NativeSettings {
-        enabled: bool,
-        display_id: Option<String>,
-        edge: Edge,
-        size: NotchSize,
-    }
-    let settings = NativeSettings::deserialize(input)?;
-    Ok(NotchSettings {
-        enabled: settings.enabled,
-        display_id: settings.display_id,
-        edge: settings.edge,
-        size: settings.size,
-    })
 }
 
 pub fn decode_event(line: &[u8]) -> Result<Action, String> {
@@ -63,15 +34,6 @@ pub fn decode_event(line: &[u8]) -> Result<Action, String> {
     {
         return Err("Unexpected native notch action fields.".into());
     }
-    if let Action::Save { settings, .. } = &action {
-        if settings
-            .display_id
-            .as_ref()
-            .is_some_and(|id| id.len() > 128 || id.is_empty())
-        {
-            return Err("Invalid display identity.".into());
-        }
-    }
     Ok(action)
 }
 
@@ -89,38 +51,6 @@ mod tests {
             decode_event(br#"{"version":1,"type":"ack","sequence":42}"#),
             Ok(Action::Ack { sequence: 42 })
         );
-        assert_eq!(
-            decode_event(br#"{"version":1,"type":"save","revision":0,"request":1,"settings":{"enabled":true,"displayId":"external","edge":"left","size":"standard"}}"#),
-            Ok(Action::Save {
-                revision: 0,
-                request: 1,
-                settings: NotchSettings {
-                    enabled: true,
-                    display_id: Some("external".into()),
-                    edge: super::super::model::Edge::Left,
-                    size: super::super::model::NotchSize::Standard,
-                },
-            })
-        );
-        assert!(decode_event(br#"{"version":1,"type":"save","revision":0,"request":1,"settings":{"enabled":true,"displayId":"external","edge":"left","size":"compact"}}"#).is_ok());
-    }
-
-    #[test]
-    fn rejects_incomplete_or_misspelled_native_settings() {
-        for settings in [
-            serde_json::json!({}),
-            serde_json::json!({"enabled": true}),
-            serde_json::json!({"edge": "left"}),
-            serde_json::json!({"enabled": true, "edeg": "left"}),
-            serde_json::json!({"enabled": true, "edge": "left", "extra": 1}),
-            serde_json::json!({"enabled": true, "displayId": "external", "edge": "left"}),
-        ] {
-            let message = serde_json::json!({"version":1,"type":"save","revision":0,"request":1,"settings":settings});
-            assert!(
-                decode_event(&serde_json::to_vec(&message).unwrap()).is_err(),
-                "accepted {message}"
-            );
-        }
     }
 
     #[test]
@@ -130,6 +60,7 @@ mod tests {
             br#"{"version":1,"type":"exec","command":"arbitrary"}"#,
             br#"{"type":"refresh"}"#,
             br#"{"version":1,"type":"openLimits","path":"arbitrary"}"#,
+            br#"{"version":1,"type":"save","revision":0,"request":1,"settings":{"enabled":true,"displayId":"external","edge":"left","size":"standard"}}"#,
         ] {
             assert!(decode_event(line).is_err());
         }
