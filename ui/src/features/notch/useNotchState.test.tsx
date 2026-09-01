@@ -25,14 +25,14 @@ it.each(["save", "event"] as const)(
     const old: NotchSnapshot = {
       revision: 1,
       supported: true,
-      settings: { enabled: true, displayId: "old-display", edge: "right", size: "standard" },
+      settings: { enabled: true, displayId: "old-display", edge: "right", size: "standard", show: "always", providers: ["claude", "codex"], pullRequests: { enabled: true, lists: ["mine"] } },
       displays: [],
       error: null,
     };
     const saved: NotchSnapshot = {
       ...old,
       revision: 2,
-      settings: { enabled: true, displayId: "new-display", edge: "left", size: "standard" },
+      settings: { enabled: true, displayId: "new-display", edge: "left", size: "standard", show: "always", providers: ["claude", "codex"], pullRequests: { enabled: true, lists: ["mine"] } },
     };
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -81,14 +81,14 @@ it("does not let an older queued event overwrite a newer save", async () => {
   const old = {
     revision: 1,
     supported: true,
-    settings: { enabled: true, displayId: "old-display", edge: "right", size: "standard" },
+    settings: { enabled: true, displayId: "old-display", edge: "right", size: "standard", show: "always", providers: ["claude", "codex"], pullRequests: { enabled: true, lists: ["mine"] } },
     displays: [],
     error: null,
   } satisfies NotchSnapshot;
   const saved = {
     ...old,
     revision: 2,
-    settings: { enabled: true, displayId: "new-display", edge: "left", size: "standard" },
+    settings: { enabled: true, displayId: "new-display", edge: "left", size: "standard", show: "always", providers: ["claude", "codex"], pullRequests: { enabled: true, lists: ["mine"] } },
   } satisfies NotchSnapshot;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["side-notch"], old);

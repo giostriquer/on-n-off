@@ -15,7 +15,9 @@ struct NotchMetrics {
     (points * scale * backingScale).rounded() / backingScale
   }
 
-  func font(_ points: CGFloat, weight: Font.Weight = .regular) -> Font {
-    .system(size: value(points), weight: weight, design: .default)
+  func font(_ points: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default)
+    -> Font
+  {
+    .system(size: value(points), weight: weight, design: design)
   }
 }

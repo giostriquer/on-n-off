@@ -306,6 +306,17 @@ pub(crate) fn open_limits_window(app: &AppHandle) -> Result<(), String> {
     hide_limits_popover(app)
 }
 
+/// Brings the main window forward on the Pull requests screen.
+pub(crate) fn open_github_window(app: &AppHandle) -> Result<(), String> {
+    show_main_window(app)?;
+    let main = app
+        .get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "the main window is not available".to_string())?;
+    main.emit("open-github-window", ())
+        .map_err(|error| error.to_string())?;
+    hide_limits_popover(app)
+}
+
 pub(crate) fn quit_app(app: &AppHandle) {
     app.exit(0);
 }

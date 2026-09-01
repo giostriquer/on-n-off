@@ -1,222 +1,370 @@
 import NotchCore
 import SwiftUI
 
-let claudeOrange = Color(red: 244 / 255, green: 130 / 255, blue: 102 / 255)
+// The app's own palette (`providerStyle.ts` / `tokens.css`, dark theme): each provider's accent
+// for its ring and bars, amber from 70 % and red from 90 % like the Limits screen.
+let claudeOrange = Color(red: 232 / 255, green: 148 / 255, blue: 74 / 255)
+let codexInk = Color(red: 238 / 255, green: 240 / 255, blue: 242 / 255)
+let cursorBlue = Color(red: 122 / 255, green: 162 / 255, blue: 255 / 255)
+let antigravityMute = Color(red: 140 / 255, green: 147 / 255, blue: 157 / 255)
 let fableOrange = Color(red: 247 / 255, green: 173 / 255, blue: 113 / 255)
-let openAIInk = Color(red: 238 / 255, green: 240 / 255, blue: 242 / 255)
-let limitReachedRed = Color(red: 226 / 255, green: 89 / 255, blue: 76 / 255)
+let warnAmber = Color(red: 224 / 255, green: 179 / 255, blue: 65 / 255)
+let tripRed = Color(red: 226 / 255, green: 89 / 255, blue: 76 / 255)
+let railInk = Color(white: 0.03)
+let popoverInk = Color(red: 0.055, green: 0.055, blue: 0.065)
+let mutedInk = Color(white: 0.6)
 
-func limitColor(_ quota: Quota?, at now: Date, base: Color) -> Color {
-  quota?.isReached(at: now) == true ? limitReachedRed : base
+func providerColor(_ id: ProviderId) -> Color {
+  switch id {
+  case .claude: return claudeOrange
+  case .codex: return codexInk
+  case .cursor: return cursorBlue
+  case .antigravity: return antigravityMute
+  }
+}
+
+/// The provider's accent while there is room, amber from 70 %, red from 90 %; grey when unreadable.
+func meterColor(_ quota: Quota?, provider: ProviderId, at now: Date) -> Color {
+  meterColor(quota, base: providerColor(provider), at: now)
+}
+
+func meterColor(_ quota: Quota?, base: Color, at now: Date) -> Color {
+  guard let percent = quota?.percent(at: now) else { return Color(white: 0.3) }
+  if percent >= 90 { return tripRed }
+  if percent >= 70 { return warnAmber }
+  return base
+}
+
+func providerName(_ id: ProviderId) -> String {
+  switch id {
+  case .claude: return "Claude"
+  case .codex: return "Codex"
+  case .antigravity: return "Antigravity"
+  case .cursor: return "Cursor"
+  }
+}
+
+/// Where and how the rail draws, computed once per host message or screen change from the
+/// settings and the display list; every view and pointer computation reads this value.
+struct RailModel {
+  let settings: NotchCore.Settings
+  let display: Display
+  /// The rail in top-left display coordinates.
+  let frame: CGRect
+  let layout: RailLayout
+  let metrics: NotchMetrics
+
+  init?(settings: NotchCore.Settings, displays: [Display]) {
+    guard let display = selectedDisplay(settings: settings, displays: displays),
+      let frame = notchRailFrame(settings: settings, displays: displays)
+    else { return nil }
+    self.settings = settings
+    self.display = display
+    self.frame = frame
+    layout = railLayout(size: settings.size, displayScale: display.scale, edge: settings.edge)
+    metrics = NotchMetrics(scale: CGFloat(settings.size.scale), backingScale: CGFloat(display.scale))
+  }
+
+  var cellIds: [RailCell] { settings.railCells }
+  var edge: NotchCore.Edge { settings.edge }
+
+  /// Cell frames in the rail's own top-left coordinates.
+  var cells: [CGRect] { railCellFrames(edge: edge, layout: layout, count: cellIds.count) }
+
+  /// The cell containing a point in the rail's own top-left coordinates.
+  func cell(at point: CGPoint) -> RailCell? {
+    cells.firstIndex { $0.contains(point) }.map { cellIds[$0] }
+  }
+
+  /// One cell's frame in top-left display coordinates.
+  func cellFrame(of id: RailCell) -> CGRect? {
+    cellIds.firstIndex(of: id).map { cells[$0].offsetBy(dx: frame.minX, dy: frame.minY) }
+  }
 }
 
 struct NotchRailView: View {
-  @ObservedObject var controller: PanelController
-  private var edge: NotchCore.Edge { controller.message?.snapshot.settings.edge ?? .right }
-  private var size: NotchCore.NotchSize { controller.message?.snapshot.settings.size ?? .standard }
-  private var scale: CGFloat { size.scale }
-  private var backingScale: CGFloat {
-    guard let snapshot = controller.message?.snapshot,
-      let displayId = snapshot.settings.displayId,
-      let display = snapshot.displays.first(where: { $0.id == displayId })
-    else { return 1 }
-    return CGFloat(display.scale)
-  }
-  private var metrics: NotchMetrics { NotchMetrics(scale: scale, backingScale: backingScale) }
-  private var layout: MeterRailLayout {
-    meterRailLayout(size: size, displayScale: Double(backingScale))
-  }
-
-  var body: some View {
-    ZStack {
-      NotchSilhouette().fill(Color(white: 0.02)).scaleEffect(x: edge == .left ? -1 : 1, y: 1)
-      VStack(spacing: CGFloat(layout.cellSpacing)) {
-        ForEach(["claude", "codex"], id: \.self) { id in
-          MeterButton(
-            id: id, entry: controller.message?.providers.first { $0.provider == id },
-            now: controller.now, selected: controller.selection == id, metrics: metrics,
-            layout: layout
-          ) { controller.toggle(id) }
-        }
-      }
-      .offset(x: CGFloat(layout.columnOffsetX), y: CGFloat(layout.columnOffsetY))
-      .padding(.vertical, CGFloat(layout.stackInset))
-    }
-    .frame(width: CGFloat(layout.railWidth), height: CGFloat(layout.railHeight))
-    .foregroundColor(.white)
-    .preferredColorScheme(.dark)
-  }
-}
-
-struct NotchDetailView: View {
-  @ObservedObject var controller: PanelController
-  private var scale: CGFloat { controller.message?.snapshot.settings.size.scale ?? 1 }
-  private var backingScale: CGFloat {
-    guard let snapshot = controller.message?.snapshot,
-      let displayId = snapshot.settings.displayId,
-      let display = snapshot.displays.first(where: { $0.id == displayId })
-    else { return 1 }
-    return CGFloat(display.scale)
-  }
-  private var metrics: NotchMetrics { NotchMetrics(scale: scale, backingScale: backingScale) }
-
-  var body: some View {
-    Group {
-      if let selection = controller.selection {
-        detailPanel(selection)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .padding(.vertical, metrics.value(18))
-          .padding(.horizontal, metrics.value(8))
-      } else {
-        Color.clear
-      }
-    }
-    .frame(width: metrics.value(312), height: metrics.value(340))
-    .foregroundColor(.white)
-    .preferredColorScheme(.dark)
-  }
-
-  private func detailPanel(_ selection: String) -> some View {
-    VStack(alignment: .leading, spacing: metrics.value(12)) {
-      HStack {
-        Text(selection == "claude" ? "Claude" : "Codex")
-          .font(metrics.font(16, weight: .semibold))
-        Spacer()
-        Button {
-          controller.select(nil)
-        } label: {
-          Image(systemName: "xmark").font(metrics.font(11, weight: .medium))
-            .frame(width: metrics.value(20), height: metrics.value(20))
-        }
-        .buttonStyle(PlainButtonStyle()).help("Collapse side notch")
-        .accessibilityLabel("Collapse side notch").keyboardShortcut(.cancelAction)
-      }
-      ProviderDetails(
-        entry: controller.message?.providers.first { $0.provider == selection },
-        now: controller.now, color: selection == "claude" ? claudeOrange : openAIInk,
-        metrics: metrics)
-      Button {
-        controller.emit(.openLimits)
-        controller.select(nil)
-      } label: {
-        Label("Open Limits", systemImage: "arrow.up.right").font(metrics.font(12))
-      }.buttonStyle(PlainButtonStyle())
-      if let error = controller.message?.actionError {
-        Text(error).font(metrics.font(10)).foregroundColor(.orange)
-      }
-    }
-    .padding(metrics.value(16))
-    .background(
-      RoundedRectangle(cornerRadius: metrics.value(20)).fill(
-        Color(red: 0.035, green: 0.035, blue: 0.043))
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: metrics.value(20)).stroke(
-        Color.white.opacity(0.08), lineWidth: metrics.value(1)))
-  }
-}
-
-private struct MeterButton: View {
-  let id: String
-  let entry: Provider?
+  let model: RailModel
+  let entries: [ProviderId: Provider]
+  let pullRequests: PullRequests?
   let now: Date
-  let selected: Bool
-  let metrics: NotchMetrics
-  let layout: MeterRailLayout
-  let action: () -> Void
-  @State private var hovered = false
-  var primary: Quota? { entry?.primary }
-  var fable: Quota? { entry?.fable }
-  var period: String {
-    primary.map { $0.kind == "weekly" ? "weekly" : "5h" }
-      ?? (entry == nil ? "updating" : "unavailable")
+  let active: RailCell?
+  let action: (RailCell) -> Void
+
+  var body: some View {
+    let layout = model.layout
+    ZStack {
+      NotchSilhouette(edge: model.edge, ear: CGFloat(layout.ear)).fill(railInk)
+      if model.edge.isVertical {
+        VStack(spacing: CGFloat(layout.cellSpacing)) {
+          ForEach(model.cellIds, id: \.self) { cell($0) }
+        }
+      } else {
+        HStack(spacing: CGFloat(layout.cellSpacing)) {
+          ForEach(model.cellIds, id: \.self) { cell($0) }
+        }
+      }
+    }
+    .frame(width: model.frame.width, height: model.frame.height)
+    .foregroundColor(.white)
+    .preferredColorScheme(.dark)
   }
-  var description: String {
-    let primaryReached = primary?.isReached(at: now) == true ? ", limit reached" : ""
-    let fableDescription = fable.map {
-      ", Fable weekly, \($0.text(at: now)) used"
-        + ($0.isReached(at: now) ? ", limit reached" : "")
-    } ?? ""
-    return "\(id == "claude" ? "Claude" : "Codex"), \(period), \(primary?.text(at: now) ?? "unavailable") used\(primaryReached)"
-      + fableDescription
-  }
-  @ViewBuilder private var auxiliaryLabel: some View {
-    if let fable = fable {
-      Text("Fable \(fable.text(at: now))")
-        .font(metrics.font(10, weight: .medium).monospacedDigit())
-        .foregroundColor(limitColor(fable, at: now, base: fableOrange))
-        .lineLimit(1).allowsTightening(true).minimumScaleFactor(0.85)
-    } else if primary?.kind != "weekly" {
-      Text(period + (primary == nil ? "" : " used"))
-        .font(metrics.font(9)).foregroundColor(Color(white: 0.67))
-    } else {
-      Color.clear.accessibilityHidden(true)
+
+  @ViewBuilder private func cell(_ id: RailCell) -> some View {
+    let layout = model.layout
+    let vertical = model.edge.isVertical
+    let size = CGSize(
+      width: CGFloat(vertical ? layout.thickness : layout.cellLength),
+      height: CGFloat(vertical ? layout.cellLength : layout.thickness))
+    switch id {
+    case .provider(let provider):
+      MeterCell(
+        id: provider, entry: entries[provider], now: now, active: active == id, layout: layout,
+        metrics: model.metrics, action: { action(id) }
+      )
+      .frame(width: size.width, height: size.height)
+    case .pullRequests:
+      PullRequestCell(
+        pulls: pullRequests, active: active == id, layout: layout, metrics: model.metrics,
+        action: { action(id) }
+      )
+      .frame(width: size.width, height: size.height)
     }
   }
+}
+
+/// The colour of one pull request's CI rollup on the ring.
+func ciColor(_ ci: String) -> Color {
+  switch ci {
+  case "success": return liveGreen
+  case "failure", "error": return tripRed
+  case "pending": return warnAmber
+  default: return Color(white: 0.3)
+  }
+}
+
+/// Segments on the pull-request ring beyond this stop being legible; the count still says how
+/// many there are.
+let maxRingSegments = 24
+
+/// The pull-request cell: the ring is split into one arc per listed pull request, coloured by
+/// its CI state, with the count beneath.
+private struct PullRequestCell: View {
+  let pulls: PullRequests?
+  let active: Bool
+  let layout: RailLayout
+  let metrics: NotchMetrics
+  let action: () -> Void
+  private var readable: Bool { pulls?.readable == true }
+  private var count: Int { pulls?.count ?? 0 }
+  private var segments: [String] {
+    guard let pulls = pulls, readable else { return [] }
+    return Array(pulls.lists.flatMap { $0.items.map(\.ci) }.prefix(maxRingSegments))
+  }
+  private var description: String {
+    guard let pulls = pulls else { return "Pull requests, updating" }
+    guard readable else { return "Pull requests, \(pulls.hint ?? "unavailable")" }
+    var attention: [String] = []
+    if pulls.failing > 0 { attention.append("\(pulls.failing) failing CI") }
+    if pulls.changesRequested > 0 { attention.append("\(pulls.changesRequested) with changes requested") }
+    if pulls.ready > 0 { attention.append("\(pulls.ready) ready to merge") }
+    return (["Pull requests, \(count) open"] + attention).joined(separator: ", ")
+  }
+
   var body: some View {
     Button(action: action) {
       VStack(alignment: .center, spacing: CGFloat(layout.contentSpacing)) {
         ZStack {
-          Circle().stroke(Color(white: 0.173), lineWidth: metrics.value(4))
-          Circle().trim(from: 0, to: (primary?.percent(at: now) ?? 0) / 100)
+          Circle().stroke(Color(white: 0.173), lineWidth: CGFloat(layout.ringStroke))
+          SegmentedRing(colors: segments.map(ciColor), lineWidth: CGFloat(layout.ringStroke))
+          PullRequestMark().stroke(
+            Color.white, style: StrokeStyle(lineWidth: metrics.value(1.6), lineCap: .round)
+          )
+          .frame(width: CGFloat(layout.glyphSize), height: CGFloat(layout.glyphSize))
+        }
+        .padding(CGFloat(layout.ringStroke) / 2)
+        .frame(width: CGFloat(layout.iconSlot), height: CGFloat(layout.iconSlot))
+        Text(readable ? "\(count)" : "—")
+          .font(metrics.font(17, weight: .medium).monospacedDigit())
+          .lineLimit(1)
+          .frame(height: CGFloat(layout.labelHeight))
+      }
+      .padding(CGFloat(layout.cellPadding))
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(PlainButtonStyle())
+    .accessibilityLabel(description)
+    .accessibilityValue(active ? "Expanded" : "Collapsed")
+    .accessibilityHint(active ? "Collapses the pull requests." : "Shows the pull requests.")
+    .help(description)
+  }
+}
+
+/// One arc per entry around the ring, equal in length, separated by a small gap, starting at
+/// twelve o'clock; a single entry fills the ring.
+struct SegmentedRing: View {
+  let colors: [Color]
+  let lineWidth: CGFloat
+  var body: some View {
+    let count = colors.count
+    let gap: CGFloat = count > 1 ? 0.025 : 0
+    let span = 1 / CGFloat(max(count, 1))
+    ZStack {
+      ForEach(Array(colors.enumerated()), id: \.offset) { index, color in
+        let start = CGFloat(index) * span
+        Circle()
+          .trim(from: start + gap / 2, to: start + span - gap / 2)
+          .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+          .rotationEffect(.degrees(-90))
+      }
+    }
+  }
+}
+
+/// GitHub's pull-request glyph: a branch dot joined to a base dot, and a merge dot on the right.
+struct PullRequestMark: Shape {
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    let unit = min(rect.width, rect.height) / 16
+    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+      CGPoint(x: rect.minX + x * unit, y: rect.minY + y * unit)
+    }
+    let radius = 2.2 * unit
+    path.addEllipse(in: CGRect(origin: point(4 - 2.2, 4 - 2.2), size: CGSize(width: 2 * radius, height: 2 * radius)))
+    path.addEllipse(in: CGRect(origin: point(4 - 2.2, 12 - 2.2), size: CGSize(width: 2 * radius, height: 2 * radius)))
+    path.addEllipse(in: CGRect(origin: point(12 - 2.2, 12 - 2.2), size: CGSize(width: 2 * radius, height: 2 * radius)))
+    path.move(to: point(4, 6.2))
+    path.addLine(to: point(4, 9.8))
+    path.move(to: point(7, 4))
+    path.addLine(to: point(9.5, 4))
+    path.addCurve(to: point(12, 6.5), control1: point(11.4, 4), control2: point(12, 4.6))
+    path.addLine(to: point(12, 9.8))
+    return path
+  }
+}
+
+/// The "show on hover" strip: reaching it opens the rail.
+struct NotchPillView: View {
+  let vertical: Bool
+  var body: some View {
+    Capsule().fill(Color.white.opacity(0.32))
+      .padding(vertical ? .horizontal : .vertical, 1)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color.black.opacity(0.001))
+      .accessibilityLabel("Show side notch")
+  }
+}
+
+private struct MeterCell: View {
+  let id: ProviderId
+  let entry: Provider?
+  let now: Date
+  let active: Bool
+  let layout: RailLayout
+  let metrics: NotchMetrics
+  let action: () -> Void
+  private var primary: Quota? { entry?.primary }
+  private var fable: Quota? { entry?.fable }
+  private var period: String {
+    primary.map { $0.kind == "weekly" ? "weekly" : "5 hour" }
+      ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
+  }
+  private var description: String {
+    let name = providerName(id)
+    guard let primary = primary else { return "\(name), \(period)" }
+    let reached = primary.isReached(at: now) ? ", limit reached" : ""
+    let fableDescription = fable.map {
+      ", Fable weekly, \($0.text(at: now)) used" + ($0.isReached(at: now) ? ", limit reached" : "")
+    } ?? ""
+    return "\(name), \(period), \(primary.text(at: now)) used\(reached)" + fableDescription
+  }
+
+  var body: some View {
+    Button(action: action) {
+      VStack(alignment: .center, spacing: CGFloat(layout.contentSpacing)) {
+        ZStack {
+          Circle().stroke(Color(white: 0.173), lineWidth: CGFloat(layout.ringStroke))
+          Circle().trim(from: 0, to: CGFloat(primary?.percent(at: now) ?? 0) / 100)
             .stroke(
-              limitColor(primary, at: now, base: id == "claude" ? claudeOrange : openAIInk),
-              style: StrokeStyle(lineWidth: metrics.value(4), lineCap: .round)
+              meterColor(primary, provider: id, at: now),
+              style: StrokeStyle(lineWidth: CGFloat(layout.ringStroke), lineCap: .round)
             )
             .rotationEffect(.degrees(-90))
           if let fable = fable {
             Circle().stroke(
               Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255),
-              lineWidth: metrics.value(3)
-            ).padding(metrics.value(6))
-            Circle().trim(from: 0, to: (fable.percent(at: now) ?? 0) / 100)
+              lineWidth: CGFloat(layout.innerRingStroke)
+            ).padding(CGFloat(layout.innerRingInset))
+            Circle().trim(from: 0, to: CGFloat(fable.percent(at: now) ?? 0) / 100)
               .stroke(
-                limitColor(fable, at: now, base: fableOrange),
-                style: StrokeStyle(lineWidth: metrics.value(3), lineCap: .round)
+                meterColor(fable, base: fableOrange, at: now),
+                style: StrokeStyle(lineWidth: CGFloat(layout.innerRingStroke), lineCap: .round)
               )
-              .rotationEffect(.degrees(-90)).padding(metrics.value(6))
+              .rotationEffect(.degrees(-90)).padding(CGFloat(layout.innerRingInset))
           }
-          ProviderMark(provider: id).fill(Color.white).frame(
-            width: metrics.value(24), height: metrics.value(24))
-        }.padding(CGFloat(layout.ringInset)).frame(
-          width: CGFloat(layout.iconSlotSize), height: CGFloat(layout.iconSlotSize))
-        Text(primary?.text(at: now) ?? "—").font(
-          metrics.font(17, weight: .medium).monospacedDigit()
-        ).lineLimit(1).multilineTextAlignment(.center)
-          .frame(
-            width: CGFloat(layout.primarySlotWidth), height: CGFloat(layout.primarySlotHeight),
-            alignment: .center
-          ).offset(x: CGFloat(layout.primaryOffsetX))
-        auxiliaryLabel.frame(
-          width: CGFloat(layout.auxiliarySlotWidth), height: CGFloat(layout.auxiliarySlotHeight),
-          alignment: .center)
-      }.padding(CGFloat(layout.cellPadding)).frame(
-        width: CGFloat(layout.cellWidth), height: CGFloat(layout.cellHeight))
-        .background(
-          RoundedRectangle(cornerRadius: metrics.value(12)).fill(
-            Color.white.opacity(hovered || selected ? 0.06 : 0)))
-    }.buttonStyle(PlainButtonStyle()).onHover { hovered = $0 }
-      .accessibilityLabel(description).accessibilityValue(selected ? "Expanded" : "Collapsed")
-      .accessibilityHint(selected ? "Collapses usage details." : "Shows usage details.")
-      .help(description)
+          ProviderMark(provider: id).fill(Color.white, style: FillStyle(eoFill: true))
+            .frame(width: CGFloat(layout.glyphSize), height: CGFloat(layout.glyphSize))
+        }
+        .padding(CGFloat(layout.ringStroke) / 2)
+        .frame(width: CGFloat(layout.iconSlot), height: CGFloat(layout.iconSlot))
+        // The percent sign makes the figure read left-heavy; a nudge right centres it optically.
+        Text(primary?.text(at: now) ?? "—")
+          .font(metrics.font(17, weight: .medium).monospacedDigit())
+          .lineLimit(1)
+          .frame(height: CGFloat(layout.labelHeight))
+          .offset(x: primary == nil ? 0 : metrics.value(2))
+      }
+      .padding(CGFloat(layout.cellPadding))
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(PlainButtonStyle())
+    .accessibilityLabel(description)
+    .accessibilityValue(active ? "Expanded" : "Collapsed")
+    .accessibilityHint(active ? "Collapses usage details." : "Shows usage details.")
+    .help(description)
   }
 }
 
-private struct NotchSilhouette: Shape {
+/// The notch silhouette: a bar whose inner side is straight and whose two ends flare into the
+/// screen edge with an S-curve `ear` points long, so the rail reads as part of the bezel. The
+/// edge side is drawn one point past the panel so no outline shows along the screen edge.
+struct NotchSilhouette: Shape {
+  let edge: NotchCore.Edge
+  let ear: CGFloat
+
   func path(in rect: CGRect) -> Path {
-    var p = Path()
-    p.move(to: CGPoint(x: 76, y: 0))
-    p.addCurve(
-      to: CGPoint(x: 34, y: 36), control1: CGPoint(x: 76, y: 28), control2: CGPoint(x: 58, y: 38))
-    p.addCurve(
-      to: CGPoint(x: 0, y: 72), control1: CGPoint(x: 12, y: 33), control2: CGPoint(x: 0, y: 50))
-    p.addLine(to: CGPoint(x: 0, y: 268))
-    p.addCurve(
-      to: CGPoint(x: 34, y: 304), control1: CGPoint(x: 0, y: 290), control2: CGPoint(x: 12, y: 307))
-    p.addCurve(
-      to: CGPoint(x: 76, y: 340), control1: CGPoint(x: 58, y: 302), control2: CGPoint(x: 76, y: 312)
-    )
-    p.closeSubpath()
-    return p.applying(CGAffineTransform(scaleX: rect.width / 76, y: rect.height / 340))
+    let thickness = edge.isVertical ? rect.width : rect.height
+    let length = edge.isVertical ? rect.height : rect.width
+    let ear = min(self.ear, length / 2)
+    // Local frame: the screen edge is x == thickness, the rail extends inward to x == 0, and
+    // the axis runs along y. The proportions come from the previous notch's hand-tuned curve.
+    let edgeX = thickness + 1
+    var path = Path()
+    path.move(to: CGPoint(x: edgeX, y: 0))
+    path.addCurve(
+      to: CGPoint(x: thickness * 0.45, y: ear * 0.5),
+      control1: CGPoint(x: thickness, y: ear * 0.39),
+      control2: CGPoint(x: thickness * 0.76, y: ear * 0.53))
+    path.addCurve(
+      to: CGPoint(x: 0, y: ear), control1: CGPoint(x: thickness * 0.16, y: ear * 0.46),
+      control2: CGPoint(x: 0, y: ear * 0.69))
+    path.addLine(to: CGPoint(x: 0, y: length - ear))
+    path.addCurve(
+      to: CGPoint(x: thickness * 0.45, y: length - ear * 0.5),
+      control1: CGPoint(x: 0, y: length - ear * 0.69),
+      control2: CGPoint(x: thickness * 0.16, y: length - ear * 0.46))
+    path.addCurve(
+      to: CGPoint(x: edgeX, y: length), control1: CGPoint(x: thickness * 0.76, y: length - ear * 0.53),
+      control2: CGPoint(x: thickness, y: length - ear * 0.39))
+    path.closeSubpath()
+    let placement: CGAffineTransform
+    switch edge {
+    case .right: placement = .identity
+    case .left: placement = CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: thickness, ty: 0)
+    case .top: placement = CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: thickness)
+    case .bottom: placement = CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0)
+    }
+    return path.applying(placement.concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY)))
   }
 }

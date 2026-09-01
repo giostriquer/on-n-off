@@ -2,6 +2,8 @@ pub mod model;
 
 #[cfg(any(target_os = "macos", test))]
 mod protocol;
+#[cfg(any(target_os = "macos", test))]
+mod sessions;
 
 #[cfg(target_os = "macos")]
 mod config;
@@ -44,11 +46,22 @@ pub fn read() -> NotchSnapshot {
 pub fn save(settings: NotchSettings) -> Result<NotchSnapshot, String> {
     #[cfg(target_os = "macos")]
     {
+        let mut settings = settings;
+        settings.providers = settings.rail_providers();
+        settings.pull_requests.lists = settings.pull_requests.selected_lists();
         let result = displays::read();
         let error = result.as_ref().err().cloned();
         let displays = result.unwrap_or_default();
-        if settings.enabled && model::layout(&settings, &displays, false).is_none() {
-            return Err("Select a connected display with mirroring turned off.".into());
+        if settings.enabled {
+            if settings.providers.is_empty() {
+                return Err("Choose at least one provider for the notch.".into());
+            }
+            if model::layout(&settings, &displays).is_none() {
+                return Err(
+                    "Select a connected display with mirroring turned off and room for the notch."
+                        .into(),
+                );
+            }
         }
         let revision = config::save(&settings)?;
         Ok(NotchSnapshot {

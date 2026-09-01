@@ -1,11 +1,36 @@
+import NotchCore
 import SwiftUI
 
-// Existing Simple Icons provider marks, converted to native vector paths.
+// Provider marks as native vector paths, converted offline from their SVG sources: Claude and
+// Codex from Simple Icons (24 × 24), Cursor's official 2D cube (466.73 × 532.09), and the
+// Antigravity arch silhouette (viewBox 13 14.5 85 85).
 struct ProviderMark: Shape {
-  let provider: String
+  let provider: ProviderId
+
   func path(in rect: CGRect) -> Path {
+    switch provider {
+    case .cursor:
+      return fitted(Self.cursor, box: CGRect(x: 0, y: 0, width: 466.73, height: 532.09), in: rect)
+    case .antigravity:
+      return fitted(Self.antigravity, box: CGRect(x: 13, y: 14.5, width: 85, height: 85), in: rect)
+    case .claude, .codex:
+      return legacyPath(in: rect)
+    }
+  }
+
+  /// `path` scaled uniformly into `rect` and centred, like an SVG with `xMidYMid meet`.
+  private func fitted(_ path: Path, box: CGRect, in rect: CGRect) -> Path {
+    let scale = min(rect.width / box.width, rect.height / box.height)
+    let offset = CGPoint(
+      x: rect.minX + (rect.width - box.width * scale) / 2 - box.minX * scale,
+      y: rect.minY + (rect.height - box.height * scale) / 2 - box.minY * scale)
+    return path.applying(
+      CGAffineTransform(translationX: offset.x, y: offset.y).scaledBy(x: scale, y: scale))
+  }
+
+  private func legacyPath(in rect: CGRect) -> Path {
     var path = Path()
-    if provider == "claude" {
+    if provider == .claude {
       path.move(to: CGPoint(x: 4.714400, y: 15.955500))
       path.addLine(to: CGPoint(x: 9.431800, y: 13.308400))
       path.addLine(to: CGPoint(x: 9.510800, y: 13.077700))
@@ -336,4 +361,82 @@ struct ProviderMark: Shape {
     }
     return path.applying(CGAffineTransform(scaleX: rect.width / 24, y: rect.height / 24))
   }
+}
+
+extension ProviderMark {
+  fileprivate static let cursor: Path = {
+    var path = Path()
+    path.move(to: CGPoint(x: 457.4300, y: 125.9400))
+    path.addLine(to: CGPoint(x: 244.4200, y: 2.9600))
+    path.addCurve(
+      to: CGPoint(x: 222.3000, y: 2.9600), control1: CGPoint(x: 237.5800, y: -0.9900),
+      control2: CGPoint(x: 229.1400, y: -0.9900))
+    path.addLine(to: CGPoint(x: 9.3000, y: 125.9400))
+    path.addCurve(
+      to: CGPoint(x: 0.0000, y: 142.0500), control1: CGPoint(x: 3.5500, y: 129.2600),
+      control2: CGPoint(x: 0.0000, y: 135.4000))
+    path.addLine(to: CGPoint(x: 0.0000, y: 390.0400))
+    path.addCurve(
+      to: CGPoint(x: 9.3000, y: 406.1500), control1: CGPoint(x: 0.0000, y: 396.6900),
+      control2: CGPoint(x: 3.5500, y: 402.8300))
+    path.addLine(to: CGPoint(x: 222.3100, y: 529.1300))
+    path.addCurve(
+      to: CGPoint(x: 244.4300, y: 529.1300), control1: CGPoint(x: 229.1500, y: 533.0800),
+      control2: CGPoint(x: 237.5900, y: 533.0800))
+    path.addLine(to: CGPoint(x: 457.4400, y: 406.1500))
+    path.addCurve(
+      to: CGPoint(x: 466.7400, y: 390.0400), control1: CGPoint(x: 463.1900, y: 402.8300),
+      control2: CGPoint(x: 466.7400, y: 396.6900))
+    path.addLine(to: CGPoint(x: 466.7400, y: 142.0500))
+    path.addCurve(
+      to: CGPoint(x: 457.4400, y: 125.9400), control1: CGPoint(x: 466.7400, y: 135.4000),
+      control2: CGPoint(x: 463.1900, y: 129.2600))
+    path.addLine(to: CGPoint(x: 457.4300, y: 125.9400))
+    path.closeSubpath()
+    path.move(to: CGPoint(x: 444.0500, y: 151.9900))
+    path.addLine(to: CGPoint(x: 238.4200, y: 508.1500))
+    path.addCurve(
+      to: CGPoint(x: 233.3600, y: 506.7900), control1: CGPoint(x: 237.0300, y: 510.5500),
+      control2: CGPoint(x: 233.3600, y: 509.5700))
+    path.addLine(to: CGPoint(x: 233.3600, y: 273.5800))
+    path.addCurve(
+      to: CGPoint(x: 226.8300, y: 262.2700), control1: CGPoint(x: 233.3600, y: 268.9200),
+      control2: CGPoint(x: 230.8700, y: 264.6100))
+    path.addLine(to: CGPoint(x: 24.8700, y: 145.6700))
+    path.addCurve(
+      to: CGPoint(x: 26.2300, y: 140.6100), control1: CGPoint(x: 22.4700, y: 144.2800),
+      control2: CGPoint(x: 23.4500, y: 140.6100))
+    path.addLine(to: CGPoint(x: 437.4900, y: 140.6100))
+    path.addCurve(
+      to: CGPoint(x: 444.0600, y: 152.0000), control1: CGPoint(x: 443.3300, y: 140.6100),
+      control2: CGPoint(x: 446.9800, y: 146.9400))
+    path.addLine(to: CGPoint(x: 444.0500, y: 152.0000))
+    path.closeSubpath()
+    return path
+  }()
+
+  fileprivate static let antigravity: Path = {
+    var path = Path()
+    path.move(to: CGPoint(x: 89.6992, y: 93.6950))
+    path.addCurve(
+      to: CGPoint(x: 94.9492, y: 88.4450), control1: CGPoint(x: 94.3659, y: 97.1950),
+      control2: CGPoint(x: 101.3660, y: 94.8617))
+    path.addCurve(
+      to: CGPoint(x: 55.8659, y: 18.4450), control1: CGPoint(x: 75.6992, y: 69.7783),
+      control2: CGPoint(x: 79.7825, y: 18.4450))
+    path.addCurve(
+      to: CGPoint(x: 16.7825, y: 88.4450), control1: CGPoint(x: 31.9492, y: 18.4450),
+      control2: CGPoint(x: 36.0325, y: 69.7783))
+    path.addCurve(
+      to: CGPoint(x: 22.0325, y: 93.6950), control1: CGPoint(x: 9.7825, y: 95.4450),
+      control2: CGPoint(x: 17.3658, y: 97.1950))
+    path.addCurve(
+      to: CGPoint(x: 55.8659, y: 59.8617), control1: CGPoint(x: 40.1159, y: 81.4450),
+      control2: CGPoint(x: 38.9492, y: 59.8617))
+    path.addCurve(
+      to: CGPoint(x: 89.6992, y: 93.6950), control1: CGPoint(x: 72.7825, y: 59.8617),
+      control2: CGPoint(x: 71.6159, y: 81.4450))
+    path.closeSubpath()
+    return path
+  }()
 }
