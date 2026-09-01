@@ -27,6 +27,11 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
     return usedPercent
   }
 
+  public func isReached(at now: Date) -> Bool {
+    guard let percent = percent(at: now) else { return false }
+    return roundedPercent(percent) == 100
+  }
+
   public func text(at now: Date) -> String {
     percent(at: now).map(formatPercent) ?? "—"
   }
@@ -227,13 +232,22 @@ public func notchFrame(settings: Settings, displays: [Display], expanded: Bool) 
   let matches = displays.filter { $0.id == id }
   guard matches.count == 1, let display = matches.first, !display.mirrored else { return nil }
   let scale = settings.size.scale
-  let railWidth = 76.0 * scale
-  let width = min(expanded ? 388.0 * scale : railWidth, display.width)
-  let height = min(340.0 * scale, display.workHeight)
+  let railWidth = pixelAligned(76.0 * scale, displayScale: display.scale)
+  let width = min(
+    pixelAligned((expanded ? 388.0 : 76.0) * scale, displayScale: display.scale),
+    display.width)
+  let height = min(
+    pixelAligned(340.0 * scale, displayScale: display.scale), display.workHeight)
   guard width >= railWidth, height >= 180 * scale else { return nil }
+  let x = settings.edge == .left ? display.x : display.x + display.width - width
+  let y = display.workY + (display.workHeight - height) / 2
   return CGRect(
-    x: settings.edge == .left ? display.x : display.x + display.width - width,
-    y: display.workY + (display.workHeight - height) / 2, width: width, height: height)
+    x: pixelAligned(x, displayScale: display.scale),
+    y: pixelAligned(y, displayScale: display.scale), width: width, height: height)
+}
+
+private func pixelAligned(_ value: Double, displayScale: Double) -> Double {
+  (value * displayScale).rounded() / displayScale
 }
 
 public struct NotchPanelFrames: Equatable, Sendable {
@@ -265,5 +279,9 @@ public func parseInstant(_ text: String?) -> Date? {
 }
 
 public func formatPercent(_ percent: Double) -> String {
-  percent > 0 && percent < 1 ? "<1%" : "\(Int(percent.rounded()))%"
+  percent > 0 && percent < 1 ? "<1%" : "\(roundedPercent(percent))%"
+}
+
+private func roundedPercent(_ percent: Double) -> Int {
+  Int(percent.rounded())
 }

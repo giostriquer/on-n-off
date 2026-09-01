@@ -141,6 +141,28 @@ final class NotchTests {
     }
   }
 
+  func testReachedLimitsAndOneXCompactFramesArePixelAligned() {
+    expectEqual(quota("weekly", 100).isReached(at: now), true)
+    expectEqual(quota("weekly", 99.49).isReached(at: now), false)
+    expectEqual(quota("weekly", 99.5).isReached(at: now), true)
+    expectEqual(
+      quota("weekly", 100, reset: "2027-01-15T08:00:00.000Z").isReached(at: now), false)
+
+    let oneX = Display(
+      id: "one-x", name: "LG", x: 0, y: 0, width: 1920, height: 1080, workY: 30,
+      workHeight: 967, scale: 1, mirrored: false)
+    let settings = Settings(enabled: true, displayId: oneX.id, edge: .right, size: .compact)
+    let frames = notchPanelFrames(settings: settings, displays: [oneX])
+    for value in [
+      frames?.rail.minX, frames?.rail.minY, frames?.rail.width, frames?.rail.height,
+      frames?.detail.minX, frames?.detail.minY, frames?.detail.width, frames?.detail.height,
+    ] {
+      expectEqual(value, value?.rounded())
+    }
+    expectEqual(frames?.rail.maxX, oneX.x + oneX.width)
+    expectEqual(frames?.detail.maxX, frames?.rail.minX)
+  }
+
   func testProtocolRejectsUnsupportedVersionOversizeAndInvalidPercent() throws {
     let valid =
       #"{"version":1,"sequence":1,"snapshot":{"settings":{"enabled":false,"edge":"right"},"displays":[]},"providers":[]}"#
@@ -207,7 +229,8 @@ checks.testStableUUIDAndNegativeCoordinatesSurviveDisplayReordering()
 checks.testMissingMirroredAmbiguousAndDisabledDisplaysHideWithoutFallback()
 try checks.testLegacySettingsDefaultToStandardAndPresetsScaleTheWholePanel()
 checks.testRailFrameNeverMovesWhenDetailsOpen()
+checks.testReachedLimitsAndOneXCompactFramesArePixelAligned()
 try checks.testProtocolRejectsUnsupportedVersionOversizeAndInvalidPercent()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("11 native check groups; \(failures) failures")
+print("12 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

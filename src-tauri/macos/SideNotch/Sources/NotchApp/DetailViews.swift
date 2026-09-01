@@ -36,14 +36,16 @@ struct ProviderDetails: View {
             GeometryReader { geometry in
               ZStack(alignment: .leading) {
                 Capsule().fill(Color(white: 0.18))
-                Capsule().fill(color).frame(
+                Capsule().fill(limitColor(quota, at: now, base: color)).frame(
                   width: geometry.size.width * (quota.percent(at: now) ?? 0) / 100)
               }
             }.frame(height: metrics.value(5)).accessibilityElement(children: .ignore)
               .accessibilityLabel(quota.label)
               .accessibilityValue(
                 quota.percent(at: now) == nil
-                  ? "Not observed since the reset" : "\(quota.text(at: now)) used")
+                  ? "Not observed since the reset"
+                  : "\(quota.text(at: now)) used"
+                    + (quota.isReached(at: now) ? ", limit reached" : ""))
             Text(quota.note(at: now)).font(metrics.font(10)).foregroundColor(.gray)
           }
         }

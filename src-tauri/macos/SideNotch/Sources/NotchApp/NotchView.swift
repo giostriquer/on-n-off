@@ -3,13 +3,25 @@ import SwiftUI
 
 let claudeOrange = Color(red: 244 / 255, green: 130 / 255, blue: 102 / 255)
 let fableOrange = Color(red: 247 / 255, green: 173 / 255, blue: 113 / 255)
-let codexGreen = Color(red: 60 / 255, green: 230 / 255, blue: 172 / 255)
+let openAIInk = Color(red: 238 / 255, green: 240 / 255, blue: 242 / 255)
+let limitReachedRed = Color(red: 226 / 255, green: 89 / 255, blue: 76 / 255)
+
+func limitColor(_ quota: Quota?, at now: Date, base: Color) -> Color {
+  quota?.isReached(at: now) == true ? limitReachedRed : base
+}
 
 struct NotchRailView: View {
   @ObservedObject var controller: PanelController
   private var edge: NotchCore.Edge { controller.message?.snapshot.settings.edge ?? .right }
   private var scale: CGFloat { controller.message?.snapshot.settings.size.scale ?? 1 }
-  private var metrics: NotchMetrics { NotchMetrics(scale: scale) }
+  private var backingScale: CGFloat {
+    guard let snapshot = controller.message?.snapshot,
+      let displayId = snapshot.settings.displayId,
+      let display = snapshot.displays.first(where: { $0.id == displayId })
+    else { return 1 }
+    return CGFloat(display.scale)
+  }
+  private var metrics: NotchMetrics { NotchMetrics(scale: scale, backingScale: backingScale) }
 
   var body: some View {
     ZStack {
@@ -33,7 +45,14 @@ struct NotchRailView: View {
 struct NotchDetailView: View {
   @ObservedObject var controller: PanelController
   private var scale: CGFloat { controller.message?.snapshot.settings.size.scale ?? 1 }
-  private var metrics: NotchMetrics { NotchMetrics(scale: scale) }
+  private var backingScale: CGFloat {
+    guard let snapshot = controller.message?.snapshot,
+      let displayId = snapshot.settings.displayId,
+      let display = snapshot.displays.first(where: { $0.id == displayId })
+    else { return 1 }
+    return CGFloat(display.scale)
+  }
+  private var metrics: NotchMetrics { NotchMetrics(scale: scale, backingScale: backingScale) }
 
   var body: some View {
     Group {
@@ -68,7 +87,7 @@ struct NotchDetailView: View {
       }
       ProviderDetails(
         entry: controller.message?.providers.first { $0.provider == selection },
-        now: controller.now, color: selection == "claude" ? claudeOrange : codexGreen,
+        now: controller.now, color: selection == "claude" ? claudeOrange : openAIInk,
         metrics: metrics)
       Button {
         controller.emit(.openLimits)
@@ -106,17 +125,22 @@ private struct MeterButton: View {
       ?? (entry == nil ? "updating" : "unavailable")
   }
   var description: String {
-    "\(id == "claude" ? "Claude" : "Codex"), \(period), \(primary?.text(at: now) ?? "unavailable") used"
-      + (fable.map { ", Fable weekly, \($0.text(at: now)) used" } ?? "")
+    let primaryReached = primary?.isReached(at: now) == true ? ", limit reached" : ""
+    let fableDescription = fable.map {
+      ", Fable weekly, \($0.text(at: now)) used"
+        + ($0.isReached(at: now) ? ", limit reached" : "")
+    } ?? ""
+    return "\(id == "claude" ? "Claude" : "Codex"), \(period), \(primary?.text(at: now) ?? "unavailable") used\(primaryReached)"
+      + fableDescription
   }
   var body: some View {
     Button(action: action) {
-      VStack(spacing: metrics.value(4)) {
+      VStack(alignment: .center, spacing: metrics.value(4)) {
         ZStack {
           Circle().stroke(Color(white: 0.173), lineWidth: metrics.value(4))
           Circle().trim(from: 0, to: (primary?.percent(at: now) ?? 0) / 100)
             .stroke(
-              id == "claude" ? claudeOrange : codexGreen,
+              limitColor(primary, at: now, base: id == "claude" ? claudeOrange : openAIInk),
               style: StrokeStyle(lineWidth: metrics.value(4), lineCap: .round)
             )
             .rotationEffect(.degrees(-90))
@@ -127,7 +151,7 @@ private struct MeterButton: View {
             ).padding(metrics.value(6))
             Circle().trim(from: 0, to: (fable.percent(at: now) ?? 0) / 100)
               .stroke(
-                fableOrange,
+                limitColor(fable, at: now, base: fableOrange),
                 style: StrokeStyle(lineWidth: metrics.value(3), lineCap: .round)
               )
               .rotationEffect(.degrees(-90)).padding(metrics.value(6))
@@ -137,14 +161,19 @@ private struct MeterButton: View {
         }.padding(metrics.value(2)).frame(
           width: metrics.value(48), height: metrics.value(48))
         Text(primary?.text(at: now) ?? "—").font(
-          metrics.font(17, weight: .medium).monospacedDigit())
+          metrics.font(17, weight: .medium).monospacedDigit()
+        ).lineLimit(1).multilineTextAlignment(.center)
+          .frame(width: metrics.value(54), alignment: .center)
         if primary?.kind != "weekly" {
           Text(period + (primary == nil ? "" : " used")).font(metrics.font(9)).foregroundColor(
             Color(white: 0.67))
         }
         if let fable = fable {
-          Text("Fable \(fable.text(at: now))").font(metrics.font(9).monospacedDigit())
-            .foregroundColor(fableOrange)
+          Text("Fable \(fable.text(at: now))")
+            .font(metrics.font(10, weight: .medium).monospacedDigit())
+            .foregroundColor(limitColor(fable, at: now, base: fableOrange))
+            .lineLimit(1).allowsTightening(true).minimumScaleFactor(0.85)
+            .frame(width: metrics.value(58), alignment: .center)
         }
       }.padding(metrics.value(3)).frame(width: metrics.value(62))
         .background(
@@ -152,6 +181,7 @@ private struct MeterButton: View {
             Color.white.opacity(hovered || selected ? 0.06 : 0)))
     }.buttonStyle(PlainButtonStyle()).onHover { hovered = $0 }
       .accessibilityLabel(description).accessibilityValue(selected ? "Expanded" : "Collapsed")
+      .accessibilityHint(selected ? "Collapses usage details." : "Shows usage details.")
       .help(description)
   }
 }
