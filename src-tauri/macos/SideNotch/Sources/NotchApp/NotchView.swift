@@ -185,7 +185,8 @@ private struct MeterButton: View {
         ).lineLimit(1).multilineTextAlignment(.center)
           .frame(
             width: CGFloat(layout.primarySlotWidth), height: CGFloat(layout.primarySlotHeight),
-            alignment: .center)
+            alignment: .center
+          ).offset(x: CGFloat(layout.primaryOffsetX))
         auxiliaryLabel.frame(
           width: CGFloat(layout.auxiliarySlotWidth), height: CGFloat(layout.auxiliarySlotHeight),
           alignment: .center)

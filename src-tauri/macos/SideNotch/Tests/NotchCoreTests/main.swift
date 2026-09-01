@@ -168,6 +168,7 @@ final class NotchTests {
       for displayScale in [1.0, 2.0] {
         let layout = meterRailLayout(size: size, displayScale: displayScale)
         expectEqual(layout.columnOffsetX, 0)
+        expectEqual(layout.primaryOffsetX * displayScale, 1)
         expectEqual(
           layout.cellHeight,
           layout.iconSlotSize + layout.primarySlotHeight + layout.auxiliarySlotHeight

@@ -126,6 +126,7 @@ public struct MeterRailLayout: Equatable, Sendable {
   public let auxiliarySlotWidth: Double
   public let ringInset: Double
   public let columnOffsetX: Double
+  public let primaryOffsetX: Double
   public let columnOffsetY: Double
   public let stackInset: Double
 }
@@ -164,7 +165,8 @@ public func meterRailLayout(size: NotchSize, displayScale: Double) -> MeterRailL
     contentSpacing: contentSpacing, iconSlotSize: iconSlotSize,
     primarySlotHeight: primarySlotHeight, auxiliarySlotHeight: auxiliarySlotHeight,
     primarySlotWidth: value(54), auxiliarySlotWidth: value(58), ringInset: value(2),
-    columnOffsetX: 0, columnOffsetY: columnOffsetY, stackInset: stackInset)
+    columnOffsetX: 0, primaryOffsetX: 1 / pixelScale, columnOffsetY: columnOffsetY,
+    stackInset: stackInset)
 }
 
 public struct Settings: Codable, Equatable, Sendable {
