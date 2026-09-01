@@ -28,11 +28,11 @@ describe("appSettings", () => {
     ).toBe(false);
   });
 
-  it("keeps limit notifications off at a ten-minute default", () => {
+  it("keeps limit notifications off at a five-minute default", () => {
     const settings = mergeAppSettings(null) as unknown as Record<string, unknown>;
 
     expect(settings.limitNotifications).toBe(false);
-    expect(settings.limitsPollMinutes).toBe(10);
+    expect(settings.limitsPollMinutes).toBe(5);
   });
 
   it("normalizes unsupported limit polling intervals", () => {
@@ -41,7 +41,7 @@ describe("appSettings", () => {
     ) as unknown as Record<string, unknown>;
 
     expect(settings.limitNotifications).toBe(true);
-    expect(settings.limitsPollMinutes).toBe(10);
+    expect(settings.limitsPollMinutes).toBe(5);
   });
 
   it("keeps the GitHub screen unscoped, quiet, and polling every sixty seconds by default", () => {

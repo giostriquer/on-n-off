@@ -77,19 +77,3 @@ pub fn apply(app: &tauri::AppHandle, snapshot: NotchSnapshot) -> Result<(), Stri
         Ok(())
     }
 }
-
-#[cfg(target_os = "macos")]
-fn save_at_revision(settings: NotchSettings, expected: u64) -> Result<NotchSnapshot, String> {
-    let displays = displays::read()?;
-    if settings.enabled && model::layout(&settings, &displays, false).is_none() {
-        return Err("Select a connected display with mirroring turned off.".into());
-    }
-    let revision = config::save_at_revision(&settings, Some(expected))?;
-    Ok(NotchSnapshot {
-        revision,
-        supported: true,
-        settings,
-        displays,
-        error: None,
-    })
-}

@@ -10,6 +10,7 @@ const onLimitsPopoverOpened = vi.hoisted(() => vi.fn());
 const hideLimitsPopover = vi.hoisted(() => vi.fn());
 const openLimitsWindow = vi.hoisted(() => vi.fn());
 const quitApp = vi.hoisted(() => vi.fn());
+const loadAppSettings = vi.hoisted(() => vi.fn());
 let openedHandler: (() => void) | null = null;
 
 vi.mock("$lib/api", () => ({
@@ -18,6 +19,7 @@ vi.mock("$lib/api", () => ({
   hideLimitsPopover,
   openLimitsWindow,
   quitApp,
+  loadAppSettings,
 }));
 
 function limits(
@@ -85,6 +87,8 @@ beforeEach(() => {
   openLimitsWindow.mockResolvedValue(undefined);
   quitApp.mockReset();
   quitApp.mockResolvedValue(undefined);
+  loadAppSettings.mockReset();
+  loadAppSettings.mockResolvedValue({ limitsPollMinutes: 5 });
 });
 
 afterEach(() => {
@@ -301,7 +305,7 @@ describe("LimitsPopover", () => {
     await act(async () => openedHandler?.());
     expect(readLimits).toHaveBeenCalledTimes(2);
 
-    vi.setSystemTime(new Date("2026-08-18T13:01:01Z"));
+    vi.setSystemTime(new Date("2026-08-18T13:05:01Z"));
     await act(async () => openedHandler?.());
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
     expect(readLimits.mock.calls.slice(2)).toEqual([

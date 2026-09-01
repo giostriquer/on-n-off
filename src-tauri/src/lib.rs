@@ -21,6 +21,7 @@ mod install_source;
 mod item_install;
 mod limits;
 mod limits_monitor;
+mod limits_refresh;
 mod mcp;
 mod monitor;
 mod notifications;

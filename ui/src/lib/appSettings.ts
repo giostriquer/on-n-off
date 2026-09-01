@@ -7,7 +7,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   binaryPaths: {},
   automaticUpdates: true,
   limitNotifications: false,
-  limitsPollMinutes: 10,
+  limitsPollMinutes: 5,
   githubScopes: [],
   githubNotifications: false,
   githubPollSeconds: 60,
@@ -27,7 +27,7 @@ export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefine
 }
 
 function normalizeLimitsPollMinutes(value: number | undefined): LimitsPollMinutes {
-  return value === 5 || value === 10 || value === 15 || value === 30 ? value : 10;
+  return value === 5 || value === 10 || value === 15 || value === 30 ? value : 5;
 }
 
 function normalizeGithubPollSeconds(value: number | undefined): GithubPollSeconds {

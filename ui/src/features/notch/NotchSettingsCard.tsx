@@ -1,14 +1,45 @@
-import { Monitor, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { displayError, parseInvokeError } from "$lib/error";
-import type { NotchSettings } from "$lib/notchTypes";
+import type { NotchDisplay, NotchSettings } from "$lib/notchTypes";
+import type { LimitsPollMinutes } from "$lib/types";
 import { useNotchState } from "./useNotchState";
 import "./side-notch.css";
 
-export function NotchSettingsCard() {
+type DisplayLayout = NotchDisplay & {
+  order: number;
+  left: number;
+  top: number;
+  layoutWidth: number;
+  layoutHeight: number;
+};
+
+export function layoutDisplays(displays: NotchDisplay[]): DisplayLayout[] {
+  if (displays.length === 0) return [];
+  const minX = Math.min(...displays.map((display) => display.x));
+  const minY = Math.min(...displays.map((display) => display.y));
+  const maxX = Math.max(...displays.map((display) => display.x + display.width));
+  const maxY = Math.max(...displays.map((display) => display.y + display.height));
+  const desktopWidth = Math.max(maxX - minX, 1);
+  const desktopHeight = Math.max(maxY - minY, 1);
+  const ordered = [...displays].sort(
+    (a, b) => a.x - b.x || a.y - b.y || a.id.localeCompare(b.id),
+  );
+  return ordered.map((display, index) => ({
+    ...display,
+    order: index + 1,
+    left: ((display.x - minX) / desktopWidth) * 100,
+    top: ((display.y - minY) / desktopHeight) * 100,
+    layoutWidth: (display.width / desktopWidth) * 100,
+    layoutHeight: (display.height / desktopHeight) * 100,
+  }));
+}
+
+export function NotchSettingsCard({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
   const state = useNotchState();
   if (state.data?.supported === false) return null;
   const settings = state.data?.settings;
   const displays = state.data?.displays ?? [];
+  const displayLayout = layoutDisplays(displays);
   const selected = displays.find(
     (display) => display.id === settings?.displayId,
   );
@@ -75,26 +106,32 @@ export function NotchSettingsCard() {
               Saved display · disconnected
             </option>
           )}
-          {displays.map((display, index) => (
+          {displayLayout.map((display) => (
             <option
               key={display.id}
               value={display.id}
               disabled={display.mirrored}
             >
-              {index + 1}. {display.name} · {Math.round(display.width)} ×{" "}
+              {display.order}. {display.name} · {Math.round(display.width)} ×{" "}
               {Math.round(display.height)}
               {display.mirrored ? " · mirrored" : ""}
             </option>
           ))}
         </select>
         <div className="notch-display-map" aria-hidden="true">
-          {displays.map((display, index) => (
+          {displayLayout.map((display) => (
             <span
               key={display.id}
+              data-display-id={display.id}
               className={display.id === settings?.displayId ? "selected" : ""}
+              style={{
+                left: `${display.left}%`,
+                top: `${display.top}%`,
+                width: `${display.layoutWidth}%`,
+                height: `${display.layoutHeight}%`,
+              }}
             >
-              <Monitor size={38} strokeWidth={1.4} />
-              <small>{index + 1}</small>
+              <small>{display.order}</small>
               {display.id === settings?.displayId && (
                 <i data-edge={settings.edge} />
               )}
@@ -145,8 +182,8 @@ export function NotchSettingsCard() {
           Only on this display. Hidden while disconnected or mirrored.
         </p>
         <p className="notch-help">
-            Refreshes every minute while visible. Overlays the screen; choose
-            the edge opposite your Dock.
+          Refreshes with all usage surfaces every {pollMinutes} minutes. Overlays
+          the screen; choose the edge opposite your Dock.
         </p>
         {message && (
           <p role="alert" className="notch-error">

@@ -2,10 +2,17 @@ import SwiftUI
 
 struct NotchMetrics {
   let scale: CGFloat
+  let backingScale: CGFloat
 
-  // Resolve preset sizes before drawing so small system-font glyphs stay pixel-aligned.
+  init(scale: CGFloat, backingScale: CGFloat = 1) {
+    self.scale = scale
+    self.backingScale = max(backingScale, 1)
+  }
+
+  // Compact and large presets produce fractional points. Snap every native metric to the target
+  // display's pixel grid so text and vector strokes do not land between pixels on 1x monitors.
   func value(_ points: CGFloat) -> CGFloat {
-    points * scale
+    (points * scale * backingScale).rounded() / backingScale
   }
 
   func font(_ points: CGFloat, weight: Font.Weight = .regular) -> Font {
