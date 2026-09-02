@@ -85,6 +85,7 @@ pub enum GithubList {
     Assigned,
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub const GITHUB_LIST_ORDER: [GithubList; 3] = [
     GithubList::Mine,
     GithubList::ReviewRequested,
@@ -110,6 +111,7 @@ impl Default for NotchPullRequests {
 
 impl NotchPullRequests {
     /// The selected lists in screen order, without duplicates.
+    #[cfg(any(target_os = "macos", test))]
     pub fn selected_lists(&self) -> Vec<GithubList> {
         GITHUB_LIST_ORDER
             .into_iter()
@@ -146,6 +148,7 @@ impl Default for NotchSettings {
 
 impl NotchSettings {
     /// The selected providers in rail order, without duplicates.
+    #[cfg(any(target_os = "macos", test))]
     pub fn rail_providers(&self) -> Vec<AgentId> {
         RAIL_ORDER
             .into_iter()
@@ -154,6 +157,7 @@ impl NotchSettings {
     }
 
     /// Cells on the rail: one per selected provider, then the pull-request cell when it is on.
+    #[cfg(any(target_os = "macos", test))]
     pub fn cell_count(&self) -> usize {
         self.rail_providers().len() + usize::from(self.pull_requests.enabled)
     }

@@ -309,7 +309,8 @@ pub(crate) fn open_limits_window(app: &AppHandle) -> Result<(), String> {
     open_main_window_on(app, "open-limits-window")
 }
 
-/// Brings the main window forward on the Pull requests screen.
+/// Brings the main window forward on the Pull requests screen (the side notch's popover).
+#[cfg(target_os = "macos")]
 pub(crate) fn open_github_window(app: &AppHandle) -> Result<(), String> {
     open_main_window_on(app, "open-github-window")
 }
