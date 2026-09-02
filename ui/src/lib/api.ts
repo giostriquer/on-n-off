@@ -171,6 +171,10 @@ export function onOpenLimitsWindow(handler: () => void): Promise<UnlistenFn> {
   return listen("open-limits-window", () => handler());
 }
 
+export function onOpenGithubWindow(handler: () => void): Promise<UnlistenFn> {
+  return listen("open-github-window", () => handler());
+}
+
 export function loadAppSettings(): Promise<AppSettings> {
   return invoke("load_app_settings");
 }

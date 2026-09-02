@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import type { NotchChanged, NotchSnapshot } from "$lib/notchTypes";
+import { defaultNotchSettings, type NotchChanged, type NotchSnapshot } from "$lib/notchTypes";
 import { useNotchState } from "./useNotchState";
 
 const calls = vi.hoisted(() => ({
@@ -25,14 +25,14 @@ it.each(["save", "event"] as const)(
     const old: NotchSnapshot = {
       revision: 1,
       supported: true,
-      settings: { enabled: true, displayId: "old-display", edge: "right", size: "standard" },
+      settings: defaultNotchSettings({ enabled: true, displayId: "old-display", providers: ["claude", "codex"] }),
       displays: [],
       error: null,
     };
     const saved: NotchSnapshot = {
       ...old,
       revision: 2,
-      settings: { enabled: true, displayId: "new-display", edge: "left", size: "standard" },
+      settings: defaultNotchSettings({ enabled: true, displayId: "new-display", edge: "left", providers: ["claude", "codex"] }),
     };
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -81,14 +81,14 @@ it("does not let an older queued event overwrite a newer save", async () => {
   const old = {
     revision: 1,
     supported: true,
-    settings: { enabled: true, displayId: "old-display", edge: "right", size: "standard" },
+    settings: defaultNotchSettings({ enabled: true, displayId: "old-display", providers: ["claude", "codex"] }),
     displays: [],
     error: null,
   } satisfies NotchSnapshot;
   const saved = {
     ...old,
     revision: 2,
-    settings: { enabled: true, displayId: "new-display", edge: "left", size: "standard" },
+    settings: defaultNotchSettings({ enabled: true, displayId: "new-display", edge: "left", providers: ["claude", "codex"] }),
   } satisfies NotchSnapshot;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["side-notch"], old);

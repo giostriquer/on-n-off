@@ -11,6 +11,17 @@ if CommandLine.arguments.contains("--displays") {
     exit(0)
   } catch { exit(1) }
 }
+if let flag = CommandLine.arguments.firstIndex(of: "--render") {
+  guard CommandLine.arguments.count > flag + 2 else {
+    FileHandle.standardError.write(
+      Data("usage: on-n-off-notch --render <message.json> <out-dir>\n".utf8))
+    exit(2)
+  }
+  exit(
+    Render.run(
+      messagePath: CommandLine.arguments[flag + 1],
+      outputDirectory: CommandLine.arguments[flag + 2]))
+}
 let controller = PanelController()
 let outputQueue = DispatchQueue(label: "app.on-n-off.notch.output")
 let outputSlots = DispatchSemaphore(value: 32)

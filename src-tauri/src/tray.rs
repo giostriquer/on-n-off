@@ -295,15 +295,24 @@ pub(crate) fn hide_limits_popover(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn open_limits_window(app: &AppHandle) -> Result<(), String> {
+/// Brings the main window forward and tells the shell which screen to show.
+fn open_main_window_on(app: &AppHandle, event: &str) -> Result<(), String> {
     show_main_window(app)?;
-
     let main = app
         .get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or_else(|| "the main window is not available".to_string())?;
-    main.emit("open-limits-window", ())
-        .map_err(|error| error.to_string())?;
+    main.emit(event, ()).map_err(|error| error.to_string())?;
     hide_limits_popover(app)
+}
+
+pub(crate) fn open_limits_window(app: &AppHandle) -> Result<(), String> {
+    open_main_window_on(app, "open-limits-window")
+}
+
+/// Brings the main window forward on the Pull requests screen (the side notch's popover).
+#[cfg(target_os = "macos")]
+pub(crate) fn open_github_window(app: &AppHandle) -> Result<(), String> {
+    open_main_window_on(app, "open-github-window")
 }
 
 pub(crate) fn quit_app(app: &AppHandle) {
