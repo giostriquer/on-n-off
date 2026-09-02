@@ -130,6 +130,9 @@ final class PanelController: NSObject, NSWindowDelegate {
   private var workspaceObservers: [NSObjectProtocol] = []
   private var outsideClick: Any?
   private var clock: Timer?
+  /// The minute the rail and popover were last rendered for; ages and reset notes are
+  /// minute-granular, so nothing is rebuilt until it changes.
+  private var shownMinute = 0
   private var pointerPoll: Timer?
   private var openWork: DispatchWorkItem?
   private var lastInside = Date.distantPast
@@ -179,7 +182,7 @@ final class PanelController: NSObject, NSWindowDelegate {
       [weak self] _ in
       MainActor.assumeIsolated { self?.dismiss() }
     }
-    clock = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+    clock = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated { self?.tick() }
     }
   }
@@ -223,6 +226,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     lastSequence = next.sequence
     let previous = message?.snapshot.settings
     message = next
+    now = Date()
     let moved =
       previous?.displayId != next.snapshot.settings.displayId
       || previous?.edge != next.snapshot.settings.edge
@@ -342,7 +346,12 @@ final class PanelController: NSObject, NSWindowDelegate {
     emit(.setShow(rail?.settings.show == .always ? .onHover : .always))
   }
 
+  /// Advances the clock the views read; rebuilds them only when the displayed minute changes,
+  /// which is all the ages, reset notes and window expiries can show.
   private func tick() {
+    let minute = Int(Date().timeIntervalSinceReferenceDate / 60)
+    guard minute != shownMinute else { return }
+    shownMinute = minute
     now = Date()
     refreshRail()
     if activeCell != nil { refreshPopover() }
@@ -387,6 +396,7 @@ final class PanelController: NSObject, NSWindowDelegate {
   private enum PopoverTransition { case none, appear, morph }
 
   private func showPopover(_ id: RailCell) {
+    now = Date()
     let switching = popoverPanel.isVisible && activeCell != nil && activeCell != id
     activeCell = id
     popoverGeneration += 1
