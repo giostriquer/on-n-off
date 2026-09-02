@@ -6,8 +6,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
@@ -21,35 +21,10 @@ const RATES_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 /// model released today shows up in LiteLLM within hours, not a day.
 const RATES_EARLY_TTL_MS: i64 = 60 * 60 * 1000;
 
-/// Why a scan is asking for the rate table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RatesRefresh {
-    /// The routine 24-hour cadence.
-    Scheduled,
-    /// The previous scan met a priceable-looking model the table did not know.
-    Early,
-    /// The user asked for a refresh; the on-disk copy is ignored.
-    Forced,
-}
-
-impl RatesRefresh {
-    fn ttl_ms(self) -> i64 {
-        match self {
-            Self::Scheduled => RATES_TTL_MS,
-            Self::Early => RATES_EARLY_TTL_MS,
-            Self::Forced => 0,
-        }
-    }
-}
-
-/// Set when a scan prices a model the table does not carry, so the next scan may re-fetch the
-/// table early instead of waiting out the day.
+/// Set when a scan prices a model the table does not carry; `ensure_rates` then re-fetches after
+/// the shorter TTL and clears the flag once a fetch succeeds, so it survives any number of
+/// summary-cache hits in between.
 static UNPRICED_SEEN: AtomicBool = AtomicBool::new(false);
-
-/// Whether the last scans met an unpriced, priceable-looking model; clears the flag.
-pub fn take_unpriced_seen() -> bool {
-    UNPRICED_SEEN.swap(false, Ordering::AcqRel)
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModelRate {
@@ -93,9 +68,69 @@ impl PricingStatus {
 
 #[derive(Debug, Clone)]
 pub struct RatesSnapshot {
-    pub table: RateTable,
+    pub table: Arc<RateTable>,
     pub status: PricingStatus,
     pub fetched_at_ms: Option<i64>,
+}
+
+/// The parsed on-disk table, keyed on the file's identity so the summary fast path never
+/// re-parses a multi-megabyte document it has already seen.
+struct RatesMemo {
+    path: PathBuf,
+    len: u64,
+    modified: Option<SystemTime>,
+    fetched_at_ms: Option<i64>,
+    table: Arc<RateTable>,
+}
+
+static RATES_MEMO: Mutex<Option<RatesMemo>> = Mutex::new(None);
+
+fn file_identity(path: &Path) -> Option<(u64, Option<SystemTime>)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()))
+}
+
+/// The on-disk table (memoised) with the instant it was fetched, if the file parses.
+fn load_disk_rates(path: &Path) -> Option<(Arc<RateTable>, Option<i64>)> {
+    let (len, modified) = file_identity(path)?;
+    {
+        let memo = RATES_MEMO
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(entry) = memo.as_ref() {
+            if entry.path == path && entry.len == len && entry.modified == modified {
+                return Some((entry.table.clone(), entry.fetched_at_ms));
+            }
+        }
+    }
+    let raw = std::fs::read_to_string(path).ok()?;
+    let doc = serde_json::from_str::<Value>(&raw).ok()?;
+    let fetched_at_ms = doc.get("fetchedAtMs").and_then(|v| v.as_i64());
+    let parsed = parse_rate_table(doc.get("document").unwrap_or(&Value::Null));
+    if parsed.is_empty() {
+        return None;
+    }
+    let table = Arc::new(parsed);
+    remember_rates(path, len, modified, fetched_at_ms, table.clone());
+    Some((table, fetched_at_ms))
+}
+
+fn remember_rates(
+    path: &Path,
+    len: u64,
+    modified: Option<SystemTime>,
+    fetched_at_ms: Option<i64>,
+    table: Arc<RateTable>,
+) {
+    *RATES_MEMO
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(RatesMemo {
+        path: path.to_path_buf(),
+        len,
+        modified,
+        fetched_at_ms,
+        table,
+    });
 }
 
 fn finite_number(value: &Value) -> Option<f64> {
@@ -280,31 +315,32 @@ pub fn with_test_fetch<R>(response: Option<Value>, f: impl FnOnce() -> R) -> R {
 }
 
 /// Load rates from disk / network. Never fails the scan — empty table + unavailable. The disk
-/// copy is reused while it is younger than the refresh policy's TTL.
-pub fn ensure_rates(home: &Path, now_ms: i64, refresh: RatesRefresh) -> RatesSnapshot {
+/// copy is reused for a day, for an hour once a scan has met a model it could not price, and
+/// not at all when the user asked for a refresh (`force`).
+pub fn ensure_rates(home: &Path, now_ms: i64, force: bool) -> RatesSnapshot {
     let path = rates_cache_path(home);
-    let mut table = RateTable::new();
+    let ttl_ms = if force {
+        0
+    } else if UNPRICED_SEEN.load(Ordering::Acquire) {
+        RATES_EARLY_TTL_MS
+    } else {
+        RATES_TTL_MS
+    };
+    let mut table = Arc::new(RateTable::new());
     let mut fetched_at_ms: Option<i64> = None;
     let mut status = PricingStatus::Unavailable;
 
-    if let Ok(raw) = std::fs::read_to_string(&path) {
-        if let Ok(doc) = serde_json::from_str::<Value>(&raw) {
-            let disk_at = doc.get("fetchedAtMs").and_then(|v| v.as_i64());
-            let document = doc.get("document").cloned().unwrap_or(Value::Null);
-            let parsed = parse_rate_table(&document);
-            if !parsed.is_empty() {
-                table = parsed;
-                fetched_at_ms = disk_at;
-                status = PricingStatus::Cached;
-                if let Some(at) = disk_at {
-                    if now_ms - at < refresh.ttl_ms() {
-                        return RatesSnapshot {
-                            table,
-                            status,
-                            fetched_at_ms,
-                        };
-                    }
-                }
+    if let Some((disk_table, disk_at)) = load_disk_rates(&path) {
+        table = disk_table;
+        fetched_at_ms = disk_at;
+        status = PricingStatus::Cached;
+        if let Some(at) = disk_at {
+            if now_ms - at < ttl_ms {
+                return RatesSnapshot {
+                    table,
+                    status,
+                    fetched_at_ms,
+                };
             }
         }
     }
@@ -312,9 +348,6 @@ pub fn ensure_rates(home: &Path, now_ms: i64, refresh: RatesRefresh) -> RatesSna
     if let Some(document) = fetch_rates_json() {
         let parsed = parse_rate_table(&document);
         if !parsed.is_empty() {
-            table = parsed;
-            fetched_at_ms = Some(now_ms);
-            status = PricingStatus::Fresh;
             let payload = serde_json::json!({
                 "fetchedAtMs": now_ms,
                 "document": document,
@@ -325,10 +358,15 @@ pub fn ensure_rates(home: &Path, now_ms: i64, refresh: RatesRefresh) -> RatesSna
             if let Ok(raw) = serde_json::to_string(&payload) {
                 let _ = std::fs::write(&path, raw);
             }
+            let table = Arc::new(parsed);
+            if let Some((len, modified)) = file_identity(&path) {
+                remember_rates(&path, len, modified, Some(now_ms), table.clone());
+            }
+            UNPRICED_SEEN.store(false, Ordering::Release);
             return RatesSnapshot {
                 table,
-                status,
-                fetched_at_ms,
+                status: PricingStatus::Fresh,
+                fetched_at_ms: Some(now_ms),
             };
         }
     }
@@ -337,7 +375,6 @@ pub fn ensure_rates(home: &Path, now_ms: i64, refresh: RatesRefresh) -> RatesSna
     if !table.is_empty() {
         status = PricingStatus::Cached;
     }
-
     RatesSnapshot {
         table,
         status,
@@ -507,9 +544,7 @@ mod tests {
     #[test]
     fn unavailable_when_no_cache_and_fetch_fails() {
         let home = scratch_dir("usage-rates-miss");
-        let snap = with_test_fetch(None, || {
-            ensure_rates(&home, 1_000_000, RatesRefresh::Scheduled)
-        });
+        let snap = with_test_fetch(None, || ensure_rates(&home, 1_000_000, false));
         assert_eq!(snap.status, PricingStatus::Unavailable);
         assert!(snap.table.is_empty());
         let _ = std::fs::remove_dir_all(&home);
@@ -526,9 +561,7 @@ mod tests {
         });
         std::fs::write(&path, payload.to_string()).unwrap();
         // Fetch would fail; still within TTL → cached.
-        let snap = with_test_fetch(None, || {
-            ensure_rates(&home, 1_000_000 + 60_000, RatesRefresh::Scheduled)
-        });
+        let snap = with_test_fetch(None, || ensure_rates(&home, 1_000_000 + 60_000, false));
         assert_eq!(snap.status, PricingStatus::Cached);
         assert!(!snap.table.is_empty());
         let _ = std::fs::remove_dir_all(&home);
@@ -536,17 +569,23 @@ mod tests {
 
     #[test]
     fn fresh_fetch_writes_disk() {
+        let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = scratch_dir("usage-rates-fresh");
-        let snap = with_test_fetch(Some(sample_doc()), || {
-            ensure_rates(&home, 5_000_000, RatesRefresh::Scheduled)
-        });
+        let snap = with_test_fetch(Some(sample_doc()), || ensure_rates(&home, 5_000_000, false));
         assert_eq!(snap.status, PricingStatus::Fresh);
         assert!(rates_cache_path(&home).is_file());
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// Tests that fetch successfully clear the process-wide early-refresh flag; serialise them.
+    fn flag_lock() -> &'static Mutex<()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        &LOCK
+    }
+
     #[test]
-    fn an_unknown_model_asks_for_an_early_refresh_and_a_forced_one_ignores_the_disk_copy() {
+    fn an_unknown_model_keeps_asking_for_an_early_refresh_until_a_fetch_succeeds() {
+        let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = crate::paths::scratch_dir("rates-refresh");
         let fetched_at = 1_000_000;
         let stale = serde_json::json!({ "fetchedAtMs": fetched_at, "document": sample_doc() });
@@ -555,49 +594,85 @@ mod tests {
         let newer = serde_json::json!({
             "claude-fable-5-1": {"input_cost_per_token": 1e-5, "output_cost_per_token": 5e-5}
         });
+        let table = parse_rate_table(&sample_doc());
+        let totals = TokenTotals {
+            uncached_input_tokens: 10,
+            ..TokenTotals::default()
+        };
 
-        // Ten minutes later an early refresh still trusts the disk copy…
+        UNPRICED_SEEN.store(false, Ordering::Release);
+        price_usage(&table, "<synthetic>", &totals, None);
+        assert!(
+            !UNPRICED_SEEN.load(Ordering::Acquire),
+            "placeholders never ask for a refresh"
+        );
+        price_usage(&table, "claude-fable-5-1", &totals, None);
+        assert!(UNPRICED_SEEN.load(Ordering::Acquire));
+
+        // Ten minutes later the disk copy still serves, and the request survives that hit…
         let early = with_test_fetch(Some(newer.clone()), || {
-            ensure_rates(&home, fetched_at + 10 * 60_000, RatesRefresh::Early)
+            ensure_rates(&home, fetched_at + 10 * 60_000, false)
         });
         assert_eq!(early.status, PricingStatus::Cached);
-        assert!(!early.table.contains_key("claude-fable-5-1"));
-        // …two hours later it re-fetches, well inside the scheduled day.
+        assert!(
+            UNPRICED_SEEN.load(Ordering::Acquire),
+            "a cache hit must not consume the flag"
+        );
+        // …so two hours later the table is re-fetched, well inside the scheduled day, and the
+        // flag clears only now.
         let refetched = with_test_fetch(Some(newer.clone()), || {
-            ensure_rates(&home, fetched_at + 2 * 60 * 60_000, RatesRefresh::Early)
+            ensure_rates(&home, fetched_at + 2 * 60 * 60_000, false)
         });
         assert_eq!(refetched.status, PricingStatus::Fresh);
         assert!(refetched.table.contains_key("claude-fable-5-1"));
-        // A forced refresh re-fetches straight away.
+        assert!(!UNPRICED_SEEN.load(Ordering::Acquire));
+        // A failed fetch keeps the flag for the next scan.
+        UNPRICED_SEEN.store(true, Ordering::Release);
         std::fs::write(rates_cache_path(&home), stale.to_string()).unwrap();
-        let forced = with_test_fetch(Some(newer), || {
-            ensure_rates(&home, fetched_at + 1, RatesRefresh::Forced)
+        let failed = with_test_fetch(None, || {
+            ensure_rates(&home, fetched_at + 2 * 60 * 60_000, false)
         });
-        assert_eq!(forced.status, PricingStatus::Fresh);
-        let scheduled = with_test_fetch(None, || {
-            ensure_rates(&home, fetched_at + 2 * 60 * 60_000, RatesRefresh::Scheduled)
+        assert_eq!(failed.status, PricingStatus::Cached);
+        assert!(UNPRICED_SEEN.load(Ordering::Acquire));
+        UNPRICED_SEEN.store(false, Ordering::Release);
+
+        // Without the flag the day applies; a forced refresh ignores the disk copy.
+        let scheduled = with_test_fetch(Some(newer.clone()), || {
+            ensure_rates(&home, fetched_at + 2 * 60 * 60_000, false)
         });
         assert_eq!(
             scheduled.status,
             PricingStatus::Cached,
             "the day is not over"
         );
+        let forced = with_test_fetch(Some(newer), || ensure_rates(&home, fetched_at + 1, true));
+        assert_eq!(forced.status, PricingStatus::Fresh);
+        std::fs::remove_dir_all(home).unwrap();
+    }
 
-        // Pricing an unknown but real-looking model raises the early-refresh flag once.
-        let table = parse_rate_table(&sample_doc());
-        let _ = take_unpriced_seen();
-        let totals = TokenTotals {
-            uncached_input_tokens: 10,
-            ..TokenTotals::default()
-        };
-        price_usage(&table, "<synthetic>", &totals, None);
+    #[test]
+    fn the_disk_table_is_parsed_once_per_file_version() {
+        let home = crate::paths::scratch_dir("rates-memo");
+        std::fs::create_dir_all(home.join(".on-n-off")).unwrap();
+        let path = rates_cache_path(&home);
+        let first = serde_json::json!({ "fetchedAtMs": 1_000_000, "document": sample_doc() });
+        std::fs::write(&path, first.to_string()).unwrap();
+        let a = with_test_fetch(None, || ensure_rates(&home, 1_000_000 + 1, false));
+        let b = with_test_fetch(None, || ensure_rates(&home, 1_000_000 + 2, false));
         assert!(
-            !take_unpriced_seen(),
-            "placeholders never trigger a refresh"
+            Arc::ptr_eq(&a.table, &b.table),
+            "an unchanged file reuses the parsed table"
         );
-        price_usage(&table, "claude-fable-5-1", &totals, None);
-        assert!(take_unpriced_seen());
-        assert!(!take_unpriced_seen(), "the flag clears once read");
+        let mut doc = sample_doc();
+        doc["claude-fable-5-1"] =
+            serde_json::json!({"input_cost_per_token": 1e-5, "output_cost_per_token": 5e-5});
+        let second = serde_json::json!({ "fetchedAtMs": 1_000_000, "document": doc });
+        std::fs::write(&path, second.to_string()).unwrap();
+        let c = with_test_fetch(None, || ensure_rates(&home, 1_000_000 + 3, false));
+        assert!(
+            c.table.contains_key("claude-fable-5-1"),
+            "a rewritten file is parsed again"
+        );
         std::fs::remove_dir_all(home).unwrap();
     }
 

@@ -303,6 +303,43 @@ public struct Snapshot: Codable, Equatable, Sendable {
 /// Rows per list on the wire; mirrors `MAX_PULL_REQUESTS` on the host.
 public let maxPullRequests = 25
 
+/// Decodes a string-backed enum, mapping values a newer host may send to `unknown` instead of
+/// rejecting the whole message.
+private func decodeLenient<Value: RawRepresentable>(
+  _ decoder: Decoder, unknown: Value
+) throws -> Value where Value.RawValue == String {
+  let raw = try decoder.singleValueContainer().decode(String.self)
+  return Value(rawValue: raw) ?? unknown
+}
+
+/// The head commit's status-check rollup, in the host's wire spelling.
+public enum CiState: String, Codable, Sendable {
+  case none, pending, success, failure, error, unknown
+  public init(from decoder: Decoder) throws {
+    self = try decodeLenient(decoder, unknown: .unknown)
+  }
+  public var failing: Bool { self == .failure || self == .error }
+}
+
+/// GitHub's `reviewDecision`, in GitHub's own spelling.
+public enum ReviewDecision: String, Codable, Sendable {
+  case approved = "APPROVED"
+  case changesRequested = "CHANGES_REQUESTED"
+  case reviewRequired = "REVIEW_REQUIRED"
+  case unknown
+  public init(from decoder: Decoder) throws {
+    self = try decodeLenient(decoder, unknown: .unknown)
+  }
+}
+
+/// The host's verdict on merging (`github::merge::classify`).
+public enum MergeKind: String, Codable, Sendable {
+  case conflicts, queued, autoMerge, ready, behind, blocked, unknown
+  public init(from decoder: Decoder) throws {
+    self = try decodeLenient(decoder, unknown: .unknown)
+  }
+}
+
 public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
   public let id: String
   public let number: UInt64
@@ -311,14 +348,15 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
   public let repo: String
   public let author: String
   public let isDraft: Bool
-  public let reviewDecision: String?
-  public let ci: String
-  public let mergeKind: String?
+  public let reviewDecision: ReviewDecision?
+  public let ci: CiState
+  public let mergeKind: MergeKind?
   public let updatedAt: String
 
   public init(
     id: String, number: UInt64, title: String, url: String, repo: String, author: String,
-    isDraft: Bool, reviewDecision: String?, ci: String, mergeKind: String?, updatedAt: String
+    isDraft: Bool, reviewDecision: ReviewDecision?, ci: CiState, mergeKind: MergeKind?,
+    updatedAt: String
   ) {
     self.id = id
     self.number = number
@@ -364,16 +402,20 @@ public struct PullRequests: Codable, Equatable, Sendable {
     self.stale = stale
     self.lists = lists
   }
-  public var readable: Bool { status == "ok" || (stale && !lists.isEmpty) }
-  public var count: Int { lists.reduce(0) { $0 + $1.items.count } }
-  public var ready: Int {
-    lists.reduce(0) { $0 + $1.items.filter { $0.mergeKind == "ready" }.count }
+  /// A live answer, or the last one while GitHub is unreachable.
+  public var readable: Bool { status == "ok" || stale }
+  /// Every listed row across the selected lists, once each (a pull request can be both
+  /// authored and assigned).
+  public var rows: [PullRequest] {
+    var seen = Set<String>()
+    return lists.flatMap(\.items).filter { seen.insert($0.id).inserted }
   }
-  public var failing: Int {
-    lists.reduce(0) { $0 + $1.items.filter { $0.ci == "failure" || $0.ci == "error" }.count }
-  }
+  /// Distinct listed pull requests; the popover's per-list "n of total" covers the rest.
+  public var count: Int { rows.count }
+  public var ready: Int { rows.filter { $0.mergeKind == .ready }.count }
+  public var failing: Int { rows.filter(\.ci.failing).count }
   public var changesRequested: Int {
-    lists.reduce(0) { $0 + $1.items.filter { $0.reviewDecision == "CHANGES_REQUESTED" }.count }
+    rows.filter { $0.reviewDecision == .changesRequested }.count
   }
 }
 

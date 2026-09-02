@@ -35,6 +35,16 @@ func meterColor(_ quota: Quota?, base: Color, at now: Date) -> Color {
   return base
 }
 
+/// The colour of one pull request's CI rollup on the ring and in the popover.
+func ciColor(_ ci: CiState) -> Color {
+  switch ci {
+  case .success: return liveGreen
+  case .failure, .error: return tripRed
+  case .pending: return warnAmber
+  case .none, .unknown: return Color(white: 0.3)
+  }
+}
+
 func providerName(_ id: ProviderId) -> String {
   switch id {
   case .claude: return "Claude"
@@ -80,6 +90,27 @@ struct RailModel {
   func cellFrame(of id: RailCell) -> CGRect? {
     cellIds.firstIndex(of: id).map { cells[$0].offsetBy(dx: frame.minX, dy: frame.minY) }
   }
+
+  /// The rail's first ear, in its own top-left coordinates: the cap that toggles how the rail
+  /// shows. It lights up on hover; the pin sits at the visible part's centroid, which leans
+  /// toward the screen edge because the silhouette narrows away from it.
+  var capRect: CGRect {
+    edge.isVertical
+      ? CGRect(x: 0, y: 0, width: layout.thickness, height: layout.ear)
+      : CGRect(x: 0, y: 0, width: layout.ear, height: layout.thickness)
+  }
+
+  var capIconCenter: CGPoint {
+    let along = layout.ear * 0.62
+    let towardEdge = layout.thickness * 0.62
+    let awayFromEdge = layout.thickness - towardEdge
+    switch edge {
+    case .right: return CGPoint(x: towardEdge, y: along)
+    case .left: return CGPoint(x: awayFromEdge, y: along)
+    case .top: return CGPoint(x: along, y: awayFromEdge)
+    case .bottom: return CGPoint(x: along, y: towardEdge)
+    }
+  }
 }
 
 struct NotchRailView: View {
@@ -88,6 +119,7 @@ struct NotchRailView: View {
   let pullRequests: PullRequests?
   let now: Date
   let active: RailCell?
+  let capHovered: Bool
   let action: (RailCell) -> Void
   let toggleShow: () -> Void
 
@@ -106,27 +138,9 @@ struct NotchRailView: View {
       }
     }
     .frame(width: model.frame.width, height: model.frame.height)
-    .overlay(pin, alignment: pinAlignment)
+    .overlay(ShowToggleCap(model: model, hovered: capHovered, action: toggleShow))
     .foregroundColor(.white)
     .preferredColorScheme(.dark)
-  }
-
-  /// The far ear's inner corner, where the silhouette still has room beside the screen edge.
-  private var pinAlignment: Alignment {
-    switch model.edge {
-    case .right: return .bottomTrailing
-    case .left: return .bottomLeading
-    case .top: return .topTrailing
-    case .bottom: return .bottomTrailing
-    }
-  }
-
-  private var pin: some View {
-    let metrics = model.metrics
-    let vertical = model.edge.isVertical
-    return ShowTogglePin(show: model.settings.show, metrics: metrics, action: toggleShow)
-      .padding(vertical ? .horizontal : .vertical, metrics.value(9))
-      .padding(vertical ? .vertical : .horizontal, metrics.value(11))
   }
 
   @ViewBuilder private func cell(_ id: RailCell) -> some View {
@@ -152,13 +166,98 @@ struct NotchRailView: View {
   }
 }
 
-/// The colour of one pull request's CI rollup on the ring.
-func ciColor(_ ci: String) -> Color {
-  switch ci {
-  case "success": return liveGreen
-  case "failure", "error": return tripRed
-  case "pending": return warnAmber
-  default: return Color(white: 0.3)
+/// What every rail cell shares: the button, the ring track around a glyph in the icon slot, and
+/// the figure beneath. Cells supply their own progress ring and glyph.
+private struct RailCellChrome<Ring: View, Glyph: View>: View {
+  let layout: RailLayout
+  let metrics: NotchMetrics
+  let label: String
+  /// The percent sign makes a figure read left-heavy; provider cells nudge theirs right.
+  let labelOffset: CGFloat
+  let description: String
+  let active: Bool
+  let action: () -> Void
+  let ring: Ring
+  let glyph: Glyph
+
+  var body: some View {
+    Button(action: action) {
+      VStack(alignment: .center, spacing: CGFloat(layout.contentSpacing)) {
+        ZStack {
+          Circle().stroke(Color(white: 0.173), lineWidth: CGFloat(layout.ringStroke))
+          ring
+          glyph.frame(width: CGFloat(layout.glyphSize), height: CGFloat(layout.glyphSize))
+        }
+        .padding(CGFloat(layout.ringStroke) / 2)
+        .frame(width: CGFloat(layout.iconSlot), height: CGFloat(layout.iconSlot))
+        Text(label)
+          .font(metrics.font(17, weight: .medium).monospacedDigit())
+          .lineLimit(1)
+          .frame(height: CGFloat(layout.labelHeight))
+          .offset(x: labelOffset)
+      }
+      .padding(CGFloat(layout.cellPadding))
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(PlainButtonStyle())
+    .accessibilityLabel(description)
+    .accessibilityValue(active ? "Expanded" : "Collapsed")
+    .accessibilityHint(active ? "Collapses the details." : "Shows the details.")
+    .help(description)
+  }
+}
+
+private struct MeterCell: View {
+  let id: ProviderId
+  let entry: Provider?
+  let now: Date
+  let active: Bool
+  let layout: RailLayout
+  let metrics: NotchMetrics
+  let action: () -> Void
+  private var primary: Quota? { entry?.primary }
+  private var fable: Quota? { entry?.fable }
+  private var period: String {
+    primary.map { $0.kind == "weekly" ? "weekly" : "5 hour" }
+      ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
+  }
+  private var description: String {
+    let name = providerName(id)
+    guard let primary = primary else { return "\(name), \(period)" }
+    let reached = primary.isReached(at: now) ? ", limit reached" : ""
+    let fableDescription = fable.map {
+      ", Fable weekly, \($0.text(at: now)) used" + ($0.isReached(at: now) ? ", limit reached" : "")
+    } ?? ""
+    return "\(name), \(period), \(primary.text(at: now)) used\(reached)" + fableDescription
+  }
+
+  var body: some View {
+    RailCellChrome(
+      layout: layout, metrics: metrics, label: primary?.text(at: now) ?? "—",
+      labelOffset: primary == nil ? 0 : metrics.value(2), description: description,
+      active: active, action: action,
+      ring: ZStack {
+        Circle().trim(from: 0, to: CGFloat(primary?.percent(at: now) ?? 0) / 100)
+          .stroke(
+            meterColor(primary, provider: id, at: now),
+            style: StrokeStyle(lineWidth: CGFloat(layout.ringStroke), lineCap: .round)
+          )
+          .rotationEffect(.degrees(-90))
+        if let fable = fable {
+          Circle().stroke(
+            Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255),
+            lineWidth: CGFloat(layout.innerRingStroke)
+          ).padding(CGFloat(layout.innerRingInset))
+          Circle().trim(from: 0, to: CGFloat(fable.percent(at: now) ?? 0) / 100)
+            .stroke(
+              meterColor(fable, base: fableOrange, at: now),
+              style: StrokeStyle(lineWidth: CGFloat(layout.innerRingStroke), lineCap: .round)
+            )
+            .rotationEffect(.degrees(-90)).padding(CGFloat(layout.innerRingInset))
+        }
+      },
+      glyph: ProviderMark(provider: id).fill(Color.white, style: FillStyle(eoFill: true)))
   }
 }
 
@@ -175,10 +274,9 @@ private struct PullRequestCell: View {
   let metrics: NotchMetrics
   let action: () -> Void
   private var readable: Bool { pulls?.readable == true }
-  private var count: Int { pulls?.count ?? 0 }
-  private var segments: [String] {
+  private var segments: [CiState] {
     guard let pulls = pulls, readable else { return [] }
-    return Array(pulls.lists.flatMap { $0.items.map(\.ci) }.prefix(maxRingSegments))
+    return Array(pulls.rows.map(\.ci).prefix(maxRingSegments))
   }
   private var description: String {
     guard let pulls = pulls else { return "Pull requests, updating" }
@@ -187,36 +285,16 @@ private struct PullRequestCell: View {
     if pulls.failing > 0 { attention.append("\(pulls.failing) failing CI") }
     if pulls.changesRequested > 0 { attention.append("\(pulls.changesRequested) with changes requested") }
     if pulls.ready > 0 { attention.append("\(pulls.ready) ready to merge") }
-    return (["Pull requests, \(count) open"] + attention).joined(separator: ", ")
+    return (["Pull requests, \(pulls.count) open"] + attention).joined(separator: ", ")
   }
 
   var body: some View {
-    Button(action: action) {
-      VStack(alignment: .center, spacing: CGFloat(layout.contentSpacing)) {
-        ZStack {
-          Circle().stroke(Color(white: 0.173), lineWidth: CGFloat(layout.ringStroke))
-          SegmentedRing(colors: segments.map(ciColor), lineWidth: CGFloat(layout.ringStroke))
-          PullRequestMark().stroke(
-            Color.white, style: StrokeStyle(lineWidth: metrics.value(1.6), lineCap: .round)
-          )
-          .frame(width: CGFloat(layout.glyphSize), height: CGFloat(layout.glyphSize))
-        }
-        .padding(CGFloat(layout.ringStroke) / 2)
-        .frame(width: CGFloat(layout.iconSlot), height: CGFloat(layout.iconSlot))
-        Text(readable ? "\(count)" : "—")
-          .font(metrics.font(17, weight: .medium).monospacedDigit())
-          .lineLimit(1)
-          .frame(height: CGFloat(layout.labelHeight))
-      }
-      .padding(CGFloat(layout.cellPadding))
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(PlainButtonStyle())
-    .accessibilityLabel(description)
-    .accessibilityValue(active ? "Expanded" : "Collapsed")
-    .accessibilityHint(active ? "Collapses the pull requests." : "Shows the pull requests.")
-    .help(description)
+    RailCellChrome(
+      layout: layout, metrics: metrics, label: readable ? "\(pulls?.count ?? 0)" : "—",
+      labelOffset: 0, description: description, active: active, action: action,
+      ring: SegmentedRing(colors: segments.map(ciColor), lineWidth: CGFloat(layout.ringStroke)),
+      glyph: PullRequestMark().stroke(
+        Color.white, style: StrokeStyle(lineWidth: metrics.value(1.6), lineCap: .round)))
   }
 }
 
@@ -263,29 +341,40 @@ struct PullRequestMark: Shape {
   }
 }
 
-/// The pin at the rail's end: filled while the rail always shows, outlined while it waits behind
-/// the hover pill; a click flips the setting.
-private struct ShowTogglePin: View {
-  let show: ShowMode
-  let metrics: NotchMetrics
+/// The rail's first ear as a control: the same colour as the rail until the pointer reaches it,
+/// then a lighter cap with a pin in the middle. A click flips between always showing the rail
+/// and showing it on hover.
+private struct ShowToggleCap: View {
+  let model: RailModel
+  let hovered: Bool
   let action: () -> Void
-  @State private var hovered = false
-  private var pinned: Bool { show == .always }
+  private var pinned: Bool { model.settings.show == .always }
   private var help: String { pinned ? "Show on hover instead" : "Always show the notch" }
 
   var body: some View {
-    Button(action: action) {
+    let cap = model.capRect
+    let metrics = model.metrics
+    ZStack(alignment: .topLeading) {
+      NotchSilhouette(edge: model.edge, ear: CGFloat(model.layout.ear))
+        .fill(Color.white.opacity(hovered ? 0.11 : 0))
+        .mask(
+          Rectangle().frame(width: cap.width, height: cap.height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        )
+        .animation(.easeInOut(duration: 0.12), value: hovered)
       Image(systemName: pinned ? "pin.fill" : "pin")
-        .font(metrics.font(9, weight: .semibold))
-        .foregroundColor(Color.white.opacity(hovered ? 0.95 : 0.45))
-        .frame(width: metrics.value(16), height: metrics.value(16))
-        .contentShape(Rectangle())
+        .font(metrics.font(12, weight: .semibold))
+        .foregroundColor(Color.white.opacity(hovered ? 0.95 : 0))
+        .position(model.capIconCenter)
+        .animation(.easeInOut(duration: 0.12), value: hovered)
+      Button(action: action) {
+        Color.clear.frame(width: cap.width, height: cap.height).contentShape(Rectangle())
+      }
+      .buttonStyle(PlainButtonStyle())
+      .accessibilityLabel(pinned ? "Always showing" : "Showing on hover")
+      .accessibilityHint(help)
+      .help(help)
     }
-    .buttonStyle(PlainButtonStyle())
-    .onHover { hovered = $0 }
-    .accessibilityLabel(pinned ? "Always showing" : "Showing on hover")
-    .accessibilityHint(help)
-    .help(help)
   }
 }
 
@@ -298,77 +387,6 @@ struct NotchPillView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(Color.black.opacity(0.001))
       .accessibilityLabel("Show side notch")
-  }
-}
-
-private struct MeterCell: View {
-  let id: ProviderId
-  let entry: Provider?
-  let now: Date
-  let active: Bool
-  let layout: RailLayout
-  let metrics: NotchMetrics
-  let action: () -> Void
-  private var primary: Quota? { entry?.primary }
-  private var fable: Quota? { entry?.fable }
-  private var period: String {
-    primary.map { $0.kind == "weekly" ? "weekly" : "5 hour" }
-      ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
-  }
-  private var description: String {
-    let name = providerName(id)
-    guard let primary = primary else { return "\(name), \(period)" }
-    let reached = primary.isReached(at: now) ? ", limit reached" : ""
-    let fableDescription = fable.map {
-      ", Fable weekly, \($0.text(at: now)) used" + ($0.isReached(at: now) ? ", limit reached" : "")
-    } ?? ""
-    return "\(name), \(period), \(primary.text(at: now)) used\(reached)" + fableDescription
-  }
-
-  var body: some View {
-    Button(action: action) {
-      VStack(alignment: .center, spacing: CGFloat(layout.contentSpacing)) {
-        ZStack {
-          Circle().stroke(Color(white: 0.173), lineWidth: CGFloat(layout.ringStroke))
-          Circle().trim(from: 0, to: CGFloat(primary?.percent(at: now) ?? 0) / 100)
-            .stroke(
-              meterColor(primary, provider: id, at: now),
-              style: StrokeStyle(lineWidth: CGFloat(layout.ringStroke), lineCap: .round)
-            )
-            .rotationEffect(.degrees(-90))
-          if let fable = fable {
-            Circle().stroke(
-              Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255),
-              lineWidth: CGFloat(layout.innerRingStroke)
-            ).padding(CGFloat(layout.innerRingInset))
-            Circle().trim(from: 0, to: CGFloat(fable.percent(at: now) ?? 0) / 100)
-              .stroke(
-                meterColor(fable, base: fableOrange, at: now),
-                style: StrokeStyle(lineWidth: CGFloat(layout.innerRingStroke), lineCap: .round)
-              )
-              .rotationEffect(.degrees(-90)).padding(CGFloat(layout.innerRingInset))
-          }
-          ProviderMark(provider: id).fill(Color.white, style: FillStyle(eoFill: true))
-            .frame(width: CGFloat(layout.glyphSize), height: CGFloat(layout.glyphSize))
-        }
-        .padding(CGFloat(layout.ringStroke) / 2)
-        .frame(width: CGFloat(layout.iconSlot), height: CGFloat(layout.iconSlot))
-        // The percent sign makes the figure read left-heavy; a nudge right centres it optically.
-        Text(primary?.text(at: now) ?? "—")
-          .font(metrics.font(17, weight: .medium).monospacedDigit())
-          .lineLimit(1)
-          .frame(height: CGFloat(layout.labelHeight))
-          .offset(x: primary == nil ? 0 : metrics.value(2))
-      }
-      .padding(CGFloat(layout.cellPadding))
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(PlainButtonStyle())
-    .accessibilityLabel(description)
-    .accessibilityValue(active ? "Expanded" : "Collapsed")
-    .accessibilityHint(active ? "Collapses usage details." : "Shows usage details.")
-    .help(description)
   }
 }
 

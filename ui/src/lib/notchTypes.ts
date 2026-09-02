@@ -16,6 +16,20 @@ export type NotchSettings = {
   /** The pull-request cell: on by default, listing only the user's own pull requests. */
   pullRequests: { enabled: boolean; lists: GithubListId[] };
 };
+/** The backend's `NotchSettings::default()`: every provider, pull requests with only "Mine". */
+export function defaultNotchSettings(overrides: Partial<NotchSettings> = {}): NotchSettings {
+  return {
+    enabled: false,
+    displayId: null,
+    edge: "right",
+    size: "standard",
+    show: "always",
+    providers: ["claude", "codex", "antigravity", "cursor"],
+    pullRequests: { enabled: true, lists: ["mine"] },
+    ...overrides,
+  };
+}
+
 export type NotchDisplay = {
   id: string;
   name: string;

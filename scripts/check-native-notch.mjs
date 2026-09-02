@@ -52,6 +52,10 @@ const now = Date.now();
 const at = offsetMs => new Date(now + offsetMs).toISOString();
 const quota = (id, label, kind, usedPercent, resetHours) => ({ id, label, kind, usedPercent, resetsAt: at(resetHours * 3_600_000), observedAt: at(0) });
 const session = (id, name, place, project, status, minutesAgo) => ({ id, name, place, project, status, lastActiveAt: at(-minutesAgo * 60_000) });
+const pull = (number, title, ci, reviewDecision, mergeKind, isDraft) => ({
+  id: `node-${number}`, number, title, url: `https://github.com/octo/tools/pull/${number}`, repo: 'octo/tools',
+  author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z',
+});
 const fixture = edge => ({
   version: 2, sequence: 1,
   snapshot: {
@@ -65,6 +69,17 @@ const fixture = edge => ({
     { provider: 'antigravity', status: 'unsupported', currentAccount: true, message: 'Antigravity has no subscription limits to show.', windows: [], sessions: [] },
     { provider: 'cursor', status: 'unsupported', currentAccount: true, message: 'Cursor has no subscription limits to show.', windows: [], sessions: [] },
   ],
+  pullRequests: {
+    status: 'ok', hint: null, stale: false,
+    lists: [
+      { id: 'mine', total: 3, items: [
+        pull(41, 'ci: give push runs on dev and main one concurrency group per commit', 'success', 'APPROVED', 'ready', false),
+        pull(40, 'feat: pull requests in the side notch', 'pending', null, null, true),
+        pull(39, 'release: corrected usage cost estimates', 'failure', 'CHANGES_REQUESTED', 'conflicts', false),
+      ] },
+      { id: 'reviewRequested', total: 1, items: [pull(98, 'Drive Spotify RLE desktop wiring', 'success', null, 'behind', false)] },
+    ],
+  },
   actionError: null,
 });
 const renderRoot = resolve(process.env.NOTCH_RENDER_DIR ?? '.tmp/notch-render');
@@ -75,7 +90,7 @@ for (const edge of ['right', 'top']) {
   writeFileSync(message, JSON.stringify(fixture(edge)));
   const result = spawnSync(executable, ['--render', message, dir], { encoding: 'utf8', timeout: 20000 });
   assert.equal(result.status, 0, `render ${edge}: ${result.stderr}`);
-  for (const name of ['rail', 'pill', 'popover-claude', 'popover-codex', 'popover-antigravity', 'popover-cursor']) {
+  for (const name of ['rail', 'rail-cap-hovered', 'pill', 'popover-claude', 'popover-codex', 'popover-antigravity', 'popover-cursor', 'popover-pull-requests']) {
     const size = statSync(resolve(dir, `${name}.png`)).size;
     // The pill is a plain capsule; every other surface carries text and glyphs.
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);

@@ -100,8 +100,13 @@ struct NativePr {
 }
 
 impl NativePr {
-    fn from_dto(pr: &GithubPrDto) -> Self {
-        Self {
+    /// Only pull requests on github.com reach the helper, which opens rows in the browser and
+    /// copies their links; anything else is dropped here rather than rejected there.
+    fn from_dto(pr: &GithubPrDto) -> Option<Self> {
+        if !pr.url.starts_with("https://github.com/") {
+            return None;
+        }
+        Some(Self {
             id: pr.id.clone(),
             number: pr.number,
             title: pr.title.clone(),
@@ -113,7 +118,7 @@ impl NativePr {
             ci: pr.ci,
             merge_kind: pr.merge_kind,
             updated_at: pr.updated_at.clone(),
-        }
+        })
     }
 }
 
@@ -132,8 +137,8 @@ fn native_pull_requests(dto: &GithubPrsDto, selected: &[GithubList]) -> NativePu
                 items: source
                     .items
                     .iter()
+                    .filter_map(NativePr::from_dto)
                     .take(MAX_PULL_REQUESTS)
-                    .map(NativePr::from_dto)
                     .collect(),
             }
         })
@@ -154,7 +159,7 @@ struct Message<'a> {
     snapshot: &'a NotchSnapshot,
     providers: Vec<MessageProvider<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pull_requests: Option<&'a NativePullRequests>,
+    pull_requests: Option<NativePullRequests>,
     action_error: &'a Option<String>,
 }
 
@@ -164,12 +169,15 @@ const SESSIONS_INTERVAL: Duration = Duration::from_secs(10);
 /// A read that never reports back (a hung child, a panicked thread) releases its slot after this.
 const READ_DEADLINE: Duration = Duration::from_secs(60);
 const PROVIDER_COUNT: usize = RAIL_ORDER.len();
+/// One in-flight read per provider, plus the sessions read and the pull-request read.
+const READ_SLOTS: usize = PROVIDER_COUNT + 2;
 
 enum Read {
     Limits(usize, Option<NativeProvider>),
     Sessions(Vec<Vec<LiveSession>>),
-    /// The pull requests plus the poll interval the app settings asked for at read time.
-    PullRequests(NativePullRequests, Duration),
+    /// The screen's whole answer; the selected lists are projected when a message is built, so
+    /// a settings change shows at once instead of after the next poll.
+    PullRequests(GithubPrsDto),
 }
 
 /// A value refreshed by a background read: at most one read in flight, refreshed on an
@@ -345,14 +353,14 @@ fn read_sessions(selected: &[AgentId]) -> Vec<Vec<LiveSession>> {
 }
 
 fn supervise(app: AppHandle, controller: Arc<Controller>) {
-    let (sender, reads) = mpsc::sync_channel::<Read>(PROVIDER_COUNT + 1);
+    let (sender, reads) = mpsc::sync_channel::<Read>(READ_SLOTS);
     let mut snapshot = initial_snapshot();
     let mut connection: Option<Connection> = None;
     let mut connected_at = Instant::now();
     let mut providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] =
         [(); PROVIDER_COUNT].map(|_| Poll::new(None));
     let mut sessions: Poll<Vec<Vec<LiveSession>>> = Poll::new(vec![Vec::new(); PROVIDER_COUNT]);
-    let mut pulls: Poll<Option<NativePullRequests>> = Poll::new(None);
+    let mut pulls: Poll<Option<GithubPrsDto>> = Poll::new(None);
     let mut pulls_interval = Duration::from_secs(60);
     let mut sequence = 0;
     let mut awaiting_ack: Option<(u64, Instant)> = None;
@@ -384,12 +392,11 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     }
                     sessions.finish(latest, Instant::now());
                 }
-                Read::PullRequests(latest, interval) => {
+                Read::PullRequests(latest) => {
                     if pulls.value.as_ref() != Some(&latest) {
                         delivery.mark_dirty();
                     }
                     pulls.finish(Some(latest), Instant::now());
-                    pulls_interval = interval;
                 }
             }
         }
@@ -487,12 +494,16 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     sequence,
                     snapshot: &snapshot,
                     providers: message_providers(&snapshot, &providers, &sessions.value),
-                    pull_requests: snapshot
-                        .settings
-                        .pull_requests
-                        .enabled
-                        .then_some(pulls.value.as_ref())
-                        .flatten(),
+                    pull_requests: pulls
+                        .value
+                        .as_ref()
+                        .filter(|_| snapshot.settings.pull_requests.enabled)
+                        .map(|dto| {
+                            native_pull_requests(
+                                dto,
+                                &snapshot.settings.pull_requests.selected_lists(),
+                            )
+                        }),
                     action_error: &action_error,
                 };
                 let result = serde_json::to_vec(&message)
@@ -548,19 +559,15 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
             pulls.release_stale(now);
             if snapshot.settings.pull_requests.enabled && pulls.due(now, pulls_interval) {
                 let force = pulls.start(now);
-                let lists = snapshot.settings.pull_requests.selected_lists();
+                // One settings read per poll keeps the cadence in step with the screen's.
+                pulls_interval = Duration::from_secs(u64::from(
+                    crate::settings::load_settings().github_poll_seconds,
+                ));
                 let sender = sender.clone();
                 thread::spawn(move || {
                     // `read_prs` memoises within the screen's poll window, so this adds no
                     // GitHub calls beyond what the screen and monitor already make.
-                    let dto = crate::github::read_prs(force);
-                    let interval = Duration::from_secs(u64::from(
-                        crate::settings::load_settings().github_poll_seconds,
-                    ));
-                    let _ = sender.send(Read::PullRequests(
-                        native_pull_requests(&dto, &lists),
-                        interval,
-                    ));
+                    let _ = sender.send(Read::PullRequests(crate::github::read_prs(force)));
                 });
             }
         }
@@ -712,13 +719,25 @@ mod tests {
             })
         };
         let many: Vec<_> = (1..=30).map(pr).collect();
+        let mut offsite = pr(7);
+        offsite["url"] = serde_json::json!("http://example.com/pull/7");
         let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
             "status": "ok", "stale": false, "scope": ["org:octo"],
             "mine": {"total": 30, "items": many},
-            "reviewRequested": {"total": 1, "items": [pr(99)]},
+            "reviewRequested": {"total": 2, "items": [offsite, pr(99)]},
             "assigned": {"total": 0, "items": []}
         }))
         .unwrap();
+        let review = native_pull_requests(&dto, &[GithubList::ReviewRequested]);
+        assert_eq!(
+            review.lists[0]
+                .items
+                .iter()
+                .map(|pr| pr.number)
+                .collect::<Vec<_>>(),
+            [99],
+            "rows that do not live on github.com never reach the helper"
+        );
         let native = native_pull_requests(&dto, &[GithubList::Mine, GithubList::Assigned]);
         assert_eq!(native.lists.len(), 2, "review requests were not selected");
         assert_eq!(native.lists[0].id, GithubList::Mine);

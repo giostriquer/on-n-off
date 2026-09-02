@@ -116,6 +116,8 @@ final class PanelController: NSObject, NSWindowDelegate {
   private var activeCell: RailCell?
   private var hovered: RailCell?
   private var pinned: RailCell?
+  /// The pointer is on the rail's cap (the show-mode control).
+  private var capHovered = false
   private var railOpen = false
   private var lastSequence: UInt64 = 0
   private let pillPanel: NotchPanel
@@ -273,6 +275,10 @@ final class PanelController: NSObject, NSWindowDelegate {
   private func stopPolling() {
     pointerPoll?.invalidate()
     pointerPoll = nil
+    if capHovered {
+      capHovered = false
+      refreshRail()
+    }
   }
 
   /// One sample of the pointer: tracks the hovered cell, keeps the popover while the pointer is
@@ -288,10 +294,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     let railFrame = railPanel.frame
     let inRail = railPanel.isVisible && railFrame.contains(location)
     let inPopover = popoverPanel.isVisible && popoverPanel.frame.contains(location)
-    let target =
-      inRail
-      ? rail.cell(at: CGPoint(x: location.x - railFrame.minX, y: railFrame.maxY - location.y))
-      : nil
+    let local = CGPoint(x: location.x - railFrame.minX, y: railFrame.maxY - location.y)
+    let target = inRail ? rail.cell(at: local) : nil
+    let onCap = inRail && rail.capRect.contains(local)
+    if onCap != capHovered {
+      capHovered = onCap
+      refreshRail()
+    }
     if target != hovered {
       hovered = target
       openWork?.cancel()
@@ -411,7 +420,7 @@ final class PanelController: NSObject, NSWindowDelegate {
       model: rail,
       entries: Dictionary(uniqueKeysWithValues: message.providers.map { ($0.provider, $0) }),
       pullRequests: message.pullRequests, now: now, active: activeCell,
-      action: { [weak self] id in self?.toggle(id) },
+      capHovered: capHovered, action: { [weak self] id in self?.toggle(id) },
       toggleShow: { [weak self] in self?.toggleShow() })
   }
 
@@ -450,7 +459,8 @@ final class PanelController: NSObject, NSWindowDelegate {
       animate { popoverPanel.animator().setFrame(frame, display: true) }
     case .none:
       popoverHost.rootView = placement.view
-      popoverPanel.setFrame(frame, display: true)
+      // The once-a-second refresh must not cut a glide short: only move when the target moved.
+      if popoverPanel.frame != frame { popoverPanel.setFrame(frame, display: true) }
       if !popoverPanel.isVisible {
         popoverPanel.alphaValue = 1
         popoverPanel.orderFrontRegardless()
@@ -493,17 +503,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     if activeCell != nil, railVisible { refreshPopover() } else { hidePopover() }
   }
 
-  /// Slides the rail in from its edge, or just keeps it in place when it is already showing.
+  /// Slides the rail in from its edge. A rail still fading out (the pointer came straight back
+  /// to the pill) is steered to the resting frame through the same animator, which replaces the
+  /// in-flight conceal instead of fighting it.
   private func revealRail(at frame: NSRect, edge: NotchCore.Edge) {
     railGeneration += 1
-    guard !railPanel.isVisible else {
-      railPanel.setFrame(frame, display: true)
-      railPanel.alphaValue = 1
+    if !railPanel.isVisible {
+      railPanel.setFrame(slidOut(frame, edge: edge), display: true)
+      railPanel.alphaValue = 0
+      railPanel.orderFrontRegardless()
+    } else if railPanel.frame == frame, railPanel.alphaValue == 1 {
       return
     }
-    railPanel.setFrame(slidOut(frame, edge: edge), display: true)
-    railPanel.alphaValue = 0
-    railPanel.orderFrontRegardless()
     animate {
       railPanel.animator().setFrame(frame, display: true)
       railPanel.animator().alphaValue = 1

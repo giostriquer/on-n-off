@@ -298,30 +298,31 @@ private struct PullRequestRow: View {
 
   private var ciLabel: String {
     switch pull.ci {
-    case "success": return "CI passing"
-    case "failure": return "CI failing"
-    case "error": return "CI errored"
-    case "pending": return "CI pending"
-    default: return "No checks"
+    case .success: return "CI passing"
+    case .failure: return "CI failing"
+    case .error: return "CI errored"
+    case .pending: return "CI pending"
+    case .none, .unknown: return "No checks"
     }
   }
 
+  /// The same wording as the Pull requests screen's badges.
   private var badges: [(String, Color)] {
     var badges: [(String, Color)] = []
     if pull.isDraft { badges.append(("Draft", mutedInk)) }
     switch pull.reviewDecision {
-    case "APPROVED": badges.append(("Approved", liveGreen))
-    case "CHANGES_REQUESTED": badges.append(("Changes requested", tripRed))
-    default: break
+    case .approved: badges.append(("Approved", liveGreen))
+    case .changesRequested: badges.append(("Changes requested", tripRed))
+    case .reviewRequired, .unknown, nil: break
     }
     switch pull.mergeKind {
-    case "conflicts": badges.append(("Conflicts", tripRed))
-    case "queued": badges.append(("Queued", liveGreen))
-    case "autoMerge": badges.append(("Auto-merge", mutedInk))
-    case "ready": badges.append(("Ready to merge", liveGreen))
-    case "behind": badges.append(("Behind base", warnAmber))
-    case "blocked": badges.append(("Blocked", warnAmber))
-    default: break
+    case .conflicts: badges.append(("Conflicts", tripRed))
+    case .queued: badges.append(("Queued", liveGreen))
+    case .autoMerge: badges.append(("Auto-merge", mutedInk))
+    case .ready: badges.append(("Ready to merge", liveGreen))
+    case .behind: badges.append(("Behind base", warnAmber))
+    case .blocked: badges.append(("Blocked", warnAmber))
+    case .unknown, nil: break
     }
     return badges
   }
@@ -369,7 +370,7 @@ private struct PullRequestRow: View {
         .accessibilityHidden(true)
         // The CI rollup as a dot: the same colours as the ring, hollow when nothing reported.
         Group {
-          if pull.ci == "none" {
+          if pull.ci == .none || pull.ci == .unknown {
             Circle().strokeBorder(Color(white: 0.35), lineWidth: metrics.value(1))
           } else {
             Circle().fill(ciColor(pull.ci))

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import type { NotchSnapshot } from "$lib/notchTypes";
+import { defaultNotchSettings, type NotchSnapshot } from "$lib/notchTypes";
 import {
   layoutDisplays,
   NotchSettingsCard,
@@ -23,15 +23,7 @@ beforeEach(() => {
   snapshot = {
     revision: 0,
     supported: true,
-    settings: {
-      enabled: false,
-      displayId: null,
-      edge: "right",
-      size: "standard",
-      show: "always",
-      providers: [...ALL],
-      pullRequests: { enabled: true, lists: ["mine"] },
-    },
+    settings: defaultNotchSettings(),
     error: null,
     displays: ["first", "second"].map((id, index) => ({
       id,

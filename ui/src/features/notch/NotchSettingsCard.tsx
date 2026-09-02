@@ -51,16 +51,21 @@ export function showPatch(choice: NotchShowChoice): Partial<Pick<NotchSettings, 
   return { enabled: true, show: choice === "hover" ? "onHover" : "always" };
 }
 
+/** Adds or removes one entry, keeping `order`'s sequence and refusing to remove the last one. */
+function toggleOrdered<T>(order: readonly T[], selected: readonly T[], id: T, shown: boolean): T[] {
+  const next = new Set(selected);
+  if (shown) next.add(id);
+  else if (next.size > 1) next.delete(id);
+  return order.filter((entry) => next.has(entry));
+}
+
 /** Toggles one provider's cell, keeping rail order and refusing to remove the last one. */
 export function toggleNotchProvider(
   providers: readonly AgentId[],
   id: AgentId,
   shown: boolean,
 ): AgentId[] {
-  const next = new Set(providers);
-  if (shown) next.add(id);
-  else if (next.size > 1) next.delete(id);
-  return ALL_AGENTS.filter((agent) => next.has(agent));
+  return toggleOrdered(ALL_AGENTS, providers, id, shown);
 }
 
 /** Toggles one pull-request list, keeping screen order and refusing to remove the last one. */
@@ -69,10 +74,7 @@ export function toggleNotchList(
   id: GithubListId,
   shown: boolean,
 ): GithubListId[] {
-  const next = new Set(lists);
-  if (shown) next.add(id);
-  else if (next.size > 1) next.delete(id);
-  return GITHUB_LIST_IDS.filter((list) => next.has(list));
+  return toggleOrdered(GITHUB_LIST_IDS, lists, id, shown);
 }
 
 const LIST_LABEL: Record<GithubListId, string> = {

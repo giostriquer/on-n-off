@@ -280,16 +280,29 @@ final class NotchTests {
       of: "\"sessions\":[", with: "\"sessions\":[" + String(repeating: oneSession + ",", count: maxSessions))
     expectThrows(try HostMessage.decode(Data(tooMany.utf8)))
     expectEqual(maxSessions, 12)
+  }
 
+  func testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows() throws {
+    let valid =
+      #"{"version":2,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
     let pull =
       #"{"id":"node","number":42,"title":"ci: one concurrency group","url":"https://github.com/octo/tools/pull/42","repo":"octo/tools","author":"gio","isDraft":false,"reviewDecision":"APPROVED","ci":"success","mergeKind":"ready","updatedAt":"2026-09-01T10:00:00Z"}"#
     let withPulls = valid.replacingOccurrences(
       of: "\"providers\":[]}",
-      with: "\"providers\":[],\"pullRequests\":{\"status\":\"ok\",\"hint\":null,\"stale\":false,\"lists\":[{\"id\":\"mine\",\"total\":1,\"items\":[\(pull)]}]}}")
-    let decoded2 = try HostMessage.decode(Data(withPulls.utf8))
-    expectEqual(decoded2.pullRequests?.count, 1)
-    expectEqual(decoded2.pullRequests?.ready, 1)
-    expectEqual(decoded2.pullRequests?.lists.first?.items.first?.link?.host, "github.com")
+      with: "\"providers\":[],\"pullRequests\":{\"status\":\"ok\",\"hint\":null,\"stale\":false,\"lists\":[{\"id\":\"mine\",\"total\":1,\"items\":[\(pull)]},{\"id\":\"assigned\",\"total\":1,\"items\":[\(pull)]}]}}")
+    let decoded = try HostMessage.decode(Data(withPulls.utf8))
+    expectEqual(decoded.pullRequests?.count, 1)  // the same pull request in two lists counts once
+    expectEqual(decoded.pullRequests?.ready, 1)
+    expectEqual(decoded.pullRequests?.lists.first?.items.first?.link?.host, "github.com")
+    expectEqual(decoded.pullRequests?.lists.first?.items.first?.ci, CiState.success)
+    expectEqual(decoded.pullRequests?.lists.first?.items.first?.reviewDecision, ReviewDecision.approved)
+    // Values a newer host may send decode to `unknown` instead of rejecting the message.
+    let newer = withPulls.replacingOccurrences(of: "\"ci\":\"success\"", with: "\"ci\":\"skipped\"")
+      .replacingOccurrences(of: "\"mergeKind\":\"ready\"", with: "\"mergeKind\":\"frozen\"")
+    let lenient = try HostMessage.decode(Data(newer.utf8))
+    expectEqual(lenient.pullRequests?.lists.first?.items.first?.ci, CiState.unknown)
+    expectEqual(lenient.pullRequests?.lists.first?.items.first?.mergeKind, MergeKind.unknown)
+    expectEqual(lenient.pullRequests?.ready, 0)
     let offsite = withPulls.replacingOccurrences(
       of: "https://github.com/octo/tools/pull/42", with: "http://example.com/pull/42")
     expectThrows(try HostMessage.decode(Data(offsite.utf8)))
@@ -366,7 +379,8 @@ checks.testPresetsScaleTheWholeRailOnThePixelGrid()
 checks.testPillsHugTheEdgeCentredOnTheRail()
 checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
 try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
+try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("15 native check groups; \(failures) failures")
+print("16 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

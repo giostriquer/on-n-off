@@ -23,8 +23,14 @@ enum Render {
       try write(
         NotchRailView(
           model: rail, entries: entries, pullRequests: message.pullRequests, now: now, active: nil,
-          action: { _ in }, toggleShow: {}),
+          capHovered: false, action: { _ in }, toggleShow: {}),
         size: rail.frame.size, scale: rail.display.scale, to: out.appendingPathComponent("rail.png"))
+      try write(
+        NotchRailView(
+          model: rail, entries: entries, pullRequests: message.pullRequests, now: now, active: nil,
+          capHovered: true, action: { _ in }, toggleShow: {}),
+        size: rail.frame.size, scale: rail.display.scale,
+        to: out.appendingPathComponent("rail-cap-hovered.png"))
       if let pill = notchPillFrame(settings: settings, displays: displays) {
         try write(
           NotchPillView(vertical: settings.edge.isVertical), size: pill.size,

@@ -7,10 +7,11 @@
  * a screen that reaches for something unmocked says so instead of hanging.
  */
 
-import type { AppSettings, AgentInfo } from "$lib/types";
+import type { AppSettings, AgentInfo, AgentId } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { limitsFor } from "./limitsFixtures";
-import type { NotchSnapshot, NotchSettings } from "$lib/notchTypes";
+import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
+import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -55,7 +56,7 @@ const emptyTab = () => ({ plugins: [], userSkills: [], mcpServers: [] });
 let notch: NotchSnapshot = {
   revision: 0,
   supported: true,
-  settings: { enabled: true, displayId: "studio", edge: "right", size: "standard", show: "always", providers: ["claude", "codex", "antigravity", "cursor"], pullRequests: { enabled: true, lists: ["mine"] } },
+  settings: defaultNotchSettings({ enabled: true, displayId: "studio" }),
   displays: [
     { id: "built-in", name: "Built-in Retina Display", x: -1728, y: 0, width: 1728, height: 1117, workY: 33, workHeight: 1084, scale: 2, mirrored: false },
     { id: "studio", name: "Studio Display", x: 0, y: 0, width: 2560, height: 1440, workY: 25, workHeight: 1415, scale: 2, mirrored: false },
@@ -64,7 +65,7 @@ let notch: NotchSnapshot = {
 };
 
 /** A month of usage with five-digit model totals, so the Overview's cost columns are exercised. */
-function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: string }) {
+function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: string }): UsageSummary {
   const totals = (output: number) => ({
     uncachedInputTokens: output * 6,
     cachedInputTokens: output * 260,
@@ -72,14 +73,14 @@ function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: 
     outputTokens: output,
     reasoningTokens: Math.round(output * 0.28),
   });
-  const models: [string, string, number][] = [
+  const models: [AgentId, string, number][] = [
     ["codex", "gpt-5.6-sol", 10969.67],
     ["claude", "claude-fable-5", 4282.86],
     ["claude", "claude-opus-5", 1589.63],
     ["claude", "claude-opus-4-8", 3.34],
   ];
   const until = new Date(`${input.untilDay}T00:00:00Z`);
-  const buckets = [];
+  const buckets: UsageBucket[] = [];
   for (let back = 15; back >= 0; back -= 1) {
     const day = new Date(until.getTime() - back * 86_400_000).toISOString().slice(0, 10);
     if (day < input.sinceDay) continue;

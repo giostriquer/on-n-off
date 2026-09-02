@@ -4,10 +4,18 @@ use serde::{Deserialize, Serialize};
 /// A cell's width on screen (points at the standard size); a vertical rail is this thick.
 #[cfg(any(target_os = "macos", test))]
 pub const CELL_WIDTH: f64 = 76.0;
-/// A cell's height on screen: icon slot, percent label, gap, and padding; a horizontal bar is
-/// this thick.
+/// A cell's height on screen, from the same parts the helper's `railLayout` adds up (icon slot,
+/// gap, percent label, padding); a horizontal bar is this thick.
 #[cfg(any(target_os = "macos", test))]
-pub const CELL_HEIGHT: f64 = 73.0;
+pub const CELL_HEIGHT: f64 = ICON_SLOT + CONTENT_SPACING + LABEL_HEIGHT + 2.0 * CELL_PADDING;
+#[cfg(any(target_os = "macos", test))]
+const ICON_SLOT: f64 = 46.0;
+#[cfg(any(target_os = "macos", test))]
+const CONTENT_SPACING: f64 = 3.0;
+#[cfg(any(target_os = "macos", test))]
+const LABEL_HEIGHT: f64 = 22.0;
+#[cfg(any(target_os = "macos", test))]
+const CELL_PADDING: f64 = 1.0;
 #[cfg(any(target_os = "macos", test))]
 pub const CELL_SPACING: f64 = 8.0;
 #[cfg(any(target_os = "macos", test))]

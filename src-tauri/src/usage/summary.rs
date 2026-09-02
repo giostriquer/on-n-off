@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(test)]
+use std::sync::Arc;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, TimeZone, Utc};
@@ -19,7 +21,7 @@ use super::aggregate::{
     UsageBucket,
 };
 use super::cache_io::atomic_write;
-use super::pricing::{ensure_rates, take_unpriced_seen, RatesRefresh, LITELLM_RATES_URL};
+use super::pricing::{ensure_rates, LITELLM_RATES_URL};
 use super::scan_cache::{
     decode_scan_cache, encode_scan_cache, prune_scan_cache, PruneOptions, ScanCache,
 };
@@ -47,7 +49,7 @@ fn usage_cache_lock() -> &'static Mutex<()> {
 
 #[cfg(test)]
 thread_local! {
-    static BEFORE_PUBLISH_PAUSE: std::cell::RefCell<Option<(Arc<std::sync::Barrier>, Arc<std::sync::Barrier>)>> = const { std::cell::RefCell::new(None) };
+    static BEFORE_PUBLISH_PAUSE: std::cell::RefCell<Option<(std::sync::Arc<std::sync::Barrier>, std::sync::Arc<std::sync::Barrier>)>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -253,16 +255,9 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
     let summary_path = summary_cache_path_for(&home);
     let source_index_path = source_index_path_for(&home);
     // Rates first: the table's age is part of the summary key, so a re-fetched table (a model
-    // released today, a price change) never serves a summary priced with the old one. A scan
-    // that met an unknown model lets the next one re-fetch early; the refresh button forces it.
-    let refresh = if input.force {
-        RatesRefresh::Forced
-    } else if take_unpriced_seen() {
-        RatesRefresh::Early
-    } else {
-        RatesRefresh::Scheduled
-    };
-    let rates = ensure_rates(&home, started_ms, refresh);
+    // released today, a price change) never serves a summary priced with the old one. The
+    // parsed table is memoised on the file, so this costs one metadata read on the fast path.
+    let rates = ensure_rates(&home, started_ms, input.force);
     let key = summary_key(&input, rates.fetched_at_ms);
     let dirs = [
         (Provider::Claude, resolve_claude_transcript_dir()?),
@@ -332,7 +327,7 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
         (source_snapshot, source_signature, prepared_sources)
     };
 
-    let rates_arc = Arc::new(rates.table);
+    let rates_arc = rates.table.clone();
 
     let mut aggregator = UsageAggregator::new(AggOpts {
         time_zone: input.time_zone.clone(),
