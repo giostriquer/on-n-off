@@ -73,21 +73,19 @@ export function AppShell() {
 
   useEffect(() => {
     let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void api
-      .onOpenLimitsWindow(() => {
-        void navigate({ to: SCREEN_PATH.limits });
-      })
-      .then((stop) => {
-        if (disposed) {
-          stop();
-        } else {
-          unlisten = stop;
-        }
+    const stops: (() => void)[] = [];
+    const subscribe = (listen: (handler: () => void) => Promise<() => void>, to: string) =>
+      listen(() => {
+        void navigate({ to });
+      }).then((stop) => {
+        if (disposed) stop();
+        else stops.push(stop);
       });
+    void subscribe(api.onOpenLimitsWindow, SCREEN_PATH.limits);
+    void subscribe(api.onOpenGithubWindow, SCREEN_PATH.github);
     return () => {
       disposed = true;
-      unlisten?.();
+      stops.forEach((stop) => stop());
     };
   }, [navigate]);
 

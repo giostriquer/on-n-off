@@ -1,3 +1,4 @@
+import { defaultNotchSettings } from "$lib/notchTypes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -16,7 +17,7 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("$lib/api", () => ({
-  readNotchState: () => Promise.resolve({ revision: 0, supported: false, settings: { enabled: false, displayId: null, edge: "right", size: "standard" }, displays: [], error: null }),
+  readNotchState: () => Promise.resolve({ revision: 0, supported: false, settings: defaultNotchSettings(), displays: [], error: null }),
   onNotchChanged: () => Promise.resolve(() => undefined),
   saveNotchSettings: vi.fn(),
   diagnoseProviders: () =>

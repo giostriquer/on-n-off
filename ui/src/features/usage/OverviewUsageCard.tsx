@@ -150,10 +150,10 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
                         style={{ width: `${Math.max(0, Math.min(100, share * 100))}%` }}
                       />
                     </span>
-                    <span className="font-mono w-16 shrink-0 text-right text-[12px]">
+                    <span className="font-mono min-w-[5.5rem] shrink-0 text-right text-[12px] tabular-nums">
                       {metric === "cost" ? formatUsd(row.costUsd) : formatTokens(row.totalTokens)}
                     </span>
-                    <span className="font-mono w-10 shrink-0 text-right text-[11px] text-[var(--mute)]">
+                    <span className="font-mono w-12 shrink-0 text-right text-[11px] text-[var(--mute)] tabular-nums">
                       {formatPercent(share)}
                     </span>
                   </div>

@@ -106,4 +106,8 @@ The helper has no provider credentials, network listener, or independent login
 item. Rust supervises its bounded stdin/stdout protocol and reaps it on shutdown.
 A closed parent pipe makes the helper exit, including after a parent crash.
 Display UUIDs retain the existing settings format. Screen placement converts
-Core Graphics top-left coordinates into AppKit bottom-left coordinates.
+Core Graphics top-left coordinates into AppKit bottom-left coordinates. The helper owns three
+non-activating panels (hover pill, rail, popover); hovering never activates it, and only a pinned
+popover takes key status so Escape can release it. Live-session rows come from
+`~/.claude/sessions/<pid>.json` (the pid is checked with `/bin/ps`) and from Codex rollouts modified
+in the last hour; the helper never opens those files itself.

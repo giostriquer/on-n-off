@@ -83,7 +83,7 @@ vi.mock("@/features/scope/ScopeBar", () => ({ ScopeBar: () => null }));
 vi.mock("@/features/shell/LeftRail", () => ({ LeftRail: () => null }));
 vi.mock("@/features/updater/UpdateStrip", () => ({ UpdateStrip: () => null }));
 vi.mock("@/features/usage/LazyUsageChart", () => ({ preloadUsageChart: vi.fn() }));
-vi.mock("$lib/api", () => ({ onOpenLimitsWindow }));
+vi.mock("$lib/api", () => ({ onOpenLimitsWindow, onOpenGithubWindow: async () => () => undefined }));
 
 describe("AppShell filter", () => {
   beforeEach(() => {

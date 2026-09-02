@@ -7,10 +7,11 @@
  * a screen that reaches for something unmocked says so instead of hanging.
  */
 
-import type { AppSettings, AgentInfo } from "$lib/types";
+import type { AppSettings, AgentInfo, AgentId } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { limitsFor } from "./limitsFixtures";
-import type { NotchSnapshot, NotchSettings } from "$lib/notchTypes";
+import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
+import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -55,13 +56,54 @@ const emptyTab = () => ({ plugins: [], userSkills: [], mcpServers: [] });
 let notch: NotchSnapshot = {
   revision: 0,
   supported: true,
-  settings: { enabled: true, displayId: "studio", edge: "right", size: "standard" },
+  settings: defaultNotchSettings({ enabled: true, displayId: "studio" }),
   displays: [
     { id: "built-in", name: "Built-in Retina Display", x: -1728, y: 0, width: 1728, height: 1117, workY: 33, workHeight: 1084, scale: 2, mirrored: false },
     { id: "studio", name: "Studio Display", x: 0, y: 0, width: 2560, height: 1440, workY: 25, workHeight: 1415, scale: 2, mirrored: false },
   ],
   error: null,
 };
+
+/** A month of usage with five-digit model totals, so the Overview's cost columns are exercised. */
+function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: string }): UsageSummary {
+  const totals = (output: number) => ({
+    uncachedInputTokens: output * 6,
+    cachedInputTokens: output * 260,
+    cacheCreationTokens: output * 2,
+    outputTokens: output,
+    reasoningTokens: Math.round(output * 0.28),
+  });
+  const models: [AgentId, string, number][] = [
+    ["codex", "gpt-5.6-sol", 10969.67],
+    ["claude", "claude-fable-5", 4282.86],
+    ["claude", "claude-opus-5", 1589.63],
+    ["claude", "claude-opus-4-8", 3.34],
+  ];
+  const until = new Date(`${input.untilDay}T00:00:00Z`);
+  const buckets: UsageBucket[] = [];
+  for (let back = 15; back >= 0; back -= 1) {
+    const day = new Date(until.getTime() - back * 86_400_000).toISOString().slice(0, 10);
+    if (day < input.sinceDay) continue;
+    for (const [provider, model, monthly] of models) {
+      const costUsd = Math.round((monthly / 16) * (1 + Math.sin(back)) * 100) / 100;
+      buckets.push({
+        day, provider, model, totals: totals(Math.round(costUsd * 1200)), costUsd,
+        cacheSavingsUsd: costUsd * 1.3, costSource: "modelPriced", records: 40, unpricedRecords: 0, sessions: 3,
+      });
+    }
+  }
+  return {
+    readAt: `${input.untilDay}T12:00:00Z`, timeZone: input.timeZone, sinceDay: input.sinceDay, untilDay: input.untilDay,
+    buckets,
+    sources: [
+      { provider: "claude", status: "ok", scannedFiles: 120, skippedFiles: 0, malformedRecords: 0, distinctSessions: 40, resolvedPath: "~/.claude/projects" },
+      { provider: "codex", status: "ok", scannedFiles: 60, skippedFiles: 0, malformedRecords: 0, distinctSessions: 20, resolvedPath: "~/.codex/sessions" },
+    ],
+    pricing: { status: "fresh", source: "litellm", fetchedAt: `${input.untilDay}T11:00:00Z`, knownModels: 900 },
+    scanDurationMs: 12,
+    cacheHit: true,
+  };
+}
 
 const handlers: Record<string, Handler> = {
   list_agents: () => AGENTS,
@@ -79,6 +121,7 @@ const handlers: Record<string, Handler> = {
   list_local_plugins: emptyTab,
   refresh: emptyTab,
   read_limits: (args) => limitsFor(args.agentId),
+  usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),
   read_notch_state: () => notch,
   save_notch_settings: (args) => { notch = { ...notch, settings: args.settings as NotchSettings }; return notch; },
   hide_limits_popover: () => undefined,

@@ -29,9 +29,6 @@
   flex-direction: column;
   gap: 8px;
 }
-.notch-settings.is-page .notch-settings-body {
-  max-width: 530px;
-}
 .notch-settings select {
   width: 100%;
   background: var(--well, #242426);
@@ -42,8 +39,7 @@
   font-size: 12px;
 }
 .notch-label-row,
-.notch-size-row,
-.notch-edge-row {
+.notch-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -54,7 +50,7 @@
 }
 .notch-display-map {
   position: relative;
-  height: 72px;
+  height: 88px;
   padding: 9px;
   background: var(--well, #202023);
   border-radius: 9px;
@@ -97,6 +93,63 @@
   right: auto;
   border-radius: 0 4px 4px 0;
 }
+.notch-display-map i[data-edge="top"],
+.notch-display-map i[data-edge="bottom"] {
+  top: -2px;
+  right: auto;
+  left: 25%;
+  width: 50%;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+}
+.notch-display-map i[data-edge="bottom"] {
+  top: auto;
+  bottom: -2px;
+  border-radius: 4px 4px 0 0;
+}
+.notch-settings h4 {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.notch-providers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--well, #202023);
+  border-radius: 9px;
+}
+.notch-providers li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.notch-providers li + li {
+  border-top: 1px solid var(--hair, #ffffff15);
+}
+.notch-providers li > div {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.notch-providers small {
+  font-size: 10.5px;
+  color: var(--mute);
+}
+.notch-lists {
+  margin-top: 6px;
+  align-self: flex-start;
+}
+.notch-lists button {
+  padding: 3px 10px;
+  font-size: 10.5px;
+}
 .notch-segment {
   display: flex;
   padding: 2px;
@@ -105,7 +158,7 @@
   border-radius: 8px;
 }
 .notch-segment button {
-  padding: 4px 15px;
+  padding: 4px 16px;
   border: 0;
   border-radius: 5px;
   font-size: 11px;

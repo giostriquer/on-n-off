@@ -1,5 +1,18 @@
 # Third-party notices
 
+## Codenotch
+
+The design of on-n-off's macOS side notch follows Codenotch 1.0 by @hivinz_
+(bundle `com.vinz.codenotch`, published at
+[vinzdg.github.io/usage-notch](https://vinzdg.github.io/usage-notch/)): the
+notch silhouette that flares into the screen edge,
+one ring cell per provider with the percentage beneath, the hover popover with
+quota windows and live sessions, the "show on hover" pill, the four edge
+options, and the shape of the Integrations settings. The design was studied
+from the running application on 2026-09-01 and re-measured by hand; no
+Codenotch source code, binaries, assets, or text are included in on-n-off, and
+the Swift, Rust, and TypeScript implementations are on-n-off's own.
+
 ## T3 Code
 
 Portions of on-n-off's Usage analytics are derived from

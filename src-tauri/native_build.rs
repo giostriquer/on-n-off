@@ -1,4 +1,8 @@
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 pub fn build() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
@@ -49,7 +53,11 @@ pub fn build() {
     let helper = binaries.join("on-n-off-notch.app");
     let contents = helper.join("Contents");
     fs::create_dir_all(contents.join("MacOS")).expect("create native helper bundle");
-    fs::copy(&binary, contents.join("MacOS/on-n-off-notch")).expect("stage native helper");
+    replace_file(
+        &binary,
+        &contents.join("MacOS/on-n-off-notch"),
+        "stage native helper",
+    );
     fs::copy(package.join("Info.plist"), contents.join("Info.plist"))
         .expect("stage helper metadata");
     let signed = Command::new("/usr/bin/codesign")
@@ -64,5 +72,16 @@ pub fn build() {
     );
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("build output"));
     let profile = out.ancestors().nth(3).expect("cargo profile directory");
-    fs::copy(binary, profile.join("on-n-off-notch")).expect("stage development native notch");
+    replace_file(
+        &binary,
+        &profile.join("on-n-off-notch"),
+        "stage development native notch",
+    );
+}
+
+/// Unlink before copying: overwriting a helper in place while an app still has it running
+/// leaves a file macOS refuses to launch (killed at exec) until it is recreated.
+fn replace_file(source: &Path, destination: &Path, what: &str) {
+    let _ = fs::remove_file(destination);
+    fs::copy(source, destination).expect(what);
 }

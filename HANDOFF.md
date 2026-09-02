@@ -95,6 +95,10 @@ signed. Do not publish its draft until the installer, its `.sig` file,
 
 The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, and `~/.on-n-off`. Because it inspects project folders (for project-scoped MCP/skills and transcripts), macOS may ask for access to **Documents** or **Desktop** the first time; declining only hides those project-scoped entries.
 
+### Side notch
+
+**Settings → Side notch**: choose a display, pick **Always show** or **Show on hover**, and an edge. Expect the notch silhouette with one ring per provider (Claude weekly with Fable's inner ring, Codex 5-hour) and a pull-request cell whose ring is split per pull request by CI colour. Hover a cell for its popover (quota windows, live sessions; pull requests with a copy button that puts a linked "review please: <title>" on the clipboard, paste it into Slack to check the link survives). Click pins the popover, Escape releases it. Top and bottom lay the cells side by side. The helper is bundled under `Contents/Helpers/on-n-off-notch.app`; nothing here writes to GitHub or provider homes.
+
 ### From source on macOS
 
 ```sh

@@ -1,0 +1,3 @@
+# The Swift helper builds into this directory during every cargo build; watching it would
+# restart `tauri dev` whenever the native checks or a manual `swift build` run.
+macos/SideNotch/.build/

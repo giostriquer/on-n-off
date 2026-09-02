@@ -56,7 +56,7 @@ mod tests {
             enabled: true,
             display_id: Some("display-two".into()),
             edge: super::super::model::Edge::Left,
-            size: super::super::model::NotchSize::Standard,
+            ..NotchSettings::default()
         };
         assert_eq!(save_to(&path, &current, &counter).unwrap(), 1);
         let persisted: NotchSettings =
