@@ -81,17 +81,6 @@ impl ItemService {
         })
     }
 
-    #[cfg(test)]
-    pub fn at(home: PathBuf, fetcher: Box<dyn Fetcher>) -> Self {
-        Self {
-            registry_path: crate::paths::installed_items_path_for(&home),
-            backups: BackupStore::at(home.join(".on-n-off").join("backups")),
-            fetcher,
-            memo: Mutex::new(Memo::default()),
-            registry_lock: Mutex::new(()),
-        }
-    }
-
     // -- network memo -----------------------------------------------------------------------
 
     fn memo(&self) -> MutexGuard<'_, Memo> {
