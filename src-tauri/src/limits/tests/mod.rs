@@ -557,6 +557,80 @@ fn a_freshly_read_login_the_endpoint_rejects_is_not_retried() {
 }
 
 #[test]
+fn a_re_read_that_finds_no_login_keeps_the_rejection_it_already_has() {
+    // The retry exists to try a newer credential. When the store has none to give, the rejection
+    // already in hand is the accurate answer: reporting the miss instead would tell a signed-in
+    // user to sign in, which is a louder falsehood than the one this retry removes.
+    let mut rig = Rig::new("limits-claude-reread-miss");
+    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string());
+    write(
+        &rig.home,
+        ".claude.json",
+        &claude_account_file("uuid-1", "me@example.com"),
+    );
+
+    let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
+    let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
+    rig.read(AgentId::Claude, false, &profile_url, &usage_url);
+    profile_request.join().unwrap();
+    usage_request.join().unwrap();
+
+    // The memoised token is refused, and by then the stored login has gone.
+    rig.keychain_json = None;
+    let (profile_url, profile_requests) = serve_sequence(&[("401 Unauthorized", &[], "{}")]);
+    let rejected = rig.read(AgentId::Claude, false, &profile_url, &refused_url());
+    let profiles = profile_requests.join().unwrap();
+
+    assert_eq!(
+        profiles.len(),
+        1,
+        "a re-read with nothing to show gives the endpoint nothing new to answer"
+    );
+    assert_eq!(rejected[0].status, LimitsStatus::Unauthenticated);
+    let message = rejected[0].message.as_deref().unwrap_or_default();
+    assert!(
+        message.contains("was rejected"),
+        "the rejection stands, rather than being replaced by the miss: {message}"
+    );
+    assert!(
+        !message.contains("Sign in with"),
+        "the user is signed in; only the re-read failed: {message}"
+    );
+}
+
+#[test]
+fn an_explicit_refresh_that_is_rejected_is_not_retried() {
+    // `force` already read the stored login, so the rejection is of the freshest credential there
+    // is. Retrying would ask the endpoint the same question over a second Keychain probe.
+    let mut rig = Rig::new("limits-claude-forced-rejected");
+    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string());
+    write(
+        &rig.home,
+        ".claude.json",
+        &claude_account_file("uuid-1", "me@example.com"),
+    );
+
+    let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
+    let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
+    rig.read(AgentId::Claude, false, &profile_url, &usage_url);
+    profile_request.join().unwrap();
+    usage_request.join().unwrap();
+    assert_eq!(rig.probes.get(), 1);
+
+    let (profile_url, profile_requests) = serve_sequence(&[("401 Unauthorized", &[], "{}")]);
+    let rejected = rig.read(AgentId::Claude, true, &profile_url, &refused_url());
+    let profiles = profile_requests.join().unwrap();
+
+    assert_eq!(rejected[0].status, LimitsStatus::Unauthenticated);
+    assert_eq!(profiles.len(), 1, "a forced read is already fresh");
+    assert_eq!(
+        rig.probes.get(),
+        2,
+        "the forced read probed once; the rejection added no second probe"
+    );
+}
+
+#[test]
 fn switching_the_claude_account_never_reuses_the_previous_accounts_token() {
     let mut rig = Rig::new("limits-claude");
     rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-a"));

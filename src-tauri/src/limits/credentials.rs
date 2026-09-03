@@ -174,7 +174,7 @@ pub(super) fn read_claude_identity(home: &Path) -> Option<ClaudeIdentity> {
 /// so a rejected `Memo` credential is worth one retry with a freshly read one, and a rejected
 /// `Stored` credential is the login's own problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoginSource {
+pub(super) enum LoginSource {
     Memo,
     Stored,
 }
@@ -191,13 +191,15 @@ impl ClaudeLoginMemo {
     }
 
     /// The login plus where it came from, so a caller can tell a stale memo apart from a stored
-    /// login the provider has actually rejected.
-    pub fn lookup(
+    /// login the provider has actually rejected. `read` is borrowed rather than consumed: one
+    /// read can need two lookups, and taking it by value made that work only for as long as the
+    /// closure happened to be `Copy`.
+    pub(super) fn lookup(
         &self,
         force: bool,
         account_id: &str,
         now_ms: i64,
-        read: impl FnOnce() -> CredentialLookup<ClaudeCredential>,
+        read: &impl Fn() -> CredentialLookup<ClaudeCredential>,
     ) -> (CredentialLookup<ClaudeCredential>, LoginSource) {
         if !force {
             if let Some((memo_account, credential)) = self.slot().clone() {
@@ -215,6 +217,18 @@ impl ClaudeLoginMemo {
             _ => None,
         };
         (result, LoginSource::Stored)
+    }
+
+    /// Re-reads the stored login and replaces what the memo holds. Named apart from `lookup`
+    /// because its one caller — retrying past a login the endpoint has rejected — already knows
+    /// the answer is fresh, and a discarded [`LoginSource`] there would read like an oversight.
+    pub(super) fn reread(
+        &self,
+        account_id: &str,
+        now_ms: i64,
+        read: &impl Fn() -> CredentialLookup<ClaudeCredential>,
+    ) -> CredentialLookup<ClaudeCredential> {
+        self.lookup(true, account_id, now_ms, read).0
     }
 
     pub fn clear(&self) {

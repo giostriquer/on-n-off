@@ -220,25 +220,30 @@ fn claude_current<P: Fn() -> KeychainProbe>(
         .as_ref()
         .and_then(|identity| identity.organization_id.clone());
     let read_credential = || read_claude_credential(home, keychain(), now_ms);
-    let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);
-    let mut loaded = claude_limits(
-        lookup,
-        selected_identity.clone(),
-        claude_profile_url,
-        claude_url,
-    );
-    // Claude Code rotates the access token before its recorded expiry, which leaves the memo
-    // holding one the endpoint has already stopped accepting. That rejection says nothing about
-    // the login, so read the stored login again and try once more before reporting one — the
-    // alternative is telling a signed-in user to sign in again until the next poll.
-    if source == LoginSource::Memo && loaded.failure == Some(LoadFailureKind::Unauthorized) {
-        let (fresh, _) = memo.lookup(true, &account.id, now_ms, read_credential);
-        loaded = claude_limits(
-            fresh,
+    let attempt = |lookup| {
+        claude_limits(
+            lookup,
             selected_identity.clone(),
             claude_profile_url,
             claude_url,
-        );
+        )
+    };
+    let (lookup, source) = memo.lookup(force, &account.id, now_ms, &read_credential);
+    let mut loaded = attempt(lookup);
+    // Claude Code rotates the access token before the expiry it records, which leaves the memo
+    // holding one the endpoint has already stopped accepting. That rejection says nothing about
+    // the login, so read the stored login again and try once more before reporting one —
+    // otherwise a signed-in user is told to sign in again until the next poll.
+    //
+    // Only a re-read that produced a login is worth a second attempt. A miss describes the store,
+    // not the rejection already in hand, and adopting it would trade an accurate "rejected" for a
+    // louder falsehood: `Missing` reports "Sign in with `claude`" at a user who is signed in, and
+    // `Unreadable` reports a Keychain failure when the prompt the retry raised went unanswered.
+    if source == LoginSource::Memo && loaded.failure == Some(LoadFailureKind::Unauthorized) {
+        let fresh = memo.reread(&account.id, now_ms, &read_credential);
+        if matches!(fresh, CredentialLookup::Found(_)) {
+            loaded = attempt(fresh);
+        }
     }
     if loaded.dto.status == LimitsStatus::Unauthenticated
         || loaded.failure == Some(LoadFailureKind::AccountMismatch)

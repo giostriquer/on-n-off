@@ -211,21 +211,21 @@ fn login_memo_serves_the_same_account_until_forced_expired_or_cleared() {
             LoginSource::Memo,
         )
     };
-    assert_eq!(memo.lookup(false, "acct", 1_000, read), stored("t1"));
+    assert_eq!(memo.lookup(false, "acct", 1_000, &read), stored("t1"));
     assert_eq!(
-        memo.lookup(false, "acct", 1_000, read),
+        memo.lookup(false, "acct", 1_000, &read),
         memoised("t1"),
         "a hit says so, because a rejected memo is worth retrying and a rejected stored login is not"
     );
     assert_eq!(reads.get(), 1);
     // Explicit refresh re-reads.
-    assert_eq!(memo.lookup(true, "acct", 1_000, read), stored("t2"));
+    assert_eq!(memo.lookup(true, "acct", 1_000, &read), stored("t2"));
     // Past the memoised expiry the memo is a miss (the CLI may have refreshed since).
-    assert_eq!(memo.lookup(false, "acct", 2_000, read), stored("t3"));
+    assert_eq!(memo.lookup(false, "acct", 2_000, &read), stored("t3"));
     // A different signed-in account never gets the other account's token.
-    assert_eq!(memo.lookup(false, "other", 1_000, read), stored("t4"));
+    assert_eq!(memo.lookup(false, "other", 1_000, &read), stored("t4"));
     memo.clear();
-    assert_eq!(memo.lookup(false, "other", 1_000, read), stored("t5"));
+    assert_eq!(memo.lookup(false, "other", 1_000, &read), stored("t5"));
     assert_eq!(reads.get(), 5);
 }
 
@@ -233,13 +233,16 @@ fn login_memo_serves_the_same_account_until_forced_expired_or_cleared() {
 fn login_memo_does_not_remember_misses() {
     let memo = ClaudeLoginMemo::new();
     assert_eq!(
-        memo.lookup(false, "acct", 0, || CredentialLookup::Missing),
+        memo.lookup(false, "acct", 0, &(|| CredentialLookup::Missing)),
         (CredentialLookup::Missing, LoginSource::Stored)
     );
     assert_eq!(
-        memo.lookup(false, "acct", 0, || CredentialLookup::Found(login(
-            "t", None
-        ))),
+        memo.lookup(
+            false,
+            "acct",
+            0,
+            &(|| CredentialLookup::Found(login("t", None)))
+        ),
         (
             CredentialLookup::Found(login("t", None)),
             LoginSource::Stored
@@ -247,16 +250,19 @@ fn login_memo_does_not_remember_misses() {
     );
     // A forced miss evicts the memo instead of serving the old token next time.
     assert_eq!(
-        memo.lookup(true, "acct", 0, || CredentialLookup::Expired {
-            renewable: true
-        }),
+        memo.lookup(
+            true,
+            "acct",
+            0,
+            &(|| CredentialLookup::Expired { renewable: true })
+        ),
         (
             CredentialLookup::Expired { renewable: true },
             LoginSource::Stored
         )
     );
     assert_eq!(
-        memo.lookup(false, "acct", 0, || CredentialLookup::Missing),
+        memo.lookup(false, "acct", 0, &(|| CredentialLookup::Missing)),
         (CredentialLookup::Missing, LoginSource::Stored)
     );
 }
