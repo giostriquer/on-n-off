@@ -115,12 +115,15 @@ user data.
   clone owned state before `await`, and `spawn_blocking` the blocking adapter work. Never hold a
   `tauri::State` borrow or a mutex guard across an `await`, and never emit an event or make a
   seconds-long call while holding a lock.
-- Startup loads the selected provider first; Overview aggregation waits for it.
-- The Vite entry chunk stays under its 500 kB warning. Never raise the threshold to hide a
-  regression.
+- Startup loads the selected provider first, through the existing per-provider in-flight
+  de-duplication rather than a second one; Overview aggregation waits for it.
+- The Vite entry chunk stays under its 500 kB warning: lazy-load heavy route and visualization
+  dependencies, and size UI assets to fit. Never raise the threshold to hide a regression.
 
 **Both CI legs run everything.**
 
+- Clippy with `-D warnings` is the enforced gate. Pedantic and nursery findings are advisory:
+  apply one deliberately, never chase the list.
 - No hard-coded drive letters or `\` separators, in code or tests.
 - Gate an item to exactly the platforms that use it. A `cfg(any(target_os = "macos", test))` on an
   item no test calls compiles unused on the Windows *test* target and fails `-D warnings` on a leg
