@@ -29,6 +29,7 @@ mod paths;
 mod plugin_meta;
 mod process;
 mod project;
+mod read_revision;
 mod scanner;
 mod settings;
 mod side_notch;
@@ -48,6 +49,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(commands::AppState::production())
         .setup(|_app| {
+            // Lets a shared read announce itself wherever it was made from; see `read_revision`.
+            read_revision::register(_app.handle());
             // Warm the CLI search path (login-shell PATH probe) off the UI thread so the
             // first provider load does not pay for it.
             std::thread::spawn(|| {
