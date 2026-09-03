@@ -1,105 +1,154 @@
 # AGENTS.md
 
+on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon). It reads what
+your coding agents have on disk and shows it in one place.
+
+This file is orientation and operations: where things are, how to run them, how to finish. It is
+deliberately short.
+
+| Read before you… | Document |
+| --- | --- |
+| work on a subsystem you do not know | [`docs/architecture/`](docs/architecture/) |
+| touch `cli_locate.rs`, `process.rs`, `scripts/`, or CI | [`OS.md`](OS.md) |
+| change a provider adapter | [`PROVIDERS.md`](PROVIDERS.md) — update it in the same change |
+| hand off or smoke-test a build | [`HANDOFF.md`](HANDOFF.md) |
+
 ## Project map
 
-on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon).
+Each entry says what a thing is and where. The **why** lives in the module doc-comment at the top
+of the file — start there, not here.
 
-- `ui/`: React 19, TypeScript, Vite, Tailwind, TanStack Router/Query/Charts.
-- `src-tauri/src/commands.rs`: the IPC boundary used by `ui/src/lib/api.ts`.
-- `src-tauri/src/{claude,codex,antigravity,cursor}.rs`: provider adapters.
-- `src-tauri/src/paths.rs`: agent homes and app data paths.
-- `src-tauri/src/cli_locate.rs`: CLI discovery. GUI apps on macOS start with a minimal `PATH`, and on Windows an app started before an installer ran misses the new registry `PATH`, so `cli_search_path()` merges the process `PATH`, the login shell's `PATH` (probed once, off the UI thread) or the registered user/machine `PATH` on Windows, and well-known install folders; `resolve_provider_cli` searches it per provider (Cursor's CLI is `agent`, a name other products also use, so only an `agent` inside a `cursor-agent` install folder or the legacy `cursor-agent` alias counts) and `AgentCli` hands the same list to spawned CLIs as their `PATH` (npm shims are `#!/usr/bin/env node`). Route every CLI lookup and spawn through these.
-- `src-tauri/src/process.rs`: child-process draining with a hard deadline, shared by `cli.rs` and the login-shell probe.
-- `src-tauri/src/cli_stub.rs`: test-only builder that writes a fake CLI as `.cmd` on Windows or an executable `sh` script elsewhere; use it instead of hand-written batch stubs.
-- `scripts/build-bundle.ps1`: builds, validates, and stages one installer format (`nsis`, `dmg`); CI runs it on both Windows and macOS runners.
-- `rust-toolchain.toml`: pins the compiler. `Swatinem/rust-cache` hashes the rustc version into the environment portion of every cache key, which is also its restore-key fallback, so an unpinned `stable` made each six-week Rust release cold-start every job at once. `scripts/read-rust-toolchain.ps1` feeds `channel` to the workflows so the version lives in one place, and rejects anything that is not an exact version. `scripts/prune-rust-toolchains.ps1` then removes every other toolchain: rust-cache runs `rustup toolchain list` and hashes *every* installed toolchain, so leaving the runner image's own `stable` beside the pin keeps the key moving whenever the image moves. Both steps must run before the rust-cache step. Bump it on its own pull request; the run after a bump pays one cold build per shared key.
-- `.github/workflows/cache-prune.yml`: keeps the Actions cache store under GitHub's 10 GB per-repository cap by deleting superseded rust-cache generations. Each generation costs roughly 1.9 GB across the four shared keys, and eviction at the cap silently turns warm jobs cold.
-- `src-tauri/src/config_io.rs` and `backup.rs`: guarded configuration writes and rollback support.
-- `src-tauri/src/read_revision.rs`: how a process-wide cached read reaches every surface holding a copy of it. The Limits screen, its menu-bar popover, the limits monitor and the notch rail share one `limits_refresh` read per provider; the Pull requests screen, the CI monitor and the notch's pull-request cell share one `github` read. Whichever gets there first fetches, and the rest must not go on showing their own older copy: a `Revision` moves once per replacement so a consumer that caches the answer (the notch's `Poll::due`) re-reads at once, and `announce` emits `shared-read-changed` so the windows' queries refetch. Two rules keep that from feeding itself, and both are load-bearing: **announce a replacement, never a read** (a `Reading` says which, so the read a consumer makes in answer is served and announces nothing), and **answer an announcement unforced** (`force` belongs to a person pressing refresh; a forced answer would call the provider and announce again without end). Route a new shared read through this rather than adding a second freshness scheme, and note that a read which discards rather than replaces its cached value on failure (as `github` does) reports `Unchanged`, or every consumer stampedes the source it was just told it could not reach.
-- `src-tauri/src/item_install/`: selective install of skills/subagents from a GitHub marketplace (tarball fetch, manifest inspection, atomic placement, `~/.on-n-off/installed-items.json` provenance registry, upstream update checks). Never shells out to a provider CLI; write roots come from `AgentAdapter::item_roots`.
-- `src-tauri/src/usage/`: read-only transcript aggregation plus caches under `.on-n-off`. Prices come from LiteLLM's public table (`pricing.rs`), cached for a day; a scan that meets a priceable-looking model the table lacks lets the next scan re-fetch after an hour, the Usage refresh button re-fetches at once, and the summary cache key carries the table's fetch time so a new table never serves old costs.
-- `src-tauri/src/side_notch/` and `src-tauri/macos/SideNotch/`: opt-in macOS usage overlay. A bundled SwiftUI/AppKit helper owns one native panel on the explicitly selected display UUID; disconnected or mirrored selections hide instead of falling back. Rust owns settings (`~/.on-n-off/side-notch.json`: display, edge incl. top/bottom, size, always/on-hover, providers), provider reads, and the live-session reader (`side_notch/sessions.rs`: `~/.claude/sessions/*.json` and recent Codex rollouts, read-only). Bounded private pipes carry current-account number snapshots plus session rows and typed actions; no credentials or network listener. The helper draws the notch silhouette with one ring cell per provider plus an optional pull-request cell (the Pull requests screen's lists, chosen per settings; rows open on GitHub and copy a linked "review please" line to the pasteboard from the helper, never writing to GitHub) and a hover/pinned popover; `NotchCore` holds the pure layout (`notchRailFrame`, `notchPillFrame`, `railCellFrames`, `popoverFrame`) mirrored by `side_notch/model.rs`. `native_build.rs` builds the helper on macOS only, and `tauri.macos.conf.json` bundles it. The main settings card stays in `ui/src/features/notch/`. Native checks use `xcrun swift run --package-path src-tauri/macos/SideNotch NotchCoreChecks` plus `bun scripts/check-native-notch.mjs` after a Rust build; no Xcode XCTest dependency.
-- `src-tauri/src/limits/`: the Limits screen's live subscription rate limits. Claude reads its stored access token (macOS Keychain via `/usr/bin/security`, else `~/.claude/.credentials.json`), verifies `/api/oauth/profile`, then reads `/api/oauth/usage`; it never reads/redeems the refresh token or writes Claude auth. Codex launches the official `codex app-server`, calls `account/read` plus `account/rateLimits/read`, and lets Codex own login and refresh; on-n-off reads only `account_id` metadata from the app-server's confirmed home. The only on-n-off writes are per-account number snapshots under `~/.on-n-off/limits/`, so signed-out accounts stay visible. Provider problems come back as a `status` on the DTO, not an error. `limits_refresh.rs` is the shared cache in front of it, keyed per provider and announced through `read_revision`.
-- `src-tauri/src/github/` and `github_monitor.rs`: the Pull requests screen. Not a provider and not behind `AgentAdapter`. Auth is borrowed from the GitHub CLI (`gh auth token`, memoised per app run, re-read once on 401, never persisted); one GraphQL request per refresh reads authored (scoped), review-requested, and assigned PRs with their CI rollups and merge state (`mergeable` for conflicts, `mergeStateStatus` for ready/blocked/behind, `mergeQueueEntry`, `autoMergeRequest`; scalars and single objects, so the request cost stays ~2 points; snapshots written without them load with `Unknown`/`false` defaults); problems come back as a `status` + `hint` on the DTO backed by the last snapshot under `~/.on-n-off/github/`. The monitor (`github_monitor.rs`, built on the plumbing in `monitor.rs` shared with `limits_monitor.rs`) notifies on CI, review-decision, conflict and ready-to-merge transitions of the authored PRs the screen lists — the scoped first page of fifty — and is opt-in; it polls while the window is hidden. The read is memoised process-wide and announced through `read_revision`, only when a fetch succeeds and replaces the memo. The merge fields are read once, in `src-tauri/src/github/merge.rs`: `classify` fills `mergeKind` on the DTO, the screen only maps kinds to badges, and the monitor's `Seen` record takes its unknown-aware facts from the same module. Never writes to GitHub.
-- `ui/src/dev/mockIpc.ts` and `scripts/ui-shots.mjs`: the UI screenshot harness. `?mock[=scenario]` on a dev build replaces Tauri's IPC with synthetic data (Pull requests scenarios in `ui/src/dev/githubFixtures.ts`, Limits accounts in `ui/src/dev/limitsFixtures.ts`; dead code in production builds), and `bun run ui:shots [scenes.json]` drives headless Chromium (Playwright, own Vite on :1425) through click/fill/press steps and writes retina PNGs to `.tmp/ui-shots/`. Design and accessibility work on a screen is judged from those captures (and, for WebKit fidelity, a `screencapture -l <window id>` of the running app), not from the markup.
-- `HANDOFF.md`: Windows and macOS runtime and smoke-test expectations.
-- `OS.md`: Windows vs macOS differences that affect PATH discovery, launchers, filesystem, WebView2, packaging. Read before touching `cli_locate.rs`, `process.rs`, scripts, or CI.
-- `PROVIDERS.md`: per-provider layout (home, CLI name and install path, plugin cache, skills, MCP file and toggle semantics, what is verified vs assumed). Update it together with the adapter it describes.
+**Frontend** — React 19, TypeScript, Vite, Tailwind, TanStack Router/Query/Charts.
 
-Keep provider-specific behavior behind `AgentAdapter`. Keep frontend calls behind `$lib/api`; do not invoke Tauri directly from feature components.
+- `ui/src/lib/api.ts` — the only place the UI calls Tauri.
+- `ui/src/features/` — one directory per screen: `agents`, `catalog`, `github`, `limits`, `notch`,
+  `scope`, `session`, `settings`, `shell`, `updater`, `usage`.
+- `ui/src/dev/mockIpc.ts` — `?mock[=scenario]` on a dev build swaps Tauri's IPC for synthetic
+  data. Dead code in production builds. Fixtures in `githubFixtures.ts`, `limitsFixtures.ts`.
 
-## Parallel worktree sessions
+**Backend** — `src-tauri/src/`.
 
-Reserve the primary checkout—the checkout where `.worktrees/` lives—for worktree creation, inspection, and integration. Do not implement task changes there. Each top-level task session owns one dedicated branch and one worktree under `.worktrees/`. Treat `git worktree list` as the source of truth; never edit another session's checkout.
+- `commands.rs` — the IPC boundary. `dto.rs` — the shapes that cross it.
+- `{claude,codex,antigravity,cursor}.rs` — provider adapters behind `AgentAdapter` (`adapter.rs`).
+- `limits/`, `github/`, `usage/`, `item_install/`, `side_notch/` — the feature subsystems.
+- `limits_refresh.rs`, `read_revision.rs` — shared cached reads and how surfaces hear about them.
+- `limits_monitor.rs`, `github_monitor.rs`, `monitor.rs` — background polling and notifications.
+- `cli_locate.rs`, `cli.rs`, `process.rs` — finding and running provider CLIs.
+- `config_io.rs`, `backup.rs` — guarded configuration writes and rollback.
+- `paths.rs` — agent homes and app data paths; `ON_N_OFF_HOME` redirects them for tests.
+- `cli_stub.rs` — test-only fake CLI builder (`.cmd` on Windows, `sh` script elsewhere).
+- `macos/SideNotch/` — the bundled SwiftUI notch helper, built by `native_build.rs`.
 
-A worktree isolates working files and its index, but all worktrees share the repository's object database, refs, remotes, and stash. Do not use `git stash` as cross-session storage, delete or rewrite another session's branch, or run repository-wide cleanup without confirming ownership. Worktrees also do not isolate ports, running processes, dependency caches, or the real agent homes described below. Coordinate dev-server and app runs across sessions, and keep runtime QA read-only unless the user authorizes configuration changes.
+**Build and CI** — `scripts/`, `.github/workflows/`.
 
-New branches use `<change-type>/<task-slug>`, and their folders use `.worktrees/<change-type>-<task-slug>`. Allowed change types are `feat`, `fix`, `perf`, `audit`, `refactor`, `docs`, `test`, `chore`, and `release`. Use a lowercase hyphenated task slug. Existing worktrees with older names can remain as-is.
+- `build-bundle.ps1` — builds, validates and stages one installer format (`nsis`, `dmg`).
+- `read-rust-toolchain.ps1`, `prune-rust-toolchains.ps1` — see "Toolchain pinning" below.
+- `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
 
-Create a task worktree from the primary checkout in PowerShell. The default base is the latest `origin/main`; use another base only when the task explicitly depends on it.
+## Toolchain pinning
 
-```powershell
-git worktree list
-git fetch origin main
+`rust-toolchain.toml` pins the compiler, and this is load-bearing for CI cost rather than for
+correctness.
 
-$WorktreeType = "perf"
-$WorktreeTask = "startup-review"
-$WorktreeBranch = "$WorktreeType/$WorktreeTask"
-$WorktreePath = Join-Path (git rev-parse --show-toplevel) ".worktrees/$WorktreeType-$WorktreeTask"
-$WorktreeBase = "origin/main"
+`Swatinem/rust-cache` hashes the rustc version into the environment portion of every cache key —
+which is also its restore-key fallback — so an unpinned `stable` cold-starts every job at once on
+each six-week Rust release. It also hashes *every* installed toolchain from `rustup toolchain
+list`, so the runner image's own `stable` sitting beside the pin keeps the key moving whenever the
+image moves.
 
-git worktree add --no-track -b $WorktreeBranch $WorktreePath $WorktreeBase
-git -C $WorktreePath rev-parse --show-toplevel
-git -C $WorktreePath branch --show-current
-git -C $WorktreePath status --short --branch
-```
+Hence two steps, both of which must run **before** the rust-cache step:
+`read-rust-toolchain.ps1` feeds `channel` to the workflows so the version lives in one place and
+rejects anything that is not an exact version, and `prune-rust-toolchains.ps1` removes every other
+toolchain. Bump the pin on its own pull request; the run after a bump pays one cold build per
+shared key.
 
-If the path or branch already exists, stop and inspect `git worktree list --porcelain`, `git branch --list $WorktreeBranch`, and the existing directory. Do not delete, prune, reuse, or repair a conflicting worktree until its ownership is confirmed. Resume an existing branch in a new worktree only after the user confirms that it belongs to the same task.
+`.github/workflows/cache-prune.yml` keeps the Actions cache under GitHub's 10 GB per-repository
+cap by deleting superseded rust-cache generations. Each generation costs roughly 1.9 GB across the
+four shared keys, and eviction at the cap silently turns warm jobs cold.
 
-After creation, use the worktree's absolute path as the working directory for every command in that session. Before the first edit and after any resume or handoff, confirm `git rev-parse --show-toplevel`, `git branch --show-current`, and `git status --short --branch`. Run `bun install` inside that worktree when frontend tooling is needed. Do not switch branches inside a task worktree, edit the primary checkout or a sibling worktree, or silently merge or rebase onto a new base.
+## Judging visuals
 
-At handoff, report the absolute worktree path, branch, HEAD commit, clean or dirty status, verification commands and results, and push or pull-request state. Integrate from a clean primary checkout, and update `main` with fast-forward-only operations.
+`bun run ui:shots [scenes.json]` drives headless Chromium (Playwright, its own Vite on `:1425`)
+through click/fill/press steps against a `?mock` build and writes retina PNGs to `.tmp/ui-shots/`.
 
-Clean up only after integration is confirmed and the user explicitly requests it. Stop processes that use the worktree, require a clean status, and remove the worktree without `--force`:
+Design and accessibility work on a screen is judged from those captures — and, for WebKit
+fidelity, from a `screencapture -l <window id>` of the running app — never from reading the
+markup. The notch helper is invisible to ordinary screenshots; use its `--render` path and
+`scripts/check-native-notch.mjs` instead.
 
-```powershell
-git -C $WorktreePath status --short --branch
-git worktree remove $WorktreePath
-```
+## Constraints
 
-Deleting the local branch is a separate action. Use `git branch -d $WorktreeBranch` only when the user also requests branch cleanup and Git confirms it is merged. Never use `git branch -D` implicitly.
+Ordinary good practice is assumed. These are the rules specific to this repo, or the ones that
+have already cost someone a day.
 
-## Data safety
+**Data safety.** Agent homes — `~/.claude`, `.codex`, `.gemini`, `.cursor`, `.agents` — are real
+user data.
 
-- Agent homes are real user data: `%USERPROFILE%\.claude` / `~/.claude`, `.codex`, `.gemini`, `.cursor`, and `.agents`.
-- Tests must use temporary fixtures or set `ON_N_OFF_HOME` to a disposable directory. Never run a mutating test against the real user home.
-- Preserve `ConfigIo` backup, atomic replacement, validation, and rollback behavior for provider configuration edits.
-- CLI installs and uninstalls can have side effects outside on-n-off's rollback boundary. State this clearly when testing them and prefer throwaway inputs.
-- Runtime QA is read-only unless the user explicitly authorizes a configuration mutation.
-- Do not weaken validation or repair malformed fixtures merely to make a test pass.
+- Tests use temporary fixtures or point `ON_N_OFF_HOME` at a disposable directory. Never run a
+  mutating test against the real home.
+- Every provider-config write goes through `ConfigIo`: backup → atomic replace → validate →
+  rollback. Preserve all four.
+- Never weaken validation, or repair a malformed fixture, to make a test pass.
+- `limits/` never reads or redeems Claude's refresh token and never writes Claude auth; `github/`
+  never writes to GitHub; `usage/` and `side_notch/` are read-only. These are promises to the
+  user, not implementation details — do not add a write path silently.
+- Runtime QA is read-only unless the user authorizes a mutation. CLI installs and uninstalls have
+  effects outside on-n-off's rollback boundary: say so, and use throwaway inputs.
 
-## Performance rules
+**Route through these rather than reinventing them.**
 
-- Tauri command handlers must not perform filesystem, process, transcript, or network work on the UI thread. Make the command `async`, clone owned state before `await`, and run blocking adapter work with `tauri::async_runtime::spawn_blocking`.
-- Do not hold `tauri::State` borrows or mutex guards across `await`.
-- Startup loads the selected provider first. Other providers may load afterward in the background, using the existing per-provider in-flight de-duplication.
-- Do not start Overview transcript aggregation before the initial selected provider finishes.
-- Drain child stdout and stderr concurrently from process start; waiting for exit before reading pipes can deadlock.
-- Keep the Vite entry chunk below its 500 kB warning threshold. Lazy-load large route/visualization dependencies and use appropriately sized UI assets.
-- Do not hide a bundle regression by increasing the warning threshold.
+- Provider differences: `AgentAdapter`. Update `PROVIDERS.md` in the same change.
+- UI → Rust: `$lib/api`. Feature components never invoke Tauri directly.
+- CLI lookup and spawning: `cli_locate.rs` and `AgentCli` — a GUI app does not inherit a
+  terminal's `PATH`.
+- Child processes: `process.rs`. Drain stdout and stderr concurrently from the start, or a full
+  pipe deadlocks.
+- Fake CLIs in tests: `cli_stub.rs`.
+- A read shared by more than one surface: `read_revision.rs`. Announce a replacement, never a
+  read, and answer an announcement unforced — either one broken makes it a loop
+  ([why](docs/architecture/shared-reads.md)).
+- `item_install/` never shells out to a provider CLI.
 
-## Implementation conventions
+**Performance.**
 
-- Preserve Tauri command names and serialized request/response shapes unless a migration is explicitly approved.
-- Prefer small typed helpers and existing adapter/config abstractions over provider-specific branches in commands or components.
-- Keep Rust free of unsafe code. Default Clippy with `-D warnings` is the enforced lint gate; pedantic/nursery findings are advisory and should be applied deliberately.
-- Keep the code and its tests platform-neutral: no hard-coded drive letters or `\` separators, gate OS-specific behavior with `cfg!(windows)` / `#[cfg(unix)]`, and remember tests run on both Windows and macOS CI runners.
-- Add a regression test before changing behavior. A new test must fail for the intended reason before the fix is written.
-- Preserve unrelated working-tree changes. Do not reset, overwrite, or broadly stage user work.
+- No filesystem, process, transcript or network work on the UI thread: make the command `async`,
+  clone owned state before `await`, and `spawn_blocking` the blocking adapter work. Never hold a
+  `tauri::State` borrow or a mutex guard across an `await`, and never emit an event or make a
+  seconds-long call while holding a lock.
+- Startup loads the selected provider first; Overview aggregation waits for it.
+- The Vite entry chunk stays under its 500 kB warning. Never raise the threshold to hide a
+  regression.
+
+**Both CI legs run everything.**
+
+- No hard-coded drive letters or `\` separators, in code or tests.
+- Gate an item to exactly the platforms that use it. A `cfg(any(target_os = "macos", test))` on an
+  item no test calls compiles unused on the Windows *test* target and fails `-D warnings` on a leg
+  you cannot reproduce locally.
+- Preserve Tauri command names and serialized shapes unless a migration is approved. Snapshots
+  written by older versions must still load: give new fields defaults.
+- On restricted Windows sandboxes Vite/esbuild can fail with `spawn EPERM`. Record it and rerun
+  the same command elsewhere; do not change code for a sandbox fault.
+
+**Tests.**
+
+- Write the regression test first. It must fail for the intended reason before the fix exists.
+- Rust unit tests live beside their module, not inside it: `foo.rs` ends with
+  `#[cfg(test)] mod tests;` and the tests live in `foo/tests.rs` (or `foo/tests/` with a
+  `mod.rs`). `updater_build.rs` is also included by `build.rs` via `#[path = …]`, which moves the
+  directory a plain `mod tests;` resolves against, so it pins
+  `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
+- Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
+  `http::{serve_once, serve_once_capturing, refused_url}`, `plugin_meta::with_fetch_text`,
+  `usage::pricing::with_test_fetch`, `usage::scan_cache` counters, `github/fixtures.rs`,
+  `limits/claude_desktop::history_path_for_home`. Single-consumer helpers stay in that module's
+  own tests file; adapter test constructors stay in the adapter files, because `item_install`
+  tests use them across domains.
+- Keep every test file under 1000 lines. Frontend tests stay co-located as `*.test.ts(x)`.
 
 ## Commands
 
-Run from the repository root, in PowerShell on Windows or bash/zsh on macOS:
+Run from the repository root, in PowerShell on Windows or bash/zsh on macOS.
 
 ```sh
 bun install
@@ -114,31 +163,55 @@ cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 
 bun run tauri build                        # Windows: NSIS
 bun run tauri build --bundles app,dmg      # macOS: .app + .dmg
+```
 
-./scripts/check-release-version.test.ps1   # PowerShell 7 on either platform
+macOS native notch checks, after a Rust build:
+
+```sh
+xcrun swift run --package-path src-tauri/macos/SideNotch NotchCoreChecks
+bun scripts/check-native-notch.mjs
+```
+
+PowerShell 7 on either platform; if `pwsh` is not installed locally, rely on CI:
+
+```sh
+./scripts/check-release-version.test.ps1
 ./scripts/build-bundle.test.ps1
 ./scripts/new-update-feed.test.ps1
 ./scripts/read-rust-toolchain.test.ps1
 ./scripts/prune-rust-toolchains.test.ps1
 ```
 
-The `scripts/*.ps1` helpers and their tests are path-neutral and run under PowerShell 7 on both CI legs; if `pwsh` is not installed locally, rely on CI for them.
+## Parallel worktree sessions
 
-On restricted Windows sandboxes, Vite/esbuild can fail with `spawn EPERM`. Record that failure, then rerun the exact command in an approved context; do not change code to accommodate the sandbox fault.
+Parallel work happens in worktrees under `.worktrees/`, cut from the latest `origin/main` unless
+the task depends on another base. Branches are `<change-type>/<task-slug>` — `feat`, `fix`,
+`perf`, `audit`, `refactor`, `docs`, `test`, `chore`, `release` — and the folder mirrors the
+branch as `.worktrees/<change-type>-<task-slug>`. The primary checkout, the one where
+`.worktrees/` lives, is for creating, inspecting and integrating them, not for implementing
+changes. Integrate from it with fast-forward-only updates to `main`.
 
-## Test layout
-
-- Rust unit tests live beside their module, not inside it: `foo.rs` ends with `#[cfg(test)] mod tests;` and the tests live in `foo/tests.rs` (a multi-file suite uses a `foo/tests/` directory with `mod.rs`). The module path (`crate::foo::tests`) is unchanged by the move, so `use super::*` and private-item access keep working.
-- Domain-shared fixtures are `#[cfg(test)]` items next to the domain that owns them: `paths::scratch_dir` (repo-wide temp homes), `http::{serve_once, serve_once_capturing, refused_url}` (loopback HTTP for limits and github), `plugin_meta::with_fetch_text`, `usage::pricing::with_test_fetch`, `usage::scan_cache` decode counters, `github/fixtures.rs`, `limits/claude_desktop::history_path_for_home`. Single-consumer helpers live inside that module's tests file. Adapter test constructors (`ClaudeAdapter::at`, `CodexAdapter::at_with_cli`, …) stay in the adapter files because `item_install` tests use them across domains.
-- `updater_build.rs` is also included by `build.rs` via `#[path = "src/updater_build.rs"]`, which changes the directory a plain `mod tests;` would resolve against, so its test module pins `#[path = "updater_build/tests.rs"]`. Do not "simplify" that away.
-- Keep every test file under 1000 lines; split by concern under `foo/tests/` when a suite grows.
-- Frontend tests stay co-located as `*.test.ts(x)` beside their source (Vitest, config at the repo root); mock-IPC fixtures live under `ui/src/dev/`.
+Two things worktrees do **not** isolate, both of which have caused trouble: the repository's
+object database, refs, remotes and stash are shared — so `git stash` is not cross-session storage
+and another session's branch is not yours to rewrite; and ports, running processes, dependency
+caches and the real agent homes are shared with every other session on the machine — so coordinate
+dev-server and app runs, and confirm ownership before touching a worktree or branch you did not
+create.
 
 ## Completion gate
 
 - Run the full frontend and Rust matrices above after relevant changes.
-- Boot the actual app for changes affecting IPC, startup, provider scanning, routing, or visuals. On macOS, also launch the built `.app` bundle with `open` (Finder-like minimal `PATH`) when CLI resolution changes. For visual or accessibility changes, run `bun run ui:shots` and look at the captures before and after.
-- Smoke Overview, Plugins, Skills, MCP, Usage, Limits, Pull requests, Agent Config, Settings, search/filtering, and every provider switch without mutating live configuration. Limits makes outbound HTTPS calls, starts `codex app-server`, and, on macOS, triggers a one-time Keychain "allow" prompt for `/usr/bin/security`. Pull requests runs `gh auth token` once and calls `api.github.com` on every refresh.
-- Verify the window remains interactive while startup work is still running.
-- Stop all dev-server/app/debugger processes when QA finishes.
-- Report exact commands, failures, and unresolved gates. Do not claim completion from stale or partial evidence.
+- Boot the actual app for changes affecting IPC, startup, provider scanning, routing or visuals.
+  On macOS, when CLI resolution changes, also launch the built `.app` with `open` — a Finder-like
+  minimal `PATH` is the case that breaks.
+- For visual or accessibility changes, run `bun run ui:shots` and look at the captures, before and
+  after.
+- Smoke Overview, Plugins, Skills, MCP, Usage, Limits, Pull requests, Agent Config, Settings,
+  search/filtering, and every provider switch — without mutating live configuration. Note that
+  Limits makes outbound HTTPS calls, starts `codex app-server`, and on macOS triggers a one-time
+  Keychain prompt for `/usr/bin/security`; Pull requests runs `gh auth token` once and calls
+  `api.github.com` on every refresh.
+- Verify the window stays interactive while startup work is still running.
+- Stop every dev-server, app and debugger process when QA finishes.
+- Report exact commands, failures and unresolved gates. Never claim completion from stale or
+  partial evidence.
