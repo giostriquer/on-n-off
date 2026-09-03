@@ -220,29 +220,24 @@ fn claude_current<P: Fn() -> KeychainProbe>(
         .as_ref()
         .and_then(|identity| identity.organization_id.clone());
     let read_credential = || read_claude_credential(home, keychain(), now_ms);
-    let attempt = |lookup| {
-        claude_limits(
-            lookup,
-            selected_identity.clone(),
-            claude_profile_url,
-            claude_url,
-        )
-    };
-    let (lookup, source) = memo.lookup(force, &account.id, now_ms, &read_credential);
+    let attempt =
+        |lookup| claude_limits(lookup, &selected_identity, claude_profile_url, claude_url);
+    let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);
     let mut loaded = attempt(lookup);
     // Claude Code rotates the access token before the expiry it records, which leaves the memo
     // holding one the endpoint has already stopped accepting. That rejection says nothing about
     // the login, so read the stored login again and try once more before reporting one —
     // otherwise a signed-in user is told to sign in again until the next poll.
     //
-    // Only a re-read that produced a login is worth a second attempt. A miss describes the store,
-    // not the rejection already in hand, and adopting it would trade an accurate "rejected" for a
-    // louder falsehood: `Missing` reports "Sign in with `claude`" at a user who is signed in, and
-    // `Unreadable` reports a Keychain failure when the prompt the retry raised went unanswered.
+    // A re-read that hands back no login leaves the rejection standing, because the rejection is
+    // the accurate answer and the alternatives are louder falsehoods: `Missing` would report
+    // "Sign in with `claude`" at a user who is signed in, and `Unreadable` a Keychain failure
+    // when the prompt this retry raised went unanswered. `Expired` is the one where the discarded
+    // message would have been gentler ("send a prompt to renew it"), but it describes a login
+    // this attempt never sent; reporting what the endpoint actually refused is the honest answer.
     if source == LoginSource::Memo && loaded.failure == Some(LoadFailureKind::Unauthorized) {
-        let fresh = memo.reread(&account.id, now_ms, &read_credential);
-        if matches!(fresh, CredentialLookup::Found(_)) {
-            loaded = attempt(fresh);
+        if let Some(fresh) = memo.refreshed(&account.id, now_ms, read_credential) {
+            loaded = attempt(CredentialLookup::Found(fresh));
         }
     }
     if loaded.dto.status == LimitsStatus::Unauthenticated
@@ -267,7 +262,7 @@ fn claude_current<P: Fn() -> KeychainProbe>(
 /// label comes from the login itself (`subscriptionType`).
 fn claude_limits(
     lookup: CredentialLookup<ClaudeCredential>,
-    selected_identity: Option<ClaudeIdentity>,
+    selected_identity: &Option<ClaudeIdentity>,
     profile_url: &str,
     usage_url: &str,
 ) -> ResolveOutcome {

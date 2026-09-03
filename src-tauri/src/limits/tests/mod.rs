@@ -174,7 +174,9 @@ struct Rig {
     home: std::path::PathBuf,
     memo: ClaudeLoginMemo,
     probes: Cell<u32>,
-    keychain_json: Option<String>,
+    /// The whole probe outcome, not just its payload, so a denied or unanswered
+    /// Keychain prompt is reachable from a test rather than only in the wild.
+    keychain: KeychainProbe,
 }
 
 impl Rig {
@@ -183,7 +185,7 @@ impl Rig {
             home: scratch_dir(prefix),
             memo: ClaudeLoginMemo::new(),
             probes: Cell::new(0),
-            keychain_json: None,
+            keychain: Ok(None),
         }
     }
 
@@ -202,7 +204,7 @@ impl Rig {
                 memo: &self.memo,
                 keychain: || {
                     self.probes.set(self.probes.get() + 1);
-                    Ok(self.keychain_json.clone())
+                    self.keychain.clone()
                 },
                 claude_profile_url,
                 claude_url,
@@ -244,7 +246,7 @@ fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
     let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
-    let dto = claude_limits(lookup, None, &profile_url, &usage_url).dto;
+    let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
     let profile_head = profile_request.join().unwrap();
     let usage_head = usage_request.join().unwrap();
     assert!(
@@ -282,7 +284,7 @@ fn claude_rejects_usage_when_the_authenticated_profile_is_a_different_account() 
     let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
     let dto = claude_limits(
         lookup,
-        Some(ClaudeIdentity {
+        &Some(ClaudeIdentity {
             account: account("uuid-1", "me@example.com"),
             organization_id: Some("org-1".to_string()),
         }),
@@ -316,7 +318,7 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
     let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
     let dto = claude_limits(
         lookup,
-        Some(ClaudeIdentity {
+        &Some(ClaudeIdentity {
             account: account("uuid-1", "me@example.com"),
             organization_id: Some("org-1".to_string()),
         }),
@@ -334,7 +336,7 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
 #[test]
 fn claude_account_mismatch_evicts_the_memoized_token_pairing() {
     let mut rig = Rig::new("limits-claude-mismatch-memo");
-    rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-old"));
+    rig.keychain = Ok(Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-old")));
     write(
         &rig.home,
         ".claude.json",
@@ -348,7 +350,7 @@ fn claude_account_mismatch_evicts_the_memoized_token_pairing() {
     assert!(profile_request.join().unwrap().contains("Bearer token-old"));
     assert_eq!(first[0].status, LimitsStatus::Failed);
 
-    rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-new"));
+    rig.keychain = Ok(Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-new")));
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
     let second = rig.read(AgentId::Claude, false, &profile_url, &usage_url);
@@ -368,7 +370,9 @@ fn claude_account_mismatch_evicts_the_memoized_token_pairing() {
 #[test]
 fn claude_read_prefers_the_keychain_login_and_uses_the_authenticated_profile_identity() {
     let mut rig = Rig::new("limits-claude");
-    rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "keychain-token"));
+    rig.keychain = Ok(Some(
+        CLAUDE_CREDENTIALS.replace("kc-token", "keychain-token"),
+    ));
     write(&rig.home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
@@ -411,7 +415,7 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
 #[test]
 fn claude_read_memoises_the_keychain_until_forced_and_forgets_it_when_rejected() {
     let mut rig = Rig::new("limits-claude");
-    rig.keychain_json = Some(CLAUDE_CREDENTIALS.to_string());
+    rig.keychain = Ok(Some(CLAUDE_CREDENTIALS.to_string()));
     write(
         &rig.home,
         ".claude.json",
@@ -478,7 +482,9 @@ fn a_rotated_token_is_retried_from_the_keychain_before_blaming_the_login() {
     // one the memo is holding. The rejection says nothing about the login itself, so the read
     // re-reads the Keychain and tries once more rather than telling the user to sign in again.
     let mut rig = Rig::new("limits-claude-rotated");
-    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.replace("kc-token", "old-token"));
+    rig.keychain = Ok(Some(
+        CLAUDE_RENEWABLE_CREDENTIALS.replace("kc-token", "old-token"),
+    ));
     write(
         &rig.home,
         ".claude.json",
@@ -493,7 +499,9 @@ fn a_rotated_token_is_retried_from_the_keychain_before_blaming_the_login() {
     assert_eq!(rig.probes.get(), 1, "the login is memoised for the app run");
 
     // Claude Code has since written a new token; the memoised one now gets a 401.
-    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.replace("kc-token", "new-token"));
+    rig.keychain = Ok(Some(
+        CLAUDE_RENEWABLE_CREDENTIALS.replace("kc-token", "new-token"),
+    ));
     let (profile_url, profile_requests) = serve_sequence(&[
         ("401 Unauthorized", &[], "{}"),
         ("200 OK", &[], CLAUDE_PROFILE),
@@ -532,7 +540,7 @@ fn a_freshly_read_login_the_endpoint_rejects_is_not_retried() {
     // the same question again would only cost a second Keychain probe, which is the prompt the
     // memo exists to avoid.
     let mut rig = Rig::new("limits-claude-fresh-rejected");
-    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string());
+    rig.keychain = Ok(Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string()));
     write(
         &rig.home,
         ".claude.json",
@@ -562,7 +570,7 @@ fn a_re_read_that_finds_no_login_keeps_the_rejection_it_already_has() {
     // already in hand is the accurate answer: reporting the miss instead would tell a signed-in
     // user to sign in, which is a louder falsehood than the one this retry removes.
     let mut rig = Rig::new("limits-claude-reread-miss");
-    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string());
+    rig.keychain = Ok(Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string()));
     write(
         &rig.home,
         ".claude.json",
@@ -576,7 +584,7 @@ fn a_re_read_that_finds_no_login_keeps_the_rejection_it_already_has() {
     usage_request.join().unwrap();
 
     // The memoised token is refused, and by then the stored login has gone.
-    rig.keychain_json = None;
+    rig.keychain = Ok(None);
     let (profile_url, profile_requests) = serve_sequence(&[("401 Unauthorized", &[], "{}")]);
     let rejected = rig.read(AgentId::Claude, false, &profile_url, &refused_url());
     let profiles = profile_requests.join().unwrap();
@@ -599,11 +607,49 @@ fn a_re_read_that_finds_no_login_keeps_the_rejection_it_already_has() {
 }
 
 #[test]
+fn a_re_read_the_keychain_refuses_keeps_the_rejection_it_already_has() {
+    // The prompt this retry raises can go unanswered — it is raised by a background poll, at a
+    // user who chose "Allow" rather than "Always Allow" — and the read then fails on its deadline.
+    // That failure describes the probe, not the login, so it must not replace the rejection.
+    let mut rig = Rig::new("limits-claude-reread-refused");
+    rig.keychain = Ok(Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string()));
+    write(
+        &rig.home,
+        ".claude.json",
+        &claude_account_file("uuid-1", "me@example.com"),
+    );
+
+    let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
+    let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
+    rig.read(AgentId::Claude, false, &profile_url, &usage_url);
+    profile_request.join().unwrap();
+    usage_request.join().unwrap();
+
+    rig.keychain = Err("Keychain prompt was not answered in time".to_string());
+    let (profile_url, profile_requests) = serve_sequence(&[("401 Unauthorized", &[], "{}")]);
+    let rejected = rig.read(AgentId::Claude, false, &profile_url, &refused_url());
+    let profiles = profile_requests.join().unwrap();
+
+    assert_eq!(profiles.len(), 1, "there was no newer login to try");
+    assert_eq!(rejected[0].status, LimitsStatus::Unauthenticated);
+    let message = rejected[0].message.as_deref().unwrap_or_default();
+    assert!(
+        message.contains("was rejected"),
+        "the rejection stands: {message}"
+    );
+    assert!(
+        !message.contains("Could not read the stored login"),
+        "the probe failed, not the login; the user is told what the endpoint actually said: \
+         {message}"
+    );
+}
+
+#[test]
 fn an_explicit_refresh_that_is_rejected_is_not_retried() {
     // `force` already read the stored login, so the rejection is of the freshest credential there
     // is. Retrying would ask the endpoint the same question over a second Keychain probe.
     let mut rig = Rig::new("limits-claude-forced-rejected");
-    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string());
+    rig.keychain = Ok(Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string()));
     write(
         &rig.home,
         ".claude.json",
@@ -633,7 +679,7 @@ fn an_explicit_refresh_that_is_rejected_is_not_retried() {
 #[test]
 fn switching_the_claude_account_never_reuses_the_previous_accounts_token() {
     let mut rig = Rig::new("limits-claude");
-    rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-a"));
+    rig.keychain = Ok(Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-a")));
     write(
         &rig.home,
         ".claude.json",
@@ -651,7 +697,7 @@ fn switching_the_claude_account_never_reuses_the_previous_accounts_token() {
     );
 
     // The user runs `claude` and signs in as B: Claude Code rewrites both stores.
-    rig.keychain_json = Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-b"));
+    rig.keychain = Ok(Some(CLAUDE_CREDENTIALS.replace("kc-token", "token-b")));
     write(
         &rig.home,
         ".claude.json",
