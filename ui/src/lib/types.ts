@@ -212,3 +212,16 @@ export type ItemStatus = {
 };
 
 export type UpdateItemMode = "overwrite" | "dismiss";
+
+/**
+ * A read the backend caches once for every surface that wants it (see `read_revision.rs`). The
+ * screens, the menu-bar popovers, the notch and the monitors share these, so any of them can be
+ * the one that fetches; the announcement is how the rest find out.
+ */
+export type SharedReadSource = "limits:claude" | "limits:codex" | "github:prs";
+
+export type SharedReadChanged = {
+  source: SharedReadSource;
+  /** Moves on every replacement; a repeat of one already seen is not announced. */
+  revision: number;
+};

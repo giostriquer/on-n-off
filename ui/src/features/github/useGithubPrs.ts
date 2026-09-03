@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
 import * as api from "$lib/api";
+import { useSharedRead } from "$lib/useSharedRead";
 import type { GithubPrs } from "$lib/githubTypes";
 
 /** Focus-driven refetches within this window are answered by the backend's own memory anyway. */
@@ -24,7 +25,9 @@ export function githubQueryOptions(pollSeconds: number, read: () => Promise<Gith
 
 /**
  * Only `refresh()` (the button) sets `force`, which makes the backend skip its in-memory result;
- * interval and focus refetches never do, so they share one request with the CI monitor.
+ * interval and focus refetches never do, so they share one request with the CI monitor. That
+ * shared result is also read by the notch's pull-request cell, so any of the three may be the
+ * one that fetches; `useSharedRead` is how this query hears about it.
  */
 export function useGithubPrs(pollSeconds: number) {
   const forceRef = useRef(false);
@@ -35,6 +38,7 @@ export function useGithubPrs(pollSeconds: number) {
       return api.readGithubPrs(force);
     }),
   );
+  useSharedRead("github:prs", ["github", "prs"]);
   function refresh() {
     forceRef.current = true;
     void query.refetch();

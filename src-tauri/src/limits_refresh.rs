@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
+use crate::read_revision::{self, Revision, Source};
 
 const MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(60 * 60);
 
@@ -16,8 +17,25 @@ struct CachedRead {
     consecutive_failures: u32,
 }
 
-static CLAUDE_CACHE: Mutex<Option<CachedRead>> = Mutex::new(None);
-static CODEX_CACHE: Mutex<Option<CachedRead>> = Mutex::new(None);
+/// One provider's shared read, with the [`Revision`] its consumers watch to notice a refresh
+/// made through another surface. The revision is deliberately outside the mutex: a read holds
+/// that lock for the whole provider call, and asking "is there anything newer?" must never block.
+struct Cache {
+    read: Mutex<Option<CachedRead>>,
+    revision: Revision,
+}
+
+impl Cache {
+    const fn new() -> Self {
+        Self {
+            read: Mutex::new(None),
+            revision: Revision::new(),
+        }
+    }
+}
+
+static CLAUDE_CACHE: Cache = Cache::new();
+static CODEX_CACHE: Cache = Cache::new();
 static POLL_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 pub fn set_poll_minutes(minutes: u16) {
@@ -38,13 +56,33 @@ pub fn poll_interval() -> Duration {
 /// One process-wide provider read per configured interval. Every automatic consumer shares this
 /// cache; a user-requested refresh bypasses it and replaces the cached observation.
 pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
+    read_limits_revisioned(agent, force).0
+}
+
+/// `read_limits` plus the shared cache's revision the entries were taken at, for a consumer that
+/// caches the answer itself and needs to notice a refresh made through another consumer.
+pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
     let Some(cache) = cache_for(agent) else {
-        return crate::limits::read_limits(agent, force);
+        return (crate::limits::read_limits(agent, force), 0);
     };
     let interval = poll_interval();
-    read_through_cache(cache, interval, force, |force| {
+    let (entries, revision) = read_through_cache(cache, interval, force, |force| {
         crate::limits::read_limits(agent, force)
-    })
+    });
+    // Outside the lock: the windows learn about a replaced read without a provider call being
+    // held up by the announcement, and without the announcement being made under a read lock.
+    if let Some(source) = Source::limits(agent) {
+        read_revision::announce(source, revision);
+    }
+    (entries, revision)
+}
+
+/// The shared cache's current revision for `agent`, `0` for a provider that is not cached. Never
+/// blocks: a caller polls this to decide whether a cheap cache-served read is worth making. Only
+/// the native notch keeps its own copy of a read, so only macOS asks.
+#[cfg(any(target_os = "macos", test))]
+pub fn revision(agent: AgentId) -> u64 {
+    cache_for(agent).map_or(0, |cache| cache.revision.current())
 }
 
 pub fn forget_snapshot(agent: AgentId, account_id: &str) -> Result<(), String> {
@@ -56,7 +94,7 @@ pub fn forget_snapshot(agent: AgentId, account_id: &str) -> Result<(), String> {
     })
 }
 
-fn cache_for(agent: AgentId) -> Option<&'static Mutex<Option<CachedRead>>> {
+fn cache_for(agent: AgentId) -> Option<&'static Cache> {
     match agent {
         AgentId::Claude => Some(&CLAUDE_CACHE),
         AgentId::Codex => Some(&CODEX_CACHE),
@@ -65,15 +103,16 @@ fn cache_for(agent: AgentId) -> Option<&'static Mutex<Option<CachedRead>>> {
 }
 
 fn read_through_cache<F>(
-    cache: &Mutex<Option<CachedRead>>,
+    cache: &Cache,
     interval: Duration,
     force: bool,
     read: F,
-) -> Vec<ProviderLimitsDto>
+) -> (Vec<ProviderLimitsDto>, u64)
 where
     F: FnOnce(bool) -> Vec<ProviderLimitsDto>,
 {
     let mut cached = cache
+        .read
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let now = Instant::now();
@@ -85,7 +124,7 @@ where
             entry.consecutive_failures,
             force,
         ) {
-            return entry.entries.clone();
+            return (entry.entries.clone(), cache.revision.current());
         }
     }
     let previous_failures = cached
@@ -98,18 +137,15 @@ where
         entries: entries.clone(),
         consecutive_failures,
     });
-    entries
+    (entries, cache.revision.bump())
 }
 
-fn forget_through_cache<F>(
-    cache: &Mutex<Option<CachedRead>>,
-    account_id: &str,
-    forget: F,
-) -> Result<(), String>
+fn forget_through_cache<F>(cache: &Cache, account_id: &str, forget: F) -> Result<(), String>
 where
     F: FnOnce() -> Result<(), String>,
 {
     let mut cached = cache
+        .read
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     forget()?;
@@ -121,6 +157,7 @@ where
                     .as_ref()
                     .is_none_or(|account| account.id != account_id)
         });
+        cache.revision.bump();
     }
     Ok(())
 }
@@ -250,7 +287,7 @@ mod tests {
 
     #[test]
     fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
-        let cache = Arc::new(Mutex::new(None));
+        let cache = Arc::new(Cache::new());
         let calls = Arc::new(AtomicUsize::new(0));
         let start = Arc::new(Barrier::new(3));
         let workers: Vec<_> = (0..2)
@@ -265,14 +302,21 @@ mod tests {
                         thread::sleep(Duration::from_millis(25));
                         Vec::new()
                     })
+                    .1
                 })
             })
             .collect();
         start.wait();
-        for worker in workers {
-            worker.join().unwrap();
-        }
+        let seen: Vec<u64> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            seen,
+            [1, 1],
+            "the coalesced reader is served the same revision as the reader that fetched"
+        );
 
         read_through_cache(&cache, Duration::from_secs(300), true, |force| {
             assert!(force);
@@ -283,21 +327,73 @@ mod tests {
     }
 
     #[test]
+    fn a_replaced_cached_read_moves_the_revision_so_other_consumers_notice() {
+        let cache = Cache::new();
+        let interval = Duration::from_secs(5 * 60);
+
+        let (_, first) = read_through_cache(&cache, interval, false, |_| {
+            vec![snapshot("current", true, LimitsStatus::Failed)]
+        });
+        let (_, unchanged) = read_through_cache(&cache, interval, false, |_| {
+            unreachable!("the cached read is still fresh")
+        });
+        assert_eq!(
+            unchanged, first,
+            "a cache-served read leaves the revision where it was: nothing new to pick up"
+        );
+
+        let (refreshed, forced) = read_through_cache(&cache, interval, true, |force| {
+            assert!(force);
+            vec![snapshot("current", true, LimitsStatus::Ok)]
+        });
+        assert!(
+            forced > first,
+            "a user refresh replaced the cached read, so the revision moved"
+        );
+
+        let (served, seen) = read_through_cache(&cache, interval, false, |_| {
+            unreachable!("the refreshed read is fresh")
+        });
+        assert_eq!(seen, forced);
+        assert_eq!(
+            served, refreshed,
+            "the next automatic consumer is served the refresh without a provider call"
+        );
+        assert_eq!(
+            revision(AgentId::Cursor),
+            0,
+            "uncached providers never move"
+        );
+    }
+
+    #[test]
     fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_success() {
-        let cache = Mutex::new(Some(CachedRead {
+        let cache = Cache::new();
+        *cache.read.lock().unwrap() = Some(CachedRead {
             refreshed_at: Instant::now(),
             entries: vec![
                 snapshot("current", true, LimitsStatus::Ok),
                 snapshot("forgotten", false, LimitsStatus::Ok),
             ],
             consecutive_failures: 0,
-        }));
+        });
 
         forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
-        assert_eq!(cache.lock().unwrap().as_ref().unwrap().entries.len(), 1);
+        assert_eq!(
+            cache.read.lock().unwrap().as_ref().unwrap().entries.len(),
+            1
+        );
+        assert_eq!(
+            cache.revision.current(),
+            1,
+            "the cached entries changed, so a consumer holding its own copy re-reads"
+        );
 
         let result = forget_through_cache(&cache, "current", || Err("disk failed".into()));
         assert_eq!(result, Err("disk failed".into()));
-        assert_eq!(cache.lock().unwrap().as_ref().unwrap().entries.len(), 1);
+        assert_eq!(
+            cache.read.lock().unwrap().as_ref().unwrap().entries.len(),
+            1
+        );
     }
 }

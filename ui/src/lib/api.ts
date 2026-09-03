@@ -12,6 +12,7 @@ import type {
   MarketplaceInspect,
   ProjectDto,
   ProviderDiagnose,
+  SharedReadChanged,
   UpdateItemMode,
   UpdaterBuildInfo,
 } from "./types";
@@ -153,6 +154,16 @@ export function saveNotchSettings(settings: NotchSettings): Promise<NotchSnapsho
 
 export function onNotchChanged(handler: (change: NotchChanged) => void): Promise<UnlistenFn> {
   return listen<NotchChanged>("side-notch-changed", (event) => handler(event.payload));
+}
+
+/**
+ * Fires when a process-wide cached read has been replaced by whichever surface got there first,
+ * so the queries built on it can pick the newer answer up instead of waiting out their interval.
+ */
+export function onSharedReadChanged(
+  handler: (change: SharedReadChanged) => void,
+): Promise<UnlistenFn> {
+  return listen<SharedReadChanged>("shared-read-changed", (event) => handler(event.payload));
 }
 
 export function openLimitsWindow(): Promise<void> {

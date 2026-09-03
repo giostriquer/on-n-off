@@ -29,7 +29,7 @@ struct Changed {
     snapshot: NotchSnapshot,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeProvider {
     provider: AgentId,
@@ -173,11 +173,21 @@ const PROVIDER_COUNT: usize = RAIL_ORDER.len();
 const READ_SLOTS: usize = PROVIDER_COUNT + 2;
 
 enum Read {
-    Limits(usize, Option<NativeProvider>),
+    /// One provider's current-account quota entry, with the shared cache revision it was taken
+    /// at so the poll can tell a later refresh apart from its own read.
+    Limits {
+        index: usize,
+        revision: u64,
+        entry: Option<NativeProvider>,
+    },
     Sessions(Vec<Vec<LiveSession>>),
-    /// The screen's whole answer; the selected lists are projected when a message is built, so
-    /// a settings change shows at once instead of after the next poll.
-    PullRequests(GithubPrsDto),
+    /// The screen's whole answer, with the revision it was read at; the selected lists are
+    /// projected when a message is built, so a settings change shows at once instead of after
+    /// the next poll.
+    PullRequests {
+        revision: u64,
+        dto: GithubPrsDto,
+    },
 }
 
 /// A value refreshed by a background read: at most one read in flight, refreshed on an
@@ -188,6 +198,9 @@ struct Poll<T> {
     started: Option<Instant>,
     last_read: Option<Instant>,
     force: bool,
+    /// For a value read through a process-wide cache: the revision the last completed read came
+    /// from. `0` for a value with no shared source.
+    source: u64,
 }
 
 impl<T> Poll<T> {
@@ -198,6 +211,7 @@ impl<T> Poll<T> {
             started: None,
             last_read: None,
             force: false,
+            source: 0,
         }
     }
 
@@ -207,6 +221,15 @@ impl<T> Poll<T> {
                 || self
                     .last_read
                     .is_none_or(|last_read| now.saturating_duration_since(last_read) >= interval))
+    }
+
+    /// A value read through a process-wide cache is also due the moment that cache moves past the
+    /// revision this poll last read: someone else — the Limits screen's refresh button, the
+    /// monitor — has already fetched fresher numbers, and waiting out the interval would leave a
+    /// user-requested refresh unshown for minutes. The follow-up read is served from that cache,
+    /// so it costs no provider call.
+    fn due_from(&self, now: Instant, interval: Duration, source: u64) -> bool {
+        self.due(now, interval) || (!self.loading && self.source != source)
     }
 
     /// Marks a read in flight and returns whether it was forced.
@@ -220,6 +243,11 @@ impl<T> Poll<T> {
         self.value = value;
         self.loading = false;
         self.last_read = Some(now);
+    }
+
+    fn finish_from(&mut self, value: T, now: Instant, source: u64) {
+        self.source = source;
+        self.finish(value, now);
     }
 
     fn release_stale(&mut self, now: Instant) {
@@ -382,9 +410,15 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
         }
         for read in reads.try_iter() {
             match read {
-                Read::Limits(index, entry) => {
-                    providers[index].finish(entry, Instant::now());
-                    delivery.mark_dirty();
+                Read::Limits {
+                    index,
+                    revision,
+                    entry,
+                } => {
+                    if providers[index].value != entry {
+                        delivery.mark_dirty();
+                    }
+                    providers[index].finish_from(entry, Instant::now(), revision);
                 }
                 Read::Sessions(latest) => {
                     if latest != sessions.value {
@@ -392,11 +426,11 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     }
                     sessions.finish(latest, Instant::now());
                 }
-                Read::PullRequests(latest) => {
-                    if pulls.value.as_ref() != Some(&latest) {
+                Read::PullRequests { revision, dto } => {
+                    if pulls.value.as_ref() != Some(&dto) {
                         delivery.mark_dirty();
                     }
-                    pulls.finish(Some(latest), Instant::now());
+                    pulls.finish_from(Some(dto), Instant::now(), revision);
                 }
             }
         }
@@ -536,16 +570,25 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
             sessions.release_stale(now);
             let interval = crate::limits_refresh::poll_interval();
             for (index, agent) in RAIL_ORDER.into_iter().enumerate() {
-                if !selected.contains(&agent) || !providers[index].due(now, interval) {
+                if !selected.contains(&agent)
+                    || !providers[index].due_from(
+                        now,
+                        interval,
+                        crate::limits_refresh::revision(agent),
+                    )
+                {
                     continue;
                 }
                 let force = providers[index].start(now);
                 let sender = sender.clone();
                 thread::spawn(move || {
-                    let _ = sender.send(Read::Limits(
+                    let (entries, revision) =
+                        crate::limits_refresh::read_limits_revisioned(agent, force);
+                    let _ = sender.send(Read::Limits {
                         index,
-                        current_provider(crate::limits_refresh::read_limits(agent, force)),
-                    ));
+                        revision,
+                        entry: current_provider(entries),
+                    });
                 });
             }
             if sessions.due(now, SESSIONS_INTERVAL) {
@@ -557,7 +600,9 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                 });
             }
             pulls.release_stale(now);
-            if snapshot.settings.pull_requests.enabled && pulls.due(now, pulls_interval) {
+            if snapshot.settings.pull_requests.enabled
+                && pulls.due_from(now, pulls_interval, crate::github::revision())
+            {
                 let force = pulls.start(now);
                 // One settings read per poll keeps the cadence in step with the screen's.
                 pulls_interval = Duration::from_secs(u64::from(
@@ -567,7 +612,8 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                 thread::spawn(move || {
                     // `read_prs` memoises within the screen's poll window, so this adds no
                     // GitHub calls beyond what the screen and monitor already make.
-                    let _ = sender.send(Read::PullRequests(crate::github::read_prs(force)));
+                    let (dto, revision) = crate::github::read_prs_revisioned(force);
+                    let _ = sender.send(Read::PullRequests { revision, dto });
                 });
             }
         }
@@ -756,6 +802,30 @@ mod tests {
             row.get("headRef").is_none(),
             "branch names are not needed in the notch"
         );
+    }
+
+    #[test]
+    fn a_shared_cache_poll_is_due_as_soon_as_another_consumer_refreshes() {
+        let now = Instant::now();
+        let interval = Duration::from_secs(5 * 60);
+        let mut poll = Poll::new(0u8);
+        assert!(poll.due_from(now, interval, 0), "never read yet");
+        poll.start(now);
+        poll.finish_from(1, now, 7);
+
+        let soon = now + Duration::from_secs(1);
+        assert!(
+            !poll.due_from(soon, interval, 7),
+            "nothing new in the shared cache, so wait out the interval"
+        );
+        assert!(
+            poll.due_from(soon, interval, 8),
+            "the Limits screen's refresh replaced the cached read: pick it up now, not in five minutes"
+        );
+        poll.start(soon);
+        assert!(!poll.due_from(soon, interval, 9), "one read in flight");
+        poll.finish_from(2, soon, 9);
+        assert!(!poll.due_from(soon, interval, 9));
     }
 
     #[test]

@@ -8,7 +8,9 @@ import { Limits } from "./Limits";
 const readLimits = vi.hoisted(() => vi.fn());
 const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
 
-vi.mock("$lib/api", () => ({ readLimits, forgetLimitsSnapshot }));
+const onSharedReadChanged = vi.hoisted(() => () => Promise.resolve(() => undefined));
+
+vi.mock("$lib/api", () => ({ readLimits, forgetLimitsSnapshot, onSharedReadChanged }));
 
 type Deferred<T> = {
   promise: Promise<T>;

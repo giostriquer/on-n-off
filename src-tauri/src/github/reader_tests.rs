@@ -58,6 +58,17 @@ impl Harness {
     }
 
     fn read(&self, cli: &AgentCli, url: &str, now_secs: i64, force: bool) -> GithubPrsDto {
+        self.read_revisioned(cli, url, now_secs, force).0
+    }
+
+    /// The read plus the revision its answer came from, as the notch's pull-request cell asks.
+    fn read_revisioned(
+        &self,
+        cli: &AgentCli,
+        url: &str,
+        now_secs: i64,
+        force: bool,
+    ) -> (GithubPrsDto, u64) {
         read_prs_in(
             &Sources {
                 home: &self.home,
@@ -169,6 +180,37 @@ fn a_fresh_read_is_served_from_memory_until_the_poll_interval_nears() {
     assert!(expired.stale, "the snapshot backs the failed refresh");
     assert_eq!(expired.data.mine.items, first.data.mine.items);
     assert_eq!(expired.data.fetched_at, first.data.fetched_at);
+}
+
+#[test]
+fn the_revision_moves_only_when_a_read_replaces_the_remembered_result() {
+    let harness = Harness::new("gh-read-revision", &[], 60);
+    let gh = gh(&harness.home.join("cli"), "gho_t");
+    let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+    let (_, first) = harness.read_revisioned(&gh, &url, NOW, false);
+    server.join().unwrap();
+    assert_eq!(first, 1, "the first read is the first replacement");
+
+    let (_, memoised) = harness.read_revisioned(&gh, &refused_url(), NOW + 30, false);
+    assert_eq!(
+        memoised, first,
+        "a memory-served read leaves the revision where it was: nothing new to pick up"
+    );
+
+    let (_, failed) = harness.read_revisioned(&gh, &refused_url(), NOW + 1, true);
+    assert_eq!(
+        failed, first,
+        "a failure discards the remembered result rather than replacing it with a newer one, so \
+         consumers keep what they have and retry on their own cadence"
+    );
+
+    let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+    let (_, refreshed) = harness.read_revisioned(&gh, &url, NOW + 2, true);
+    server.join().unwrap();
+    assert!(
+        refreshed > first,
+        "the Pull requests screen's refresh replaced the result, so consumers re-read at once"
+    );
 }
 
 #[test]

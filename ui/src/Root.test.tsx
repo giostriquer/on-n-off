@@ -19,6 +19,7 @@ vi.mock("$lib/api", () => ({
   hideLimitsPopover: vi.fn(() => Promise.resolve()),
   openLimitsWindow: vi.fn(() => Promise.resolve()),
   quitApp: vi.fn(() => Promise.resolve()),
+  onSharedReadChanged: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
 it("selects the lightweight Limits surface from the window query", () => {
