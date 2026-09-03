@@ -1,18 +1,18 @@
 use super::model::NotchSettings;
+use crate::read_revision::Revision;
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
-    },
+    sync::Mutex,
 };
 
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
-static REVISION: AtomicU64 = AtomicU64::new(0);
+/// Moves on every save, so a snapshot in flight from before the save is discarded rather than
+/// drawn: the same mechanism the shared provider reads use, see [`Revision`].
+static REVISION: Revision = Revision::new();
 
 pub fn revision() -> u64 {
-    REVISION.load(Ordering::SeqCst)
+    REVISION.current()
 }
 
 fn path() -> Result<PathBuf, String> {
@@ -37,11 +37,11 @@ pub fn save(settings: &NotchSettings) -> Result<u64, String> {
     save_to(&path()?, settings, &REVISION)
 }
 
-fn save_to(path: &Path, settings: &NotchSettings, counter: &AtomicU64) -> Result<u64, String> {
+fn save_to(path: &Path, settings: &NotchSettings, counter: &Revision) -> Result<u64, String> {
     let body = serde_json::to_string_pretty(settings).map_err(|error| error.to_string())?;
     crate::usage::cache_io::atomic_write(path, &body)
         .map_err(|error| format!("Cannot save side-notch settings: {error}"))?;
-    Ok(counter.fetch_add(1, Ordering::SeqCst) + 1)
+    Ok(counter.bump())
 }
 
 #[cfg(test)]

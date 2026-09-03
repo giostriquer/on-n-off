@@ -58,6 +58,18 @@ impl Harness {
     }
 
     fn read(&self, cli: &AgentCli, url: &str, now_secs: i64, force: bool) -> GithubPrsDto {
+        self.read_revisioned(cli, url, now_secs, force).0
+    }
+
+    /// The read plus what it did to the remembered result: the notch's pull-request cell takes
+    /// the revision from it, and only a replacement is announced to the windows.
+    fn read_revisioned(
+        &self,
+        cli: &AgentCli,
+        url: &str,
+        now_secs: i64,
+        force: bool,
+    ) -> (GithubPrsDto, Reading) {
         read_prs_in(
             &Sources {
                 home: &self.home,
@@ -169,6 +181,45 @@ fn a_fresh_read_is_served_from_memory_until_the_poll_interval_nears() {
     assert!(expired.stale, "the snapshot backs the failed refresh");
     assert_eq!(expired.data.mine.items, first.data.mine.items);
     assert_eq!(expired.data.fetched_at, first.data.fetched_at);
+}
+
+#[test]
+fn only_a_read_that_replaces_the_remembered_result_is_announced() {
+    let harness = Harness::new("gh-read-revision", &[], 60);
+    let gh = gh(&harness.home.join("cli"), "gho_t");
+    let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+    let (_, first) = harness.read_revisioned(&gh, &url, NOW, false);
+    server.join().unwrap();
+    assert_eq!(
+        first,
+        Reading::Replaced(1),
+        "the first read replaces nothing-yet"
+    );
+
+    let (_, memoised) = harness.read_revisioned(&gh, &refused_url(), NOW + 30, false);
+    assert_eq!(
+        memoised,
+        Reading::Unchanged(1),
+        "the read a consumer makes in answer to an announcement is memory-served and announces \
+         nothing, which is what ends the exchange"
+    );
+
+    let (_, failed) = harness.read_revisioned(&gh, &refused_url(), NOW + 1, true);
+    assert_eq!(
+        failed,
+        Reading::Unchanged(1),
+        "a failure discards the remembered result rather than replacing it with a newer one; \
+         announcing would send every consumer back to GitHub for the request that just failed"
+    );
+
+    let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
+    let (_, refreshed) = harness.read_revisioned(&gh, &url, NOW + 2, true);
+    server.join().unwrap();
+    assert_eq!(
+        refreshed,
+        Reading::Replaced(2),
+        "the Pull requests screen's refresh replaced the result, so consumers re-read at once"
+    );
 }
 
 #[test]

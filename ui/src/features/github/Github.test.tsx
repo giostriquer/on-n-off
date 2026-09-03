@@ -8,7 +8,9 @@ import { Github } from "./Github";
 const readGithubPrs = vi.hoisted(() => vi.fn());
 const openUrl = vi.hoisted(() => vi.fn());
 
-vi.mock("$lib/api", () => ({ readGithubPrs, openUrl }));
+const onSharedReadChanged = vi.hoisted(() => () => Promise.resolve(() => undefined));
+
+vi.mock("$lib/api", () => ({ readGithubPrs, openUrl, onSharedReadChanged }));
 
 const NOW = "2026-08-24T20:00:00Z";
 

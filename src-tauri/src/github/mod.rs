@@ -23,6 +23,7 @@ use crate::cli::AgentCli;
 use crate::dto::{GithubPrsData, GithubPrsDto, GithubStatus};
 use crate::http::{post_json, HttpError, RateLimitReset};
 use crate::paths;
+use crate::read_revision::{Reading, Revision, Source};
 use crate::settings::{self, AppSettings};
 use auth::{read_token_with, GhTokenMemo, TokenError, GH_TOKEN, TOKEN_DEADLINE};
 use query::{request_body, GRAPHQL_URL};
@@ -43,8 +44,14 @@ static READ_MEMO: ReadMemo = ReadMemo::new();
 type Failure = (GithubStatus, String);
 
 /// Process-wide reader state: the last successful result and when it was read, plus the instant
-/// until which polling is paused for rate-limit reasons.
-pub struct ReadMemo(Mutex<ReadMemoState>);
+/// until which polling is paused for rate-limit reasons. `revision` moves whenever a fetch
+/// replaces that result, so the notch's pull-request cell — the one consumer that keeps its own
+/// copy — notices a refresh made on the screen instead of waiting out its own interval. It sits
+/// outside the mutex so asking costs no lock; see [`Revision`].
+pub struct ReadMemo {
+    state: Mutex<ReadMemoState>,
+    revision: Revision,
+}
 
 #[derive(Default)]
 struct ReadMemoState {
@@ -54,14 +61,17 @@ struct ReadMemoState {
 
 impl ReadMemo {
     pub const fn new() -> Self {
-        Self(Mutex::new(ReadMemoState {
-            cached: None,
-            paused_until: None,
-        }))
+        Self {
+            state: Mutex::new(ReadMemoState {
+                cached: None,
+                paused_until: None,
+            }),
+            revision: Revision::new(),
+        }
     }
 
     fn state(&self) -> MutexGuard<'_, ReadMemoState> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -81,15 +91,44 @@ struct Sources<'a> {
 /// by the last successful data when there is any. `force` skips the in-memory result but never
 /// re-runs `gh auth token`; the token is only re-read after GitHub rejects it.
 pub fn read_prs(force: bool) -> GithubPrsDto {
+    read_prs_revisioned(force).0
+}
+
+/// `read_prs` plus the revision of the remembered result, for a consumer that caches the answer
+/// itself and needs to notice a refresh made through another surface. On an answer this reader
+/// did not fetch — memory-served, paused, or failed — that is the revision of a result the DTO
+/// may not carry; recording it is still right, because there is nothing newer to pick up and a
+/// consumer must not be sent back to GitHub for a request this reader could not make.
+pub fn read_prs_revisioned(force: bool) -> (GithubPrsDto, u64) {
+    let (dto, reading) = read_prs_locked(force);
+    // Outside `READ_LOCK`, so the announcement never delays a read waiting behind it.
+    if reading.replaced() {
+        crate::read_revision::announce(Source::GithubPrs);
+    }
+    (dto, reading.revision())
+}
+
+/// The revision of the remembered pull-request result. Never blocks; `0` before the first
+/// successful read. Only the native notch keeps its own copy of a read, so only macOS asks --
+/// and it is the only caller, so the item does not exist elsewhere rather than sitting unused.
+#[cfg(target_os = "macos")]
+pub fn revision() -> u64 {
+    READ_MEMO.revision.current()
+}
+
+fn read_prs_locked(force: bool) -> (GithubPrsDto, Reading) {
     let _guard = READ_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
     let settings = settings::load_settings();
     let home = match paths::user_home() {
         Ok(home) => home,
         Err(error) => {
-            return problem(
-                GithubStatus::Network,
-                format!("Could not find the home directory: {}", error.message),
-                &settings,
+            return (
+                problem(
+                    GithubStatus::Network,
+                    format!("Could not find the home directory: {}", error.message),
+                    &settings,
+                ),
+                Reading::Unchanged(READ_MEMO.revision.current()),
             )
         }
     };
@@ -108,7 +147,12 @@ pub fn read_prs(force: bool) -> GithubPrsDto {
     )
 }
 
-fn read_prs_in(sources: &Sources<'_>, force: bool) -> GithubPrsDto {
+/// The answer paired with what this read did to the remembered result. Only a successful fetch
+/// replaces it: unlike the limits cache, which remembers a failed read and can serve it, a
+/// failure here discards the remembered result, so announcing one would send every consumer
+/// holding a copy straight back to GitHub for a request this reader has just been told it
+/// cannot make.
+fn read_prs_in(sources: &Sources<'_>, force: bool) -> (GithubPrsDto, Reading) {
     let window = i64::from(sources.settings.github_poll_seconds) - CACHE_MARGIN_SECS;
     let snapshot_path = paths::github_prs_path_for(sources.home);
     {
@@ -116,7 +160,10 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> GithubPrsDto {
         if !force {
             if let Some((read_at, cached)) = &state.cached {
                 if sources.now_secs - read_at < window {
-                    return cached.clone();
+                    return (
+                        cached.clone(),
+                        Reading::Unchanged(sources.read_memo.revision.current()),
+                    );
                 }
             }
         }
@@ -132,7 +179,10 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> GithubPrsDto {
                     .as_ref()
                     .map(|(_, cached)| cached.data.clone())
                     .or_else(|| snapshot::load(&snapshot_path));
-                return stale_or(paused, remembered);
+                return (
+                    stale_or(paused, remembered),
+                    Reading::Unchanged(sources.read_memo.revision.current()),
+                );
             }
         }
     }
@@ -141,8 +191,11 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> GithubPrsDto {
             if let Err(error) = snapshot::save(&snapshot_path, &dto.data) {
                 eprintln!("could not remember the GitHub read: {error}");
             }
-            sources.read_memo.state().cached = Some((sources.now_secs, dto.clone()));
-            dto
+            let mut state = sources.read_memo.state();
+            state.cached = Some((sources.now_secs, dto.clone()));
+            let reading = Reading::Replaced(sources.read_memo.revision.bump());
+            drop(state);
+            (dto, reading)
         }
         Err((status, hint)) => {
             // A failure is never papered over by the result it replaced: the next poll asks
@@ -154,7 +207,10 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> GithubPrsDto {
                 .take()
                 .map(|(_, cached)| cached.data)
                 .or_else(|| snapshot::load(&snapshot_path));
-            stale_or(problem(status, hint, sources.settings), remembered)
+            (
+                stale_or(problem(status, hint, sources.settings), remembered),
+                Reading::Unchanged(sources.read_memo.revision.current()),
+            )
         }
     }
 }

@@ -3,7 +3,7 @@ use super::*;
 fn a_saved_document_round_trips_and_advances_the_revision() {
     let dir = crate::paths::scratch_dir("notch-settings");
     let path = dir.join("side-notch.json");
-    let counter = AtomicU64::new(0);
+    let counter = Revision::new();
     let current = NotchSettings {
         enabled: true,
         display_id: Some("display-two".into()),
@@ -14,6 +14,6 @@ fn a_saved_document_round_trips_and_advances_the_revision() {
     let persisted: NotchSettings =
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(persisted, current);
-    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert_eq!(counter.current(), 1);
     fs::remove_dir_all(dir).unwrap();
 }
