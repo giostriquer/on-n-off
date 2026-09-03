@@ -3,7 +3,7 @@
 One section per provider: home folder, CLI, plugin layout, skills, MCP config, and what the app may
 mutate. Adapters live in `src-tauri/src/{claude,codex,antigravity,cursor}.rs`; keep provider quirks
 there behind `AgentAdapter`. Everything the app writes goes through `ConfigIo` (backup → atomic
-replace → validate → rollback). Agent homes are real user data — see AGENTS.md "Data safety".
+replace → validate → rollback). Agent homes are real user data — see AGENTS.md "Constraints".
 
 Legend: **verified** = observed on a real machine or in the provider's docs; **code** = what the
 adapter assumes today (change the adapter and this file together).
