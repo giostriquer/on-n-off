@@ -3,7 +3,7 @@ mod memory;
 
 use super::*;
 use crate::dto::LimitWindowKind;
-use crate::http::{refused_url, serve_once, HttpError};
+use crate::http::{refused_url, serve_once, serve_sequence, HttpError};
 use crate::paths::scratch_dir;
 use json::window;
 use serde_json::json;
@@ -445,17 +445,115 @@ fn claude_read_memoises_the_keychain_until_forced_and_forgets_it_when_rejected()
         "an explicit refresh re-reads the Keychain"
     );
 
-    let (profile_url, profile_request) = serve_once("401 Unauthorized", "{}");
+    // The memoised token is rejected, so the stored login is read again and tried once more;
+    // rejected a second time, the login really is the problem.
+    let (profile_url, profile_requests) = serve_sequence(&[
+        ("401 Unauthorized", &[], "{}"),
+        ("401 Unauthorized", &[], "{}"),
+    ]);
     let rejected = rig.read(AgentId::Claude, false, &profile_url, &refused_url());
-    profile_request.join().unwrap();
+    profile_requests.join().unwrap();
     assert_eq!(rejected[0].status, LimitsStatus::Unauthenticated);
-    assert_eq!(rig.probes.get(), 2);
+    let message = rejected[0].message.as_deref().unwrap_or_default();
+    assert!(
+        message.contains("was rejected") && !message.contains("expired"),
+        "a login re-read moments ago has not expired; say what happened: {message}"
+    );
+    assert_eq!(
+        rig.probes.get(),
+        3,
+        "the rejection re-read the Keychain once before blaming the login"
+    );
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
     rig.read(AgentId::Claude, false, &profile_url, &usage_url);
     profile_request.join().unwrap();
     usage_request.join().unwrap();
-    assert_eq!(rig.probes.get(), 3, "a rejected token evicts the memo");
+    assert_eq!(rig.probes.get(), 4, "a rejected token evicts the memo");
+}
+
+#[test]
+fn a_rotated_token_is_retried_from_the_keychain_before_blaming_the_login() {
+    // Claude Code rotates the access token before its recorded `expiresAt`, which invalidates the
+    // one the memo is holding. The rejection says nothing about the login itself, so the read
+    // re-reads the Keychain and tries once more rather than telling the user to sign in again.
+    let mut rig = Rig::new("limits-claude-rotated");
+    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.replace("kc-token", "old-token"));
+    write(
+        &rig.home,
+        ".claude.json",
+        &claude_account_file("uuid-1", "me@example.com"),
+    );
+
+    let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
+    let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
+    rig.read(AgentId::Claude, false, &profile_url, &usage_url);
+    profile_request.join().unwrap();
+    usage_request.join().unwrap();
+    assert_eq!(rig.probes.get(), 1, "the login is memoised for the app run");
+
+    // Claude Code has since written a new token; the memoised one now gets a 401.
+    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.replace("kc-token", "new-token"));
+    let (profile_url, profile_requests) = serve_sequence(&[
+        ("401 Unauthorized", &[], "{}"),
+        ("200 OK", &[], CLAUDE_PROFILE),
+    ]);
+    let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
+    let recovered = rig.read(AgentId::Claude, false, &profile_url, &usage_url);
+    let profiles = profile_requests.join().unwrap();
+    usage_request.join().unwrap();
+
+    assert_eq!(
+        recovered[0].status,
+        LimitsStatus::Ok,
+        "a rotated token is not a dead login: {:?}",
+        recovered[0].message
+    );
+    assert_eq!(
+        rig.probes.get(),
+        2,
+        "the rejection re-read the Keychain once"
+    );
+    assert_eq!(profiles.len(), 2, "the retry reached the endpoint");
+    assert!(
+        profiles[0].head.contains("Bearer old-token"),
+        "the first attempt used the memoised token"
+    );
+    assert!(
+        profiles[1].head.contains("Bearer new-token"),
+        "the retry used the token the Keychain now holds"
+    );
+}
+
+#[test]
+fn a_freshly_read_login_the_endpoint_rejects_is_not_retried() {
+    // The retry exists for a memo holding a token Claude Code has rotated past. A login read
+    // from the Keychain moments ago and rejected is the login's own problem: asking the endpoint
+    // the same question again would only cost a second Keychain probe, which is the prompt the
+    // memo exists to avoid.
+    let mut rig = Rig::new("limits-claude-fresh-rejected");
+    rig.keychain_json = Some(CLAUDE_RENEWABLE_CREDENTIALS.to_string());
+    write(
+        &rig.home,
+        ".claude.json",
+        &claude_account_file("uuid-1", "me@example.com"),
+    );
+
+    let (profile_url, profile_requests) = serve_sequence(&[("401 Unauthorized", &[], "{}")]);
+    let rejected = rig.read(AgentId::Claude, false, &profile_url, &refused_url());
+    let profiles = profile_requests.join().unwrap();
+
+    assert_eq!(rejected[0].status, LimitsStatus::Unauthenticated);
+    assert_eq!(
+        profiles.len(),
+        1,
+        "the first read of the run was not memoised, so there was no stale token to retry past"
+    );
+    assert_eq!(
+        rig.probes.get(),
+        1,
+        "and the Keychain is probed once, not twice"
+    );
 }
 
 #[test]

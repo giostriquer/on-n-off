@@ -169,6 +169,16 @@ pub(super) fn read_claude_identity(home: &Path) -> Option<ClaudeIdentity> {
     })
 }
 
+/// Where a looked-up login came from. Claude Code rotates the access token before its recorded
+/// expiry, which invalidates the one the memo is holding while the memo still believes it good —
+/// so a rejected `Memo` credential is worth one retry with a freshly read one, and a rejected
+/// `Stored` credential is the login's own problem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginSource {
+    Memo,
+    Stored,
+}
+
 /// Process-wide memo of the last good Claude login, keyed by the account it belongs to, so a
 /// user who clicked "Allow" (not "Always Allow") on the Keychain prompt sees it once per app run
 /// rather than on every refetch. A hit needs the same signed-in account and an unexpired token;
@@ -180,18 +190,20 @@ impl ClaudeLoginMemo {
         Self(Mutex::new(None))
     }
 
+    /// The login plus where it came from, so a caller can tell a stale memo apart from a stored
+    /// login the provider has actually rejected.
     pub fn lookup(
         &self,
         force: bool,
         account_id: &str,
         now_ms: i64,
         read: impl FnOnce() -> CredentialLookup<ClaudeCredential>,
-    ) -> CredentialLookup<ClaudeCredential> {
+    ) -> (CredentialLookup<ClaudeCredential>, LoginSource) {
         if !force {
             if let Some((memo_account, credential)) = self.slot().clone() {
                 let expired = credential.expires_at_ms.is_some_and(|at| at <= now_ms);
                 if memo_account == account_id && !expired {
-                    return CredentialLookup::Found(credential);
+                    return (CredentialLookup::Found(credential), LoginSource::Memo);
                 }
             }
         }
@@ -202,7 +214,7 @@ impl ClaudeLoginMemo {
             }
             _ => None,
         };
-        result
+        (result, LoginSource::Stored)
     }
 
     pub fn clear(&self) {
