@@ -1,7 +1,7 @@
-use super::*;
 use crate::dto::LimitWindowKind;
+use crate::limits::json::window;
+use crate::limits::*;
 use crate::paths::scratch_dir;
-use json::window;
 
 fn account(id: &str, label: &str) -> LimitsAccountDto {
     LimitsAccountDto {
