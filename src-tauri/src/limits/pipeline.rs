@@ -104,7 +104,7 @@ pub(super) fn resolve_provider<T>(
             dto: finish(
                 provider,
                 LimitsStatus::Unauthenticated,
-                Some(relogin(cli)),
+                Some(rejected(cli)),
                 named(),
             ),
             failure: Some(LoadFailureKind::Unauthorized),
@@ -161,6 +161,15 @@ pub(super) fn finish(
 
 fn relogin(cli: &str) -> String {
     format!("Login expired — run `{cli}` and sign in again to refresh subscription limits.")
+}
+
+/// The token the endpoint refused. Deliberately not "expired": a refusal says nothing about the
+/// clock, and claiming otherwise sends a signed-in user to re-authenticate over a token the
+/// provider simply stopped accepting.
+fn rejected(cli: &str) -> String {
+    format!(
+        "The stored `{cli}` login was rejected — run `{cli}` and sign in again to refresh subscription limits."
+    )
 }
 
 fn token_expired(cli: &str, renewable: bool) -> String {
