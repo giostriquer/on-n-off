@@ -9,15 +9,11 @@
 
 mod claude;
 mod claude_desktop;
-#[cfg(test)]
-mod claude_observation_tests;
 mod codex;
 mod codex_app_server;
 mod codex_sessions;
 mod credentials;
 mod json;
-#[cfg(test)]
-mod memory_tests;
 mod observations;
 mod pipeline;
 mod snapshots;
@@ -329,5 +325,4 @@ fn default_account() -> LimitsAccountDto {
 }
 
 #[cfg(test)]
-#[path = "provider_tests.rs"]
 mod tests;

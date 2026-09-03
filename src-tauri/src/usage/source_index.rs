@@ -15,7 +15,6 @@ use super::transcripts::{UsageProvider, UsageRecord, USAGE_TRANSCRIPT_PARSER_VER
 pub const USAGE_SOURCE_INDEX_VERSION: u32 = 3;
 
 #[cfg(test)]
-#[path = "source_index_test_support.rs"]
 mod test_support;
 
 #[cfg(test)]
@@ -687,5 +686,4 @@ impl Fnv64 {
 }
 
 #[cfg(test)]
-#[path = "source_index_tests.rs"]
 mod tests;

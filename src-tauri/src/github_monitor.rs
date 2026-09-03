@@ -317,5 +317,4 @@ fn save_state(path: &Path, state: &MonitorState) -> Result<(), String> {
 }
 
 #[cfg(test)]
-#[path = "github_monitor_tests.rs"]
 mod tests;
