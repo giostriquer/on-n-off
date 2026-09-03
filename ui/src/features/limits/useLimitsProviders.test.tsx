@@ -38,7 +38,7 @@ describe("limits refresh policy", () => {
       ["codex", false],
     ]);
 
-    for (const listener of calls.listeners) listener({ source: "limits:codex", revision: 9 });
+    for (const listener of calls.listeners) listener({ source: "limits:codex" });
 
     await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
     expect(calls.readLimits).toHaveBeenLastCalledWith("codex", false);

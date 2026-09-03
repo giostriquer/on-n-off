@@ -198,9 +198,10 @@ struct Poll<T> {
     started: Option<Instant>,
     last_read: Option<Instant>,
     force: bool,
-    /// For a value read through a process-wide cache: the revision the last completed read came
-    /// from. `0` for a value with no shared source.
-    source: u64,
+    /// The revision of the shared source this value was read at, so a replacement made through
+    /// another surface can be told from this poll's own read. `0` throughout for a value with no
+    /// shared source.
+    read_at: u64,
 }
 
 impl<T> Poll<T> {
@@ -211,25 +212,23 @@ impl<T> Poll<T> {
             started: None,
             last_read: None,
             force: false,
-            source: 0,
+            read_at: 0,
         }
     }
 
-    fn due(&self, now: Instant, interval: Duration) -> bool {
+    /// Due on its interval, when forced, and — for a value read through a process-wide cache —
+    /// the moment `latest` moves past the revision this poll read at: someone else, the Limits
+    /// screen's refresh button or a monitor, has already fetched fresher numbers, and waiting out
+    /// the interval would leave a user-requested refresh unshown for minutes. That follow-up read
+    /// is served from the same cache, so it costs no provider call. A value with no shared source
+    /// passes `0` and is left with the interval alone.
+    fn due(&self, now: Instant, interval: Duration, latest: u64) -> bool {
         !self.loading
             && (self.force
+                || self.read_at != latest
                 || self
                     .last_read
                     .is_none_or(|last_read| now.saturating_duration_since(last_read) >= interval))
-    }
-
-    /// A value read through a process-wide cache is also due the moment that cache moves past the
-    /// revision this poll last read: someone else — the Limits screen's refresh button, the
-    /// monitor — has already fetched fresher numbers, and waiting out the interval would leave a
-    /// user-requested refresh unshown for minutes. The follow-up read is served from that cache,
-    /// so it costs no provider call.
-    fn due_from(&self, now: Instant, interval: Duration, source: u64) -> bool {
-        self.due(now, interval) || (!self.loading && self.source != source)
     }
 
     /// Marks a read in flight and returns whether it was forced.
@@ -239,15 +238,11 @@ impl<T> Poll<T> {
         std::mem::take(&mut self.force)
     }
 
-    fn finish(&mut self, value: T, now: Instant) {
+    fn finish(&mut self, value: T, now: Instant, read_at: u64) {
         self.value = value;
         self.loading = false;
         self.last_read = Some(now);
-    }
-
-    fn finish_from(&mut self, value: T, now: Instant, source: u64) {
-        self.source = source;
-        self.finish(value, now);
+        self.read_at = read_at;
     }
 
     fn release_stale(&mut self, now: Instant) {
@@ -418,19 +413,19 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     if providers[index].value != entry {
                         delivery.mark_dirty();
                     }
-                    providers[index].finish_from(entry, Instant::now(), revision);
+                    providers[index].finish(entry, Instant::now(), revision);
                 }
                 Read::Sessions(latest) => {
                     if latest != sessions.value {
                         delivery.mark_dirty();
                     }
-                    sessions.finish(latest, Instant::now());
+                    sessions.finish(latest, Instant::now(), 0);
                 }
                 Read::PullRequests { revision, dto } => {
                     if pulls.value.as_ref() != Some(&dto) {
                         delivery.mark_dirty();
                     }
-                    pulls.finish_from(Some(dto), Instant::now(), revision);
+                    pulls.finish(Some(dto), Instant::now(), revision);
                 }
             }
         }
@@ -571,11 +566,7 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
             let interval = crate::limits_refresh::poll_interval();
             for (index, agent) in RAIL_ORDER.into_iter().enumerate() {
                 if !selected.contains(&agent)
-                    || !providers[index].due_from(
-                        now,
-                        interval,
-                        crate::limits_refresh::revision(agent),
-                    )
+                    || !providers[index].due(now, interval, crate::limits_refresh::revision(agent))
                 {
                     continue;
                 }
@@ -591,7 +582,7 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     });
                 });
             }
-            if sessions.due(now, SESSIONS_INTERVAL) {
+            if sessions.due(now, SESSIONS_INTERVAL, 0) {
                 sessions.start(now);
                 let sender = sender.clone();
                 let selected = selected.clone();
@@ -601,7 +592,7 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
             }
             pulls.release_stale(now);
             if snapshot.settings.pull_requests.enabled
-                && pulls.due_from(now, pulls_interval, crate::github::revision())
+                && pulls.due(now, pulls_interval, crate::github::revision())
             {
                 let force = pulls.start(now);
                 // One settings read per poll keeps the cadence in step with the screen's.

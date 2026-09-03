@@ -142,23 +142,23 @@ fn a_shared_cache_poll_is_due_as_soon_as_another_consumer_refreshes() {
     let now = Instant::now();
     let interval = Duration::from_secs(5 * 60);
     let mut poll = Poll::new(0u8);
-    assert!(poll.due_from(now, interval, 0), "never read yet");
+    assert!(poll.due(now, interval, 0), "never read yet");
     poll.start(now);
-    poll.finish_from(1, now, 7);
+    poll.finish(1, now, 7);
 
     let soon = now + Duration::from_secs(1);
     assert!(
-        !poll.due_from(soon, interval, 7),
+        !poll.due(soon, interval, 7),
         "nothing new in the shared cache, so wait out the interval"
     );
     assert!(
-        poll.due_from(soon, interval, 8),
+        poll.due(soon, interval, 8),
         "the Limits screen's refresh replaced the cached read: pick it up now, not in five minutes"
     );
     poll.start(soon);
-    assert!(!poll.due_from(soon, interval, 9), "one read in flight");
-    poll.finish_from(2, soon, 9);
-    assert!(!poll.due_from(soon, interval, 9));
+    assert!(!poll.due(soon, interval, 9), "one read in flight");
+    poll.finish(2, soon, 9);
+    assert!(!poll.due(soon, interval, 9));
 }
 
 #[test]
@@ -166,14 +166,15 @@ fn a_poll_refreshes_on_its_interval_forces_once_and_never_stays_loading_forever(
     let now = Instant::now();
     let interval = Duration::from_secs(5 * 60);
     let mut poll = Poll::new(0u8);
-    assert!(poll.due(now, interval), "never read yet");
+    // A value with no shared source: `0` throughout, so only the interval and `force` speak.
+    assert!(poll.due(now, interval, 0), "never read yet");
     assert!(!poll.start(now));
-    assert!(!poll.due(now, interval), "one read in flight");
-    poll.finish(1, now);
-    assert!(!poll.due(now + Duration::from_secs(299), interval));
-    assert!(poll.due(now + interval, interval));
+    assert!(!poll.due(now, interval, 0), "one read in flight");
+    poll.finish(1, now, 0);
+    assert!(!poll.due(now + Duration::from_secs(299), interval, 0));
+    assert!(poll.due(now + interval, interval, 0));
     poll.force = true;
-    assert!(poll.due(now + Duration::from_secs(1), interval));
+    assert!(poll.due(now + Duration::from_secs(1), interval, 0));
     assert!(poll.start(now), "the forced read reports force once");
     assert!(!poll.force);
     poll.release_stale(now + READ_DEADLINE);

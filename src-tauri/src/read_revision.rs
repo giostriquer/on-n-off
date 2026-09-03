@@ -1,24 +1,29 @@
-//! The revision a process-wide cached read carries.
+//! The revision a process-wide value carries, and the announcement that a shared read moved.
 //!
 //! Several surfaces share one cached read of the same expensive source. The Limits screen, its
 //! menu-bar popover, the limits monitor and the native notch's rail all share `limits_refresh`'s
 //! provider read; the Pull requests screen, the CI monitor and the notch's pull-request cell all
-//! share `github`'s. Sharing keeps the provider calls down, but a consumer that also keeps its
-//! own copy of the answer — the notch keeps one per cell, so it can draw while a read is in
-//! flight — cannot tell a cache it has already seen from one another consumer has just replaced.
-//! Left at that, a refresh the user asked for on a screen stays invisible in the notch until the
-//! notch's own interval comes round, minutes later.
+//! share `github`'s. Sharing keeps the provider calls down, but every one of those surfaces also
+//! keeps its own copy of the answer — the notch keeps one per cell so it can draw while a read is
+//! in flight, the screens keep query caches — and a copy cannot tell a cache it has already seen
+//! from one another surface has just replaced. Left at that, a refresh the user asked for on a
+//! screen stays invisible in the notch until the notch's own interval comes round, minutes later,
+//! and a monitor read that finds fresher numbers leaves the screens on their last answer.
 //!
-//! A `Revision` closes that gap: it moves whenever the cached read is replaced, and a consumer
-//! that records the revision its copy came from can ask "is there anything newer?" on every tick
-//! without blocking on the lock a read holds for the whole of its provider call.
+//! [`Revision`] closes the pull side: it moves once per replacement and is readable without
+//! taking the lock a read holds for its whole provider call, so a consumer that recorded the
+//! revision its copy came from can ask "is there anything newer?" on every tick.
+//! [`announce`] closes the push side, for the windows, which cannot poll a counter from
+//! JavaScript: it emits `shared-read-changed` and the query owning that source refetches.
 //!
-//! The screens have the same gap in reverse — a monitor or notch read that finds fresher numbers
-//! leaves them showing their own last answer until their poll interval — and they cannot poll a
-//! counter from JavaScript. [`announce`] closes that side: a read that moved a revision emits
-//! `shared-read-changed` to every window, and the query that owns the source refetches. That
-//! refetch is served from the same cache, so it costs no provider call, and a source announces a
-//! given revision once, so a cache-served refetch announces nothing and the loop stops there.
+//! Two rules keep that exchange from feeding itself, and both are load-bearing:
+//!
+//! - **Announce a replacement, never a read.** A consumer answering an announcement re-reads, is
+//!   served the value already there, and so announces nothing. That is what ends the exchange;
+//!   announcing every read would need a watermark to do the same job less clearly.
+//! - **Answer an announcement unforced.** A forced read bypasses the cache, which would make
+//!   every announcement produce a provider call and a fresh announcement, without end. The
+//!   `force` flag belongs to a person pressing refresh, never to this event.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -26,10 +31,9 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::dto::AgentId;
-
-/// Starts at `0`, which is also the revision of a source nothing has read yet and the one
-/// reported for a source that is not cached at all.
+/// A monotonic generation counter for a process-wide value: it moves once each time that value is
+/// replaced. Starts at `0`, which is also the revision of a value nothing has produced yet and
+/// the one reported for a source that is not cached at all.
 #[derive(Debug, Default)]
 pub struct Revision(AtomicU64);
 
@@ -43,16 +47,37 @@ impl Revision {
         self.0.load(Ordering::Acquire)
     }
 
-    /// Announces a replaced cached read and returns the revision it now carries. Call it while
-    /// holding the lock that guards the read, so the revision a locked reader sees always
-    /// matches the value beside it.
+    /// Marks the value replaced and returns the revision it now carries. Call it while holding
+    /// the lock that guards the value, so the revision a locked reader sees always matches what
+    /// sits beside it.
     pub fn bump(&self) -> u64 {
         self.0.fetch_add(1, Ordering::AcqRel).wrapping_add(1)
     }
 }
 
+/// What a read through a shared cache did. `Unchanged` covers every answer that left the shared
+/// value where it was — served from the cache, refused while paused, or failed — because none of
+/// them give another consumer something newer to pick up. Only `Replaced` is announced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reading {
+    Unchanged(u64),
+    Replaced(u64),
+}
+
+impl Reading {
+    pub fn revision(self) -> u64 {
+        match self {
+            Self::Unchanged(revision) | Self::Replaced(revision) => revision,
+        }
+    }
+
+    pub fn replaced(self) -> bool {
+        matches!(self, Self::Replaced(_))
+    }
+}
+
 /// A shared read the windows can be told about — one variant per cache that actually exists, so
-/// there is no announcing a source nothing shares. The name is the wire value the UI matches on.
+/// there is no announcing a source nothing shares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     LimitsClaude,
@@ -61,32 +86,13 @@ pub enum Source {
 }
 
 impl Source {
-    /// `None` for a provider read straight through rather than from a shared cache.
-    pub fn limits(agent: AgentId) -> Option<Self> {
-        match agent {
-            AgentId::Claude => Some(Self::LimitsClaude),
-            AgentId::Codex => Some(Self::LimitsCodex),
-            AgentId::Antigravity | AgentId::Cursor => None,
-        }
-    }
-
+    /// The wire value the UI matches on. The union it must agree with is `SharedReadSource` in
+    /// `ui/src/lib/types.ts`; change the two together.
     fn name(self) -> &'static str {
         match self {
             Self::LimitsClaude => "limits:claude",
             Self::LimitsCodex => "limits:codex",
             Self::GithubPrs => "github:prs",
-        }
-    }
-
-    /// The highest revision already announced for this source.
-    fn announced(self) -> &'static AtomicU64 {
-        static LIMITS_CLAUDE: AtomicU64 = AtomicU64::new(0);
-        static LIMITS_CODEX: AtomicU64 = AtomicU64::new(0);
-        static GITHUB_PRS: AtomicU64 = AtomicU64::new(0);
-        match self {
-            Self::LimitsClaude => &LIMITS_CLAUDE,
-            Self::LimitsCodex => &LIMITS_CODEX,
-            Self::GithubPrs => &GITHUB_PRS,
         }
     }
 }
@@ -95,43 +101,28 @@ impl Source {
 #[serde(rename_all = "camelCase")]
 struct Announcement {
     source: &'static str,
-    revision: u64,
 }
 
 /// Set once at setup. A read can be made from a command, a monitor or the notch supervisor, and
-/// only some of those hold an `AppHandle`; keeping one here is what lets the announcement live
-/// at the single point where a revision moves instead of at every call site that can move one.
+/// only some of those hold an `AppHandle`; keeping one here is what lets the announcement sit at
+/// the point where the value is replaced rather than at every call site that can replace one.
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
 pub fn register(app: &AppHandle) {
     let _ = APP.set(app.clone());
 }
 
-/// Tells every window that `source` has a cached read newer than what they last saw. Silent when
-/// this revision has already been announced, so the refetch it provokes — served from the cache,
-/// carrying the same revision — does not announce again.
-pub fn announce(source: Source, revision: u64) {
-    // Before the watermark, so a read made before setup registered the handle leaves the
-    // revision unannounced rather than marking it delivered to nobody.
-    let Some(app) = APP.get() else {
-        return;
-    };
-    if !advanced(source.announced(), revision) {
-        return;
+/// Tells every window that `source` now holds a read newer than the one they are showing. Call it
+/// only for a [`Reading::Replaced`], and only outside the lock that read holds.
+pub fn announce(source: Source) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit(
+            "shared-read-changed",
+            Announcement {
+                source: source.name(),
+            },
+        );
     }
-    let _ = app.emit(
-        "shared-read-changed",
-        Announcement {
-            source: source.name(),
-            revision,
-        },
-    );
-}
-
-/// Raises the watermark to `revision` and reports whether this call is the one that raised it, so
-/// concurrent readers of the same revision announce it exactly once between them.
-fn advanced(announced: &AtomicU64, revision: u64) -> bool {
-    announced.fetch_max(revision, Ordering::AcqRel) < revision
 }
 
 #[cfg(test)]

@@ -38,7 +38,7 @@ export function useGithubPrs(pollSeconds: number) {
       return api.readGithubPrs(force);
     }),
   );
-  useSharedRead("github:prs", ["github", "prs"]);
+  useSharedRead("github:prs");
   function refresh() {
     forceRef.current = true;
     void query.refetch();

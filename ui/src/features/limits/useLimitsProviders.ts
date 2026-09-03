@@ -46,7 +46,7 @@ function useProviderLimits(
     refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   });
-  useSharedRead(`limits:${provider}`, ["limits", provider]);
+  useSharedRead(`limits:${provider}`);
   function refresh() {
     forceRef.current = true;
     void query.refetch();

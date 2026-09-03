@@ -92,7 +92,7 @@ fn automatic_failures_back_off_for_every_consumer() {
 
 #[test]
 fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
-    let cache = Arc::new(Cache::new());
+    let cache = Arc::new(Cache::new(Source::LimitsClaude));
     let calls = Arc::new(AtomicUsize::new(0));
     let start = Arc::new(Barrier::new(3));
     let workers: Vec<_> = (0..2)
@@ -112,15 +112,15 @@ fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
         })
         .collect();
     start.wait();
-    let seen: Vec<u64> = workers
+    let seen: Vec<Reading> = workers
         .into_iter()
         .map(|worker| worker.join().unwrap())
         .collect();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        seen,
-        [1, 1],
-        "the coalesced reader is served the same revision as the reader that fetched"
+    assert!(
+        seen.contains(&Reading::Replaced(1)) && seen.contains(&Reading::Unchanged(1)),
+        "one reader fetched and announces; the coalesced one is served the same revision and \
+         announces nothing: {seen:?}"
     );
 
     read_through_cache(&cache, Duration::from_secs(300), true, |force| {
@@ -132,34 +132,39 @@ fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
 }
 
 #[test]
-fn a_replaced_cached_read_moves_the_revision_so_other_consumers_notice() {
-    let cache = Cache::new();
+fn only_a_read_that_replaces_the_cache_is_announced() {
+    let cache = Cache::new(Source::LimitsClaude);
     let interval = Duration::from_secs(5 * 60);
 
     let (_, first) = read_through_cache(&cache, interval, false, |_| {
         vec![snapshot("current", true, LimitsStatus::Failed)]
     });
+    assert_eq!(first, Reading::Replaced(1));
+
     let (_, unchanged) = read_through_cache(&cache, interval, false, |_| {
         unreachable!("the cached read is still fresh")
     });
     assert_eq!(
-        unchanged, first,
-        "a cache-served read leaves the revision where it was: nothing new to pick up"
+        unchanged,
+        Reading::Unchanged(1),
+        "the read a consumer makes in answer to an announcement is served the same entry and \
+         announces nothing, which is what ends the exchange"
     );
 
     let (refreshed, forced) = read_through_cache(&cache, interval, true, |force| {
         assert!(force);
         vec![snapshot("current", true, LimitsStatus::Ok)]
     });
-    assert!(
-        forced > first,
-        "a user refresh replaced the cached read, so the revision moved"
+    assert_eq!(
+        forced,
+        Reading::Replaced(2),
+        "a user refresh replaced the cached read, so every other surface is told"
     );
 
     let (served, seen) = read_through_cache(&cache, interval, false, |_| {
         unreachable!("the refreshed read is fresh")
     });
-    assert_eq!(seen, forced);
+    assert_eq!(seen, Reading::Unchanged(2));
     assert_eq!(
         served, refreshed,
         "the next automatic consumer is served the refresh without a provider call"
@@ -172,8 +177,28 @@ fn a_replaced_cached_read_moves_the_revision_so_other_consumers_notice() {
 }
 
 #[test]
+fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_call() {
+    let cache = Cache::new(Source::LimitsCodex);
+    let interval = Duration::from_secs(5 * 60);
+
+    let (_, failed) = read_through_cache(&cache, interval, true, |_| {
+        vec![snapshot("current", true, LimitsStatus::Failed)]
+    });
+    assert!(
+        failed.replaced(),
+        "unlike the GitHub reader, a failure here is remembered, so it is worth announcing"
+    );
+
+    let (served, reading) = read_through_cache(&cache, interval, false, |_| {
+        unreachable!("a consumer answering the announcement must not reach the provider")
+    });
+    assert_eq!(reading, Reading::Unchanged(failed.revision()));
+    assert_eq!(served[0].status, LimitsStatus::Failed);
+}
+
+#[test]
 fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_success() {
-    let cache = Cache::new();
+    let cache = Cache::new(Source::LimitsClaude);
     *cache.read.lock().unwrap() = Some(CachedRead {
         refreshed_at: Instant::now(),
         entries: vec![
@@ -183,15 +208,22 @@ fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_succes
         consecutive_failures: 0,
     });
 
-    forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
+    let dropped = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
     assert_eq!(
         cache.read.lock().unwrap().as_ref().unwrap().entries.len(),
         1
     );
     assert_eq!(
-        cache.revision.current(),
-        1,
-        "the cached entries changed, so a consumer holding its own copy re-reads"
+        dropped,
+        Reading::Replaced(1),
+        "the other window lists remembered accounts too, so it has to be told this one is gone"
+    );
+
+    let already_gone = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
+    assert_eq!(
+        already_gone,
+        Reading::Unchanged(1),
+        "nothing was removed, so nobody is sent to re-read"
     );
 
     let result = forget_through_cache(&cache, "current", || Err("disk failed".into()));

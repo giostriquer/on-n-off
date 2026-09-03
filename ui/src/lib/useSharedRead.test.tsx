@@ -19,8 +19,8 @@ vi.mock("$lib/api", () => ({
   },
 }));
 
-function announce(change: SharedReadChanged) {
-  for (const listener of calls.listeners) listener(change);
+function announce(source: SharedReadChanged["source"]) {
+  for (const listener of calls.listeners) listener({ source });
 }
 
 it("refetches only the query whose shared read was replaced, and stops listening on unmount", async () => {
@@ -31,17 +31,35 @@ it("refetches only the query whose shared read was replaced, and stops listening
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const hook = renderHook(() => useSharedRead("limits:codex", ["limits", "codex"]), { wrapper });
+  const hook = renderHook(() => useSharedRead("limits:codex"), { wrapper });
   await waitFor(() => expect(calls.listeners.size).toBe(1));
 
-  announce({ source: "limits:claude", revision: 4 });
-  announce({ source: "github:prs", revision: 4 });
+  announce("limits:claude");
+  announce("github:prs");
   expect(invalidate).not.toHaveBeenCalled();
 
-  announce({ source: "limits:codex", revision: 4 });
+  announce("limits:codex");
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["limits", "codex"] });
 
   hook.unmount();
   expect(calls.unlisten).toHaveBeenCalledTimes(1);
   expect(calls.listeners.size).toBe(0);
+});
+
+it.each([
+  ["limits:claude", ["limits", "claude"]],
+  ["limits:codex", ["limits", "codex"]],
+  ["github:prs", ["github", "prs"]],
+] as const)("refetches the query %s actually backs", async (source, queryKey) => {
+  calls.listeners.clear();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidate = vi.spyOn(client, "invalidateQueries").mockResolvedValue();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  renderHook(() => useSharedRead(source), { wrapper });
+  await waitFor(() => expect(calls.listeners.size).toBe(1));
+
+  announce(source);
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: [...queryKey] });
 });

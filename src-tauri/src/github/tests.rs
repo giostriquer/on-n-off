@@ -61,14 +61,15 @@ impl Harness {
         self.read_revisioned(cli, url, now_secs, force).0
     }
 
-    /// The read plus the revision its answer came from, as the notch's pull-request cell asks.
+    /// The read plus what it did to the remembered result: the notch's pull-request cell takes
+    /// the revision from it, and only a replacement is announced to the windows.
     fn read_revisioned(
         &self,
         cli: &AgentCli,
         url: &str,
         now_secs: i64,
         force: bool,
-    ) -> (GithubPrsDto, u64) {
+    ) -> (GithubPrsDto, Reading) {
         read_prs_in(
             &Sources {
                 home: &self.home,
@@ -183,32 +184,40 @@ fn a_fresh_read_is_served_from_memory_until_the_poll_interval_nears() {
 }
 
 #[test]
-fn the_revision_moves_only_when_a_read_replaces_the_remembered_result() {
+fn only_a_read_that_replaces_the_remembered_result_is_announced() {
     let harness = Harness::new("gh-read-revision", &[], 60);
     let gh = gh(&harness.home.join("cli"), "gho_t");
     let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
     let (_, first) = harness.read_revisioned(&gh, &url, NOW, false);
     server.join().unwrap();
-    assert_eq!(first, 1, "the first read is the first replacement");
+    assert_eq!(
+        first,
+        Reading::Replaced(1),
+        "the first read replaces nothing-yet"
+    );
 
     let (_, memoised) = harness.read_revisioned(&gh, &refused_url(), NOW + 30, false);
     assert_eq!(
-        memoised, first,
-        "a memory-served read leaves the revision where it was: nothing new to pick up"
+        memoised,
+        Reading::Unchanged(1),
+        "the read a consumer makes in answer to an announcement is memory-served and announces \
+         nothing, which is what ends the exchange"
     );
 
     let (_, failed) = harness.read_revisioned(&gh, &refused_url(), NOW + 1, true);
     assert_eq!(
-        failed, first,
-        "a failure discards the remembered result rather than replacing it with a newer one, so \
-         consumers keep what they have and retry on their own cadence"
+        failed,
+        Reading::Unchanged(1),
+        "a failure discards the remembered result rather than replacing it with a newer one; \
+         announcing would send every consumer back to GitHub for the request that just failed"
     );
 
     let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
     let (_, refreshed) = harness.read_revisioned(&gh, &url, NOW + 2, true);
     server.join().unwrap();
-    assert!(
-        refreshed > first,
+    assert_eq!(
+        refreshed,
+        Reading::Replaced(2),
         "the Pull requests screen's refresh replaced the result, so consumers re-read at once"
     );
 }
