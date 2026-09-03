@@ -9,9 +9,10 @@ use flate2::Compression;
 
 use super::fetch::{self, Fetcher};
 use super::registry::{self, InstalledItem, InstalledItemsFile};
-use super::{write, ItemService, ResolveRoots};
+use super::{write, ItemService, Memo, ResolveRoots};
 use crate::adapter::AgentAdapter;
 use crate::antigravity::AntigravityAdapter;
+use crate::backup::BackupStore;
 use crate::claude::ClaudeAdapter;
 use crate::codex::CodexAdapter;
 use crate::cursor::CursorAdapter;
@@ -24,6 +25,18 @@ use crate::paths::scratch_dir;
 const SHA_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SHA_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const SHA_C: &str = "cccccccccccccccccccccccccccccccccccccccc";
+
+impl ItemService {
+    pub fn at(home: PathBuf, fetcher: Box<dyn Fetcher>) -> Self {
+        Self {
+            registry_path: crate::paths::installed_items_path_for(&home),
+            backups: BackupStore::at(home.join(".on-n-off").join("backups")),
+            fetcher,
+            memo: Mutex::new(Memo::default()),
+            registry_lock: Mutex::new(()),
+        }
+    }
+}
 
 // Fixtures shared by every test module in this folder.
 

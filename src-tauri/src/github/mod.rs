@@ -11,7 +11,6 @@ mod parse;
 mod query;
 mod snapshot;
 #[cfg(test)]
-#[path = "reader_tests.rs"]
 mod tests;
 
 use std::path::Path;

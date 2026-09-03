@@ -424,9 +424,7 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
 }
 
 #[cfg(test)]
-#[path = "summary_test_support.rs"]
 mod test_support;
 
 #[cfg(test)]
-#[path = "summary_tests.rs"]
 mod tests;

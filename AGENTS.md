@@ -125,6 +125,14 @@ The `scripts/*.ps1` helpers and their tests are path-neutral and run under Power
 
 On restricted Windows sandboxes, Vite/esbuild can fail with `spawn EPERM`. Record that failure, then rerun the exact command in an approved context; do not change code to accommodate the sandbox fault.
 
+## Test layout
+
+- Rust unit tests live beside their module, not inside it: `foo.rs` ends with `#[cfg(test)] mod tests;` and the tests live in `foo/tests.rs` (a multi-file suite uses a `foo/tests/` directory with `mod.rs`). The module path (`crate::foo::tests`) is unchanged by the move, so `use super::*` and private-item access keep working.
+- Domain-shared fixtures are `#[cfg(test)]` items next to the domain that owns them: `paths::scratch_dir` (repo-wide temp homes), `http::{serve_once, serve_once_capturing, refused_url}` (loopback HTTP for limits and github), `plugin_meta::with_fetch_text`, `usage::pricing::with_test_fetch`, `usage::scan_cache` decode counters, `github/fixtures.rs`, `limits/claude_desktop::history_path_for_home`. Single-consumer helpers live inside that module's tests file. Adapter test constructors (`ClaudeAdapter::at`, `CodexAdapter::at_with_cli`, …) stay in the adapter files because `item_install` tests use them across domains.
+- `updater_build.rs` is also included by `build.rs` via `#[path = "src/updater_build.rs"]`, which changes the directory a plain `mod tests;` would resolve against, so its test module pins `#[path = "updater_build/tests.rs"]`. Do not "simplify" that away.
+- Keep every test file under 1000 lines; split by concern under `foo/tests/` when a suite grows.
+- Frontend tests stay co-located as `*.test.ts(x)` beside their source (Vitest, config at the repo root); mock-IPC fixtures live under `ui/src/dev/`.
+
 ## Completion gate
 
 - Run the full frontend and Rust matrices above after relevant changes.

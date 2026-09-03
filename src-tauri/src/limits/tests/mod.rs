@@ -1,3 +1,6 @@
+mod claude_observation;
+mod memory;
+
 use super::*;
 use crate::dto::LimitWindowKind;
 use crate::http::{refused_url, serve_once, HttpError};
