@@ -38,6 +38,9 @@ pub struct AppSettings {
     pub github_notifications: bool,
     #[serde(default = "github_poll_seconds_default")]
     pub github_poll_seconds: u16,
+    /// Windows only: closing the main window hides it and leaves the app in the tray.
+    #[serde(default)]
+    pub close_to_tray: bool,
 }
 
 const fn automatic_updates_default() -> bool {
@@ -63,6 +66,7 @@ impl Default for AppSettings {
             github_scopes: Vec::new(),
             github_notifications: false,
             github_poll_seconds: github_poll_seconds_default(),
+            close_to_tray: false,
         }
     }
 }

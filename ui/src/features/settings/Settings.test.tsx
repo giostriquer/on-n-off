@@ -38,6 +38,7 @@ vi.mock("$lib/api", () => ({
       },
     ]),
   requestNotificationPermission: apiMocks.requestNotificationPermission,
+  traySupported: () => Promise.resolve(true),
 }));
 
 const agents: AgentInfo[] = [
@@ -90,13 +91,13 @@ function renderSettings({
   onToggleVisible = () => undefined,
   onLimitNotificationsChange = () => undefined,
   onLimitsPollMinutesChange = () => undefined,
-  onGithubChange = () => undefined,
+  onSettingsChange = () => undefined,
   githubScopes = [],
 }: {
   onToggleVisible?: (id: AgentInfo["id"], hidden: boolean) => void;
   onLimitNotificationsChange?: (enabled: boolean) => void;
   onLimitsPollMinutesChange?: (minutes: LimitsPollMinutes) => void;
-  onGithubChange?: (patch: Partial<AppSettings>) => void;
+  onSettingsChange?: (patch: Partial<AppSettings>) => void;
   githubScopes?: string[];
 } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -114,13 +115,14 @@ function renderSettings({
             githubScopes,
             githubNotifications: false,
             githubPollSeconds: 60,
+            closeToTray: false,
           }}
           onToggleVisible={onToggleVisible}
           onSaveBinary={() => undefined}
           onAutomaticUpdatesChange={() => undefined}
           onLimitNotificationsChange={onLimitNotificationsChange}
           onLimitsPollMinutesChange={onLimitsPollMinutesChange}
-          onGithubChange={onGithubChange}
+          onSettingsChange={onSettingsChange}
         />
       </UpdateProvider>
     </QueryClientProvider>,
@@ -185,8 +187,8 @@ describe("Settings", () => {
 
   it("adds and removes GitHub scopes with Enter and the chip button, never on blur", async () => {
     const user = userEvent.setup();
-    const onGithubChange = vi.fn();
-    renderSettings({ onGithubChange, githubScopes: ["org:acme", "repo:me/tool"] });
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange, githubScopes: ["org:acme", "repo:me/tool"] });
 
     const card = screen.getByRole("region", { name: "Pull requests" });
     expect(card).toHaveTextContent("org:acme");
@@ -195,50 +197,68 @@ describe("Settings", () => {
     const input = screen.getByRole("textbox", { name: "Scopes" });
     expect(input).toHaveAccessibleDescription(/org:NAME, user:NAME or OWNER\/REPO/);
     await user.type(input, "  user:me{Enter}");
-    expect(onGithubChange).toHaveBeenCalledWith({ githubScopes: ["org:acme", "repo:me/tool", "user:me"] });
+    expect(onSettingsChange).toHaveBeenCalledWith({ githubScopes: ["org:acme", "repo:me/tool", "user:me"] });
     expect(input).toHaveValue("");
 
     await user.click(screen.getByRole("button", { name: "Remove org:acme" }));
-    expect(onGithubChange).toHaveBeenCalledWith({ githubScopes: ["repo:me/tool"] });
+    expect(onSettingsChange).toHaveBeenCalledWith({ githubScopes: ["repo:me/tool"] });
 
-    onGithubChange.mockClear();
+    onSettingsChange.mockClear();
     await user.type(input, "   {Enter}");
-    expect(onGithubChange).not.toHaveBeenCalled();
+    expect(onSettingsChange).not.toHaveBeenCalled();
 
     await user.type(input, "org:acme{Enter}");
-    expect(onGithubChange).not.toHaveBeenCalled();
+    expect(onSettingsChange).not.toHaveBeenCalled();
     expect(input).toHaveValue("");
 
     // Leaving the field keeps the draft: a blur-commit would race the chip's Remove click.
     await user.type(input, "org:other");
     await user.tab();
-    expect(onGithubChange).not.toHaveBeenCalled();
+    expect(onSettingsChange).not.toHaveBeenCalled();
     expect(input).toHaveValue("org:other");
   });
 
   it("requests notification permission before enabling pull request notifications and persists the interval", async () => {
     const user = userEvent.setup();
-    const onGithubChange = vi.fn();
-    renderSettings({ onGithubChange });
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
 
     await user.click(screen.getByRole("button", { name: "Notify about CI, review and merge changes" }));
 
     expect(apiMocks.requestNotificationPermission).toHaveBeenCalledTimes(1);
-    expect(onGithubChange).toHaveBeenCalledWith({ githubNotifications: true });
+    expect(onSettingsChange).toHaveBeenCalledWith({ githubNotifications: true });
 
     await user.selectOptions(screen.getByRole("combobox", { name: "GitHub polling interval" }), "120");
-    expect(onGithubChange).toHaveBeenCalledWith({ githubPollSeconds: 120 });
+    expect(onSettingsChange).toHaveBeenCalledWith({ githubPollSeconds: 120 });
   });
 
   it("keeps pull request notifications disabled when notification permission is denied", async () => {
     apiMocks.requestNotificationPermission.mockResolvedValue(false);
     const user = userEvent.setup();
-    const onGithubChange = vi.fn();
-    renderSettings({ onGithubChange });
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
 
     await user.click(screen.getByRole("button", { name: "Notify about CI, review and merge changes" }));
 
-    expect(onGithubChange).not.toHaveBeenCalled();
+    expect(onSettingsChange).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent("Notifications are blocked in system settings.");
+  });
+
+  // The card itself is covered in TraySettingsCard.test.tsx; this pins that Settings mounts it
+  // and routes it through the same patch callback as every other card.
+  it("routes the tray card through the shared settings patch", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+
+    const card = await screen.findByRole("region", { name: "Windows tray" });
+    expect(card).toHaveTextContent(/notification area/i);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Keep on-n-off running in the tray when the window is closed",
+      }),
+    );
+    expect(onSettingsChange).toHaveBeenCalledWith({ closeToTray: true });
   });
 });

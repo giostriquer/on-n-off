@@ -195,6 +195,8 @@ pub async fn save_app_settings(
     })
     .await?;
     crate::limits_refresh::set_poll_minutes(saved.limits_poll_minutes);
+    // The tray reads this on every close; `tray::setup` seeded it, this keeps it current.
+    crate::tray::set_close_to_tray(saved.close_to_tray);
     crate::limits_monitor::wake(&app);
     crate::github_monitor::wake(&app);
     Ok(saved)
@@ -395,6 +397,12 @@ pub fn hide_limits_popover(app: tauri::AppHandle) -> Result<(), AdapterError> {
 #[tauri::command]
 pub fn open_limits_window(app: tauri::AppHandle) -> Result<(), AdapterError> {
     crate::tray::open_limits_window(&app).map_err(AdapterError::message)
+}
+
+/// Whether this platform has a notification-area icon for `closeToTray` to hide into.
+#[tauri::command]
+pub fn tray_supported() -> bool {
+    cfg!(target_os = "windows")
 }
 
 #[tauri::command]

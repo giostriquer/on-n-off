@@ -174,6 +174,11 @@ export function quitApp(): Promise<void> {
   return invoke("quit_app");
 }
 
+/** Whether this platform has a notification-area icon for `closeToTray` to hide into. */
+export function traySupported(): Promise<boolean> {
+  return invoke("tray_supported");
+}
+
 export function onLimitsPopoverOpened(handler: () => void): Promise<UnlistenFn> {
   return listen("limits-popover-opened", () => handler());
 }

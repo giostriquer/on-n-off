@@ -37,6 +37,8 @@ of the file — start there, not here.
 - `config_io.rs`, `backup.rs` — guarded configuration writes and rollback.
 - `paths.rs` — agent homes and app data paths; `ON_N_OFF_HOME` redirects them for tests.
 - `cli_stub.rs` — test-only fake CLI builder (`.cmd` on Windows, `sh` script elsewhere).
+- `tray.rs` — the status item on both platforms: a Limits popover on macOS, the app's own home
+  on Windows. See [`OS.md`](OS.md) for what differs.
 - `macos/SideNotch/` — the bundled SwiftUI notch helper, built by `native_build.rs` on macOS only.
 - `side_notch/win_*.rs` — the Windows notch, which has no helper and paints its own window.
 

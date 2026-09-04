@@ -61,4 +61,12 @@ describe("appSettings", () => {
     expect(settings.githubNotifications).toBe(true);
     expect(settings.githubPollSeconds).toBe(60);
   });
+
+  it("keeps the app out of the tray on close by default and preserves an opt-in", () => {
+    expect((mergeAppSettings(null) as unknown as Record<string, unknown>).closeToTray).toBe(false);
+    expect(
+      (mergeAppSettings(JSON.parse('{"closeToTray":true}')) as unknown as Record<string, unknown>)
+        .closeToTray,
+    ).toBe(true);
+  });
 });
