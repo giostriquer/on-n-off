@@ -136,6 +136,30 @@ fn a_click_pins_the_popover_until_the_same_cell_is_clicked_again() {
 }
 
 #[test]
+fn a_click_outside_the_overlay_dismisses_a_pinned_popover() {
+    // What the low-level mouse hook drives. The hook is armed only while something is
+    // pinned and is torn down with the window thread that installed it, so this is the
+    // one path that has to keep working across a restart of that thread.
+    let mut machine = Machine::new();
+    machine.accept(data(ShowMode::Always));
+    machine.set_displays(vec![display("d1", false)]);
+
+    let cell = cell_rect(&machine);
+    machine.clicked(cell.mid_x(), cell.mid_y());
+    assert_eq!(machine.pinned, Some(0));
+    machine.take_dirty();
+
+    machine.dismiss();
+    assert_eq!(machine.pinned, None);
+    assert_eq!(machine.hover.active, None);
+    assert!(machine.take_dirty(), "the dismissal asks for a repaint");
+
+    // Nothing pinned and nothing hovered: no repaint to ask for.
+    machine.dismiss();
+    assert!(!machine.take_dirty(), "an idle dismissal is not a change");
+}
+
+#[test]
 fn clicking_the_cap_asks_for_the_show_mode_to_flip() {
     // Always -> OnHover: the cap is visible on the open rail.
     let mut machine = Machine::new();

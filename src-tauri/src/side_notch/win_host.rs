@@ -355,12 +355,13 @@ fn initial_snapshot() -> NotchSnapshot {
 fn supervise(app: AppHandle, controller: Arc<Controller>) {
     let (sender, reads) = mpsc::sync_channel::<Read>(READ_SLOTS);
     let mut snapshot = initial_snapshot();
-    let (action_tx, action_rx) = mpsc::channel::<WinAction>();
-    let mut action_rx = action_rx;
-    let mut window_tx = super::win_window::spawn(action_tx);
-    if let Ok(mut window) = controller.window.lock() {
-        *window = Some(window_tx.clone());
-    }
+    // The window thread exists only while the notch is on. It owns an always-on-top
+    // window and, while a popover is pinned, a process-wide low-level mouse hook; the
+    // notch is off by default, so a user who never enables it must never pay for either.
+    // This is `window.rs`'s `connection` — a helper it starts and stops the same way.
+    let mut window_tx: Option<mpsc::Sender<WindowMsg>> = None;
+    // Actions only arrive while a window exists; until one does, this end is disconnected.
+    let (_no_window_yet, mut action_rx) = mpsc::channel::<WinAction>();
     let mut providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] =
         [(); PROVIDER_COUNT].map(|_| Poll::new(None));
     let mut session_poll: Poll<Vec<Vec<LiveSession>>> = Poll::new(vec![Vec::new(); PROVIDER_COUNT]);
@@ -402,37 +403,51 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
             }
         }
         if !snapshot.settings.enabled {
+            if let Some(window) = window_tx.take() {
+                let _ = window.send(WindowMsg::Shutdown);
+            }
+            if let Ok(mut window) = controller.window.lock() {
+                *window = None;
+            }
             runtime_error = None;
             retry_delay = 1;
-        }
-        // The window thread died (a panic): surface it and restart with backoff.
-        let action_error_ref = action_error.as_deref();
-        let message = if delivery.due(Instant::now()) {
-            WindowMsg::Data(rail_data(
-                &snapshot,
-                &providers,
-                &session_poll,
-                &pulls,
-                action_error_ref,
-            ))
-        } else {
-            WindowMsg::Ping
-        };
-        if window_tx.send(message).is_err() {
-            runtime_error = Some("Native notch stopped unexpectedly. Retrying…".into());
-            retry_delay = (retry_delay * 2).min(30);
-            delivery.mark_dirty();
-            let (action_tx, action_rx_next) = mpsc::channel::<WinAction>();
-            window_tx = super::win_window::spawn(action_tx);
-            action_rx = action_rx_next;
+        } else if window_tx.is_none() {
+            let (action_tx, next_rx) = mpsc::channel::<WinAction>();
+            action_rx = next_rx;
+            window_tx = Some(super::win_window::spawn(action_tx));
             if let Ok(mut window) = controller.window.lock() {
-                *window = Some(window_tx.clone());
+                *window = window_tx.clone();
             }
-            delivery.sent(Instant::now());
-            continue;
+            delivery.mark_dirty();
         }
-        if delivery.due(Instant::now()) {
-            delivery.sent(Instant::now());
+        let action_error_ref = action_error.as_deref();
+        if let Some(window) = window_tx.clone() {
+            let message = if delivery.due(Instant::now()) {
+                WindowMsg::Data(rail_data(
+                    &snapshot,
+                    &providers,
+                    &session_poll,
+                    &pulls,
+                    action_error_ref,
+                ))
+            } else {
+                WindowMsg::Ping
+            };
+            // The window thread died (a panic): surface it and restart with backoff.
+            if window.send(message).is_err() {
+                runtime_error = Some("Native notch stopped unexpectedly. Retrying…".into());
+                retry_delay = (retry_delay * 2).min(30);
+                delivery.mark_dirty();
+                window_tx = None;
+                if let Ok(mut window) = controller.window.lock() {
+                    *window = None;
+                }
+                delivery.sent(Instant::now());
+                continue;
+            }
+            if delivery.due(Instant::now()) {
+                delivery.sent(Instant::now());
+            }
         }
         for action in action_rx.try_iter() {
             handle_action(

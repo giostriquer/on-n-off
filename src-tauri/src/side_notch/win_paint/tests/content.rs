@@ -251,9 +251,10 @@ fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
 
 #[test]
 fn the_popover_keeps_the_mac_weight_of_every_run() {
-    // Segoe UI has no medium face, so the mac `.medium` runs land on the regular one;
-    // semibold is a full step heavier — about a fifth wider — and reads chunky beside
-    // the labels that really are semibold.
+    // Every run the mac draws `.medium` or `.semibold` has to carry that weight here
+    // too. What the two resolve to is the font's business — Segoe UI ships no 500, so
+    // DirectWrite lands both on semibold, exactly as it does for the app's own
+    // `font-medium` — but the popover still has to ask for the right one.
     let pulls = PrCellData {
         status: GithubStatus::Ok,
         hint: None,

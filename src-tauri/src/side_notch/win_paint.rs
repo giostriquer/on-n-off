@@ -1,6 +1,8 @@
-//! Pure plan + paint for the Windows side notch: geometry ported from `NotchCore`
+//! Plan + paint for the Windows side notch: geometry ported from `NotchCore`
 //! (mirroring `side_notch::model`), rasterized with `tiny-skia` into a
-//! premultiplied-BGRA pixmap. No OS calls: deterministic on any OS.
+//! premultiplied-BGRA pixmap. The geometry is pure, but the module is not: `text`
+//! shapes through DirectWrite, so a popover's own size depends on the fonts installed
+//! on the machine that draws it.
 // Rendering helpers pass device coordinates around; folding them into structs would
 // obscure the math this module exists to keep transparent.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]

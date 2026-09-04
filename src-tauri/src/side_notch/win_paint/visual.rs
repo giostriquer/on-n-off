@@ -35,7 +35,7 @@ fn data(cells: Vec<CellData>, action_error: Option<String>) -> RailData {
 
 /// Visual harness: renders realistic scenes to PNGs so layout bugs can be seen
 /// without launching the app. Run with:
-/// `cargo test --lib side_notch::win_paint::tests::visual_dump -- --ignored --no-capture`
+/// `cargo test --lib side_notch::win_paint::visual -- --ignored`
 #[ignore]
 #[test]
 fn visual_dump() {

@@ -184,6 +184,20 @@ impl Machine {
         std::mem::take(&mut self.dirty)
     }
 
+    /// Closes a pinned popover and the hover behind it, the way a click outside the
+    /// overlay does. Every other transition on this machine is a method with a test, and
+    /// this one has to be too: it is the one the outside-click hook drives, and the hook
+    /// is the part that has already been wrong once.
+    pub fn dismiss(&mut self) {
+        if self.pinned.is_none() && self.hover.active.is_none() && self.hovered_cell.is_none() {
+            return;
+        }
+        self.pinned = None;
+        self.hover.active = None;
+        self.hovered_cell = None;
+        self.dirty = true;
+    }
+
     /// One pointer sample, in window-local points. The cursor may be outside the
     /// window (sampled globally while the rail is open, mirroring the macOS
     /// controller's `NSEvent.mouseLocation` sampling).
@@ -402,18 +416,25 @@ static OUTSIDE_CLICK_PENDING: AtomicBool = AtomicBool::new(false);
 struct SendHook(windows::Win32::UI::WindowsAndMessaging::HHOOK);
 unsafe impl Send for SendHook {}
 
-fn arm_outside_click_hook() {
+/// Installs the hook, if it is not already installed, and points it at `hwnd`.
+///
+/// Only a pinned popover needs it, and it costs the whole session: Windows calls the
+/// procedure synchronously on this thread for every mouse move anywhere. So it is armed
+/// on the pin and disarmed off it, by the thread that owns the window — a hook belongs to
+/// the thread that installed it, and one left behind by a thread that has since died is
+/// dead with it.
+fn arm_outside_click_hook(hwnd: isize) {
     let mut guard = OUTSIDE_CLICK_HOOK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    if guard.is_some() {
-        return;
+    if guard.is_none() {
+        // SAFETY: Windows invokes the procedure on this thread while it pumps messages.
+        match unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), None, 0) } {
+            Ok(hook) => *guard = Some(SendHook(hook)),
+            Err(_) => return,
+        }
     }
-    // SAFETY: Windows invokes the procedure on this thread while it pumps messages.
-    if let Ok(hook) = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), None, 0) }
-    {
-        *guard = Some(SendHook(hook));
-    }
+    OUTSIDE_CLICK_HWND.store(hwnd, Ordering::SeqCst);
 }
 
 fn disarm_outside_click_hook() {
@@ -473,7 +494,9 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
     window.set_visible(false);
     unsafe { ensure_layered(hwnd) };
     disable_window_chrome(hwnd);
-    arm_outside_click_hook();
+    // A previous window thread that panicked leaves its handle in the static; Windows has
+    // already torn the hook down with that thread, so clear the record before arming.
+    disarm_outside_click_hook();
 
     let mut machine = Machine::new();
     let mut was_visible = false;
@@ -522,18 +545,16 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
                     }
                 }
                 machine.advance(Instant::now());
-                // The hook's atomic hwnd gates it to the pinned state; an outside
-                // click sets the pending flag, handled here.
+                // The hook exists only while a popover is pinned, which is the only state
+                // an outside click has to reach; it sets a flag, and the dismissal happens
+                // here, on this thread.
                 if machine.pinned.is_some() {
-                    OUTSIDE_CLICK_HWND.store(hwnd, Ordering::SeqCst);
+                    arm_outside_click_hook(hwnd);
                 } else {
-                    OUTSIDE_CLICK_HWND.store(0, Ordering::SeqCst);
+                    disarm_outside_click_hook();
                 }
                 if OUTSIDE_CLICK_PENDING.swap(false, Ordering::SeqCst) {
-                    machine.pinned = None;
-                    machine.hover.active = None;
-                    machine.hovered_cell = None;
-                    machine.dirty = true;
+                    machine.dismiss();
                 }
             }
             Event::UserEvent(WindowMsg::Data(data)) => {

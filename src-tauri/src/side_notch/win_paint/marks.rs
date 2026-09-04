@@ -560,19 +560,19 @@ const CURSOR: Shape = Shape {
                 Seg::Curve {
                     c1: (233.36, 268.92),
                     c2: (230.87, 264.61),
-                    to: (24.87, 145.67),
+                    to: (226.83, 262.27),
                 },
-                Seg::Line((26.23, 140.61)),
+                Seg::Line((24.87, 145.67)),
                 Seg::Curve {
                     c1: (22.47, 144.28),
                     c2: (23.45, 140.61),
-                    to: (437.49, 140.61),
+                    to: (26.23, 140.61),
                 },
-                Seg::Line((444.06, 152.0)),
+                Seg::Line((437.49, 140.61)),
                 Seg::Curve {
                     c1: (443.33, 140.61),
                     c2: (446.98, 146.94),
-                    to: (444.05, 152.0),
+                    to: (444.06, 152.0),
                 },
                 Seg::Line((444.05, 152.0)),
             ],
@@ -832,92 +832,4 @@ pub(super) fn stroke(pixmap: &mut Pixmap, path: &Path, stroke: f32, color: [u8; 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn coverage(shape: &Shape, box_: (f32, f32, f32, f32)) -> usize {
-        let mut pixmap = Pixmap::new(48, 48).unwrap();
-        fill(
-            shape,
-            box_,
-            (8.0, 8.0, 32.0, 32.0),
-            [255, 0, 0, 255],
-            &mut pixmap,
-        );
-        pixmap
-            .data()
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .filter(|px| px[3] > 0)
-            .count()
-    }
-
-    #[test]
-    fn every_provider_mark_draws_pixels() {
-        assert!(
-            coverage(&CLAUDE, (0.0, 0.0, 24.0, 24.0)) > 200,
-            "claude starburst"
-        );
-        assert!(coverage(&CODEX, (0.0, 0.0, 24.0, 24.0)) > 200, "codex knot");
-        assert!(
-            coverage(&CURSOR, (0.0, 0.0, 466.73, 532.09)) > 200,
-            "cursor cube"
-        );
-        assert!(
-            coverage(&ANTIGRAVITY, (13.0, 14.5, 85.0, 85.0)) > 100,
-            "antigravity arch"
-        );
-    }
-
-    #[test]
-    fn marks_fit_inside_their_rect() {
-        let mut pixmap = Pixmap::new(32, 32).unwrap();
-        provider(
-            crate::dto::AgentId::Claude,
-            (4.0, 4.0, 24.0, 24.0),
-            [255, 255, 255, 255],
-            &mut pixmap,
-        );
-        for (index, px) in pixmap.data().as_chunks::<4>().0.iter().enumerate() {
-            if px[3] > 0 {
-                let x = index % 32;
-                let y = index / 32;
-                assert!((1..31).contains(&x), "glyph leaks horizontally at {x}");
-                assert!((1..31).contains(&y), "glyph leaks vertically at {y}");
-            }
-        }
-    }
-
-    #[test]
-    fn stroke_only_marks_draw() {
-        let mut pixmap = Pixmap::new(24, 24).unwrap();
-        pull_request(
-            (2.0, 2.0, 20.0, 20.0),
-            1.6,
-            [255, 255, 255, 255],
-            &mut pixmap,
-        );
-        assert!(
-            pixmap
-                .data()
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .filter(|px| px[3] > 0)
-                .count()
-                > 50
-        );
-        pin((2.0, 2.0, 20.0, 20.0), [255, 255, 255, 255], &mut pixmap);
-        assert!(
-            pixmap
-                .data()
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .filter(|px| px[3] > 0)
-                .count()
-                > 50
-        );
-    }
-}
+mod tests;
