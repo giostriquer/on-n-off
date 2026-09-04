@@ -549,6 +549,9 @@ fn handle_action(
             pulls.force = true;
         }
         WinAction::OpenLimits => {
+            // Windows keeps a non-activating overlay from taking the foreground, so a
+            // main window that is already open behind another app is shown and raised
+            // but not brought in front of it; the taskbar button flashes instead.
             *action_error = crate::tray::open_limits_window(app).err();
         }
         WinAction::OpenPullRequests => {

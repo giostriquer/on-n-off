@@ -218,3 +218,61 @@ fn mirrored_or_missing_displays_hide_the_rail() {
     machine.set_displays(vec![display("d1", false)]);
     assert!(machine.plan().is_some());
 }
+
+#[test]
+fn leaving_the_window_clears_the_cap_highlight() {
+    let mut machine = Machine::new();
+    machine.set_displays(vec![display("d1", false)]);
+    machine.accept(data(ShowMode::Always));
+    let cap = machine.plan().expect("plan").cap.rect;
+    let now = Instant::now();
+    machine.cursor_at(cap.mid_x(), cap.mid_y(), true, now);
+    assert!(
+        machine.hover.cap_hovered,
+        "the pin lights under the pointer"
+    );
+    machine.cursor_at(-40.0, -40.0, false, now + Duration::from_millis(100));
+    assert!(
+        !machine.hover.cap_hovered,
+        "and fades again once the pointer is gone"
+    );
+}
+
+#[test]
+fn the_overlay_style_drops_the_caption_and_resize_frame() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WS_CAPTION, WS_CLIPSIBLINGS, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+    };
+    // What tao leaves on an undecorated window: a caption and a resize frame, whose
+    // invisible border shrinks the client area the layered surface is clipped to.
+    let tao = WS_VISIBLE.0 | WS_CLIPSIBLINGS.0 | WS_CAPTION.0 | WS_THICKFRAME.0;
+    let overlay = overlay_style(tao);
+    assert_eq!(overlay & WS_CAPTION.0, 0, "no caption");
+    assert_eq!(overlay & WS_THICKFRAME.0, 0, "no resize frame");
+    assert_eq!(overlay & WS_POPUP.0, WS_POPUP.0, "a bare popup");
+    assert_eq!(
+        overlay & (WS_VISIBLE.0 | WS_CLIPSIBLINGS.0),
+        WS_VISIBLE.0 | WS_CLIPSIBLINGS.0,
+        "visibility and clipping are left alone"
+    );
+    assert_eq!(overlay_style(overlay), overlay, "and it is idempotent");
+}
+
+#[test]
+fn the_collapsed_strip_still_gets_pointer_samples() {
+    // tao reports no `CursorMoved` for this non-activating layered window, so the
+    // poll is the only way the hover strip can notice the pointer reaching it.
+    let mut machine = Machine::new();
+    machine.set_displays(vec![display("d1", false)]);
+    machine.accept(data(ShowMode::OnHover));
+    assert!(machine.plan().expect("plan").pill.is_some(), "collapsed");
+    assert!(
+        machine.pointer_poll_active(),
+        "the strip is watched while the rail is closed"
+    );
+    let now = Instant::now();
+    assert!(
+        machine.deadline(now) <= now + POINTER_POLL,
+        "and the loop wakes on the short cadence to do it"
+    );
+}

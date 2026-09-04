@@ -702,24 +702,42 @@ pub(super) fn pull_request(
     }
 }
 
-/// A pushpin glyph for the show-mode cap, centred in `rect`.
+/// A pushpin glyph for the show-mode cap, centred in `rect`. The mac cap swaps
+/// `pin.fill` for `pin` between the two show modes; a 12 pt outline turns to mush in
+/// this rasteriser, so the caller dims the same silhouette instead.
 pub(super) fn pin(rect: (f32, f32, f32, f32), color: [u8; 4], pixmap: &mut Pixmap) {
     let (rx, ry, rw, rh) = rect;
-    let unit = rw.min(rh);
+    let u = rw.min(rh);
     let cx = rx + rw / 2.0;
     let cy = ry + rh / 2.0;
-    let u = unit;
+    // A pushpin seen head-on: a cap bar, a barrel, a flange and the needle.
+    let at = |x: f32, y: f32| (cx + x * u, cy + y * u);
+    let outline = [
+        (-0.30, -0.40),
+        (0.30, -0.40),
+        (0.30, -0.24),
+        (0.19, -0.24),
+        (0.13, 0.06),
+        (0.30, 0.06),
+        (0.30, 0.18),
+        (0.05, 0.18),
+        (0.00, 0.46),
+        (-0.05, 0.18),
+        (-0.30, 0.18),
+        (-0.30, 0.06),
+        (-0.13, 0.06),
+        (-0.19, -0.24),
+        (-0.30, -0.24),
+    ];
     let mut pb = PathBuilder::new();
-    pb.move_to(cx, cy - u * 0.45);
-    pb.line_to(cx + u * 0.3, cy - u * 0.1);
-    pb.line_to(cx + u * 0.1, cy - u * 0.08);
-    pb.line_to(cx + u * 0.1, cy + u * 0.2);
-    pb.line_to(cx + u * 0.22, cy + u * 0.45);
-    pb.line_to(cx, cy + u * 0.32);
-    pb.line_to(cx - u * 0.22, cy + u * 0.45);
-    pb.line_to(cx - u * 0.1, cy + u * 0.2);
-    pb.line_to(cx - u * 0.1, cy - u * 0.08);
-    pb.line_to(cx - u * 0.3, cy - u * 0.1);
+    for (index, (x, y)) in outline.iter().enumerate() {
+        let (px, py) = at(*x, *y);
+        if index == 0 {
+            pb.move_to(px, py);
+        } else {
+            pb.line_to(px, py);
+        }
+    }
     pb.close();
     if let Some(path) = pb.finish() {
         filled(pixmap, &path, color);

@@ -221,6 +221,32 @@ fn visual_dump() {
     )
     .unwrap();
 
+    // The show-mode cap under the pointer, in both pin states.
+    for (name, show) in [("pinned", ShowMode::Always), ("hover", ShowMode::OnHover)] {
+        let mut capped = settings.clone();
+        capped.show = show;
+        let planned = plan(
+            &capped,
+            &displays,
+            &RailData {
+                settings: capped.clone(),
+                cells: data.cells.clone(),
+                action_error: None,
+            },
+            Hover {
+                rail_open: true,
+                cap_hovered: true,
+                ..Hover::default()
+            },
+        )
+        .expect("cap");
+        std::fs::write(
+            format!("{out}/cap-{name}.png"),
+            render(&planned).encode_png().unwrap(),
+        )
+        .unwrap();
+    }
+
     let mut hover_settings = settings.clone();
     hover_settings.show = ShowMode::OnHover;
     let planned = plan(&hover_settings, &displays, &data, Hover::default()).expect("pill");

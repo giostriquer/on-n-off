@@ -128,8 +128,16 @@ pub struct NotchSettings {
     pub edge: Edge,
     pub size: NotchSize,
     pub show: ShowMode,
+    #[serde(default = "documented_providers")]
     pub providers: Vec<AgentId>,
     pub pull_requests: NotchPullRequests,
+}
+
+/// What a settings document written before the notch had a provider list meant: every
+/// provider. A fresh install starts narrower (see `Default`), but nobody who already
+/// has a rail loses cells from it.
+fn documented_providers() -> Vec<AgentId> {
+    RAIL_ORDER.to_vec()
 }
 
 impl Default for NotchSettings {
@@ -140,7 +148,10 @@ impl Default for NotchSettings {
             edge: Edge::default(),
             size: NotchSize::default(),
             show: ShowMode::default(),
-            providers: RAIL_ORDER.to_vec(),
+            // Only the providers that publish a subscription quota worth a ring.
+            // Antigravity has none and Cursor only reports one on some setups, so a
+            // first run would rail two dashes; both are one toggle away in settings.
+            providers: vec![AgentId::Claude, AgentId::Codex],
             pull_requests: NotchPullRequests::default(),
         }
     }
@@ -227,16 +238,17 @@ pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> 
     let vertical = settings.edge.is_vertical();
     let thickness = if vertical { CELL_WIDTH } else { CELL_HEIGHT } * scale;
     let length = rail_length(count, if vertical { CELL_HEIGHT } else { CELL_WIDTH }) * scale;
+    let aligned = |value: f64| pixel_aligned(value, display.scale);
     if vertical {
         if length > display.work_height {
             return None;
         }
         Some(Layout {
-            x: match settings.edge {
+            x: aligned(match settings.edge {
                 Edge::Left => display.x,
                 _ => display.x + display.width - thickness,
-            },
-            y: display.work_y + (display.work_height - length) / 2.0,
+            }),
+            y: aligned(display.work_y + (display.work_height - length) / 2.0),
             width: thickness,
             height: length,
         })
@@ -245,15 +257,29 @@ pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> 
             return None;
         }
         Some(Layout {
-            x: display.x + (display.width - length) / 2.0,
-            y: match settings.edge {
+            x: aligned(display.x + (display.width - length) / 2.0),
+            y: aligned(match settings.edge {
                 Edge::Top => display.work_y,
                 _ => display.work_y + display.work_height - thickness,
-            },
+            }),
             width: length,
             height: thickness,
         })
     }
+}
+
+/// A point snapped to the display's pixel grid, the `pixelAligned` port. Centring the
+/// rail in a work area that does not divide evenly leaves it on a half pixel, and the
+/// window origin moves with the popover: without this the whole rail slides half a
+/// pixel whenever a popover opens above its top edge.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
+    let scale = if display_scale.is_finite() && display_scale > 0.0 {
+        display_scale
+    } else {
+        1.0
+    };
+    (value * scale).round() / scale
 }
 
 #[cfg(test)]

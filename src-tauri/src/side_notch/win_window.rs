@@ -33,7 +33,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SW_SHOWNOACTIVATE, WH_MOUSE_LL, WM_LBUTTONDOWN, WS_EX_LAYERED,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, UpdateLayeredWindow, GWL_EXSTYLE, ULW_ALPHA,
+    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, UpdateLayeredWindow, GWL_EXSTYLE,
+    GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+    SWP_NOZORDER, ULW_ALPHA,
 };
 
 /// What the window asks the host to do; the macOS `ClientAction` set plus the two
@@ -188,9 +190,11 @@ impl Machine {
     pub fn cursor_at(&mut self, x: f64, y: f64, inside: bool, now: Instant) {
         self.cursor_inside = inside;
         if !inside {
-            // A pending hover-open must not fire once the pointer is gone.
+            // A pending hover-open must not fire once the pointer is gone, and the
+            // cap's pin fades with it (the mac cap only lights while hovered).
             self.hovered_cell = None;
             self.open_at = None;
+            self.clear_cap_highlight();
             return;
         }
         self.last_inside = now;
@@ -235,6 +239,14 @@ impl Machine {
         self.cursor_inside = false;
     }
 
+    /// Puts the cap's pin out; the highlight only follows a pointer on the ear.
+    fn clear_cap_highlight(&mut self) {
+        if self.hover.cap_hovered {
+            self.hover.cap_hovered = false;
+            self.dirty = true;
+        }
+    }
+
     /// Advances the timers: hover-open delay, close grace, pinned-pointer watch.
     pub fn advance(&mut self, now: Instant) {
         if let Some(at) = self.open_at {
@@ -254,6 +266,7 @@ impl Machine {
         if elapsed > HOVER_CLOSE_GRACE && self.pinned.is_none() {
             // A pinned popover stays open until an outside click (the low-level mouse
             // hook below) or a click on its cell; only hover-open popovers close here.
+            self.clear_cap_highlight();
             if self.hover.active.is_some() {
                 self.hover.active = None;
                 self.dirty = true;
@@ -278,9 +291,12 @@ impl Machine {
     fn rail_open(&self) -> bool {
         self.always_shown() || self.hover.rail_open
     }
-    /// Whether the loop should sample the pointer on its short cadence.
+    /// Whether the loop should sample the pointer on its short cadence. tao reports no
+    /// `CursorMoved` for this non-activating layered window, so the poll is the only
+    /// pointer news there is: it has to run while the collapsed strip is showing too,
+    /// or reaching the strip never opens the rail.
     pub fn pointer_poll_active(&self) -> bool {
-        self.rail_open() || self.pinned.is_some()
+        !self.suppressed && self.settings().is_some_and(|settings| settings.enabled)
     }
 
     /// A click in window-local points; returns the actions it asks for.
@@ -349,7 +365,7 @@ impl Machine {
     /// The next instant something can change, for the event loop's `WaitUntil`.
     pub fn deadline(&self, now: Instant) -> Instant {
         let mut deadline = now + SCREEN_POLL;
-        if self.rail_open() {
+        if self.pointer_poll_active() {
             deadline = deadline.min(now + POINTER_POLL);
         }
         if let Some(at) = self.open_at {
@@ -682,13 +698,52 @@ fn fullscreen_foreground(machine: &Machine, own: HWND) -> bool {
     rect.left <= mx && rect.top <= my && rect.right >= mx + mw && rect.bottom >= my + mh
 }
 
+/// The overlay's window styles. tao leaves an undecorated window with a caption and a
+/// resize frame; Windows then keeps an invisible border on the left, right and bottom,
+/// so the client area — and with it the layered surface — is inset by the border width
+/// and the desktop compositor draws a shadow and a top hairline around the remainder.
+/// A bare popup has no non-client frame, so the rail fills its window rect and reaches
+/// the screen edge.
+pub(super) fn overlay_style(current: u32) -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WS_BORDER, WS_CAPTION, WS_DLGFRAME, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
+        WS_THICKFRAME,
+    };
+    let frame = WS_CAPTION.0
+        | WS_BORDER.0
+        | WS_DLGFRAME.0
+        | WS_THICKFRAME.0
+        | WS_SYSMENU.0
+        | WS_MINIMIZEBOX.0
+        | WS_MAXIMIZEBOX.0;
+    (current & !frame) | WS_POPUP.0
+}
+
+/// Re-asserts the layered bit and the popup frame; tao rewrites the style words
+/// whenever its own flags diff, so this runs before every present.
 unsafe fn ensure_layered(hwnd: isize) {
-    let ex = GetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE);
-    SetWindowLongPtrW(
-        HWND(hwnd as *mut _),
-        GWL_EXSTYLE,
-        ex | (WS_EX_LAYERED.0 as isize),
-    );
+    let window = HWND(hwnd as *mut _);
+    let ex = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    SetWindowLongPtrW(window, GWL_EXSTYLE, ex | (WS_EX_LAYERED.0 as isize));
+    let style = GetWindowLongPtrW(window, GWL_STYLE) as u32;
+    let wanted = overlay_style(style);
+    if wanted != style {
+        SetWindowLongPtrW(window, GWL_STYLE, wanted as isize);
+        let _ = SetWindowPos(
+            window,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED
+                | SWP_NOMOVE
+                | SWP_NOSIZE
+                | SWP_NOZORDER
+                | SWP_NOACTIVATE
+                | SWP_NOOWNERZORDER,
+        );
+    }
 }
 
 /// Windows 11 rounds every top-level window's corners and draws a 1 px border — on a

@@ -20,6 +20,9 @@ fn settings(id: &str, edge: Edge) -> NotchSettings {
         enabled: true,
         display_id: Some(id.into()),
         edge,
+        // The placement tests measure a four-cell rail; which providers a fresh
+        // install rails is a separate question.
+        providers: RAIL_ORDER.to_vec(),
         pull_requests: NotchPullRequests {
             enabled: false,
             lists: vec![GithubList::Mine],
@@ -114,10 +117,14 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let defaults = NotchSettings::default();
     assert!(defaults.pull_requests.enabled);
     assert_eq!(defaults.pull_requests.lists, [GithubList::Mine]);
-    assert_eq!(defaults.cell_count(), 5);
+    assert_eq!(defaults.cell_count(), 3, "two providers plus the cell");
     let legacy: NotchSettings =
         serde_json::from_str(r#"{"enabled":true,"displayId":"main","edge":"right"}"#).unwrap();
-    assert_eq!(legacy.cell_count(), 5, "older documents gain the cell");
+    assert_eq!(
+        legacy.cell_count(),
+        5,
+        "older documents gain the cell and keep their providers"
+    );
     let mut current = settings("main", Edge::Right);
     current.pull_requests = NotchPullRequests {
         enabled: true,
@@ -178,4 +185,70 @@ fn presets_scale_the_whole_rail() {
         assert_eq!(rail.width, CELL_WIDTH * scale);
         assert_eq!(rail.height, rail_length(4, CELL_HEIGHT) * scale);
     }
+}
+
+#[test]
+fn the_rail_lands_on_whole_device_pixels() {
+    // A work area that does not divide evenly leaves the rail on a half pixel. The
+    // window origin is the union with the popover, so opening a popover above the rail
+    // shifts that half pixel into the rail's own drawing and the cells visibly jump.
+    let displays = vec![Display {
+        id: "d1".into(),
+        name: "d1".into(),
+        x: 0.0,
+        y: 0.0,
+        width: 1920.0,
+        height: 1080.0,
+        work_y: 0.0,
+        work_height: 1032.0,
+        scale: 1.0,
+        mirrored: false,
+    }];
+    let settings = NotchSettings {
+        enabled: true,
+        display_id: Some("d1".into()),
+        ..NotchSettings::default()
+    };
+    let frame = layout(&settings, &displays).expect("fits");
+    assert_eq!(
+        frame.y.fract(),
+        0.0,
+        "the rail starts on a pixel: {}",
+        frame.y
+    );
+    assert_eq!(frame.x.fract(), 0.0, "and so does its edge: {}", frame.x);
+
+    // The same on a 150 % display, where a pixel is two thirds of a point.
+    let mut scaled = displays.clone();
+    scaled[0].scale = 1.5;
+    let frame = layout(&settings, &scaled).expect("fits");
+    assert_eq!(
+        (frame.y * 1.5).fract(),
+        0.0,
+        "aligned to the display grid, not to points: {}",
+        frame.y
+    );
+}
+
+#[test]
+fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
+    // Antigravity publishes no subscription limits and Cursor only does on some
+    // setups, so a rail full of dashes is not a good first run; both are one toggle
+    // away in the settings card.
+    let fresh = NotchSettings::default();
+    assert_eq!(
+        fresh.providers,
+        vec![AgentId::Claude, AgentId::Codex],
+        "the two with quotas to draw"
+    );
+    // A settings file that names them keeps them.
+    let chosen = NotchSettings {
+        providers: RAIL_ORDER.to_vec(),
+        ..NotchSettings::default()
+    };
+    assert_eq!(
+        chosen.rail_providers().len(),
+        4,
+        "an explicit choice stands"
+    );
 }

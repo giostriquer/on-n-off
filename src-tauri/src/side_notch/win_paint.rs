@@ -310,7 +310,9 @@ pub enum CellContent {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct QuotaView {
-    pub percent: f64,
+    /// `None` once the window reset or the figure is out of range, like the mac
+    /// `Quota.percent(at:)`; the ring then draws no arc and the label reads "—".
+    pub percent: Option<f64>,
     pub reached: bool,
 }
 
@@ -368,7 +370,18 @@ pub enum MarkKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextWeight {
     Regular,
+    Medium,
     Semibold,
+}
+
+impl TextWeight {
+    fn face(self) -> text::Weight {
+        match self {
+            Self::Regular => text::Weight::Regular,
+            Self::Medium => text::Weight::Medium,
+            Self::Semibold => text::Weight::Semibold,
+        }
+    }
 }
 
 pub type Color = [u8; 4];
@@ -422,9 +435,10 @@ pub fn rail_hit(plan: &Plan, x: f64, y: f64) -> Option<usize> {
 // Quota / session / PR projections (the NotchCore `Provider` ports).
 
 fn quota_view(window: &LimitWindowDto) -> QuotaView {
+    let percent = quota_percent(window);
     QuotaView {
-        percent: window.used_percent,
-        reached: window.used_percent.round() as u64 == 100,
+        percent,
+        reached: percent.is_some_and(|percent| percent.round() as u64 == 100),
     }
 }
 
@@ -542,7 +556,8 @@ fn cell_content(data: &CellData) -> CellContent {
             primary: primary_quota(provider),
             fable: fable_quota(provider),
             label: primary_quota(provider)
-                .map(|q| format!("{}%", q.percent.round()))
+                .and_then(|quota| quota.percent)
+                .map(format_percent)
                 .unwrap_or_else(|| "—".into()),
         },
         CellData::PullRequests(pulls) => {
@@ -662,7 +677,13 @@ pub fn plan(
                 .into_iter()
                 .map(|(item, rect)| (item, rect.translated(card.x, card.y)))
                 .collect(),
-            zones,
+            // Zones come out of the same walk as the entries, in card coordinates:
+            // they move onto the card with them, or nothing in the popover is
+            // clickable.
+            zones: zones
+                .into_iter()
+                .map(|(zone, rect)| (zone, rect.translated(card.x, card.y)))
+                .collect(),
             action_error: data.action_error.clone(),
         })
     });
@@ -732,6 +753,14 @@ fn popover_entries(
     let mut y = v(12.0);
     let x = v(12.0);
     let spacing = v(10.0);
+    // Where a glyph's own centre has to land to sit on the middle of a line of text.
+    let ink_middle = |points: f64, weight: TextWeight| -> f64 {
+        f64::from(text::ink_middle_px(
+            device_size(points, display_scale),
+            weight.face(),
+        )) / display_scale
+    };
+    let header_lift = ink_middle(13.0, TextWeight::Semibold) - v(13.0) / 2.0;
 
     fn text_entry(
         entries: &mut Vec<(PopItem, R)>,
@@ -768,7 +797,9 @@ fn popover_entries(
                     kind: MarkKind::Provider(provider.provider),
                     size: v(13.0),
                 },
-                R::new(x, y, v(13.0), v(13.0)),
+                // The mac header is an HStack, so the glyph centres on the title's
+                // line box rather than hanging from its top.
+                R::new(x, y + header_lift, v(13.0), v(13.0)),
             ));
             text_entry(
                 &mut entries,
@@ -789,7 +820,14 @@ fn popover_entries(
                     .message
                     .clone()
                     .unwrap_or_else(|| "Usage unavailable.".into());
-                for line in wrap_lines(&message, inner_w, v(11.0), 4) {
+                for line in wrap_lines(
+                    &message,
+                    inner_w,
+                    v(11.0),
+                    TextWeight::Regular,
+                    display_scale,
+                    4,
+                ) {
                     text_entry(
                         &mut entries,
                         x,
@@ -840,10 +878,22 @@ fn popover_entries(
                 // overlap (SwiftUI's Spacer + lineLimit(1) behaviour). The note yields
                 // first: it keeps at most 60 % of the row, the label the rest.
                 let note_max = inner_w * 0.6;
-                let note = ellipsize(&reset_note(&window), note_max, v(10.0), TextWeight::Regular);
-                let note_w = measure_weight(&note, v(10.0), TextWeight::Regular);
+                let note = ellipsize(
+                    &reset_note(&window),
+                    note_max,
+                    v(10.0),
+                    TextWeight::Regular,
+                    display_scale,
+                );
+                let note_w = measure_weight(&note, v(10.0), TextWeight::Regular, display_scale);
                 let label_space = (inner_w - note_w - v(8.0)).max(inner_w * 0.3);
-                let label = ellipsize(&window.label, label_space, v(11.0), TextWeight::Semibold);
+                let label = ellipsize(
+                    &window.label,
+                    label_space,
+                    v(11.0),
+                    TextWeight::Semibold,
+                    display_scale,
+                );
                 text_entry(
                     &mut entries,
                     x,
@@ -873,7 +923,7 @@ fn popover_entries(
                 entries.push((
                     PopItem::Bar {
                         percent,
-                        color: meter_color(percent, provider.provider),
+                        color: meter_color(percent, provider_color(provider.provider)),
                     },
                     R::new(x, y, inner_w, v(4.0)),
                 ));
@@ -883,32 +933,34 @@ fn popover_entries(
                     x,
                     y,
                     inner_w,
-                    line_h(10.5, TextWeight::Semibold),
-                    format!("{}% Used", window.used_percent.round()),
+                    line_h(10.5, TextWeight::Medium),
+                    quota_percent(&window)
+                        .map(|percent| format!("{} Used", format_percent(percent)))
+                        .unwrap_or_else(|| "—".into()),
                     v(10.5),
-                    TextWeight::Semibold,
+                    TextWeight::Medium,
                     [255, 255, 255, 255],
                     false,
                 );
-                y += line_h(10.5, TextWeight::Semibold) + v(5.0);
+                y += line_h(10.5, TextWeight::Medium) + spacing;
             }
 
             if !provider.sessions.is_empty() {
-                y += v(5.0);
                 entries.push((PopItem::Divider, R::new(x, y, inner_w, 1.0)));
-                y += v(8.0);
+                y += spacing;
                 for session in &provider.sessions {
                     let working =
                         session.status == crate::side_notch::sessions::SessionStatus::Working;
                     let status_text = if working { "working" } else { "idle" };
-                    let status_w = measure_weight(status_text, v(10.5), TextWeight::Regular);
-                    let mut name = session.name.clone();
-                    while name.chars().count() > 1
-                        && measure_weight(&name, v(11.0), TextWeight::Semibold)
-                            > inner_w - status_w - v(8.0)
-                    {
-                        name.pop();
-                    }
+                    let status_w =
+                        measure_weight(status_text, v(10.5), TextWeight::Medium, display_scale);
+                    let name = ellipsize(
+                        &session.name,
+                        inner_w - status_w - v(8.0),
+                        v(11.0),
+                        TextWeight::Semibold,
+                        display_scale,
+                    );
                     text_entry(
                         &mut entries,
                         x,
@@ -926,14 +978,14 @@ fn popover_entries(
                         x,
                         y,
                         inner_w,
-                        line_h(10.5, TextWeight::Semibold),
+                        line_h(10.5, TextWeight::Medium),
                         if working {
                             "working".into()
                         } else {
                             "idle".into()
                         },
                         v(10.5),
-                        TextWeight::Semibold,
+                        TextWeight::Medium,
                         if working {
                             provider_color(provider.provider)
                         } else {
@@ -968,6 +1020,8 @@ fn popover_entries(
                     );
                     y += line_h(10.0, TextWeight::Regular) + v(8.0);
                 }
+                // The sessions block ends where the next card child starts.
+                y += spacing - v(8.0);
             }
         }
         CellData::PullRequests(pulls) => {
@@ -976,7 +1030,7 @@ fn popover_entries(
                     kind: MarkKind::PullRequests,
                     size: v(13.0),
                 },
-                R::new(x, y, v(13.0), v(13.0)),
+                R::new(x, y + header_lift, v(13.0), v(13.0)),
             ));
             text_entry(
                 &mut entries,
@@ -995,7 +1049,14 @@ fn popover_entries(
             let readable = pulls.status == GithubStatus::Ok || pulls.stale;
             if pulls.hint.is_some() && pulls.status != GithubStatus::Ok {
                 let color = if readable { WARN_AMBER } else { MUTED_INK };
-                for line in wrap_lines(pulls.hint.as_deref().unwrap_or(""), inner_w, v(11.0), 4) {
+                for line in wrap_lines(
+                    pulls.hint.as_deref().unwrap_or(""),
+                    inner_w,
+                    v(11.0),
+                    TextWeight::Regular,
+                    display_scale,
+                    4,
+                ) {
                     text_entry(
                         &mut entries,
                         x,
@@ -1012,9 +1073,7 @@ fn popover_entries(
                 }
                 y += v(4.0);
             }
-            let _ = readable;
-
-            for list in &pulls.lists {
+            for list in pulls.lists.iter().filter(|_| readable) {
                 text_entry(
                     &mut entries,
                     x,
@@ -1062,7 +1121,14 @@ fn popover_entries(
                 for row in &list.items {
                     let title_size = v(11.0);
                     let copy_w = v(20.0);
-                    let lines = wrap_lines(&row.title, inner_w - copy_w - v(8.0), title_size, 2);
+                    let lines = wrap_lines(
+                        &row.title,
+                        inner_w - copy_w - v(8.0),
+                        title_size,
+                        TextWeight::Semibold,
+                        display_scale,
+                        2,
+                    );
                     let copy_h = v(16.0);
                     let row_top = y;
                     for (line_index, line) in lines.iter().enumerate() {
@@ -1110,12 +1176,13 @@ fn popover_entries(
                         MUTED_INK,
                         false,
                     );
-                    line_x += measure_text(&repo, repo_size) + v(8.0);
+                    line_x += measure_text(&repo, repo_size, display_scale) + v(8.0);
                     // Badges stop before the CI dot at the row's right edge.
                     let badge_limit = x + inner_w - v(7.0) - v(10.0);
                     for (badge, color) in row_badges(row) {
                         let badge_size = v(9.5);
-                        let badge_w = measure_weight(&badge, badge_size, TextWeight::Semibold);
+                        let badge_w =
+                            measure_weight(&badge, badge_size, TextWeight::Medium, display_scale);
                         if line_x + badge_w > badge_limit {
                             break;
                         }
@@ -1124,10 +1191,10 @@ fn popover_entries(
                             line_x,
                             y,
                             inner_w,
-                            line_h(9.5, TextWeight::Semibold),
+                            line_h(9.5, TextWeight::Medium),
                             badge.clone(),
                             badge_size,
-                            TextWeight::Semibold,
+                            TextWeight::Medium,
                             badge_color(color),
                             false,
                         );
@@ -1135,7 +1202,12 @@ fn popover_entries(
                     }
                     entries.push((
                         PopItem::Dot { ci: row.ci },
-                        R::new(x + inner_w - v(7.0), y, v(7.0), v(7.0)),
+                        R::new(
+                            x + inner_w - v(7.0),
+                            y + ink_middle(10.0, TextWeight::Regular) - v(7.0) / 2.0,
+                            v(7.0),
+                            v(7.0),
+                        ),
                     ));
                     // The whole row opens on GitHub (except the copy affordance).
                     zones.push((
@@ -1177,75 +1249,92 @@ fn popover_entries(
         CellData::PullRequests(_) => "Open Pull requests",
     };
     let footer_size = v(10.5);
-    let footer_w = measure_weight(footer_title, footer_size, TextWeight::Semibold) + v(12.0);
-    entries.push((
-        PopItem::Mark {
-            kind: MarkKind::OpenArrow,
-            size: v(9.0),
-        },
-        R::new(x + inner_w - footer_w, y, v(9.0), v(9.0)),
-    ));
+    let footer_line = line_h(10.5, TextWeight::Medium);
+    let arrow = v(9.0);
+    let label_w = measure_weight(footer_title, footer_size, TextWeight::Medium, display_scale);
+    let footer_w = label_w + v(3.0) + arrow;
+    let footer_x = x + inner_w - footer_w;
     text_entry(
         &mut entries,
-        x + inner_w - footer_w + v(9.0) + v(3.0),
+        footer_x,
         y,
-        footer_w,
-        line_h(10.5, TextWeight::Semibold),
+        label_w,
+        footer_line,
         footer_title.into(),
         footer_size,
-        TextWeight::Semibold,
+        TextWeight::Medium,
         MUTED_INK,
         false,
     );
-    y += line_h(10.5, TextWeight::Semibold);
-    zones.push((
-        Zone::Footer,
+    entries.push((
+        PopItem::Mark {
+            kind: MarkKind::OpenArrow,
+            size: arrow,
+        },
         R::new(
-            x + inner_w - footer_w,
-            y - line_h(10.5, TextWeight::Semibold),
-            footer_w,
-            line_h(10.5, TextWeight::Semibold),
+            x + inner_w - arrow,
+            y + ink_middle(10.5, TextWeight::Medium) - arrow / 2.0,
+            arrow,
+            arrow,
         ),
     ));
+    zones.push((Zone::Footer, R::new(footer_x, y, footer_w, footer_line)));
+    // The card's height comes from the entries, so the walk ends here.
     (entries, zones)
 }
 
-fn wrap_lines(text: &str, max_w: f64, size: f64, max_lines: usize) -> Vec<String> {
+fn wrap_lines(
+    text: &str,
+    max_w: f64,
+    size: f64,
+    weight: TextWeight,
+    scale: f64,
+    max_lines: usize,
+) -> Vec<String> {
     if size <= 0.0 {
         return vec![text.to_string()];
     }
+    // Semibold runs about a fifth wider than regular at these sizes, so wrapping at
+    // the wrong weight pushes the last word past the box it was measured for.
     text::wrap_px(
         text,
-        max_w as f32,
-        size as f32,
-        text::Weight::Regular,
+        (max_w * scale) as f32,
+        device_size(size, scale),
+        weight.face(),
         max_lines,
     )
 }
 
-fn measure_text(text: &str, size: f64) -> f64 {
-    f64::from(text::measure_px(
-        text,
-        size.max(1.0) as f32,
-        text::Weight::Regular,
-    ))
+/// The rasterised height of `size` points on a display of `scale`.
+fn device_size(size: f64, scale: f64) -> f32 {
+    (size * scale).max(1.0) as f32
 }
 
-fn measure_weight(text: &str, size: f64, weight: TextWeight) -> f64 {
-    let weight = match weight {
-        TextWeight::Regular => text::Weight::Regular,
-        TextWeight::Semibold => text::Weight::Semibold,
-    };
-    f64::from(text::measure_px(text, size.max(1.0) as f32, weight))
+/// A run of text measured in points. GDI hints every pixel size on its own, so a run
+/// measured at the point size is not `scale` times narrower than the same run
+/// rasterised at point x scale; measuring at the device size and converting back
+/// keeps a scaled display from drifting by a fifth on the longer labels.
+fn measure_weight(text: &str, size: f64, weight: TextWeight, scale: f64) -> f64 {
+    f64::from(text::measure_px(
+        text,
+        device_size(size, scale),
+        weight.face(),
+    )) / scale
+}
+
+fn measure_text(text: &str, size: f64, scale: f64) -> f64 {
+    measure_weight(text, size, TextWeight::Regular, scale)
 }
 
 /// Truncates `text` with an ellipsis so it fits `max_px` when drawn at `size`/`weight`.
-fn ellipsize(text: &str, max_px: f64, size: f64, weight: TextWeight) -> String {
-    if measure_weight(text, size, weight) <= max_px {
+fn ellipsize(text: &str, max_px: f64, size: f64, weight: TextWeight, scale: f64) -> String {
+    if measure_weight(text, size, weight, scale) <= max_px {
         return text.to_string();
     }
     let mut cut = text.to_string();
-    while cut.chars().count() > 1 && measure_weight(&format!("{cut}…"), size, weight) > max_px {
+    while cut.chars().count() > 1
+        && measure_weight(&format!("{cut}…"), size, weight, scale) > max_px
+    {
         cut.pop();
     }
     format!("{cut}…")
@@ -1276,7 +1365,7 @@ fn reset_note(window: &LimitWindowDto) -> String {
     let now = chrono::Utc::now();
     let clock = reset
         .with_timezone(&chrono::Local)
-        .format("%a %l:%M %p")
+        .format("%a %-I:%M %p")
         .to_string();
     if reset <= now {
         format!("Reset {clock} · last seen {}%", window.used_percent.round())
@@ -1328,6 +1417,8 @@ const CODEX_INK: Color = [238, 240, 242, 255];
 const CURSOR_BLUE: Color = [122, 162, 255, 255];
 const ANTIGRAVITY_MUTE: Color = [140, 147, 157, 255];
 const FABLE_TRACK: Color = [53, 42, 38, 255];
+/// The mac `ShowToggleCap`'s hovered fill: white at 11 %.
+const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
 const UNREADABLE_INK: Color = [77, 77, 77, 255];
 
 fn provider_color(provider: AgentId) -> Color {
@@ -1339,13 +1430,22 @@ fn provider_color(provider: AgentId) -> Color {
     }
 }
 
-/// The provider's accent, amber from 70 %, red from 90 %; grey when unreadable.
-fn meter_color(percent: Option<f64>, provider: AgentId) -> Color {
+/// The base accent, amber from 70 %, red from 90 %; grey when unreadable.
+fn meter_color(percent: Option<f64>, base: Color) -> Color {
     match percent {
         None => UNREADABLE_INK,
         Some(percent) if percent >= 90.0 => TRIP_RED,
         Some(percent) if percent >= 70.0 => WARN_AMBER,
-        Some(_) => provider_color(provider),
+        Some(_) => base,
+    }
+}
+
+/// The mac `formatPercent`: a used sliver reads "<1%" rather than rounding to zero.
+fn format_percent(percent: f64) -> String {
+    if percent > 0.0 && percent < 1.0 {
+        "<1%".into()
+    } else {
+        format!("{}%", percent.round())
     }
 }
 
@@ -1395,6 +1495,7 @@ pub fn render(plan: &Plan) -> Pixmap {
         plan.edge,
         &plan.metrics,
         scale,
+        RAIL_INK,
         None,
     );
     draw_cap(
@@ -1451,6 +1552,7 @@ fn draw_silhouette_masked(
     edge: Edge,
     metrics: &Metrics,
     scale: f32,
+    color: Color,
     mask: Option<&tiny_skia::Mask>,
 ) {
     let t = if vertical(edge) { rail.w } else { rail.h } as f32;
@@ -1493,7 +1595,7 @@ fn draw_silhouette_masked(
     };
     let scaled = Transform::from_scale(scale, scale).pre_concat(place);
     if let Some(path) = local.transform(scaled) {
-        paint_solid_masked(pixmap, &path, RAIL_INK, false, mask);
+        paint_solid_masked(pixmap, &path, color, false, mask);
     }
 }
 
@@ -1522,9 +1624,7 @@ fn draw_pill(pixmap: &mut Pixmap, pill: &R, scale: f32) {
             pill.h as f32 * scale / 2.0 - inset,
         )
     };
-    let mut capsule = PathBuilder::new();
-    capsule.push_oval(Rect::from_xywh(cx - rx, cy - ry, rx * 2.0, ry * 2.0).unwrap());
-    if let Some(path) = capsule.finish() {
+    if let Some(path) = capsule_px(cx - rx, cy - ry, rx * 2.0, ry * 2.0) {
         paint_solid(pixmap, &path, [255, 255, 255, 82], false);
     }
 }
@@ -1556,7 +1656,15 @@ fn draw_cap(
             false,
             Transform::identity(),
         );
-        draw_silhouette_masked(pixmap, rail, edge, metrics, scale, Some(&mask));
+        draw_silhouette_masked(
+            pixmap,
+            rail,
+            edge,
+            metrics,
+            scale,
+            CAP_HIGHLIGHT,
+            Some(&mask),
+        );
     }
     marks::pin(
         (
@@ -1565,9 +1673,25 @@ fn draw_cap(
             12.0 * scale,
             12.0 * scale,
         ),
-        [255, 255, 255, 242],
+        // Bright while the rail is pinned open, dim while it waits behind the strip.
+        if cap.pinned {
+            [255, 255, 255, 242]
+        } else {
+            [255, 255, 255, 140]
+        },
         pixmap,
     );
+}
+
+/// SwiftUI's `Capsule` in device pixels: a rectangle with half-round ends. Drawing
+/// one as an oval instead pinches it to nothing away from the middle, which turns a
+/// 4 pt meter bar into a hairline.
+fn capsule_px(x: f32, y: f32, w: f32, h: f32) -> Option<Path> {
+    rounded_rect_path(
+        R::new(f64::from(x), f64::from(y), f64::from(w), f64::from(h)),
+        f64::from(w.min(h)) / 2.0,
+        1.0,
+    )
 }
 
 fn rounded_rect_path(rect: R, radius: f64, scale: f32) -> Option<Path> {
@@ -1684,6 +1808,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
             label,
         } => {
             if let Some(primary) = primary {
+                let percent = primary.percent.unwrap_or(0.0);
                 stroke_ring(
                     pixmap,
                     center.0,
@@ -1691,12 +1816,13 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     radius,
                     ring_stroke,
                     -90.0,
-                    -90.0 + primary.percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(Some(primary.percent), *provider),
+                    -90.0 + percent.clamp(0.0, 100.0) as f32 * 3.6,
+                    meter_color(primary.percent, provider_color(*provider)),
                     true,
                 );
             }
             if let Some(fable) = fable {
+                let fable_percent = fable.percent.unwrap_or(0.0);
                 let inner_radius = radius - metrics.inner_ring_inset as f32 * scale;
                 stroke_ring(
                     pixmap,
@@ -1716,14 +1842,8 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     inner_radius,
                     metrics.inner_ring_stroke as f32 * scale,
                     -90.0,
-                    -90.0 + fable.percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    if fable.percent >= 90.0 {
-                        TRIP_RED
-                    } else if fable.percent >= 70.0 {
-                        WARN_AMBER
-                    } else {
-                        FABLE_ORANGE
-                    },
+                    -90.0 + fable_percent.clamp(0.0, 100.0) as f32 * 3.6,
+                    meter_color(fable.percent, FABLE_ORANGE),
                     true,
                 );
             }
@@ -1773,15 +1893,15 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
         + metrics.cell_padding as f32 * scale
         + icon_slot
         + metrics.content_spacing as f32 * scale
-        + text::ascent_px(label_size, text::Weight::Regular);
-    let measured = text::measure_px(&label, label_size, text::Weight::Regular);
+        + text::ascent_px(label_size, text::Weight::Medium);
+    let measured = text::measure_px(&label, label_size, text::Weight::Medium);
     text::draw_px(
         pixmap,
         center.0 - measured / 2.0 + offset,
         baseline,
         &label,
         label_size,
-        text::Weight::Regular,
+        text::Weight::Medium,
         [255, 255, 255, 255],
     );
 }
@@ -1825,23 +1945,19 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
     // The tail: a triangle pointing from the card toward the rail.
     let half = (7.0 * plan.size_scale) as f32 * scale;
     let length = tail_space.max(tail_space_y) as f32 * scale;
-    let (tx, ty) = if vertical(edge) {
-        // The tail attaches to the card's screen-edge side and points at the rail.
-        match edge {
-            Edge::Right => (
-                card.x as f32 * scale + card.w as f32 * scale,
-                popover.tail as f32 * scale,
-            ),
-            _ => (card.x as f32 * scale, popover.tail as f32 * scale),
-        }
+    // `tail` is measured from the card's own leading edge, the way the mac popover
+    // positions its tail inside the card's GeometryReader.
+    let along = if vertical(edge) {
+        (card.y + popover.tail) as f32 * scale
     } else {
-        match edge {
-            Edge::Top => (popover.tail as f32 * scale, card.y as f32 * scale),
-            _ => (
-                popover.tail as f32 * scale,
-                card.y as f32 * scale + card.h as f32 * scale,
-            ),
-        }
+        (card.x + popover.tail) as f32 * scale
+    };
+    let (tx, ty) = match edge {
+        // The tail attaches to the card's screen-edge side and points at the rail.
+        Edge::Right => ((card.x + card.w) as f32 * scale, along),
+        Edge::Left => (card.x as f32 * scale, along),
+        Edge::Top => (along, card.y as f32 * scale),
+        Edge::Bottom => (along, (card.y + card.h) as f32 * scale),
     };
     let mut tail_pb = PathBuilder::new();
     match edge {
@@ -1906,10 +2022,7 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
                 right,
             } => {
                 let device_size = *size as f32 * scale;
-                let weight = match weight {
-                    TextWeight::Regular => text::Weight::Regular,
-                    TextWeight::Semibold => text::Weight::Semibold,
-                };
+                let weight = weight.face();
                 let baseline = px.y as f32 + text::ascent_px(device_size, weight);
                 if *right {
                     text::draw_px_right(
@@ -1935,21 +2048,14 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
                 }
             }
             PopItem::Bar { percent, color } => {
-                let mut track = PathBuilder::new();
-                track.push_oval(
-                    Rect::from_xywh(px.x as f32, px.y as f32, px.w as f32, px.h as f32).unwrap(),
-                );
-                if let Some(path) = track.finish() {
+                if let Some(path) = capsule_px(px.x as f32, px.y as f32, px.w as f32, px.h as f32) {
                     paint_solid(pixmap, &path, [255, 255, 255, 36], false);
                 }
                 if let Some(percent) = percent {
                     let fill_w = (px.w * percent.clamp(0.0, 100.0) / 100.0).max(px.h);
-                    let mut fill = PathBuilder::new();
-                    fill.push_oval(
-                        Rect::from_xywh(px.x as f32, px.y as f32, fill_w as f32, px.h as f32)
-                            .unwrap(),
-                    );
-                    if let Some(path) = fill.finish() {
+                    if let Some(path) =
+                        capsule_px(px.x as f32, px.y as f32, fill_w as f32, px.h as f32)
+                    {
                         paint_solid(pixmap, &path, *color, false);
                     }
                 }
