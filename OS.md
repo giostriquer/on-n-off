@@ -96,7 +96,7 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
 - In this repo's shell tooling, prefer `Join-Path`, `$env:VAR`, `-LiteralPath`; in bash use forward
   slashes and `cygpath -w` when handing paths to Windows programs.
 
-## Native side notch (macOS)
+## Native side notch: macOS
 
 The opt-in side notch is a SwiftUI/AppKit helper bundled under `Contents/Helpers/on-n-off-notch.app`
 with its own native application identity. `src-tauri/native_build.rs` compiles it only for macOS;
@@ -111,3 +111,71 @@ non-activating panels (hover pill, rail, popover); hovering never activates it, 
 popover takes key status so Escape can release it. Live-session rows come from
 `~/.claude/sessions/<pid>.json` (the pid is checked with `/bin/ps`) and from Codex rollouts modified
 in the last hour; the helper never opens those files itself.
+
+## Native side notch: Windows
+
+Windows has no helper process. One transparent, always-on-top, non-activating `tao` window per
+selected display is painted with tiny-skia and presented through `UpdateLayeredWindow`, which
+carries the new origin, size and pixels in one call. These behaviours decide whether it works:
+
+- **The window must be a bare `WS_POPUP`.** tao leaves an undecorated window with `WS_CAPTION` and
+  `WS_THICKFRAME`; Windows then keeps an invisible resize border on the left, right and bottom, so
+  the client area is inset by the border width, the layered surface is clipped to it, and the
+  compositor draws a drop shadow and a top hairline around what is left. `overlay_style` strips the
+  frame before every present, which is also what lets the rail reach the screen edge.
+- **Hit testing is per-pixel alpha.** A transparent part of the overlay clicks through to whatever is
+  underneath, so the rail's flared ends and the gap beside a popover are not clickable, and
+  `WindowFromPoint` is what tells the state machine whether the pointer is on the notch.
+- **tao reports no `CursorMoved` for this window.** The 80 ms pointer poll is the only hover input
+  there is, and it has to keep running while the collapsed strip is showing or reaching the strip
+  never opens the rail.
+- **The text engine hints every pixel size on its own.** A string measured at the point size is not `scale` times
+  narrower than the same string rasterised at point x scale, so measurement for layout has to happen
+  at the device size and convert back, or a 150 % display drifts by about a fifth on longer labels.
+- **The rail has to sit on whole device pixels.** Centring it in a work area that does
+  not divide evenly (1032 px tall, say) leaves it on a half pixel, and the window origin
+  is the union of the rail with the popover: opening a popover above the rail's top edge
+  then shifts that half pixel into the rail's own drawing and every cell visibly jumps.
+  `model::layout` snaps the frame with `pixel_aligned`, the `pixelAligned` port.
+- **A non-activating overlay cannot take the foreground.** The popover's "Open Limits" and "Open Pull
+  requests" links show and raise the main window, but Windows refuses the focus change, so a window
+  that was already open behind another app stays behind it and the taskbar button flashes instead.
+
+- **Text goes through DirectWrite, along the WebView's own path.** GDI's
+  `ANTIALIASED_QUALITY` is a 4x4 supersample — exactly 16 coverage levels, and curves that
+  stair-step beside the app's WebView text. `win_paint/text.rs` shapes each run with
+  `IDWriteFontFace` and rasterises it through `IDWriteGlyphRunAnalysis` in
+  `CLEARTYPE_NATURAL_SYMMETRIC`, takes the **3x1 ClearType texture**, and collapses each
+  triple by sRGB luminance — what Skia does when Chromium needs a grayscale alpha mask, and
+  softer at the stems than DirectWrite's own 1x1 grayscale texture, which comes out a pixel
+  narrower per word and harder at the edges. A layered overlay composites per-pixel alpha
+  and cannot show subpixel colour; that is the only part of the path it cannot follow.
+- **The alpha texture is linear coverage.** Every Windows text stack corrects it for the
+  display before blending, and skipping that leaves light text on a dark panel a visible
+  step thinner than the same string in the app. The correction is the sRGB display exponent,
+  *not* the system's ClearType gamma (`IDWriteRenderingParams::GetGamma`, 1.8 on a default
+  install), which lands far too light.
+- **The face is the app's own, and so is the weight it resolves to.** `ui/src/tokens.css`
+  asks for `-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui,
+  sans-serif`; on Windows the first three do not resolve, so the WebView draws in `Segoe UI`
+  and the notch asks for the same family (`Tahoma` only as a last resort). That family ships
+  300/350/400/600/700 and no 500. CSS would step a 500 request *down* onto regular, but
+  Chromium hands the choice to DirectWrite, which steps it *up* onto semibold — so the app's
+  own `font-medium` runs render semibold. `installed_face` asks DirectWrite the same
+  question, through `GetFirstMatchingFont`; scoring the family by hand instead put every
+  percentage on the rail a full weight lighter than the same figure in the app.
+- **Glyphs beside text line up on the cap band.** SF Pro's line box happens to sit on its
+  cap centre, so the mac design's `HStack` and the app's `flex items-center` both land there.
+  Segoe UI's ascent runs far above its cap line and its descender far below, so neither the
+  line box nor the whole ink extent lands where the eye expects — centring on the ink drops a
+  header mark about a pixel and a half below its title. `text::cap_middle_px` gives the cap
+  offset from the real font metrics.
+- **Typography is checked against the app engine, not by eye.**
+  `win_paint::visual::specimen` renders every size and weight the notch draws on one sheet.
+  Rebuild the same rows as HTML and render them with `msedge --headless`, once plain and
+  once with `--disable-lcd-text` — the WebView sits between those two. Advance widths and
+  ink centroids should match outright and total ink to a few per cent. Measure
+  alpha-weighted: a premultiplied PNG read as RGB reports every partial pixel as solid.
+
+Win11 is the floor (`CurrentBuildNumber` >= 22000); the settings card says so on older builds.
+

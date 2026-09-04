@@ -43,7 +43,7 @@ flowchart TB
         net["api.anthropic · chatgpt.com<br/>api.github.com · LiteLLM"]
     end
 
-    notch["on-n-off-notch<br/><i>bundled SwiftUI helper, macOS only</i>"]
+    notch["on-n-off-notch<br/><i>bundled SwiftUI helper, macOS only;<br/>Windows paints its own window</i>"]
 
     main --> api
     popover --> api
@@ -64,9 +64,10 @@ Two things to hold onto:
 
 - **`commands.rs` is the only door.** The UI reaches Rust through `$lib/api`, which reaches
   `commands.rs`, and nothing else. Feature components never invoke Tauri directly.
-- **The notch is a separate process.** It is a bundled Swift helper, not a WebView. Rust owns its
-  settings and feeds it snapshots over bounded private pipes; it draws and reports back typed
-  actions. No credentials cross that pipe and it opens no listener.
+- **The notch is not a WebView.** On macOS it is a bundled Swift helper in its own process: Rust
+  owns its settings and feeds it snapshots over bounded private pipes, and it draws and reports
+  back typed actions. No credentials cross that pipe and it opens no listener. On Windows there is
+  no helper — the app paints a layered overlay window itself over in-process channels.
 
 ## Reads, and why they are shared
 
@@ -110,7 +111,7 @@ the real explanation. What follows is only enough to know which one you want.
 | `limits/` + `limits_refresh.rs` | Live subscription rate limits | Provider problems come back as a `status` on the DTO, never an `Err`. See below. |
 | `github/` + `github_monitor.rs` | The Pull requests screen and its CI notifications | Not a provider, not behind `AgentAdapter`. See below. |
 | `item_install/` | Installing skills/subagents from a GitHub marketplace | The only substantial writer. Atomic placement plus a provenance registry at `~/.on-n-off/installed-items.json`, so upstream changes stay visible after the user edits their copy. |
-| `side_notch/` | The macOS notch overlay | See [side-notch.md](side-notch.md). |
+| `side_notch/` | The notch overlay, macOS and Windows 11 | See [side-notch.md](side-notch.md). |
 | `monitor.rs` | Shared polling/notification plumbing | `limits_monitor` and `github_monitor` are both built on it; they poll while the window is hidden. |
 
 ### Limits
