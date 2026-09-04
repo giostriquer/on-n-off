@@ -251,10 +251,11 @@ fn text_is_measured_at_the_size_it_is_drawn_on_a_scaled_display() {
 }
 
 #[test]
-fn the_header_glyph_sits_on_the_middle_of_its_title() {
-    // Measured off the mac popover: the header mark's ink centre lands on the title's
-    // ink centre, not on its line box, which rides about two pixels high because text
-    // ink runs from the cap line down to the descender.
+fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
+    // The mac header is an `HStack` and the app's rows are `flex items-center`; both
+    // land a mark beside a title on the middle of the capitals. Centring on the whole
+    // ink extent instead drops the mark about a pixel and a half, because Segoe UI's
+    // descender runs much deeper below the baseline than its cap line runs above it.
     let (planned, pixmap) = popover_render(claude_with(vec![window(
         "w",
         "Weekly - all models",
@@ -289,9 +290,11 @@ fn the_header_glyph_sits_on_the_middle_of_its_title() {
         f64::from(rows[0] + rows[rows.len() - 1]) / 2.0
     };
     let glyph = ink_centre(mark.x, mark.x + mark.w);
-    let words = ink_centre(title.x, title.x + title.w.min(90.0));
+    // The leading capital on its own: cap line to baseline, with no ascender or
+    // descender in the window to widen the band.
+    let caps = ink_centre(title.x, title.x + 8.0);
     assert!(
-        (glyph - words).abs() <= 1.0,
-        "the glyph rides with the words: glyph {glyph}, words {words}"
+        (glyph - caps).abs() <= 1.0,
+        "the glyph sits on the capitals: glyph {glyph}, caps {caps}"
     );
 }

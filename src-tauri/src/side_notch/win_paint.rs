@@ -754,13 +754,13 @@ fn popover_entries(
     let x = v(12.0);
     let spacing = v(10.0);
     // Where a glyph's own centre has to land to sit on the middle of a line of text.
-    let ink_middle = |points: f64, weight: TextWeight| -> f64 {
-        f64::from(text::ink_middle_px(
+    let cap_middle = |points: f64, weight: TextWeight| -> f64 {
+        f64::from(text::cap_middle_px(
             device_size(points, display_scale),
             weight.face(),
         )) / display_scale
     };
-    let header_lift = ink_middle(13.0, TextWeight::Semibold) - v(13.0) / 2.0;
+    let header_lift = cap_middle(13.0, TextWeight::Semibold) - v(13.0) / 2.0;
 
     fn text_entry(
         entries: &mut Vec<(PopItem, R)>,
@@ -1204,7 +1204,7 @@ fn popover_entries(
                         PopItem::Dot { ci: row.ci },
                         R::new(
                             x + inner_w - v(7.0),
-                            y + ink_middle(10.0, TextWeight::Regular) - v(7.0) / 2.0,
+                            y + cap_middle(10.0, TextWeight::Regular) - v(7.0) / 2.0,
                             v(7.0),
                             v(7.0),
                         ),
@@ -1273,7 +1273,7 @@ fn popover_entries(
         },
         R::new(
             x + inner_w - arrow,
-            y + ink_middle(10.5, TextWeight::Medium) - arrow / 2.0,
+            y + cap_middle(10.5, TextWeight::Medium) - arrow / 2.0,
             arrow,
             arrow,
         ),

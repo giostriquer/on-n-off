@@ -50,16 +50,17 @@ fn glyphs_carry_more_greys_than_gdi_smoothing() {
 }
 
 #[test]
-fn coverage_is_gamma_corrected_like_the_rest_of_windows() {
+fn coverage_is_gamma_corrected_like_the_app_engine() {
     // An alpha texture is linear coverage. Every Windows text stack — the app's own
-    // WebView included — gamma-corrects it before blending; without that, light text
-    // on a dark panel comes out thin and washed out next to the app.
+    // WebView included — corrects it before blending; without that, light text on a
+    // dark panel comes out thin and washed out next to the app. The curve was fitted
+    // against that engine, so it has to be a real correction, not the identity.
     let table = with_engine(|engine| Some(engine.gamma)).expect("DirectWrite starts");
     assert_eq!(table[0], 0, "nothing stays nothing");
     assert_eq!(table[255], 255, "and full coverage stays full");
     assert!(
-        table[128] > 150,
-        "a half-covered pixel blends heavier than linear: {}",
+        (185..=200).contains(&table[128]),
+        "a half-covered pixel blends the way the WebView blends it: {}",
         table[128]
     );
     assert!(
@@ -149,21 +150,68 @@ fn measure_matches_draw_width() {
 }
 
 #[test]
-fn medium_runs_never_land_on_the_semibold_face() {
-    // `Segoe UI` ships 300/350/400/600/700 and no 500, and DirectWrite's own matching
-    // rounds a request for 500 up onto semibold — a full step heavier than the mac
-    // design asks for, and what reads as chunky at these sizes. The nearest-weight
-    // pick has to break that tie downwards.
+fn medium_runs_land_on_the_face_the_webview_would_pick() {
+    // `Segoe UI` ships 300/350/400/600/700 and no 500. CSS would step a 500 request
+    // down onto regular; DirectWrite steps it up onto semibold, and DirectWrite is what
+    // resolves the app's own `font-medium` runs inside the WebView. Scoring the family
+    // here instead put the overlay's percentages a whole weight lighter than the same
+    // figures in the app.
     let sample = "Open Limits 81% Used";
-    let regular = measure_px(sample, 11.0, Weight::Regular);
-    let medium = measure_px(sample, 11.0, Weight::Medium);
-    let semibold = measure_px(sample, 11.0, Weight::Semibold);
+    let regular = ink(sample, 17.0, Weight::Regular);
+    let medium = ink(sample, 17.0, Weight::Medium);
+    let semibold = ink(sample, 17.0, Weight::Semibold);
     assert!(
-        medium < semibold,
-        "medium stays off semibold: medium {medium}, semibold {semibold}"
+        medium > regular,
+        "medium is not the regular cut: regular {regular}, medium {medium}"
     );
     assert_eq!(
-        medium, regular,
-        "and lands on the regular cut, the closest this family has"
+        medium, semibold,
+        "it is the cut DirectWrite hands the WebView for a 500"
+    );
+}
+
+/// Total coverage a run puts on the pixmap, as a stand-in for how heavy it reads.
+fn ink(text: &str, size: f32, weight: Weight) -> u64 {
+    let mut pixmap = Pixmap::new(400, 60).unwrap();
+    pixmap.fill(tiny_skia::Color::TRANSPARENT);
+    draw_px(
+        &mut pixmap,
+        8.0,
+        40.0,
+        text,
+        size,
+        weight,
+        [255, 255, 255, 255],
+    );
+    pixmap.pixels().iter().map(|px| u64::from(px.alpha())).sum()
+}
+
+#[test]
+fn a_glyph_beside_a_title_centres_on_its_cap_band() {
+    // The mac header is an `HStack`, and the app's own rows are `flex items-center`;
+    // on both, a mark beside a title lands on the middle of the capitals, not on the
+    // middle of the ink. Segoe UI's descender is deep enough that centring on the ink
+    // instead drops the mark a visible step below the title it belongs to.
+    let (size, weight, baseline) = (13.0f32, Weight::Semibold, 30.0f32);
+    let mut pixmap = Pixmap::new(120, 48).unwrap();
+    pixmap.fill(tiny_skia::Color::TRANSPARENT);
+    draw_px(
+        &mut pixmap,
+        8.0,
+        baseline,
+        "HH",
+        size,
+        weight,
+        [255, 255, 255, 255],
+    );
+    let cap_top = (0..48)
+        .find(|row| (0..120).any(|col| pixmap.pixels()[row * 120 + col].alpha() > 40))
+        .expect("the capitals land on the pixmap") as f32;
+    let cap_centre = (cap_top + baseline) / 2.0;
+
+    let placed = baseline - ascent_px(size, weight) + cap_middle_px(size, weight);
+    assert!(
+        (placed - cap_centre).abs() <= 1.0,
+        "mark centre {placed} sits on the cap band centre {cap_centre} (cap top {cap_top})"
     );
 }

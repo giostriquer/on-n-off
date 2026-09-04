@@ -280,3 +280,51 @@ fn visual_dump() {
     )
     .unwrap();
 }
+
+/// Type specimen: every (size, weight) the notch draws, on the popover ink, one
+/// baseline per row, so the sheet can be diffed against the engine the app's own
+/// window draws with. Write the same rows as HTML — 26 px tall, 12 px in, a zero-width
+/// 20 px inline-block strut to pin each baseline, `ui/src/tokens.css`'s font stack —
+/// and render it with `msedge --headless --window-size=420,234 --screenshot=…`, once
+/// plain and once with `--disable-lcd-text`; the WebView sits between those two. Ink
+/// centroids and advance widths should match outright, total ink to a few per cent.
+///
+/// `cargo test --lib side_notch::win_paint::visual::specimen -- --ignored`
+#[ignore]
+#[test]
+fn specimen() {
+    let out = concat!(env!("CARGO_MANIFEST_DIR"), "/../.tmp-visual");
+    let _ = std::fs::create_dir_all(out);
+    let samples: &[(f32, text::Weight, &str)] = &[
+        (17.0, text::Weight::Medium, "27% 79% 100%"),
+        (13.0, text::Weight::Semibold, "Claude Usage"),
+        (12.0, text::Weight::Semibold, "Pull requests"),
+        (11.0, text::Weight::Semibold, "Weekly · all models"),
+        (11.0, text::Weight::Regular, "Antigravity has no limits."),
+        (10.5, text::Weight::Medium, "27% Used · working"),
+        (10.0, text::Weight::Regular, "Resets Mon 7:59 AM"),
+        (9.5, text::Weight::Semibold, "MINE"),
+        (9.5, text::Weight::Medium, "Ready"),
+    ];
+    let (w, h, pitch, x, base) = (420u32, 26 * samples.len() as u32, 26.0f32, 12.0f32, 20.0f32);
+    let mut pixmap = Pixmap::new(w, h).unwrap();
+    let [r, g, b, _] = POPOVER_INK;
+    pixmap.fill(tiny_skia::Color::from_rgba8(r, g, b, 255));
+    for (row, (size, weight, sample)) in samples.iter().enumerate() {
+        let top = row as f32 * pitch;
+        text::draw_px(
+            &mut pixmap,
+            x,
+            top + base,
+            sample,
+            *size,
+            *weight,
+            [255, 255, 255, 255],
+        );
+    }
+    std::fs::write(
+        format!("{out}/specimen-notch.png"),
+        pixmap.encode_png().unwrap(),
+    )
+    .unwrap();
+}

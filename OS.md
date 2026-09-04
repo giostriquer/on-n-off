@@ -129,7 +129,7 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
 - **tao reports no `CursorMoved` for this window.** The 80 ms pointer poll is the only hover input
   there is, and it has to keep running while the collapsed strip is showing or reaching the strip
   never opens the rail.
-- **GDI hints every pixel size on its own.** A string measured at the point size is not `scale` times
+- **The text engine hints every pixel size on its own.** A string measured at the point size is not `scale` times
   narrower than the same string rasterised at point x scale, so measurement for layout has to happen
   at the device size and convert back, or a 150 % display drifts by about a fifth on longer labels.
 - **The rail has to sit on whole device pixels.** Centring it in a work area that does
@@ -141,30 +141,41 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
   requests" links show and raise the main window, but Windows refuses the focus change, so a window
   that was already open behind another app stays behind it and the taskbar button flashes instead.
 
-- **Text goes through DirectWrite, and matches the app's own.** GDI's
-  `ANTIALIASED_QUALITY` is a 4x4 supersample — exactly 16 coverage levels, and curves
-  that stair-step beside the app's WebView text. `win_paint/text.rs` shapes each run
-  with `IDWriteFontFace` and rasterises it through `IDWriteGlyphRunAnalysis` in
-  `CLEARTYPE_NATURAL_SYMMETRIC` with `DWRITE_GRID_FIT_MODE_ENABLED` and
-  `DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE`: the hinting and positioning Windows uses for
-  UI text, with grayscale output because a layered overlay composites per-pixel alpha
-  and cannot show subpixel colour. Two things are easy to get wrong here and both make
-  the notch look nothing like the app: turning the grid fit off leaves 10-13 px stems
-  unsnapped and mushy, and blending the alpha texture as-is leaves light text on a dark
-  panel thin and washed out — an alpha texture is *linear* coverage, and every Windows
-  text stack gamma-corrects it first, so `gamma_table` builds that curve from
-  `IDWriteRenderingParams::GetGamma`.
-- **The face is the app's own.** `ui/src/tokens.css` asks for `-apple-system,
-  BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif`; on Windows the
-  first three do not resolve, so the WebView draws in `Segoe UI` and the notch asks for
-  the same family (`Tahoma` only as a last resort). That family ships 300/350/400/600/700
-  and no 500, and DirectWrite's own matching rounds a request for 500 *up* onto semibold
-  — a full step heavier than the mac design's `.medium` runs. `installed_face` therefore
-  picks the nearest installed weight itself, breaking ties downwards.
-- **Glyphs beside text line up on the ink, not the line box.** Text ink runs from the
-  cap line down to the descender, so a mark centred on its line box rides about two
-  pixels high; measured off the mac popover, its header marks sit on the ink centre.
-  `text::ink_middle_px` gives that offset from the real font metrics.
+- **Text goes through DirectWrite, along the WebView's own path.** GDI's
+  `ANTIALIASED_QUALITY` is a 4x4 supersample — exactly 16 coverage levels, and curves that
+  stair-step beside the app's WebView text. `win_paint/text.rs` shapes each run with
+  `IDWriteFontFace` and rasterises it through `IDWriteGlyphRunAnalysis` in
+  `CLEARTYPE_NATURAL_SYMMETRIC`, takes the **3x1 ClearType texture**, and collapses each
+  triple by sRGB luminance — what Skia does when Chromium needs a grayscale alpha mask, and
+  softer at the stems than DirectWrite's own 1x1 grayscale texture, which comes out a pixel
+  narrower per word and harder at the edges. A layered overlay composites per-pixel alpha
+  and cannot show subpixel colour; that is the only part of the path it cannot follow.
+- **The alpha texture is linear coverage.** Every Windows text stack corrects it for the
+  display before blending, and skipping that leaves light text on a dark panel a visible
+  step thinner than the same string in the app. The correction is the sRGB display exponent,
+  *not* the system's ClearType gamma (`IDWriteRenderingParams::GetGamma`, 1.8 on a default
+  install), which lands far too light.
+- **The face is the app's own, and so is the weight it resolves to.** `ui/src/tokens.css`
+  asks for `-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui,
+  sans-serif`; on Windows the first three do not resolve, so the WebView draws in `Segoe UI`
+  and the notch asks for the same family (`Tahoma` only as a last resort). That family ships
+  300/350/400/600/700 and no 500. CSS would step a 500 request *down* onto regular, but
+  Chromium hands the choice to DirectWrite, which steps it *up* onto semibold — so the app's
+  own `font-medium` runs render semibold. `installed_face` asks DirectWrite the same
+  question, through `GetFirstMatchingFont`; scoring the family by hand instead put every
+  percentage on the rail a full weight lighter than the same figure in the app.
+- **Glyphs beside text line up on the cap band.** SF Pro's line box happens to sit on its
+  cap centre, so the mac design's `HStack` and the app's `flex items-center` both land there.
+  Segoe UI's ascent runs far above its cap line and its descender far below, so neither the
+  line box nor the whole ink extent lands where the eye expects — centring on the ink drops a
+  header mark about a pixel and a half below its title. `text::cap_middle_px` gives the cap
+  offset from the real font metrics.
+- **Typography is checked against the app engine, not by eye.**
+  `win_paint::visual::specimen` renders every size and weight the notch draws on one sheet.
+  Rebuild the same rows as HTML and render them with `msedge --headless`, once plain and
+  once with `--disable-lcd-text` — the WebView sits between those two. Advance widths and
+  ink centroids should match outright and total ink to a few per cent. Measure
+  alpha-weighted: a premultiplied PNG read as RGB reports every partial pixel as solid.
 
 Win11 is the floor (`CurrentBuildNumber` >= 22000); the settings card says so on older builds.
 

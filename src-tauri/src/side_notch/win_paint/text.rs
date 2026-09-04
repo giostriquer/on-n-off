@@ -1,9 +1,16 @@
-//! Text on the notch pixmap: DirectWrite shapes and rasterises the system UI face,
-//! the same engine the app's WebView draws with, so the overlay's labels match the
-//! rest of on-n-off instead of the coarser 16-level grey GDI produces. Glyph runs go
-//! through `IDWriteGlyphRunAnalysis`, whose ClearType texture is averaged back into a
-//! single coverage value: a layered window composites per-pixel alpha and cannot show
-//! subpixel colour.
+//! Text on the notch pixmap. The overlay sits beside the app's own window, so this
+//! re-treads the path that window's WebView takes to the screen rather than forming a
+//! second opinion on how to draw Segoe UI: the face DirectWrite hands the WebView for
+//! a given weight, the same ClearType glyph-run analysis, the same luminance collapse
+//! of the 3x1 texture Skia does when it needs an alpha mask, and a display-gamma
+//! correction on the result. A layered window composites per-pixel alpha and cannot
+//! show subpixel colour, which is the one place the overlay cannot follow.
+//!
+//! `win_paint::visual::specimen` dumps every size and weight the notch draws. Render
+//! the same sheet with `msedge --headless` — with and without `--disable-lcd-text`,
+//! which brackets what the WebView does — and the two are the reference this was
+//! checked against: same advance widths, same ink centroids, total ink within a few
+//! per cent.
 //!
 //! DirectWrite is COM, which is why this module opts into unsafe explicitly.
 
@@ -12,24 +19,23 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use tiny_skia::Pixmap;
-use windows::core::{Interface, PCWSTR};
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_TEXTURE_ALIASED_1x1, DWRITE_TEXTURE_CLEARTYPE_3x1, DWriteCreateFactory, IDWriteFactory,
-    IDWriteFactory2, IDWriteFont, IDWriteFontCollection, IDWriteFontFace, IDWriteGlyphRunAnalysis,
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL,
+    DWRITE_TEXTURE_CLEARTYPE_3x1, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
+    IDWriteFontFace, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL,
     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_MEDIUM,
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_GLYPH_METRICS,
-    DWRITE_GLYPH_RUN, DWRITE_GRID_FIT_MODE_ENABLED, DWRITE_MEASURING_MODE_NATURAL,
-    DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC, DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
-    DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+    DWRITE_GLYPH_RUN, DWRITE_MEASURING_MODE_NATURAL,
+    DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Weight {
     Regular,
-    /// The mac design's `.medium`. `Segoe UI Variable` carries a real 500, so these
-    /// runs stay a step below semibold instead of collapsing onto it.
+    /// The mac design's `.medium`, and the app's `font-medium`. Segoe UI ships no 500,
+    /// and DirectWrite resolves the request onto semibold — so this is a step heavier
+    /// than the name suggests, exactly as `font-medium` is in the app's own screens.
     Medium,
     Semibold,
 }
@@ -60,7 +66,6 @@ struct Face {
     face: IDWriteFontFace,
     units_per_em: f32,
     ascent: f32,
-    descent: f32,
     cap_height: f32,
 }
 
@@ -105,7 +110,7 @@ impl Engine {
             } else {
                 FALLBACK_FACE
             };
-            let gamma = gamma_table(&factory);
+            let gamma = gamma_table();
             Some(Self {
                 factory,
                 collection,
@@ -133,15 +138,15 @@ impl Engine {
             face,
             units_per_em: f32::from(metrics.designUnitsPerEm.max(1)),
             ascent: f32::from(metrics.ascent),
-            descent: f32::from(metrics.descent),
             cap_height: f32::from(metrics.capHeight),
         })
     }
 
-    /// The installed instance closest to this weight, ties going to the lighter one.
-    /// `Segoe UI` ships 300/350/400/600/700 and no 500, and DirectWrite's own matching
-    /// rounds a request for 500 *up* onto semibold — a full step heavier than the mac
-    /// design's `.medium` runs, and the thing that reads as chunky at these sizes.
+    /// The instance DirectWrite itself picks for this weight. Segoe UI ships
+    /// 300/350/400/600/700 and no 500, and where CSS would step a 500 request down onto
+    /// regular, DirectWrite steps it up onto semibold — so the WebView renders the app's
+    /// `font-medium` runs in semibold. Asking DirectWrite the same question, rather than
+    /// scoring the family here, is what keeps the two in step.
     fn installed_face(&self, weight: Weight) -> Option<IDWriteFontFace> {
         // SAFETY: a family lookup and the font face it hands back.
         unsafe {
@@ -155,46 +160,35 @@ impl Engine {
                 return None;
             }
             let family = self.collection.GetFontFamily(index).ok()?;
-            let wanted = weight.dwrite().0;
-            let mut best: Option<(i32, IDWriteFont)> = None;
-            for slot in 0..family.GetFontCount() {
-                let Ok(font) = family.GetFont(slot) else {
-                    continue;
-                };
-                if font.GetStyle() != DWRITE_FONT_STYLE_NORMAL
-                    || font.GetStretch() != DWRITE_FONT_STRETCH_NORMAL
-                {
-                    continue;
-                }
-                let have = font.GetWeight().0;
-                let distance = (have - wanted).abs() * 2 + i32::from(have > wanted);
-                if best.as_ref().is_none_or(|(closest, _)| distance < *closest) {
-                    best = Some((distance, font));
-                }
-            }
-            best?.1.CreateFontFace().ok()
+            family
+                .GetFirstMatchingFont(
+                    weight.dwrite(),
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL,
+                )
+                .ok()?
+                .CreateFontFace()
+                .ok()
         }
     }
 }
 
-/// The system's text gamma as a lookup table over coverage.
-fn gamma_table(factory: &IDWriteFactory) -> [u8; 256] {
-    // SAFETY: reads two scalars off a rendering-params object owned here.
-    let gamma = unsafe {
-        factory
-            .CreateRenderingParams()
-            .ok()
-            .map_or(1.8, |params| params.GetGamma())
-    };
-    let gamma = if gamma.is_finite() && gamma > 1.0 {
-        gamma
-    } else {
-        1.8
-    };
+/// Coverage -> blended coverage. A DirectWrite alpha texture is linear coverage, and
+/// every Windows text stack corrects it for the display before it blends; skipping that
+/// leaves light text on a dark panel a visible step thinner than the same string in the
+/// app. The sRGB display exponent is the correction, not the system's ClearType gamma
+/// (1.8 on this machine), which lands far too light.
+///
+/// `win_paint::visual::specimen` renders every size and weight the notch draws and
+/// `msedge --headless` renders the same sheet, which is how this was checked: the total
+/// ink lands within 3% of the app engine's grayscale output and within 4% of its
+/// subpixel output, the two bounds a layered window has to sit between.
+fn gamma_table() -> [u8; 256] {
+    const GAMMA: f32 = 2.2;
     let mut table = [0u8; 256];
     for (level, slot) in table.iter_mut().enumerate() {
         let coverage = level as f32 / 255.0;
-        *slot = (coverage.powf(1.0 / gamma) * 255.0)
+        *slot = (coverage.powf(1.0 / GAMMA) * 255.0)
             .round()
             .clamp(0.0, 255.0) as u8;
     }
@@ -263,19 +257,24 @@ pub(super) fn ascent_px(size: f32, weight: Weight) -> f32 {
     .unwrap_or_else(|| (size * 0.8).round())
 }
 
-/// Where the middle of a line's visible ink sits below the line's top, in device
-/// pixels. Ink runs from the cap line down to the descender, so a glyph centred on the
-/// line box rides high beside it; the mac popover lines its header marks up with the
-/// ink instead, which is what reads as level.
-pub(super) fn ink_middle_px(size: f32, weight: Weight) -> f32 {
+/// Where a glyph beside a line of text has to put its own centre, measured down from
+/// the line's top, in device pixels.
+///
+/// The mac header is an `HStack` and the app's rows are `flex items-center`; on SF Pro
+/// both land on the middle of the capitals, because its line box happens to sit there.
+/// Segoe UI's ascent runs a long way above its cap line and its descender a long way
+/// below, so neither the line box nor the full ink extent lands where the eye expects:
+/// centring on the ink drops the mark a step below the title beside it. The cap band is
+/// the rule both platforms are really following.
+pub(super) fn cap_middle_px(size: f32, weight: Weight) -> f32 {
     let size = size.max(1.0);
     with_engine(|engine| {
         let face = engine.face(weight)?;
         let scale = face.scale(size);
         let baseline = (face.ascent * scale).round();
-        Some(baseline - (face.cap_height - face.descent) * scale / 2.0)
+        Some(baseline - face.cap_height * scale / 2.0)
     })
-    .unwrap_or(size * 0.55)
+    .unwrap_or(size * 0.45)
 }
 
 /// Advance width of `text` in device pixels when drawn at `size`.
@@ -386,82 +385,56 @@ fn rasterize(
             isSideways: false.into(),
             bidiLevel: 0,
         };
-        // The rendering Windows itself uses for UI text: ClearType-quality hinting
-        // and positioning, with the grid fit on so stems land on whole pixels and stay
-        // crisp at 10-13 px, but grayscale output — a layered overlay composites
-        // per-pixel alpha and cannot show subpixel colour. Older systems without
-        // `IDWriteFactory2` fall back to the plain call.
-        let grayscale: Option<IDWriteGlyphRunAnalysis> =
-            factory.cast::<IDWriteFactory2>().ok().and_then(|factory| {
-                factory
-                    .CreateGlyphRunAnalysis(
-                        &run,
-                        None,
-                        DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC,
-                        DWRITE_MEASURING_MODE_NATURAL,
-                        DWRITE_GRID_FIT_MODE_ENABLED,
-                        DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE,
-                        x,
-                        baseline,
-                    )
-                    .ok()
-            });
-        let (analysis, texture) = match grayscale {
-            Some(analysis) => (analysis, DWRITE_TEXTURE_ALIASED_1x1),
-            None => {
-                let analysis = factory.CreateGlyphRunAnalysis(
-                    &run,
-                    1.0,
-                    None,
-                    DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
-                    DWRITE_MEASURING_MODE_NATURAL,
-                    x,
-                    baseline,
-                );
-                std::mem::ManuallyDrop::drop(&mut run.fontFace);
-                (analysis.ok()?, DWRITE_TEXTURE_CLEARTYPE_3x1)
-            }
-        };
-        if texture == DWRITE_TEXTURE_ALIASED_1x1 {
-            std::mem::ManuallyDrop::drop(&mut run.fontFace);
-        }
-        let bounds: RECT = analysis.GetAlphaTextureBounds(texture).ok()?;
+        // The same call Chromium's text stack makes for a glyph run: ClearType-quality
+        // outlines and subpixel positioning, asked for as the 3x1 texture. A layered
+        // window composites per-pixel alpha and cannot show subpixel colour, so the
+        // three samples collapse to one below — which is also what the WebView does for
+        // a grayscale mask, and is softer at the stems than DirectWrite's own 1x1
+        // grayscale texture.
+        let analysis = factory.CreateGlyphRunAnalysis(
+            &run,
+            1.0,
+            None,
+            DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC,
+            DWRITE_MEASURING_MODE_NATURAL,
+            x,
+            baseline,
+        );
+        std::mem::ManuallyDrop::drop(&mut run.fontFace);
+        let analysis = analysis.ok()?;
+        let bounds: RECT = analysis
+            .GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1)
+            .ok()?;
         let width = (bounds.right - bounds.left).max(0) as usize;
         let height = (bounds.bottom - bounds.top).max(0) as usize;
         if width == 0 || height == 0 {
             return None;
         }
-        // The grayscale texture is one coverage byte per pixel; the ClearType fallback
-        // is three samples that have to be averaged back down to one.
-        let samples_per_pixel = if texture == DWRITE_TEXTURE_ALIASED_1x1 {
-            1
-        } else {
-            3
-        };
-        let mut samples = vec![0u8; width * height * samples_per_pixel];
+        let mut samples = vec![0u8; width * height * 3];
         analysis
-            .CreateAlphaTexture(texture, &bounds, &mut samples)
+            .CreateAlphaTexture(DWRITE_TEXTURE_CLEARTYPE_3x1, &bounds, &mut samples)
             .ok()?;
-        let coverage = if samples_per_pixel == 1 {
-            samples
-        } else {
-            samples
+        Some(Raster {
+            coverage: samples
                 .as_chunks::<3>()
                 .0
                 .iter()
-                .map(|triple| {
-                    ((u32::from(triple[0]) + u32::from(triple[1]) + u32::from(triple[2])) / 3) as u8
-                })
-                .collect()
-        };
-        Some(Raster {
-            coverage,
+                .map(|triple| luminance(*triple))
+                .collect(),
             width,
             height,
             left: bounds.left,
             top: bounds.top,
         })
     }
+}
+
+/// One coverage value from a ClearType triple, weighted the way Skia collapses the
+/// same texture when it needs an alpha mask: the sRGB luminance of the three samples,
+/// not their mean, so a stem that lands between two subpixels keeps its weight.
+fn luminance(triple: [u8; 3]) -> u8 {
+    let [r, g, b] = triple.map(u32::from);
+    ((r * 54 + g * 183 + b * 19) >> 8) as u8
 }
 
 /// Word-wraps `text` into at most `max_lines` lines no wider than `max_px`, with an

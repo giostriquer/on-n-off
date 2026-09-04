@@ -250,7 +250,7 @@ fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
 }
 
 #[test]
-fn the_popover_keeps_the_mac_medium_weight_off_semibold() {
+fn the_popover_keeps_the_mac_weight_of_every_run() {
     // Segoe UI has no medium face, so the mac `.medium` runs land on the regular one;
     // semibold is a full step heavier — about a fifth wider — and reads chunky beside
     // the labels that really are semibold.
@@ -336,11 +336,14 @@ fn the_popover_keeps_the_mac_medium_weight_off_semibold() {
         seen >= 8,
         "the popovers really carried these runs: {seen} of 10"
     );
-    // And the two weights really are different ink on this system.
-    let regular = measure_weight("Open Limits", 11.0, TextWeight::Medium, 1.0);
-    let heavy = measure_weight("Open Limits", 11.0, TextWeight::Semibold, 1.0);
+    // And a medium run really is heavier ink than a regular one on this system. Segoe UI
+    // has no 500, so DirectWrite resolves both medium and semibold onto the semibold cut
+    // — the same thing it does for the app's own `font-medium`, which is why the two
+    // measure alike here.
+    let plain = measure_weight("Open Limits", 11.0, TextWeight::Regular, 1.0);
+    let heavy = measure_weight("Open Limits", 11.0, TextWeight::Medium, 1.0);
     assert!(
-        heavy > regular,
-        "semibold is the heavier face: {regular} vs {heavy}"
+        heavy > plain,
+        "a medium run is heavier than a regular one: {plain} vs {heavy}"
     );
 }
