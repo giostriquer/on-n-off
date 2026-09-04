@@ -45,8 +45,29 @@ If a CLI works in a terminal but the app says **os error 193** / “not a valid 
 2. **Usage** — scan local transcripts (read-only of agent files; may write caches under `%USERPROFILE%\.on-n-off\`)
 3. **Limits** — live Claude subscription limits from its profile and usage HTTPS endpoints, plus Codex subscription limits through `codex app-server`. on-n-off never refreshes or writes Claude auth; Codex owns its own login and refresh lifecycle. On macOS, click **Allow** on the one-time Keychain prompt for `security`. Remembers each account's last numbers under `%USERPROFILE%\.on-n-off\limits\` so switching accounts with `codex login` / `claude` keeps the other one listed; **Forget** on a stale card deletes just that file. Optional limit notifications are off by default under **Settings → Limit notifications**. When enabled, the background monitor checks every 5, 10, 15, or 30 minutes while the app is running, notifies once when a window reaches 100% or resets, backs off after provider failures, and stores its deduplication baseline in `%USERPROFILE%\.on-n-off\limits-monitor.json`.
 4. **Pull requests** — your open GitHub pull requests (review requested, authored within the configured scope, assigned) with each one's CI rollup and merge state: an Approved / Changes requested badge from the review decision, and one merge badge — Conflicts, Queued (#position) for the merge queue, Auto-merge, Ready to merge, Behind base, or Blocked when nothing on the row already explains it (it stays quiet while a review is still required, since that is every protected PR's default state, and when changes were requested or CI is not green). Rows are grouped by repository: a list that spans several repositories gets one sub-heading per `owner/name`, a list from one repository names it on its title row instead, and either way the row itself carries only author and branches. The dot opens the checks tab, the row opens the PR. The row badges' vertical nudge was tuned against SF Mono; on Windows (Cascadia Mono / Consolas) check that the badge capitals sit centred on the title. Needs the GitHub CLI installed and signed in (`gh auth login`): on-n-off runs `gh auth token` once per app run and sends one GraphQL request per refresh to `api.github.com`; it never writes to GitHub. The last good read is kept under `%USERPROFILE%\.on-n-off\github\prs.json` and shown with an amber strip when a refresh fails. **Settings → Pull requests** holds the scope (`org:NAME`, `user:NAME`, `OWNER/REPO`), the refresh interval (30 s to 5 min; the screen polls only while the window is visible, the monitor polls on the same interval whenever notifications are on), and the opt-in notifications for the authored PRs the screen lists — CI failed / passed / green again, approved, changes requested, merge conflicts appeared or cleared, and ready to merge (which speaks for the good news arriving with it) — whose baseline lives in `%USERPROFILE%\.on-n-off\github\monitor.json`. Within each list, rows that need fixing (failing CI, conflicts, changes requested) come first, then rows that are waiting (pending CI, behind base, blocked for no visible reason), then the rest, newest activity first.
-5. **Agent config** — check paths and project scope
-6. Only then try a **single toggle** or install on a throwaway plugin if you want write coverage
+5. **Side notch** (Windows 11 only; the settings card says so on older builds) — see below
+6. **Agent config** — check paths and project scope
+7. Only then try a **single toggle** or install on a throwaway plugin if you want write coverage
+
+### Side notch on Windows
+
+**Settings → Side notch**: choose a display, a size, an edge, and **Always show** or **Show
+on hover**. There is no helper process and nothing to install — the app paints one
+transparent always-on-top overlay window per display and presents it with
+`UpdateLayeredWindow`. Things worth looking at, because they are where Windows differs:
+
+- The rail reaches the screen edge with no drop shadow, hairline, or gap around it.
+- Empty parts of the overlay click through to whatever is underneath; only the drawn rail
+  and popover take the pointer.
+- Reaching the collapsed pill with the pointer opens the rail, and leaving closes it.
+- Text matches the app's own: same face, same weight, same crispness as the window beside
+  it, with header marks level with their titles. Compare a popover against the Limits
+  screen at the same zoom.
+- At 125 % or 150 % display scaling the cells stay on whole pixels and nothing jumps when a
+  popover opens above the rail's top edge.
+- **Open Limits** / **Open Pull requests** show and raise the main window. Windows refuses a
+  foreground change from a non-activating overlay, so a window that was already behind
+  another app flashes in the taskbar instead of coming forward; that is expected.
 
 ## Safety notes
 
@@ -97,7 +118,7 @@ The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, and `~/.on-n-of
 
 ### Side notch
 
-**Settings → Side notch**: choose a display, pick **Always show** or **Show on hover**, and an edge. Expect the notch silhouette with one ring per provider (Claude weekly with Fable's inner ring, Codex 5-hour) and a pull-request cell whose ring is split per pull request by CI colour. Hover a cell for its popover (quota windows, live sessions; pull requests with a copy button that puts a linked "review please: <title>" on the clipboard, paste it into Slack to check the link survives). Click pins the popover, Escape releases it. Top and bottom lay the cells side by side. The helper is bundled under `Contents/Helpers/on-n-off-notch.app`; nothing here writes to GitHub or provider homes.
+**Settings → Side notch**: choose a display, pick **Always show** or **Show on hover**, and an edge. Expect the notch silhouette with one ring per provider (Claude weekly with Fable's inner ring, Codex 5-hour) and a pull-request cell whose ring is split per pull request by CI colour. Hover a cell for its popover (quota windows, live sessions; pull requests with a copy button that puts a linked "review please: <title>" on the clipboard, paste it into Slack to check the link survives). Click pins the popover, Escape releases it. Top and bottom lay the cells side by side. On macOS the helper is bundled under `Contents/Helpers/on-n-off-notch.app`; nothing here writes to GitHub or provider homes.
 
 ### From source on macOS
 

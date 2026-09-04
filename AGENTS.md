@@ -37,7 +37,8 @@ of the file — start there, not here.
 - `config_io.rs`, `backup.rs` — guarded configuration writes and rollback.
 - `paths.rs` — agent homes and app data paths; `ON_N_OFF_HOME` redirects them for tests.
 - `cli_stub.rs` — test-only fake CLI builder (`.cmd` on Windows, `sh` script elsewhere).
-- `macos/SideNotch/` — the bundled SwiftUI notch helper, built by `native_build.rs`.
+- `macos/SideNotch/` — the bundled SwiftUI notch helper, built by `native_build.rs` on macOS only.
+- `side_notch/win_*.rs` — the Windows notch, which has no helper and paints its own window.
 
 **Build and CI** — `scripts/`, `.github/workflows/`.
 
@@ -75,6 +76,12 @@ Design and accessibility work on a screen is judged from those captures — and,
 fidelity, from a `screencapture -l <window id>` of the running app — never from reading the
 markup. The notch helper is invisible to ordinary screenshots; use its `--render` path and
 `scripts/check-native-notch.mjs` instead.
+
+The Windows notch draws its own pixels, so
+`cargo test --lib side_notch::win_paint::visual -- --ignored` dumps the rail, every popover and a
+type specimen to `.tmp-visual/`; judge it from those and from a screen grab of the running
+overlay. Its typography is not judged by eye at all — see
+[`docs/architecture/side-notch.md`](docs/architecture/side-notch.md).
 
 ## Constraints
 

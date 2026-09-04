@@ -408,13 +408,13 @@ pub async fn read_notch_state(
 ) -> Result<crate::side_notch::NotchSnapshot, AdapterError> {
     blocking("notch displays", move || {
         let snapshot = crate::side_notch::read();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         let snapshot = {
             let mut snapshot = snapshot;
             crate::side_notch::add_runtime_error(&app, &mut snapshot);
             snapshot
         };
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let _ = app;
         Ok(snapshot)
     })

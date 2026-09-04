@@ -28,6 +28,7 @@ ui/dist
 # Workbench scratch
 .workbench/
 .tmp/
+.tmp-visual/
 .worktrees/
 /tmp/
 

@@ -19,12 +19,15 @@ boundary.
 See [HANDOFF.md](./HANDOFF.md) for per-platform prerequisites and the
 recommended smoke-test order.
 
-### macOS side notch
+### Side notch
 
-The notch is a native SwiftUI view in an AppKit panel. A small helper is bundled
-inside the macOS app and runs while the feature is enabled. It closes with the
-parent app; there is no extra installation, login item, or local network service.
-The main application remains Tauri.
+The notch is native on both platforms and looks the same on each. On macOS it is a
+SwiftUI view in an AppKit panel, drawn by a small helper bundled inside the app that
+runs while the feature is enabled; it closes with the parent app. On Windows 11 there
+is no helper at all: the app paints one transparent, click-through-where-empty overlay
+window per display itself, in the same colours, metrics and typeface the rest of the
+app uses. Either way there is no extra installation, login item, or local network
+service, and the main application remains Tauri.
 
 In **Settings → Side notch**, choose a display, a Compact, Standard, or Large
 size, and an edge (right, left, top, or bottom), then pick **Always show** or
@@ -53,12 +56,13 @@ project, whether it is working or idle, and how long ago it was active. Clicking
 a cell pins the popover; Escape or a click elsewhere releases it. The menu-bar
 tray stays available.
 
-The selection is saved by display UUID in `~/.on-n-off/side-notch.json`. The
-notch hides when that display disconnects or joins a mirror set, and returns when
-it is available again. It never moves to another display automatically. It is an
+The selection is saved by display in `~/.on-n-off/side-notch.json` — by UUID on
+macOS, by device name on Windows. The notch hides when that display disconnects or
+joins a mirror set, and returns when it is available again. It never moves to another display automatically. It is an
 overlay, so choose the edge opposite your Dock. It does not reserve screen space.
 Usage refreshes on the Limits interval without forcing another Keychain read;
-live sessions refresh every ten seconds while the rail is visible.
+live sessions refresh every ten seconds while the rail is visible. Windows 11 is the
+floor on Windows; the settings card says so on older builds.
 
 ## Run from source
 
