@@ -132,7 +132,7 @@ export function NotchSettingsCard({ pollMinutes = 5 }: { pollMinutes?: LimitsPol
       <header>
         <div>
           <h3>Side notch</h3>
-          <p>Usage rings at the edge of one display, with details on hover. macOS only.</p>
+          <p>Usage rings at the edge of one display, with details on hover. macOS and Windows 11.</p>
         </div>
       </header>
       <div className="notch-settings-body">

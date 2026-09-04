@@ -55,7 +55,7 @@ pub fn run() {
             });
             #[cfg(target_os = "macos")]
             tray::setup(_app)?;
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             side_notch::setup(_app);
             limits_monitor::setup(_app);
             github_monitor::setup(_app);
@@ -107,7 +107,7 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|_app, _event| {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         if matches!(_event, tauri::RunEvent::Exit) {
             side_notch::shutdown(_app);
         }

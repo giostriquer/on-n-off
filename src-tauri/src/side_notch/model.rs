@@ -2,23 +2,23 @@ use crate::dto::AgentId;
 use serde::{Deserialize, Serialize};
 
 /// A cell's width on screen (points at the standard size); a vertical rail is this thick.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const CELL_WIDTH: f64 = 76.0;
 /// A cell's height on screen, from the same parts the helper's `railLayout` adds up (icon slot,
 /// gap, percent label, padding); a horizontal bar is this thick.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const CELL_HEIGHT: f64 = ICON_SLOT + CONTENT_SPACING + LABEL_HEIGHT + 2.0 * CELL_PADDING;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 const ICON_SLOT: f64 = 46.0;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 const CONTENT_SPACING: f64 = 3.0;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 const LABEL_HEIGHT: f64 = 22.0;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 const CELL_PADDING: f64 = 1.0;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const CELL_SPACING: f64 = 8.0;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 /// Also the length of the ear curve that flares each end into the screen edge.
 pub const RAIL_INSET: f64 = 40.0;
 
@@ -40,7 +40,7 @@ pub enum NotchSize {
 }
 
 impl NotchSize {
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(target_os = "macos", target_os = "windows", test))]
     fn scale(self) -> f64 {
         match self {
             Self::Compact => 0.875,
@@ -61,7 +61,7 @@ pub enum Edge {
 }
 
 impl Edge {
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(target_os = "macos", target_os = "windows", test))]
     fn is_vertical(self) -> bool {
         matches!(self, Self::Left | Self::Right)
     }
@@ -85,7 +85,7 @@ pub enum GithubList {
     Assigned,
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const GITHUB_LIST_ORDER: [GithubList; 3] = [
     GithubList::Mine,
     GithubList::ReviewRequested,
@@ -111,7 +111,7 @@ impl Default for NotchPullRequests {
 
 impl NotchPullRequests {
     /// The selected lists in screen order, without duplicates.
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(target_os = "macos", target_os = "windows", test))]
     pub fn selected_lists(&self) -> Vec<GithubList> {
         GITHUB_LIST_ORDER
             .into_iter()
@@ -148,7 +148,7 @@ impl Default for NotchSettings {
 
 impl NotchSettings {
     /// The selected providers in rail order, without duplicates.
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(target_os = "macos", target_os = "windows", test))]
     pub fn rail_providers(&self) -> Vec<AgentId> {
         RAIL_ORDER
             .into_iter()
@@ -157,7 +157,7 @@ impl NotchSettings {
     }
 
     /// Cells on the rail: one per selected provider, then the pull-request cell when it is on.
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(any(target_os = "macos", target_os = "windows", test))]
     pub fn cell_count(&self) -> usize {
         self.rail_providers().len() + usize::from(self.pull_requests.enabled)
     }
@@ -190,7 +190,7 @@ pub struct NotchSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub struct Layout {
     pub x: f64,
     pub y: f64,
@@ -199,7 +199,7 @@ pub struct Layout {
 }
 
 /// Length of the rail along its axis for `count` cells of `cell` length, before size scaling.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn rail_length(count: usize, cell: f64) -> f64 {
     let count = count as f64;
     count * cell + (count - 1.0).max(0.0) * CELL_SPACING + 2.0 * RAIL_INSET
@@ -208,7 +208,7 @@ pub fn rail_length(count: usize, cell: f64) -> f64 {
 /// The rail's frame in top-left display coordinates, or `None` when the notch must stay hidden:
 /// disabled, no provider, the selected display missing, ambiguous, or mirrored, or a rail that
 /// does not fit inside the display's work area.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> {
     if !settings.enabled {
         return None;
