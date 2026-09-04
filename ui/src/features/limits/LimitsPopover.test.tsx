@@ -20,6 +20,7 @@ vi.mock("$lib/api", () => ({
   openLimitsWindow,
   quitApp,
   loadAppSettings,
+  onSharedReadChanged: () => Promise.resolve(() => undefined),
 }));
 
 function limits(

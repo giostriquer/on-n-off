@@ -30,7 +30,7 @@ use crate::http::{get_json, HttpError};
 use crate::paths;
 use credentials::{
     read_claude_credential, read_claude_identity, ClaudeCredential, ClaudeIdentity,
-    ClaudeLoginMemo, CredentialLookup, KeychainProbe, CLAUDE_LOGIN,
+    ClaudeLoginMemo, CredentialLookup, KeychainProbe, LoginSource, CLAUDE_LOGIN,
 };
 use observations::ObservedWindowSet;
 #[cfg(test)]
@@ -57,7 +57,7 @@ struct Parsed {
 
 /// Everything `read_limits` needs that tests replace: where the homes/snapshots live, the Claude
 /// Keychain probe and memo, and the Claude endpoint.
-struct Sources<'a, P: FnOnce() -> KeychainProbe> {
+struct Sources<'a, P: Fn() -> KeychainProbe> {
     home: &'a Path,
     memo: &'a ClaudeLoginMemo,
     keychain: P,
@@ -107,7 +107,7 @@ pub fn forget_snapshot(agent: AgentId, account_id: &str) -> Result<(), String> {
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
-fn read_limits_in<P: FnOnce() -> KeychainProbe>(
+fn read_limits_in<P: Fn() -> KeychainProbe>(
     agent: AgentId,
     force: bool,
     sources: Sources<'_, P>,
@@ -197,7 +197,7 @@ fn aggregate_accounts(
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
 /// login may be reused; otherwise the Keychain (or the credentials file) is read. A rejected token
 /// evicts the memo so the next read goes back to the Keychain.
-fn claude_current<P: FnOnce() -> KeychainProbe>(
+fn claude_current<P: Fn() -> KeychainProbe>(
     force: bool,
     sources: Sources<'_, P>,
 ) -> (ProviderLimitsDto, Option<ObservedWindowSet>) {
@@ -219,10 +219,27 @@ fn claude_current<P: FnOnce() -> KeychainProbe>(
     let organization_id = selected_identity
         .as_ref()
         .and_then(|identity| identity.organization_id.clone());
-    let lookup = memo.lookup(force, &account.id, now_ms, || {
-        read_claude_credential(home, keychain(), now_ms)
-    });
-    let loaded = claude_limits(lookup, selected_identity, claude_profile_url, claude_url);
+    let read_credential = || read_claude_credential(home, keychain(), now_ms);
+    let attempt =
+        |lookup| claude_limits(lookup, &selected_identity, claude_profile_url, claude_url);
+    let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);
+    let mut loaded = attempt(lookup);
+    // Claude Code rotates the access token before the expiry it records, which leaves the memo
+    // holding one the endpoint has already stopped accepting. That rejection says nothing about
+    // the login, so read the stored login again and try once more before reporting one —
+    // otherwise a signed-in user is told to sign in again until the next poll.
+    //
+    // A re-read that hands back no login leaves the rejection standing, because the rejection is
+    // the accurate answer and the alternatives are louder falsehoods: `Missing` would report
+    // "Sign in with `claude`" at a user who is signed in, and `Unreadable` a Keychain failure
+    // when the prompt this retry raised went unanswered. `Expired` is the one where the discarded
+    // message would have been gentler ("send a prompt to renew it"), but it describes a login
+    // this attempt never sent; reporting what the endpoint actually refused is the honest answer.
+    if source == LoginSource::Memo && loaded.failure == Some(LoadFailureKind::Unauthorized) {
+        if let Some(fresh) = memo.refreshed(&account.id, now_ms, read_credential) {
+            loaded = attempt(CredentialLookup::Found(fresh));
+        }
+    }
     if loaded.dto.status == LimitsStatus::Unauthenticated
         || loaded.failure == Some(LoadFailureKind::AccountMismatch)
     {
@@ -245,7 +262,7 @@ fn claude_current<P: FnOnce() -> KeychainProbe>(
 /// label comes from the login itself (`subscriptionType`).
 fn claude_limits(
     lookup: CredentialLookup<ClaudeCredential>,
-    selected_identity: Option<ClaudeIdentity>,
+    selected_identity: &Option<ClaudeIdentity>,
     profile_url: &str,
     usage_url: &str,
 ) -> ResolveOutcome {

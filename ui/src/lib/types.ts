@@ -212,3 +212,16 @@ export type ItemStatus = {
 };
 
 export type UpdateItemMode = "overwrite" | "dismiss";
+
+/**
+ * A read the backend caches once for every surface that wants it. The screens, the menu-bar
+ * popovers, the notch and the monitors share these, so any of them can be the one that fetches;
+ * the announcement is how the rest find out. These strings are the contract with `Source::name`
+ * in `src-tauri/src/read_revision.rs`; change the two together.
+ */
+export type SharedReadSource = "limits:claude" | "limits:codex" | "github:prs";
+
+/** Sent once per replacement of a shared read, never for a read that changed nothing. */
+export type SharedReadChanged = {
+  source: SharedReadSource;
+};
