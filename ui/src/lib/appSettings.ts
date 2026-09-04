@@ -11,6 +11,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   githubScopes: [],
   githubNotifications: false,
   githubPollSeconds: 60,
+  closeToTray: false,
 };
 
 export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefined): AppSettings {
@@ -23,6 +24,7 @@ export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefine
     githubScopes: overlay?.githubScopes ?? [],
     githubNotifications: overlay?.githubNotifications ?? false,
     githubPollSeconds: normalizeGithubPollSeconds(overlay?.githubPollSeconds),
+    closeToTray: overlay?.closeToTray ?? false,
   };
 }
 

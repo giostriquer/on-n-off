@@ -179,3 +179,30 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
 
 Win11 is the floor (`CurrentBuildNumber` >= 22000); the settings card says so on older builds.
 
+## System tray
+
+Added 2026-09 with the Windows tray. `tray.rs` holds both platforms. `hides_on_close` takes the
+platform as a parameter rather than reading the `HIDES_ALL_ON_CLOSE` constant, so both CI legs
+assert both policies instead of each checking only its own; a single test pins the constant to
+the leg it is running on.
+
+| | Windows | macOS |
+|---|---|---|
+| What the icon is | the app itself — left click raises the main window, right click opens the menu | the Limits popover; no menu |
+| Icon format | full colour: Windows draws the bitmap as-is, so a template image arrives as a black square | monochrome template (`icon_as_template(true)`) |
+| Closing the main window | quits, unless the user turned `closeToTray` on — then `hide()` | always hides; the Dock icon brings it back through `RunEvent::Reopen` |
+| Taskbar button | `hide()` removes it on its own; `set_skip_taskbar` is for a **visible** window and is unsupported on macOS | n/a |
+| Second launch while hidden | starts a whole second process — two tray icons, two notch overlays, two monitors — unless `tauri-plugin-single-instance` is registered **before every other plugin** | the bundle is already single-instance; a Finder re-launch emits `RunEvent::Reopen` |
+
+`tauri-plugin-single-instance` keys its mutex on the bundle identifier alone (`{identifier}-sim`),
+which a dev build shares with the installed app and with every other worktree. Registered
+unconditionally it would make `bun run tauri dev` raise whatever on-n-off is already running
+instead of starting, which the parallel-worktree model in AGENTS.md depends on. So it sits behind
+the default `single-instance` cargo feature: `tauri dev` builds with `--no-default-features` and
+drops it, while `tauri build` keeps it. A cargo feature rather than `debug_assertions` because
+`cargo clippy --all-features` — the PR gate — still compiles the branch, and because
+`tauri build --debug` produces an installed-shaped app that *should* have it.
+
+The `closeToTray` flag is mirrored in an atomic that `tray::setup` seeds before the event loop
+starts, so the close handler never reads the settings file on the event-loop thread; macOS keeps
+no mirror at all, because it hides on close whatever the setting says.

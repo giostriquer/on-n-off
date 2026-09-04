@@ -25,7 +25,7 @@ export function SettingsRoute() {
       onLimitsPollMinutesChange={(minutes) => {
         void session.persistAppSettings({ ...session.appSettings, limitsPollMinutes: minutes });
       }}
-      onGithubChange={(patch) => {
+      onSettingsChange={(patch) => {
         void session.persistAppSettings({ ...session.appSettings, ...patch });
       }}
     />

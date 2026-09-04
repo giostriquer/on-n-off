@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Rocker } from "@/features/agents/Rocker";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
 import { NotchSettingsCard } from "@/features/notch/NotchSettingsCard";
+import { TraySettingsCard } from "./TraySettingsCard";
 import { FOCUS_RING } from "$lib/a11y";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { visibleAgentIds } from "$lib/appSettings";
@@ -26,8 +27,8 @@ type SettingsProps = {
   onAutomaticUpdatesChange: (enabled: boolean) => void;
   onLimitNotificationsChange: (enabled: boolean) => void;
   onLimitsPollMinutesChange: (minutes: LimitsPollMinutes) => void;
-  /** One callback for the Pull requests card; the route merges the patch into the settings. */
-  onGithubChange: (patch: GithubSettingsPatch) => void;
+  /** The cards that patch settings directly; the route merges the patch and persists it. */
+  onSettingsChange: (patch: Partial<AppSettings>) => void;
 };
 
 export type GithubSettingsPatch = Partial<
@@ -56,7 +57,7 @@ export function Settings({
   onAutomaticUpdatesChange,
   onLimitNotificationsChange,
   onLimitsPollMinutesChange,
-  onGithubChange,
+  onSettingsChange,
 }: SettingsProps) {
   const diagnose = useQuery({
     queryKey: ["diagnose-providers", settings.binaryPaths],
@@ -98,13 +99,18 @@ export function Settings({
         onPollMinutesChange={onLimitsPollMinutesChange}
       />
 
+      <TraySettingsCard
+        closeToTray={settings.closeToTray}
+        onCloseToTrayChange={(enabled) => onSettingsChange({ closeToTray: enabled })}
+      />
+
       <NotchSettingsCard pollMinutes={settings.limitsPollMinutes} />
 
       <GithubSettingsCard
         scopes={settings.githubScopes}
         enabled={settings.githubNotifications}
         pollSeconds={settings.githubPollSeconds}
-        onChange={onGithubChange}
+        onChange={onSettingsChange}
       />
 
       <section aria-label="Providers">
