@@ -88,6 +88,8 @@ export type AppSettings = {
   githubScopes: string[];
   githubNotifications: boolean;
   githubPollSeconds: GithubPollSeconds;
+  /** Windows only: closing the main window hides it into the tray instead of quitting. */
+  closeToTray: boolean;
 };
 
 export type DiagnoseCheck = {

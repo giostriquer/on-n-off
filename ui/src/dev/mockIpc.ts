@@ -49,6 +49,7 @@ let settings: AppSettings = {
   githubScopes: ["org:acme", "repo:octo/tools"],
   githubNotifications: false,
   githubPollSeconds: 60,
+  closeToTray: false,
 };
 
 const emptyTab = () => ({ plugins: [], userSkills: [], mcpServers: [] });
@@ -127,6 +128,7 @@ const handlers: Record<string, Handler> = {
   hide_limits_popover: () => undefined,
   open_limits_window: () => undefined,
   quit_app: () => undefined,
+  tray_supported: () => true,
   read_github_prs: () => {
     if (!Object.hasOwn(SCENARIOS, scenario)) {
       throw { kind: "message", message: `mock: unknown scenario "${scenario}"`, path: null };

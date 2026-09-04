@@ -229,3 +229,16 @@ fn refuses_hiding_every_provider() {
     .unwrap_err();
     assert!(err.message.contains("at least one provider"));
 }
+
+#[test]
+fn close_to_tray_defaults_off_and_survives_a_round_trip() {
+    // Settings files written before the tray existed must still load.
+    assert!(!parse_settings(Some(r#"{"limitsPollMinutes":10}"#)).close_to_tray);
+    assert!(!AppSettings::default().close_to_tray);
+
+    let enabled = parse_settings(Some(r#"{"closeToTray":true}"#));
+    assert!(enabled.close_to_tray);
+
+    let body = serde_json::to_string(&enabled).unwrap();
+    assert!(parse_settings(Some(&body)).close_to_tray);
+}

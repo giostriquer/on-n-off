@@ -41,7 +41,23 @@ mod usage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Single instance must be registered before every other plugin. Without it, launching
+    // on-n-off while it sits hidden in the tray starts a second copy: two tray icons, two
+    // notch overlays, two monitors.
+    //
+    // Behind the default `single-instance` feature, which `tauri dev` drops by building with
+    // --no-default-features. The plugin keys its mutex on the bundle identifier alone, which a
+    // dev build shares with the installed app and with every other worktree, so registering it
+    // unconditionally would make `tauri dev` raise whatever on-n-off is already running
+    // instead of starting. See OS.md.
+    #[cfg(all(target_os = "windows", feature = "single-instance"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        if let Err(error) = tray::show_main_window(app) {
+            eprintln!("failed to raise the running instance: {error}");
+        }
+    }));
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -56,7 +72,7 @@ pub fn run() {
             std::thread::spawn(|| {
                 let _ = cli_locate::cli_search_path();
             });
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             tray::setup(_app)?;
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             side_notch::setup(_app);
@@ -96,11 +112,12 @@ pub fn run() {
             commands::hide_limits_popover,
             commands::open_limits_window,
             commands::quit_app,
+            commands::tray_supported,
             commands::read_notch_state,
             commands::save_notch_settings,
         ]);
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     let builder = builder.on_window_event(|window, event| {
         tray::handle_window_event(window, event);
     });

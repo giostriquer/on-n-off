@@ -13,6 +13,14 @@ homepage = "https://github.com/giostriquer/on-n-off"
 # such module carries an explicit `#![allow(unsafe_code)]` next to its cfg gate.
 unsafe_code = "deny"
 
+[features]
+# `tauri dev` builds with --no-default-features, and that is what turns single-instance
+# off there: the plugin keys its mutex on the bundle identifier alone, which a dev build
+# shares with the installed app and with every other worktree. Declared as a feature
+# rather than gated on `debug_assertions` so `--all-features` still lints the branch.
+default = ["single-instance"]
+single-instance = []
+
 [lib]
 name = "on_n_off_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -41,6 +49,7 @@ tauri-plugin-notification = "2"
 tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]
+tauri-plugin-single-instance = "2"
 winreg = "0.55"
 # Side notch overlay (Windows 11): tao is pinned to the version tauri already
 # pulls in, so the lockfile never holds two copies.

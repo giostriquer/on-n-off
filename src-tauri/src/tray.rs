@@ -1,3 +1,20 @@
+//! The app's presence outside its main window.
+//!
+//! Both desktop platforms keep a status item, but they do different jobs.
+//!
+//! On macOS it is a Limits popover. Clicking the template icon opens a small always-on-top
+//! window, and both app windows hide rather than close, because the status item — not the
+//! Dock — is where the app lives.
+//!
+//! On Windows it is the app itself. Left click raises the main window, right click offers the
+//! screens and a quit, and the icon is always present. Closing the main window quits, as it
+//! always has, unless the user turned `closeToTray` on; then it hides, which is also what
+//! removes the taskbar button. The live quota rail is `side_notch`'s job there, so this icon
+//! stays static.
+
+#[cfg(target_os = "windows")]
+use std::sync::atomic::{AtomicBool, Ordering};
+
 #[cfg(target_os = "macos")]
 use std::sync::Mutex;
 #[cfg(any(target_os = "macos", test))]
@@ -7,12 +24,20 @@ use std::time::Instant;
 
 use tauri::{AppHandle, Emitter, Manager};
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use tauri::{Window, WindowEvent};
+
 #[cfg(target_os = "macos")]
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::{Effect, EffectState, EffectsBuilder},
-    PhysicalPosition, PhysicalSize, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
-    WindowEvent,
+    PhysicalPosition, PhysicalSize, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
+
+#[cfg(target_os = "windows")]
+use tauri::{
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
 #[cfg(any(target_os = "macos", test))]
@@ -23,6 +48,10 @@ const TRAY_GAP: i32 = 6;
 const FOCUS_LOSS_GUARD: Duration = Duration::from_millis(250);
 const POPOVER_LABEL: &str = "limits-popover";
 const MAIN_WINDOW_LABEL: &str = "main";
+#[cfg(target_os = "macos")]
+const TRAY_ICON_ID: &str = "limits";
+#[cfg(target_os = "windows")]
+const TRAY_ICON_ID: &str = "tray";
 #[cfg(target_os = "macos")]
 const POPOVER_WIDTH: f64 = 350.0;
 #[cfg(target_os = "macos")]
@@ -119,14 +148,92 @@ fn tray_click_action(visible: bool, since_focus_loss: Option<Duration>) -> TrayC
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
-fn hides_on_close(label: &str) -> bool {
-    matches!(label, MAIN_WINDOW_LABEL | POPOVER_LABEL)
+/// Whether this platform hides every app window on close. macOS does, because the status item
+/// is the app's home there and the Dock icon brings the windows back; Windows has no
+/// equivalent, so it hides only what the user asked it to.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+const HIDES_ALL_ON_CLOSE: bool = cfg!(target_os = "macos");
+
+/// The close policy. The platform is a parameter rather than a constant read, so both CI legs
+/// exercise both branches instead of each checking only its own.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn hides_on_close(label: &str, hides_all: bool, close_to_tray: bool) -> bool {
+    match label {
+        MAIN_WINDOW_LABEL => hides_all || close_to_tray,
+        POPOVER_LABEL => hides_all,
+        _ => false,
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
 fn hides_on_focus_loss(label: &str, focused: bool) -> bool {
     label == POPOVER_LABEL && !focused
+}
+
+/// The saved `closeToTray` flag. [`setup`] seeds it before the event loop starts, so it is
+/// already resolved by the time any close can arrive, and `save_app_settings` refreshes it.
+/// The close handler therefore only ever loads an atomic, never the settings file.
+#[cfg(target_os = "windows")]
+static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+pub(crate) fn set_close_to_tray(enabled: bool) {
+    CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
+}
+
+/// macOS hides on close whatever the setting says, so it keeps no mirror to update.
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn set_close_to_tray(_enabled: bool) {}
+
+/// What [`hides_on_close`] should see for `close_to_tray` here. macOS never consults it.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn close_to_tray() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        CLOSE_TO_TRAY.load(Ordering::Relaxed)
+    }
+    #[cfg(not(target_os = "windows"))]
+    false
+}
+
+/// What a tray menu entry does. The ids live here rather than inline in [`setup`], so the
+/// builder and the lookup cannot drift apart, and the mapping stays testable without a
+/// running app.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MenuAction {
+    Open,
+    Limits,
+    PullRequests,
+    Quit,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl MenuAction {
+    /// Every entry, in the order the menu shows them, with the label it carries.
+    const ENTRIES: [(Self, &'static str); 4] = [
+        (Self::Open, "Open on-n-off"),
+        (Self::Limits, "Limits"),
+        (Self::PullRequests, "Pull requests"),
+        (Self::Quit, "Quit on-n-off"),
+    ];
+
+    const fn id(self) -> &'static str {
+        match self {
+            Self::Open => "tray-open",
+            Self::Limits => "tray-limits",
+            Self::PullRequests => "tray-pull-requests",
+            Self::Quit => "tray-quit",
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn menu_action(id: &str) -> Option<MenuAction> {
+    MenuAction::ENTRIES
+        .into_iter()
+        .find(|(action, _)| action.id() == id)
+        .map(|(action, _)| action)
 }
 
 #[cfg(target_os = "macos")]
@@ -156,7 +263,7 @@ impl MacTrayState {
 pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
     app.manage(MacTrayState::default());
 
-    TrayIconBuilder::with_id("limits")
+    TrayIconBuilder::with_id(TRAY_ICON_ID)
         .icon(tauri::include_image!("icons/tray-template.png"))
         .icon_as_template(true)
         .tooltip("on-n-off Limits")
@@ -177,6 +284,69 @@ pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+/// The Windows notification-area icon: the app's home while the main window is hidden.
+#[cfg(target_os = "windows")]
+pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
+    // Seeded here, before the event loop starts, so a close never has to read the disk.
+    set_close_to_tray(crate::settings::load_settings().close_to_tray);
+
+    let mut items = MenuBuilder::new(app);
+    for (action, label) in MenuAction::ENTRIES {
+        if matches!(action, MenuAction::Quit) {
+            items = items.separator();
+        }
+        items = items.text(action.id(), label);
+    }
+    let menu = items.build()?;
+
+    let tray = TrayIconBuilder::with_id(TRAY_ICON_ID)
+        // The colour app icon, not macOS's monochrome template: Windows draws the bitmap
+        // as-is, so a template image would arrive as a black square. Embedded rather than
+        // read from `default_window_icon()`, which is an `Option` — an iconless tray entry
+        // must be unreachable, because it is the only way back to a hidden window.
+        .icon(tauri::include_image!("icons/32x32.png"))
+        .tooltip("on-n-off")
+        .menu(&menu)
+        // Left click belongs to the window; the menu is the right-click affordance.
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| {
+            let Some(action) = menu_action(event.id.as_ref()) else {
+                return;
+            };
+            if let Err(error) = run_menu_action(app, action) {
+                eprintln!("tray menu action failed: {error}");
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Err(error) = show_main_window(tray.app_handle()) {
+                    eprintln!("failed to open the main window from the tray: {error}");
+                }
+            }
+        });
+    tray.build(app)?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn run_menu_action(app: &AppHandle, action: MenuAction) -> Result<(), String> {
+    match action {
+        MenuAction::Open => show_main_window(app),
+        MenuAction::Limits => open_limits_window(app),
+        MenuAction::PullRequests => open_github_window(app),
+        MenuAction::Quit => {
+            quit_app(app);
+            Ok(())
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -327,15 +497,18 @@ pub(crate) fn show_main_window(app: &AppHandle) -> Result<(), String> {
     main.set_focus().map_err(|error| error.to_string())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn handle_window_event(window: &Window, event: &WindowEvent) {
     match event {
-        WindowEvent::CloseRequested { api, .. } if hides_on_close(window.label()) => {
+        WindowEvent::CloseRequested { api, .. }
+            if hides_on_close(window.label(), HIDES_ALL_ON_CLOSE, close_to_tray()) =>
+        {
             api.prevent_close();
             if let Err(error) = window.hide() {
                 eprintln!("failed to hide {} window: {error}", window.label());
             }
         }
+        #[cfg(target_os = "macos")]
         WindowEvent::Focused(focused) if hides_on_focus_loss(window.label(), *focused) => {
             window.state::<MacTrayState>().record_focus_loss();
             if let Err(error) = window.hide() {
