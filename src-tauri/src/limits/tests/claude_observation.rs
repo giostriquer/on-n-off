@@ -1,6 +1,7 @@
 use crate::dto::LimitWindowKind;
 use crate::http::{refused_url, serve_once};
 use crate::limits::json::window;
+use crate::limits::tests::refused_endpoints;
 use crate::limits::*;
 use crate::paths::scratch_dir;
 use std::fs;
@@ -62,6 +63,7 @@ impl ClaudeObservationRig {
     }
 
     fn read(&self) -> Vec<ProviderLimitsDto> {
+        let refused = refused_url();
         read_limits_in(
             AgentId::Claude,
             false,
@@ -69,8 +71,7 @@ impl ClaudeObservationRig {
                 home: &self.home,
                 memo: &self.memo,
                 keychain: || Ok(None),
-                claude_profile_url: &refused_url(),
-                claude_url: &refused_url(),
+                claude: refused_endpoints(&refused),
                 claude_desktop_history: claude_desktop::history_path_for_home(&self.home),
                 now_ms: DESKTOP_TIMESTAMP_MS + 1,
             },
@@ -188,8 +189,11 @@ fn a_successful_endpoint_read_remains_authoritative_over_local_windows() {
             home: &rig.home,
             memo: &rig.memo,
             keychain: || Ok(None),
-            claude_profile_url: &profile_url,
-            claude_url: &usage_url,
+            claude: ClaudeEndpoints {
+                token: &refused_url(),
+                profile: &profile_url,
+                usage: &usage_url,
+            },
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: DESKTOP_TIMESTAMP_MS + 1,
         },

@@ -299,3 +299,75 @@ fn security_tool_outcomes_map_to_probe_results() {
     assert!(denied.contains("User canceled"), "{denied}");
     assert!(denied.contains("click Allow"), "{denied}");
 }
+
+/// The renewal writes back to the store this reports, so which one it picks and when it falls
+/// through are the same question the read answers — and it has to stay one answer. A Keychain
+/// entry that holds no usable login must not shadow a file that does.
+#[test]
+fn the_login_document_names_the_store_it_came_from_and_falls_through_like_the_read() {
+    let home = scratch_dir("limits-store");
+    let file_json = CLAUDE_JSON.replace("kc-token", "file-token");
+    write(&home, ".claude/.credentials.json", &file_json);
+    let path = home.join(".claude").join(".credentials.json");
+
+    let (store, document) = claude_login_document(&home, Ok(Some(CLAUDE_JSON.to_string())))
+        .unwrap()
+        .unwrap();
+    assert_eq!(store, ClaudeStore::Keychain);
+    assert_eq!(document["claudeAiOauth"]["accessToken"], "kc-token");
+
+    let (store, document) = claude_login_document(&home, Ok(None)).unwrap().unwrap();
+    assert_eq!(store, ClaudeStore::File(path.clone()));
+    assert_eq!(document["claudeAiOauth"]["accessToken"], "file-token");
+
+    // JSON without a login, and JSON that will not parse: both let the file behind have its turn,
+    // exactly as `read_claude_credential` does.
+    for shadow in [r#"{"claudeAiOauth":{}}"#, "{ not json"] {
+        let (store, _) = claude_login_document(&home, Ok(Some(shadow.to_string())))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store,
+            ClaudeStore::File(path.clone()),
+            "a useless Keychain entry must not shadow a usable file: {shadow}"
+        );
+    }
+}
+
+/// The two agree by construction, and this is what says so: whatever store the document came from,
+/// the credential the read hands out is the one parsed from that same document.
+#[test]
+fn the_read_and_the_document_lookup_never_disagree_about_the_login() {
+    let home = scratch_dir("limits-store-agree");
+    write(&home, ".claude/.credentials.json", CLAUDE_JSON);
+    for probe in [
+        Ok(None),
+        Ok(Some(CLAUDE_JSON.replace("kc-token", "other").to_string())),
+        Ok(Some("{ not json".to_string())),
+    ] {
+        let document = claude_login_document(&home, probe.clone())
+            .unwrap()
+            .map(|(_, document)| document);
+        let expected = document.as_ref().and_then(parse_claude_credential);
+        match read_claude_credential(&home, probe, NOW_MS) {
+            CredentialLookup::Found(credential) => assert_eq!(Some(credential), expected),
+            other => panic!("expected a login, got {other:?}"),
+        }
+    }
+}
+
+/// A guessed account name would file a second Keychain item under the same service, and the read
+/// matches on service alone, so it could then return either one.
+#[test]
+fn the_keychain_account_is_read_off_the_entry_rather_than_guessed() {
+    let dump = "keychain: \"/Users/me/Library/Keychains/login.keychain-db\"\n\
+        attributes:\n    \
+        \"acct\"<blob>=\"giovanne.striquer\"\n    \
+        \"svce\"<blob>=\"Claude Code-credentials\"\n";
+    assert_eq!(
+        parse_keychain_account(dump).as_deref(),
+        Some("giovanne.striquer")
+    );
+    assert_eq!(parse_keychain_account("attributes:\n"), None);
+    assert_eq!(parse_keychain_account("    \"acct\"<blob>=\"\"\n"), None);
+}

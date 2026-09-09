@@ -48,8 +48,9 @@ export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes })
       </div>
 
       <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
-        quota observations come from read-only sources tied to each subscription account · each account
-        shows its latest observation · on-n-off does not implement provider login flows ·
+        quota observations come from sources tied to each subscription account · each account shows
+        its latest observation · on-n-off does not implement provider login flows, and renews a
+        stored token only the way that provider's own CLI would ·
         signed-out accounts remain visible with their last trustworthy observations
       </p>
     </div>
