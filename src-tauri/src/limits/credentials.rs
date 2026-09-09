@@ -1,12 +1,13 @@
-//! Read-only lookup of the CLIs' stored logins. Nothing here writes to the Keychain or the
-//! credential files, and nothing refreshes a token. Tokens live in memory only: for one request,
-//! plus the Claude access token memoised in-process (`ClaudeLoginMemo`) so the Keychain prompt is
-//! not repeated on every refetch — never the refresh token, never on disk.
+//! Lookup of the CLIs' stored logins. Nothing *here* writes to the Keychain or the credential
+//! files, and nothing here refreshes a token: [`super::claude_renew`] is the one module that does,
+//! and it borrows this module's source precedence rather than repeating it. Tokens live in memory
+//! only: for one request, plus the Claude access token memoised in-process (`ClaudeLoginMemo`) so
+//! the Keychain prompt is not repeated on every refetch — never the refresh token, never on disk.
 
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde_json::Value;
@@ -25,8 +26,9 @@ pub struct ClaudeCredential {
     pub token: String,
     /// `expiresAt` from Claude Code's credential JSON, epoch milliseconds.
     pub expires_at_ms: Option<i64>,
-    /// A `refreshToken` is stored alongside the access token. Only its presence is read; the
-    /// token itself is never loaded, and nothing here ever redeems it.
+    /// A `refreshToken` is stored alongside the access token. Only its presence is carried here;
+    /// the token itself never enters this type, so no consumer of a `ClaudeCredential` can reach
+    /// it. [`super::claude_renew`] reads it straight off the stored document instead.
     pub has_refresh_token: bool,
     /// `refreshTokenExpiresAt`, epoch milliseconds, when the login states one.
     pub refresh_expires_at_ms: Option<i64>,
@@ -69,64 +71,94 @@ pub enum CredentialLookup<T> {
     },
     /// A login may exist but could not be read (Keychain denied, unreadable file).
     Unreadable(String),
+    /// A renewal redeemed the refresh token and then could not store the result. The old token is
+    /// spent, so the CLI cannot renew itself out of this either: only a new sign-in will do.
+    Stranded,
 }
 
 /// Outcome of probing the macOS Keychain: `Ok(Some(json))` entry found, `Ok(None)` no entry,
 /// `Err(why)` the entry could not be read (access denied, tool failure).
 pub type KeychainProbe = Result<Option<String>, String>;
 
-#[cfg(target_os = "macos")]
-const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+/// The one name for Claude Code's Keychain entry. Read and write share it: a second copy that
+/// drifted would mean writing a renewed login to an entry nothing reads.
+#[cfg(any(target_os = "macos", test))]
+pub(super) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 /// What one credential source (Keychain entry or file) yielded.
 enum Source {
-    Found(ClaudeCredential),
+    Found(ClaudeStore, Value),
     /// Nothing stored (or JSON without an access token).
     Absent,
     /// Something is stored but could not be read or parsed.
     Broken(String),
 }
 
-/// Keychain entry first (macOS), then `<home>/.claude/.credentials.json` (all platforms). A token
-/// past its own `expiresAt` is reported as `Expired` without any network call, tagged with whether
-/// the login can still renew itself.
-pub fn read_claude_credential(
+/// Where a stored login lives, so a renewal writes back to the entry the next read will consult.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ClaudeStore {
+    /// The `Claude Code-credentials` Keychain entry, which only macOS has.
+    Keychain,
+    /// `<home>/.claude/.credentials.json`: the only store on Windows, and the macOS fallback.
+    File(PathBuf),
+}
+
+/// The stored login document and the store holding it: Keychain entry first (macOS), then
+/// `<home>/.claude/.credentials.json` (all platforms). `Ok(None)` when no source holds a login,
+/// `Err` when one is there but could not be read.
+///
+/// The single implementation of "which store holds the Claude login". Both the read below and the
+/// renewal in [`super::claude_renew`] go through it, so the two can never disagree about which
+/// entry they are talking about — a second copy of this precedence would let a renewal redeem the
+/// file's refresh token and write it over a Keychain entry the next read prefers.
+pub(super) fn claude_login_document(
     home: &Path,
     keychain: KeychainProbe,
-    now_ms: i64,
-) -> CredentialLookup<ClaudeCredential> {
-    let sources = [
-        claude_from_keychain(keychain),
-        claude_from_file(&home.join(".claude").join(".credentials.json")),
-    ];
+) -> Result<Option<(ClaudeStore, Value)>, String> {
+    let path = home.join(".claude").join(".credentials.json");
+    let sources = [claude_from_keychain(keychain), claude_from_file(&path)];
     let mut first_break = None;
     for source in sources {
         match source {
-            Source::Found(credential) => {
-                return if credential.expires_at_ms.is_some_and(|at| at <= now_ms) {
-                    CredentialLookup::Expired {
-                        renewable: credential.renewable(now_ms),
-                    }
-                } else {
-                    CredentialLookup::Found(credential)
-                };
-            }
+            Source::Found(store, document) => return Ok(Some((store, document))),
             Source::Absent => {}
             Source::Broken(why) => {
                 first_break.get_or_insert(why);
             }
         }
     }
-    match first_break {
-        Some(why) => CredentialLookup::Unreadable(why),
-        None => CredentialLookup::Missing,
-    }
+    first_break.map_or(Ok(None), Err)
 }
 
+/// The stored login as the rest of `limits/` sees it. A token past its own `expiresAt` is reported
+/// as `Expired` without any network call, tagged with whether the login can still renew itself.
+pub fn read_claude_credential(
+    home: &Path,
+    keychain: KeychainProbe,
+    now_ms: i64,
+) -> CredentialLookup<ClaudeCredential> {
+    let document = match claude_login_document(home, keychain) {
+        Ok(Some((_, document))) => document,
+        Ok(None) => return CredentialLookup::Missing,
+        Err(why) => return CredentialLookup::Unreadable(why),
+    };
+    let Some(credential) = parse_claude_credential(&document) else {
+        return CredentialLookup::Missing;
+    };
+    if credential.expires_at_ms.is_some_and(|at| at <= now_ms) {
+        return CredentialLookup::Expired {
+            renewable: credential.renewable(now_ms),
+        };
+    }
+    CredentialLookup::Found(credential)
+}
+
+/// A source counts as `Found` only when it parses into a login. A Keychain entry holding JSON
+/// without an access token is `Absent`, so the file behind it still gets its turn.
 fn claude_from_keychain(probe: KeychainProbe) -> Source {
     match probe {
         Ok(Some(json)) => match serde_json::from_str::<Value>(&json) {
-            Ok(value) => parse_claude_credential(&value).map_or(Source::Absent, Source::Found),
+            Ok(value) => found(ClaudeStore::Keychain, value),
             Err(error) => Source::Broken(format!("Keychain entry is not valid JSON: {error}")),
         },
         Ok(None) => Source::Absent,
@@ -136,14 +168,22 @@ fn claude_from_keychain(probe: KeychainProbe) -> Source {
 
 fn claude_from_file(path: &Path) -> Source {
     match read_json_file(path) {
-        Ok(Some(value)) => parse_claude_credential(&value).map_or(Source::Absent, Source::Found),
+        Ok(Some(value)) => found(ClaudeStore::File(path.to_path_buf()), value),
         Ok(None) => Source::Absent,
         Err(why) => Source::Broken(why),
     }
 }
 
+fn found(store: ClaudeStore, document: Value) -> Source {
+    if parse_claude_credential(&document).is_some() {
+        Source::Found(store, document)
+    } else {
+        Source::Absent
+    }
+}
+
 /// `{"claudeAiOauth": {"accessToken", "expiresAt", "refreshTokenExpiresAt", "subscriptionType", ...}}`.
-fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential> {
+pub(super) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential> {
     let oauth = value.get("claudeAiOauth")?;
     let token = optional_string(oauth.get("accessToken"))?;
     Some(ClaudeCredential {
@@ -234,12 +274,6 @@ impl ClaudeLoginMemo {
         }
     }
 
-    /// Remember a login this process just renewed, so the rest of the run reuses it instead of
-    /// probing the Keychain again for a token it already holds.
-    pub(super) fn remember(&self, account_id: &str, credential: &ClaudeCredential) {
-        *self.slot() = Some((account_id.to_string(), credential.clone()));
-    }
-
     pub fn clear(&self) {
         *self.slot() = None;
     }
@@ -315,6 +349,49 @@ pub fn keychain_claude_json() -> KeychainProbe {
 #[cfg(not(target_os = "macos"))]
 pub fn keychain_claude_json() -> KeychainProbe {
     Ok(None)
+}
+
+/// The account the existing entry is filed under, so a write updates *that* item.
+///
+/// `security add-generic-password -U` matches on service **and** account, and the read above
+/// matches on service alone. Guessing the account from `$USER` would therefore create a second
+/// item for the same service whenever the guess is wrong, and `find-generic-password` then
+/// returns one of the two in no defined order — on-n-off and Claude Code reading different
+/// logins, with nothing on screen to say so. Asking the entry itself removes the guess.
+#[cfg(target_os = "macos")]
+pub(super) fn keychain_claude_account() -> Option<String> {
+    use crate::process::{wait_with_deadline, CommandOutcome};
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    // No `-w`, so this prints attributes only and never the secret, and raises no prompt.
+    let child = Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    match wait_with_deadline(child, Duration::from_secs(30)) {
+        Ok(CommandOutcome::Exited {
+            success: true,
+            stdout,
+            ..
+        }) => parse_keychain_account(&stdout),
+        _ => None,
+    }
+}
+
+/// Pull `acct` out of `security find-generic-password`'s attribute dump. Kept pure so the parsing
+/// is testable on every platform; only the spawn above is macOS-specific.
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn parse_keychain_account(attributes: &str) -> Option<String> {
+    attributes
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("\"acct\"<blob>=\""))
+        .find_map(|rest| rest.strip_suffix('"'))
+        .filter(|account| !account.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]

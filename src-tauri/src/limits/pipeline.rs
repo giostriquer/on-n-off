@@ -91,6 +91,17 @@ pub(super) fn resolve_provider<T>(
                 failure: None,
             };
         }
+        CredentialLookup::Stranded => {
+            return ResolveOutcome {
+                dto: finish(
+                    provider,
+                    LimitsStatus::Unauthenticated,
+                    Some(stranded(cli)),
+                    named(),
+                ),
+                failure: None,
+            };
+        }
     };
     match load(&credential) {
         Ok(mut parsed) => {
@@ -169,6 +180,15 @@ fn relogin(cli: &str) -> String {
 fn rejected(cli: &str) -> String {
     format!(
         "The stored `{cli}` login was rejected — run `{cli}` and sign in again to refresh subscription limits."
+    )
+}
+
+/// on-n-off renewed the login and then could not store it, so the refresh token it spent is gone
+/// and the CLI cannot renew itself either. Say what happened rather than name a remedy that
+/// sounds ordinary: this is on-n-off's doing, and only a new sign-in clears it.
+fn stranded(cli: &str) -> String {
+    format!(
+        "on-n-off renewed the `{cli}` login but could not store it, so the stored login no longer works. Run `{cli}` and sign in again."
     )
 }
 

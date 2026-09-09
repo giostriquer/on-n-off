@@ -1,6 +1,7 @@
 //! Subscription rate limits aggregated per account from provider-owned clients/endpoints,
-//! remembered snapshots, and account-correlated local observations. Claude's stored login remains
-//! read-only; Codex owns its authentication and refresh lifecycle through app-server.
+//! remembered snapshots, and account-correlated local observations. Claude's stored login is read
+//! here and renewed in one place only, [`claude_renew`], when its access token has expired and can
+//! still renew itself; Codex owns its authentication and refresh lifecycle through app-server.
 //!
 //! `read_limits` never fails for provider-side reasons; every outcome is a `ProviderLimitsDto`
 //! whose `status` + `message` tell the UI what to show. Because each CLI stores one login at a
@@ -29,10 +30,9 @@ use crate::dto::{
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
-use claude_renew::RenewError;
 use credentials::{
-    read_claude_credential, read_claude_identity, ClaudeCredential, ClaudeIdentity,
-    ClaudeLoginMemo, CredentialLookup, KeychainProbe, LoginSource, CLAUDE_LOGIN,
+    read_claude_identity, ClaudeCredential, ClaudeIdentity, ClaudeLoginMemo, CredentialLookup,
+    KeychainProbe, LoginSource, CLAUDE_LOGIN,
 };
 use observations::ObservedWindowSet;
 #[cfg(test)]
@@ -57,15 +57,23 @@ struct Parsed {
     credits: Option<LimitsCreditsDto>,
 }
 
+/// The three services one Claude read talks to, together so adding a fourth costs one field and
+/// not an edit at every call site.
+#[derive(Debug, Clone, Copy)]
+struct ClaudeEndpoints<'a> {
+    /// Where a stale access token is renewed, before anything is asked of the other two.
+    token: &'a str,
+    profile: &'a str,
+    usage: &'a str,
+}
+
 /// Everything `read_limits` needs that tests replace: where the homes/snapshots live, the Claude
-/// Keychain probe and memo, and the Claude endpoint.
+/// Keychain probe and memo, and the Claude endpoints.
 struct Sources<'a, P: Fn() -> KeychainProbe> {
     home: &'a Path,
     memo: &'a ClaudeLoginMemo,
     keychain: P,
-    claude_token_url: &'a str,
-    claude_profile_url: &'a str,
-    claude_url: &'a str,
+    claude: ClaudeEndpoints<'a>,
     claude_desktop_history: PathBuf,
     now_ms: i64,
 }
@@ -96,9 +104,11 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             home: &home,
             memo: &CLAUDE_LOGIN,
             keychain: credentials::keychain_claude_json,
-            claude_token_url: claude_renew::TOKEN_URL,
-            claude_profile_url: CLAUDE_PROFILE_URL,
-            claude_url: CLAUDE_USAGE_URL,
+            claude: ClaudeEndpoints {
+                token: claude_renew::TOKEN_URL,
+                profile: CLAUDE_PROFILE_URL,
+                usage: CLAUDE_USAGE_URL,
+            },
             claude_desktop_history,
             now_ms: Utc::now().timestamp_millis(),
         },
@@ -209,9 +219,7 @@ fn claude_current<P: Fn() -> KeychainProbe>(
         home,
         memo,
         keychain,
-        claude_token_url,
-        claude_profile_url,
-        claude_url,
+        claude,
         claude_desktop_history,
         now_ms,
         ..
@@ -224,19 +232,13 @@ fn claude_current<P: Fn() -> KeychainProbe>(
     let organization_id = selected_identity
         .as_ref()
         .and_then(|identity| identity.organization_id.clone());
-    let read_credential = || read_claude_credential(home, keychain(), now_ms);
-    let attempt =
-        |lookup| claude_limits(lookup, &selected_identity, claude_profile_url, claude_url);
+    // Reading the Claude login includes renewing it: an access token lives eight hours and Claude
+    // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
+    // broken login. Keeping that inside the read means the memo stores the renewed login like any
+    // other, and the rejected-token retry below gets the renewal too.
+    let read_credential = || claude_renew::current_login(home, &keychain, now_ms, claude.token);
+    let attempt = |lookup| claude_limits(lookup, &selected_identity, claude.profile, claude.usage);
     let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);
-    // An access token lives eight hours and Claude Code renews it only while it is running, so a
-    // gap longer than that is the ordinary case, not a broken login. Do the renewal Claude Code
-    // would have done, under its own lock, before deciding there is anything to report.
-    let lookup = match lookup {
-        CredentialLookup::Expired { renewable: true } => {
-            renewed(memo, &account.id, home, &keychain, now_ms, claude_token_url)
-        }
-        other => other,
-    };
     let mut loaded = attempt(lookup);
     // Claude Code rotates the access token before the expiry it records, which leaves the memo
     // holding one the endpoint has already stopped accepting. That rejection says nothing about
@@ -270,35 +272,6 @@ fn claude_current<P: Fn() -> KeychainProbe>(
         })
         .flatten();
     (loaded.dto, local_observations)
-}
-
-/// The renewed login, or the closest true statement about why there is none.
-///
-/// A refused refresh token is the one case that really does need a new sign-in, so it comes back
-/// as `Expired { renewable: false }` and the user is told that instead of being sent to run
-/// `claude` for a renewal that would fail the same way. Every other failure — the lock held by
-/// Claude Code itself, an unreachable issuer — leaves the original message standing, because
-/// "send a prompt with `claude` to renew it" is still the accurate advice.
-fn renewed<P: Fn() -> KeychainProbe>(
-    memo: &ClaudeLoginMemo,
-    account_id: &str,
-    home: &Path,
-    keychain: &P,
-    now_ms: i64,
-    token_url: &str,
-) -> CredentialLookup<ClaudeCredential> {
-    match claude_renew::renew(home, keychain(), now_ms, token_url) {
-        Ok(credential) => {
-            memo.remember(account_id, &credential);
-            CredentialLookup::Found(credential)
-        }
-        Err(RenewError::Rejected | RenewError::NoRefreshToken) => {
-            CredentialLookup::Expired { renewable: false }
-        }
-        Err(RenewError::Busy | RenewError::Failed(_)) => {
-            CredentialLookup::Expired { renewable: true }
-        }
-    }
 }
 
 /// Claude: verify the stored token's profile, then read usage with the OAuth beta header. The plan

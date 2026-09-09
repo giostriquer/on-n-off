@@ -8,8 +8,16 @@
 //! This is the one place in `limits/` that reads Claude's refresh token, redeems it, and writes
 //! the result back to Claude Code's own store. It cooperates rather than races: the same two lock
 //! directories in the same order, the same grant against the same client id, the same stored
-//! shape. Claude Code is built for that — it takes the lock around every refresh of its own and
-//! re-reads afterwards to notice one another process already did.
+//! shape, and [`credentials::claude_login_document`] rather than a second opinion about which
+//! store holds the login. Claude Code is built for that — it takes the lock around every refresh
+//! of its own and re-reads under it to notice one another process already did.
+//!
+//! **The redemption is the point of no return.** The issuer rotates the refresh token on most
+//! renewals, which kills the old one as soon as the reply is written. From `post_grant` returning
+//! until the store is written, the only live credential the user has is a value on this stack, so
+//! everything past that point retries, keeps what it is holding rather than deleting it, and — if
+//! it still cannot store the login — reports [`RenewError::Stranded`] rather than advice that can
+//! no longer work.
 //!
 //! Nothing leaves this module holding a refresh token. Callers get a [`ClaudeCredential`], which
 //! carries only the access token and whether a refresh token exists.
@@ -20,7 +28,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::{json, Value};
 
-use super::credentials::{ClaudeCredential, KeychainProbe};
+use super::credentials::{self, ClaudeCredential, ClaudeStore, CredentialLookup, KeychainProbe};
 use super::json::optional_string;
 use crate::http::{post_grant, HttpError};
 
@@ -42,73 +50,138 @@ const DEFAULT_SCOPES: [&str; 5] = [
 /// the two implementations take turns instead of both deciding the other is stuck.
 const LOCK_STALE: Duration = Duration::from_secs(60);
 
-#[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+/// How many times to try storing a login that has already been redeemed. By then the old refresh
+/// token is dead, so giving up on the first transient failure would cost the user their sign-in.
+const STORE_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum RenewError {
     /// Another process holds Claude Code's refresh lock. Its renewal is the one that should win,
     /// and the caller keeps the message it already had rather than redeeming the same token twice.
     Busy,
-    /// The stored login has no refresh token to redeem.
-    NoRefreshToken,
-    /// The issuer refused the refresh token itself. Only a new sign-in helps, so the caller says
-    /// so instead of offering to renew.
+    /// The issuer refused the refresh token itself. Only a new sign-in helps.
     Rejected,
-    /// The network, the store, or a reply whose shape we do not recognise.
+    /// The issuer could not be reached, or answered something transient. The login is fine and the
+    /// next poll will try again.
+    Unreachable,
+    /// Redeemed, then not stored. The user is signed out of Claude Code as a result, and is the
+    /// only one who can put it right.
+    Stranded,
+    /// Nothing was redeemed: the store could not be read, or its shape was not one we know.
     Failed(String),
 }
 
-/// Where the login is kept, so a renewal writes it back where the next read will look.
-enum Store {
-    /// macOS keeps it in the `Claude Code-credentials` Keychain entry.
-    #[cfg(target_os = "macos")]
-    Keychain,
-    /// `<home>/.claude/.credentials.json`: the only store on Windows, and the macOS fallback.
-    File(PathBuf),
+/// The current Claude login, renewed when the stored one has expired and can still renew itself.
+///
+/// This is the whole answer to "what is the Claude login right now", so every caller gets the
+/// renewal — including the re-read that follows a rejected token, where the stored login may be a
+/// renewable expired one rather than a dead one.
+pub(super) fn current_login<P: Fn() -> KeychainProbe>(
+    home: &Path,
+    keychain: &P,
+    now_ms: i64,
+    token_url: &str,
+) -> CredentialLookup<ClaudeCredential> {
+    let lookup = credentials::read_claude_credential(home, keychain(), now_ms);
+    if lookup != (CredentialLookup::Expired { renewable: true }) {
+        return lookup;
+    }
+    match renew(home, keychain, now_ms, token_url) {
+        Ok(credential) => CredentialLookup::Found(credential),
+        // Only a new sign-in helps, so say that rather than offer a renewal that would fail again.
+        Err(RenewError::Rejected) => CredentialLookup::Expired { renewable: false },
+        Err(RenewError::Stranded) => CredentialLookup::Stranded,
+        // The store, not the login. `Unreadable` is where that already reports; calling it an
+        // expiry would send the user to run `claude` over a login on-n-off could not read.
+        Err(RenewError::Failed(why)) => CredentialLookup::Unreadable(why),
+        // Nothing was spent and nothing is wrong with the login. Whoever holds the lock is
+        // renewing now and the next poll reads what they wrote; an issuer we could not reach will
+        // be there next time. Until then "send a prompt with `claude` to renew it" is still the
+        // accurate advice, and it is the message the user already had.
+        Err(RenewError::Busy | RenewError::Unreachable) => {
+            CredentialLookup::Expired { renewable: true }
+        }
+    }
 }
 
 /// Redeem the stored refresh token for a new access token and write it back.
 ///
-/// The probe is taken again rather than reused: between noticing the expiry and holding the lock,
-/// Claude Code may have run and renewed the login itself, and the point of the lock is to act on
-/// what the store says under it.
-pub(super) fn renew(
+/// The store is read *under* the lock, Keychain probe included: acting on what it says while
+/// holding the lock is the whole mechanism for not redeeming a token another process has already
+/// replaced. A first-ever Keychain prompt left unanswered can hold the lock past the minute after
+/// which Claude Code would break it, and that is the one window where both sides can redeem. It is
+/// narrow — reaching here means Claude Code has not run for eight hours — and Claude Code's own
+/// 401 recovery covers whichever side loses.
+fn renew<P: Fn() -> KeychainProbe>(
     home: &Path,
-    keychain: KeychainProbe,
+    keychain: &P,
     now_ms: i64,
     token_url: &str,
 ) -> Result<ClaudeCredential, RenewError> {
     let _lock = RefreshLock::acquire(home)?;
-    let (store, mut document) = locate(home, keychain)?;
-    let oauth = document
-        .get("claudeAiOauth")
-        .ok_or(RenewError::NoRefreshToken)?;
-    // Under the lock the store is authoritative. Someone else renewing while we waited is the
-    // outcome the lock exists to produce, not a failure.
-    if let Some(fresh) = unexpired(oauth, now_ms) {
+    let (target, mut document) = credentials::claude_login_document(home, keychain())
+        .map_err(RenewError::Failed)?
+        .ok_or_else(|| RenewError::Failed("no stored Claude login to renew".to_string()))?;
+
+    // Under the lock the store is authoritative. Another process having renewed while we waited is
+    // the outcome the lock exists to produce, not a failure.
+    if let Some(fresh) = credentials::parse_claude_credential(&document)
+        .filter(|credential| !credential.expires_at_ms.is_some_and(|at| at <= now_ms))
+    {
         return Ok(fresh);
     }
-    let refresh_token =
-        optional_string(oauth.get("refreshToken")).ok_or(RenewError::NoRefreshToken)?;
+    let oauth = &document["claudeAiOauth"];
+    // The read only reaches a renewal when it saw one, so its absence here means the store changed
+    // under us into one that needs a sign-in rather than a refresh.
+    let refresh_token = optional_string(oauth.get("refreshToken")).ok_or(RenewError::Rejected)?;
     let scopes = scopes(oauth);
 
     let reply = post_grant(token_url, &request_body(&refresh_token, &scopes)).map_err(|error| {
         match error {
             // 400 `invalid_grant` is how the issuer says the refresh token is spent or revoked.
             HttpError::Unauthorized | HttpError::Status(400) => RenewError::Rejected,
-            other => RenewError::Failed(other.to_string()),
+            // A success we could not read. `post_grant` only parses on 2xx, so the issuer very
+            // likely did rotate the token and the reply carrying it is the part we lost — which
+            // is the stranded case, not a retryable one.
+            HttpError::Parse(_) => RenewError::Stranded,
+            _ => RenewError::Unreachable,
         }
     })?;
 
-    let credential = apply(&mut document, &reply, now_ms).map_err(RenewError::Failed)?;
-    store.write(&document).map_err(RenewError::Failed)?;
-    Ok(credential)
+    // Past here the old refresh token is dead and `document` holds the only live one.
+    apply(&mut document, &reply, now_ms).map_err(|_| RenewError::Stranded)?;
+    store(&target, &document).map_err(|_| RenewError::Stranded)?;
+    // Parsed back out of what was written, so the credential returned is provably the stored one.
+    credentials::parse_claude_credential(&document).ok_or(RenewError::Stranded)
 }
 
-/// The grant Claude Code sends, field for field. `scope` is required: the issuer narrows a
-/// refresh to the scopes asked for, and a login that came back without them is one the usage
-/// endpoint would refuse.
+/// Write the renewed login, trying more than once because there is no un-renewed state left to
+/// fall back to. Reports the last failure only once every attempt has failed.
+fn store(target: &ClaudeStore, document: &Value) -> Result<(), String> {
+    let raw = serde_json::to_string(document).map_err(|error| error.to_string())?;
+    let mut last = String::new();
+    for attempt in 0..STORE_ATTEMPTS {
+        match write(target, &raw) {
+            Ok(()) => return Ok(()),
+            Err(why) => last = why,
+        }
+        if attempt + 1 < STORE_ATTEMPTS {
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+    Err(last)
+}
+
+fn write(target: &ClaudeStore, raw: &str) -> Result<(), String> {
+    match target {
+        ClaudeStore::Keychain => write_keychain(raw),
+        ClaudeStore::File(path) => write_file(path, raw),
+    }
+}
+
+/// The grant Claude Code sends, field for field. `scope` is required: the issuer narrows a refresh
+/// to the scopes asked for, and a login that came back without them is one the usage endpoint
+/// would refuse.
 fn request_body(refresh_token: &str, scopes: &[String]) -> Value {
     json!({
         "grant_type": "refresh_token",
@@ -125,8 +198,8 @@ fn scopes(oauth: &Value) -> Vec<String> {
         .map(|entries| {
             entries
                 .iter()
-                .map(Some)
-                .filter_map(optional_string)
+                .filter_map(Value::as_str)
+                .map(str::to_string)
                 .collect()
         })
         .unwrap_or_default();
@@ -139,12 +212,12 @@ fn scopes(oauth: &Value) -> Vec<String> {
     stored
 }
 
-/// Fold the reply into the stored document and describe what the store now holds.
+/// Fold the reply into the stored document.
 ///
 /// Only the fields the reply carries are replaced. Everything else the login knows —
 /// `subscriptionType`, `rateLimitTier`, anything a newer Claude Code has added — is left alone,
 /// because this write has to leave a document Claude Code still recognises as its own.
-fn apply(document: &mut Value, reply: &Value, now_ms: i64) -> Result<ClaudeCredential, String> {
+fn apply(document: &mut Value, reply: &Value, now_ms: i64) -> Result<(), String> {
     let access_token =
         optional_string(reply.get("access_token")).ok_or("token reply carried no access_token")?;
     let expires_at_ms = seconds(reply.get("expires_in"))
@@ -164,10 +237,7 @@ fn apply(document: &mut Value, reply: &Value, now_ms: i64) -> Result<ClaudeCrede
         .get_mut("claudeAiOauth")
         .and_then(Value::as_object_mut)
         .ok_or("stored login is not a claudeAiOauth object")?;
-    oauth.insert(
-        "accessToken".to_string(),
-        Value::String(access_token.clone()),
-    );
+    oauth.insert("accessToken".to_string(), Value::String(access_token));
     oauth.insert("expiresAt".to_string(), json!(expires_at_ms));
     if let Some(rotated) = rotated {
         oauth.insert("refreshToken".to_string(), Value::String(rotated));
@@ -178,81 +248,25 @@ fn apply(document: &mut Value, reply: &Value, now_ms: i64) -> Result<ClaudeCrede
     if let Some(granted) = granted {
         oauth.insert("scopes".to_string(), Value::Array(granted));
     }
-    Ok(ClaudeCredential {
-        token: access_token,
-        expires_at_ms: Some(expires_at_ms),
-        has_refresh_token: optional_string(oauth.get("refreshToken")).is_some(),
-        refresh_expires_at_ms: oauth.get("refreshTokenExpiresAt").and_then(Value::as_i64),
-        subscription_type: optional_string(oauth.get("subscriptionType")),
-    })
+    Ok(())
 }
 
 fn seconds(value: Option<&Value>) -> Option<i64> {
     value.and_then(Value::as_i64).filter(|seconds| *seconds > 0)
 }
 
-/// The stored login when its access token is still good, so a renewal that lost the race to
-/// another process reports the winner's token rather than redeeming a second one.
-fn unexpired(oauth: &Value, now_ms: i64) -> Option<ClaudeCredential> {
-    let token = optional_string(oauth.get("accessToken"))?;
-    let expires_at_ms = oauth.get("expiresAt").and_then(Value::as_i64);
-    if expires_at_ms.is_some_and(|at| at <= now_ms) {
-        return None;
-    }
-    Some(ClaudeCredential {
-        token,
-        expires_at_ms,
-        has_refresh_token: optional_string(oauth.get("refreshToken")).is_some(),
-        refresh_expires_at_ms: oauth.get("refreshTokenExpiresAt").and_then(Value::as_i64),
-        subscription_type: optional_string(oauth.get("subscriptionType")),
-    })
-}
-
-/// The stored login and its store, in the order `read_claude_credential` consults them, so the
-/// renewal writes back to the source the next read will actually use.
-fn locate(home: &Path, keychain: KeychainProbe) -> Result<(Store, Value), RenewError> {
-    #[cfg(target_os = "macos")]
-    if let Ok(Some(raw)) = keychain {
-        let document =
-            serde_json::from_str(&raw).map_err(|error| RenewError::Failed(error.to_string()))?;
-        return Ok((Store::Keychain, document));
-    }
-    #[cfg(not(target_os = "macos"))]
-    drop(keychain);
-
-    let path = home.join(".claude").join(".credentials.json");
-    let raw = fs::read_to_string(&path)
-        .map_err(|error| RenewError::Failed(format!("{}: {error}", path.display())))?;
-    let document =
-        serde_json::from_str(&raw).map_err(|error| RenewError::Failed(error.to_string()))?;
-    Ok((Store::File(path), document))
-}
-
-impl Store {
-    fn write(&self, document: &Value) -> Result<(), String> {
-        let raw = serde_json::to_string(document).map_err(|error| error.to_string())?;
-        match self {
-            #[cfg(target_os = "macos")]
-            Self::Keychain => write_keychain(&raw),
-            Self::File(path) => write_file(path, &raw),
-        }
-    }
-}
-
 /// Replace the credentials file without ever leaving a half-written login on disk: a private
-/// temporary beside it, then one rename. The file holds a refresh token, so it is created 0600
-/// and never handed to `ConfigIo`, whose backups would copy the secret somewhere Claude Code
-/// does not know about and does not clean up.
+/// temporary beside it, then one rename. The file holds a refresh token, so it is created 0600 and
+/// never handed to `ConfigIo`, whose backups would copy the secret somewhere Claude Code neither
+/// knows about nor rotates.
+///
+/// A failed rename leaves the temporary in place on purpose. By then it holds the only live
+/// refresh token, and a user who has to sign in again is better served by a file they can look at
+/// than by a tidy directory.
 fn write_file(path: &Path, raw: &str) -> Result<(), String> {
     let temporary = path.with_extension("json.on-n-off");
     write_private(&temporary, raw).map_err(|error| format!("{}: {error}", temporary.display()))?;
-    match fs::rename(&temporary, path) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            let _ = fs::remove_file(&temporary);
-            Err(format!("{}: {error}", path.display()))
-        }
-    }
+    fs::rename(&temporary, path).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 #[cfg(unix)]
@@ -275,16 +289,22 @@ fn write_private(path: &Path, raw: &str) -> std::io::Result<()> {
     fs::write(path, raw)
 }
 
-/// `security -i` reads the command from stdin, which is the whole point: the token would
-/// otherwise sit in the process table for every other user on the machine to read. `-U` updates
-/// the entry in place, and `-X` takes the JSON hex-encoded, as Claude Code writes it.
+/// `security -i` reads the command from stdin, which is the whole point: the token would otherwise
+/// sit in the process table for every other user on the machine to read. `-U` updates the entry in
+/// place, and `-X` takes the JSON hex-encoded, as Claude Code writes it.
+///
+/// The account comes from the entry itself, never from a guess. `-U` matches on service *and*
+/// account, so a wrong guess would file a second item under the same service rather than update
+/// the first, and the read — which matches on service alone — could then return either one.
 #[cfg(target_os = "macos")]
 fn write_keychain(raw: &str) -> Result<(), String> {
     use crate::process::{wait_with_deadline, CommandOutcome};
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let command = keychain_command(&keychain_account(), KEYCHAIN_SERVICE, raw);
+    let account = credentials::keychain_claude_account()
+        .ok_or_else(|| "no Claude Keychain entry to update".to_string())?;
+    let command = keychain_command(&account, credentials::CLAUDE_KEYCHAIN_SERVICE, raw);
     let mut child = Command::new("/usr/bin/security")
         .arg("-i")
         .stdin(Stdio::piped())
@@ -292,12 +312,16 @@ fn write_keychain(raw: &str) -> Result<(), String> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("could not run /usr/bin/security: {error}"))?;
-    child
+    // Bound and dropped explicitly: `security` reads commands until stdin closes, so the handle
+    // has to go before the wait. One command of a few kilobytes cannot fill a pipe buffer, so
+    // writing it before the drainers start cannot deadlock.
+    let mut stdin = child
         .stdin
         .take()
-        .ok_or_else(|| "security took no stdin".to_string())?
-        .write_all(command.as_bytes())
-        .map_err(|error| format!("could not write to security: {error}"))?;
+        .ok_or_else(|| "security took no stdin".to_string())?;
+    let written = stdin.write_all(command.as_bytes());
+    drop(stdin);
+    written.map_err(|error| format!("could not write to security: {error}"))?;
     match wait_with_deadline(child, Duration::from_secs(30)) {
         Ok(CommandOutcome::Exited { success: true, .. }) => Ok(()),
         Ok(CommandOutcome::Exited { stderr, .. }) => {
@@ -308,33 +332,18 @@ fn write_keychain(raw: &str) -> Result<(), String> {
     }
 }
 
+/// Mirrors `keychain_claude_json`'s stub: these platforms have no such entry to write, and the
+/// file store is the one their read will have chosen.
+#[cfg(not(target_os = "macos"))]
+fn write_keychain(_raw: &str) -> Result<(), String> {
+    Err("this platform has no Claude Code Keychain entry".to_string())
+}
+
 /// Kept pure so the quoting is testable on every platform; only the spawn above is macOS-only.
 #[cfg(any(target_os = "macos", test))]
 fn keychain_command(account: &str, service: &str, raw: &str) -> String {
     let hex: String = raw.bytes().map(|byte| format!("{byte:02x}")).collect();
     format!("add-generic-password -U -a \"{account}\" -s \"{service}\" -X \"{hex}\"\n")
-}
-
-/// The account Claude Code files the entry under.
-#[cfg(target_os = "macos")]
-fn keychain_account() -> String {
-    keychain_account_from(&std::env::var("USER").unwrap_or_default()).to_string()
-}
-
-/// `$USER`, and Claude Code's fixed fallback when that is empty or holds anything the Keychain
-/// would not take as an account name. Reading the variable is the caller's job so this stays a
-/// function about the rule rather than about the environment.
-#[cfg(any(target_os = "macos", test))]
-fn keychain_account_from(name: &str) -> &str {
-    let acceptable = !name.is_empty()
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
-    if acceptable {
-        name
-    } else {
-        "claude-code-user"
-    }
 }
 
 /// Claude Code's two refresh locks, held for one renewal and released when this value drops.
@@ -382,7 +391,8 @@ fn take(path: &Path, now: SystemTime) -> Result<(), RenewError> {
             if !is_stale(path, now) {
                 return Err(RenewError::Busy);
             }
-            // Whoever left it behind is gone; Claude Code breaks an abandoned lock the same way.
+            // Whoever left it behind is gone; Claude Code breaks an abandoned lock the same way,
+            // and this inherits the same race between two processes that both judged it stale.
             let _ = fs::remove_dir(path);
             fs::create_dir(path).map_err(|_| RenewError::Busy)
         }
