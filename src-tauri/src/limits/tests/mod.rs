@@ -3,7 +3,7 @@ mod memory;
 
 use super::*;
 use crate::dto::LimitWindowKind;
-use crate::http::{refused_url, serve_once, serve_sequence, HttpError};
+use crate::http::{refused_url, serve_once, serve_once_capturing, serve_sequence, HttpError};
 use crate::paths::scratch_dir;
 use json::window;
 use serde_json::json;
@@ -50,6 +50,10 @@ const CLAUDE_CREDENTIALS: &str = r#"{"claudeAiOauth":{"accessToken":"kc-token","
 const CLAUDE_RENEWABLE_CREDENTIALS: &str = r#"{"claudeAiOauth":{"accessToken":"kc-token","expiresAt":1787022473402,"refreshToken":"rt","refreshTokenExpiresAt":1787981634215,"subscriptionType":"max"}}"#;
 /// Well before the Claude fixture's `expiresAt`.
 const NOW_MS: i64 = 1787000000000;
+/// What `platform.claude.com/v1/oauth/token` answers a `refresh_token` grant. `expires_in` is
+/// the eight hours Claude Code's access tokens actually live; the reply rotates the refresh
+/// token and says nothing about the subscription, which the stored login already knows.
+const CLAUDE_REFRESH_REPLY: &str = r#"{"access_token":"renewed-token","refresh_token":"rt2","expires_in":28800,"refresh_token_expires_in":604800,"scope":"user:profile user:inference"}"#;
 
 #[test]
 fn missing_login_is_signed_out_and_names_the_cli() {
@@ -174,6 +178,9 @@ struct Rig {
     home: std::path::PathBuf,
     memo: ClaudeLoginMemo,
     probes: Cell<u32>,
+    /// Refuses connections unless a renewal test replaces it: a read that reaches the token
+    /// endpoint when it had a good login is a bug these tests should fail on.
+    token_url: String,
     /// The whole probe outcome, not just its payload, so a denied or unanswered
     /// Keychain prompt is reachable from a test rather than only in the wild.
     keychain: KeychainProbe,
@@ -185,6 +192,7 @@ impl Rig {
             home: scratch_dir(prefix),
             memo: ClaudeLoginMemo::new(),
             probes: Cell::new(0),
+            token_url: refused_url(),
             keychain: Ok(None),
         }
     }
@@ -206,6 +214,7 @@ impl Rig {
                     self.probes.set(self.probes.get() + 1);
                     self.keychain.clone()
                 },
+                claude_token_url: &self.token_url,
                 claude_profile_url,
                 claude_url,
                 claude_desktop_history: claude_desktop::history_path_for_home(&self.home),
@@ -402,6 +411,7 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
             home: &rig.home,
             memo: &rig.memo,
             keychain: || Ok(None),
+            claude_token_url: &refused_url(),
             claude_profile_url: &refused_url(),
             claude_url: &refused_url(),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
@@ -410,6 +420,83 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
     );
     assert_eq!(expired[0].status, LimitsStatus::Unauthenticated);
     assert!(expired[0].message.as_deref().unwrap().contains("`claude`"));
+}
+
+/// The renewal Claude Code performs for itself, done here instead. An access token lives eight
+/// hours and only a `claude` run mints a new one, so any longer gap left a signed-in user staring
+/// at "Access token expired" until they went and typed in a terminal.
+#[test]
+fn an_expired_claude_login_is_renewed_from_its_refresh_token_before_the_read() {
+    let rig = Rig::new("limits-claude-renew");
+    write(
+        &rig.home,
+        ".claude/.credentials.json",
+        CLAUDE_RENEWABLE_CREDENTIALS,
+    );
+    write(
+        &rig.home,
+        ".claude.json",
+        &claude_account_file("uuid-1", "me@example.com"),
+    );
+    let after = 1787022473402 + 1;
+    let (token_url, token_request) = serve_once_capturing("200 OK", &[], CLAUDE_REFRESH_REPLY);
+    let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
+    let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
+
+    let dtos = read_limits_in(
+        AgentId::Claude,
+        false,
+        Sources {
+            home: &rig.home,
+            memo: &rig.memo,
+            keychain: || Ok(None),
+            claude_token_url: &token_url,
+            claude_profile_url: &profile_url,
+            claude_url: &usage_url,
+            claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
+            now_ms: after,
+        },
+    );
+
+    let token = token_request.join().unwrap();
+    assert!(
+        token.body.contains(r#""grant_type":"refresh_token""#),
+        "{}",
+        token.body
+    );
+    assert!(
+        token.body.contains(r#""refresh_token":"rt""#),
+        "{}",
+        token.body
+    );
+    assert!(
+        !token.head.to_lowercase().contains("authorization:"),
+        "the token endpoint authenticates by grant, not by the token being replaced: {}",
+        token.head
+    );
+    profile_request.join().unwrap();
+    let usage_head = usage_request.join().unwrap();
+    assert!(
+        usage_head.contains("Authorization: Bearer renewed-token"),
+        "{usage_head}"
+    );
+    assert_eq!(dtos[0].status, LimitsStatus::Ok, "{:?}", dtos[0].message);
+
+    let stored: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(rig.home.join(".claude/.credentials.json")).unwrap(),
+    )
+    .unwrap();
+    let oauth = &stored["claudeAiOauth"];
+    assert_eq!(oauth["accessToken"], "renewed-token");
+    assert_eq!(
+        oauth["refreshToken"], "rt2",
+        "a rotated refresh token is kept"
+    );
+    assert_eq!(oauth["expiresAt"].as_i64(), Some(after + 28_800_000));
+    assert_eq!(
+        oauth["subscriptionType"], "max",
+        "fields the reply does not carry survive the write"
+    );
 }
 
 #[test]
@@ -812,6 +899,7 @@ fn an_expired_access_token_with_a_live_refresh_token_asks_only_for_a_cli_run() {
             home: &rig.home,
             memo: &rig.memo,
             keychain: || Ok(None),
+            claude_token_url: &refused_url(),
             claude_profile_url: &refused_url(),
             claude_url: &refused_url(),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
@@ -846,6 +934,7 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
             home: &rig.home,
             memo: &rig.memo,
             keychain: || Ok(None),
+            claude_token_url: &refused_url(),
             claude_profile_url: &refused_url(),
             claude_url: &refused_url(),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),

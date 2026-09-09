@@ -98,7 +98,11 @@ user data.
 - Every provider-config write goes through `ConfigIo`: backup → atomic replace → validate →
   rollback. Preserve all four.
 - Never weaken validation, or repair a malformed fixture, to make a test pass.
-- `limits/` never reads or redeems Claude's refresh token and never writes Claude auth; `github/`
+- `limits/` renews Claude's access token only in `limits/claude_renew.rs`, only once the stored one
+  has passed its expiry, and only under Claude Code's own refresh locks. No other module reads a
+  refresh token, and the renewed login is written back to Claude Code's store, never anywhere
+  else. Do not widen that: a refresh token copied into a backup, a log, or a second store is a
+  credential the user cannot see and Claude Code will not rotate. `github/`
   never writes to GitHub; `usage/` and `side_notch/` are read-only. These are promises to the
   user, not implementation details — do not add a write path silently.
 - Runtime QA is read-only unless the user authorizes a mutation. CLI installs and uninstalls have

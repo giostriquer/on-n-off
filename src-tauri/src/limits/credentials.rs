@@ -234,6 +234,12 @@ impl ClaudeLoginMemo {
         }
     }
 
+    /// Remember a login this process just renewed, so the rest of the run reuses it instead of
+    /// probing the Keychain again for a token it already holds.
+    pub(super) fn remember(&self, account_id: &str, credential: &ClaudeCredential) {
+        *self.slot() = Some((account_id.to_string(), credential.clone()));
+    }
+
     pub fn clear(&self) {
         *self.slot() = None;
     }
