@@ -103,6 +103,32 @@ fn expired_and_unreadable_logins_map_to_their_statuses_without_loading() {
     assert!(!loaded.get());
 }
 
+/// The state on-n-off can put a user into by renewing a login it then could not store. The message
+/// has to own that, name the reason, and send them to the only remedy that works — telling them to
+/// run `claude` to renew it would point at a refresh token that is already spent.
+#[test]
+fn a_stranded_login_says_on_n_off_spent_it_and_asks_for_a_new_sign_in() {
+    let dto = resolve::<()>(
+        AgentId::Claude,
+        Some(account("uuid-1", "me@example.com")),
+        CredentialLookup::Stranded("Keychain write failed (denied)".to_string()),
+        |_| unreachable!("nothing is loaded with a login that was not stored"),
+    );
+    assert_eq!(dto.status, LimitsStatus::Unauthenticated);
+    let message = dto.message.as_deref().unwrap();
+    assert!(message.starts_with("on-n-off renewed"), "{message}");
+    assert!(
+        message.contains("Keychain write failed (denied)"),
+        "{message}"
+    );
+    assert!(message.contains("sign in again"), "{message}");
+    assert!(
+        !message.contains("send a prompt"),
+        "the spent token cannot be renewed by running `claude`: {message}"
+    );
+    assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
+}
+
 #[test]
 fn a_rejected_token_is_unauthenticated_and_other_http_failures_are_failed() {
     let rejected = resolve(

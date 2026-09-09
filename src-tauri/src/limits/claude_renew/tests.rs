@@ -45,6 +45,14 @@ fn login(home: &Path, token_url: &str) -> CredentialLookup<ClaudeCredential> {
     current_login(home, &|| Ok(None), NOW_MS, token_url)
 }
 
+fn stored_token(home: &Path) -> String {
+    let raw = fs::read_to_string(home.join(".claude").join(".credentials.json")).unwrap();
+    serde_json::from_str::<Value>(&raw).unwrap()["claudeAiOauth"]["accessToken"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
 #[test]
 fn a_renewal_replaces_the_tokens_and_leaves_everything_else_alone() {
     let mut document = stored();
@@ -139,6 +147,10 @@ fn an_expired_login_is_renewed_and_the_renewal_is_what_gets_stored() {
         "the credential handed back is the one on disk, not a parallel reconstruction"
     );
     assert!(
+        !path.with_extension("json.on-n-off").exists(),
+        "the temporary is renamed away, never left holding a refresh token"
+    );
+    assert!(
         !home.join(".claude").join(".oauth_refresh.lock").exists()
             && !home.join(".claude.lock").exists(),
         "the locks are released once the renewal is done"
@@ -155,7 +167,14 @@ fn a_login_another_process_renewed_while_we_waited_is_used_as_it_stands() {
     let home = home_with("renew-lost-race", &document);
 
     // A refused endpoint: reaching the network at all would be the bug.
-    let credential = renew(&home, &|| Ok(None), NOW_MS, &refused_url()).unwrap();
+    let credential = renew(
+        &home,
+        &|| Ok(None),
+        NOW_MS,
+        &refused_url(),
+        &RefusedLogin::new(),
+    )
+    .unwrap();
     assert_eq!(credential.token, "theirs");
 }
 
@@ -167,19 +186,52 @@ fn a_held_lock_leaves_the_renewal_to_whoever_holds_it() {
     let _held = RefreshLock::acquire(&home).unwrap();
 
     assert_eq!(
-        login(&home, &refused_url()),
-        CredentialLookup::Expired { renewable: true },
+        renew(
+            &home,
+            &|| Ok(None),
+            NOW_MS,
+            &refused_url(),
+            &RefusedLogin::new()
+        )
+        .unwrap_err(),
+        RenewError::Busy,
         "a refused endpoint would have reported differently, so nothing was sent"
+    );
+    assert_eq!(
+        login(&home, &refused_url()),
+        CredentialLookup::Expired { renewable: true }
     );
 }
 
+/// An issuer we cannot reach spends nothing and says nothing about the login, so the advice the
+/// user already had is still the right advice.
+#[test]
+fn an_unreachable_issuer_keeps_the_advice_the_user_already_had() {
+    let home = home_with("renew-offline", &stored());
+
+    assert!(matches!(
+        renew(
+            &home,
+            &|| Ok(None),
+            NOW_MS,
+            &refused_url(),
+            &RefusedLogin::new()
+        ),
+        Err(RenewError::Unavailable(_))
+    ));
+    assert_eq!(
+        login(&home, &refused_url()),
+        CredentialLookup::Expired { renewable: true }
+    );
+    assert_eq!(stored_token(&home), "old", "the store is untouched");
+}
+
 /// `invalid_grant`: the refresh token is spent or revoked, and no amount of running `claude` will
-/// renew it. The user has to sign in again and the message has to say so.
+/// renew it. The user has to sign in again, and the message has to say so.
 #[test]
 fn a_refused_refresh_token_asks_for_a_new_sign_in_rather_than_a_renewal() {
     let home = home_with("renew-rejected", &stored());
-    let (token_url, request) =
-        serve_once_capturing("400 Bad Request", &[], r#"{"error":"invalid_grant"}"#);
+    let (token_url, request) = serve_once_capturing("400 Bad Request", &[], r#"{"error":"x"}"#);
 
     assert_eq!(
         login(&home, &token_url),
@@ -188,47 +240,105 @@ fn a_refused_refresh_token_asks_for_a_new_sign_in_rather_than_a_renewal() {
     request.join().unwrap();
 }
 
-/// A store that cannot be read is a problem with the store, not with the login. Reporting it as an
-/// expiry would send the user to run `claude` over a login on-n-off could not read either.
+/// A refusal is permanent for that stored login, so posting it again would achieve nothing except
+/// taking both of Claude Code's lock directories every five minutes for as long as the user leaves
+/// it alone. A login Claude Code has since rewritten is a different login, and worth trying.
 #[test]
-fn a_store_that_cannot_be_read_reports_the_store() {
-    let home = scratch_dir("renew-unreadable");
-    let path = home.join(".claude").join(".credentials.json");
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, "{ not json").unwrap();
+fn the_same_refused_login_is_not_sent_a_second_time() {
+    let home = home_with("renew-refused-memo", &stored());
+    let refused = RefusedLogin::new();
+    let (token_url, request) = serve_once_capturing("400 Bad Request", &[], r#"{"error":"x"}"#);
 
-    let CredentialLookup::Unreadable(why) = login(&home, &refused_url()) else {
-        panic!("expected the store's own failure");
-    };
-    assert!(why.contains(".credentials.json"), "{why}");
+    let attempt = |url: &str| renew(&home, &|| Ok(None), NOW_MS, url, &refused);
+    assert_eq!(attempt(&token_url).unwrap_err(), RenewError::Rejected);
+    request.join().unwrap();
+
+    // The one-shot server is gone: connecting again would report `Unavailable`, not `Rejected`.
+    assert_eq!(attempt(&token_url).unwrap_err(), RenewError::Rejected);
+
+    let mut rewritten = stored();
+    rewritten["claudeAiOauth"]["expiresAt"] = json!(NOW_MS - 2);
+    fs::write(
+        home.join(".claude").join(".credentials.json"),
+        rewritten.to_string(),
+    )
+    .unwrap();
+    let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
+    assert_eq!(attempt(&token_url).unwrap().token, "new");
+    request.join().unwrap();
 }
 
 /// The dangerous case: redeemed, then not stored. The refresh token that bought the new login is
-/// spent, so "run `claude` to renew it" is advice that cannot work any more, and saying it would
-/// leave the user hunting a problem on-n-off caused.
+/// spent, so "run `claude` to renew it" is advice that cannot work, and the user is owed both the
+/// fact that on-n-off caused it and the reason.
 #[test]
-fn a_renewal_that_cannot_be_stored_says_so_instead_of_offering_a_dead_remedy() {
+fn a_reply_that_is_not_a_token_strands_the_login_and_says_why() {
     let home = home_with("renew-stranded", &stored());
-    let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
+    let (token_url, request) = serve_once_capturing("200 OK", &[], r#"{"ok":true}"#);
 
-    // A directory sitting where the write needs its temporary file. Everything up to and including
-    // the redemption works; only the store fails, which is the case worth being sure about.
-    let blocked = home
-        .join(".claude")
-        .join(".credentials.json.on-n-off")
-        .to_path_buf();
-    fs::create_dir(&blocked).unwrap();
-
-    assert_eq!(login(&home, &token_url), CredentialLookup::Stranded);
+    let CredentialLookup::Stranded(why) = login(&home, &token_url) else {
+        panic!("a 2xx that carries no token is not something to retry");
+    };
     request.join().unwrap();
+    assert!(why.contains("access_token"), "{why}");
+    assert_eq!(stored_token(&home), "old");
+}
+
+/// A 2xx we cannot parse is the same hazard: `post_grant` only parses on success, so the issuer
+/// almost certainly did rotate the token behind the reply we lost.
+#[test]
+fn an_unreadable_success_is_treated_as_a_spent_token_not_a_retry() {
+    let home = home_with("renew-unparseable", &stored());
+    let (token_url, request) = serve_once_capturing("200 OK", &[], "<html>gateway</html>");
+
+    assert!(matches!(
+        login(&home, &token_url),
+        CredentialLookup::Stranded(_)
+    ));
+    request.join().unwrap();
+}
+
+/// Everything that can fail about the write for reasons unrelated to the reply has to fail before
+/// the grant is sent, because after it there is no un-renewed state to fall back to.
+#[test]
+fn a_write_that_cannot_be_prepared_fails_before_anything_is_spent() {
+    let home = home_with("renew-unwritable", &stored());
+    let path = home.join(".claude").join(".credentials.json");
+    // A directory where the temporary has to go.
+    fs::create_dir(path.with_extension("json.on-n-off")).unwrap();
+
+    assert!(Writer::prepare(&ClaudeStore::File(path)).is_err());
+    assert!(matches!(
+        renew(
+            &home,
+            &|| Ok(None),
+            NOW_MS,
+            &refused_url(),
+            &RefusedLogin::new()
+        ),
+        Err(RenewError::Unavailable(_))
+    ));
     assert_eq!(
-        serde_json::from_str::<Value>(
-            &fs::read_to_string(home.join(".claude").join(".credentials.json")).unwrap()
-        )
-        .unwrap()["claudeAiOauth"]["accessToken"],
-        "old",
-        "nothing half-written reached the store"
+        login(&home, &refused_url()),
+        CredentialLookup::Expired { renewable: true },
+        "the login is fine; the write is on-n-off's problem, and the user's remedy is unchanged"
     );
+    assert_eq!(stored_token(&home), "old");
+}
+
+/// A prepared write that is never committed takes its temporary with it. Leaving one behind would
+/// park a live refresh token in a file Claude Code neither knows about nor rotates, which is the
+/// same objection that keeps `ConfigIo` out of this module.
+#[test]
+fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
+    let home = home_with("renew-temp", &stored());
+    let path = home.join(".claude").join(".credentials.json");
+    let temporary = path.with_extension("json.on-n-off");
+
+    let writer = Writer::prepare(&ClaudeStore::File(path)).unwrap();
+    assert!(temporary.exists(), "prepared up front, before the grant");
+    drop(writer);
+    assert!(!temporary.exists());
 }
 
 #[test]
@@ -264,23 +374,25 @@ fn a_lock_left_behind_by_a_dead_process_is_broken_once_it_goes_stale() {
     assert!(RefreshLock::acquire_at(&home, past_stale).is_ok());
 }
 
-/// The renewed login lands in a file only this user can read, and the replacement is one rename,
-/// so a reader never sees a half-written login.
+/// The one `security` call made under the lock has to finish well inside the minute after which
+/// Claude Code breaks it, or the write races whoever broke it.
+#[cfg(target_os = "macos")]
 #[test]
-fn the_credentials_file_is_replaced_atomically_and_stays_private() {
+fn the_keychain_write_deadline_fits_inside_the_lock_it_is_held_under() {
+    assert!(KEYCHAIN_WRITE_DEADLINE < LOCK_STALE);
+}
+
+/// The renewed login lands in a file only this user can read.
+#[test]
+fn the_credentials_file_is_written_private() {
     let home = scratch_dir("renew-file");
     let path = home.join(".claude").join(".credentials.json");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, "{}").unwrap();
 
-    write_file(&path, r#"{"claudeAiOauth":{"accessToken":"new"}}"#).unwrap();
+    write_private(&path, r#"{"claudeAiOauth":{"accessToken":"new"}}"#).unwrap();
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         r#"{"claudeAiOauth":{"accessToken":"new"}}"#
-    );
-    assert!(
-        !path.with_extension("json.on-n-off").exists(),
-        "the temporary is renamed, not left beside the login"
     );
 
     #[cfg(unix)]
@@ -295,9 +407,12 @@ fn the_credentials_file_is_replaced_atomically_and_stays_private() {
 /// out of the process table, and no quoting in the JSON can escape into the command.
 #[test]
 fn the_keychain_write_hex_encodes_the_login_instead_of_quoting_it() {
-    let command = keychain_command("me", "Claude Code-credentials", r#"{"a":"b\"c"}"#);
+    let service = credentials::CLAUDE_KEYCHAIN_SERVICE;
+    let command = keychain_command("me", service, r#"{"a":"b\"c"}"#);
     assert!(
-        command.starts_with(r#"add-generic-password -U -a "me" -s "Claude Code-credentials" -X ""#),
+        command.starts_with(&format!(
+            r#"add-generic-password -U -a "me" -s "{service}" -X ""#
+        )),
         "{command}"
     );
     let hex = command
@@ -313,18 +428,16 @@ fn the_keychain_write_hex_encodes_the_login_instead_of_quoting_it() {
     );
 }
 
-/// The Keychain write against a throwaway entry of our own, so the real login is never at stake:
-/// `security` really runs, the command really arrives over stdin, and `-U` really replaces an
-/// entry that already exists. The unit test above pins the command's shape; this pins that macOS
-/// accepts it.
+/// The production write, driven against a throwaway entry of our own so the real login is never at
+/// stake. This calls `write_keychain` itself rather than re-implementing its spawn, so the two
+/// cannot drift, and it covers the account lookup the renewal resolves before it spends anything.
 ///
 /// `cargo test --manifest-path src-tauri/Cargo.toml rehearse_the_keychain_write -- --ignored`
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "writes a throwaway Keychain entry; not part of CI"]
 fn rehearse_the_keychain_write() {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
+    use std::process::Command;
 
     const SERVICE: &str = "on-n-off keychain write rehearsal";
     let account = "on-n-off-test";
@@ -338,40 +451,33 @@ fn rehearse_the_keychain_write() {
             .success()
             .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
     };
-    let write = |raw: &str| {
-        let mut child = Command::new("/usr/bin/security")
-            .arg("-i")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(keychain_command(account, SERVICE, raw).as_bytes())
-            .unwrap();
-        assert!(
-            child.wait().unwrap().success(),
-            "security refused the write"
-        );
-    };
 
     // A quote and a space in the payload: the two things hex encoding exists to survive.
     let first = r#"{"claudeAiOauth":{"accessToken":"one","note":"a \"quoted\" word"}}"#;
     let second = r#"{"claudeAiOauth":{"accessToken":"two"}}"#;
-    write(first);
+    write_keychain(account, SERVICE, first).unwrap();
     assert_eq!(
         read().as_deref(),
         Some(first),
         "the entry round-trips byte for byte"
     );
-    write(second);
+    write_keychain(account, SERVICE, second).unwrap();
     assert_eq!(
         read().as_deref(),
         Some(second),
         "-U replaces an entry that already exists rather than failing or duplicating it"
+    );
+
+    // The account lookup, against output `security` really produced rather than a fixture.
+    let attributes = Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", SERVICE])
+        .output()
+        .unwrap();
+    assert_eq!(
+        credentials::parse_keychain_account(&String::from_utf8_lossy(&attributes.stdout))
+            .as_deref(),
+        Some(account),
+        "the parser reads `security`'s own output, not just a hand-written fixture"
     );
 
     Command::new("/usr/bin/security")

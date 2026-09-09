@@ -71,9 +71,10 @@ pub enum CredentialLookup<T> {
     },
     /// A login may exist but could not be read (Keychain denied, unreadable file).
     Unreadable(String),
-    /// A renewal redeemed the refresh token and then could not store the result. The old token is
-    /// spent, so the CLI cannot renew itself out of this either: only a new sign-in will do.
-    Stranded,
+    /// A renewal redeemed the refresh token and then could not store the result, carrying why. The
+    /// old token is spent, so the CLI cannot renew itself out of this either: only a new sign-in
+    /// will do, and the user is owed the reason on the way there.
+    Stranded(String),
 }
 
 /// Outcome of probing the macOS Keychain: `Ok(Some(json))` entry found, `Ok(None)` no entry,
@@ -130,9 +131,12 @@ pub(super) fn claude_login_document(
     first_break.map_or(Ok(None), Err)
 }
 
-/// The stored login as the rest of `limits/` sees it. A token past its own `expiresAt` is reported
-/// as `Expired` without any network call, tagged with whether the login can still renew itself.
-pub fn read_claude_credential(
+/// The stored login as it is, without renewing it. A token past its own `expiresAt` is reported as
+/// `Expired` without any network call, tagged with whether the login can still renew itself.
+///
+/// Callers outside this module want [`super::claude_renew::current_login`], which is this plus the
+/// renewal; reaching for the non-renewing one is how the expired-login message came back.
+pub(super) fn read_claude_credential(
     home: &Path,
     keychain: KeychainProbe,
     now_ms: i64,

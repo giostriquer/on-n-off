@@ -128,9 +128,16 @@ Each provider is read the way that provider intends, and neither login is ours t
   writes Claude's store, and it does the same thing Claude Code does: the same two lock
   directories in the same order, the same grant against the same client id, the same stored shape,
   and a re-read under the lock so a login another process just renewed is used rather than
-  redeemed again. A refresh token the issuer refuses is reported as needing a new sign-in; a
-  renewal that succeeds and then cannot be stored says exactly that, because by then the old token
-  is spent and only signing in again will clear it.
+  redeemed again.
+
+  The work is ordered around the redemption, because that is the point of no return: the issuer
+  rotates the refresh token, so from the reply until the store is written the only live credential
+  is a value on the stack. Everything that can fail on its own account — resolving the Keychain
+  entry's account, proving the credentials file's directory will take a temporary — happens
+  *before* the grant, leaving one `rename` or one `security -U` after it. A refresh token the
+  issuer refuses is reported as needing a new sign-in, and not sent again while the store still
+  holds it; a renewal that succeeds and then cannot be stored says exactly that, with the reason,
+  because by then the old token is spent and only signing in again will clear it.
 - **Codex** — launch the official `codex app-server` and call `account/read` plus
   `account/rateLimits/read`. Codex owns its own login and refresh; on-n-off reads only
   `account_id` metadata from the app-server's confirmed home.

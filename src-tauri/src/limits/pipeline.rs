@@ -58,47 +58,10 @@ pub(super) fn resolve_provider<T>(
     };
     let credential = match lookup {
         CredentialLookup::Found(credential) => credential,
-        CredentialLookup::Missing => {
+        other => {
+            let (status, message) = describe(cli, other);
             return ResolveOutcome {
-                dto: finish(
-                    provider,
-                    LimitsStatus::SignedOut,
-                    Some(format!("Sign in with `{cli}` to see subscription limits.")),
-                    named(),
-                ),
-                failure: None,
-            };
-        }
-        CredentialLookup::Expired { renewable } => {
-            return ResolveOutcome {
-                dto: finish(
-                    provider,
-                    LimitsStatus::Unauthenticated,
-                    Some(token_expired(cli, renewable)),
-                    named(),
-                ),
-                failure: None,
-            };
-        }
-        CredentialLookup::Unreadable(why) => {
-            return ResolveOutcome {
-                dto: finish(
-                    provider,
-                    LimitsStatus::Failed,
-                    Some(format!("Could not read the stored login: {why}")),
-                    named(),
-                ),
-                failure: None,
-            };
-        }
-        CredentialLookup::Stranded => {
-            return ResolveOutcome {
-                dto: finish(
-                    provider,
-                    LimitsStatus::Unauthenticated,
-                    Some(stranded(cli)),
-                    named(),
-                ),
+                dto: finish(provider, status, Some(message), named()),
                 failure: None,
             };
         }
@@ -183,12 +146,33 @@ fn rejected(cli: &str) -> String {
     )
 }
 
+/// What a login state that is not a usable credential means for the user. One place, so a new
+/// state is a line here rather than another ten-line arm in `resolve_provider`.
+fn describe<T>(cli: &str, lookup: CredentialLookup<T>) -> (LimitsStatus, String) {
+    match lookup {
+        // `resolve_provider` takes this branch itself; a credential is not a failure to describe.
+        CredentialLookup::Found(_) => unreachable!("a found credential is loaded, not described"),
+        CredentialLookup::Missing => (
+            LimitsStatus::SignedOut,
+            format!("Sign in with `{cli}` to see subscription limits."),
+        ),
+        CredentialLookup::Expired { renewable } => {
+            (LimitsStatus::Unauthenticated, token_expired(cli, renewable))
+        }
+        CredentialLookup::Unreadable(why) => (
+            LimitsStatus::Failed,
+            format!("Could not read the stored login: {why}"),
+        ),
+        CredentialLookup::Stranded(why) => (LimitsStatus::Unauthenticated, stranded(cli, &why)),
+    }
+}
+
 /// on-n-off renewed the login and then could not store it, so the refresh token it spent is gone
-/// and the CLI cannot renew itself either. Say what happened rather than name a remedy that
-/// sounds ordinary: this is on-n-off's doing, and only a new sign-in clears it.
-fn stranded(cli: &str) -> String {
+/// and the CLI cannot renew itself either. Say what happened, and why, rather than name a remedy
+/// that sounds ordinary: this is on-n-off's doing, and only a new sign-in clears it.
+fn stranded(cli: &str, why: &str) -> String {
     format!(
-        "on-n-off renewed the `{cli}` login but could not store it, so the stored login no longer works. Run `{cli}` and sign in again."
+        "on-n-off renewed the `{cli}` login but could not store it ({why}), so the stored login no longer works. Run `{cli}` and sign in again."
     )
 }
 
