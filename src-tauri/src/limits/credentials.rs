@@ -83,7 +83,10 @@ pub type KeychainProbe = Result<Option<String>, String>;
 
 /// The one name for Claude Code's Keychain entry. Read and write share it: a second copy that
 /// drifted would mean writing a renewed login to an entry nothing reads.
-#[cfg(any(target_os = "macos", test))]
+///
+/// Deliberately not gated to macOS. The renewal names the store it is writing to on every
+/// platform, and the stub that answers "there is no Keychain here" is chosen inside
+/// `write_keychain`, not by making the name itself disappear.
 pub(super) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 /// What one credential source (Keychain entry or file) yielded.
