@@ -1,10 +1,12 @@
 mod claude_observation;
+mod claude_renewal;
 mod memory;
 
 use super::*;
 use crate::dto::LimitWindowKind;
 use crate::http::{refused_url, serve_once, serve_sequence, HttpError};
 use crate::paths::scratch_dir;
+use credentials::read_claude_credential;
 use json::window;
 use serde_json::json;
 use std::cell::Cell;
@@ -101,6 +103,32 @@ fn expired_and_unreadable_logins_map_to_their_statuses_without_loading() {
     assert!(!loaded.get());
 }
 
+/// The state on-n-off can put a user into by renewing a login it then could not store. The message
+/// has to own that, name the reason, and send them to the only remedy that works — telling them to
+/// run `claude` to renew it would point at a refresh token that is already spent.
+#[test]
+fn a_stranded_login_says_on_n_off_spent_it_and_asks_for_a_new_sign_in() {
+    let dto = resolve::<()>(
+        AgentId::Claude,
+        Some(account("uuid-1", "me@example.com")),
+        CredentialLookup::Stranded("Keychain write failed (denied)".to_string()),
+        |_| unreachable!("nothing is loaded with a login that was not stored"),
+    );
+    assert_eq!(dto.status, LimitsStatus::Unauthenticated);
+    let message = dto.message.as_deref().unwrap();
+    assert!(message.starts_with("on-n-off renewed"), "{message}");
+    assert!(
+        message.contains("Keychain write failed (denied)"),
+        "{message}"
+    );
+    assert!(message.contains("sign in again"), "{message}");
+    assert!(
+        !message.contains("send a prompt"),
+        "the spent token cannot be renewed by running `claude`: {message}"
+    );
+    assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
+}
+
 #[test]
 fn a_rejected_token_is_unauthenticated_and_other_http_failures_are_failed() {
     let rejected = resolve(
@@ -169,11 +197,24 @@ fn a_successful_load_is_ok_with_windows_ordered_weekly_session_model() {
         .all(|window| { chrono::DateTime::parse_from_rfc3339(&window.observed_at).is_ok() }));
 }
 
+/// Three endpoints that all refuse connections, for a read that must not reach the network at
+/// all. One refused port answers for every one of them.
+fn refused_endpoints(url: &str) -> ClaudeEndpoints<'_> {
+    ClaudeEndpoints {
+        token: url,
+        profile: url,
+        usage: url,
+    }
+}
+
 /// Test doubles for `read_limits_in`: a scratch home, a fresh memo, a counting Keychain probe.
 struct Rig {
     home: std::path::PathBuf,
     memo: ClaudeLoginMemo,
     probes: Cell<u32>,
+    /// Refuses connections unless a renewal test replaces it: a read that reaches the token
+    /// endpoint when it had a good login is a bug these tests should fail on.
+    token_url: String,
     /// The whole probe outcome, not just its payload, so a denied or unanswered
     /// Keychain prompt is reachable from a test rather than only in the wild.
     keychain: KeychainProbe,
@@ -185,16 +226,19 @@ impl Rig {
             home: scratch_dir(prefix),
             memo: ClaudeLoginMemo::new(),
             probes: Cell::new(0),
+            token_url: refused_url(),
             keychain: Ok(None),
         }
     }
 
+    /// The token endpoint stays refused: these tests hand out good logins, and one of them
+    /// reaching for a renewal is a bug they should fail on.
     fn read(
         &self,
         agent: AgentId,
         force: bool,
-        claude_profile_url: &str,
-        claude_url: &str,
+        profile: &str,
+        usage: &str,
     ) -> Vec<ProviderLimitsDto> {
         read_limits_in(
             agent,
@@ -206,8 +250,11 @@ impl Rig {
                     self.probes.set(self.probes.get() + 1);
                     self.keychain.clone()
                 },
-                claude_profile_url,
-                claude_url,
+                claude: ClaudeEndpoints {
+                    token: &self.token_url,
+                    profile,
+                    usage,
+                },
                 claude_desktop_history: claude_desktop::history_path_for_home(&self.home),
                 now_ms: NOW_MS,
             },
@@ -395,6 +442,7 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
         LimitsStatus::SignedOut
     );
     write(&rig.home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
+    let refused = refused_url();
     let expired = read_limits_in(
         AgentId::Claude,
         false,
@@ -402,8 +450,7 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
             home: &rig.home,
             memo: &rig.memo,
             keychain: || Ok(None),
-            claude_profile_url: &refused_url(),
-            claude_url: &refused_url(),
+            claude: refused_endpoints(&refused),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,
         },
@@ -805,6 +852,7 @@ fn an_expired_access_token_with_a_live_refresh_token_asks_only_for_a_cli_run() {
         ".claude.json",
         &claude_account_file("uuid-1", "me@example.com"),
     );
+    let refused = refused_url();
     let dtos = read_limits_in(
         AgentId::Claude,
         false,
@@ -812,8 +860,7 @@ fn an_expired_access_token_with_a_live_refresh_token_asks_only_for_a_cli_run() {
             home: &rig.home,
             memo: &rig.memo,
             keychain: || Ok(None),
-            claude_profile_url: &refused_url(),
-            claude_url: &refused_url(),
+            claude: refused_endpoints(&refused),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,
         },
@@ -839,6 +886,7 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
         ".claude/.credentials.json",
         &CLAUDE_RENEWABLE_CREDENTIALS.replace("1787981634215", "1787022473402"),
     );
+    let refused = refused_url();
     let dtos = read_limits_in(
         AgentId::Claude,
         false,
@@ -846,8 +894,7 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
             home: &rig.home,
             memo: &rig.memo,
             keychain: || Ok(None),
-            claude_profile_url: &refused_url(),
-            claude_url: &refused_url(),
+            claude: refused_endpoints(&refused),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,
         },

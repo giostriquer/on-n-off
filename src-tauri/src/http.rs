@@ -107,6 +107,32 @@ pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpErr
     parse_body(response)
 }
 
+/// POST an OAuth grant as JSON and parse the reply.
+///
+/// The one thing that separates this from `post_json` is that it sends no `Authorization` header:
+/// a grant authenticates by its own contents, and the credential being replaced is exactly the one
+/// the endpoint would refuse. Callers lean on the status taxonomy more than elsewhere — a token
+/// issuer answers 400 to refuse the grant itself, and telling that apart from a transport failure
+/// decides whether the user has to sign in again.
+pub fn post_grant(url: &str, body: &Value) -> Result<Value, HttpError> {
+    let payload =
+        serde_json::to_string(body).map_err(|error| HttpError::Parse(error.to_string()))?;
+    let response = match agent()
+        .post(url)
+        .set("Accept", "application/json")
+        .set("Content-Type", "application/json")
+        .send_string(&payload)
+    {
+        Ok(response) => response,
+        Err(ureq::Error::Status(401, _)) => return Err(HttpError::Unauthorized),
+        Err(ureq::Error::Status(code, _)) => return Err(HttpError::Status(code)),
+        Err(ureq::Error::Transport(transport)) => {
+            return Err(HttpError::Network(transport.kind().to_string()))
+        }
+    };
+    parse_body(response)
+}
+
 /// `Some` when the response says the rate limit is exhausted: `retry-after` (secondary limits)
 /// wins over `x-ratelimit-reset` (the primary limit). GitHub sends the `x-ratelimit-*` headers
 /// on every reply, so only a zero remaining count marks a 403 as a rate limit.

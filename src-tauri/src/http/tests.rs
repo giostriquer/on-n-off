@@ -177,3 +177,72 @@ fn rate_limited_errors_describe_themselves_without_leaking_anything() {
         "rate limited"
     );
 }
+
+#[test]
+fn post_grant_sends_the_body_without_an_authorization_header() {
+    let (url, request) = serve_once_capturing("200 OK", &[], r#"{"access_token":"new"}"#);
+    let body = serde_json::json!({ "grant_type": "refresh_token", "refresh_token": "rt" });
+    let value = post_grant(&url, &body).unwrap();
+    assert_eq!(value["access_token"], "new");
+
+    let captured = request.join().unwrap();
+    assert!(
+        !captured.head.to_lowercase().contains("authorization:"),
+        "a grant carries its own credential in the body: {}",
+        captured.head
+    );
+    assert!(
+        captured.head.contains("Content-Type: application/json"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&captured.body).unwrap(),
+        body,
+        "the grant arrives as sent"
+    );
+}
+
+/// The distinctions the Claude renewal decides on: 400 means the grant itself was refused and the
+/// user has to sign in again, anything else means try later.
+#[test]
+fn post_grant_keeps_a_refused_grant_apart_from_a_transport_failure() {
+    let (url, request) =
+        serve_once_capturing("400 Bad Request", &[], r#"{"error":"invalid_grant"}"#);
+    assert_eq!(
+        post_grant(&url, &serde_json::json!({})),
+        Err(HttpError::Status(400))
+    );
+    request.join().unwrap();
+
+    let (url, request) = serve_once_capturing("401 Unauthorized", &[], "{}");
+    assert_eq!(
+        post_grant(&url, &serde_json::json!({})),
+        Err(HttpError::Unauthorized)
+    );
+    request.join().unwrap();
+
+    let (url, request) = serve_once_capturing("503 Service Unavailable", &[], "{}");
+    assert_eq!(
+        post_grant(&url, &serde_json::json!({})),
+        Err(HttpError::Status(503))
+    );
+    request.join().unwrap();
+
+    assert!(matches!(
+        post_grant(&refused_url(), &serde_json::json!({})),
+        Err(HttpError::Network(_))
+    ));
+}
+
+/// A 2xx whose body is not JSON. The renewal reads that as the token having been rotated behind a
+/// reply it could not parse, so the taxonomy has to keep it out of the retryable bucket.
+#[test]
+fn post_grant_reports_an_unreadable_success_as_a_parse_failure() {
+    let (url, request) = serve_once_capturing("200 OK", &[], "<html>gateway</html>");
+    assert!(matches!(
+        post_grant(&url, &serde_json::json!({})),
+        Err(HttpError::Parse(_))
+    ));
+    request.join().unwrap();
+}
