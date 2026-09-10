@@ -317,17 +317,37 @@ struct SegmentedRing: View {
           .trim(from: start + gap / 2, to: start + span - gap / 2)
           .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
           .rotationEffect(.degrees(-90))
-        arc.foregroundColor(ciColor(segment.ci))
         if segment.passingWithConflicts {
-          // The outer third of the stroke carries conflicts; the inner two-thirds
-          // retain the CI color. Both bands span exactly the same PR arc.
-          Circle()
-            .trim(from: start + gap / 2, to: start + span - gap / 2)
-            .stroke(tripRed, style: StrokeStyle(lineWidth: lineWidth / 3, lineCap: .butt))
-            .rotationEffect(.degrees(-90))
-            .padding(-lineWidth / 3)
+          ConflictArc(from: start + gap / 2, to: start + span - gap / 2, lineWidth: lineWidth)
+        } else {
+          arc.foregroundColor(ciColor(segment.ci))
         }
       }
+    }
+  }
+}
+
+/// One stroke with a soft radial transition centered on the outer-third boundary.
+/// Green and red share their edge coverage instead of painting one band over another.
+private struct ConflictArc: View {
+  let from: CGFloat
+  let to: CGFloat
+  let lineWidth: CGFloat
+  var body: some View {
+    GeometryReader { geometry in
+      let radius = min(geometry.size.width, geometry.size.height) / 2
+      let outer = radius + lineWidth / 2
+      let boundary = radius + lineWidth / 6
+      let blend = lineWidth * 0.18
+      let gradient = RadialGradient(gradient: Gradient(stops: [
+        .init(color: liveGreen, location: 0),
+        .init(color: liveGreen, location: (boundary - blend) / outer),
+        .init(color: tripRed, location: (boundary + blend) / outer),
+        .init(color: tripRed, location: 1),
+      ]), center: .center, startRadius: 0, endRadius: outer)
+      Circle().trim(from: from, to: to)
+        .stroke(gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+        .rotationEffect(.degrees(-90))
     }
   }
 }

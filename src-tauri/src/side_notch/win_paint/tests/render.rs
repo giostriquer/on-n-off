@@ -300,7 +300,7 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
 }
 
 #[test]
-fn conflicts_color_the_outer_third_and_preserve_the_icon() {
+fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
     let mut planned = plan(
         &settings(),
@@ -337,8 +337,9 @@ fn conflicts_color_the_outer_third_and_preserve_the_icon() {
             let x = (index % plain.width() as usize) as f64;
             let y = (index / plain.width() as usize) as f64;
             assert!(
-                ((x - cx).hypot(y - cy) - (radius + stroke / 3.0)).abs() <= stroke / 6.0 + 1.5,
-                "only the outer third of the ring may change; preserve the icon and label"
+                ((x - cx).hypot(y - cy) - (radius + stroke / 3.0)).abs()
+                    <= stroke / 6.0 + stroke * 0.18 + 1.5,
+                "only the outer band and its transition may change; preserve the icon and label"
             );
             if after.red() > after.green() {
                 red += 1;
