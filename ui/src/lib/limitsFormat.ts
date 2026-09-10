@@ -106,8 +106,13 @@ export function formatUsedPercent(usedPercent: number): string {
 }
 
 /** "max" → "Max", "enterprise_x" → "Enterprise x"; empty when unknown. */
-export function planLabel(plan: string | null | undefined): string {
+export function planLabel(plan: string | null | undefined, provider?: string): string {
   const raw = plan?.trim().replaceAll("_", " ") ?? "";
   if (!raw) return "";
+  if (provider === "codex") {
+    const code = raw.toLowerCase().replaceAll(/[ _-]/g, "");
+    if (code === "pro") return "Pro ×20";
+    if (code === "prolite") return "Pro ×5";
+  }
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }

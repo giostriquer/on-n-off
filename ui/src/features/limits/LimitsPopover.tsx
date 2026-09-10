@@ -190,7 +190,7 @@ function PopoverProviderSection({
 function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: number; divided: boolean }) {
   const name = providerLabel(entry.provider);
   const label = entry.account?.label ?? name;
-  const plan = planLabel(entry.plan);
+  const plan = planLabel(entry.plan, entry.provider);
   const windows = visibleLimitWindows(entry);
   const { message, refreshPaused, remembered, updatedAt } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
@@ -205,15 +205,15 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
           {remembered ? (
-            <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
+            <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">
               Remembered account
             </span>
           ) : refreshPaused ? (
-            <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
+            <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">
               Refresh paused
             </span>
           ) : null}
-          {plan ? <span className="shrink-0 text-[10px] text-[var(--mute)] uppercase">{plan}</span> : null}
+          {plan ? <span className="shrink-0 type-badge text-[var(--mute)] uppercase">{plan}</span> : null}
         </div>
         {updatedAt ? <p className="mt-0.5 mb-0 text-[10px] text-[var(--mute)] tabular-nums">Latest observation {updatedAt}</p> : null}
       </header>

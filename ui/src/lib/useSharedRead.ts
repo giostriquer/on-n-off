@@ -11,6 +11,7 @@ import type { SharedReadSource } from "$lib/types";
 const QUERY_KEYS: Record<SharedReadSource, QueryKey> = {
   "limits:claude": ["limits", "claude"],
   "limits:codex": ["limits", "codex"],
+  "subscription:codex": ["subscription", "codex"],
   "github:prs": ["github", "prs"],
 };
 

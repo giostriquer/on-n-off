@@ -371,6 +371,9 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
     self.updatedAt = updatedAt
   }
 
+  /// Identify passing PRs whose ring needs a merge-conflict band.
+  public var passingWithConflicts: Bool { ci == .success && mergeKind == .conflicts }
+
   /// Only GitHub pages ever open from the notch.
   public var link: URL? {
     guard let url = URL(string: url), url.scheme == "https", url.host == "github.com" else {

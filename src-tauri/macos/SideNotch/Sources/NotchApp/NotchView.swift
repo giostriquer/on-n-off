@@ -274,14 +274,16 @@ private struct PullRequestCell: View {
   let metrics: NotchMetrics
   let action: () -> Void
   private var readable: Bool { pulls?.readable == true }
-  private var segments: [CiState] {
+  private var segments: [PullRequest] {
     guard let pulls = pulls, readable else { return [] }
-    return Array(pulls.rows.map(\.ci).prefix(maxRingSegments))
+    return Array(pulls.rows.prefix(maxRingSegments))
   }
   private var description: String {
     guard let pulls = pulls else { return "Pull requests, updating" }
     guard readable else { return "Pull requests, \(pulls.hint ?? "unavailable")" }
     var attention: [String] = []
+    let conflicts = pulls.rows.filter { $0.mergeKind == .conflicts }.count
+    if conflicts > 0 { attention.append("\(conflicts) with merge conflicts") }
     if pulls.failing > 0 { attention.append("\(pulls.failing) failing CI") }
     if pulls.changesRequested > 0 { attention.append("\(pulls.changesRequested) with changes requested") }
     if pulls.ready > 0 { attention.append("\(pulls.ready) ready to merge") }
@@ -292,29 +294,60 @@ private struct PullRequestCell: View {
     RailCellChrome(
       layout: layout, metrics: metrics, label: readable ? "\(pulls?.count ?? 0)" : "—",
       labelOffset: 0, description: description, active: active, action: action,
-      ring: SegmentedRing(colors: segments.map(ciColor), lineWidth: CGFloat(layout.ringStroke)),
+      ring: SegmentedRing(segments: segments, lineWidth: CGFloat(layout.ringStroke)),
       glyph: PullRequestMark().stroke(
-        Color.white, style: StrokeStyle(lineWidth: metrics.value(1.6), lineCap: .round)))
+        Color.white,
+        style: StrokeStyle(lineWidth: metrics.value(1.6), lineCap: .round)))
   }
 }
 
 /// One arc per entry around the ring, equal in length, separated by a small gap, starting at
 /// twelve o'clock; a single entry fills the ring.
 struct SegmentedRing: View {
-  let colors: [Color]
+  let segments: [PullRequest]
   let lineWidth: CGFloat
   var body: some View {
-    let count = colors.count
+    let count = segments.count
     let gap: CGFloat = count > 1 ? 0.025 : 0
     let span = 1 / CGFloat(max(count, 1))
     ZStack {
-      ForEach(Array(colors.enumerated()), id: \.offset) { index, color in
+      ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
         let start = CGFloat(index) * span
-        Circle()
+        let arc = Circle()
           .trim(from: start + gap / 2, to: start + span - gap / 2)
-          .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+          .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
           .rotationEffect(.degrees(-90))
+        if segment.passingWithConflicts {
+          ConflictArc(from: start + gap / 2, to: start + span - gap / 2, lineWidth: lineWidth)
+        } else {
+          arc.foregroundColor(ciColor(segment.ci))
+        }
       }
+    }
+  }
+}
+
+/// One stroke with a soft radial transition centered on the outer-third boundary.
+/// Green and red share their edge coverage instead of painting one band over another.
+private struct ConflictArc: View {
+  let from: CGFloat
+  let to: CGFloat
+  let lineWidth: CGFloat
+  var body: some View {
+    GeometryReader { geometry in
+      let radius = min(geometry.size.width, geometry.size.height) / 2
+      let outer = radius + lineWidth / 2
+      let boundary = radius + lineWidth / 6
+      let blend = lineWidth * 0.18
+      let gradient = RadialGradient(gradient: Gradient(stops: [
+        .init(color: liveGreen, location: 0),
+        .init(color: liveGreen, location: (boundary - blend) / outer),
+        .init(color: tripRed, location: (boundary + blend) / outer),
+        .init(color: tripRed, location: 1),
+      ]), center: .center, startRadius: 0, endRadius: outer)
+      Circle().trim(from: from, to: to)
+        .stroke(gradient, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+        .rotationEffect(.degrees(-90))
     }
   }
 }

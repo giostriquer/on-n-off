@@ -29,7 +29,7 @@ declare global {
 const params = new URLSearchParams(window.location.search);
 const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
-if (!Object.hasOwn(SCENARIOS, scenario)) {
+if (!Object.hasOwn(SCENARIOS, scenario) && !["subscriptionRenewal", "subscriptionStale", "subscriptionMissing"].includes(scenario)) {
   console.error(`[mock] unknown github scenario "${scenario}"; known: ${Object.keys(SCENARIOS).join(", ")}`);
 }
 
@@ -122,6 +122,18 @@ const handlers: Record<string, Handler> = {
   list_local_plugins: emptyTab,
   refresh: emptyTab,
   read_limits: (args) => limitsFor(args.agentId),
+  read_codex_subscription: (args) => ({
+    metadata: scenario === "subscriptionMissing" ? null : {
+      date: "2026-09-24T20:00:00Z",
+      kind: args.accountId === "codex-2" ? "paidThrough" : scenario === "subscriptionRenewal" ? "renews" : "expires",
+      source: args.accountId === "codex-2" ? "localToken" : "billing",
+      checkedAt: "2026-08-24T20:00:00Z",
+      stale: args.accountId === "codex-2" || scenario === "subscriptionStale",
+    },
+    connected: false, browserSupported: true, unavailable: scenario === "subscriptionStale",
+  }),
+  connect_codex_billing: () => undefined,
+  disconnect_codex_billing: () => undefined,
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),
   read_notch_state: () => notch,
   save_notch_settings: (args) => { notch = { ...notch, settings: args.settings as NotchSettings }; return notch; },

@@ -83,6 +83,7 @@ pub enum Source {
     LimitsClaude,
     LimitsCodex,
     GithubPrs,
+    SubscriptionCodex,
 }
 
 impl Source {
@@ -92,6 +93,7 @@ impl Source {
         match self {
             Self::LimitsClaude => "limits:claude",
             Self::LimitsCodex => "limits:codex",
+            Self::SubscriptionCodex => "subscription:codex",
             Self::GithubPrs => "github:prs",
         }
     }

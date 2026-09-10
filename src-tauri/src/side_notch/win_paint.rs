@@ -304,10 +304,17 @@ pub enum CellContent {
         label: String,
     },
     PullRequests {
-        segments: Vec<CiState>,
+        segments: Vec<PrRingSegment>,
         count: u64,
         readable: bool,
     },
+}
+
+/// CI color and merge-conflict state for a displayed PR.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PrRingSegment {
+    ci: CiState,
+    passing_with_conflicts: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -572,7 +579,14 @@ fn cell_content(data: &CellData) -> CellContent {
                 .count() as u64;
             CellContent::PullRequests {
                 segments: if readable {
-                    rows.iter().take(24).map(|row| row.ci).collect()
+                    rows.iter()
+                        .take(24)
+                        .map(|row| PrRingSegment {
+                            ci: row.ci,
+                            passing_with_conflicts: row.ci == CiState::Success
+                                && row.merge_kind == Some(MergeKind::Conflicts),
+                        })
+                        .collect()
                 } else {
                     Default::default()
                 },
@@ -1732,6 +1746,7 @@ fn stroke_ring(
     to_deg: f32,
     color: Color,
     round_caps: bool,
+    conflict: bool,
 ) {
     let n = (((to_deg - from_deg).abs() / 5.0).ceil() as usize).max(2);
     let mut pb = PathBuilder::new();
@@ -1759,6 +1774,32 @@ fn stroke_ring(
         let mut paint = Paint::default();
         paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
         paint.anti_alias = true;
+        // Keep passing CI arcs on the same rounding path with and without the
+        // gradient, preserving antialiased pixels in the unaffected green area.
+        paint.force_hq_pipeline = conflict || color == LIVE_GREEN;
+        if conflict {
+            let outer = radius + stroke / 2.0;
+            let boundary = radius + stroke / 6.0;
+            let blend = stroke * 0.18;
+            let green =
+                tiny_skia::Color::from_rgba8(LIVE_GREEN[0], LIVE_GREEN[1], LIVE_GREEN[2], 255);
+            let red = tiny_skia::Color::from_rgba8(TRIP_RED[0], TRIP_RED[1], TRIP_RED[2], 255);
+            if let Some(shader) = tiny_skia::RadialGradient::new(
+                tiny_skia::Point::from_xy(cx, cy),
+                tiny_skia::Point::from_xy(cx, cy),
+                outer,
+                vec![
+                    tiny_skia::GradientStop::new(0.0, green),
+                    tiny_skia::GradientStop::new((boundary - blend) / outer, green),
+                    tiny_skia::GradientStop::new((boundary + blend) / outer, red),
+                    tiny_skia::GradientStop::new(1.0, red),
+                ],
+                tiny_skia::SpreadMode::Pad,
+                Transform::identity(),
+            ) {
+                paint.shader = shader;
+            }
+        }
         if let Some(stroked) = path.stroke(&stroke_style, 1.0) {
             pixmap.fill_path(
                 &stroked,
@@ -1792,6 +1833,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
         360.0,
         TRACK_INK,
         true,
+        false,
     );
 
     let glyph_size = metrics.glyph as f32 * scale;
@@ -1821,6 +1863,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     -90.0 + percent.clamp(0.0, 100.0) as f32 * 3.6,
                     meter_color(primary.percent, provider_color(*provider)),
                     true,
+                    false,
                 );
             }
             if let Some(fable) = fable {
@@ -1836,6 +1879,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     360.0,
                     FABLE_TRACK,
                     false,
+                    false,
                 );
                 stroke_ring(
                     pixmap,
@@ -1847,6 +1891,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     -90.0 + fable_percent.clamp(0.0, 100.0) as f32 * 3.6,
                     meter_color(fable.percent, FABLE_ORANGE),
                     true,
+                    false,
                 );
             }
             marks::provider(*provider, glyph_rect, [255, 255, 255, 255], pixmap);
@@ -1864,7 +1909,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                 } else {
                     0.0
                 };
-                for (index, ci) in segments.iter().enumerate() {
+                for (index, segment) in segments.iter().enumerate() {
                     stroke_ring(
                         pixmap,
                         center.0,
@@ -1873,8 +1918,9 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                         ring_stroke,
                         -90.0 + index as f32 * span + gap_deg / 2.0,
                         -90.0 + (index + 1) as f32 * span - gap_deg / 2.0,
-                        ci_color(*ci),
+                        ci_color(segment.ci),
                         false,
+                        segment.passing_with_conflicts,
                     );
                 }
             }

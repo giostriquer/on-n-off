@@ -20,8 +20,17 @@ pub(crate) enum CommandOutcome {
 /// killed and its drainers are detached, since a spawned descendant may still own the
 /// inherited pipe handles.
 pub(crate) fn wait_with_deadline(
+    child: Child,
+    timeout: Duration,
+) -> std::io::Result<CommandOutcome> {
+    wait_with_cancellation(child, timeout, || false)
+}
+
+/// As above, with cooperative cancellation that kills and reaps the owned child.
+pub(crate) fn wait_with_cancellation(
     mut child: Child,
     timeout: Duration,
+    canceled: impl Fn() -> bool,
 ) -> std::io::Result<CommandOutcome> {
     let stdout = child.stdout.take().map(read_pipe);
     let stderr = child.stderr.take().map(read_pipe);
@@ -35,7 +44,7 @@ pub(crate) fn wait_with_deadline(
                     stderr: join_pipe(stderr),
                 });
             }
-            Ok(None) if started.elapsed() >= timeout => {
+            Ok(None) if started.elapsed() >= timeout || canceled() => {
                 let _ = child.kill();
                 let _ = child.wait();
                 drop(stdout);

@@ -348,3 +348,51 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
         "a medium run is heavier than a regular one: {plain} vs {heavy}"
     );
 }
+
+#[test]
+fn conflict_band_only_marks_passing_prs_with_merge_conflicts() {
+    for ci in [
+        CiState::None,
+        CiState::Pending,
+        CiState::Success,
+        CiState::Failure,
+        CiState::Error,
+    ] {
+        for merge_kind in [
+            None,
+            Some(MergeKind::Conflicts),
+            Some(MergeKind::Ready),
+            Some(MergeKind::Behind),
+            Some(MergeKind::Blocked),
+        ] {
+            let content = cell_content(&CellData::PullRequests(PrCellData {
+                status: GithubStatus::Ok,
+                hint: None,
+                stale: false,
+                lists: vec![PrListData {
+                    id: GithubList::Mine,
+                    total: 1,
+                    items: vec![PrRowData {
+                        id: "fixture".into(),
+                        number: 1,
+                        title: "Fixture".into(),
+                        url: "https://github.com/o/r/pull/1".into(),
+                        repo: "o/r".into(),
+                        is_draft: false,
+                        review_decision: None,
+                        ci,
+                        merge_kind,
+                    }],
+                }],
+            }));
+            let CellContent::PullRequests { segments, .. } = content else {
+                panic!("PR cell")
+            };
+            assert_eq!(segments[0].ci, ci);
+            assert_eq!(
+                segments[0].passing_with_conflicts,
+                ci == CiState::Success && merge_kind == Some(MergeKind::Conflicts)
+            );
+        }
+    }
+}

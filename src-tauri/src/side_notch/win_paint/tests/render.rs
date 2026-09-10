@@ -298,3 +298,53 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
         "the glyph sits on the capitals: glyph {glyph}, caps {caps}"
     );
 }
+
+#[test]
+fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
+    let mut planned = plan(
+        &settings(),
+        &displays,
+        &data(vec![CellData::Provider(provider_data(
+            AgentId::Claude,
+            42.0,
+        ))]),
+        Hover::default(),
+    )
+    .expect("fits");
+    planned.cells[0].content = CellContent::PullRequests {
+        segments: vec![PrRingSegment {
+            ci: CiState::Success,
+            passing_with_conflicts: false,
+        }],
+        count: 1,
+        readable: true,
+    };
+    let plain = render(&planned);
+    if let CellContent::PullRequests { segments, .. } = &mut planned.cells[0].content {
+        segments[0].passing_with_conflicts = true;
+    }
+    let conflict = render(&planned);
+    let scale = planned.display_scale;
+    let cell = &planned.cells[0];
+    let cx = cell.rect.mid_x() * scale;
+    let cy = (cell.rect.y + planned.metrics.cell_padding + planned.metrics.icon_slot / 2.0) * scale;
+    let stroke = planned.metrics.ring_stroke * scale;
+    let radius = (planned.metrics.icon_slot * scale - stroke) / 2.0;
+    let mut red = 0;
+    for (index, (before, after)) in plain.pixels().iter().zip(conflict.pixels()).enumerate() {
+        if before != after {
+            let x = (index % plain.width() as usize) as f64;
+            let y = (index / plain.width() as usize) as f64;
+            assert!(
+                ((x - cx).hypot(y - cy) - (radius + stroke / 3.0)).abs()
+                    <= stroke / 6.0 + stroke * 0.18 + 1.5,
+                "only the outer band and its transition may change; preserve the icon and label"
+            );
+            if after.red() > after.green() {
+                red += 1;
+            }
+        }
+    }
+    assert!(red > 0, "the outer band conveys the conflict");
+}

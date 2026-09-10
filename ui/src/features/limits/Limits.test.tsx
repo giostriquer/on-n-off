@@ -10,7 +10,7 @@ const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
 
 const onSharedReadChanged = vi.hoisted(() => () => Promise.resolve(() => undefined));
 
-vi.mock("$lib/api", () => ({ readLimits, forgetLimitsSnapshot, onSharedReadChanged }));
+vi.mock("$lib/api", () => ({ readLimits, forgetLimitsSnapshot, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue({metadata:null,connected:false,unavailable:false}) }));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -125,7 +125,7 @@ describe("Limits", () => {
     renderLimits();
 
     await waitFor(() => expect(within(card("Claude limits · me@claude.example")).getByText("Max")).toBeTruthy());
-    await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro")).toBeTruthy());
+    await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro ×20")).toBeTruthy());
     expect(readLimits).toHaveBeenCalledWith("claude", false);
     expect(readLimits).toHaveBeenCalledWith("codex", false);
     expect(readLimits).toHaveBeenCalledTimes(2);
@@ -385,7 +385,7 @@ describe("Limits", () => {
     const pending = deferred<ProviderLimits[]>();
     answer(pending.promise, [okCodex()]);
     renderLimits();
-    await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro")).toBeTruthy());
+    await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro ×20")).toBeTruthy());
     const claude = card("Claude limits");
     expect(claude.getAttribute("data-status")).toBe("pending");
     expect(within(claude).getByText(/Checking limits/)).toBeTruthy();
@@ -407,7 +407,7 @@ describe("Limits", () => {
     });
     const view = renderLimits();
     await waitFor(() => expect(within(card("Claude limits · me@claude.example")).getByText("Max")).toBeTruthy());
-    await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro")).toBeTruthy());
+    await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro ×20")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh limits" }));
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
@@ -425,4 +425,20 @@ describe("Limits", () => {
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(6));
     expect(readLimits.mock.calls.slice(4).every((call) => call[1] === false)).toBe(true);
   });
+});
+
+import { readCodexSubscription } from "$lib/api";
+it("places plan and subscription status in one header using the existing subscription read", async () => {
+  vi.mocked(readCodexSubscription).mockClear().mockResolvedValueOnce({
+    metadata: {date:"2026-10-10T12:00:00Z",kind:"expires",source:"billing",checkedAt:NOW,stale:false},
+    connected:false,unavailable:false,
+  });
+  answer([okClaude()], [okCodex()]);
+  renderLimits();
+  const tag = await screen.findByLabelText("Subscription status: No renewal");
+  expect(tag.closest("header")).toHaveTextContent("Pro ×20");
+  const plan = within(tag.closest("header")!).getByText("Pro ×20");
+  expect(tag.compareDocumentPosition(plan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByText(/Expires on/)).toBeInTheDocument();
+  expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
