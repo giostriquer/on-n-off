@@ -300,39 +300,49 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
 }
 
 #[test]
-fn conflict_hatching_keeps_green_and_stays_inside_its_arc() {
-    let mut plain = Pixmap::new(80, 80).unwrap();
-    stroke_ring(
-        &mut plain, 40.0, 40.0, 24.0, 8.0, -90.0, 0.0, LIVE_GREEN, false, false,
-    );
-    let mut hatched = Pixmap::new(80, 80).unwrap();
-    stroke_ring(
-        &mut hatched,
-        40.0,
-        40.0,
-        24.0,
-        8.0,
-        -90.0,
-        0.0,
-        LIVE_GREEN,
-        false,
-        true,
-    );
+fn conflict_changes_only_the_pr_icon_and_keeps_ci_ring_pixels() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
+    let mut planned = plan(
+        &settings(),
+        &displays,
+        &data(vec![CellData::Provider(provider_data(
+            AgentId::Claude,
+            42.0,
+        ))]),
+        Hover::default(),
+    )
+    .expect("fits");
+    planned.cells[0].content = CellContent::PullRequests {
+        segments: vec![PrRingSegment {
+            ci: CiState::Success,
+            passing_with_conflicts: false,
+        }],
+        count: 1,
+        readable: true,
+    };
+    let plain = render(&planned);
+    if let CellContent::PullRequests { segments, .. } = &mut planned.cells[0].content {
+        segments[0].passing_with_conflicts = true;
+    }
+    let conflict = render(&planned);
+    let scale = planned.display_scale;
+    let cell = &planned.cells[0];
+    let cx = cell.rect.mid_x() * scale;
+    let cy = (cell.rect.y + planned.metrics.cell_padding + planned.metrics.icon_slot / 2.0) * scale;
+    let half = (planned.metrics.glyph / 2.0 + 2.0) * scale;
     let mut red = 0;
-    let mut green = 0;
-    for (base, striped) in plain.pixels().iter().zip(hatched.pixels()) {
-        if base.alpha() == 0 {
-            assert_eq!(striped.alpha(), 0, "hatch escaped its PR arc");
-        }
-        if striped.alpha() > 200 {
-            if striped.red() > striped.green() {
+    for (index, (before, after)) in plain.pixels().iter().zip(conflict.pixels()).enumerate() {
+        if before != after {
+            let x = (index % plain.width() as usize) as f64;
+            let y = (index / plain.width() as usize) as f64;
+            assert!(
+                (x - cx).abs() <= half && (y - cy).abs() <= half,
+                "conflicts must not alter ring or label pixels"
+            );
+            if after.red() > after.green() {
                 red += 1;
-            }
-            if striped.green() > striped.red() {
-                green += 1;
             }
         }
     }
-    assert!(red > 0, "conflict is visible");
-    assert!(green > red, "passing CI remains the dominant color");
+    assert!(red > 0, "the PR icon conveys the conflict");
 }

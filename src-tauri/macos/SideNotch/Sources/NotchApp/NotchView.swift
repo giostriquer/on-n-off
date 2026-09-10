@@ -296,7 +296,8 @@ private struct PullRequestCell: View {
       labelOffset: 0, description: description, active: active, action: action,
       ring: SegmentedRing(segments: segments, lineWidth: CGFloat(layout.ringStroke)),
       glyph: PullRequestMark().stroke(
-        Color.white, style: StrokeStyle(lineWidth: metrics.value(1.6), lineCap: .round)))
+        segments.contains(where: \.passingWithConflicts) ? tripRed : Color.white,
+        style: StrokeStyle(lineWidth: metrics.value(1.6), lineCap: .round)))
   }
 }
 
@@ -317,30 +318,9 @@ struct SegmentedRing: View {
           .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
           .rotationEffect(.degrees(-90))
         arc.foregroundColor(ciColor(segment.ci))
-        if segment.conflictStripes {
-          ConflictHatching(pitch: lineWidth * 1.6)
-            .stroke(tripRed.opacity(0.85), lineWidth: lineWidth * 0.16)
-            .padding(-lineWidth / 2)
-            .mask(arc)
-        }
 
       }
     }
-  }
-}
-
-/// Fine parallel hatching, nearly vertical, masked to the affected green arc.
-/// Scale the texture with the rail so compact rings retain the same visual weight.
-private struct ConflictHatching: Shape {
-  let pitch: CGFloat
-  func path(in rect: CGRect) -> Path {
-    var path = Path()
-    let lean = rect.height * 0.15
-    for x in stride(from: rect.minX - pitch, through: rect.maxX + lean + pitch, by: pitch) {
-      path.move(to: CGPoint(x: x, y: rect.minY))
-      path.addLine(to: CGPoint(x: x - lean, y: rect.maxY))
-    }
-    return path
   }
 }
 

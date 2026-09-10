@@ -350,7 +350,7 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
 }
 
 #[test]
-fn conflict_stripes_only_mark_passing_prs_with_merge_conflicts() {
+fn conflict_icon_only_marks_passing_prs_with_merge_conflicts() {
     for ci in [
         CiState::None,
         CiState::Pending,
@@ -390,7 +390,7 @@ fn conflict_stripes_only_mark_passing_prs_with_merge_conflicts() {
             };
             assert_eq!(segments[0].ci, ci);
             assert_eq!(
-                segments[0].conflict_stripes,
+                segments[0].passing_with_conflicts,
                 ci == CiState::Success && merge_kind == Some(MergeKind::Conflicts)
             );
         }

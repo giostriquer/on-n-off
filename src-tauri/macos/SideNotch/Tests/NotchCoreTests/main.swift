@@ -312,13 +312,13 @@ final class NotchTests {
     expectEqual(maxPullRequests, 25)
   }
 
-  func testConflictStripesRequirePassingCIAndMergeConflicts() {
+  func testConflictIconRequiresPassingCIAndMergeConflicts() {
     let states: [CiState] = [.none, .pending, .success, .failure, .error, .unknown]
     let kinds: [MergeKind?] = [nil, .conflicts, .queued, .autoMerge, .ready, .behind, .blocked, .unknown]
     for ci in states {
       for kind in kinds {
         let row = PullRequest(id: "fixture", number: 1, title: "Fixture", url: "https://github.com/o/r/pull/1", repo: "o/r", author: "fixture", isDraft: false, reviewDecision: nil, ci: ci, mergeKind: kind, updatedAt: "")
-        expectEqual(row.conflictStripes, ci == .success && kind == .conflicts)
+        expectEqual(row.passingWithConflicts, ci == .success && kind == .conflicts)
       }
     }
   }
@@ -391,7 +391,7 @@ checks.testPillsHugTheEdgeCentredOnTheRail()
 checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
 try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
 try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
-checks.testConflictStripesRequirePassingCIAndMergeConflicts()
+checks.testConflictIconRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
 print("17 native check groups; \(failures) failures")

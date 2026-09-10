@@ -310,11 +310,11 @@ pub enum CellContent {
     },
 }
 
-/// The CI color and the independent conflict overlay for one PR's ring arc.
+/// CI color and merge-conflict state for a displayed PR.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PrRingSegment {
     ci: CiState,
-    conflict_stripes: bool,
+    passing_with_conflicts: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -583,7 +583,7 @@ fn cell_content(data: &CellData) -> CellContent {
                         .take(24)
                         .map(|row| PrRingSegment {
                             ci: row.ci,
-                            conflict_stripes: row.ci == CiState::Success
+                            passing_with_conflicts: row.ci == CiState::Success
                                 && row.merge_kind == Some(MergeKind::Conflicts),
                         })
                         .collect()
@@ -1746,7 +1746,6 @@ fn stroke_ring(
     to_deg: f32,
     color: Color,
     round_caps: bool,
-    conflict_stripes: bool,
 ) {
     let n = (((to_deg - from_deg).abs() / 5.0).ceil() as usize).max(2);
     let mut pb = PathBuilder::new();
@@ -1782,36 +1781,6 @@ fn stroke_ring(
                 Transform::identity(),
                 None,
             );
-            if conflict_stripes {
-                // Same fine, near-vertical texture as the native helper. The mask
-                // confines it to this PR arc, including its antialiased boundaries.
-                if let Some(mut mask) = tiny_skia::Mask::new(pixmap.width(), pixmap.height()) {
-                    mask.fill_path(&stroked, FillRule::Winding, true, Transform::identity());
-                    let mut lines = PathBuilder::new();
-                    let pitch = stroke * 1.6;
-                    let extent = radius + stroke / 2.0;
-                    let lean = extent * 2.0 * 0.15;
-                    let mut x = cx - extent - pitch;
-                    while x <= cx + extent + lean + pitch {
-                        lines.move_to(x, cy - extent);
-                        lines.line_to(x - lean, cy + extent);
-                        x += pitch;
-                    }
-                    if let Some(lines) = lines.finish() {
-                        paint.set_color_rgba8(TRIP_RED[0], TRIP_RED[1], TRIP_RED[2], 217);
-                        pixmap.stroke_path(
-                            &lines,
-                            &paint,
-                            &Stroke {
-                                width: stroke * 0.16,
-                                ..Default::default()
-                            },
-                            Transform::identity(),
-                            Some(&mask),
-                        );
-                    }
-                }
-            }
         }
     }
 }
@@ -1837,7 +1806,6 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
         360.0,
         TRACK_INK,
         true,
-        false,
     );
 
     let glyph_size = metrics.glyph as f32 * scale;
@@ -1867,7 +1835,6 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     -90.0 + percent.clamp(0.0, 100.0) as f32 * 3.6,
                     meter_color(primary.percent, provider_color(*provider)),
                     true,
-                    false,
                 );
             }
             if let Some(fable) = fable {
@@ -1883,7 +1850,6 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     360.0,
                     FABLE_TRACK,
                     false,
-                    false,
                 );
                 stroke_ring(
                     pixmap,
@@ -1895,7 +1861,6 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     -90.0 + fable_percent.clamp(0.0, 100.0) as f32 * 3.6,
                     meter_color(fable.percent, FABLE_ORANGE),
                     true,
-                    false,
                 );
             }
             marks::provider(*provider, glyph_rect, [255, 255, 255, 255], pixmap);
@@ -1924,11 +1889,18 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                         -90.0 + (index + 1) as f32 * span - gap_deg / 2.0,
                         ci_color(segment.ci),
                         false,
-                        segment.conflict_stripes,
                     );
                 }
             }
-            marks::pull_request(glyph_rect, 1.6 * scale, [255, 255, 255, 255], pixmap);
+            let icon_color = if segments
+                .iter()
+                .any(|segment| segment.passing_with_conflicts)
+            {
+                TRIP_RED
+            } else {
+                [255, 255, 255, 255]
+            };
+            marks::pull_request(glyph_rect, 1.6 * scale, icon_color, pixmap);
             (
                 if *readable {
                     count.to_string()
