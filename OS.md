@@ -65,6 +65,9 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   installer kind is its own `tauri build` pass); unsigned → SmartScreen warning; verify SHA-256 / attestation.
 - macOS: `.app` + `.dmg` (Apple Silicon), ad-hoc signed, not notarised → right-click → Open on first
   launch. The dmg step needs Automation permission for the terminal locally.
+- SwiftPM resource bundles belong in `Contents/Resources`, not `Contents/Helpers`. The native
+  Swift build engine can emit a flat `.bundle` without an Info.plist; codesign rejects it in the
+  helper code directory, but seals it correctly as app resources (2026-09, billing helper).
 - Icons: `icon.icns` carries macOS margins + drop shadow; Windows `icon.ico` / PNGs must be full-bleed
   with transparent corners (no shadow). Regenerate the Windows set from the icns master, not the
   other way round.
