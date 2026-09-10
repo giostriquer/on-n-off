@@ -318,8 +318,10 @@ struct SegmentedRing: View {
           .rotationEffect(.degrees(-90))
         arc.foregroundColor(ciColor(segment.ci))
         if segment.conflictStripes {
-          ConflictRingMarks(
-            from: start + gap / 2, to: start + span - gap / 2, lineWidth: lineWidth)
+          ConflictHatching(pitch: lineWidth * 1.6)
+            .stroke(tripRed.opacity(0.85), lineWidth: lineWidth * 0.16)
+            .padding(-lineWidth / 2)
+            .mask(arc)
         }
 
       }
@@ -327,25 +329,18 @@ struct SegmentedRing: View {
   }
 }
 
-/// Inset red ticks follow the arc with even spacing and clear margins at both ends.
-/// The continuous green edges retain the ring's CI color and smooth silhouette.
-private struct ConflictRingMarks: View {
-  let from: CGFloat
-  let to: CGFloat
-  let lineWidth: CGFloat
-  var body: some View {
-    GeometryReader { geometry in
-      let circumference = .pi * min(geometry.size.width, geometry.size.height)
-      let length = (to - from) * circumference
-      let count = max(1, Int(length / (lineWidth * 2.3)))
-      let halfTick = min(lineWidth * 0.11 / max(circumference, 1), (to - from) / CGFloat(count) / 4)
-      ForEach(0..<count, id: \.self) { index in
-        let center = from + (CGFloat(index) + 0.5) * (to - from) / CGFloat(count)
-        Circle().trim(from: center - halfTick, to: center + halfTick)
-          .stroke(tripRed, style: StrokeStyle(lineWidth: lineWidth * 0.55, lineCap: .butt))
-          .rotationEffect(.degrees(-90))
-      }
+/// Fine parallel hatching, nearly vertical, masked to the affected green arc.
+/// Scale the texture with the rail so compact rings retain the same visual weight.
+private struct ConflictHatching: Shape {
+  let pitch: CGFloat
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    let lean = rect.height * 0.15
+    for x in stride(from: rect.minX - pitch, through: rect.maxX + lean + pitch, by: pitch) {
+      path.move(to: CGPoint(x: x, y: rect.minY))
+      path.addLine(to: CGPoint(x: x - lean, y: rect.maxY))
     }
+    return path
   }
 }
 

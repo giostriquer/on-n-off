@@ -1783,28 +1783,33 @@ fn stroke_ring(
                 None,
             );
             if conflict_stripes {
-                // Match the native helper: short inset ticks with equal end margins,
-                // preserving both smooth green edges without a full-window mask.
-                let span = to_deg - from_deg;
-                let length = span.to_radians() * radius;
-                let count = ((length / (stroke * 2.3)) as usize).max(1);
-                let half_tick = (stroke * 0.11 / radius)
-                    .to_degrees()
-                    .min(span / count as f32 / 4.0);
-                for index in 0..count {
-                    let center = from_deg + (index as f32 + 0.5) * span / count as f32;
-                    stroke_ring(
-                        pixmap,
-                        cx,
-                        cy,
-                        radius,
-                        stroke * 0.55,
-                        center - half_tick,
-                        center + half_tick,
-                        TRIP_RED,
-                        false,
-                        false,
-                    );
+                // Same fine, near-vertical texture as the native helper. The mask
+                // confines it to this PR arc, including its antialiased boundaries.
+                if let Some(mut mask) = tiny_skia::Mask::new(pixmap.width(), pixmap.height()) {
+                    mask.fill_path(&stroked, FillRule::Winding, true, Transform::identity());
+                    let mut lines = PathBuilder::new();
+                    let pitch = stroke * 1.6;
+                    let extent = radius + stroke / 2.0;
+                    let lean = extent * 2.0 * 0.15;
+                    let mut x = cx - extent - pitch;
+                    while x <= cx + extent + lean + pitch {
+                        lines.move_to(x, cy - extent);
+                        lines.line_to(x - lean, cy + extent);
+                        x += pitch;
+                    }
+                    if let Some(lines) = lines.finish() {
+                        paint.set_color_rgba8(TRIP_RED[0], TRIP_RED[1], TRIP_RED[2], 217);
+                        pixmap.stroke_path(
+                            &lines,
+                            &paint,
+                            &Stroke {
+                                width: stroke * 0.16,
+                                ..Default::default()
+                            },
+                            Transform::identity(),
+                            Some(&mask),
+                        );
+                    }
                 }
             }
         }
