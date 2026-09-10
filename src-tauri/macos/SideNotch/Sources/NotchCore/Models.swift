@@ -371,6 +371,9 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
     self.updatedAt = updatedAt
   }
 
+  /// Preserve passing CI while marking the separate merge-conflict state on its ring arc.
+  public var conflictStripes: Bool { ci == .success && mergeKind == .conflicts }
+
   /// Only GitHub pages ever open from the notch.
   public var link: URL? {
     guard let url = URL(string: url), url.scheme == "https", url.host == "github.com" else {

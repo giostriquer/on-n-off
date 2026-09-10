@@ -118,6 +118,9 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
 /// Drop the remembered snapshot of one account (the user's "Forget" on a remembered card).
 pub fn forget_snapshot(agent: AgentId, account_id: &str) -> Result<(), String> {
     let home = paths::user_home().map_err(|error| error.message)?;
+    if agent == AgentId::Codex {
+        crate::subscription::forget(&home, account_id)?;
+    }
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 

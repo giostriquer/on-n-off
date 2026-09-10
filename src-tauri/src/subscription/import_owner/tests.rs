@@ -1,0 +1,54 @@
+use super::*;
+use std::{process::Stdio, sync::Arc, time::Duration};
+
+#[test]
+fn shutdown_reaps_import_before_removing_its_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    let scratch = private_scratch(root.path()).unwrap();
+    let path = scratch.path().to_path_buf();
+    std::fs::write(path.join("source"), "disposable cookie fixture").unwrap();
+    let helper = crate::cli_stub::CliStub::new("import")
+        .copy("source", "snapshot")
+        .sleep(10)
+        .write(&path);
+    let owner = Arc::new(ImportOwner::default());
+    let worker_owner = Arc::clone(&owner);
+    let worker = std::thread::spawn(move || {
+        let mut command = std::process::Command::new(helper);
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        worker_owner.run(command, scratch)
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while !path.join("snapshot").exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(path.join("snapshot").exists());
+    owner.shutdown();
+    assert!(
+        !path.exists(),
+        "shutdown must remove the credential snapshot before returning"
+    );
+    assert!(matches!(
+        worker.join().unwrap().unwrap(),
+        crate::process::CommandOutcome::TimedOut
+    ));
+    let scratch = private_scratch(root.path()).unwrap();
+    assert!(owner
+        .run(std::process::Command::new("unused"), scratch)
+        .is_err());
+}
+
+#[test]
+fn recovery_preserves_live_leases_and_removes_only_abandoned_imports() {
+    let root = tempfile::tempdir().unwrap();
+    let live = private_scratch(root.path()).unwrap();
+    let scratch = private_scratch(root.path()).unwrap();
+    let abandoned = scratch.directory.keep();
+    drop(scratch._lease);
+    let unrelated = root.path().join("other");
+    std::fs::create_dir(&unrelated).unwrap();
+    recover(root.path());
+    assert!(live.path().exists());
+    assert!(!abandoned.exists());
+    assert!(unrelated.exists());
+}

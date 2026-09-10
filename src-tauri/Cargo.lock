@@ -2492,8 +2492,9 @@ dependencies = [
 
 [[package]]
 name = "on-n-off"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
+ "base64 0.22.1",
  "block2",
  "chrono",
  "chrono-tz",
@@ -2516,6 +2517,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
  "tiny-skia",
  "tokio",
  "toml 0.8.2",

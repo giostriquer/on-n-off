@@ -298,3 +298,41 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
         "the glyph sits on the capitals: glyph {glyph}, caps {caps}"
     );
 }
+
+#[test]
+fn conflict_hatching_keeps_green_and_stays_inside_its_arc() {
+    let mut plain = Pixmap::new(80, 80).unwrap();
+    stroke_ring(
+        &mut plain, 40.0, 40.0, 24.0, 8.0, -90.0, 0.0, LIVE_GREEN, false, false,
+    );
+    let mut hatched = Pixmap::new(80, 80).unwrap();
+    stroke_ring(
+        &mut hatched,
+        40.0,
+        40.0,
+        24.0,
+        8.0,
+        -90.0,
+        0.0,
+        LIVE_GREEN,
+        false,
+        true,
+    );
+    let mut red = 0;
+    let mut green = 0;
+    for (base, striped) in plain.pixels().iter().zip(hatched.pixels()) {
+        if base.alpha() == 0 {
+            assert_eq!(striped.alpha(), 0, "hatch escaped its PR arc");
+        }
+        if striped.alpha() > 200 {
+            if striped.red() > striped.green() {
+                red += 1;
+            }
+            if striped.green() > striped.red() {
+                green += 1;
+            }
+        }
+    }
+    assert!(red > 0, "conflict is visible");
+    assert!(green > red, "passing CI remains the dominant color");
+}

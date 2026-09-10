@@ -206,3 +206,14 @@ export function requestNotificationPermission(): Promise<boolean> {
 export function diagnoseProviders(): Promise<ProviderDiagnose[]> {
   return invoke("diagnose_providers");
 }
+
+/** Optional billing enrichment; a successful import enables throttled daily browser checks. */
+export function readCodexSubscription(accountId: string): Promise<import("./subscriptionTypes").SubscriptionReading> {
+  return invoke("read_codex_subscription", { accountId });
+}
+export function connectCodexBilling(accountId: string): Promise<void> {
+  return invoke("connect_codex_billing", { accountId });
+}
+export function disconnectCodexBilling(accountId: string): Promise<void> {
+  return invoke("disconnect_codex_billing", { accountId });
+}
