@@ -85,9 +85,7 @@ final class Reader: NSObject, WKNavigationDelegate {
     func read(cookies: [HTTPCookie], account: String) async -> [String: Any]? {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
-        let folder = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.deletingLastPathComponent()
-        guard let resources = Bundle(url: folder.appendingPathComponent("BrowserBilling_BrowserBilling.bundle")) else { return nil }
-        guard let url = resources.url(forResource: "billing", withExtension: "js"),
+        guard let url = BillingResources.scriptURL(executable: URL(fileURLWithPath: CommandLine.arguments[0])),
               let script = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         config.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         for cookie in cookies { await config.websiteDataStore.httpCookieStore.setCookie(cookie) }

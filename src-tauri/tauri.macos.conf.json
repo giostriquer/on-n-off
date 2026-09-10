@@ -4,7 +4,7 @@
       "files": {
         "Helpers/on-n-off-notch.app": "binaries/on-n-off-notch.app",
         "Helpers/on-n-off-billing": "binaries/on-n-off-billing",
-        "Helpers/BrowserBilling_BrowserBilling.bundle": "binaries/BrowserBilling_BrowserBilling.bundle"
+        "Resources/BrowserBilling_BrowserBilling.bundle": "binaries/BrowserBilling_BrowserBilling.bundle"
       }
     }
   }
