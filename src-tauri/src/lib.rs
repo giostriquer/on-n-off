@@ -34,6 +34,7 @@ mod scanner;
 mod settings;
 mod side_notch;
 mod sort;
+mod subscription;
 mod tray;
 #[cfg(test)]
 mod updater_build;
@@ -76,6 +77,8 @@ pub fn run() {
             tray::setup(_app)?;
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             side_notch::setup(_app);
+            #[cfg(target_os = "macos")]
+            std::thread::spawn(subscription::recover_imports);
             limits_monitor::setup(_app);
             github_monitor::setup(_app);
             Ok(())
@@ -107,6 +110,9 @@ pub fn run() {
             commands::refresh,
             commands::usage_summary,
             commands::read_limits,
+            commands::read_codex_subscription,
+            commands::connect_codex_billing,
+            commands::disconnect_codex_billing,
             commands::forget_limits_snapshot,
             commands::read_github_prs,
             commands::hide_limits_popover,
@@ -127,6 +133,10 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|_app, _event| {
+        #[cfg(target_os = "macos")]
+        if matches!(_event, tauri::RunEvent::Exit) {
+            subscription::shutdown();
+        }
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         if matches!(_event, tauri::RunEvent::Exit) {
             side_notch::shutdown(_app);

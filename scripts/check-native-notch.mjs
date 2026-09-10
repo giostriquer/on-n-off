@@ -72,7 +72,8 @@ const fixture = edge => ({
   pullRequests: {
     status: 'ok', hint: null, stale: false,
     lists: [
-      { id: 'mine', total: 3, items: [
+      { id: 'mine', total: 4, items: [
+        pull(42, 'fix: passing checks with merge conflicts', 'success', 'APPROVED', 'conflicts', false),
         pull(41, 'ci: give push runs on dev and main one concurrency group per commit', 'success', 'APPROVED', 'ready', false),
         pull(40, 'feat: pull requests in the side notch', 'pending', null, null, true),
         pull(39, 'release: corrected usage cost estimates', 'failure', 'CHANGES_REQUESTED', 'conflicts', false),

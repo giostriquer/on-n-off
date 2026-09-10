@@ -111,3 +111,12 @@ describe("planLabel", () => {
     expect(planLabel(undefined)).toBe("");
   });
 });
+
+it("distinguishes Codex Pro tiers without relabeling another provider's Pro", () => {
+  expect(planLabel("pro", "codex")).toBe("Pro ×20");
+  for (const value of ["prolite", "pro_lite", "pro-lite", " Pro Lite "]) {
+    expect(planLabel(value, "codex")).toBe("Pro ×5");
+  }
+  expect(planLabel("pro", "claude")).toBe("Pro");
+  expect(planLabel("future_plan", "codex")).toBe("Future plan");
+});

@@ -441,3 +441,39 @@ pub async fn save_notch_settings(
     crate::side_notch::apply(&app, snapshot.clone()).map_err(AdapterError::message)?;
     Ok(snapshot)
 }
+
+/// Cached Codex ID-token metadata plus optional account-scoped billing enrichment.
+#[tauri::command]
+pub async fn read_codex_subscription(
+    app: tauri::AppHandle,
+    account_id: String,
+) -> Result<crate::subscription::SubscriptionReading, AdapterError> {
+    blocking("subscription read", move || {
+        let home = crate::paths::user_home()?;
+        Ok(crate::subscription::read(&app, &home, &account_id))
+    })
+    .await
+}
+#[tauri::command]
+pub async fn connect_codex_billing(
+    app: tauri::AppHandle,
+    account_id: String,
+) -> Result<(), AdapterError> {
+    let selected = account_id.clone();
+    blocking("subscription identity", move || {
+        let home = crate::paths::user_home()?;
+        crate::subscription::validate_account(&home, &selected).map_err(AdapterError::message)
+    })
+    .await?;
+    blocking("browser billing import", move || {
+        crate::subscription::connect(&app, account_id).map_err(AdapterError::message)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn disconnect_codex_billing(
+    app: tauri::AppHandle,
+    account_id: String,
+) -> Result<(), AdapterError> {
+    crate::subscription::disconnect(&app, Some(&account_id)).map_err(AdapterError::message)
+}

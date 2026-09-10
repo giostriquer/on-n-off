@@ -50,6 +50,7 @@ it.each([
   ["limits:claude", ["limits", "claude"]],
   ["limits:codex", ["limits", "codex"]],
   ["github:prs", ["github", "prs"]],
+  ["subscription:codex", ["subscription", "codex"]],
 ] as const)("refetches the query %s actually backs", async (source, queryKey) => {
   calls.listeners.clear();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

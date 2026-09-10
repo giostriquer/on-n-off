@@ -38,3 +38,5 @@ artifacts/
 # Native notch build products
 src-tauri/macos/SideNotch/.build/
 src-tauri/binaries/
+
+src-tauri/macos/BrowserBilling/.build/

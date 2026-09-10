@@ -14,6 +14,15 @@
   --font-mono: "SF Mono", ui-monospace, Menlo, "Cascadia Mono", Consolas, monospace;
 }
 
+/* Plan and status labels use the app UI face, not the technical-value mono stack. */
+@utility type-badge {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+}
+
 /*
   Explicit light/dark tokens — avoid light-dark() in Tauri WebView2,
   which was resolving inconsistently and breaking fills/contrast.
