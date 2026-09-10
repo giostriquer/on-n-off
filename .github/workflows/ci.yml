@@ -157,3 +157,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native notch model checks failed." }
           bun scripts/check-native-notch.mjs src-tauri/target/debug/on-n-off-notch
           if ($LASTEXITCODE -ne 0) { throw "Native notch lifecycle checks failed." }
+          xcrun swift run --package-path src-tauri/macos/BrowserBilling -Xswiftc -warnings-as-errors BrowserBillingChecks
+          if ($LASTEXITCODE -ne 0) { throw "Browser billing checks failed." }
+          bun scripts/check-billing-resources.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Billing resource signing checks failed." }
