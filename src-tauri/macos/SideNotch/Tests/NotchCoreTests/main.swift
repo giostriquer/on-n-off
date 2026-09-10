@@ -312,7 +312,7 @@ final class NotchTests {
     expectEqual(maxPullRequests, 25)
   }
 
-  func testConflictIconRequiresPassingCIAndMergeConflicts() {
+  func testConflictBandRequiresPassingCIAndMergeConflicts() {
     let states: [CiState] = [.none, .pending, .success, .failure, .error, .unknown]
     let kinds: [MergeKind?] = [nil, .conflicts, .queued, .autoMerge, .ready, .behind, .blocked, .unknown]
     for ci in states {
@@ -391,7 +391,7 @@ checks.testPillsHugTheEdgeCentredOnTheRail()
 checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
 try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
 try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
-checks.testConflictIconRequiresPassingCIAndMergeConflicts()
+checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
 print("17 native check groups; \(failures) failures")

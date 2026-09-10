@@ -1890,17 +1890,24 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                         ci_color(segment.ci),
                         false,
                     );
+                    if segment.passing_with_conflicts {
+                        // Match Swift's concentric outer third without changing
+                        // the total ring thickness or the PR arc's end angles.
+                        stroke_ring(
+                            pixmap,
+                            center.0,
+                            center.1,
+                            radius + ring_stroke / 3.0,
+                            ring_stroke / 3.0,
+                            -90.0 + index as f32 * span + gap_deg / 2.0,
+                            -90.0 + (index + 1) as f32 * span - gap_deg / 2.0,
+                            TRIP_RED,
+                            false,
+                        );
+                    }
                 }
             }
-            let icon_color = if segments
-                .iter()
-                .any(|segment| segment.passing_with_conflicts)
-            {
-                TRIP_RED
-            } else {
-                [255, 255, 255, 255]
-            };
-            marks::pull_request(glyph_rect, 1.6 * scale, icon_color, pixmap);
+            marks::pull_request(glyph_rect, 1.6 * scale, [255, 255, 255, 255], pixmap);
             (
                 if *readable {
                     count.to_string()

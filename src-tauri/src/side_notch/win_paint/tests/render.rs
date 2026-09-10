@@ -300,7 +300,7 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
 }
 
 #[test]
-fn conflict_changes_only_the_pr_icon_and_keeps_ci_ring_pixels() {
+fn conflicts_color_the_outer_third_and_preserve_the_icon() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
     let mut planned = plan(
         &settings(),
@@ -329,20 +329,21 @@ fn conflict_changes_only_the_pr_icon_and_keeps_ci_ring_pixels() {
     let cell = &planned.cells[0];
     let cx = cell.rect.mid_x() * scale;
     let cy = (cell.rect.y + planned.metrics.cell_padding + planned.metrics.icon_slot / 2.0) * scale;
-    let half = (planned.metrics.glyph / 2.0 + 2.0) * scale;
+    let stroke = planned.metrics.ring_stroke * scale;
+    let radius = (planned.metrics.icon_slot * scale - stroke) / 2.0;
     let mut red = 0;
     for (index, (before, after)) in plain.pixels().iter().zip(conflict.pixels()).enumerate() {
         if before != after {
             let x = (index % plain.width() as usize) as f64;
             let y = (index / plain.width() as usize) as f64;
             assert!(
-                (x - cx).abs() <= half && (y - cy).abs() <= half,
-                "conflicts must not alter ring or label pixels"
+                ((x - cx).hypot(y - cy) - (radius + stroke / 3.0)).abs() <= stroke / 6.0 + 1.5,
+                "only the outer third of the ring may change; preserve the icon and label"
             );
             if after.red() > after.green() {
                 red += 1;
             }
         }
     }
-    assert!(red > 0, "the PR icon conveys the conflict");
+    assert!(red > 0, "the outer band conveys the conflict");
 }

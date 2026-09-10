@@ -350,7 +350,7 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
 }
 
 #[test]
-fn conflict_icon_only_marks_passing_prs_with_merge_conflicts() {
+fn conflict_band_only_marks_passing_prs_with_merge_conflicts() {
     for ci in [
         CiState::None,
         CiState::Pending,

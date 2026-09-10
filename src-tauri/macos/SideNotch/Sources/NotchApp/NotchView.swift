@@ -296,7 +296,7 @@ private struct PullRequestCell: View {
       labelOffset: 0, description: description, active: active, action: action,
       ring: SegmentedRing(segments: segments, lineWidth: CGFloat(layout.ringStroke)),
       glyph: PullRequestMark().stroke(
-        segments.contains(where: \.passingWithConflicts) ? tripRed : Color.white,
+        Color.white,
         style: StrokeStyle(lineWidth: metrics.value(1.6), lineCap: .round)))
   }
 }
@@ -318,7 +318,15 @@ struct SegmentedRing: View {
           .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
           .rotationEffect(.degrees(-90))
         arc.foregroundColor(ciColor(segment.ci))
-
+        if segment.passingWithConflicts {
+          // The outer third of the stroke carries conflicts; the inner two-thirds
+          // retain the CI color. Both bands span exactly the same PR arc.
+          Circle()
+            .trim(from: start + gap / 2, to: start + span - gap / 2)
+            .stroke(tripRed, style: StrokeStyle(lineWidth: lineWidth / 3, lineCap: .butt))
+            .rotationEffect(.degrees(-90))
+            .padding(-lineWidth / 3)
+        }
       }
     }
   }
