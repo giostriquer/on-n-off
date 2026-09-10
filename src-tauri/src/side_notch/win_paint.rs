@@ -1774,6 +1774,9 @@ fn stroke_ring(
         let mut paint = Paint::default();
         paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
         paint.anti_alias = true;
+        // Keep passing CI arcs on the same rounding path with and without the
+        // gradient, preserving antialiased pixels in the unaffected green area.
+        paint.force_hq_pipeline = conflict || color == LIVE_GREEN;
         if conflict {
             let outer = radius + stroke / 2.0;
             let boundary = radius + stroke / 6.0;
