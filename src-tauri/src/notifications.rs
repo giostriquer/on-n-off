@@ -10,34 +10,36 @@ use tauri_plugin_notification::NotificationExt;
 
 use crate::dto::AdapterError;
 
-#[cfg(target_os = "macos")]
-pub async fn request_permission(_app: AppHandle) -> Result<bool, AdapterError> {
-    use block2::RcBlock;
-    use objc2::runtime::Bool;
-    use objc2_foundation::NSError;
-    use objc2_user_notifications::{UNAuthorizationOptions, UNUserNotificationCenter};
-    use tauri::async_runtime;
-
-    let (sender, mut receiver) = async_runtime::channel(1);
-    {
-        let completion: RcBlock<dyn Fn(Bool, *mut NSError)> =
-            RcBlock::new(move |granted: Bool, error: *mut NSError| {
-                let result = authorization_result(granted.as_bool(), !error.is_null())
-                    .map_err(str::to_string);
-                let _ = sender.try_send(result);
-            });
-        UNUserNotificationCenter::currentNotificationCenter()
-            .requestAuthorizationWithOptions_completionHandler(
-                UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
-                &completion,
-            );
+pub async fn request_permission(app: AppHandle) -> Result<bool, AdapterError> {
+    // The center handle is not `Send`, so the request is fired before anything is awaited.
+    #[cfg(target_os = "macos")]
+    let answer = macos::center().map(|center| macos::request_authorization(&center));
+    #[cfg(target_os = "macos")]
+    if let Some(mut answer) = answer {
+        return answer
+            .recv()
+            .await
+            .ok_or_else(|| AdapterError::message("macOS did not return notification permission"))?
+            .map_err(AdapterError::message);
     }
+    request_permission_through_plugin(&app)
+}
 
-    receiver
-        .recv()
-        .await
-        .ok_or_else(|| AdapterError::message("macOS did not return notification permission"))?
-        .map_err(AdapterError::message)
+fn request_permission_through_plugin(app: &AppHandle) -> Result<bool, AdapterError> {
+    use tauri_plugin_notification::PermissionState;
+
+    let notification = app.notification();
+    let state = notification
+        .permission_state()
+        .map_err(|error| AdapterError::message(error.to_string()))?;
+    match state {
+        PermissionState::Granted => Ok(true),
+        PermissionState::Denied => Ok(false),
+        PermissionState::Prompt | PermissionState::PromptWithRationale => notification
+            .request_permission()
+            .map(|state| state == PermissionState::Granted)
+            .map_err(|error| AdapterError::message(error.to_string())),
+    }
 }
 
 /// Ask again at startup while a notification setting is on. macOS only offers the sound
@@ -58,24 +60,6 @@ pub fn refresh_authorization(app: AppHandle) {
             );
         }
     });
-}
-
-#[cfg(not(target_os = "macos"))]
-pub async fn request_permission(app: AppHandle) -> Result<bool, AdapterError> {
-    use tauri_plugin_notification::PermissionState;
-
-    let notification = app.notification();
-    let state = notification
-        .permission_state()
-        .map_err(|error| AdapterError::message(error.to_string()))?;
-    match state {
-        PermissionState::Granted => Ok(true),
-        PermissionState::Denied => Ok(false),
-        PermissionState::Prompt | PermissionState::PromptWithRationale => notification
-            .request_permission()
-            .map(|state| state == PermissionState::Granted)
-            .map_err(|error| AdapterError::message(error.to_string())),
-    }
 }
 
 /// The sound a notification arrives with. Every notification plays one, so the OS's own
@@ -123,6 +107,8 @@ impl Sound {
     }
 }
 
+/// On a bundled macOS app the result only says the request was handed to the framework, which
+/// decides later and off-thread; a refusal is logged there, never returned.
 pub fn show(
     app: &AppHandle,
     title: String,
@@ -130,7 +116,8 @@ pub fn show(
     sound: Sound,
 ) -> Result<(), AdapterError> {
     #[cfg(target_os = "macos")]
-    if macos::post(&title, &body, sound) {
+    if let Some(center) = macos::center() {
+        macos::post(&center, &title, &body, sound);
         return Ok(());
     }
     app.notification()
@@ -145,20 +132,46 @@ pub fn show(
 #[cfg(target_os = "macos")]
 mod macos {
     use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::runtime::Bool;
     use objc2_foundation::{NSBundle, NSError, NSString, NSUUID};
     use objc2_user_notifications::{
-        UNMutableNotificationContent, UNNotificationRequest, UNNotificationSound,
-        UNUserNotificationCenter,
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
+        UNNotificationSound, UNUserNotificationCenter,
     };
 
-    use super::Sound;
+    use tauri::async_runtime::Receiver;
 
-    /// Post through `UserNotifications`. `false` when this process has no bundle identifier
-    /// (an unbundled dev build), which the framework cannot serve; the caller falls back.
-    pub(super) fn post(title: &str, body: &str, sound: Sound) -> bool {
-        if NSBundle::mainBundle().bundleIdentifier().is_none() {
-            return false;
-        }
+    use super::{authorization_result, Sound};
+
+    /// The framework's notification center, or `None` when this process has no bundle
+    /// identifier (an unbundled dev build): asking for the center there raises an Objective-C
+    /// exception that kills the process, so the callers fall back to the plugin instead.
+    pub(super) fn center() -> Option<Retained<UNUserNotificationCenter>> {
+        NSBundle::mainBundle().bundleIdentifier()?;
+        Some(UNUserNotificationCenter::currentNotificationCenter())
+    }
+
+    /// Ask for alerts and sound; the framework's answer arrives on the returned channel.
+    pub(super) fn request_authorization(
+        center: &UNUserNotificationCenter,
+    ) -> Receiver<Result<bool, String>> {
+        let (sender, receiver) = tauri::async_runtime::channel(1);
+        let completion: RcBlock<dyn Fn(Bool, *mut NSError)> =
+            RcBlock::new(move |granted: Bool, error: *mut NSError| {
+                let result = authorization_result(granted.as_bool(), !error.is_null())
+                    .map_err(str::to_string);
+                let _ = sender.try_send(result);
+            });
+        center.requestAuthorizationWithOptions_completionHandler(
+            UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+            &completion,
+        );
+        receiver
+    }
+
+    /// Hand a notification to the framework; it decides later, on its own queue.
+    pub(super) fn post(center: &UNUserNotificationCenter, title: &str, body: &str, sound: Sound) {
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(title));
         content.setBody(&NSString::from_str(body));
@@ -180,9 +193,7 @@ mod macos {
                 eprintln!("macOS refused a notification");
             }
         });
-        UNUserNotificationCenter::currentNotificationCenter()
-            .addNotificationRequest_withCompletionHandler(&request, Some(&completion));
-        true
+        center.addNotificationRequest_withCompletionHandler(&request, Some(&completion));
     }
 }
 
