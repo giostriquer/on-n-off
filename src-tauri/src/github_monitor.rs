@@ -7,7 +7,11 @@
 //! notification plays a sound; going green without conflicts and getting merged each have
 //! their own, so the two are told apart without looking.
 
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle};
@@ -34,6 +38,11 @@ pub struct GithubMonitor;
 struct MonitorState {
     schema_version: u8,
     seen: HashMap<String, Seen>,
+    /// Pull requests that left the open list on the previous poll without the merged list naming
+    /// them. The two searches are indexed separately, so a merge can leave one before it reaches
+    /// the other; the next poll gets to claim these, and then they are forgotten for good.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    vanished: HashSet<String>,
 }
 
 impl Default for MonitorState {
@@ -41,6 +50,7 @@ impl Default for MonitorState {
         Self {
             schema_version: MONITOR_STATE_SCHEMA_VERSION,
             seen: HashMap::new(),
+            vanished: HashSet::new(),
         }
     }
 }
@@ -123,18 +133,17 @@ struct Event {
     repo: String,
     number: u64,
     title: String,
-    /// The pull request stood green with no known conflicts once this happened.
-    green: bool,
+    sound: Sound,
 }
 
 impl Event {
-    fn of(kind: EventKind, pr: &GithubPrDto, green: bool) -> Self {
+    fn of(kind: EventKind, pr: &GithubPrDto, sound: Sound) -> Self {
         Self {
             kind,
             repo: pr.repo.clone(),
             number: pr.number,
             title: pr.title.clone(),
-            green,
+            sound,
         }
     }
 }
@@ -220,7 +229,7 @@ async fn poll_once(
     *state = next;
     for event in events {
         let (title, body) = notification_copy(&event);
-        monitor::notify(app, "github monitor", title, body, sound(&event));
+        monitor::notify(app, "github monitor", title, body, event.sound);
     }
     Ok(failed)
 }
@@ -257,18 +266,16 @@ fn notification_copy(event: &Event) -> (String, String) {
     )
 }
 
-/// Merging has its own sound, and so does good news that leaves the pull request green and
-/// conflict-free; an approval alone, and every piece of bad news, arrive with the default.
-fn sound(event: &Event) -> Sound {
-    match event.kind {
-        EventKind::Merged => Sound::Merged,
-        EventKind::CiPassed
-        | EventKind::CiGreenAgain
-        | EventKind::ConflictsResolved
-        | EventKind::ReadyToMerge
-            if event.green =>
-        {
-            Sound::Green
+/// Merging has its own sound, and so does good news that leaves the pull request green with no
+/// known conflicts — which "ready to merge" is by definition, whether or not the repository runs
+/// checks. An approval alone, and every piece of bad news, arrive with the default.
+fn sound_for(kind: EventKind, after: Seen) -> Sound {
+    let green = after.ci == CiState::Success && after.conflicts != Some(true);
+    match kind {
+        EventKind::Merged => Sound::Done,
+        EventKind::ReadyToMerge => Sound::Success,
+        EventKind::CiPassed | EventKind::CiGreenAgain | EventKind::ConflictsResolved if green => {
+            Sound::Success
         }
         _ => Sound::Default,
     }
@@ -276,8 +283,9 @@ fn sound(event: &Event) -> Sound {
 
 /// Compare a read against what was last seen of the user's own pull requests. Only a fresh,
 /// successful read moves the baseline: a failed or stale one changes nothing. A pull request
-/// that is no longer open is announced once if the merged list names it, and forgotten either
-/// way, so a merge that happened before it was ever seen open says nothing.
+/// that is no longer open is announced once if the merged list names it on this poll or the
+/// next, and forgotten either way, so a merge that happened before it was ever seen open says
+/// nothing.
 fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
     if prs.status != GithubStatus::Ok || prs.stale {
         return Vec::new();
@@ -288,23 +296,29 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
         let before = state.seen.get(&pr.id);
         let after = Seen::of(pr).or_last_known(before);
         if let Some(before) = before {
-            let green = after.ci == CiState::Success && after.conflicts != Some(true);
             events.extend(
                 transitions(*before, after)
                     .into_iter()
-                    .map(|kind| Event::of(kind, pr, green)),
+                    .map(|kind| Event::of(kind, pr, sound_for(kind, after))),
             );
         }
         next.insert(pr.id.clone(), after);
     }
-    events.extend(
-        prs.data
-            .merged
-            .items
-            .iter()
-            .filter(|pr| state.seen.contains_key(&pr.id) && !next.contains_key(&pr.id))
-            .map(|pr| Event::of(EventKind::Merged, pr, false)),
-    );
+    let mut vanished: HashSet<String> = state
+        .seen
+        .keys()
+        .filter(|id| !next.contains_key(*id))
+        .cloned()
+        .chain(state.vanished.drain())
+        .collect();
+    for pr in &prs.data.merged.items {
+        if vanished.remove(&pr.id) {
+            events.push(Event::of(EventKind::Merged, pr, Sound::Done));
+        }
+    }
+    // Whatever the previous poll's leftovers were, this poll was their last chance.
+    vanished.retain(|id| state.seen.contains_key(id));
+    state.vanished = vanished;
     state.seen = next;
     events
 }

@@ -170,11 +170,41 @@ fn a_merged_pull_request_is_announced_once_with_the_merged_sound_then_forgotten(
     assert_eq!(events[0].repo, "acme/app");
     assert_eq!(events[0].number, 41);
     assert_eq!(notification_copy(&events[0]).0, "Merged");
-    assert_eq!(sound(&events[0]), Sound::Merged);
+    assert_eq!(events[0].sound, Sound::Done);
     assert!(!state.seen.contains_key("a"));
 
     // The merged list keeps naming it on later polls; it was announced when it left `seen`.
     assert!(observe(&mut state, &merged).is_empty());
+}
+
+#[test]
+fn a_merge_the_merged_search_reports_one_poll_late_is_still_announced_but_not_two() {
+    for (polls_late, announced) in [(1, true), (2, false)] {
+        let mut state = MonitorState::default();
+        observe(&mut state, &read(vec![pr("a", CiState::Success)]));
+        for _ in 0..polls_late {
+            assert!(observe(&mut state, &read(vec![])).is_empty());
+        }
+        let late = read_with_merged(vec![], vec![pr("a", CiState::Success)]);
+        let events = observe(&mut state, &late);
+        assert_eq!(!events.is_empty(), announced, "{polls_late} polls late");
+        assert!(state.vanished.is_empty());
+        assert!(observe(&mut state, &late).is_empty());
+    }
+}
+
+#[test]
+fn a_closed_pull_request_is_remembered_for_one_poll_only() {
+    let mut state = MonitorState::default();
+    observe(&mut state, &read(vec![pr("a", CiState::Success)]));
+    observe(&mut state, &read(vec![]));
+    assert!(state.vanished.contains("a"));
+    let raw = serde_json::to_string(&state).unwrap();
+    assert!(raw.contains("\"vanished\":[\"a\"]"), "{raw}");
+    observe(&mut state, &read(vec![]));
+    assert!(state.vanished.is_empty());
+    let raw = serde_json::to_string(&state).unwrap();
+    assert!(!raw.contains("vanished"), "{raw}");
 }
 
 #[test]
@@ -194,7 +224,7 @@ fn going_green_without_conflicts_gets_the_green_sound_and_everything_else_the_de
     observe(&mut state, &read(vec![pr("a", CiState::Pending)]));
     let events = observe(&mut state, &read(vec![pr("a", CiState::Success)]));
     assert_eq!(kinds(&events), [EventKind::CiPassed]);
-    assert_eq!(sound(&events[0]), Sound::Green);
+    assert_eq!(events[0].sound, Sound::Success);
 
     let mut state = MonitorState::default();
     let mut pending_and_dirty = with_merge("a", Mergeability::Conflicting, MergeState::Dirty);
@@ -203,19 +233,19 @@ fn going_green_without_conflicts_gets_the_green_sound_and_everything_else_the_de
     let green_but_dirty = with_merge("a", Mergeability::Conflicting, MergeState::Dirty);
     let events = observe(&mut state, &read(vec![green_but_dirty]));
     assert_eq!(kinds(&events), [EventKind::CiPassed]);
-    assert_eq!(sound(&events[0]), Sound::Default);
+    assert_eq!(events[0].sound, Sound::Default);
 
     let mut state = MonitorState::default();
     observe(&mut state, &read(vec![pr("a", CiState::Success)]));
     let events = observe(&mut state, &read(vec![pr("a", CiState::Failure)]));
     assert_eq!(kinds(&events), [EventKind::CiFailed]);
-    assert_eq!(sound(&events[0]), Sound::Default);
+    assert_eq!(events[0].sound, Sound::Default);
 }
 
 #[test]
 fn conflicts_clearing_on_a_green_pull_request_sounds_green_on_a_pending_one_it_does_not() {
     for (ci, expected) in [
-        (CiState::Success, Sound::Green),
+        (CiState::Success, Sound::Success),
         (CiState::Pending, Sound::Default),
     ] {
         let mut state = MonitorState::default();
@@ -226,7 +256,7 @@ fn conflicts_clearing_on_a_green_pull_request_sounds_green_on_a_pending_one_it_d
         clean.ci = ci;
         let events = observe(&mut state, &read(vec![clean]));
         assert_eq!(kinds(&events), [EventKind::ConflictsResolved]);
-        assert_eq!(sound(&events[0]), expected, "{ci:?}");
+        assert_eq!(events[0].sound, expected, "{ci:?}");
     }
 }
 
@@ -684,7 +714,18 @@ fn ready_to_merge_sounds_green_and_approval_alone_does_not() {
     ready.review_decision = Some(ReviewDecision::Approved);
     let events = observe(&mut state, &read(vec![ready]));
     assert_eq!(kinds(&events), [EventKind::ReadyToMerge]);
-    assert_eq!(sound(&events[0]), Sound::Green);
+    assert_eq!(events[0].sound, Sound::Success);
+
+    // A repository without checks is ready without ever being "green".
+    let mut state = MonitorState::default();
+    let mut blocked = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
+    blocked.ci = CiState::None;
+    observe(&mut state, &read(vec![blocked]));
+    let mut ready = with_merge("a", Mergeability::Mergeable, MergeState::Clean);
+    ready.ci = CiState::None;
+    let events = observe(&mut state, &read(vec![ready]));
+    assert_eq!(kinds(&events), [EventKind::ReadyToMerge]);
+    assert_eq!(events[0].sound, Sound::Success);
 
     let mut state = MonitorState::default();
     observe(&mut state, &read(vec![with_review("a", None)]));
@@ -693,7 +734,7 @@ fn ready_to_merge_sounds_green_and_approval_alone_does_not() {
         &read(vec![with_review("a", Some(ReviewDecision::Approved))]),
     );
     assert_eq!(kinds(&events), [EventKind::Approved]);
-    assert_eq!(sound(&events[0]), Sound::Default);
+    assert_eq!(events[0].sound, Sound::Default);
 }
 
 #[test]
@@ -703,7 +744,7 @@ fn every_event_has_notification_copy() {
         repo: "acme/app".into(),
         number: 41,
         title: "Add the thing".into(),
-        green: false,
+        sound: Sound::Default,
     };
     let titles: Vec<String> = [
         EventKind::CiFailed,

@@ -46,6 +46,13 @@ pub(super) enum Search {
     Merged,
 }
 
+impl Search {
+    /// Whether the configured scopes narrow this search: they describe the user's own work.
+    fn is_scoped(self) -> bool {
+        matches!(self, Self::Mine | Self::Merged)
+    }
+}
+
 pub(super) fn search_query(search: Search, scopes: &[String]) -> String {
     let base = match search {
         Search::Mine => "is:pr is:open author:@me",
@@ -54,7 +61,7 @@ pub(super) fn search_query(search: Search, scopes: &[String]) -> String {
         Search::Assigned => "is:pr is:open assignee:@me",
         Search::Merged => "is:pr is:merged author:@me sort:updated-desc",
     };
-    if !matches!(search, Search::Mine | Search::Merged) || scopes.is_empty() {
+    if !search.is_scoped() || scopes.is_empty() {
         return base.to_string();
     }
     let mut query = base.to_string();

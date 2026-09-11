@@ -69,7 +69,7 @@ export type GithubPrsData = {
   reviewRequested: GithubPrList;
   assigned: GithubPrList;
   /** The user's latest merged PRs; read for the monitor's "merged" notification, not shown. */
-  merged?: GithubPrList;
+  merged: GithubPrList;
   rateLimit?: GithubRateLimit | null;
 };
 

@@ -75,6 +75,7 @@ export function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
     mine: { total: MINE.length, items: MINE.map((seed) => pr(seed, "mine")) },
     reviewRequested: { total: REVIEW.length, items: REVIEW.map((seed) => pr(seed, "review")) },
     assigned: { total: ASSIGNED.length, items: ASSIGNED.map((seed) => pr(seed, "assigned")) },
+    merged: { total: 0, items: [] },
     rateLimit: { remaining: 4877, resetAt: new Date(NOW + 1_800_000).toISOString() },
     ...overrides,
   };
@@ -89,6 +90,7 @@ export function problemPrs(status: GithubStatus, hint: string): GithubPrs {
     mine: { total: 0, items: [] },
     reviewRequested: { total: 0, items: [] },
     assigned: { total: 0, items: [] },
+    merged: { total: 0, items: [] },
   };
 }
 
@@ -117,6 +119,7 @@ export const SCENARIOS: Record<string, () => GithubPrs | Promise<GithubPrs>> = {
       mine: { total: 0, items: [] },
       reviewRequested: { total: 0, items: [] },
       assigned: { total: 0, items: [] },
+      merged: { total: 0, items: [] },
     }),
   many: manyPrs,
   stale: () => okPrs({ status: "network", hint: "Could not reach GitHub (network error: Dns).", stale: true }),
