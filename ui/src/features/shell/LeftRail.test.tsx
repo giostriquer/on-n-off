@@ -25,9 +25,9 @@ describe("LeftRail", () => {
     );
     expect(screen.getByRole("navigation", { name: "Section" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Overview/i }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("button", { name: /Plugins 3\/4/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Skills 4\/6/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /MCP servers 0\/0/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Plugins\s*3\/4/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Skills\s*4\/6/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /MCP servers\s*0\/0/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Usage$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Pull requests$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Settings$/i })).toBeTruthy();
@@ -60,7 +60,7 @@ describe("LeftRail", () => {
     expect(screen.getByText("Master cut")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Master cut" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("everything live on Claude")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: /Skills 4\/6/i }));
+    await user.click(screen.getByRole("button", { name: /Skills\s*4\/6/i }));
     expect(onScreen).toHaveBeenCalledWith("skills");
     await user.click(screen.getByRole("button", { name: "Master cut" }));
     expect(onMaster).toHaveBeenCalledWith(false);

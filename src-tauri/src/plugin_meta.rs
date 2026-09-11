@@ -315,11 +315,13 @@ fn fetch_text(url: &str) -> Option<String> {
     if let Some(result) = test_fetch_text(url) {
         return result;
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(2))
-        .user_agent("on-n-off/0.1")
-        .build();
-    agent.get(url).call().ok()?.into_string().ok()
+    let agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(2)))
+            .user_agent("on-n-off/0.1")
+            .build(),
+    );
+    agent.get(url).call().ok()?.body_mut().read_to_string().ok()
 }
 
 fn github_manifest_urls(url: &str, path: &str, rev: &str) -> Vec<String> {

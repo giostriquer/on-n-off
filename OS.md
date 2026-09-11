@@ -103,8 +103,12 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
 
 The opt-in side notch is a SwiftUI/AppKit helper bundled under `Contents/Helpers/on-n-off-notch.app`
 with its own native application identity. `src-tauri/native_build.rs` compiles it only for macOS;
-`tauri.macos.conf.json` adds the binary to the macOS bundle. Swift Command Line
-Tools suffice: native model checks use an executable test target, not XCTest.
+`tauri.macos.conf.json` adds the binary to the macOS bundle. Building it needs full Xcode:
+the macOS 27 SDK redeclares SwiftUI's `@State` as a macro backed by `libSwiftUIMacros.dylib`,
+which ships only with Xcode, so a Command Line Tools install fails with "plugin for module
+'SwiftUIMacros' not found". Without Xcode, build against the last SDK whose `@State` is a
+property wrapper: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk`. No test
+runner is needed either way; native model checks use an executable test target, not XCTest.
 The helper has no provider credentials, network listener, or independent login
 item. Rust supervises its bounded stdin/stdout protocol and reaps it on shutdown.
 A closed parent pipe makes the helper exit, including after a parent crash.

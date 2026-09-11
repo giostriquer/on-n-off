@@ -28,20 +28,23 @@ pub struct HttpFetcher;
 
 impl Fetcher for HttpFetcher {
     fn get(&self, url: &str, accept: Option<&str>) -> Result<Vec<u8>, String> {
-        let agent = ureq::AgentBuilder::new()
-            .timeout(TIMEOUT)
-            .user_agent(concat!("on-n-off/", env!("CARGO_PKG_VERSION")))
-            .build();
+        let agent = ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .timeout_global(Some(TIMEOUT))
+                .user_agent(concat!("on-n-off/", env!("CARGO_PKG_VERSION")))
+                .build(),
+        );
         let mut request = agent.get(url);
         if let Some(accept) = accept {
-            request = request.set("Accept", accept);
+            request = request.header("Accept", accept);
         }
         let response = request.call().map_err(|error| match error {
-            ureq::Error::Status(code, _) => format!("HTTP {code} from {url}"),
-            ureq::Error::Transport(transport) => transport.to_string(),
+            ureq::Error::StatusCode(code) => format!("HTTP {code} from {url}"),
+            other => other.to_string(),
         })?;
         let mut body = Vec::new();
         response
+            .into_body()
             .into_reader()
             .take(MAX_TARBALL_BYTES as u64 + 1)
             .read_to_end(&mut body)

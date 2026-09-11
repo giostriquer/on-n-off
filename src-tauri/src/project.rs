@@ -44,10 +44,12 @@ pub fn parse_claude_projects(text: &str) -> Vec<String> {
 }
 
 pub fn parse_codex_projects(text: &str) -> Vec<String> {
-    let Ok(value) = text.parse::<toml::Value>() else {
+    // A document, not a value: `toml::Value`'s own `FromStr` reads a single TOML value, so a file
+    // that opens with a table header fails to parse at all and every project is lost.
+    let Ok(document) = text.parse::<toml::Table>() else {
         return Vec::new();
     };
-    value
+    document
         .get("projects")
         .and_then(|value| value.as_table())
         .map(|projects| projects.keys().cloned().collect())

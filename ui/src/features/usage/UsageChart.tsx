@@ -134,23 +134,25 @@ export function UsageChart({
           y: false,
         }),
       ],
-      x: {
-        scale: () => scalePoint<string>().domain(keys).padding(0.08),
-        axis: {
-          ticks: {
-            values: keys.filter((_, index) => index % labelStep === 0 || index === keys.length - 1),
-            format: (value) => labelByKey.get(String(value)) ?? String(value),
+      scales: {
+        x: {
+          scale: () => scalePoint<string>().domain(keys).padding(0.08),
+          axis: {
+            ticks: {
+              values: keys.filter((_, index) => index % labelStep === 0 || index === keys.length - 1),
+              format: (value) => labelByKey.get(String(value)) ?? String(value),
+            },
           },
         },
-      },
-      y: {
-        scale: scaleLinear,
-        nice: true,
-        grid: true,
-        axis: {
-          ticks: {
-            count: 4,
-            format: (value) => formatTick(Number(value)),
+        y: {
+          scale: scaleLinear,
+          nice: true,
+          grid: true,
+          axis: {
+            ticks: {
+              count: 4,
+              format: (value) => formatTick(Number(value)),
+            },
           },
         },
       },
@@ -158,7 +160,9 @@ export function UsageChart({
         domain: [...PROVIDERS],
         range: colors,
       },
-      margin: { top: 10, right: 8, bottom: 28, left: 52 },
+      // The first and last x labels are centred on their tick, so half of each sits outside the
+      // plot: the side margins have to hold that half, or the label runs into the card edge.
+      margin: { top: 10, right: 30, bottom: 32, left: 52 },
     });
 
     return defineChart(base, {
@@ -185,7 +189,7 @@ export function UsageChart({
 
   return (
     <section className="usage-chart" aria-label="Usage over time">
-      <div className="mb-3 flex items-center gap-3">
+      <div className="mb-3 flex h-7 items-center gap-3">
         <span className="text-[13px] font-semibold tracking-[-0.01em]">
           {hourly ? "Hourly" : "Daily"} {metric === "cost" ? "cost" : "tokens"}
         </span>
@@ -204,7 +208,7 @@ export function UsageChart({
             <button
               key={value}
               type="button"
-              className={`h-7 cursor-pointer rounded-none border-0 px-2.5 text-[10.5px] font-semibold tracking-[0.05em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--fill)] ${
+              className={`h-7 cursor-pointer rounded-none border-0 px-2.5 text-[11px] font-semibold tracking-[0.05em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--fill)] ${
                 metric === value
                   ? "bg-[var(--fill)] text-[var(--fill-ink)]"
                   : "bg-transparent text-[var(--mute)]"
