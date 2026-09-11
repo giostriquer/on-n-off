@@ -70,6 +70,7 @@ function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
       ],
     },
     assigned: { total: 0, items: [] },
+    merged: { total: 0, items: [] },
     rateLimit: { remaining: 4998, resetAt: "2026-08-24T23:00:00Z" },
     ...overrides,
   };
@@ -84,6 +85,7 @@ function problem(status: GithubStatus, hint: string, overrides: Partial<GithubPr
     mine: { total: 0, items: [] },
     reviewRequested: { total: 0, items: [] },
     assigned: { total: 0, items: [] },
+    merged: { total: 0, items: [] },
     ...overrides,
   };
 }

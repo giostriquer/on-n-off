@@ -35,6 +35,7 @@ fn data() -> GithubPrsData {
         },
         review_requested: GithubPrListDto::default(),
         assigned: GithubPrListDto::default(),
+        merged: GithubPrListDto::default(),
         rate_limit: None,
     }
 }

@@ -1,11 +1,17 @@
 //! Background watcher for the user's own pull requests: when, between two reads, the head
-//! commit's CI goes red or green, the review decision lands, conflicts appear or clear, or the
-//! pull request becomes ready to merge, a tray notification says so. Opt-in
+//! commit's CI goes red or green, the review decision lands, conflicts appear or clear, the
+//! pull request becomes ready to merge, or it gets merged, a tray notification says so. Opt-in
 //! (`github_notifications`), polls on the same interval as the screen and shares its in-memory
 //! result, and remembers the last-seen state on disk so a restart never re-notifies. The merge
-//! fields are read through `github::merge`, the same classification the screen shows.
+//! fields are read through `github::merge`, the same classification the screen shows. Every
+//! notification plays a sound; going green without conflicts and getting merged each have
+//! their own, so the two are told apart without looking.
 
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle};
@@ -13,6 +19,7 @@ use tauri::{async_runtime, AppHandle};
 use crate::dto::{CiState, GithubPrDto, GithubPrsDto, GithubStatus, ReviewDecision};
 use crate::github::merge;
 use crate::monitor::{self, wait_for_wake_or_deadline};
+use crate::notifications::Sound;
 
 const DISABLED_WAKE: Duration = Duration::from_secs(60 * 60);
 /// The Limits monitor, the Keychain probe and the first provider load all run at startup; the
@@ -31,6 +38,11 @@ pub struct GithubMonitor;
 struct MonitorState {
     schema_version: u8,
     seen: HashMap<String, Seen>,
+    /// Pull requests that left the open list on the previous poll without the merged list naming
+    /// them. The two searches are indexed separately, so a merge can leave one before it reaches
+    /// the other; the next poll gets to claim these, and then they are forgotten for good.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    vanished: HashSet<String>,
 }
 
 impl Default for MonitorState {
@@ -38,6 +50,7 @@ impl Default for MonitorState {
         Self {
             schema_version: MONITOR_STATE_SCHEMA_VERSION,
             seen: HashMap::new(),
+            vanished: HashSet::new(),
         }
     }
 }
@@ -100,6 +113,8 @@ enum EventKind {
     ConflictsResolved,
     /// Everything the base branch asks for is in place; only the merge button is left.
     ReadyToMerge,
+    /// The pull request left the open list and the merged list names it.
+    Merged,
 }
 
 impl EventKind {
@@ -118,6 +133,19 @@ struct Event {
     repo: String,
     number: u64,
     title: String,
+    sound: Sound,
+}
+
+impl Event {
+    fn of(kind: EventKind, pr: &GithubPrDto, sound: Sound) -> Self {
+        Self {
+            kind,
+            repo: pr.repo.clone(),
+            number: pr.number,
+            title: pr.title.clone(),
+            sound,
+        }
+    }
 }
 
 pub fn setup(app: &mut tauri::App) {
@@ -167,8 +195,9 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             poll_delay(settings.github_poll_seconds, consecutive_failures)
         } else {
             consecutive_failures = 0;
-            if !state.seen.is_empty() {
+            if !state.seen.is_empty() || !state.vanished.is_empty() {
                 state.seen.clear();
+                state.vanished.clear();
                 if let Err(error) = monitor::persist_state(&state_path, &state).await {
                     eprintln!("github monitor could not clear its state: {error}");
                 }
@@ -201,7 +230,7 @@ async fn poll_once(
     *state = next;
     for event in events {
         let (title, body) = notification_copy(&event);
-        monitor::notify(app, "github monitor", title, body);
+        monitor::notify(app, "github monitor", title, body, event.sound);
     }
     Ok(failed)
 }
@@ -230,6 +259,7 @@ fn notification_copy(event: &Event) -> (String, String) {
         EventKind::Conflicts => "Merge conflicts",
         EventKind::ConflictsResolved => "Conflicts resolved",
         EventKind::ReadyToMerge => "Ready to merge",
+        EventKind::Merged => "Merged",
     };
     (
         title.to_string(),
@@ -237,9 +267,26 @@ fn notification_copy(event: &Event) -> (String, String) {
     )
 }
 
+/// Merging has its own sound, and so does good news that leaves the pull request green with no
+/// known conflicts — which "ready to merge" is by definition, whether or not the repository runs
+/// checks. An approval alone, and every piece of bad news, arrive with the default.
+fn sound_for(kind: EventKind, after: Seen) -> Sound {
+    let green = after.ci == CiState::Success && after.conflicts != Some(true);
+    match kind {
+        EventKind::Merged => Sound::Done,
+        EventKind::ReadyToMerge => Sound::Success,
+        EventKind::CiPassed | EventKind::CiGreenAgain | EventKind::ConflictsResolved if green => {
+            Sound::Success
+        }
+        _ => Sound::Default,
+    }
+}
+
 /// Compare a read against what was last seen of the user's own pull requests. Only a fresh,
-/// successful read moves the baseline: a failed or stale one changes nothing, and a pull request
-/// that is no longer open is simply forgotten.
+/// successful read moves the baseline: a failed or stale one changes nothing. A pull request
+/// that is no longer open is announced once if the merged list names it on this poll or the
+/// next, and forgotten either way, so a merge that happened before it was ever seen open says
+/// nothing.
 fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
     if prs.status != GithubStatus::Ok || prs.stale {
         return Vec::new();
@@ -250,15 +297,35 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
         let before = state.seen.get(&pr.id);
         let after = Seen::of(pr).or_last_known(before);
         if let Some(before) = before {
-            events.extend(transitions(*before, after).into_iter().map(|kind| Event {
-                kind,
-                repo: pr.repo.clone(),
-                number: pr.number,
-                title: pr.title.clone(),
-            }));
+            events.extend(
+                transitions(*before, after)
+                    .into_iter()
+                    .map(|kind| Event::of(kind, pr, sound_for(kind, after))),
+            );
         }
         next.insert(pr.id.clone(), after);
     }
+    // A leftover that is open again this poll is back in `seen`, not a candidate: claiming it
+    // now and again when it next leaves would announce one merge twice.
+    let mut vanished: HashSet<String> = state
+        .seen
+        .keys()
+        .cloned()
+        .chain(state.vanished.drain())
+        .filter(|id| !next.contains_key(id))
+        .collect();
+    for pr in &prs.data.merged.items {
+        if vanished.remove(&pr.id) {
+            events.push(Event::of(
+                EventKind::Merged,
+                pr,
+                sound_for(EventKind::Merged, Seen::of(pr)),
+            ));
+        }
+    }
+    // Whatever the previous poll's leftovers were, this poll was their last chance.
+    vanished.retain(|id| state.seen.contains_key(id));
+    state.vanished = vanished;
     state.seen = next;
     events
 }

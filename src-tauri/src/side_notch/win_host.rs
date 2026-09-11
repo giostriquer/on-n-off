@@ -242,8 +242,9 @@ enum Read {
     Limits(usize, Option<NativeProvider>),
     Sessions(Vec<Vec<LiveSession>>),
     /// The screen's whole answer; the selected lists are projected when a frame is
-    /// built, so a settings change shows at once instead of after the next poll.
-    PullRequests(GithubPrsDto),
+    /// built, so a settings change shows at once instead of after the next poll. Boxed: it
+    /// dwarfs the other variants (`clippy::large_enum_variant`).
+    PullRequests(Box<GithubPrsDto>),
 }
 
 #[derive(Default)]
@@ -395,10 +396,10 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     session_poll.finish(latest, Instant::now());
                 }
                 Read::PullRequests(latest) => {
-                    if pulls.value.as_ref() != Some(&latest) {
+                    if pulls.value.as_ref() != Some(&*latest) {
                         delivery.mark_dirty();
                     }
-                    pulls.finish(Some(latest), Instant::now());
+                    pulls.finish(Some(*latest), Instant::now());
                 }
             }
         }
@@ -503,7 +504,8 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                 thread::spawn(move || {
                     // `read_prs` memoises within the screen's poll window, so this adds
                     // no GitHub calls beyond what the screen and monitor already make.
-                    let _ = sender.send(Read::PullRequests(crate::github::read_prs(force)));
+                    let _ =
+                        sender.send(Read::PullRequests(Box::new(crate::github::read_prs(force))));
                 });
             }
         }

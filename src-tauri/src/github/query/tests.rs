@@ -23,6 +23,19 @@ fn mine_is_scoped_and_the_other_searches_are_not() {
 }
 
 #[test]
+fn merged_is_scoped_like_mine_and_reads_the_latest_first() {
+    let scopes = vec!["org:acme".to_string()];
+    assert_eq!(
+        search_query(Search::Merged, &scopes),
+        "is:pr is:merged author:@me sort:updated-desc org:acme"
+    );
+    assert_eq!(
+        search_query(Search::Merged, &[]),
+        "is:pr is:merged author:@me sort:updated-desc"
+    );
+}
+
+#[test]
 fn the_request_body_carries_the_document_and_every_search_string() {
     let body = request_body(&["org:acme".to_string()]);
     let document = body["query"].as_str().unwrap();
@@ -57,4 +70,10 @@ fn the_request_body_carries_the_document_and_every_search_string() {
         "is:pr is:open user-review-requested:@me"
     );
     assert_eq!(body["variables"]["assigned"], "is:pr is:open assignee:@me");
+    assert_eq!(
+        body["variables"]["merged"],
+        "is:pr is:merged author:@me sort:updated-desc org:acme"
+    );
+    assert_eq!(body["variables"]["recent"], RECENT_MERGES);
+    assert!(document.contains("merged: search("));
 }

@@ -2,7 +2,7 @@
 
 /// One authored PR with failing CI, two review requests (one direct: a draft that already has
 /// conflicts, which only `mergeable` reports because the state says `DRAFT`; one via a team), no
-/// assignments, and a healthy rate-limit budget.
+/// assignments, one recently merged authored PR (of three ever), and a healthy rate-limit budget.
 pub(super) const REPLY: &str = r#"{
   "data": {
     "viewer": { "login": "octocat" },
@@ -40,6 +40,18 @@ pub(super) const REPLY: &str = r#"{
       ]
     },
     "direct": { "issueCount": 1, "nodes": [ { "id": "PR_rev1" } ] },
-    "assigned": { "issueCount": 0, "nodes": [] }
+    "assigned": { "issueCount": 0, "nodes": [] },
+    "merged": {
+      "issueCount": 3,
+      "nodes": [
+        {
+          "id": "PR_merged1", "number": 39, "title": "Land the other thing", "url": "https://github.com/acme/app/pull/39",
+          "isDraft": false, "updatedAt": "2026-08-24T19:30:00Z", "headRefName": "feat/other", "baseRefName": "main",
+          "reviewDecision": "APPROVED", "repository": { "nameWithOwner": "acme/app" }, "author": { "login": "octocat" },
+          "mergeable": "UNKNOWN", "mergeStateStatus": "UNKNOWN", "mergeQueueEntry": null, "autoMergeRequest": null,
+          "commits": { "nodes": [ { "commit": { "statusCheckRollup": { "state": "SUCCESS" } } } ] }
+        }
+      ]
+    }
   }
 }"#;

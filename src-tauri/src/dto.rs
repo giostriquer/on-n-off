@@ -508,6 +508,10 @@ pub struct GithubPrsData {
     pub mine: GithubPrListDto,
     pub review_requested: GithubPrListDto,
     pub assigned: GithubPrListDto,
+    /// The user's most recently merged pull requests, scoped like `mine`; the monitor tells
+    /// "merged" from "closed" by it. The default keeps a snapshot written before it loadable.
+    #[serde(default)]
+    pub merged: GithubPrListDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<GithubRateLimitDto>,
 }
