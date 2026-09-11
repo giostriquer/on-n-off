@@ -5,6 +5,7 @@ use tauri::{async_runtime, AppHandle};
 
 use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
 use crate::monitor::{self, wait_for_wake_or_deadline};
+use crate::notifications::Sound;
 
 const DISABLED_WAKE_MINUTES: u16 = 60;
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
@@ -139,7 +140,7 @@ async fn poll_once(
     }
     for event in events {
         let (title, body) = notification_copy(&event);
-        monitor::notify(app, "limits monitor", title, body);
+        monitor::notify(app, "limits monitor", title, body, Sound::Default);
     }
     Ok(provider_failed)
 }

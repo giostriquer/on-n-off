@@ -1,9 +1,11 @@
 //! Background watcher for the user's own pull requests: when, between two reads, the head
-//! commit's CI goes red or green, the review decision lands, conflicts appear or clear, or the
-//! pull request becomes ready to merge, a tray notification says so. Opt-in
+//! commit's CI goes red or green, the review decision lands, conflicts appear or clear, the
+//! pull request becomes ready to merge, or it gets merged, a tray notification says so. Opt-in
 //! (`github_notifications`), polls on the same interval as the screen and shares its in-memory
 //! result, and remembers the last-seen state on disk so a restart never re-notifies. The merge
-//! fields are read through `github::merge`, the same classification the screen shows.
+//! fields are read through `github::merge`, the same classification the screen shows. Every
+//! notification plays a sound; going green without conflicts and getting merged each have
+//! their own, so the two are told apart without looking.
 
 use std::{collections::HashMap, path::Path, time::Duration};
 
@@ -13,6 +15,7 @@ use tauri::{async_runtime, AppHandle};
 use crate::dto::{CiState, GithubPrDto, GithubPrsDto, GithubStatus, ReviewDecision};
 use crate::github::merge;
 use crate::monitor::{self, wait_for_wake_or_deadline};
+use crate::notifications::Sound;
 
 const DISABLED_WAKE: Duration = Duration::from_secs(60 * 60);
 /// The Limits monitor, the Keychain probe and the first provider load all run at startup; the
@@ -100,6 +103,8 @@ enum EventKind {
     ConflictsResolved,
     /// Everything the base branch asks for is in place; only the merge button is left.
     ReadyToMerge,
+    /// The pull request left the open list and the merged list names it.
+    Merged,
 }
 
 impl EventKind {
@@ -118,6 +123,20 @@ struct Event {
     repo: String,
     number: u64,
     title: String,
+    /// The pull request stood green with no known conflicts once this happened.
+    green: bool,
+}
+
+impl Event {
+    fn of(kind: EventKind, pr: &GithubPrDto, green: bool) -> Self {
+        Self {
+            kind,
+            repo: pr.repo.clone(),
+            number: pr.number,
+            title: pr.title.clone(),
+            green,
+        }
+    }
 }
 
 pub fn setup(app: &mut tauri::App) {
@@ -201,7 +220,7 @@ async fn poll_once(
     *state = next;
     for event in events {
         let (title, body) = notification_copy(&event);
-        monitor::notify(app, "github monitor", title, body);
+        monitor::notify(app, "github monitor", title, body, sound(&event));
     }
     Ok(failed)
 }
@@ -230,6 +249,7 @@ fn notification_copy(event: &Event) -> (String, String) {
         EventKind::Conflicts => "Merge conflicts",
         EventKind::ConflictsResolved => "Conflicts resolved",
         EventKind::ReadyToMerge => "Ready to merge",
+        EventKind::Merged => "Merged",
     };
     (
         title.to_string(),
@@ -237,9 +257,27 @@ fn notification_copy(event: &Event) -> (String, String) {
     )
 }
 
+/// Merging has its own sound, and so does good news that leaves the pull request green and
+/// conflict-free; an approval alone, and every piece of bad news, arrive with the default.
+fn sound(event: &Event) -> Sound {
+    match event.kind {
+        EventKind::Merged => Sound::Merged,
+        EventKind::CiPassed
+        | EventKind::CiGreenAgain
+        | EventKind::ConflictsResolved
+        | EventKind::ReadyToMerge
+            if event.green =>
+        {
+            Sound::Green
+        }
+        _ => Sound::Default,
+    }
+}
+
 /// Compare a read against what was last seen of the user's own pull requests. Only a fresh,
-/// successful read moves the baseline: a failed or stale one changes nothing, and a pull request
-/// that is no longer open is simply forgotten.
+/// successful read moves the baseline: a failed or stale one changes nothing. A pull request
+/// that is no longer open is announced once if the merged list names it, and forgotten either
+/// way, so a merge that happened before it was ever seen open says nothing.
 fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
     if prs.status != GithubStatus::Ok || prs.stale {
         return Vec::new();
@@ -250,15 +288,23 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
         let before = state.seen.get(&pr.id);
         let after = Seen::of(pr).or_last_known(before);
         if let Some(before) = before {
-            events.extend(transitions(*before, after).into_iter().map(|kind| Event {
-                kind,
-                repo: pr.repo.clone(),
-                number: pr.number,
-                title: pr.title.clone(),
-            }));
+            let green = after.ci == CiState::Success && after.conflicts != Some(true);
+            events.extend(
+                transitions(*before, after)
+                    .into_iter()
+                    .map(|kind| Event::of(kind, pr, green)),
+            );
         }
         next.insert(pr.id.clone(), after);
     }
+    events.extend(
+        prs.data
+            .merged
+            .items
+            .iter()
+            .filter(|pr| state.seen.contains_key(&pr.id) && !next.contains_key(&pr.id))
+            .map(|pr| Event::of(EventKind::Merged, pr, false)),
+    );
     state.seen = next;
     events
 }

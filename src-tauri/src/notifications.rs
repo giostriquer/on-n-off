@@ -51,11 +51,55 @@ pub async fn request_permission(app: AppHandle) -> Result<bool, AdapterError> {
     }
 }
 
-pub fn show(app: &AppHandle, title: String, body: String) -> Result<(), AdapterError> {
+/// The sound a notification arrives with. Every notification plays one, so the OS's own
+/// per-app "play sound" switch stays the single place to silence them; the two named ones
+/// mark the pull request news worth hearing across the room.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sound {
+    /// The platform's default notification sound.
+    Default,
+    /// A pull request stands green with no conflicts.
+    Green,
+    /// A pull request was merged.
+    Merged,
+}
+
+impl Sound {
+    #[cfg(test)]
+    pub(crate) const ALL: [Self; 3] = [Self::Default, Self::Green, Self::Merged];
+
+    /// The name the platform's notification API expects: a system sound from
+    /// `/System/Library/Sounds` on macOS, one of the toast `ms-winsoundevent` names on Windows.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Default => "NSUserNotificationDefaultSoundName",
+            Self::Green => "Glass",
+            Self::Merged => "Hero",
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::Green => "IM",
+            Self::Merged => "Mail",
+        }
+    }
+}
+
+pub fn show(
+    app: &AppHandle,
+    title: String,
+    body: String,
+    sound: Sound,
+) -> Result<(), AdapterError> {
     app.notification()
         .builder()
         .title(title)
         .body(body)
+        .sound(sound.name())
         .show()
         .map_err(|error| AdapterError::message(error.to_string()))
 }

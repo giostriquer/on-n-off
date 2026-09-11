@@ -138,6 +138,11 @@ fn a_successful_read_fills_the_lists_and_remembers_them() {
         body["variables"]["mine"],
         "is:pr is:open author:@me org:acme"
     );
+    assert_eq!(
+        body["variables"]["merged"],
+        "is:pr is:merged author:@me sort:updated-desc org:acme"
+    );
+    assert_eq!(dto.data.merged.items[0].id, "PR_merged1");
     assert_no_token(&dto, &harness.home, "gho_t");
     assert_eq!(
         snapshot::load(&github_prs_path_for(&harness.home)),
