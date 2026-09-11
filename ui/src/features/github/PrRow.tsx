@@ -64,7 +64,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
         onClick={() => void api.openUrl(pr.url)}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 font-mono text-[11.5px] text-[var(--mute)]">#{pr.number}</span>
+          <span className="shrink-0 font-mono text-[11px] text-[var(--mute)]">#{pr.number}</span>
           <span className="min-w-0 truncate text-[13px] text-[var(--silkscreen)]">{pr.title}</span>
           {pr.isDraft ? <Badge>Draft</Badge> : null}
           {badges.map((badge) =>
@@ -76,7 +76,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
           )}
           {pr.reviewRequest === "team" ? <Badge>team</Badge> : null}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-[var(--mute)]">
+        <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-[var(--mute)]">
           <span className="shrink-0">{pr.author}</span>
           <span aria-hidden="true">·</span>
           <span className="min-w-0 truncate">{`${pr.headRef} → ${pr.baseRef}`}</span>
@@ -85,7 +85,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
       <time
         dateTime={pr.updatedAt}
         title={formatObservedAt(pr.updatedAt)}
-        className="shrink-0 font-mono text-[11px] text-[var(--mute)]"
+        className="shrink-0 font-mono text-[10px] text-[var(--mute)]"
       >
         {formatAgo(pr.updatedAt, now)}
       </time>

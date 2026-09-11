@@ -25,14 +25,14 @@ export function UpdaterSettingsCard({
     >
       <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[15px] font-semibold">Application updates</h3>
-          <p className="mt-1 mb-0 font-mono text-[11.5px] text-[var(--mute)]">
+          <h3 className="m-0 text-[13px] font-semibold">Application updates</h3>
+          <p className="mt-1 mb-0 font-mono text-[12px] text-[var(--mute)]">
             Installed <span>{updater.currentVersion ?? "loading…"}</span> · <span>Stable</span>
             {updater.buildInfo?.installerKind ? ` · ${updater.buildInfo.installerKind.toUpperCase()}` : ""}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
             Auto-download
           </span>
           <Rocker

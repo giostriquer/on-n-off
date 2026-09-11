@@ -47,7 +47,6 @@ export function AppShell() {
     showMasterCut,
     currentProjects,
     currentScopePath,
-    scopeNote,
     installOpen,
     setInstallOpen,
     installError,
@@ -55,7 +54,8 @@ export function AppShell() {
     uninstallTarget,
     setUninstallTarget,
     setFilter,
-    loadTab,
+    refreshAll,
+    refreshing,
     selectScope,
     pickProjectFolder,
     openProjectPath,
@@ -146,7 +146,7 @@ export function AppShell() {
               aria-selected={selected === agent.id}
               aria-controls="agent-panel"
               tabIndex={selected === agent.id ? 0 : -1}
-              className={`h-[30px] min-w-[92px] cursor-pointer rounded-none border-0 px-3 text-[11.5px] font-semibold tracking-[0.05em] uppercase ${
+              className={`h-[30px] min-w-[92px] cursor-pointer rounded-none border-0 px-3 text-[11px] font-semibold tracking-[0.05em] uppercase ${
                 selected === agent.id
                   ? "bg-[var(--fill)] text-[var(--fill-ink)]"
                   : "bg-[var(--plate)] text-[var(--mute)]"
@@ -171,7 +171,7 @@ export function AppShell() {
             }`}
             aria-hidden="true"
           />
-          <span className="font-mono text-[11.5px] text-[var(--mute)]">{cliLine}</span>
+          <span className="font-mono text-[11px] text-[var(--mute)]">{cliLine}</span>
         </div>
         <div className="flex-1" />
         <label className="flex h-8 items-center gap-2 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-2.5">
@@ -192,16 +192,20 @@ export function AppShell() {
         </label>
         <button
           type="button"
-          className="flex size-8 items-center justify-center rounded-lg border border-[var(--hair)] bg-[var(--well)] text-[var(--silkscreen)]"
+          className="flex size-8 items-center justify-center rounded-lg border border-[var(--hair)] bg-[var(--well)] text-[var(--silkscreen)] disabled:opacity-45"
           title={copy.refresh}
           aria-label={copy.refresh}
-          onClick={() => void loadTab(selected, true)}
+          disabled={refreshing}
+          onClick={() => void refreshAll()}
         >
-          <RefreshCw className="size-3.5" aria-hidden="true" />
+          <RefreshCw
+            className={`size-3.5 ${refreshing ? "motion-safe:animate-spin" : ""}`}
+            aria-hidden="true"
+          />
         </button>
         <button
           type="button"
-          className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-3.5 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
+          className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-3.5 text-[11px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
           disabled={!canInstall}
           onClick={() => setInstallOpen(true)}
         >
@@ -215,7 +219,6 @@ export function AppShell() {
         agentId={selected}
         projects={currentProjects}
         selectedPath={currentScopePath}
-        note={scopeNote}
         tally={tallyLine(counts, currentAgent.displayName)}
         globalItems={globalItemCount(currentTab.dto)}
         onSelect={(path) => void selectScope(path)}

@@ -28,14 +28,14 @@ export function TraySettingsCard({ closeToTray, onCloseToTrayChange }: TraySetti
     >
       <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[15px] font-semibold">Windows tray</h3>
-          <p className="mt-1 mb-0 text-[11.5px] text-[var(--mute)]">
+          <h3 className="m-0 text-[13px] font-semibold">Windows tray</h3>
+          <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
             on-n-off always keeps an icon in the notification area. Turn this on and closing the
             window leaves it running there instead of quitting.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
             Close to tray
           </span>
           <Rocker

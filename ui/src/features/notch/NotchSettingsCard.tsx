@@ -4,7 +4,7 @@ import { displayError, parseInvokeError } from "$lib/error";
 import { GITHUB_LIST_IDS, type GithubListId } from "$lib/githubTypes";
 import type { NotchDisplay, NotchEdge, NotchSettings } from "$lib/notchTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import type { AgentId, LimitsPollMinutes } from "$lib/types";
+import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { useNotchState } from "./useNotchState";
 import "./side-notch.css";
@@ -83,27 +83,20 @@ const LIST_LABEL: Record<GithubListId, string> = {
   assigned: "Assigned",
 };
 
-const SHOW_OPTIONS: [NotchShowChoice, string, string][] = [
-  ["always", "Always show", "The rail stays open with every reading visible."],
-  ["hover", "Show on hover", "A small pill at the screen edge opens the rail when you reach it."],
-  ["hide", "Hide", "Nothing is shown. Your choices are kept for next time."],
+const SHOW_OPTIONS: [NotchShowChoice, string][] = [
+  ["always", "Always show"],
+  ["hover", "Show on hover"],
+  ["hide", "Hide"],
 ];
 
-const EDGE_OPTIONS: [NotchEdge, string, string][] = [
-  ["right", "Right", "Down the right-hand edge, clear of a Dock on that side."],
-  ["left", "Left", "Down the left-hand edge, clear of a Dock on that side."],
-  ["top", "Top", "A wide bar below the menu bar, readings side by side."],
-  ["bottom", "Bottom", "A wide bar resting above the Dock, readings side by side."],
+const EDGE_OPTIONS: [NotchEdge, string][] = [
+  ["right", "Right"],
+  ["left", "Left"],
+  ["top", "Top"],
+  ["bottom", "Bottom"],
 ];
 
-const PROVIDER_NOTE: Record<AgentId, string> = {
-  claude: "Usage rings, quota windows, and live Claude Code sessions.",
-  codex: "Usage rings, quota windows, and live Codex sessions.",
-  antigravity: "A cell without a meter until Antigravity exposes subscription limits.",
-  cursor: "A cell without a meter until Cursor exposes subscription limits.",
-};
-
-export function NotchSettingsCard({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
+export function NotchSettingsCard() {
   const state = useNotchState();
   if (state.data?.supported === false) return null;
   const settings = state.data?.settings;
@@ -152,7 +145,6 @@ export function NotchSettingsCard({ pollMinutes = 5 }: { pollMinutes?: LimitsPol
             ))}
           </div>
         </div>
-        <p className="notch-help">{SHOW_OPTIONS.find(([value]) => value === choice)?.[2]}</p>
         <div className="notch-row">
           <span id="notch-edge-label">Edge</span>
           <div role="group" aria-labelledby="notch-edge-label" className="notch-segment">
@@ -169,9 +161,6 @@ export function NotchSettingsCard({ pollMinutes = 5 }: { pollMinutes?: LimitsPol
             ))}
           </div>
         </div>
-        <p className="notch-help">
-          {EDGE_OPTIONS.find(([value]) => value === settings?.edge)?.[2]}
-        </p>
         <div className="notch-label-row">
           <label htmlFor="notch-display">Display</label>
           <button
@@ -262,7 +251,6 @@ export function NotchSettingsCard({ pollMinutes = 5 }: { pollMinutes?: LimitsPol
                 <ProviderIcon provider={id} className="size-4 shrink-0" title="" />
                 <div>
                   <span>{providerLabel(id)}</span>
-                  <small>{PROVIDER_NOTE[id]}</small>
                 </div>
                 <button
                   type="button"
@@ -285,7 +273,6 @@ export function NotchSettingsCard({ pollMinutes = 5 }: { pollMinutes?: LimitsPol
             <GitPullRequest className="size-4 shrink-0" aria-hidden="true" />
             <div>
               <span>Pull requests</span>
-              <small>Open pull requests from the Pull requests screen, with one-click review requests.</small>
               {settings?.pullRequests.enabled && (
                 <div
                   role="group"
@@ -334,11 +321,6 @@ export function NotchSettingsCard({ pollMinutes = 5 }: { pollMinutes?: LimitsPol
             </button>
           </li>
         </ul>
-        <p className="notch-help">
-          Only on this display. Hidden while disconnected or mirrored. Refreshes with all usage
-          surfaces every {pollMinutes} minutes; live sessions every few seconds. Overlays the
-          screen without reserving space.
-        </p>
         {message && (
           <p role="alert" className="notch-error">
             {message}

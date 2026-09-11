@@ -84,7 +84,7 @@ export function InstallSheet({
         >
           <header className="flex items-center gap-2.5 border-b border-[var(--hair)] px-4 py-[13px]">
             <span className="size-2 shrink-0 bg-[var(--fill)]" aria-hidden="true" />
-            <h2 id="install-sheet-title" className="text-[14px] font-semibold tracking-[0.05em] uppercase">
+            <h2 id="install-sheet-title" className="text-[15px] font-semibold tracking-[0.05em] uppercase">
               Install — {agentName}
             </h2>
           </header>
@@ -118,18 +118,18 @@ export function InstallSheet({
               />
             ) : (
               <>
-                <p className="text-[11.5px] text-[var(--mute)]">{hint}</p>
+                <p className="text-[12px] text-[var(--mute)]">{hint}</p>
                 <div className="flex items-center gap-2.5">
                   <button
                     type="button"
-                    className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3 text-[12.5px] text-[var(--silkscreen)] disabled:opacity-45"
+                    className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3 text-[12px] text-[var(--silkscreen)] disabled:opacity-45"
                     disabled={!installFolder || busy}
                     onClick={() => void pickFolder()}
                   >
                     {copy.folder}
                   </button>
                   {!installFolder ? (
-                    <span className="flex-1 text-[11.5px] text-[var(--mute)]">{copy.folderUnsupported}</span>
+                    <span className="flex-1 text-[12px] text-[var(--mute)]">{copy.folderUnsupported}</span>
                   ) : null}
                 </div>
                 {inlineError ? (

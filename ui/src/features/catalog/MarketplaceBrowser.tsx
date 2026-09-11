@@ -95,7 +95,7 @@ export function MarketplaceBrowser({
               onChange={() => onChange({ action: entry.id })}
             />
             <span className="flex flex-col">
-              <span className="text-[12.5px] font-medium text-[var(--silkscreen)]">{entry.label}</span>
+              <span className="text-[12px] font-medium text-[var(--silkscreen)]">{entry.label}</span>
               <span className="text-[11px] text-[var(--mute)]">{entry.hint}</span>
             </span>
           </label>
@@ -188,7 +188,7 @@ function PluginGroup({
       <header className="flex items-baseline gap-2">
         <span className="text-[12px] font-semibold text-[var(--silkscreen)]">{plugin.name}</span>
         {plugin.version ? (
-          <span className="font-mono text-[10.5px] text-[var(--mute)]">v{plugin.version}</span>
+          <span className="font-mono text-[11px] text-[var(--mute)]">v{plugin.version}</span>
         ) : null}
       </header>
       {!plugin.supported ? (
@@ -297,7 +297,7 @@ function EntryList({
   const linkClass = "underline disabled:no-underline disabled:opacity-45";
   return (
     <div className="flex flex-col gap-0.5 pl-1">
-      <div className="flex items-center gap-2 text-[10.5px] tracking-[0.04em] text-[var(--mute)] uppercase">
+      <div className="flex items-center gap-2 text-[11px] tracking-[0.04em] text-[var(--mute)] uppercase">
         <span>{title}</span>
         {tag ? <span className="rounded border border-[var(--hair)] px-1 normal-case">{tag}</span> : null}
         {!readOnly ? (
@@ -392,7 +392,7 @@ function DependencyLine({
   onAdd: (dep: ItemDependency) => void;
 }) {
   return (
-    <span className="flex flex-wrap items-baseline gap-x-1.5 text-[10.5px] text-[var(--mute)]">
+    <span className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-[var(--mute)]">
       <span>{marketplaceCopy.needs}:</span>
       {deps.map((dep, index) => {
         const missing = selected !== null && !selected.has(depKey(dep));
@@ -457,7 +457,7 @@ function OutcomeList({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="h-7 rounded-md border border-[var(--warn)] px-2.5 text-[11.5px] font-semibold text-[var(--warn)] disabled:opacity-45"
+            className="h-7 rounded-md border border-[var(--warn)] px-2.5 text-[12px] font-semibold text-[var(--warn)] disabled:opacity-45"
             disabled={busy}
             onClick={onOverwriteConflicts}
           >

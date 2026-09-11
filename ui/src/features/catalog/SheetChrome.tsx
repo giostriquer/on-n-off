@@ -22,14 +22,14 @@ export function SheetFooter({
       {summary ? <span className="mr-auto text-[11px] text-[var(--mute)]">{summary}</span> : null}
       <button
         type="button"
-        className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)]"
+        className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12px] text-[var(--silkscreen)]"
         onClick={onCancel}
       >
         {cancelLabel}
       </button>
       <button
         type="button"
-        className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-4 text-[11.5px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
+        className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-4 text-[12px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
         disabled={submitDisabled}
         onClick={onSubmit}
       >

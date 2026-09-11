@@ -4,7 +4,6 @@ import type {
   CiState,
   GithubPr,
   GithubPrList,
-  GithubPrsData,
   GithubStatus,
   MergeKind,
   ReviewDecision,
@@ -177,29 +176,3 @@ export function statusHeadline(status: GithubStatus): string {
   }
 }
 
-export type PrsSummary = {
-  mine: number;
-  /** Red CI among the user's own pull requests that were loaded. */
-  failing: number;
-  /** Own pull requests (loaded) with merge conflicts. */
-  conflicts: number;
-  /** Own pull requests (loaded) with every merge requirement met and nothing merging them yet. */
-  ready: number;
-  /** True when GitHub holds more own pull requests than were loaded, so the counts are floors. */
-  countsArePartial: boolean;
-  review: number;
-  assigned: number;
-};
-
-/** The header's one-line summary. */
-export function prsSummary(data: GithubPrsData): PrsSummary {
-  return {
-    mine: data.mine.total,
-    failing: data.mine.items.filter((pr) => pr.ci === "failure" || pr.ci === "error").length,
-    conflicts: data.mine.items.filter((pr) => pr.mergeKind === "conflicts").length,
-    ready: data.mine.items.filter((pr) => pr.mergeKind === "ready").length,
-    countsArePartial: truncated(data.mine),
-    review: data.reviewRequested.total,
-    assigned: data.assigned.total,
-  };
-}

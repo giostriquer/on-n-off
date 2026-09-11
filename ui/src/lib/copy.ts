@@ -21,7 +21,7 @@ export const copy = {
   installHelper: "HTTPS git, owner/repo, name@marketplace, or npx skills add. SSH later.",
   installInvalid: "Use an HTTPS git URL, owner/repo, name@marketplace, or npx skills add.",
   filterPlaceholder: "plugins, skills, mcps…",
-  refresh: "Refresh",
+  refresh: "Refresh all providers",
   install: "Install",
   installing: "Installing…",
   folder: "Choose folder…",

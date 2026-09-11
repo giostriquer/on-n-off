@@ -6,7 +6,6 @@ import {
   projectFromPath,
   projectLabel,
   sameProjectPath,
-  scopeChip,
 } from "./project";
 
 describe("project", () => {
@@ -25,13 +24,9 @@ describe("project", () => {
     expect(merged.map((project) => project.label)).toEqual(["conoswiki", "on-n-off", "scratch"]);
   });
 
-  it("detects pasted folder paths and chips real local counts", () => {
+  it("detects pasted folder paths", () => {
     expect(looksLikeFolderPath(String.raw`E:\dev\on-n-off`)).toBe(true);
     expect(looksLikeFolderPath("~/work/app")).toBe(true);
     expect(looksLikeFolderPath("conoswiki")).toBe(false);
-    expect(scopeChip(null)).toBe("global config");
-    expect(scopeChip({ id: "e:/dev/app", label: "app", path: "E:/dev/app", skillCount: 3, mcpCount: 1 })).toBe(
-      "3 local skills · 1 project mcps",
-    );
   });
 });

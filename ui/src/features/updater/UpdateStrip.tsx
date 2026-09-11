@@ -18,7 +18,7 @@ export function UpdateStrip() {
       <div className="min-w-0 flex-1">
         <p className="m-0 text-[13px] font-semibold">on-n-off {update.version} is ready</p>
         {update.body ? (
-          <details className="mt-0.5 text-[11.5px] text-[var(--mute)]">
+          <details className="mt-0.5 text-[11px] text-[var(--mute)]">
             <summary className="cursor-pointer">Release notes</summary>
             <p className="mb-0 whitespace-pre-wrap">{update.body}</p>
           </details>

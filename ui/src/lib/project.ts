@@ -37,13 +37,6 @@ export function looksLikeFolderPath(value: string): boolean {
   return /^(~[\\/]?|\/|\.\/|\.\.[\\/]|[A-Za-z]:[\\/])/.test(trimmed) || /[\\/]/.test(trimmed);
 }
 
-export function scopeChip(project: ProjectDto | null | undefined): string {
-  if (!project) {
-    return "global config";
-  }
-  return `${project.skillCount ?? 0} local skills · ${project.mcpCount ?? 0} project mcps`;
-}
-
 export function mergeProjects(recognized: ProjectDto[], extra: ProjectDto[]): ProjectDto[] {
   const out: ProjectDto[] = [];
   for (const project of [...recognized, ...extra]) {

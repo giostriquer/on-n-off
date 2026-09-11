@@ -64,7 +64,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
       aria-label="Usage summary"
     >
       <header className="flex items-center gap-2.5 border-b border-[var(--hair)] px-3.5 py-2.5">
-        <span className="text-[11.5px] font-semibold tracking-[0.03em] uppercase">Usage</span>
+        <span className="text-[12px] font-semibold tracking-[0.03em] uppercase">Usage</span>
         <span className="font-mono text-[11px] text-[var(--mute)]">
           {formatDayRange(displayedWindow.sinceDay, displayedWindow.untilDay)}
           {loading ? " · scanning…" : null}
@@ -85,7 +85,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
       ) : (
         <>
           {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
-          <div className="grid md:grid-cols-[236px_minmax(0,1fr)]">
+          <div className="grid md:grid-cols-[252px_minmax(0,1fr)]">
             <div className="flex flex-col gap-2 border-b border-[var(--hair)] p-3.5 md:border-r md:border-b-0">
               <span className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
                 {metric === "cost" ? "Raw token cost" : "Processed tokens"}
@@ -93,14 +93,12 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
               <span className="text-[34px] leading-none font-semibold tracking-[-0.03em]">
                 {metric === "cost" ? formatUsd(folded.costUsd) : formatTokens(folded.totalTokens)}
               </span>
-              <span className="font-mono text-[11.5px] leading-snug text-[var(--mute)]">
+              {/* One line: the column is sized so the pair never wraps onto an orphan word. */}
+              <span className="min-w-0 truncate font-mono text-[11px] leading-snug text-[var(--mute)]">
                 {formatTokens(folded.totalTokens)} tokens · {folded.activeDays} active days
               </span>
-              {pricingNote ? <span className="text-[11.5px] leading-snug text-[var(--mute)]">{pricingNote}</span> : null}
-              <span className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
-                machine-wide · session transcripts · not scoped to a folder
-              </span>
-              <div className="mt-auto flex flex-wrap gap-1.5 pt-2">
+              {pricingNote ? <span className="text-[12px] leading-snug text-[var(--mute)]">{pricingNote}</span> : null}
+              <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-2">
                 {(summary?.sources ?? []).map((source) => (
                   <span
                     key={source.provider}
@@ -116,7 +114,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
                 ))}
               </div>
             </div>
-            <div className="min-w-0 p-3">
+            <div className="min-w-0 px-3.5 pt-3.5 pb-4">
               <LazyUsageChart
                 folded={folded}
                 metric={metric}
@@ -129,7 +127,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
             </div>
           </div>
           <div className="border-t border-[var(--hair)]">
-            <div className="px-3.5 pt-2.5 text-[10.5px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
+            <div className="px-3.5 pt-2.5 text-[11px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
               Models
             </div>
             {models.length === 0 ? (
@@ -143,7 +141,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
                     className="flex items-center gap-2.5 border-b border-[var(--hair)] px-3.5 py-2 last:border-b-0"
                   >
                     <ProviderIcon provider={row.provider} className="size-3.5 shrink-0 translate-y-px" title={providerLabel(row.provider)} />
-                    <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{row.model}</span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{row.model}</span>
                     <span className="h-1 w-24 shrink-0 overflow-hidden rounded-sm bg-[var(--well)]">
                       <span
                         className="block h-full rounded-sm bg-[var(--fill)]"

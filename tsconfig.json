@@ -18,10 +18,9 @@
     "esModuleInterop": true,
     "sourceMap": true,
     "types": ["vite/client", "vitest/globals"],
-    "baseUrl": ".",
     "paths": {
-      "$lib/*": ["ui/src/lib/*"],
-      "@/*": ["ui/src/*"]
+      "$lib/*": ["./ui/src/lib/*"],
+      "@/*": ["./ui/src/*"]
     }
   },
   "include": ["ui/src/**/*.ts", "ui/src/**/*.tsx"]

@@ -86,10 +86,7 @@ impl Harness {
 }
 
 fn authorization(request: &CapturedRequest) -> String {
-    request
-        .head
-        .lines()
-        .find_map(|line| line.strip_prefix("Authorization: "))
+    crate::http::head_header(&request.head, "authorization")
         .unwrap_or_default()
         .to_string()
 }

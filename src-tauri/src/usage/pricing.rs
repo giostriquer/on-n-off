@@ -279,15 +279,18 @@ fn fetch_rates_json() -> Option<Value> {
     if let Some(override_result) = test_fetch_override() {
         return override_result;
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(10))
-        .user_agent("on-n-off/0.1")
-        .build();
+    let agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .user_agent("on-n-off/0.1")
+            .build(),
+    );
     let body = agent
         .get(LITELLM_RATES_URL)
         .call()
         .ok()?
-        .into_string()
+        .body_mut()
+        .read_to_string()
         .ok()?;
     serde_json::from_str(&body).ok()
 }

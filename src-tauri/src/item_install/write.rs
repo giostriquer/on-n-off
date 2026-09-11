@@ -5,8 +5,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
-
 use super::fetch::Tarball;
 use crate::dto::{AdapterError, ItemKind};
 
@@ -80,14 +78,10 @@ pub fn short(sha: &str) -> &str {
     sha.get(..7).unwrap_or(sha)
 }
 
-pub fn hash_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
 pub fn hash_files(files: &ItemFiles) -> BTreeMap<String, String> {
     files
         .iter()
-        .map(|(path, bytes)| (path.clone(), hash_bytes(bytes)))
+        .map(|(path, bytes)| (path.clone(), crate::sha::sha256_hex(bytes)))
         .collect()
 }
 
@@ -107,7 +101,7 @@ pub fn hash_tree_on_disk(
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let mut map = BTreeMap::new();
-            map.insert(name, hash_bytes(&bytes));
+            map.insert(name, crate::sha::sha256_hex(&bytes));
             Ok(Some(map))
         }
         ItemKind::Skill => {
@@ -136,7 +130,7 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, String>) -> Result<(
                 .to_string_lossy()
                 .replace('\\', "/");
             let bytes = fs::read(&path).map_err(|error| io_error(error, &path))?;
-            out.insert(relative, hash_bytes(&bytes));
+            out.insert(relative, crate::sha::sha256_hex(&bytes));
         }
     }
     Ok(())

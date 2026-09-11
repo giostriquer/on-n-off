@@ -236,3 +236,59 @@ describe("Usage loading continuity", () => {
     expect(revisitedChart).toHaveAttribute("data-until-time", "2026-08-15T15:00:00.000Z");
   });
 });
+
+function twoDaySummary(): UsageSummary {
+  const bucket = (day: string, provider: "claude" | "codex", model: string, costUsd: number) => ({
+    day,
+    provider,
+    model,
+    totals: {
+      uncachedInputTokens: 100,
+      cachedInputTokens: 0,
+      cacheCreationTokens: 0,
+      outputTokens: 20,
+      reasoningTokens: 0,
+    },
+    costUsd,
+    cacheSavingsUsd: 0,
+    costSource: "modelPriced" as const,
+    records: 1,
+    unpricedRecords: 0,
+    sessions: 1,
+  });
+  return {
+    ...summary(),
+    sinceDay: "2026-08-14",
+    untilDay: "2026-08-15",
+    buckets: [
+      bucket("2026-08-14", "codex", "gpt-5.6-sol", 1),
+      bucket("2026-08-15", "codex", "gpt-5.6-sol", 3),
+      bucket("2026-08-15", "claude", "claude-fable-5", 1),
+    ],
+  };
+}
+
+describe("Usage day breakdown", () => {
+  it("lists days newest first and opens one into its models", async () => {
+    usageSummary.mockResolvedValue(twoDaySummary());
+    renderUsage();
+    await screen.findByRole("region", { name: "Usage totals" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Day" }));
+    const rows = screen.getAllByRole("button", { expanded: false }).filter((row) => /Aug 1[45]/.test(row.textContent ?? ""));
+    expect(rows.map((row) => row.textContent?.slice(0, 6))).toEqual(["Aug 15", "Aug 14"]);
+
+    fireEvent.click(rows[0]);
+
+    const open = screen.getByRole("button", { expanded: true });
+    const models = document.getElementById(open.getAttribute("aria-controls") ?? "");
+    expect(models).not.toBeNull();
+    expect(within(models as HTMLElement).getByText("gpt-5.6-sol")).toBeTruthy();
+    expect(within(models as HTMLElement).getByText("claude-fable-5")).toBeTruthy();
+    // One denominator for the column: $3 and $1 of the window's $5, so the rows under a day
+    // add up to the day row itself (80.0%).
+    expect(rows[0].textContent).toContain("80.0%");
+    expect(within(models as HTMLElement).getByText("60.0%")).toBeTruthy();
+    expect(within(models as HTMLElement).getByText("20.0%")).toBeTruthy();
+  });
+});

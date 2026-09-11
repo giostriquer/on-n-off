@@ -84,16 +84,16 @@ const SkillCard = memo(function SkillCard({
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-[16px]/[1.15] font-semibold break-words">{skill.name}</span>
+            <span className="text-[13px]/[1.15] font-semibold break-words">{skill.name}</span>
             {status ? (
               <OriginTag status={status} />
             ) : (
-              <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+              <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
                 {isProjectOrigin(skill.origin) ? "Project skill" : skill.pluginId ? "Plugin skill" : "User skill"}
               </span>
             )}
           </div>
-          <div className="mt-0.5 line-clamp-3 text-[11.5px] leading-snug break-words text-[var(--mute)]">
+          <div className="mt-0.5 line-clamp-3 text-[11px] leading-snug break-words text-[var(--mute)]">
             {skill.description || skill.id}
           </div>
         </div>
@@ -109,7 +109,7 @@ const SkillCard = memo(function SkillCard({
           </div>
         ) : (
           <span
-            className="mt-1 flex min-w-[88px] shrink-0 items-center gap-[7px] font-mono text-[10.5px] text-[var(--mute)]"
+            className="mt-1 flex min-w-[88px] shrink-0 items-center gap-[7px] font-mono text-[11px] text-[var(--mute)]"
             title={lockedNote}
           >
             <span className="size-2 shrink-0 rounded-full bg-[var(--mute)]" aria-hidden="true" />
@@ -171,7 +171,7 @@ export function ItemList({
   return (
     <div className="flex flex-col gap-3.5 px-5 pt-[18px] pb-[26px]">
       <header className="flex items-baseline gap-3">
-        <h2 className="m-0 shrink-0 text-[17px] font-semibold tracking-[0.05em] uppercase whitespace-nowrap">{title}</h2>
+        <h2 className="m-0 shrink-0 text-[15px] font-semibold tracking-[0.05em] uppercase whitespace-nowrap">{title}</h2>
         <span className="min-w-0 font-mono text-[12px]/[1.3] text-[var(--mute)]">{subtitle}</span>
         <div className="flex-1" />
         {headerActions}
@@ -180,7 +180,7 @@ export function ItemList({
             <button
               key={next}
               type="button"
-              className={`h-[26px] rounded-none border-0 px-3 text-[10.5px] font-semibold tracking-[0.03em] uppercase ${
+              className={`h-[26px] rounded-none border-0 px-3 text-[11px] font-semibold tracking-[0.03em] uppercase ${
                 chip === next ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
               }`}
               aria-pressed={chip === next}
@@ -227,7 +227,7 @@ export function ItemList({
                       aria-hidden="true"
                     />
                     <div className="min-w-0 flex-1 basis-[238px]">
-                      <div className="text-[16px]/[1.15] font-semibold break-words">{plugin.name}</div>
+                      <div className="text-[13px]/[1.15] font-semibold break-words">{plugin.name}</div>
                       <div
                         className="mt-0.5 truncate font-mono text-[11px]/[1.4] text-[var(--mute)]"
                         title={plugin.source}
@@ -242,7 +242,7 @@ export function ItemList({
                             {formatPluginVersion(plugin.version)}
                           </div>
                           <div
-                            className={`font-mono text-[10.5px]/[1.3] ${
+                            className={`font-mono text-[11px]/[1.3] ${
                               pluginOutOfSync(plugin) ? "text-[var(--warn)]" : "text-[var(--mute)]"
                             }`}
                           >
@@ -256,7 +256,7 @@ export function ItemList({
                     {pluginOutOfSync(plugin) ? (
                       <button
                         type="button"
-                        className="mt-0.5 h-[26px] shrink-0 border border-[var(--warn)] bg-transparent px-3 text-[10.5px] font-semibold tracking-[0.03em] text-[var(--warn)] uppercase disabled:opacity-45"
+                        className="mt-0.5 h-[26px] shrink-0 border border-[var(--warn)] bg-transparent px-3 text-[11px] font-semibold tracking-[0.03em] text-[var(--warn)] uppercase disabled:opacity-45"
                         disabled={!cliOk || busy}
                         aria-label={`Update ${plugin.name}`}
                         onClick={() => onUpdate?.(plugin)}
@@ -279,7 +279,7 @@ export function ItemList({
                     <div className="mx-3 mb-3 ml-[46px] border border-[var(--hair)] bg-[var(--well)]">
                       <div className="flex items-center gap-2.5 border-b border-[var(--hair)] px-[11px] py-2">
                         <span
-                          className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-[var(--mute)]"
+                          className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--mute)]"
                           title={plugin.id}
                         >
                           {plugin.id}
