@@ -1784,8 +1784,11 @@ fn stroke_ring(
             let green =
                 tiny_skia::Color::from_rgba8(LIVE_GREEN[0], LIVE_GREEN[1], LIVE_GREEN[2], 255);
             let red = tiny_skia::Color::from_rgba8(TRIP_RED[0], TRIP_RED[1], TRIP_RED[2], 255);
+            // tiny-skia 0.12 takes the two-point conical form: the inner circle is the ring's
+            // centre with no radius, the outer one is the same centre at `outer`.
             if let Some(shader) = tiny_skia::RadialGradient::new(
                 tiny_skia::Point::from_xy(cx, cy),
+                0.0,
                 tiny_skia::Point::from_xy(cx, cy),
                 outer,
                 vec![
