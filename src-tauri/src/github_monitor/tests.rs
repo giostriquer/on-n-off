@@ -194,6 +194,21 @@ fn a_merge_the_merged_search_reports_one_poll_late_is_still_announced_but_not_tw
 }
 
 #[test]
+fn a_pull_request_that_flickers_back_into_the_open_list_is_announced_merged_once() {
+    let mut state = MonitorState::default();
+    let open = pr("a", CiState::Success);
+    observe(&mut state, &read(vec![open.clone()]));
+    assert!(observe(&mut state, &read(vec![])).is_empty());
+    // A stale open-list replica still lists it while the merged list already names it.
+    let flicker = read_with_merged(vec![open.clone()], vec![open.clone()]);
+    assert!(observe(&mut state, &flicker).is_empty());
+    assert!(state.vanished.is_empty());
+    let gone = read_with_merged(vec![], vec![open]);
+    assert_eq!(kinds(&observe(&mut state, &gone)), [EventKind::Merged]);
+    assert!(observe(&mut state, &gone).is_empty());
+}
+
+#[test]
 fn a_closed_pull_request_is_remembered_for_one_poll_only() {
     let mut state = MonitorState::default();
     observe(&mut state, &read(vec![pr("a", CiState::Success)]));

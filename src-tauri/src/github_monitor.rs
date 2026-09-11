@@ -195,8 +195,9 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             poll_delay(settings.github_poll_seconds, consecutive_failures)
         } else {
             consecutive_failures = 0;
-            if !state.seen.is_empty() {
+            if !state.seen.is_empty() || !state.vanished.is_empty() {
                 state.seen.clear();
+                state.vanished.clear();
                 if let Err(error) = monitor::persist_state(&state_path, &state).await {
                     eprintln!("github monitor could not clear its state: {error}");
                 }
@@ -304,16 +305,22 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
         }
         next.insert(pr.id.clone(), after);
     }
+    // A leftover that is open again this poll is back in `seen`, not a candidate: claiming it
+    // now and again when it next leaves would announce one merge twice.
     let mut vanished: HashSet<String> = state
         .seen
         .keys()
-        .filter(|id| !next.contains_key(*id))
         .cloned()
         .chain(state.vanished.drain())
+        .filter(|id| !next.contains_key(id))
         .collect();
     for pr in &prs.data.merged.items {
         if vanished.remove(&pr.id) {
-            events.push(Event::of(EventKind::Merged, pr, Sound::Done));
+            events.push(Event::of(
+                EventKind::Merged,
+                pr,
+                sound_for(EventKind::Merged, Seen::of(pr)),
+            ));
         }
     }
     // Whatever the previous poll's leftovers were, this poll was their last chance.
