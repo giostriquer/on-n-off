@@ -11,6 +11,7 @@ use std::{fs, io};
 use serde::{de::DeserializeOwned, Serialize};
 use tauri::{async_runtime, AppHandle, Manager};
 
+use crate::notifications::Sound;
 use crate::usage::cache_io::atomic_write;
 
 const WAKE_HEARTBEAT: Duration = Duration::from_secs(30);
@@ -119,8 +120,8 @@ pub(crate) async fn persist_state<T: Serialize + Clone + Send + 'static>(
 }
 
 /// Show a notification; a delivery failure is logged with the monitor's name, never raised.
-pub(crate) fn notify(app: &AppHandle, monitor: &str, title: String, body: String) {
-    if let Err(error) = crate::notifications::show(app, title, body) {
+pub(crate) fn notify(app: &AppHandle, monitor: &str, title: String, body: String, sound: Sound) {
+    if let Err(error) = crate::notifications::show(app, title, body, sound) {
         eprintln!("{monitor} could not show a notification: {}", error.message);
     }
 }

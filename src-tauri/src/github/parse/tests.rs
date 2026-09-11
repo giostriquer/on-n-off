@@ -71,6 +71,24 @@ fn the_fixture_parses_into_the_three_lists() {
 }
 
 #[test]
+fn recently_merged_pull_requests_ride_along_and_a_reply_without_them_is_fine() {
+    let parsed = parse(&reply()).unwrap();
+    assert_eq!(parsed.data.merged.total, 3);
+    let [merged] = parsed.data.merged.items.as_slice() else {
+        panic!("{:?}", parsed.data.merged);
+    };
+    assert_eq!(merged.id, "PR_merged1");
+    assert_eq!(merged.number, 39);
+    assert_eq!(merged.repo, "acme/app");
+
+    let mut without = reply();
+    without["data"].as_object_mut().unwrap().remove("merged");
+    let parsed = parse(&without).unwrap();
+    assert!(parsed.data.merged.items.is_empty());
+    assert_eq!(parsed.data.merged.total, 0);
+}
+
+#[test]
 fn every_rollup_state_maps_and_unknown_ones_fall_back_to_none() {
     for (state, expected) in [
         (json!("SUCCESS"), CiState::Success),

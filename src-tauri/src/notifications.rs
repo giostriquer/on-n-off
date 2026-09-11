@@ -51,11 +51,52 @@ pub async fn request_permission(app: AppHandle) -> Result<bool, AdapterError> {
     }
 }
 
-pub fn show(app: &AppHandle, title: String, body: String) -> Result<(), AdapterError> {
+/// The sound a notification arrives with. Every notification plays one, so the OS's own
+/// per-app "play sound" switch stays the single place to silence them; the two named ones let
+/// a monitor mark news worth telling apart without looking (what each means is its call).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sound {
+    /// The platform's default notification sound.
+    Default,
+    /// Something turned out well.
+    Success,
+    /// Something is finished.
+    Done,
+}
+
+impl Sound {
+    /// The name the platform's notification API expects: a system sound from
+    /// `/System/Library/Sounds` on macOS, one of the toast `ms-winsoundevent` names on Windows.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Default => "NSUserNotificationDefaultSoundName",
+            Self::Success => "Glass",
+            Self::Done => "Hero",
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::Success => "IM",
+            Self::Done => "Mail",
+        }
+    }
+}
+
+pub fn show(
+    app: &AppHandle,
+    title: String,
+    body: String,
+    sound: Sound,
+) -> Result<(), AdapterError> {
     app.notification()
         .builder()
         .title(title)
         .body(body)
+        .sound(sound.name())
         .show()
         .map_err(|error| AdapterError::message(error.to_string()))
 }

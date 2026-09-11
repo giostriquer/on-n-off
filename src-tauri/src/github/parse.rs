@@ -63,6 +63,7 @@ pub(super) fn parse(reply: &Value) -> Result<ParsedPrs, String> {
             mine: list(&data["mine"]),
             review_requested,
             assigned: list(&data["assigned"]),
+            merged: list(&data["merged"]),
             rate_limit: rate_limit(&data["rateLimit"]),
         },
         warnings,

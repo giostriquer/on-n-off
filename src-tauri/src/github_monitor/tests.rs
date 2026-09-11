@@ -31,6 +31,10 @@ fn pr(id: &str, ci: CiState) -> GithubPrDto {
 }
 
 fn read(mine: Vec<GithubPrDto>) -> GithubPrsDto {
+    read_with_merged(mine, Vec::new())
+}
+
+fn read_with_merged(mine: Vec<GithubPrDto>, merged: Vec<GithubPrDto>) -> GithubPrsDto {
     GithubPrsDto {
         status: GithubStatus::Ok,
         hint: None,
@@ -41,6 +45,10 @@ fn read(mine: Vec<GithubPrDto>) -> GithubPrsDto {
             mine: GithubPrListDto {
                 total: mine.len() as u64,
                 items: mine,
+            },
+            merged: GithubPrListDto {
+                total: merged.len() as u64,
+                items: merged,
             },
             ..GithubPrsData::default()
         },
@@ -134,7 +142,7 @@ fn events_carry_the_pull_request_and_read_as_notifications() {
 }
 
 #[test]
-fn a_merged_or_closed_pull_request_is_forgotten_silently() {
+fn a_closed_pull_request_is_forgotten_silently() {
     let mut state = MonitorState::default();
     observe(
         &mut state,
@@ -144,6 +152,127 @@ fn a_merged_or_closed_pull_request_is_forgotten_silently() {
     assert!(events.is_empty());
     assert_eq!(state.seen.len(), 1);
     assert!(!state.seen.contains_key("a"));
+}
+
+#[test]
+fn a_merged_pull_request_is_announced_once_with_the_merged_sound_then_forgotten() {
+    let mut state = MonitorState::default();
+    observe(
+        &mut state,
+        &read(vec![pr("a", CiState::Success), pr("b", CiState::Pending)]),
+    );
+    let merged = read_with_merged(
+        vec![pr("b", CiState::Pending)],
+        vec![pr("a", CiState::Success)],
+    );
+    let events = observe(&mut state, &merged);
+    assert_eq!(kinds(&events), [EventKind::Merged]);
+    assert_eq!(events[0].repo, "acme/app");
+    assert_eq!(events[0].number, 41);
+    assert_eq!(notification_copy(&events[0]).0, "Merged");
+    assert_eq!(events[0].sound, Sound::Done);
+    assert!(!state.seen.contains_key("a"));
+
+    // The merged list keeps naming it on later polls; it was announced when it left `seen`.
+    assert!(observe(&mut state, &merged).is_empty());
+}
+
+#[test]
+fn a_merge_the_merged_search_reports_one_poll_late_is_still_announced_but_not_two() {
+    for (polls_late, announced) in [(1, true), (2, false)] {
+        let mut state = MonitorState::default();
+        observe(&mut state, &read(vec![pr("a", CiState::Success)]));
+        for _ in 0..polls_late {
+            assert!(observe(&mut state, &read(vec![])).is_empty());
+        }
+        let late = read_with_merged(vec![], vec![pr("a", CiState::Success)]);
+        let events = observe(&mut state, &late);
+        assert_eq!(!events.is_empty(), announced, "{polls_late} polls late");
+        assert!(state.vanished.is_empty());
+        assert!(observe(&mut state, &late).is_empty());
+    }
+}
+
+#[test]
+fn a_pull_request_that_flickers_back_into_the_open_list_is_announced_merged_once() {
+    let mut state = MonitorState::default();
+    let open = pr("a", CiState::Success);
+    observe(&mut state, &read(vec![open.clone()]));
+    assert!(observe(&mut state, &read(vec![])).is_empty());
+    // A stale open-list replica still lists it while the merged list already names it.
+    let flicker = read_with_merged(vec![open.clone()], vec![open.clone()]);
+    assert!(observe(&mut state, &flicker).is_empty());
+    assert!(state.vanished.is_empty());
+    let gone = read_with_merged(vec![], vec![open]);
+    assert_eq!(kinds(&observe(&mut state, &gone)), [EventKind::Merged]);
+    assert!(observe(&mut state, &gone).is_empty());
+}
+
+#[test]
+fn a_closed_pull_request_is_remembered_for_one_poll_only() {
+    let mut state = MonitorState::default();
+    observe(&mut state, &read(vec![pr("a", CiState::Success)]));
+    observe(&mut state, &read(vec![]));
+    assert!(state.vanished.contains("a"));
+    let raw = serde_json::to_string(&state).unwrap();
+    assert!(raw.contains("\"vanished\":[\"a\"]"), "{raw}");
+    observe(&mut state, &read(vec![]));
+    assert!(state.vanished.is_empty());
+    let raw = serde_json::to_string(&state).unwrap();
+    assert!(!raw.contains("vanished"), "{raw}");
+}
+
+#[test]
+fn a_pull_request_merged_before_it_was_ever_seen_open_is_not_announced() {
+    let mut state = MonitorState::default();
+    let first = read_with_merged(
+        vec![pr("b", CiState::Pending)],
+        vec![pr("z", CiState::Success)],
+    );
+    assert!(observe(&mut state, &first).is_empty());
+    assert!(observe(&mut state, &first).is_empty());
+}
+
+#[test]
+fn going_green_without_conflicts_gets_the_green_sound_and_everything_else_the_default() {
+    let mut state = MonitorState::default();
+    observe(&mut state, &read(vec![pr("a", CiState::Pending)]));
+    let events = observe(&mut state, &read(vec![pr("a", CiState::Success)]));
+    assert_eq!(kinds(&events), [EventKind::CiPassed]);
+    assert_eq!(events[0].sound, Sound::Success);
+
+    let mut state = MonitorState::default();
+    let mut pending_and_dirty = with_merge("a", Mergeability::Conflicting, MergeState::Dirty);
+    pending_and_dirty.ci = CiState::Pending;
+    observe(&mut state, &read(vec![pending_and_dirty]));
+    let green_but_dirty = with_merge("a", Mergeability::Conflicting, MergeState::Dirty);
+    let events = observe(&mut state, &read(vec![green_but_dirty]));
+    assert_eq!(kinds(&events), [EventKind::CiPassed]);
+    assert_eq!(events[0].sound, Sound::Default);
+
+    let mut state = MonitorState::default();
+    observe(&mut state, &read(vec![pr("a", CiState::Success)]));
+    let events = observe(&mut state, &read(vec![pr("a", CiState::Failure)]));
+    assert_eq!(kinds(&events), [EventKind::CiFailed]);
+    assert_eq!(events[0].sound, Sound::Default);
+}
+
+#[test]
+fn conflicts_clearing_on_a_green_pull_request_sounds_green_on_a_pending_one_it_does_not() {
+    for (ci, expected) in [
+        (CiState::Success, Sound::Success),
+        (CiState::Pending, Sound::Default),
+    ] {
+        let mut state = MonitorState::default();
+        let mut dirty = with_merge("a", Mergeability::Conflicting, MergeState::Dirty);
+        dirty.ci = ci;
+        observe(&mut state, &read(vec![dirty]));
+        let mut clean = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
+        clean.ci = ci;
+        let events = observe(&mut state, &read(vec![clean]));
+        assert_eq!(kinds(&events), [EventKind::ConflictsResolved]);
+        assert_eq!(events[0].sound, expected, "{ci:?}");
+    }
 }
 
 #[test]
@@ -590,12 +719,47 @@ fn a_persisted_record_with_every_fact_round_trips() {
 }
 
 #[test]
+fn ready_to_merge_sounds_green_and_approval_alone_does_not() {
+    let mut state = MonitorState::default();
+    let mut blocked = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
+    blocked.ci = CiState::Success;
+    observe(&mut state, &read(vec![blocked]));
+    let mut ready = with_merge("a", Mergeability::Mergeable, MergeState::Clean);
+    ready.ci = CiState::Success;
+    ready.review_decision = Some(ReviewDecision::Approved);
+    let events = observe(&mut state, &read(vec![ready]));
+    assert_eq!(kinds(&events), [EventKind::ReadyToMerge]);
+    assert_eq!(events[0].sound, Sound::Success);
+
+    // A repository without checks is ready without ever being "green".
+    let mut state = MonitorState::default();
+    let mut blocked = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
+    blocked.ci = CiState::None;
+    observe(&mut state, &read(vec![blocked]));
+    let mut ready = with_merge("a", Mergeability::Mergeable, MergeState::Clean);
+    ready.ci = CiState::None;
+    let events = observe(&mut state, &read(vec![ready]));
+    assert_eq!(kinds(&events), [EventKind::ReadyToMerge]);
+    assert_eq!(events[0].sound, Sound::Success);
+
+    let mut state = MonitorState::default();
+    observe(&mut state, &read(vec![with_review("a", None)]));
+    let events = observe(
+        &mut state,
+        &read(vec![with_review("a", Some(ReviewDecision::Approved))]),
+    );
+    assert_eq!(kinds(&events), [EventKind::Approved]);
+    assert_eq!(events[0].sound, Sound::Default);
+}
+
+#[test]
 fn every_event_has_notification_copy() {
     let event = Event {
         kind: EventKind::Approved,
         repo: "acme/app".into(),
         number: 41,
         title: "Add the thing".into(),
+        sound: Sound::Default,
     };
     let titles: Vec<String> = [
         EventKind::CiFailed,
@@ -606,6 +770,7 @@ fn every_event_has_notification_copy() {
         EventKind::Conflicts,
         EventKind::ConflictsResolved,
         EventKind::ReadyToMerge,
+        EventKind::Merged,
     ]
     .into_iter()
     .map(|kind| {
@@ -626,7 +791,8 @@ fn every_event_has_notification_copy() {
             "Changes requested",
             "Merge conflicts",
             "Conflicts resolved",
-            "Ready to merge"
+            "Ready to merge",
+            "Merged"
         ]
     );
 }

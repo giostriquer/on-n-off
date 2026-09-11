@@ -1,22 +1,28 @@
-//! The one GraphQL document the screen needs, and the search strings that feed it. Four searches
-//! ride in a single request; without a `contexts` connection the whole thing costs about two
-//! rate-limit points, so a 60 s poll spends ~120 of the 5 000 points an hour GitHub grants. The
-//! merge-state fields are scalars and single objects, so they add nothing to that cost.
+//! The one GraphQL document the screen and the monitor need, and the search strings that feed
+//! it. Five searches ride in a single request; without a `contexts` connection the whole thing
+//! costs about two rate-limit points, so a 60 s poll spends ~120 of the 5 000 points an hour
+//! GitHub grants. The merge-state fields are scalars and single objects, so they add nothing to
+//! that cost, and the merged search reads a short page.
 
 use serde_json::{json, Value};
 
 pub(super) const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 /// Items per list; the DTO's `total` still reports the full match count.
 pub(super) const PAGE_SIZE: u32 = 50;
+/// Merged pull requests read per poll, latest activity first. Only one merged since the previous
+/// poll matters, so the page stays short; a burst of more than this many in one interval loses
+/// the oldest.
+pub(super) const RECENT_MERGES: u32 = 10;
 
 const DOCUMENT: &str = "\
-query($mine: String!, $review: String!, $direct: String!, $assigned: String!, $first: Int!) {
+query($mine: String!, $review: String!, $direct: String!, $assigned: String!, $merged: String!, $first: Int!, $recent: Int!) {
   viewer { login }
   rateLimit { remaining resetAt }
   mine: search(type: ISSUE, query: $mine, first: $first) { issueCount nodes { ...pr } }
   review: search(type: ISSUE, query: $review, first: $first) { issueCount nodes { ...pr } }
   direct: search(type: ISSUE, query: $direct, first: $first) { issueCount nodes { ... on PullRequest { id } } }
   assigned: search(type: ISSUE, query: $assigned, first: $first) { issueCount nodes { ...pr } }
+  merged: search(type: ISSUE, query: $merged, first: $recent) { issueCount nodes { ...pr } }
 }
 fragment pr on PullRequest {
   id number title url isDraft updatedAt headRefName baseRefName reviewDecision
@@ -36,6 +42,15 @@ pub(super) enum Search {
     DirectReviewRequested,
     /// Open PRs with the user in the assignee field.
     Assigned,
+    /// The user's merged PRs, latest activity first, narrowed by the configured scopes.
+    Merged,
+}
+
+impl Search {
+    /// Whether the configured scopes narrow this search: they describe the user's own work.
+    fn is_scoped(self) -> bool {
+        matches!(self, Self::Mine | Self::Merged)
+    }
 }
 
 pub(super) fn search_query(search: Search, scopes: &[String]) -> String {
@@ -44,8 +59,9 @@ pub(super) fn search_query(search: Search, scopes: &[String]) -> String {
         Search::ReviewRequested => "is:pr is:open review-requested:@me",
         Search::DirectReviewRequested => "is:pr is:open user-review-requested:@me",
         Search::Assigned => "is:pr is:open assignee:@me",
+        Search::Merged => "is:pr is:merged author:@me sort:updated-desc",
     };
-    if search != Search::Mine || scopes.is_empty() {
+    if !search.is_scoped() || scopes.is_empty() {
         return base.to_string();
     }
     let mut query = base.to_string();
@@ -64,7 +80,9 @@ pub(super) fn request_body(scopes: &[String]) -> Value {
             "review": search_query(Search::ReviewRequested, scopes),
             "direct": search_query(Search::DirectReviewRequested, scopes),
             "assigned": search_query(Search::Assigned, scopes),
+            "merged": search_query(Search::Merged, scopes),
             "first": PAGE_SIZE,
+            "recent": RECENT_MERGES,
         }
     })
 }
