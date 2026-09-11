@@ -47,7 +47,7 @@ function RailButton({ id, label, Icon, screen, count, className, onScreen, onInt
   return (
     <button
       type="button"
-      className={`flex h-[34px] items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11.5px] font-semibold tracking-[0.04em] uppercase transition-colors hover:bg-[var(--well)] hover:text-[var(--silkscreen)] ${
+      className={`flex h-[34px] items-center gap-2.5 rounded-none border-0 px-2 text-left text-[11px] font-semibold tracking-[0.04em] uppercase transition-colors hover:bg-[var(--well)] hover:text-[var(--silkscreen)] ${
         active ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
       } ${className ?? ""}`}
       aria-current={active ? "page" : undefined}
@@ -129,7 +129,7 @@ export function LeftRail({
       <div className="min-h-3.5 flex-1" />
       {showMasterCut ? (
         <div className="mb-2 flex flex-col gap-1.5 border border-dashed border-[var(--hair)] p-2.5">
-          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
             Master cut
           </span>
           <Rocker
@@ -141,7 +141,7 @@ export function LeftRail({
             ariaLabel="Master cut"
             onToggle={() => onMaster(!masterOn)}
           />
-          <span className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">{masterNote}</span>
+          <span className="font-mono text-[11px] leading-snug text-[var(--mute)]">{masterNote}</span>
         </div>
       ) : null}
       <RailButton
@@ -164,7 +164,7 @@ export function LeftRail({
       />
       <RailButton id="settings" label="Settings" Icon={Settings} screen={screen} className="w-full" onScreen={onScreen} />
       <div className="mt-2 flex flex-col gap-1.5 border-t border-[var(--hair)] px-2 pt-2.5 pb-0.5">
-        <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+        <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
           Appearance
         </span>
         <div

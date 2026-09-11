@@ -15,6 +15,9 @@ export type ProviderTotals = {
   tokenShare: number;
 };
 
+/** A model's totals within one day. Shares belong to the caller, which holds the denominator. */
+export type ModelDayTotals = Omit<ModelTotals, "costShare" | "tokenShare">;
+
 export type ModelTotals = {
   model: string;
   provider: AgentId;
@@ -97,6 +100,35 @@ const EMPTY: FoldedUsage = {
   daily: [],
   hourly: [],
 };
+
+/**
+ * The models behind each day, so a day row can open into the same columns the model breakdown
+ * shows. Totals only: the caller shares them against the window, the way the day rows above them
+ * are shared, so one column never carries two denominators.
+ */
+export function foldModelsByDay(
+  summary: UsageSummary | null,
+): ReadonlyMap<string, readonly ModelDayTotals[]> {
+  const byDay = new Map<string, Map<string, ModelDayTotals>>();
+  for (const bucket of summary?.buckets ?? []) {
+    const day = byDay.get(bucket.day) ?? new Map<string, ModelDayTotals>();
+    const key = `${bucket.provider}\0${bucket.model}`;
+    const row = day.get(key) ?? {
+      model: bucket.model,
+      provider: bucket.provider,
+      costUsd: 0,
+      totalTokens: 0,
+      records: 0,
+    };
+    row.costUsd += bucket.costUsd;
+    row.totalTokens += bucketTokens(bucket);
+    row.records += bucket.records;
+    day.set(key, row);
+    byDay.set(bucket.day, day);
+  }
+
+  return new Map([...byDay].map(([day, models]) => [day, [...models.values()]]));
+}
 
 export function foldUsage(summary: UsageSummary | null): FoldedUsage {
   if (!summary || summary.buckets.length === 0) {

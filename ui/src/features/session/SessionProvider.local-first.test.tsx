@@ -21,6 +21,7 @@ function deferred<T>(): Deferred<T> {
 
 const state = vi.hoisted(() => ({
   events: [] as string[],
+  hiddenAgents: [] as AgentId[],
   localHandler: null as null | ((agentId: AgentId, path: string | null) => Promise<AgentTabDto>),
   refreshHandler: null as null | ((agentId: AgentId, path: string | null) => Promise<AgentTabDto>),
   projectsHandler: null as null | ((agentId: AgentId) => Promise<ProjectDto[]>),
@@ -134,8 +135,11 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
   loadAppSettings: () =>
-    Promise.resolve({ hiddenAgents: [], binaryPaths: {}, automaticUpdates: true }),
-  listAgents: () => Promise.resolve(AGENTS),
+    Promise.resolve({ hiddenAgents: state.hiddenAgents, binaryPaths: {}, automaticUpdates: true }),
+  listAgents: () => {
+    state.events.push("agents");
+    return Promise.resolve(AGENTS);
+  },
   listProjects: (agentId: AgentId) => {
     state.events.push(`projects:${agentId}`);
     return state.projectsHandler?.(agentId) ?? Promise.resolve([]);
@@ -186,8 +190,12 @@ function Probe() {
         {session.currentProjects.map((project) => project.id).join(",")}
       </span>
       <span data-testid="banner">{session.banner ?? ""}</span>
+      <span data-testid="log">{session.log.map((entry) => entry.text).join(" | ")}</span>
       <button type="button" onClick={() => void session.loadTab("codex", true)}>
         Refresh Codex
+      </button>
+      <button type="button" onClick={() => void session.refreshAll()}>
+        Refresh all
       </button>
       <button type="button" onClick={() => void session.selectScope("C:/fixture/new-scope")}>
         Select new scope
@@ -229,6 +237,7 @@ describe("SessionProvider local-first startup", () => {
     Object.defineProperty(performance, "mark", { configurable: true, value: vi.fn() });
     localStorage.setItem(AGENT_KEY, "codex");
     state.events.length = 0;
+    state.hiddenAgents = [];
     state.localHandler = (agentId) => Promise.resolve(agentId === "codex" ? LOCAL_TAB : EMPTY_TAB);
     state.refreshHandler = (agentId) =>
       Promise.resolve(agentId === "codex" ? ENRICHED_TAB : EMPTY_TAB);
@@ -428,5 +437,50 @@ describe("SessionProvider local-first startup", () => {
     await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
     expect(screen.getByTestId("scope-path")).toHaveTextContent("C:/fixture/new-scope");
     expect(screen.getByTestId("banner")).toBeEmptyDOMElement();
+  });
+
+  it("refreshes every visible provider from one Refresh and probes only the open tab", async () => {
+    renderSession();
+    await waitFor(() => {
+      for (const id of ["claude", "codex", "antigravity", "cursor"]) {
+        expect(state.events).toContain(`refresh:${id}:global`);
+      }
+    });
+    state.events.length = 0;
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+
+    await waitFor(() => {
+      expect(state.events).toContain("refresh:codex:global");
+      expect(state.events).toContain("local:claude:global");
+      expect(state.events).toContain("local:antigravity:global");
+      expect(state.events).toContain("local:cursor:global");
+    });
+    expect(state.events).not.toContain("local:codex:global");
+    expect(state.events.filter((event) => event === "agents")).toHaveLength(1);
+    // The sweep's whole point is the providers behind the open tab, so it says which it read.
+    await waitFor(() =>
+      expect(screen.getByTestId("log")).toHaveTextContent("refreshed Claude, Codex, Antigravity, Cursor"),
+    );
+  });
+
+  it("leaves a hidden provider out of the Refresh sweep", async () => {
+    state.hiddenAgents = ["antigravity"];
+    renderSession();
+    await waitFor(() => {
+      for (const id of ["claude", "codex", "cursor"]) {
+        expect(state.events).toContain(`refresh:${id}:global`);
+      }
+    });
+    state.events.length = 0;
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+
+    await waitFor(() => {
+      expect(state.events).toContain("refresh:codex:global");
+      expect(state.events).toContain("local:claude:global");
+      expect(state.events).toContain("local:cursor:global");
+    });
+    expect(state.events).not.toContain("local:antigravity:global");
   });
 });

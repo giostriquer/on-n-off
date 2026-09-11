@@ -7,7 +7,6 @@ import {
   groupPrsByRepo,
   listCountLabel,
   orderPrs,
-  prsSummary,
   statusHeadline,
 } from "$lib/githubFormat";
 import type { GithubListId, GithubPr, GithubPrList, GithubPrs } from "$lib/githubTypes";
@@ -76,7 +75,7 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="github-screen" aria-busy={loading}>
       <header className="flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1">
-          <h2 className="m-0 text-[17px] font-semibold tracking-[0.05em] uppercase">Pull requests</h2>
+          <h2 className="m-0 text-[15px] font-semibold tracking-[0.05em] uppercase">Pull requests</h2>
           <p className="mt-1 mb-0 font-mono text-[12px] text-[var(--mute)]" data-testid="github-caption">
             {prs?.viewer ? `${prs.viewer} · ` : ""}
             {updated ? `updated ${updated} · ` : ""}
@@ -91,7 +90,6 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
               <span aria-hidden="true"> · refreshing</span>
             ) : null}
           </p>
-          {prs ? <Summary prs={prs} /> : null}
         </div>
         <ScopeChips scope={prs?.scope ?? []} onOpenSettings={onOpenSettings} />
         <button
@@ -142,46 +140,11 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
         ))}
       </div>
 
-      <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
+      <p className="font-mono text-[11px] leading-snug text-[var(--mute)]">
         read-only · signed in through `gh auth login`, nothing is written to GitHub · refreshed while this
         window is visible · the CI glyph opens the checks tab, the row opens the pull request
       </p>
     </div>
-  );
-}
-
-/**
- * "1 mine · 1 failing · 1 with conflicts · 2 ready · 15 to review · 0 assigned". Failing,
- * conflicts and ready appear only when there is any, with a "+" when only part of the user's
- * pull requests were loaded.
- */
-function Summary({ prs }: { prs: GithubPrs }) {
-  const { mine, failing, conflicts, ready, countsArePartial, review, assigned } = prsSummary(prs);
-  const partial = countsArePartial ? "+" : "";
-  const counts = [
-    { count: failing, noun: "failing", color: "var(--trip)" },
-    { count: conflicts, noun: "with conflicts", color: "var(--trip)" },
-    { count: ready, noun: "ready", color: "var(--live)" },
-  ];
-  return (
-    <p className="mt-1.5 mb-0 text-[12.5px] text-[var(--silkscreen)]" data-testid="github-summary">
-      {mine} mine
-      {counts.map(({ count, noun, color }) =>
-        count ? (
-          <span key={noun}>
-            {" · "}
-            <span className="font-semibold" style={{ color }}>
-              {count}
-              {partial} {noun}
-            </span>
-          </span>
-        ) : null,
-      )}
-      {" · "}
-      {review} to review
-      {" · "}
-      {assigned} assigned
-    </p>
   );
 }
 
@@ -223,7 +186,7 @@ function SearchField({ query, onChange }: { query: string; onChange: (query: str
       />
       <input
         type="search"
-        className={`h-8 w-full rounded-md border border-[var(--hair)] bg-[var(--well)] pr-8 pl-8 font-mono text-[11.5px] text-[var(--silkscreen)] placeholder:text-[var(--mute)] [&::-webkit-search-cancel-button]:hidden ${FOCUS_RING}`}
+        className={`h-8 w-full rounded-md border border-[var(--hair)] bg-[var(--well)] pr-8 pl-8 font-mono text-[12px] text-[var(--silkscreen)] placeholder:text-[var(--mute)] [&::-webkit-search-cancel-button]:hidden ${FOCUS_RING}`}
         aria-label="Search pull requests"
         placeholder="title, #number, repository, author, branch"
         value={query}
@@ -297,7 +260,7 @@ function PrList({
         <h3 className="m-0">
           <button
             type="button"
-            className={`flex ${SECTION_HEADER_HEIGHT} w-full items-center gap-2 rounded-[11px] border-0 bg-transparent px-3.5 text-left text-[11.5px] font-semibold tracking-[0.03em] uppercase hover:bg-[var(--well)] ${FOCUS_RING}`}
+            className={`flex ${SECTION_HEADER_HEIGHT} w-full items-center gap-2 rounded-[11px] border-0 bg-transparent px-3.5 text-left text-[12px] font-semibold tracking-[0.03em] uppercase hover:bg-[var(--well)] ${FOCUS_RING}`}
             aria-expanded={open}
             aria-controls={open ? bodyId : undefined}
             onClick={onToggle}
@@ -330,7 +293,7 @@ function PrList({
               >
                 {/* Sits under the section header while its rows scroll past. */}
                 <h4
-                  className={`sticky ${REPO_BAND_TOP} m-0 flex items-center gap-2 bg-[var(--well)] px-3.5 py-1 font-mono text-[10.5px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase`}
+                  className={`sticky ${REPO_BAND_TOP} m-0 flex items-center gap-2 bg-[var(--well)] px-3.5 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase`}
                 >
                   {group.repo}
                   <span className="font-normal normal-case">{group.items.length}</span>

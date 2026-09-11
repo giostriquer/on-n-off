@@ -18,7 +18,7 @@ export type ManagedItemActions = {
 /** `from owner/repo` — the tag a copied item wears instead of "User skill". */
 export function OriginTag({ status }: { status: ItemStatus }) {
   return (
-    <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+    <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
       {copy.fromRepo(`${status.source.owner}/${status.source.repo}`)}
     </span>
   );
@@ -91,7 +91,7 @@ export function AgentCard({
         <span className="mt-2 size-2 shrink-0 rounded-full bg-[var(--live)]" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-[16px]/[1.15] font-semibold break-words">{status.displayName}</span>
+            <span className="text-[13px]/[1.15] font-semibold break-words">{status.displayName}</span>
             <OriginTag status={status} />
           </div>
           <div className="mt-0.5 truncate font-mono text-[11px]/[1.4] text-[var(--mute)]" title={status.targetPath}>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { scopeConfigPath } from "$lib/catalog";
-import { looksLikeFolderPath, projectLabel, sameProjectPath, scopeChip } from "$lib/project";
+import { looksLikeFolderPath, projectLabel, sameProjectPath } from "$lib/project";
 import type { AgentId, ProjectDto } from "$lib/types";
 import "./ScopeBar.css";
 
@@ -8,7 +8,6 @@ type ScopeBarProps = {
   agentId: AgentId;
   projects: ProjectDto[];
   selectedPath: string | null;
-  note: string;
   tally: string;
   globalItems: number;
   onSelect: (path: string | null) => void;
@@ -24,7 +23,6 @@ export function ScopeBar({
   agentId,
   projects,
   selectedPath,
-  note,
   tally,
   globalItems,
   onSelect,
@@ -41,7 +39,6 @@ export function ScopeBar({
     : null;
   const title = selected?.label ?? "All projects";
   const pathLine = selected?.path ?? scopeConfigPath(agentId);
-  const chip = scopeChip(selected);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -131,10 +128,6 @@ export function ScopeBar({
         <span className="scope-chevron">▾</span>
       </button>
 
-      <span className={`scope-chip${selected ? " is-project" : ""}`}>{chip}</span>
-      <span className="scope-note" title={note}>
-        {note}
-      </span>
       <span className="scope-spacer" />
       <span className="scope-tally">{tally}</span>
 

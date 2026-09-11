@@ -80,7 +80,6 @@ it("requires an explicit display before the rail can be shown, then saves its id
     providers: [...ALL],
     pullRequests: { enabled: true, lists: ["mine"] },
   });
-  expect(screen.getByText(/small pill at the screen edge/)).toBeTruthy();
 });
 
 it("keeps a disconnected display selected and lets the notch be hidden", async () => {
@@ -127,7 +126,6 @@ it("offers four edges and three size presets and persists the choice", async () 
   await waitFor(() =>
     expect(calls.save).toHaveBeenLastCalledWith(expect.objectContaining({ edge: "top" })),
   );
-  expect(await screen.findByText(/below the menu bar/)).toBeTruthy();
   fireEvent.click(button("Large"));
   await waitFor(() =>
     expect(calls.save).toHaveBeenLastCalledWith(

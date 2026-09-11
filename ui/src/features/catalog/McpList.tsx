@@ -26,7 +26,7 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
   return (
     <div className="flex flex-col gap-3.5 px-5 pt-[18px] pb-[26px]">
       <header className="flex items-baseline gap-3">
-        <h2 className="m-0 shrink-0 text-[17px] font-semibold tracking-[0.05em] uppercase whitespace-nowrap">MCP servers</h2>
+        <h2 className="m-0 shrink-0 text-[15px] font-semibold tracking-[0.05em] uppercase whitespace-nowrap">MCP servers</h2>
         <span className="font-mono text-xs leading-snug text-[var(--mute)]">
           {live} live · {hasProject ? "global + this project" : "user-scope config only"} · handshake not probed
         </span>
@@ -36,7 +36,7 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
             <button
               key={next}
               type="button"
-              className={`h-[26px] rounded-none border-0 px-3 text-[10.5px] font-semibold tracking-[0.03em] uppercase ${
+              className={`h-[26px] rounded-none border-0 px-3 text-[11px] font-semibold tracking-[0.03em] uppercase ${
                 chip === next ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
               }`}
               aria-pressed={chip === next}
@@ -51,7 +51,7 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
       {notice ? (
         <p
           role="note"
-          className="rounded-[9px] border border-[var(--hair)] bg-[var(--well)] px-3 py-2 text-[12.5px]/[1.45] text-[var(--mute)]"
+          className="rounded-[9px] border border-[var(--hair)] bg-[var(--well)] px-3 py-2 text-[12px]/[1.45] text-[var(--mute)]"
         >
           {notice}
         </p>
@@ -79,12 +79,12 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
                 />
                 <div className="w-[238px] min-w-0 shrink-0">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-[16px]/[1.15] font-semibold break-words">{server.name}</span>
-                    <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+                    <span className="text-[13px]/[1.15] font-semibold break-words">{server.name}</span>
+                    <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
                       {server.system.toUpperCase()}
                     </span>
                     {isProjectOrigin(server.origin) ? (
-                      <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+                      <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
                         PROJECT
                       </span>
                     ) : null}

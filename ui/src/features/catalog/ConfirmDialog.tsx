@@ -45,7 +45,7 @@ export function ConfirmDialog({
           <footer className="mt-4 flex justify-end gap-2">
             <button
               type="button"
-              className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)]"
+              className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12px] text-[var(--silkscreen)]"
               onClick={onCancel}
             >
               {copy.cancel}
@@ -53,7 +53,7 @@ export function ConfirmDialog({
             {alternate ? (
               <button
                 type="button"
-                className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12.5px] text-[var(--silkscreen)] disabled:opacity-45"
+                className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3.5 text-[12px] text-[var(--silkscreen)] disabled:opacity-45"
                 disabled={busy}
                 onClick={alternate.onClick}
               >
@@ -62,7 +62,7 @@ export function ConfirmDialog({
             ) : null}
             <button
               type="button"
-              className="h-8 rounded-lg border border-[var(--trip)] bg-[var(--trip)] px-3.5 text-[12.5px] text-[#f7f1ea] disabled:opacity-45"
+              className="h-8 rounded-lg border border-[var(--trip)] bg-[var(--trip)] px-3.5 text-[12px] text-[#f7f1ea] disabled:opacity-45"
               disabled={busy}
               onClick={onConfirm}
             >

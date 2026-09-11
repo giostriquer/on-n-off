@@ -31,7 +31,6 @@ describe("ScopeBar", () => {
         agentId="claude"
         projects={projects}
         selectedPath={null}
-        note="global agent config is the source of truth"
         tally="3 plugins · 4 skills · 0 mcps live on Claude"
         globalItems={7}
         onSelect={onSelect}
@@ -41,7 +40,6 @@ describe("ScopeBar", () => {
     );
     expect(screen.getByText("SCOPE")).toBeTruthy();
     expect(screen.getByText("All projects")).toBeTruthy();
-    expect(screen.getByText("global config")).toBeTruthy();
     expect(screen.queryByText("Choose folder…")).toBeNull();
     await fireEvent.click(screen.getByRole("button", { name: /All projects/i }));
     expect(screen.getByPlaceholderText("Search projects, or paste a folder path…")).toBeTruthy();
@@ -62,7 +60,6 @@ describe("ScopeBar", () => {
         agentId="codex"
         projects={projects}
         selectedPath={String.raw`E:\dev\on-n-off`}
-        note={String.raw`local skills · E:\dev\on-n-off`}
         tally="1 plugins · 2 skills · 1 mcps live on Codex"
         globalItems={4}
         onSelect={() => undefined}
@@ -70,7 +67,6 @@ describe("ScopeBar", () => {
         onOpenPath={onOpenPath}
       />,
     );
-    expect(screen.getByText("2 local skills · 1 project mcps")).toBeTruthy();
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     const search = screen.getByPlaceholderText("Search projects, or paste a folder path…");
     await fireEvent.input(search, { target: { value: "cono" } });
@@ -90,7 +86,6 @@ describe("ScopeBar", () => {
         agentId="claude"
         projects={projects}
         selectedPath={null}
-        note="global agent config is the source of truth"
         tally="0 plugins · 0 skills · 0 mcps live on Claude"
         globalItems={0}
         onSelect={() => undefined}

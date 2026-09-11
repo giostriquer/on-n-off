@@ -148,8 +148,9 @@ type SessionContextValue = {
   currentProjects: ProjectDto[];
   currentScopePath: string | null;
   currentScopeLabel: string;
-  scopeNote: string;
   loadTab: (agentId: AgentId, probe?: boolean) => Promise<void>;
+  refreshAll: () => Promise<void>;
+  refreshing: boolean;
   selectScope: (path: string | null) => Promise<void>;
   pickProjectFolder: () => Promise<void>;
   openProjectPath: (path: string) => Promise<void>;
@@ -448,6 +449,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [agentLabel, enrichTab, loadProjects, loadRememberedScope, note, withLock],
   );
   loadTabRef.current = loadTab;
+
+  /**
+   * The header Refresh: every visible provider, not only the open tab — a user who edits Claude's
+   * config while Codex is selected expects one button to catch it. Boot sweeps `ALL_AGENTS`
+   * instead, so unhiding a provider later finds its tab already warm.
+   *
+   * Only the open tab probes. A probe re-reads CLI health for all four providers at once, so a
+   * probe per provider would repeat that scan; the rest reload local-first and enrich in the
+   * background, which lands the same data.
+   *
+   * Resolving means every reload was dispatched, not that every one finished: a provider already
+   * loading takes a queued reload that runs after this returns.
+   */
+  const refreshAll = useCallback(async () => {
+    const primary = selectedRef.current;
+    const targets = visibleAgentIds(appSettings.hiddenAgents);
+    await Promise.all(targets.map((id) => loadTab(id, id === primary)));
+    // loadTab only narrates the open tab, so without this the sweep's whole point — that the
+    // providers behind the tab were read too — leaves no trace.
+    note("SYNC", `refreshed ${targets.map(agentLabel).join(", ")}`);
+  }, [agentLabel, appSettings.hiddenAgents, loadTab, note]);
 
   useEffect(() => {
     if (bootStartedRef.current) {
@@ -828,6 +850,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return agents.filter((agent) => visible.includes(agent.id));
   }, [agents, appSettings.hiddenAgents]);
   const currentTab = tabs[selected];
+  const refreshing = useMemo(
+    () => visibleAgents.some((agent) => tabs[agent.id].inFlight),
+    [tabs, visibleAgents],
+  );
   const catalogInventory = useMemo(
     () => deriveCatalogInventory(currentTab.dto),
     [currentTab.dto],
@@ -862,7 +888,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const currentProjects = projectView.projects;
   const currentScopePath = projectView.path;
   const currentScopeLabel = projectView.label;
-  const scopeNote = projectView.note;
 
   const value = useMemo<SessionContextValue>(
     () => ({
@@ -905,8 +930,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       currentProjects,
       currentScopePath,
       currentScopeLabel,
-      scopeNote,
       loadTab,
+      refreshAll,
+      refreshing,
       selectScope,
       pickProjectFolder,
       openProjectPath,
@@ -960,8 +986,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       currentProjects,
       currentScopePath,
       currentScopeLabel,
-      scopeNote,
       loadTab,
+      refreshAll,
+      refreshing,
       selectScope,
       pickProjectFolder,
       openProjectPath,

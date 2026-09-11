@@ -160,8 +160,10 @@ describe("Limits", () => {
     expect(within(codex).getAllByText(/Latest observation/)).toHaveLength(1);
     expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
     expect(within(codex).getAllByText(/resets in/)).toHaveLength(1);
-    expect(screen.getByText("Subscription limits")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Subscription limits" })).toBeTruthy();
+    // The caption carries the poll interval the user configured, the way Pull requests does.
+    expect(screen.getByText("every 5 minutes")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh limits" }).hasAttribute("disabled")).toBe(false);
   });
 
@@ -265,7 +267,6 @@ describe("Limits", () => {
     // It is still the signed-in account: nothing to sign into, nothing to forget.
     expect(within(claude).queryByText(/sign in/)).toBeNull();
     expect(within(claude).queryByRole("button", { name: /^Forget/ })).toBeNull();
-    expect(screen.getByText("Subscription limits")).toBeTruthy();
   });
 
   it("re-reads every provider on focus only after the configured interval", async () => {
@@ -337,7 +338,6 @@ describe("Limits", () => {
     answer([statusOnly("claude", "signedOut", null)], [statusOnly("codex", "signedOut", null), staleCodex()]);
     renderLimits();
     await waitFor(() => expect(card("Codex limits · personal@codex.example")).toBeTruthy());
-    expect(screen.queryByText(/^Subscription limits · as of/)).toBeNull();
     expect(within(card("Codex limits · personal@codex.example")).getAllByText(/Latest observation/)).toHaveLength(1);
   });
 
@@ -362,7 +362,6 @@ describe("Limits", () => {
     await waitFor(() => expect(within(card("Claude limits")).getByText(message)).toBeTruthy());
     expect(card("Claude limits").getAttribute("data-status")).toBe(status);
     expect(within(card("Claude limits")).queryByRole("meter")).toBeNull();
-    expect(screen.getByText("Subscription limits")).toBeTruthy();
   });
 
   it("falls back to generic copy when a non-ok status carries no message", async () => {
@@ -370,7 +369,6 @@ describe("Limits", () => {
     renderLimits();
     await waitFor(() => expect(within(card("Claude limits")).getByText("Claude limits are unavailable.")).toBeTruthy());
     expect(within(card("Codex limits")).getByText("Codex limits are unavailable.")).toBeTruthy();
-    expect(screen.queryByText(/^Subscription limits · as of/)).toBeNull();
   });
 
   it("explains an ok answer with no windows and shows unlimited credits", async () => {

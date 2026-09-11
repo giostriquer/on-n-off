@@ -118,7 +118,7 @@ export function ScopePicker({
         {scope.kind === "project" ? (
           <>
             <select
-              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--hair)] bg-[var(--well)] px-1.5 font-mono text-[11.5px] text-[var(--silkscreen)]"
+              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--hair)] bg-[var(--well)] px-1.5 font-mono text-[12px] text-[var(--silkscreen)]"
               aria-label="Project"
               value={scope.projectPath}
               disabled={disabled}
@@ -135,7 +135,7 @@ export function ScopePicker({
             </select>
             <button
               type="button"
-              className="h-7 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 text-[11.5px] text-[var(--silkscreen)]"
+              className="h-7 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 text-[12px] text-[var(--silkscreen)]"
               disabled={disabled}
               onClick={pickFolder}
             >
@@ -145,7 +145,7 @@ export function ScopePicker({
         ) : null}
       </div>
       {providers.length > 0 ? (
-        <ul className="flex flex-col gap-0.5 font-mono text-[10.5px] text-[var(--mute)]">
+        <ul className="flex flex-col gap-0.5 font-mono text-[11px] text-[var(--mute)]">
           {providers.map((provider) => (
             <li key={provider}>{previewPath(provider, scope)}</li>
           ))}

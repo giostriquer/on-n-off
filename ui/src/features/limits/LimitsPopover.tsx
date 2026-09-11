@@ -86,7 +86,7 @@ export function LimitsPopover() {
     <main className="limits-popover-shell flex h-full min-h-0 flex-col overflow-hidden rounded-[16px] border border-[var(--popover-hair)] text-[var(--silkscreen)]">
       <header className="flex shrink-0 items-center gap-3 border-b border-[var(--popover-hair)] px-3.5 py-2.5">
         <div className="min-w-0 flex-1">
-          <h1 className="m-0 text-[16px] leading-tight font-semibold tracking-[-0.01em]">Limits</h1>
+          <h1 className="m-0 text-[15px] leading-tight font-semibold tracking-[-0.01em]">Limits</h1>
           <p className="mt-0.5 mb-0 text-[11px] text-[var(--mute)] tabular-nums">
             {loading ? "Updating…" : "Subscription usage"}
           </p>
@@ -156,9 +156,9 @@ function PopoverProviderSection({
     <section aria-label={`${name} accounts`} className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5 px-1">
         <ProviderIcon provider={provider} className="size-3.5 shrink-0" title="" />
-        <h2 className="m-0 text-[11.5px] font-semibold tracking-[0.045em] uppercase">{name}</h2>
+        <h2 className="m-0 text-[12px] font-semibold tracking-[0.045em] uppercase">{name}</h2>
         {entries ? (
-          <span className="ml-auto text-[10.5px] text-[var(--mute)]">
+          <span className="ml-auto text-[11px] text-[var(--mute)]">
             {entries.length} {entries.length === 1 ? "account" : "accounts"}
           </span>
         ) : null}
@@ -256,7 +256,7 @@ function PopoverWindow({
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
       <div className="min-w-0">
-        <span className="block truncate text-[10.5px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
+        <span className="block truncate text-[11px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
           {window.label}
         </span>
         {note ? <span className="mt-0.5 block text-[10px] leading-tight text-[var(--mute)] tabular-nums">{note}</span> : null}
