@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { ChevronRight, RefreshCw } from "lucide-react";
 import { displayError, parseInvokeError } from "$lib/error";
-import { PROVIDERS, foldUsage, providerLabel } from "$lib/usageMerge";
+import { PROVIDERS, foldModelsByDay, foldUsage, providerLabel } from "$lib/usageMerge";
 import {
   formatCount,
   formatDayRange,
@@ -50,7 +50,7 @@ function Segmented<T extends string>({
         <button
           key={option.value}
           type="button"
-          className={`h-7 cursor-pointer rounded-none border-0 px-2.5 text-[10.5px] font-semibold tracking-[0.05em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--fill)] ${
+          className={`h-7 cursor-pointer rounded-none border-0 px-2.5 text-[11px] font-semibold tracking-[0.05em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--fill)] ${
             value === option.value
               ? "bg-[var(--fill)] text-[var(--fill-ink)]"
               : "bg-transparent text-[var(--mute)]"
@@ -69,6 +69,7 @@ export function Usage() {
   const [windowDays, setWindowDays] = useState(30);
   const [metric, setMetric] = useState<UsageMetric>("cost");
   const [breakdown, setBreakdown] = useState<BreakdownMode>("model");
+  const [openDays, setOpenDays] = useState<ReadonlySet<string>>(() => new Set());
   const [forceRevision, setForceRevision] = useState(0);
   const forceRef = useRef(false);
   const lastCompleteRef = useRef<UsageQueryResult | null>(null);
@@ -104,7 +105,7 @@ export function Usage() {
   const displayedWindow = displayed?.window ?? activeWindow;
   const loading = query.isFetching;
   const error = query.error ? displayError(parseInvokeError(query.error), "Usage") : null;
-  const folded = foldUsage(summary);
+  const folded = useMemo(() => foldUsage(summary), [summary]);
   const bothMissing = !!summary && summary.sources.every((s) => s.status === "missing");
 
   const inputTokens =
@@ -133,9 +134,13 @@ export function Usage() {
 
   const days = [...folded.daily]
     .filter((period) => period.costUsd > 0 || period.totalTokens > 0)
-    .sort((a, b) =>
-      metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens,
-    );
+    .sort((a, b) => b.day.localeCompare(a.day));
+  // Only the day breakdown opens into models, and expanding a row re-renders the screen:
+  // without this every chevron click would re-walk the window's buckets.
+  const modelsByDay = useMemo(
+    () => (breakdown === "day" ? foldModelsByDay(summary) : null),
+    [breakdown, summary],
+  );
 
   const pricingNote = !summary
     ? ""
@@ -242,7 +247,7 @@ export function Usage() {
                       <span className="font-mono text-[13px] font-medium">
                         {metric === "cost" ? formatUsd(row.costUsd) : formatTokens(row.totalTokens)}
                       </span>
-                      <span className="font-mono text-[11.5px] text-[var(--mute)]">
+                      <span className="font-mono text-[12px] text-[var(--mute)]">
                         {formatPercent(share)} of {metric}
                         {" · "}
                         {formatTokens(row.totalTokens)} tokens
@@ -329,7 +334,7 @@ export function Usage() {
               />
             </div>
 
-            <div className="grid grid-cols-[minmax(0,1.4fr)_88px_64px_88px] gap-2 border-b border-[var(--hair)] pb-2 font-mono text-[10.5px] tracking-[0.04em] text-[var(--mute)] uppercase">
+            <div className="grid grid-cols-[minmax(0,1.4fr)_88px_64px_88px] gap-2 border-b border-[var(--hair)] pb-2 font-mono text-[11px] tracking-[0.04em] text-[var(--mute)] uppercase">
               <span>{breakdown === "model" ? "Model" : "Day"}</span>
               <span className="text-right">Cost</span>
               <span className="text-right">Share</span>
@@ -347,13 +352,13 @@ export function Usage() {
                   >
                     <div className="flex min-w-0 items-center gap-2">
                       <ProviderIcon provider={row.provider} className="size-3.5 shrink-0 translate-y-px" />
-                      <span className="truncate text-[13.5px] font-medium">{row.model}</span>
+                      <span className="truncate text-[13px] font-medium">{row.model}</span>
                     </div>
-                    <span className="font-mono text-right text-[12.5px]">{formatUsd(row.costUsd)}</span>
+                    <span className="font-mono text-right text-[12px]">{formatUsd(row.costUsd)}</span>
                     <span className="font-mono text-right text-[12px] text-[var(--mute)]">
                       {formatPercent(metric === "cost" ? row.costShare : row.tokenShare)}
                     </span>
-                    <span className="font-mono text-right text-[12.5px]">{formatTokens(row.totalTokens)}</span>
+                    <span className="font-mono text-right text-[12px]">{formatTokens(row.totalTokens)}</span>
                   </div>
                 ))
               )
@@ -369,15 +374,76 @@ export function Usage() {
                     : folded.totalTokens === 0
                       ? 0
                       : period.totalTokens / folded.totalTokens;
+                const open = openDays.has(period.day);
+                const ordered = open
+                  ? [...(modelsByDay?.get(period.day) ?? [])].sort((a, b) =>
+                      metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens,
+                    )
+                  : [];
                 return (
-                  <div
-                    key={period.day}
-                    className="grid grid-cols-[minmax(0,1.4fr)_88px_64px_88px] items-center gap-2 border-b border-[var(--hair)] py-2.5 last:border-b-0"
-                  >
-                    <span className="font-mono text-[13px]">{formatDayShort(period.day)}</span>
-                    <span className="font-mono text-right text-[12.5px]">{formatUsd(period.costUsd)}</span>
-                    <span className="font-mono text-right text-[12px] text-[var(--mute)]">{formatPercent(share)}</span>
-                    <span className="font-mono text-right text-[12.5px]">{formatTokens(period.totalTokens)}</span>
+                  <div key={period.day} className="border-b border-[var(--hair)] last:border-b-0">
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      aria-controls={open ? `usage-day-${period.day}` : undefined}
+                      className="grid w-full grid-cols-[minmax(0,1.4fr)_88px_64px_88px] items-center gap-2 rounded-none border-0 bg-transparent px-0 py-2.5 text-left"
+                      onClick={() =>
+                        setOpenDays((prev) => {
+                          const next = new Set(prev);
+                          if (!next.delete(period.day)) {
+                            next.add(period.day);
+                          }
+                          return next;
+                        })
+                      }
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <ChevronRight
+                          className={`size-3.5 shrink-0 text-[var(--mute)] transition-transform motion-reduce:transition-none ${
+                            open ? "rotate-90" : ""
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <span className="font-mono text-[13px]">{formatDayShort(period.day)}</span>
+                      </span>
+                      <span className="font-mono text-right text-[12px]">{formatUsd(period.costUsd)}</span>
+                      <span className="font-mono text-right text-[12px] text-[var(--mute)]">{formatPercent(share)}</span>
+                      <span className="font-mono text-right text-[12px]">{formatTokens(period.totalTokens)}</span>
+                    </button>
+                    {open ? (
+                      <div id={`usage-day-${period.day}`} className="pb-2">
+                        {ordered.length === 0 ? (
+                          <p className="py-1 pl-5 text-[12px] text-[var(--mute)]">No model activity on this day.</p>
+                        ) : (
+                          ordered.map((row) => (
+                            <div
+                              key={`${row.provider}-${row.model}`}
+                              className="grid grid-cols-[minmax(0,1.4fr)_88px_64px_88px] items-center gap-2 py-1.5"
+                            >
+                              <div className="flex min-w-0 items-center gap-2 pl-5">
+                                <ProviderIcon provider={row.provider} className="size-3 shrink-0 translate-y-px" />
+                                <span className="truncate text-[12px] text-[var(--mute)]">{row.model}</span>
+                              </div>
+                              <span className="font-mono text-right text-[11px] text-[var(--mute)]">{formatUsd(row.costUsd)}</span>
+                              <span className="font-mono text-right text-[11px] text-[var(--mute)]">
+                                {formatPercent(
+                                  metric === "cost"
+                                    ? folded.costUsd === 0
+                                      ? 0
+                                      : row.costUsd / folded.costUsd
+                                    : folded.totalTokens === 0
+                                      ? 0
+                                      : row.totalTokens / folded.totalTokens,
+                                )}
+                              </span>
+                              <span className="font-mono text-right text-[11px] text-[var(--mute)]">
+                                {formatTokens(row.totalTokens)}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })
@@ -392,9 +458,9 @@ export function Usage() {
 function Metric({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">{label}</div>
+      <div className="text-[11px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">{label}</div>
       <div className="mt-1 text-[18px] leading-none font-semibold tracking-[-0.02em]">{value}</div>
-      <div className="mt-1.5 text-[11.5px] text-[var(--mute)]">{hint}</div>
+      <div className="mt-1.5 text-[12px] text-[var(--mute)]">{hint}</div>
     </div>
   );
 }

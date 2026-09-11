@@ -4,7 +4,7 @@ mod memory;
 
 use super::*;
 use crate::dto::LimitWindowKind;
-use crate::http::{refused_url, serve_once, serve_sequence, HttpError};
+use crate::http::{head_header, refused_url, serve_once, serve_sequence, HttpError};
 use crate::paths::scratch_dir;
 use credentials::read_claude_credential;
 use json::window;
@@ -296,20 +296,24 @@ fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
     let profile_head = profile_request.join().unwrap();
     let usage_head = usage_request.join().unwrap();
-    assert!(
-        profile_head.contains("Authorization: Bearer kc-token"),
+    assert_eq!(
+        head_header(&profile_head, "authorization"),
+        Some("Bearer kc-token"),
         "{profile_head}"
     );
-    assert!(
-        profile_head.contains("Cache-Control: no-cache"),
+    assert_eq!(
+        head_header(&profile_head, "cache-control"),
+        Some("no-cache"),
         "{profile_head}"
     );
-    assert!(
-        usage_head.contains("Authorization: Bearer kc-token"),
+    assert_eq!(
+        head_header(&usage_head, "authorization"),
+        Some("Bearer kc-token"),
         "{usage_head}"
     );
-    assert!(
-        usage_head.contains("anthropic-beta: oauth-2025-04-20"),
+    assert_eq!(
+        head_header(&usage_head, "anthropic-beta"),
+        Some("oauth-2025-04-20"),
         "{usage_head}"
     );
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
@@ -424,10 +428,10 @@ fn claude_read_prefers_the_keychain_login_and_uses_the_authenticated_profile_ide
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
     let dtos = rig.read(AgentId::Claude, false, &profile_url, &usage_url);
-    assert!(profile_request
-        .join()
-        .unwrap()
-        .contains("Authorization: Bearer keychain-token"));
+    assert_eq!(
+        head_header(&profile_request.join().unwrap(), "authorization"),
+        Some("Bearer keychain-token")
+    );
     usage_request.join().unwrap();
     assert_eq!(dtos[0].status, LimitsStatus::Ok, "{:?}", dtos[0].message);
     assert_eq!(account_of(&dtos[0]).id, "uuid-1");

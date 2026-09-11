@@ -32,6 +32,7 @@ mod project;
 mod read_revision;
 mod scanner;
 mod settings;
+mod sha;
 mod side_notch;
 mod sort;
 mod subscription;

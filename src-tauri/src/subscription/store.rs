@@ -5,7 +5,6 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::{
     fs::File,
     io::Read,
@@ -56,7 +55,7 @@ struct Stored {
     last_attempt_at: Option<DateTime<Utc>>,
 }
 fn path(home: &Path, account: &str) -> PathBuf {
-    let hash = format!("{:x}", Sha256::digest(account.as_bytes()));
+    let hash = crate::sha::sha256_hex(account.as_bytes());
     home.join(".on-n-off/subscriptions")
         .join(format!("codex-{hash}.json"))
 }

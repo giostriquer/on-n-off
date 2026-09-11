@@ -156,10 +156,10 @@ export function MarketplaceInstall({
 
   return (
     <>
-      {!inspect ? <p className="text-[11.5px] text-[var(--mute)]">{hint}</p> : null}
+      {!inspect ? <p className="text-[12px] text-[var(--mute)]">{hint}</p> : null}
       {note ? (
         <p
-          className={`text-[11.5px] ${note.tone === "trip" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
+          className={`text-[12px] ${note.tone === "trip" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
           role={note.tone === "trip" ? "alert" : undefined}
         >
           {note.text}

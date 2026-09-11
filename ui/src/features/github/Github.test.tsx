@@ -128,7 +128,6 @@ describe("Github", () => {
     expect(meta).toContain("octocat");
     expect(meta).toContain("updated just now");
     expect(meta).toContain("every 60 s");
-    expect(screen.getByTestId("github-summary").textContent).toBe("1 mine · 1 failing · 2 to review · 0 assigned");
     expect(screen.getByText("org:acme")).toBeTruthy();
 
     expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual([
@@ -358,7 +357,7 @@ describe("Github", () => {
     expect(within(section("Review requested")).queryByText("Team ask")).toBeNull();
   });
 
-  it("names own pull requests with conflicts or ready to merge in the summary, with their badges", async () => {
+  it("badges own pull requests that have conflicts, are ready, or sit in the merge queue", async () => {
     readGithubPrs.mockResolvedValue(
       okPrs({
         mine: {
@@ -375,9 +374,6 @@ describe("Github", () => {
     renderGithub();
 
     await screen.findByText("Conflicted");
-    expect(screen.getByTestId("github-summary").textContent).toBe(
-      "4 mine · 1 failing · 1 with conflicts · 1 ready · 2 to review · 0 assigned",
-    );
     const mine = section("Mine");
     expect(within(mine).getByText("Conflicts").style.color).toBe("var(--trip)");
     expect(within(mine).getByText("Ready to merge").style.color).toBe("var(--live)");
@@ -424,7 +420,7 @@ describe("Github", () => {
     expect(within(review).getByText("tools: bump lockfile")).toBeTruthy();
   });
 
-  it("marks every own-list count as partial when GitHub holds more than was loaded", async () => {
+  it("shows the loaded slice against the GitHub total in the section heading", async () => {
     readGithubPrs.mockResolvedValue(
       okPrs({
         mine: {
@@ -440,9 +436,6 @@ describe("Github", () => {
     );
     renderGithub();
     await screen.findByText("Second thing");
-    expect(screen.getByTestId("github-summary").textContent).toBe(
-      "137 mine · 1+ failing · 1+ with conflicts · 1+ ready · 2 to review · 0 assigned",
-    );
     expect(within(section("Mine")).getByRole("heading", { level: 3 }).textContent).toContain("4 of 137");
   });
 
@@ -454,6 +447,5 @@ describe("Github", () => {
     expect(within(section("Mine")).getByText("Checking…")).toBeTruthy();
     expect(within(section("Review requested")).getByText("Checking…")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByTestId("github-summary")).toBeNull();
   });
 });

@@ -6,10 +6,21 @@ fn returns_parsed_json_and_sends_the_given_headers() {
     let value = get_json(&url, &[("Authorization", "Bearer t0k"), ("X-Probe", "1")]).unwrap();
     assert_eq!(value["ok"], serde_json::Value::Bool(true));
     let head = request.join().unwrap();
-    assert!(head.contains("Authorization: Bearer t0k"), "{head}");
-    assert!(head.contains("X-Probe: 1"), "{head}");
-    assert!(head.contains("User-Agent: on-n-off/"), "{head}");
-    assert!(head.contains("Accept: application/json"), "{head}");
+    assert_eq!(
+        head_header(&head, "authorization"),
+        Some("Bearer t0k"),
+        "{head}"
+    );
+    assert_eq!(head_header(&head, "x-probe"), Some("1"), "{head}");
+    assert!(
+        head_header(&head, "user-agent").is_some_and(|agent| agent.starts_with("on-n-off/")),
+        "{head}"
+    );
+    assert_eq!(
+        head_header(&head, "accept"),
+        Some("application/json"),
+        "{head}"
+    );
 }
 
 #[test]
@@ -59,23 +70,27 @@ fn post_json_sends_a_bearer_json_body_and_parses_the_reply() {
         "{}",
         captured.head
     );
-    assert!(
-        captured.head.contains("Authorization: Bearer t0k"),
+    assert_eq!(
+        head_header(&captured.head, "authorization"),
+        Some("Bearer t0k"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(
+        head_header(&captured.head, "content-type"),
+        Some("application/json"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(
+        head_header(&captured.head, "accept"),
+        Some("application/json"),
         "{}",
         captured.head
     );
     assert!(
-        captured.head.contains("Content-Type: application/json"),
-        "{}",
-        captured.head
-    );
-    assert!(
-        captured.head.contains("Accept: application/json"),
-        "{}",
-        captured.head
-    );
-    assert!(
-        captured.head.contains("User-Agent: on-n-off/"),
+        head_header(&captured.head, "user-agent")
+            .is_some_and(|agent| agent.starts_with("on-n-off/")),
         "{}",
         captured.head
     );
@@ -191,8 +206,9 @@ fn post_grant_sends_the_body_without_an_authorization_header() {
         "a grant carries its own credential in the body: {}",
         captured.head
     );
-    assert!(
-        captured.head.contains("Content-Type: application/json"),
+    assert_eq!(
+        head_header(&captured.head, "content-type"),
+        Some("application/json"),
         "{}",
         captured.head
     );

@@ -24,7 +24,7 @@
 .rocker.tab {
   height: 30px;
   min-width: 92px;
-  font-size: 11.5px;
+  font-size: 11px;
 }
 
 .rocker.plugin {
@@ -36,19 +36,19 @@
 .rocker.skill {
   height: 22px;
   min-width: 70px;
-  font-size: 9.5px;
+  font-size: 10px;
 }
 
 .rocker.theme {
   height: 22px;
   min-width: 72px;
-  font-size: 9.5px;
+  font-size: 10px;
 }
 
 .rocker.master {
   height: 30px;
   width: 100%;
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .rocker .half {

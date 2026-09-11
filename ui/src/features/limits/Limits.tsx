@@ -22,14 +22,18 @@ export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes })
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="limits-screen" aria-busy={loading}>
-      <header className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1 font-mono text-[12px] text-[var(--mute)]">
-          Subscription limits
-          {loading ? (
-            <span className="ml-2" role="status" aria-live="polite">
-              · Checking…
-            </span>
-          ) : null}
+      <header className="flex flex-wrap items-end gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="m-0 text-[15px] font-semibold tracking-[0.05em] uppercase">Subscription limits</h2>
+          <p className="mt-1 mb-0 font-mono text-[12px] text-[var(--mute)]">
+            every {pollMinutes} minutes
+            {loading ? (
+              <span role="status" aria-live="polite">
+                {" "}
+                · Checking…
+              </span>
+            ) : null}
+          </p>
         </div>
         <button
           type="button"
@@ -48,7 +52,7 @@ export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes })
         ))}
       </div>
 
-      <p className="font-mono text-[10.5px] leading-snug text-[var(--mute)]">
+      <p className="font-mono text-[11px] leading-snug text-[var(--mute)]">
         Reset times apply to usage limits. Signed-out accounts show their last known usage.
       </p>
     </div>
@@ -127,7 +131,7 @@ function CardHeader({ entry, provider, updatedAt, status }: { entry?: ProviderLi
       <div className="flex items-center gap-2.5">
         <ProviderIcon provider={provider} className="size-3.5 shrink-0" />
         <div className="flex min-w-0 flex-1 items-baseline gap-2.5">
-          <span className="shrink-0 text-[11.5px] font-semibold tracking-[0.03em] uppercase">{name}</span>
+          <span className="shrink-0 text-[12px] font-semibold tracking-[0.03em] uppercase">{name}</span>
           {label ? <span className="min-w-0 truncate font-mono text-[11px] text-[var(--mute)]" title={label}>{label}</span> : null}
         </div>
         {credits ? (
@@ -288,7 +292,7 @@ function HeroWindow({
           {text}
         </span>
         {note ? (
-          <span className="min-w-0 flex-1 pb-0.5 font-mono text-[11.5px] leading-snug text-[var(--mute)]">{note}</span>
+          <span className="min-w-0 flex-1 pb-0.5 font-mono text-[12px] leading-snug text-[var(--mute)]">{note}</span>
         ) : null}
       </div>
       <Meter window={window} percent={percent} tone={tone} valueText={valueText} provider={provider} className="h-1.5" />

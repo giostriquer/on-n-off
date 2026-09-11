@@ -157,6 +157,7 @@ fn model_priced_matches_hand_calc() {
 
 #[test]
 fn unavailable_when_no_cache_and_fetch_fails() {
+    let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
     let home = scratch_dir("usage-rates-miss");
     let snap = with_test_fetch(None, || ensure_rates(&home, 1_000_000, false));
     assert_eq!(snap.status, PricingStatus::Unavailable);
@@ -166,6 +167,7 @@ fn unavailable_when_no_cache_and_fetch_fails() {
 
 #[test]
 fn uses_disk_cache_within_ttl() {
+    let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
     let home = scratch_dir("usage-rates-cache");
     let path = rates_cache_path(&home);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -191,7 +193,10 @@ fn fresh_fetch_writes_disk() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Tests that fetch successfully clear the process-wide early-refresh flag; serialise them.
+/// Every test that drives `ensure_rates` shares two pieces of process-wide state: the
+/// early-refresh flag a successful fetch clears, and the single-slot parsed-table memo, which the
+/// next test's scratch home overwrites. Serialise them, or the memo test reads another test's
+/// slot and sees a re-parse.
 fn flag_lock() -> &'static Mutex<()> {
     static LOCK: Mutex<()> = Mutex::new(());
     &LOCK
@@ -266,6 +271,7 @@ fn an_unknown_model_keeps_asking_for_an_early_refresh_until_a_fetch_succeeds() {
 
 #[test]
 fn the_disk_table_is_parsed_once_per_file_version() {
+    let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
     let home = crate::paths::scratch_dir("rates-memo");
     std::fs::create_dir_all(home.join(".on-n-off")).unwrap();
     let path = rates_cache_path(&home);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatTokens, formatUsd, makeWindow } from "./usageFormat";
-import { foldUsage, PROVIDERS, providerLabel } from "./usageMerge";
+import { foldModelsByDay, foldUsage, PROVIDERS, providerLabel } from "./usageMerge";
 import { buildChartSeries, toChartRows } from "./usageChart";
 import type { UsageSummary } from "./usageTypes";
 
@@ -124,6 +124,26 @@ describe("foldUsage", () => {
     expect(folded.tokens.uncachedInputTokens).toBe(310);
     expect(folded.tokens.outputTokens).toBe(65);
     expect(folded.activeDays).toBe(2);
+  });
+});
+
+describe("foldModelsByDay", () => {
+  it("groups a day's models and totals them to that day's own total", () => {
+    const folded = foldUsage(summary());
+    const byDay = foldModelsByDay(summary());
+    const first = byDay.get("2026-08-07") ?? [];
+    expect(first.map((row) => row.model).sort()).toEqual(["claude-fable-5", "gpt-5.6"]);
+    const claude = first.find((row) => row.model === "claude-fable-5");
+    expect(claude?.costUsd).toBeCloseTo(1.25);
+    // The rows under a day add up to the day row above them, which is what lets the caller
+    // share both levels against the window.
+    const day = folded.daily.find((period) => period.day === "2026-08-07");
+    expect(first.reduce((total, row) => total + row.costUsd, 0)).toBeCloseTo(day?.costUsd ?? 0);
+    expect(first.reduce((total, row) => total + row.totalTokens, 0)).toBe(day?.totalTokens);
+  });
+
+  it("is empty for no summary", () => {
+    expect(foldModelsByDay(null).size).toBe(0);
   });
 });
 

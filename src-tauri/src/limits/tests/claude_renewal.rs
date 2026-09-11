@@ -3,7 +3,7 @@
 //! caller was handed. The mechanism's own edges live in `limits/claude_renew/tests.rs`.
 
 use super::*;
-use crate::http::serve_once_capturing;
+use crate::http::{head_header, serve_once_capturing};
 
 /// What `platform.claude.com/v1/oauth/token` answers a `refresh_token` grant. `expires_in` is
 /// the eight hours Claude Code's access tokens actually live; the reply rotates the refresh
@@ -62,8 +62,9 @@ fn an_expired_claude_login_is_renewed_from_its_refresh_token_before_the_read() {
     );
     profile_request.join().unwrap();
     let usage_head = usage_request.join().unwrap();
-    assert!(
-        usage_head.contains("Authorization: Bearer renewed-token"),
+    assert_eq!(
+        head_header(&usage_head, "authorization"),
+        Some("Bearer renewed-token"),
         "{usage_head}"
     );
     assert_eq!(dtos[0].status, LimitsStatus::Ok, "{:?}", dtos[0].message);

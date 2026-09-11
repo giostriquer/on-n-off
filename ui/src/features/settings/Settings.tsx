@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FolderOpen, RefreshCw, X } from "lucide-react";
+import { FolderOpen, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Rocker } from "@/features/agents/Rocker";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
@@ -59,8 +59,11 @@ export function Settings({
   onLimitsPollMinutesChange,
   onSettingsChange,
 }: SettingsProps) {
+  // Keyed on the health the shell already probed, not just the binary overrides: a refresh that
+  // finds a newly installed CLI would otherwise leave this card listing the failure that fixed.
+  const health = agents.map((agent) => `${agent.id}:${agent.cliOk}`).join(",");
   const diagnose = useQuery({
-    queryKey: ["diagnose-providers", settings.binaryPaths],
+    queryKey: ["diagnose-providers", settings.binaryPaths, health],
     queryFn: () => api.diagnoseProviders(),
   });
   const reports = diagnose.data ?? [];
@@ -70,21 +73,11 @@ export function Settings({
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]">
       <header className="flex flex-wrap items-end gap-3">
         <div>
-          <h2 className="m-0 text-[17px] font-semibold tracking-[0.05em] uppercase">Settings</h2>
+          <h2 className="m-0 text-[15px] font-semibold tracking-[0.05em] uppercase">Settings</h2>
           <p className="mt-1 font-mono text-[12px] text-[var(--mute)]">
             providers on this machine · hide from tabs · diagnose CLI setup
           </p>
         </div>
-        <div className="flex-1" />
-        <button
-          type="button"
-          className="inline-flex size-8 items-center justify-center rounded-lg border border-[var(--hair)] bg-[var(--well)] text-[var(--silkscreen)] disabled:opacity-45"
-          aria-label="Re-run diagnose"
-          disabled={diagnose.isFetching}
-          onClick={() => void diagnose.refetch()}
-        >
-          <RefreshCw className={`size-3.5 ${diagnose.isFetching ? "animate-spin" : ""}`} aria-hidden="true" />
-        </button>
       </header>
 
       <UpdaterSettingsCard
@@ -104,7 +97,7 @@ export function Settings({
         onCloseToTrayChange={(enabled) => onSettingsChange({ closeToTray: enabled })}
       />
 
-      <NotchSettingsCard pollMinutes={settings.limitsPollMinutes} />
+      <NotchSettingsCard />
 
       <GithubSettingsCard
         scopes={settings.githubScopes}
@@ -196,13 +189,13 @@ function GithubSettingsCard({
     <section aria-label="Pull requests" className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
       <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[15px] font-semibold">Pull requests</h3>
-          <p className="mt-1 mb-0 text-[11.5px] text-[var(--mute)]">
+          <h3 className="m-0 text-[13px] font-semibold">Pull requests</h3>
+          <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
             Reads GitHub through the `gh` CLI's login; nothing is written to GitHub.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
             PR notify
           </span>
           <Rocker
@@ -219,7 +212,7 @@ function GithubSettingsCard({
           <label htmlFor="github-scope" className="text-[12px] text-[var(--mute)]">
             Scopes
           </label>
-          <span id="github-scope-help" className="font-mono text-[10.5px] text-[var(--mute)]">
+          <span id="github-scope-help" className="font-mono text-[11px] text-[var(--mute)]">
             org:NAME, user:NAME or OWNER/REPO narrow the pull requests you authored · Enter adds · empty
             means all repositories · same-kind scopes combine, mixing kinds narrows
           </span>
@@ -228,7 +221,7 @@ function GithubSettingsCard({
           {scopes.map((scope) => (
             <span
               key={scope}
-              className="inline-flex items-center gap-0.5 rounded-md border border-[var(--hair)] py-0.5 pr-0.5 pl-1.5 font-mono text-[10.5px]"
+              className="inline-flex items-center gap-0.5 rounded-md border border-[var(--hair)] py-0.5 pr-0.5 pl-1.5 font-mono text-[11px]"
             >
               {scope}
               <button
@@ -275,7 +268,7 @@ function GithubSettingsCard({
           ))}
         </select>
         {permissionMessage ? (
-          <p className="m-0 basis-full text-[11.5px] text-[var(--trip)]" role="status">
+          <p className="m-0 basis-full text-[12px] text-[var(--trip)]" role="status">
             {permissionMessage}
           </p>
         ) : null}
@@ -304,13 +297,13 @@ function LimitNotificationsCard({
     >
       <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[15px] font-semibold">Usage limits</h3>
-          <p className="mt-1 mb-0 text-[11.5px] text-[var(--mute)]">
+          <h3 className="m-0 text-[13px] font-semibold">Usage limits</h3>
+          <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
             Notifies when usage reaches 100% or a limit resets while on-n-off is running.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
             Notify
           </span>
           <Rocker
@@ -340,7 +333,7 @@ function LimitNotificationsCard({
           ))}
         </select>
         {permissionMessage ? (
-          <p className="m-0 basis-full text-[11.5px] text-[var(--trip)]" role="status">
+          <p className="m-0 basis-full text-[12px] text-[var(--trip)]" role="status">
             {permissionMessage}
           </p>
         ) : null}
@@ -391,22 +384,22 @@ function ProviderCard({
       <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
         <ProviderIcon provider={agent.id} className="mt-0.5 size-5 shrink-0" />
         <div className="min-w-0 flex-1">
-          <div className="text-[15px] font-semibold">{agent.displayName}</div>
-          <div className="mt-1 font-mono text-[11.5px] text-[var(--mute)]">
+          <div className="text-[13px] font-semibold">{agent.displayName}</div>
+          <div className="mt-1 font-mono text-[12px] text-[var(--mute)]">
             {cliOk ? "CLI found" : "CLI missing"}
             {" · "}
             {report?.homePath ?? BINARY_NAME[agent.id]}
           </div>
         </div>
         <span
-          className={`mt-0.5 shrink-0 border px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] ${
+          className={`mt-0.5 shrink-0 border px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] ${
             cliOk ? "border-[var(--live)] text-[var(--live)]" : "border-[var(--trip)] text-[var(--trip)]"
           }`}
         >
           {cliOk ? "OK" : "DOWN"}
         </span>
         <div className="flex flex-col items-end gap-1">
-          <span className="text-[9.5px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
+          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
             Show in tabs
           </span>
           <Rocker
@@ -468,10 +461,10 @@ function ProviderCard({
                     aria-hidden="true"
                   />
                   <div className="min-w-0">
-                    <div className="text-[12.5px] font-semibold">{check.label}</div>
+                    <div className="text-[12px] font-semibold">{check.label}</div>
                     <div className="font-mono text-[11px] leading-snug text-[var(--mute)]">{check.detail}</div>
                     {check.hint ? (
-                      <div className="mt-0.5 text-[11.5px] leading-snug text-[var(--mute)]">{check.hint}</div>
+                      <div className="mt-0.5 text-[12px] leading-snug text-[var(--mute)]">{check.hint}</div>
                     ) : null}
                   </div>
                 </li>

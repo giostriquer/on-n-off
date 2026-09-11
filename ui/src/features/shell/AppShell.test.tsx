@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 
 const setFilter = vi.hoisted(() => vi.fn());
+const refreshAll = vi.hoisted(() => vi.fn());
+const loadTab = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
 const routerState = vi.hoisted(() => ({ pathname: "/plugins" }));
 const onOpenLimitsWindow = vi.hoisted(() =>
@@ -46,7 +48,6 @@ const session = {
   showMasterCut: false,
   currentProjects: [],
   currentScopePath: null,
-  scopeNote: "global agent config is the source of truth",
   installOpen: false,
   setInstallOpen: vi.fn(),
   installError: null,
@@ -54,7 +55,9 @@ const session = {
   uninstallTarget: null,
   setUninstallTarget: vi.fn(),
   setFilter,
-  loadTab: vi.fn(),
+  loadTab,
+  refreshAll,
+  refreshing: false,
   selectScope: vi.fn(),
   pickProjectFolder: vi.fn(),
   openProjectPath: vi.fn(),
@@ -180,5 +183,34 @@ describe("AppShell native navigation", () => {
     act(() => openLimitsHandler?.());
 
     expect(navigate).toHaveBeenCalledWith({ to: "/limits" });
+  });
+});
+
+describe("AppShell refresh", () => {
+  beforeEach(() => {
+    refreshAll.mockClear();
+    loadTab.mockClear();
+  });
+
+  it("stays out of the way while a sweep is still running", () => {
+    session.refreshing = true;
+    try {
+      render(<AppShell />);
+      const button = screen.getByRole("button", { name: "Refresh all providers" });
+      expect(button.hasAttribute("disabled")).toBe(true);
+      fireEvent.click(button);
+      expect(refreshAll).not.toHaveBeenCalled();
+    } finally {
+      session.refreshing = false;
+    }
+  });
+
+  it("sweeps every provider instead of only the open tab", () => {
+    render(<AppShell />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all providers" }));
+
+    expect(refreshAll).toHaveBeenCalledTimes(1);
+    expect(loadTab).not.toHaveBeenCalled();
   });
 });

@@ -77,7 +77,7 @@ function cliBinaryName(id: AgentId): string {
 function Status({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span
-      className={`shrink-0 border px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] ${
+      className={`shrink-0 border px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] ${
         ok ? "border-[var(--live)] text-[var(--live)]" : "border-[var(--trip)] text-[var(--trip)]"
       }`}
     >
@@ -213,7 +213,7 @@ export function AgentConfig({
       <header className="flex flex-wrap items-end gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <ProviderIcon provider={agent.id} className="size-5 shrink-0" />
-          <h2 className="m-0 text-[17px] font-semibold tracking-[0.05em] uppercase">
+          <h2 className="m-0 text-[15px] font-semibold tracking-[0.05em] uppercase">
             {agent.displayName} config
           </h2>
         </div>
@@ -221,11 +221,11 @@ export function AgentConfig({
         <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-[var(--mute)]">
           <Status ok={agent.cliOk} label={agent.cliOk ? "CLI OK" : "CLI DOWN"} />
           {driftCount > 0 ? (
-            <span className="border border-[var(--warn)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] text-[var(--warn)]">
+            <span className="border border-[var(--warn)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--warn)]">
               {driftCount} DRIFT
             </span>
           ) : (
-            <span className="border border-[var(--hair)] px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em]">
+            <span className="border border-[var(--hair)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em]">
               IN SYNC
             </span>
           )}
@@ -233,7 +233,7 @@ export function AgentConfig({
       </header>
 
       {agent.cliError ? (
-        <p className="rounded-[11px] border border-[var(--trip)] bg-[var(--plate)] px-3.5 py-2.5 text-[12.5px] text-[var(--trip)]">
+        <p className="rounded-[11px] border border-[var(--trip)] bg-[var(--plate)] px-3.5 py-2.5 text-[12px] text-[var(--trip)]">
           {agent.cliError}
         </p>
       ) : null}
@@ -244,7 +244,7 @@ export function AgentConfig({
             <div className="text-[11px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
               Project scope on {agent.displayName}
             </div>
-            <div className="mt-1 font-mono text-[11.5px] text-[var(--mute)]">
+            <div className="mt-1 font-mono text-[12px] text-[var(--mute)]">
               {selectedPath ? "project mode" : "global config"} · {projects.length} recognized
               {withLocal > 0 ? ` · ${withLocal} with local skills/MCP` : ""}
             </div>
@@ -256,13 +256,13 @@ export function AgentConfig({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter projects…"
-              className="min-w-0 flex-1 border-0 bg-transparent text-[12.5px] text-[var(--silkscreen)] outline-none placeholder:text-[var(--mute)]"
+              className="min-w-0 flex-1 border-0 bg-transparent text-[12px] text-[var(--silkscreen)] outline-none placeholder:text-[var(--mute)]"
             />
           </label>
           {onPickFolder ? (
             <button
               type="button"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--hair)] bg-transparent px-2.5 text-[10.5px] font-semibold tracking-[0.04em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--fill)]"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--hair)] bg-transparent px-2.5 text-[11px] font-semibold tracking-[0.04em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--fill)]"
               onClick={onPickFolder}
             >
               <FolderPlus className="size-3.5" aria-hidden="true" />
@@ -274,7 +274,7 @@ export function AgentConfig({
         <div className="grid gap-3 border-b border-[var(--hair)] px-3.5 py-3 sm:grid-cols-3">
           <div className="rounded-md border border-[var(--hair)] bg-[var(--well)] px-3 py-2.5">
             <div className="text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">Active scope</div>
-            <div className="mt-1 truncate text-[14px] font-semibold">{selected?.label ?? "All projects"}</div>
+            <div className="mt-1 truncate text-[13px] font-semibold">{selected?.label ?? "All projects"}</div>
             <div className="mt-1 truncate font-mono text-[11px] text-[var(--mute)]">
               {selected?.path ?? `${root}/ · global source of truth`}
             </div>
@@ -284,7 +284,7 @@ export function AgentConfig({
             <div className="mt-1 text-[22px] leading-none font-semibold">
               {selected ? (selected.skillCount ?? 0) : projects.reduce((n, p) => n + (p.skillCount ?? 0), 0)}
             </div>
-            <div className="mt-1 text-[11.5px] text-[var(--mute)]">
+            <div className="mt-1 text-[12px] text-[var(--mute)]">
               {selected ? "in the selected project" : "across recognized projects"}
             </div>
           </div>
@@ -293,7 +293,7 @@ export function AgentConfig({
             <div className="mt-1 text-[22px] leading-none font-semibold">
               {selected ? (selected.mcpCount ?? 0) : projects.reduce((n, p) => n + (p.mcpCount ?? 0), 0)}
             </div>
-            <div className="mt-1 text-[11.5px] text-[var(--mute)]">
+            <div className="mt-1 text-[12px] text-[var(--mute)]">
               {selected ? "servers in this project" : "servers across projects"}
             </div>
           </div>
@@ -320,8 +320,8 @@ export function AgentConfig({
           }`}
           onClick={() => onSelectScope?.(null)}
         >
-          <span className="truncate text-[13.5px] font-semibold">All projects</span>
-          <span className="truncate font-mono text-[11.5px] text-[var(--mute)]">{root}/</span>
+          <span className="truncate text-[13px] font-semibold">All projects</span>
+          <span className="truncate font-mono text-[12px] text-[var(--mute)]">{root}/</span>
           <span className="font-mono text-[11px] text-[var(--mute)]">—</span>
           <span className="font-mono text-right text-[12px]">
             {projects.reduce((n, p) => n + (p.skillCount ?? 0), 0)}
@@ -355,9 +355,9 @@ export function AgentConfig({
                     className={`size-1.5 shrink-0 rounded-full ${active ? "bg-[var(--live)]" : "bg-[var(--mute)] opacity-40"}`}
                     aria-hidden="true"
                   />
-                  <span className="truncate text-[13.5px] font-semibold">{project.label}</span>
+                  <span className="truncate text-[13px] font-semibold">{project.label}</span>
                 </span>
-                <span className="truncate font-mono text-[11.5px] text-[var(--mute)]">{project.path}</span>
+                <span className="truncate font-mono text-[12px] text-[var(--mute)]">{project.path}</span>
                 <span className="truncate font-mono text-[11px] text-[var(--mute)]">{project.branch || "—"}</span>
                 <span className="font-mono text-right text-[12px]">{project.skillCount ?? 0}</span>
                 <span className="font-mono text-right text-[12px]">{project.mcpCount ?? 0}</span>
@@ -401,19 +401,19 @@ export function AgentConfig({
             </span>
             <div>
               <div className="text-[13px] font-semibold">Back up before write</div>
-              <div className="mt-0.5 text-[11.5px] text-[var(--mute)]">
+              <div className="mt-0.5 text-[12px] text-[var(--mute)]">
                 Copy the target file into ~/.on-n-off/backups. Always on.
               </div>
             </div>
             <div>
               <div className="text-[13px] font-semibold">Roll back on failure</div>
-              <div className="mt-0.5 text-[11.5px] text-[var(--mute)]">
+              <div className="mt-0.5 text-[12px] text-[var(--mute)]">
                 Restore the previous file if a write fails. Always on.
               </div>
             </div>
             <div>
               <div className="text-[13px] font-semibold">Watch config files</div>
-              <div className="mt-0.5 text-[11.5px] text-[var(--mute)]">Not in v1. Refresh still rescans.</div>
+              <div className="mt-0.5 text-[12px] text-[var(--mute)]">Not in v1. Refresh still rescans.</div>
             </div>
           </section>
         </div>
@@ -444,11 +444,11 @@ export function AgentConfig({
             >
               <span className="font-mono w-10 shrink-0 text-[11px] text-[var(--mute)]">{entry.at}</span>
               <span
-                className={`shrink-0 px-1.5 py-0.5 text-[9.5px] font-semibold tracking-[0.03em] ${tripTagClass(entry.tag)}`}
+                className={`shrink-0 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] ${tripTagClass(entry.tag)}`}
               >
                 {entry.tag}
               </span>
-              <span className="min-w-0 truncate text-[12.5px]">{entry.text}</span>
+              <span className="min-w-0 truncate text-[12px]">{entry.text}</span>
             </div>
           ))
         )}

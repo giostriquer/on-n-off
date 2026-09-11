@@ -27,7 +27,6 @@ export type ProjectView = {
   projects: ProjectDto[];
   path: string | null;
   label: string;
-  note: string;
 };
 
 export function deriveCatalogInventory(dto: AgentTabDto | null): CatalogInventory {
@@ -62,13 +61,11 @@ export function deriveProjectView(
       projects: merged,
       path,
       label: "all projects",
-      note: "global agent config is the source of truth",
     };
   }
   return {
     projects: merged,
     path,
     label: merged.find((project) => sameProjectPath(project.path, path))?.label ?? projectLabel(path),
-    note: `local skills · ${path}`,
   };
 }

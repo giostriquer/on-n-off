@@ -1,6 +1,6 @@
 [package]
 name = "on-n-off"
-version = "0.8.0"
+version = "0.9.0"
 description = "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration"
 authors = ["Giovanne Striquer"]
 edition = "2021"
@@ -33,13 +33,13 @@ tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-toml = "0.8"
-toml_edit = "0.22"
-ureq = "2"
+toml = "1.1"
+toml_edit = "0.25"
+ureq = "3"
 flate2 = "1"
 tar = "0.4"
-sha2 = "0.10"
-base64 = "0.22"
+sha2 = "0.11"
+base64 = "0.23"
 regex = "1"
 chrono = { version = "0.4.45", features = ["clock", "serde"] }
 chrono-tz = "0.10.4"
@@ -51,11 +51,14 @@ tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"
+# `winreg` and `windows` are held at the versions the tauri/tao tree already resolves, for the
+# same reason `tao` is: a second copy of `windows` is the largest codegen unit in the Windows
+# tree, and every duplicated generation counts against the 10 GB Actions cache cap that
+# cache-prune.yml exists to defend. 0.62 and 0.56 change none of the Win32 functions, DirectWrite
+# methods or registry APIs this crate calls, so the bump would be cost without gain.
 winreg = "0.55"
-# Side notch overlay (Windows 11): tao is pinned to the version tauri already
-# pulls in, so the lockfile never holds two copies.
 tao = "0.35"
-tiny-skia = "0.11"
+tiny-skia = "0.12"
 windows = { version = "0.61", features = [
   "Win32_Devices_Display",
   "Win32_Foundation",

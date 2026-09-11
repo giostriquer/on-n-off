@@ -26,12 +26,12 @@ export function SkillRow({ skill, busy = false, live, onToggle }: SkillRowProps)
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-semibold leading-snug break-words">{skill.name}</div>
         {skill.description ? (
-          <div className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug break-words text-[var(--mute)]">
+          <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug break-words text-[var(--mute)]">
             {skill.description}
           </div>
         ) : null}
         {skill.togglable ? (
-          <div className="mt-0.5 font-mono text-[10.5px] text-[var(--mute)]">user-togglable</div>
+          <div className="mt-0.5 font-mono text-[11px] text-[var(--mute)]">user-togglable</div>
         ) : null}
       </div>
       {skill.togglable ? (
@@ -46,7 +46,7 @@ export function SkillRow({ skill, busy = false, live, onToggle }: SkillRowProps)
         </div>
       ) : (
         <span
-          className="mt-1 flex min-w-[88px] shrink-0 items-center gap-[7px] font-mono text-[10.5px] text-[var(--mute)]"
+          className="mt-1 flex min-w-[88px] shrink-0 items-center gap-[7px] font-mono text-[11px] text-[var(--mute)]"
           title={lockedNote}
         >
           <span className="size-2 shrink-0 rounded-full bg-[var(--mute)]" aria-hidden="true" />

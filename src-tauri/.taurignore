@@ -1,3 +1,4 @@
-# The Swift helper builds into this directory during every cargo build; watching it would
-# restart `tauri dev` whenever the native checks or a manual `swift build` run.
-macos/SideNotch/.build/
+# Every Swift helper builds into its own `.build` directory during a cargo build; watching
+# them would restart `tauri dev` on each build, including the manual `swift build` runs and
+# the native checks. Covers macos/SideNotch and macos/BrowserBilling.
+macos/*/.build/

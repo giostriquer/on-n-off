@@ -40,7 +40,7 @@
 .usage-chart-tooltip .ts-chart-tooltip__title {
   margin-bottom: 0.35rem;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 10px;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--mute);

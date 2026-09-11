@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GithubPr, GithubPrsData } from "./githubTypes";
+import type { GithubPr } from "./githubTypes";
 import {
   ciLabel,
   ciTone,
@@ -9,7 +9,6 @@ import {
   listCountLabel,
   mergeBadge,
   orderPrs,
-  prsSummary,
   reviewBadge,
   statusHeadline,
 } from "./githubFormat";
@@ -178,54 +177,4 @@ describe("githubFormat", () => {
     expect(reviewBadge(undefined)).toBeNull();
   });
 
-  it("summarises the three lists in one line, naming failing CI on own pull requests", () => {
-    const data: GithubPrsData = {
-      scope: [],
-      mine: { total: 3, items: [pr({ ci: "failure" }), pr({ ci: "error" }), pr({ ci: "success" })] },
-      reviewRequested: { total: 15, items: [pr({ ci: "failure" })] },
-      assigned: { total: 0, items: [] },
-    };
-    expect(prsSummary(data)).toEqual({ mine: 3, failing: 2, conflicts: 0, ready: 0, countsArePartial: false, review: 15, assigned: 0 });
-    expect(prsSummary({ ...data, mine: { total: 0, items: [] } })).toEqual({
-      mine: 0,
-      failing: 0,
-      conflicts: 0,
-      ready: 0,
-      countsArePartial: false,
-      review: 15,
-      assigned: 0,
-    });
-    // With more on GitHub than was loaded, the failing count covers only the loaded page.
-    expect(prsSummary({ ...data, mine: { total: 137, items: data.mine.items } })).toEqual({
-      mine: 137,
-      failing: 2,
-      conflicts: 0,
-      ready: 0,
-      countsArePartial: true,
-      review: 15,
-      assigned: 0,
-    });
-  });
-
-  it("counts own pull requests with conflicts and ready to merge", () => {
-    const data: GithubPrsData = {
-      scope: [],
-      mine: {
-        total: 6,
-        items: [
-          pr({ mergeKind: "conflicts" }),
-          pr({ mergeKind: "conflicts", isDraft: true }),
-          pr({ mergeKind: "ready", ci: "success" }),
-          pr({ mergeKind: "blocked" }),
-          // Queued and auto-merge rows say so; they are past "ready", not counted as it.
-          pr({ mergeKind: "queued", mergeQueue: { position: 1 } }),
-          pr({ mergeKind: "autoMerge" }),
-        ],
-      },
-      // Conflicts on the review list are the author's problem, not the reviewer's.
-      reviewRequested: { total: 1, items: [pr({ mergeKind: "conflicts" })] },
-      assigned: { total: 0, items: [] },
-    };
-    expect(prsSummary(data)).toMatchObject({ conflicts: 2, ready: 1 });
-  });
 });
