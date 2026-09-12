@@ -80,6 +80,8 @@ pub fn run() {
             side_notch::setup(_app);
             #[cfg(target_os = "macos")]
             std::thread::spawn(subscription::recover_imports);
+            #[cfg(target_os = "macos")]
+            notifications::refresh_authorization(_app.handle().clone());
             limits_monitor::setup(_app);
             github_monitor::setup(_app);
             Ok(())
