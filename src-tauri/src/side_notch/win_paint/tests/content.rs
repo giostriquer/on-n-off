@@ -130,7 +130,7 @@ fn a_reset_window_reads_as_zero_and_never_recites_its_spent_figure() {
         })
         .collect();
     assert!(
-        texts.iter().any(|text| *text == "0% Used"),
+        texts.contains(&"0% Used"),
         "the popover says so too: {texts:?}"
     );
     assert!(
