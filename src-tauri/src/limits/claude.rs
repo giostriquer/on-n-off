@@ -19,6 +19,7 @@ pub(super) fn parse_profile(payload: &Value) -> Result<ClaudeIdentity, String> {
         .ok_or_else(|| "missing organization".to_string())?;
     Ok(ClaudeIdentity {
         account: LimitsAccountDto {
+            legacy_id: None,
             id: optional_string(account.get("uuid"))
                 .ok_or_else(|| "missing account uuid".to_string())?,
             label: optional_string(account.get("email")),

@@ -15,6 +15,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
         status: LimitsStatus::Ok,
         message: None,
         account: Some(LimitsAccountDto {
+            legacy_id: None,
             id: id.to_string(),
             label: Some(label.to_string()),
         }),
@@ -33,6 +34,46 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
         window.observed_at = observed_at.to_string();
     }
     dto
+}
+
+#[test]
+fn legacy_removal_rechecks_the_stored_email_after_another_account_replaces_history() {
+    let home = scratch_dir("limits-forget-matching");
+    let store = SnapshotStore::for_home(&home);
+    store
+        .save(&snapshot(
+            AgentId::Codex,
+            "team",
+            "first@example.com",
+            "2026-09-13T12:00:00Z",
+        ))
+        .unwrap();
+    // The UI confirmed the first account, but another writer replaced its workspace-keyed row.
+    store
+        .save(&snapshot(
+            AgentId::Codex,
+            "team",
+            "second@example.com",
+            "2026-09-13T13:00:00Z",
+        ))
+        .unwrap();
+    assert!(store
+        .forget_matching_email(AgentId::Codex, "team", "first@example.com")
+        .is_err());
+    assert_eq!(
+        store.load(AgentId::Codex)[0]
+            .account
+            .as_ref()
+            .unwrap()
+            .label
+            .as_deref(),
+        Some("second@example.com")
+    );
+    store
+        .forget_matching_email(AgentId::Codex, "team", " Second@Example.com ")
+        .unwrap();
+    assert!(store.load(AgentId::Codex).is_empty());
+    std::fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
@@ -139,6 +180,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
         status: LimitsStatus::Ok,
         message: None,
         account: Some(LimitsAccountDto {
+            legacy_id: None,
             id: "acct-1".to_string(),
             label: Some("a@x".to_string()),
         }),
@@ -287,4 +329,36 @@ fn account_ids_are_made_safe_for_file_names() {
         store.load(AgentId::Claude)[0].account.as_ref().unwrap().id,
         "../evil/../id with spaces"
     );
+}
+
+#[test]
+fn simultaneous_store_instances_cannot_replace_a_newer_observation_with_an_older_one() {
+    use std::sync::Barrier;
+    for _ in 0..8 {
+        let home = tempfile::tempdir().unwrap();
+        let start = Barrier::new(16);
+        std::thread::scope(|threads| {
+            for second in 0..16 {
+                let home = home.path();
+                let start = &start;
+                threads.spawn(move || {
+                    let mut dto = snapshot(
+                        AgentId::Codex,
+                        "profile:shared",
+                        "me@x",
+                        &format!("2026-09-13T12:00:{second:02}Z"),
+                    );
+                    dto.windows[0].used_percent = f64::from(second);
+                    start.wait();
+                    SnapshotStore::for_home(home).save(&dto).unwrap();
+                });
+            }
+        });
+        let loaded = SnapshotStore::for_home(home.path()).load(AgentId::Codex);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(
+            loaded[0].windows[0].used_percent, 15.0,
+            "concurrent publication lost the newest usage"
+        );
+    }
 }

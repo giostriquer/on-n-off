@@ -1,3 +1,4 @@
+import { AccountPreferences } from "@/features/accounts/AccountPreferences";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, X } from "lucide-react";
@@ -98,6 +99,7 @@ export function Settings({
       />
 
       <NotchSettingsCard />
+      <AccountPreferences />
 
       <GithubSettingsCard
         scopes={settings.githubScopes}

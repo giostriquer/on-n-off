@@ -1,3 +1,4 @@
+import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeReading } from "./subscriptionFixtures";
 /**
  * Dev-only stand-in for Tauri's IPC so the UI can run in a plain browser (and under the
  * screenshot harness, `bun run ui:shots`). Loaded by `main.tsx` only in dev builds and only when
@@ -9,7 +10,7 @@
 
 import type { AppSettings, AgentInfo, AgentId } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
-import { limitsFor } from "./limitsFixtures";
+import { claudeWithoutReset, limitsFor } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
@@ -29,9 +30,15 @@ declare global {
 const params = new URLSearchParams(window.location.search);
 const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
-if (!Object.hasOwn(SCENARIOS, scenario) && !["subscriptionRenewal", "subscriptionStale", "subscriptionMissing"].includes(scenario)) {
+if (!Object.hasOwn(SCENARIOS, scenario) && !["subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked", "accountDuplicate", "billingFailure", "claudeMissingReset", "subscriptionBadges"].includes(scenario)) {
   console.error(`[mock] unknown github scenario "${scenario}"; known: ${Object.keys(SCENARIOS).join(", ")}`);
 }
+
+const vaultDenied = new Error("Could not unlock saved accounts.");
+const billingFailure = new Error("Could not read a matching browser session. Check browser cookie access, then retry.");
+let vaultLocked = scenario === "accountLocked";
+let duplicateReconnected = false;
+const pendingLogins = new Map<string, () => void>();
 
 const AGENTS: AgentInfo[] = [
   { id: "claude", displayName: "Claude", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true },
@@ -121,8 +128,50 @@ const handlers: Record<string, Handler> = {
   list_plugins: emptyTab,
   list_local_plugins: emptyTab,
   refresh: emptyTab,
-  read_limits: (args) => limitsFor(args.agentId),
-  read_codex_subscription: (args) => ({
+  read_account_preferences: () => rememberingMock,
+  read_accounts: (args) => {
+    if (vaultLocked) throw vaultDenied;
+    if (scenario === "subscriptionBadges" && args.agent === "codex") return { profiles: subscriptionBadgeProfiles(), nativeObservationId: "badge:renewal", nativeAccount: null, recoveryRequired: false, notice: null };
+    if (scenario === "accountDuplicate" && args.agent === "codex") return {
+      profiles: [{ id: "saved", observationId: "profile:shared", identity: { provider: "codex", userId: "shared-user", workspaceId: "ca292064-c3f4-453c-b15a-43ef63c46478" }, label: "shared@example.com", email: "shared@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, needsLogin: false }],
+      nativeObservationId: "codex-1", nativeAccount: null, recoveryRequired: false, notice: null,
+    };
+    return ({
+    profiles: [
+      { id: "personal", observationId: args.agent === "codex" ? "codex-1" : "claude-1", identity: { provider: args.agent, userId: "user-personal", workspaceId: "Personal workspace" }, label: "personal@example.com", email: "personal@example.com", category: null, savedAt: "2026-08-24T18:30:00Z", active: true, needsLogin: false },
+      { id: "work", observationId: args.agent === "codex" ? "codex-2" : "claude-2", identity: { provider: args.agent, userId: "user-work", workspaceId: "Acme workspace" }, label: "person@acme.example", email: "person@acme.example", category: "Client A / research", savedAt: "2026-08-23T14:20:00Z", active: false, needsLogin: false },
+    ], nativeObservationId: args.agent === "codex" ? "codex-1" : "claude-1", nativeAccount: { provider: args.agent, userId: "user-personal", workspaceId: "Personal workspace" }, recoveryRequired: false, notice: null,
+  }); },
+  account_action: (args) => {
+    if (args.action === "unlock") vaultLocked = false;
+    if (args.action === "remember") rememberingMock = true;
+    if (args.action === "stopRemembering") rememberingMock = false;
+  },
+  add_account: (args) => scenario === "accountDuplicate"
+    ? (duplicateReconnected = true, undefined)
+    : scenario === "accountLogin"
+    ? new Promise<void>(resolve => pendingLogins.set(String(args.operationId), resolve))
+    : undefined,
+  cancel_account_login: (args) => {
+    const id = String(args.operationId);
+    pendingLogins.get(id)?.();
+    pendingLogins.delete(id);
+  },
+  read_limits: (args) => {
+    if (scenario === "subscriptionBadges" && args.agentId === "codex") return subscriptionBadgeLimits();
+    if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
+    const entries = limitsFor(args.agentId);
+    if (scenario !== "accountDuplicate" || args.agentId !== "codex") return entries;
+    const legacy = { ...entries[1], currentAccount: false, account: {
+      id: "ca292064-c3f4-453c-b15a-43ef63c46478", label: "shared@example.com",
+    } };
+    // Older app versions can rewrite the scoped snapshot without its optional legacyId.
+    return [entries[0], ...(duplicateReconnected ? [{ ...legacy,
+      account: { id: "profile:shared", label: "shared@example.com" },
+      windows: entries[0].windows.map(window => ({ ...window, usedPercent: 42 })),
+    }] : []), legacy];
+  },
+  read_codex_subscription: (args) => scenario === "subscriptionBadges" ? subscriptionBadgeReading(args.accountId) : ({
     metadata: scenario === "subscriptionMissing" ? null : {
       date: "2026-09-24T20:00:00Z",
       kind: args.accountId === "codex-2" ? "paidThrough" : scenario === "subscriptionRenewal" ? "renews" : "expires",
@@ -130,9 +179,9 @@ const handlers: Record<string, Handler> = {
       checkedAt: "2026-08-24T20:00:00Z",
       stale: args.accountId === "codex-2" || scenario === "subscriptionStale",
     },
-    connected: false, browserSupported: true, unavailable: scenario === "subscriptionStale",
+    connected: false, browserSupported: true, canConnect: true, unavailable: scenario === "subscriptionStale",
   }),
-  connect_codex_billing: () => undefined,
+  connect_codex_billing: () => { if (scenario === "billingFailure") throw billingFailure; },
   disconnect_codex_billing: () => undefined,
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),
   read_notch_state: () => notch,
@@ -168,7 +217,7 @@ window.__TAURI_INTERNALS__ = {
     try {
       return await handler(args);
     } catch (error) {
-      console.error(`[mock] ${cmd} failed:`, error);
+      if (error !== vaultDenied && error !== billingFailure) console.error(`[mock] ${cmd} failed:`, error);
       throw error;
     }
   },
@@ -192,3 +241,5 @@ window.__TAURI_INTERNALS__ = {
 window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
 
 console.info(`[mock] Tauri IPC mocked · github scenario "${scenario}" · latency ${latency} ms`);
+
+let rememberingMock = false;

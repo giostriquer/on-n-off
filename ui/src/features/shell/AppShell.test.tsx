@@ -1,9 +1,11 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 
 const setFilter = vi.hoisted(() => vi.fn());
 const refreshAll = vi.hoisted(() => vi.fn());
+const readLimits = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 const loadTab = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
 const routerState = vi.hoisted(() => ({ pathname: "/plugins" }));
@@ -86,7 +88,7 @@ vi.mock("@/features/scope/ScopeBar", () => ({ ScopeBar: () => null }));
 vi.mock("@/features/shell/LeftRail", () => ({ LeftRail: () => null }));
 vi.mock("@/features/updater/UpdateStrip", () => ({ UpdateStrip: () => null }));
 vi.mock("@/features/usage/LazyUsageChart", () => ({ preloadUsageChart: vi.fn() }));
-vi.mock("$lib/api", () => ({ onOpenLimitsWindow, onOpenGithubWindow: async () => () => undefined }));
+vi.mock("$lib/api", () => ({ readLimits, onOpenLimitsWindow, onOpenGithubWindow: async () => () => undefined }));
 
 describe("AppShell filter", () => {
   beforeEach(() => {
@@ -106,7 +108,7 @@ describe("AppShell filter", () => {
   });
 
   it("applies input changes and clears the active provider filter with Escape", () => {
-    render(<AppShell />);
+    render(<QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}><AppShell /></QueryClientProvider>);
     const input = screen.getByRole("searchbox");
 
     expect(input).toHaveValue("workbench");
@@ -152,7 +154,7 @@ describe("AppShell tab-loading gate", () => {
       ];
       for (const [pathname, mounted] of cases) {
         routerState.pathname = pathname;
-        const view = render(<AppShell />);
+        const view = render(<QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}><AppShell /></QueryClientProvider>);
         expect(screen.queryByTestId("outlet") !== null, pathname).toBe(mounted);
         expect(screen.queryByText(/Loading Codex/) !== null, pathname).toBe(!mounted);
         view.unmount();
@@ -177,7 +179,7 @@ describe("AppShell native navigation", () => {
   });
 
   it("opens the Limits route when the retained main window receives the native event", async () => {
-    render(<AppShell />);
+    render(<QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}><AppShell /></QueryClientProvider>);
     await waitFor(() => expect(openLimitsHandler).not.toBeNull());
 
     act(() => openLimitsHandler?.());
@@ -189,13 +191,14 @@ describe("AppShell native navigation", () => {
 describe("AppShell refresh", () => {
   beforeEach(() => {
     refreshAll.mockClear();
+    readLimits.mockClear();
     loadTab.mockClear();
   });
 
   it("stays out of the way while a sweep is still running", () => {
     session.refreshing = true;
     try {
-      render(<AppShell />);
+      render(<QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}><AppShell /></QueryClientProvider>);
       const button = screen.getByRole("button", { name: "Refresh all providers" });
       expect(button.hasAttribute("disabled")).toBe(true);
       fireEvent.click(button);
@@ -205,12 +208,15 @@ describe("AppShell refresh", () => {
     }
   });
 
-  it("sweeps every provider instead of only the open tab", () => {
-    render(<AppShell />);
+  it("sweeps every provider and refreshes both subscription caches", async () => {
+    render(<QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}><AppShell /></QueryClientProvider>);
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh all providers" }));
 
     expect(refreshAll).toHaveBeenCalledTimes(1);
     expect(loadTab).not.toHaveBeenCalled();
+    await waitFor(() => expect(readLimits).toHaveBeenCalledWith("claude", true));
+    expect(readLimits).toHaveBeenCalledWith("codex", true);
+    await waitFor(() => expect(screen.getByRole("button", {name: "Refresh all providers"})).toBeEnabled());
   });
 });

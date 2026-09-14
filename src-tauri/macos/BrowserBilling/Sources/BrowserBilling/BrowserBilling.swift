@@ -11,9 +11,10 @@ struct BrowserBilling {
     @MainActor static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        guard (2...3).contains(CommandLine.arguments.count), !CommandLine.arguments[1].isEmpty else { exit(2) }
-        let nonInteractive = CommandLine.arguments.count == 3
-        if nonInteractive && CommandLine.arguments[2] != "--non-interactive" { exit(2) }
+        guard (3...4).contains(CommandLine.arguments.count), !CommandLine.arguments[1].isEmpty else { exit(2) }
+        let expectedUser = CommandLine.arguments[2]
+        let nonInteractive = CommandLine.arguments.count == 4
+        if nonInteractive && CommandLine.arguments[3] != "--non-interactive" { exit(2) }
         let account = CommandLine.arguments[1]
         // Keep the crash-recovery lease through process exit. A recovery that won
         // the lock before us may have deleted the directory: refuse to read cookies.
@@ -30,7 +31,7 @@ struct BrowserBilling {
         // A native deadline also covers synchronous cookie reads and Keychain prompts.
         DispatchQueue.global().asyncAfter(deadline: .now() + 55) { exit(3) }
         Task { @MainActor in
-            let value = await read(account: account, nonInteractive: nonInteractive) ?? ["error": "unavailable"]
+            let value = await read(account: account, expectedUser: expectedUser, nonInteractive: nonInteractive) ?? ["error": "unavailable"]
             if JSONSerialization.isValidJSONObject(value),
                let data = try? JSONSerialization.data(withJSONObject: value) {
                 FileHandle.standardOutput.write(data)
@@ -41,13 +42,14 @@ struct BrowserBilling {
         withExtendedLifetime(lease) { app.run() }
     }
 
-    @MainActor static func read(account: String, nonInteractive: Bool) async -> [String: Any]? {
+    @MainActor static func read(account: String, expectedUser: String, nonInteractive: Bool) async -> [String: Any]? {
         let client: BrowserCookieClient
         if let home = ProcessInfo.processInfo.environment["ON_N_OFF_HOME"] {
             client = BrowserCookieClient(configuration: .init(homeDirectories: [URL(fileURLWithPath: home)]))
         } else { client = BrowserCookieClient() }
         let query = BrowserCookieQuery(domains: ["chatgpt.com", "openai.com"])
         var sawMismatch = false
+        var incomplete = false
         // Same strategy as CodexBar: try separate profile candidates; never merge accounts.
         for browser: Browser in [.safari, .chrome, .edge, .brave, .firefox] {
             for store in client.stores(for: browser) {
@@ -56,7 +58,7 @@ struct BrowserBilling {
                         try client.records(matching: query, in: store)
                     }
                 }
-                return try client.records(matching: query, in: store) }).value else { continue }
+                return try client.records(matching: query, in: store) }).value else { incomplete = true; continue }
                 let cookies = BrowserCookieClient.makeHTTPCookies(records, origin: query.origin).filter {
                     let domain = $0.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
                     return domain == "chatgpt.com" || domain.hasSuffix(".chatgpt.com") ||
@@ -64,15 +66,16 @@ struct BrowserBilling {
                 }
                 guard cookies.contains(where: { $0.name.contains("session-token") }) else { continue }
                 let reader = Reader()
-                let result = await reader.read(cookies: cookies, account: account)
+                let result = await reader.read(cookies: cookies, account: account, expectedUser: expectedUser)
                 withExtendedLifetime(reader) {}
                 if let result {
                     if result["error"] as? String == "accountMismatch" { sawMismatch = true }
                     else if result["error"] == nil { return result }
-                }
+                    else { incomplete = true }
+                } else { incomplete = true }
             }
         }
-        return sawMismatch ? ["error": "accountMismatch"] : nil
+        return sawMismatch && !incomplete ? ["error": "accountMismatch"] : nil
     }
 }
 
@@ -82,7 +85,7 @@ final class Reader: NSObject, WKNavigationDelegate {
     private var loaded = false
     private var failed = false
 
-    func read(cookies: [HTTPCookie], account: String) async -> [String: Any]? {
+    func read(cookies: [HTTPCookie], account: String, expectedUser: String) async -> [String: Any]? {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         guard let url = BillingResources.scriptURL(executable: URL(fileURLWithPath: CommandLine.arguments[0])),
@@ -108,7 +111,7 @@ final class Reader: NSObject, WKNavigationDelegate {
         let deadline = Date().addingTimeInterval(15)
         while !loaded && !failed && Date() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
         guard loaded, !failed else { return nil }
-        let result = try? await web.callAsyncJavaScript("return await window.__onNOffReadBilling(account)", arguments: ["account": account], in: nil, contentWorld: .page)
+        let result = try? await web.callAsyncJavaScript("return await window.__onNOffReadBilling(account, expectedUser || undefined)", arguments: ["account": account, "expectedUser": expectedUser], in: nil, contentWorld: .page)
         guard let value = result as? [String: Any] else { return nil }
         if let error = value["error"] as? String, ["accountMismatch", "unavailable"].contains(error) { return ["error": error] }
         guard value["accountId"] as? String == account else { return nil }

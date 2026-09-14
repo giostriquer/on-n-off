@@ -114,9 +114,15 @@ the real explanation. What follows is only enough to know which one you want.
 | `side_notch/` | The notch overlay, macOS and Windows 11 | See [side-notch.md](side-notch.md). |
 | `monitor.rs` | Shared polling/notification plumbing | `limits_monitor` and `github_monitor` are both built on it; they poll while the window is hidden. |
 
+### Accounts
+
+The opt-in [account manager](accounts.md) saves protected renewable profiles and explicitly changes
+the default native CLI login. Active credentials remain native-owned. Inactive profiles never
+refresh in the background. Config, plugins, MCP settings and sessions are preserved.
+
 ### Limits
 
-Each provider is read the way that provider intends, and neither login is ours to *own*:
+Each provider is read the way that provider intends, and active login renewal remains native-store-owned:
 
 - **Claude** — read the stored access token (macOS Keychain via `/usr/bin/security`, else
   `~/.claude/.credentials.json`), verify it against `/api/oauth/profile`, then read
@@ -124,7 +130,7 @@ Each provider is read the way that provider intends, and neither login is ours t
 
   That token lives eight hours and Claude Code renews it only while Claude Code is running, so
   on-n-off — which runs continuously — renews it too rather than reporting an expired login at a
-  signed-in user. `limits/claude_renew.rs` is the only place that reads the refresh token or
+  signed-in user. `accounts/claude_renew.rs` is the only place that reads the refresh token or
   writes Claude's store, and it does the same thing Claude Code does: the same two lock
   directories in the same order, the same grant against the same client id, the same stored shape,
   and a re-read under the lock so a login another process just renewed is used rather than

@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { AgentBanner } from "@/features/agents/AgentBanner";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import { LazyInstallSheet } from "@/features/catalog/LazyInstallSheet";
@@ -19,12 +19,15 @@ import { globalItemCount, tallyLine, type Screen } from "$lib/catalog";
 import { copy } from "$lib/copy";
 import * as api from "$lib/api";
 import type { AgentInfo } from "$lib/types";
+import { useQueryClient } from "@tanstack/react-query";
 import markUrl from "../../../../src-tauri/icons/128x128.png";
 
 /** Screens that read no per-provider tab data, so they stay mounted while a provider tab loads. */
 const PROVIDER_INDEPENDENT_SCREENS: ReadonlySet<Screen> = new Set<Screen>(["usage", "limits", "github", "settings"]);
 
 export function AppShell() {
+  const client = useQueryClient();
+  const [refreshingReads, setRefreshingReads] = useState(false);
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const screen = pathToScreen(pathname);
@@ -66,6 +69,12 @@ export function AppShell() {
     installBusy,
     confirmUninstall,
   } = session;
+
+  async function refresh() {
+    setRefreshingReads(true);
+    try { await Promise.allSettled([refreshAll(), import("@/features/limits/useLimitsProviders").then(({ refreshLimits }) => refreshLimits(client)), client.invalidateQueries({ queryKey: ["accounts"] })]); }
+    finally { setRefreshingReads(false); }
+  }
 
   useEffect(() => {
     localStorage.setItem("on-n-off.screen", screen);
@@ -195,21 +204,22 @@ export function AppShell() {
           className="flex size-8 items-center justify-center rounded-lg border border-[var(--hair)] bg-[var(--well)] text-[var(--silkscreen)] disabled:opacity-45"
           title={copy.refresh}
           aria-label={copy.refresh}
-          disabled={refreshing}
-          onClick={() => void refreshAll()}
+          disabled={refreshing || refreshingReads}
+          onClick={() => void refresh()}
         >
           <RefreshCw
-            className={`size-3.5 ${refreshing ? "motion-safe:animate-spin" : ""}`}
+            className={`size-3.5 ${refreshing || refreshingReads ? "motion-safe:animate-spin" : ""}`}
             aria-hidden="true"
           />
         </button>
         <button
           type="button"
-          className="h-8 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-3.5 text-[11px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
+          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-[var(--fill)] bg-[var(--fill)] px-3.5 text-[11px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] disabled:opacity-45"
           disabled={!canInstall}
           onClick={() => setInstallOpen(true)}
         >
-          + INSTALL
+          <Plus className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="leading-none">INSTALL</span>
         </button>
       </header>
 

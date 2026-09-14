@@ -50,3 +50,19 @@ it("stops waiting when no billing response arrives", async () => {
   await vi.advanceTimersByTimeAsync(12500);
   expect(await result).toEqual({error:"unavailable"});
 });
+
+const userToken = (user: string, workspace: string) => "h." + btoa(JSON.stringify({"https://api.openai.com/auth":{chatgpt_user_id:user,chatgpt_account_id:workspace}})) + ".s";
+it("checks workspace membership when the correct user has a different default workspace", async () => {
+  const {window,fetch} = setup(vi.fn(async url => response(url.includes("/api/auth/session") ? {accessToken:userToken("user-a","personal")} : url === "/backend-api/accounts" ? {items:[{id:"team"}]} : billing)));
+  expect(await window.__onNOffReadBilling("team","user-a")).toEqual({accountId:"team",...billing});
+  expect(fetch.mock.calls.filter(call=>call[0] === "/backend-api/accounts")).toHaveLength(2);
+});
+it("refuses another user even when both users belong to the same workspace", async () => {
+  const {window,fetch} = setup(vi.fn(async url => response(url.includes("/api/auth/session") ? {accessToken:userToken("user-b","team")} : billing)));
+  expect(await window.__onNOffReadBilling("team","user-a")).toEqual({error:"accountMismatch"});
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+it("does not treat an unreadable membership list as proof of a wrong account", async () => {
+  const {window} = setup(vi.fn(async url => url.includes("/api/auth/session") ? response({accessToken:userToken("user-a","personal")}) : response({},false)));
+  expect(await window.__onNOffReadBilling("team","user-a")).toEqual({error:"unavailable"});
+});

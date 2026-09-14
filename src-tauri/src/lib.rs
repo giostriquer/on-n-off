@@ -1,3 +1,4 @@
+mod accounts;
 mod adapter;
 mod antigravity;
 mod backup;
@@ -83,6 +84,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             notifications::refresh_authorization(_app.handle().clone());
             limits_monitor::setup(_app);
+            accounts::discovery::setup(_app);
             github_monitor::setup(_app);
             Ok(())
         })
@@ -113,6 +115,11 @@ pub fn run() {
             commands::refresh,
             commands::usage_summary,
             commands::read_limits,
+            commands::read_accounts,
+            commands::read_account_preferences,
+            commands::account_action,
+            commands::add_account,
+            commands::cancel_account_login,
             commands::read_codex_subscription,
             commands::connect_codex_billing,
             commands::disconnect_codex_billing,

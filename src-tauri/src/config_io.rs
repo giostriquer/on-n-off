@@ -14,6 +14,39 @@ pub struct ConfigIo {
 }
 
 impl ConfigIo {
+    /// Account activation has already persisted an encrypted recovery journal before this call.
+    /// Back up the narrow oauthAccount identity there, never the credential in BackupStore.
+    pub(crate) fn patch_account_identity(
+        path: &Path,
+        account: Option<&JsonValue>,
+    ) -> Result<(), String> {
+        let original = crate::accounts::native::read_json(path)?;
+        let mut next = original.clone();
+        let object = next
+            .as_object_mut()
+            .ok_or("Malformed native account configuration.")?;
+        if let Some(account) = account {
+            object.insert("oauthAccount".into(), account.clone());
+        } else {
+            object.remove("oauthAccount");
+        }
+        let bytes =
+            serde_json::to_vec_pretty(&next).map_err(|_| "Cannot encode account configuration.")?;
+        let result = crate::accounts::vault::atomic_write(path, &bytes).and_then(|()| {
+            if crate::accounts::native::read_json(path)? == next {
+                Ok(())
+            } else {
+                Err("Account configuration validation failed.".into())
+            }
+        });
+        if result.is_err() {
+            let bytes = serde_json::to_vec_pretty(&original)
+                .map_err(|_| "Cannot encode account recovery.")?;
+            crate::accounts::vault::atomic_write(path,&bytes).map_err(|_|"Account configuration recovery failed. The protected activation journal has been retained.")?;
+        }
+        result
+    }
+
     pub fn new() -> Result<Self, AdapterError> {
         Ok(Self {
             backups: BackupStore::new()?,

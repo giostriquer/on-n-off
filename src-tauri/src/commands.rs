@@ -374,9 +374,11 @@ pub async fn read_limits(
 pub async fn forget_limits_snapshot(
     agent_id: AgentId,
     account_id: String,
+    expected_email: Option<String>,
 ) -> Result<(), AdapterError> {
     blocking("limits forget", move || {
-        crate::limits_refresh::forget_snapshot(agent_id, &account_id).map_err(AdapterError::message)
+        crate::limits_refresh::forget_snapshot(agent_id, &account_id, expected_email.as_deref())
+            .map_err(AdapterError::message)
     })
     .await
 }
@@ -450,7 +452,7 @@ pub async fn read_codex_subscription(
 ) -> Result<crate::subscription::SubscriptionReading, AdapterError> {
     blocking("subscription read", move || {
         let home = crate::paths::user_home()?;
-        Ok(crate::subscription::read(&app, &home, &account_id))
+        crate::subscription::read(&app, &home, &account_id).map_err(AdapterError::message)
     })
     .await
 }
@@ -476,4 +478,87 @@ pub async fn disconnect_codex_billing(
     account_id: String,
 ) -> Result<(), AdapterError> {
     crate::subscription::disconnect(&app, Some(&account_id)).map_err(AdapterError::message)
+}
+
+#[tauri::command]
+pub async fn read_accounts(
+    agent: AgentId,
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::accounts::AccountsDto, AdapterError> {
+    if !state.adapter(agent).supports_accounts() {
+        return Err(AdapterError::message(
+            "Account profiles are unsupported for this provider.",
+        ));
+    }
+    blocking("read accounts", move || {
+        crate::accounts::list(agent).map_err(AdapterError::message)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn read_account_preferences() -> Result<bool, AdapterError> {
+    blocking("account remembering preference", || {
+        let home = crate::paths::user_home()?;
+        crate::accounts::discovery::enabled(&home).map_err(AdapterError::message)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn account_action(
+    agent: AgentId,
+    action: String,
+    profile_id: Option<String>,
+    label: Option<String>,
+    category: Option<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AdapterError> {
+    if !state.adapter(agent).supports_accounts() {
+        return Err(AdapterError::message(
+            "Account profiles are unsupported for this provider.",
+        ));
+    }
+    blocking("account action", move || {
+        let id = profile_id.as_deref().unwrap_or("");
+        match action.as_str() {
+            "unlock" => crate::accounts::unlock(),
+            "remember" => crate::accounts::discovery::set_enabled(true),
+            "stopRemembering" => crate::accounts::discovery::set_enabled(false),
+            "save" => crate::accounts::save_current(agent),
+            "use" => crate::accounts::use_profile(agent, id, false),
+            "recover" => crate::accounts::use_profile(agent, id, true),
+            "remove" => crate::accounts::remove(id),
+            "category" | "rename" => crate::accounts::set_category(
+                id,
+                category.as_deref().or(label.as_deref()).unwrap_or(""),
+            ),
+            "signOut" => crate::accounts::sign_out(agent),
+            _ => Err("Unknown account action.".into()),
+        }
+        .map_err(AdapterError::message)
+    })
+    .await?;
+    crate::accounts::discovery::wake(&app);
+    Ok(())
+}
+#[tauri::command]
+pub async fn add_account(
+    agent: AgentId,
+    operation_id: String,
+    profile_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AdapterError> {
+    if !state.adapter(agent).supports_accounts() {
+        return Err(AdapterError::message(
+            "Account profiles are unsupported for this provider.",
+        ));
+    }
+    blocking("official sign-in", move || {
+        crate::accounts::add(agent, operation_id, profile_id).map_err(AdapterError::message)
+    })
+    .await
+}
+#[tauri::command]
+pub fn cancel_account_login(operation_id: String) {
+    crate::accounts::cancel(&operation_id);
 }

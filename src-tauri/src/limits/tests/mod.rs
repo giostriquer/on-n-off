@@ -35,6 +35,7 @@ fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
 
 fn account(id: &str, label: &str) -> LimitsAccountDto {
     LimitsAccountDto {
+        legacy_id: None,
         id: id.to_string(),
         label: Some(label.to_string()),
     }
@@ -770,7 +771,18 @@ fn switching_the_claude_account_never_reuses_the_previous_accounts_token() {
         .collect();
     assert_eq!(
         ids,
-        [("uuid-b".to_string(), true), ("uuid-a".to_string(), false)]
+        [
+            (
+                "profile:1ec440b85711ca5d735ff58bd7a386f6575f2ba5b8d13001274cee6ff445b5b4"
+                    .to_string(),
+                true
+            ),
+            (
+                "profile:7ca98bb7137e6e534d127d9c8c7f969463c49412dacc66652f233c1a6ad48309"
+                    .to_string(),
+                false
+            )
+        ]
     );
 }
 
@@ -792,6 +804,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
         status: LimitsStatus::Ok,
         message: None,
         account: Some(LimitsAccountDto {
+            legacy_id: None,
             id: "acct-1".to_string(),
             label: Some("me@example.com".to_string()),
         }),

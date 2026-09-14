@@ -131,8 +131,8 @@ export function readLimits(agentId: AgentId, force = false): Promise<ProviderLim
   return invoke("read_limits", { agentId, force });
 }
 
-export function forgetLimitsSnapshot(agentId: AgentId, accountId: string): Promise<void> {
-  return invoke("forget_limits_snapshot", { agentId, accountId });
+export function forgetLimitsSnapshot(agentId: AgentId, accountId: string, expectedEmail?: string): Promise<void> {
+  return invoke("forget_limits_snapshot", { agentId, accountId, ...(expectedEmail !== undefined ? { expectedEmail } : {}) });
 }
 
 /** The GitHub screen's pull requests; `force` skips the backend's in-memory result. */
@@ -217,3 +217,18 @@ export function connectCodexBilling(accountId: string): Promise<void> {
 export function disconnectCodexBilling(accountId: string): Promise<void> {
   return invoke("disconnect_codex_billing", { accountId });
 }
+
+export function readAccounts(agent: import("./accountTypes").AccountProvider): Promise<import("./accountTypes").AccountsReading> {
+  return invoke("read_accounts", { agent });
+}
+export function accountAction(agent: import("./accountTypes").AccountProvider, action: import("./accountTypes").AccountAction, profileId?: string, category?: string): Promise<void> {
+  return invoke("account_action", { agent, action, profileId: profileId ?? null, category: category ?? null });
+}
+export function addAccount(agent: import("./accountTypes").AccountProvider, operationId: string, profileId?: string): Promise<void> {
+  return invoke("add_account", { agent, operationId, profileId: profileId ?? null });
+}
+export function cancelAccountLogin(operationId: string): Promise<void> {
+  return invoke("cancel_account_login", { operationId });
+}
+
+export function readAccountPreferences(): Promise<boolean> { return invoke("read_account_preferences"); }
