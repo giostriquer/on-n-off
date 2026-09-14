@@ -158,6 +158,7 @@ fn claude_account_comes_from_claude_json_oauth_account() {
         read_claude_identity(&home),
         Some(ClaudeIdentity {
             account: LimitsAccountDto {
+                legacy_id: None,
                 id: "uuid-1".to_string(),
                 label: Some("me@example.com".to_string())
             },
@@ -167,6 +168,7 @@ fn claude_account_comes_from_claude_json_oauth_account() {
     assert_eq!(
         read_claude_account(&home),
         Some(LimitsAccountDto {
+            legacy_id: None,
             id: "uuid-1".to_string(),
             label: Some("me@example.com".to_string())
         })
@@ -188,6 +190,7 @@ fn login(token: &str, expires_at_ms: Option<i64>) -> ClaudeCredential {
         has_refresh_token: true,
         refresh_expires_at_ms: None,
         subscription_type: Some("max".to_string()),
+        rate_limit_tier: None,
     }
 }
 
@@ -269,6 +272,7 @@ fn debug_output_never_contains_the_token() {
         has_refresh_token: true,
         refresh_expires_at_ms: None,
         subscription_type: Some("max".to_string()),
+        rate_limit_tier: None,
     };
     let printed = format!("{claude:?}");
     assert!(!printed.contains("secret-"), "{printed}");
@@ -370,4 +374,15 @@ fn the_keychain_account_is_read_off_the_entry_rather_than_guessed() {
     );
     assert_eq!(parse_keychain_account("attributes:\n"), None);
     assert_eq!(parse_keychain_account("    \"acct\"<blob>=\"\"\n"), None);
+}
+
+#[test]
+fn disposable_home_does_not_read_or_renew_the_real_keychain_login() {
+    let calls = std::cell::Cell::new(0);
+    let result = isolated_keychain(true, || {
+        calls.set(calls.get() + 1);
+        Ok(Some("real-native-credential".into()))
+    });
+    assert_eq!(result, Ok(None));
+    assert_eq!(calls.get(), 0);
 }

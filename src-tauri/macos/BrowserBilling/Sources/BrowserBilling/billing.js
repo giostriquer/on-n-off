@@ -5,11 +5,12 @@
   const originalFetch = window.fetch.bind(window);
   let captured = null;
   let expected = null;
-  function tokenAccount(token) {
+  function tokenIdentity(token) {
     if (typeof token !== "string") return null;
     const claims = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    return claims["https://api.openai.com/auth"]?.chatgpt_account_id;
+    return claims["https://api.openai.com/auth"];
   }
+  function tokenAccount(token) { return tokenIdentity(token)?.chatgpt_account_id; }
   function fields(body) {
     const date = Object.hasOwn(body, "active_until") ? body.active_until : body.activeUntil;
     const renew = Object.hasOwn(body, "will_renew") ? body.will_renew : body.willRenew;
@@ -35,7 +36,7 @@
     } catch (_) { /* Keep the provider's response untouched. */ }
     return response;
   };
-  window.__onNOffReadBilling = async (account) => {
+  window.__onNOffReadBilling = async (account, expectedUser) => {
     let failure = "unavailable";
     expected = account;
     captured = null;
@@ -45,7 +46,22 @@
       const response = await originalFetch("/api/auth/session", { credentials: "include", signal: controller.signal });
       if (!response.ok) throw new Error("session unavailable");
       const token = (await response.json()).accessToken;
-      if (tokenAccount(token) !== account) { failure = tokenAccount(token) ? "accountMismatch" : "unavailable"; throw new Error("account mismatch"); }
+      const identity = tokenIdentity(token);
+      if (expectedUser && identity?.chatgpt_user_id !== expectedUser) {
+        failure = identity?.chatgpt_user_id ? "accountMismatch" : "unavailable";
+        throw new Error("user could not be verified");
+      }
+      if (identity?.chatgpt_account_id !== account) {
+        if (!expectedUser) { failure = identity?.chatgpt_account_id ? "accountMismatch" : "unavailable"; throw new Error("account mismatch"); }
+        const memberships = await originalFetch("/backend-api/accounts", {
+          credentials: "include", signal: controller.signal,
+          headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+        });
+        if (!memberships.ok) throw new Error("membership unavailable");
+        const body = await memberships.json();
+        if (!Array.isArray(body.items)) throw new Error("membership unavailable");
+        if (!body.items.some(item => item?.id === account)) { failure = "accountMismatch"; throw new Error("workspace not available"); }
+      }
       return token;
     }
     try {

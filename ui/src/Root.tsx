@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useLayoutEffect } from "react";
-import { LimitsPopover } from "@/features/limits/LimitsPopover";
+import { lazy, Suspense, useLayoutEffect } from "react";
+const LimitsPopover = lazy(() => import("@/features/limits/LimitsPopover").then(module => ({ default: module.LimitsPopover })));
 import { App } from "./App";
 
 const popoverQueryClient = new QueryClient({
@@ -28,7 +28,7 @@ export function Root({ search = window.location.search }: { search?: string }) {
   if (surface === "limits-popover") {
     return (
       <QueryClientProvider client={popoverQueryClient}>
-        <LimitsPopover />
+        <Suspense fallback={null}><LimitsPopover /></Suspense>
       </QueryClientProvider>
     );
   }

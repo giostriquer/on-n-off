@@ -10,12 +10,13 @@
 
 mod claude;
 mod claude_desktop;
-mod claude_renew;
+use crate::accounts::claude_renew;
 mod codex;
 mod codex_app_server;
 mod codex_sessions;
-mod credentials;
-mod json;
+pub(crate) mod credentials;
+pub(crate) mod json;
+pub(crate) mod login;
 mod observations;
 mod pipeline;
 mod snapshots;
@@ -116,8 +117,17 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
 }
 
 /// Drop the remembered snapshot of one account (the user's "Forget" on a remembered card).
-pub fn forget_snapshot(agent: AgentId, account_id: &str) -> Result<(), String> {
+pub fn forget_snapshot(
+    agent: AgentId,
+    account_id: &str,
+    expected_email: Option<&str>,
+) -> Result<(), String> {
     let home = paths::user_home().map_err(|error| error.message)?;
+    if let Some(email) = expected_email {
+        // Legacy cleanup is conditional numeric history removal. The scoped account's separate
+        // Forget remains responsible for its billing lifecycle and import invalidation.
+        return SnapshotStore::for_home(&home).forget_matching_email(agent, account_id, email);
+    }
     if agent == AgentId::Codex {
         crate::subscription::forget(&home, account_id)?;
     }
@@ -208,7 +218,7 @@ fn aggregate_accounts(
         )
     };
     let _ = store.save(&current);
-    std::iter::once(current).chain(remembered).collect()
+    snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
 }
 
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
@@ -264,7 +274,8 @@ fn claude_current<P: Fn() -> KeychainProbe>(
     {
         memo.clear();
     }
-    let local_observations = (loaded.dto.status != LimitsStatus::Ok)
+    // Desktop history identifies an organization, never its user. Do not attach it to a user profile.
+    let local_observations = (selected_identity.is_none() && loaded.dto.status != LimitsStatus::Ok)
         .then(|| {
             organization_id
                 .as_deref()
@@ -274,11 +285,22 @@ fn claude_current<P: Fn() -> KeychainProbe>(
                 .map(|usage| ObservedWindowSet::local(usage.observed_at, usage.windows))
         })
         .flatten();
+    if let (Some(identity), Some(account)) = (&selected_identity, &mut loaded.dto.account) {
+        if let Some(workspace) = &identity.organization_id {
+            account.legacy_id = Some(identity.account.id.clone());
+            account.id = crate::accounts::model::Identity {
+                provider: AgentId::Claude,
+                user_id: identity.account.id.clone(),
+                workspace_id: workspace.clone(),
+            }
+            .observation_key();
+        }
+    }
     (loaded.dto, local_observations)
 }
 
 /// Claude: verify the stored token's profile, then read usage with the OAuth beta header. The plan
-/// label comes from the login itself (`subscriptionType`).
+/// label comes from the login itself (`subscriptionType` and known Max `rateLimitTier` values).
 fn claude_limits(
     lookup: CredentialLookup<ClaudeCredential>,
     selected_identity: &Option<ClaudeIdentity>,
@@ -320,7 +342,7 @@ fn claude_limits(
             )?;
             Ok(Parsed {
                 account: Some(profile.account),
-                plan: credential.subscription_type.clone(),
+                plan: credential.plan(),
                 windows: claude::parse_claude(&payload),
                 credits: None,
             })
@@ -355,9 +377,14 @@ fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
 
 fn default_account() -> LimitsAccountDto {
     LimitsAccountDto {
+        legacy_id: None,
         id: DEFAULT_ACCOUNT.to_string(),
         label: None,
     }
+}
+
+pub(crate) fn clear_login_memo() {
+    credentials::CLAUDE_LOGIN.clear();
 }
 
 #[cfg(test)]

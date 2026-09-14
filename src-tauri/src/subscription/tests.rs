@@ -124,12 +124,12 @@ fn reading_identity_does_not_write_credentials_and_stores_only_dates() {
 }
 
 #[test]
-fn automatic_refresh_requires_import_and_persists_its_cooldown() {
+fn automatic_refresh_persists_its_cooldown() {
     let home = fixture_home();
     let now = "2026-09-10T12:00:00Z"
         .parse::<chrono::DateTime<chrono::Utc>>()
         .unwrap();
-    assert!(!store::claim_auto_refresh(&home, "account-a", now));
+    assert!(store::claim_auto_refresh(&home, "account-a", now));
     let metadata = parse_billing(
         &serde_json::json!({"active_until":"2026-10-10T12:00:00Z","will_renew":false}),
         now,
@@ -152,7 +152,7 @@ fn automatic_refresh_requires_import_and_persists_its_cooldown() {
         "account-a",
         now + chrono::Duration::hours(25)
     ));
-    assert!(!store::claim_auto_refresh(
+    assert!(store::claim_auto_refresh(
         &home,
         "account-b",
         now + chrono::Duration::hours(48)
@@ -165,10 +165,45 @@ fn automatic_refresh_requires_import_and_persists_its_cooldown() {
     assert!(!store::claim_auto_refresh(&home, "account-a", now));
     assert_eq!(store::load(&home, "account-a").unwrap(), metadata);
     store::forget(&home, "account-a").unwrap();
-    assert!(!store::claim_auto_refresh(
+    assert!(store::claim_auto_refresh(
         &home,
         "account-a",
         now + chrono::Duration::days(3)
     ));
     std::fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn first_billing_attempt_is_throttled_across_restarts_without_inventing_metadata() {
+    let home = fixture_home();
+    assert!(store::claim_auto_refresh(&home, "account-a", now()));
+    assert!(store::load(&home, "account-a").is_none());
+    assert!(!store::claim_auto_refresh(
+        &home,
+        "account-a",
+        now() + chrono::Duration::hours(1)
+    ));
+    assert!(store::claim_auto_refresh(
+        &home,
+        "account-a",
+        now() + chrono::Duration::days(1)
+    ));
+    assert!(store::load(&home, "account-a").is_none());
+}
+
+#[test]
+fn a_busy_saved_account_vault_is_retryable_not_an_absent_identity() {
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().join(".on-n-off/accounts");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("vault.enc"), "fixture-not-read-under-contention").unwrap();
+    crate::accounts::vault::tests::unlock_fixture(&home);
+    let lease = std::fs::File::create(root.join("operation.lock")).unwrap();
+    lease.try_lock().unwrap();
+    assert!(browser::read_metadata(home.path(), "profile:inactive", now()).is_err());
+    let error = validate_account(home.path(), "profile:inactive").unwrap_err();
+    assert!(
+        error.contains("operation"),
+        "must preserve the retryable vault error: {error}"
+    );
 }

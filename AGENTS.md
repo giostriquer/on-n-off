@@ -98,13 +98,17 @@ user data.
 - Every provider-config write goes through `ConfigIo`: backup → atomic replace → validate →
   rollback. Preserve all four.
 - Never weaken validation, or repair a malformed fixture, to make a test pass.
-- `limits/` renews Claude's access token only in `limits/claude_renew.rs`, only once the stored one
-  has passed its expiry, and only under Claude Code's own refresh locks. No other module reads a
-  refresh token, and the renewed login is written back to Claude Code's store, never anywhere
-  else. Do not widen that: a refresh token copied into a backup, a log, or a second store is a
-  credential the user cannot see and Claude Code will not rotate. `github/`
-  never writes to GitHub; `usage/` and `side_notch/` are read-only. These are promises to the
-  user, not implementation details — do not add a write path silently.
+- `accounts/` owns opt-in automatic remembering, the saved-profile vault and explicit native login
+  changes. Automatic remembering verifies native logins and never activates a profile. Its encrypted
+  vault stores renewable logins; only the small vault key enters the OS credential store. No
+  secret enters DTOs, ordinary config backups, logs or plaintext fallback storage. The active
+  native login remains authoritative. Saved shadows never refresh independently. Switching
+  captures the latest outgoing native credential before replacement; logout is a separate action
+  that can revoke it. Claude renewal lives only in `accounts/claude_renew.rs`, only after expiry
+  and under the native refresh locks, and writes only the active native store. Account identity
+  configuration writes still go through `ConfigIo`, with the protected account journal as their
+  backup participant. See [account ownership](docs/architecture/accounts.md).
+  `github/` never writes to GitHub; `usage/` and `side_notch/` remain read-only.
 - Runtime QA is read-only unless the user authorizes a mutation. CLI installs and uninstalls have
   effects outside on-n-off's rollback boundary: say so, and use throwaway inputs.
 

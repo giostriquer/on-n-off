@@ -14,6 +14,7 @@ fn remembered(id: &str, reset_at: &str) -> ProviderLimitsDto {
         status: LimitsStatus::Ok,
         message: None,
         account: Some(LimitsAccountDto {
+            legacy_id: None,
             id: id.to_string(),
             label: Some(format!("{id}@example.com")),
         }),

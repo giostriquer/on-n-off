@@ -17,6 +17,7 @@ fn snapshot(
         status: LimitsStatus::Ok,
         message: None,
         account: Some(LimitsAccountDto {
+            legacy_id: None,
             id: account_id.into(),
             label: Some(account_label.into()),
         }),

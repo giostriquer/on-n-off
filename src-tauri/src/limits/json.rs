@@ -5,14 +5,14 @@ use serde_json::Value;
 use crate::dto::{LimitWindowDto, LimitWindowKind};
 
 /// Finite percentage clamped to `0..=100`; `None` for anything that is not a number.
-pub(super) fn percent(value: Option<&Value>) -> Option<f64> {
+pub(crate) fn percent(value: Option<&Value>) -> Option<f64> {
     value
         .and_then(Value::as_f64)
         .filter(|v| v.is_finite())
         .map(|v| v.clamp(0.0, 100.0))
 }
 
-pub(super) fn optional_string(value: Option<&Value>) -> Option<String> {
+pub(crate) fn optional_string(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
         .map(str::trim)
@@ -21,7 +21,7 @@ pub(super) fn optional_string(value: Option<&Value>) -> Option<String> {
 }
 
 /// `sonnet_4_5` → `Sonnet 4 5`; `opus` → `Opus`.
-pub(super) fn humanize(raw: &str) -> String {
+pub(crate) fn humanize(raw: &str) -> String {
     raw.split('_')
         .filter(|part| !part.is_empty())
         .map(|part| {
@@ -35,7 +35,7 @@ pub(super) fn humanize(raw: &str) -> String {
         .join(" ")
 }
 
-pub(super) fn window(
+pub(crate) fn window(
     id: impl Into<String>,
     label: impl Into<String>,
     kind: LimitWindowKind,

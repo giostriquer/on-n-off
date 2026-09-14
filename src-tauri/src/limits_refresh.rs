@@ -69,6 +69,16 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
     let Some(cache) = cache_for(agent) else {
         return (crate::limits::read_limits(agent, force), 0);
     };
+    let Some(_account_read) = crate::accounts::activity::read(agent) else {
+        let read = cache
+            .read
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        return (
+            read.as_ref().map(|r| r.entries.clone()).unwrap_or_default(),
+            cache.revision.current(),
+        );
+    };
     let interval = poll_interval();
     let (entries, reading) = read_through_cache(cache, interval, force, |force| {
         crate::limits::read_limits(agent, force)
@@ -93,12 +103,16 @@ pub fn revision(agent: AgentId) -> u64 {
     cache_for(agent).map_or(0, |cache| cache.revision.current())
 }
 
-pub fn forget_snapshot(agent: AgentId, account_id: &str) -> Result<(), String> {
+pub fn forget_snapshot(
+    agent: AgentId,
+    account_id: &str,
+    expected_email: Option<&str>,
+) -> Result<(), String> {
     let Some(cache) = cache_for(agent) else {
-        return crate::limits::forget_snapshot(agent, account_id);
+        return crate::limits::forget_snapshot(agent, account_id, expected_email);
     };
     let reading = forget_through_cache(cache, account_id, || {
-        crate::limits::forget_snapshot(agent, account_id)
+        crate::limits::forget_snapshot(agent, account_id, expected_email)
     })?;
     // Dropping a remembered account replaces the shared entries like any read does, and the other
     // window lists those accounts too: without this it goes on offering to forget an account this
@@ -207,6 +221,18 @@ fn cache_is_fresh(
 ) -> bool {
     let interval = crate::monitor::backoff(interval, consecutive_failures, MAX_FAILURE_BACKOFF);
     !force && now.saturating_duration_since(refreshed_at) < interval
+}
+
+/// Discard the previous account projection, then publish one normal shared replacement.
+pub(crate) fn account_changed(agent: AgentId) {
+    if let Some(cache) = cache_for(agent) {
+        *cache
+            .read
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+    crate::limits::clear_login_memo();
+    let _ = read_limits(agent, false);
 }
 
 #[cfg(test)]
