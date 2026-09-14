@@ -32,9 +32,11 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
     self.observedAt = observedAt
   }
 
+  /// The window's percent now: zero once its reset has passed, since that is where the provider
+  /// restarts the quota; nil only when the reported figure is not a usable percentage.
   public func percent(at now: Date) -> Double? {
     guard usedPercent.isFinite, (0...100).contains(usedPercent) else { return nil }
-    if let reset = parseInstant(resetsAt), reset <= now { return nil }
+    if let reset = parseInstant(resetsAt), reset <= now { return 0 }
     return usedPercent
   }
 
@@ -47,14 +49,14 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
     percent(at: now).map(formatPercent) ?? "—"
   }
 
-  /// "Resets Tue 8:00 PM" while the window is pending; "Reset Tue 8:00 PM · last seen 97%"
-  /// afterwards; empty when the provider reported no reset.
+  /// "Resets Tue 8:00 PM" while the window is pending; "Reset Tue 8:00 PM" once it has, without
+  /// the spent cycle's figure; empty when the provider reported no reset.
   public func note(at now: Date) -> String {
     guard let reset = parseInstant(resetsAt) else { return "" }
     let formatter = DateFormatter()
     formatter.dateFormat = "EEE h:mm a"
     let clock = formatter.string(from: reset)
-    if reset <= now { return "Reset \(clock) · last seen \(formatPercent(usedPercent))" }
+    if reset <= now { return "Reset \(clock)" }
     return "Resets \(clock)"
   }
 }

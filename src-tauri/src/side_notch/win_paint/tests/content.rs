@@ -91,30 +91,51 @@ fn percent_labels_follow_the_mac_rounding_rules() {
     }
 }
 #[test]
-fn a_reset_window_shows_a_dash_instead_of_a_stale_figure() {
+fn a_reset_window_reads_as_zero_and_never_recites_its_spent_figure() {
     let mut expired = window("w", "Weekly - all models", LimitWindowKind::Weekly, 97.0);
     expired.resets_at = Some("2020-01-01T00:00:00Z".into());
     let content = cell_content(&CellData::Provider(claude_with(vec![expired.clone()])));
     match content {
         CellContent::Provider { label, primary, .. } => {
-            assert_eq!(label, "—", "the figure is stale once the window reset");
+            assert_eq!(label, "0%", "the quota renewed at the reset");
             assert_eq!(
                 primary.and_then(|quota| quota.percent),
-                None,
-                "and the ring draws no arc"
+                Some(0.0),
+                "and the ring draws an empty arc rather than none at all"
             );
         }
         _ => panic!("wrong content kind"),
     }
 
+    assert_eq!(
+        reset_note(&expired),
+        format!(
+            "Reset {}",
+            chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Local)
+                .format("%a %-I:%M %p")
+        ),
+        "the note says when it renewed, not what it held before"
+    );
+
     let (planned, _) = popover_render(claude_with(vec![expired]));
     let popover = planned.popover.as_ref().expect("the popover is open");
+    let texts: Vec<&str> = popover
+        .entries
+        .iter()
+        .filter_map(|(item, _)| match item {
+            PopItem::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
     assert!(
-        popover
-            .entries
-            .iter()
-            .any(|(item, _)| matches!(item, PopItem::Text { text, .. } if text == "—")),
-        "the popover says so too"
+        texts.contains(&"0% Used"),
+        "the popover says so too: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text.contains("97")),
+        "the spent cycle's figure appears nowhere: {texts:?}"
     );
 }
 #[test]
