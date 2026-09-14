@@ -100,10 +100,20 @@ On macOS, real Claude sign-ins retain the OS home so Security can locate the log
 `CLAUDE_CONFIG_DIR` isolates the CLI configuration and selects its scoped credential entry.
 Disposable file-backed tests still redirect the OS home and never use the real Keychain.
 
-Known CLI, desktop and IDE agent processes must be closed before native activation or sign-out.
-The process preflight is conservative and never terminates user processes. It is not a guarantee
-against an external client launched after preflight; keep clients closed until the operation ends.
-Desktop and IDE uptake is not claimed from a file write. Restart those clients after switching.
+Ordinary Claude activation allows running clients: Claude Code handles native credential changes.
+It still acquires the native refresh locks, preserves outgoing credentials in the protected journal,
+and verifies the incoming identity. This does not move an already in-flight request to another account
+or claim immediate uptake by Claude Desktop or IDE sessions.
+
+Codex activation, and sign-out or explicit crash recovery for either provider, require known CLI,
+desktop and IDE agent processes to be closed. The conservative process preflight never terminates
+user processes. It cannot prevent an external client starting afterward; keep clients closed until
+these operations finish. Restart Codex clients after switching.
+
+Claude's [quickstart](https://code.claude.com/docs/en/quickstart) documents `/login` inside a running
+session. Its [2.1.178 changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21178)
+also records a fix for credentials refreshed outside a session. The exception applies only to ordinary activation;
+revocation and abandoned-login cleanup retain their original process checks.
 
 Isolated login directories have a lease and a provider marker. Completion/cancellation removes
 only their scoped secrets. Abandoned directories are recovered only after the lease is free and

@@ -164,7 +164,11 @@ pub fn use_profile(provider: AgentId, id: &str, recover: bool) -> Result<(), Str
     let home = home()?;
     let native = native::NativeStore::resolve(provider, &home)?;
     native.preflight()?;
-    clients::require_closed(provider)?;
+    if recover {
+        clients::require_closed(provider)?;
+    } else {
+        clients::require_activation_safe(provider)?;
+    }
     let store = store::Store::open(&home, false)?;
     let mut db = store.load()?;
     if recover {

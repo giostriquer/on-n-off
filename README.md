@@ -17,7 +17,7 @@ app for Windows and macOS.
 - **Project scope** — inspect agent configuration globally or for a specific project.
 
 Support varies by provider; Cursor currently supports browsing installed items.
-Account switching requires the provider's running clients to be closed.
+Codex account switching requires its running clients to be closed; Claude Code can stay open.
 Browser-connected subscription renewal details are available for Codex on macOS.
 
 ## Install

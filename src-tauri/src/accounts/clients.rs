@@ -1,6 +1,22 @@
 //! Conservative native-writer preflight. Processes are inspected only, never terminated.
 use crate::dto::AgentId;
 use std::{process::Command, time::Duration};
+/// Ordinary activation can rely on Claude Code's native credential-change handling.
+/// Sign-out, crash recovery, and abandoned-login cleanup still require closed clients.
+pub fn require_activation_safe(provider: AgentId) -> Result<(), String> {
+    activation_preflight(provider, require_closed)
+}
+
+fn activation_preflight(
+    provider: AgentId,
+    check_closed: impl FnOnce(AgentId) -> Result<(), String>,
+) -> Result<(), String> {
+    if provider == AgentId::Claude {
+        return Ok(());
+    }
+    check_closed(provider)
+}
+
 pub fn require_closed(provider: AgentId) -> Result<(), String> {
     #[cfg(unix)]
     let mut command = {
