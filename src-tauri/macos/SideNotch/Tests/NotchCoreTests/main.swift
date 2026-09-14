@@ -64,18 +64,29 @@ final class NotchTests {
     }
   }
 
-  func testWindowsExpireIndependentlyAndUnknownResetRemainsUsable() {
+  func testWindowsRenewIndependentlyAndUnknownResetRemainsUsable() {
     let entry = provider(windows: [
       quota("weekly", 41),
       quota("model", 58, label: "Weekly · Fable", reset: "2026-01-01T00:00:00Z"),
     ])
     expectEqual(entry.orderedWindows[0].percent(at: now), 41)
-    expectNil(entry.orderedWindows[1].percent(at: now))
+    // A window past its own reset is back at zero, not unknown: the quota renewed.
+    expectEqual(entry.orderedWindows[1].percent(at: now), 0)
+    expectEqual(entry.orderedWindows[1].text(at: now), "0%")
     expectEqual(quota("weekly", 0.4, reset: "invalid").percent(at: now), 0.4)
-    expectNil(quota("weekly", 9, reset: "2027-01-15T08:00:00.000Z").percent(at: now))
+    expectEqual(quota("weekly", 9, reset: "2027-01-15T08:00:00.000Z").percent(at: now), 0)
+    // A figure that is not a usable percentage stays unknown, reset or not.
+    expectNil(quota("weekly", .nan).percent(at: now))
+    expectNil(quota("weekly", 101, reset: "2026-01-01T00:00:00Z").percent(at: now))
+    expectEqual(quota("weekly", .nan).text(at: now), "—")
     expectEqual(quota("weekly", 100).isReached(at: now), true)
     expectEqual(quota("weekly", 99.49).isReached(at: now), false)
     expectEqual(quota("weekly", 41, reset: "2027-02-01T00:00:00Z").note(at: now).hasPrefix("Resets "), true)
+    // The renewed note says when, and never recites the spent cycle's figure.
+    let renewed = quota("weekly", 97, reset: "2026-01-01T00:00:00Z").note(at: now)
+    expectEqual(renewed.hasPrefix("Reset "), true)
+    expectEqual(renewed.contains("last seen"), false)
+    expectEqual(renewed.contains("97"), false)
     expectEqual(quota("weekly", 41).note(at: now), "")
   }
 
@@ -379,7 +390,7 @@ func expectThrows<T>(_ value: @autoclosure () throws -> T, line: Int = #line) {
 let checks = NotchTests()
 checks.testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst()
 checks.testUnavailableAndRememberedAccountsNeverPopulateRings()
-checks.testWindowsExpireIndependentlyAndUnknownResetRemainsUsable()
+checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testCodexPrefersSessionAndHidesInternalBuckets()
 checks.testSessionAgesReadLikeTheReferenceApp()
 checks.testRailFramesFollowTheSelectedUUIDOnEveryEdge()

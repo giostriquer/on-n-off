@@ -210,7 +210,7 @@ private struct QuotaBlock: View {
       .accessibilityLabel(quota.label)
       .accessibilityValue(
         quota.percent(at: now) == nil
-          ? "Not observed since the reset"
+          ? "Usage unavailable"
           : "\(quota.text(at: now)) used" + (quota.isReached(at: now) ? ", limit reached" : ""))
       Text(quota.percent(at: now) == nil ? "—" : "\(quota.text(at: now)) Used")
         .font(metrics.font(10.5, weight: .medium).monospacedDigit())

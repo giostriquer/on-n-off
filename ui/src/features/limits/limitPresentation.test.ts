@@ -15,16 +15,17 @@ const window: LimitWindow = {
 };
 
 describe("presentLimitWindow", () => {
-  it("presents an elapsed window as reset: when, at what clock time, and what it last held", () => {
+  it("reads an elapsed window as 0%, not as a dash and not as its old figure", () => {
     const presented = presentLimitWindow(window, NOW);
     expect(presented).toEqual({
       percent: 0,
       tone: "calm",
-      text: "—",
-      color: "var(--mute)",
-      note: `reset 1h ago · ${formatResetAt(window.resetsAt)} · last seen 93%`,
-      valueText: "not observed since the reset",
+      text: "0%",
+      color: undefined,
+      note: `reset 1h ago · ${formatResetAt(window.resetsAt)}`,
     });
+    // The renewed window is zero; the figure it held before the reset is gone, not recited.
+    expect(presented.note).not.toContain("93");
     // The clock time is the reset's, not the observation's.
     expect(presented.note).not.toContain(formatResetAt(window.observedAt));
   });
@@ -37,7 +38,6 @@ describe("presentLimitWindow", () => {
       text: "93%",
       color: "var(--trip)",
       note: `resets in 3h 0m · ${formatResetAt(resetsAt)}`,
-      valueText: undefined,
     });
   });
 
@@ -48,14 +48,13 @@ describe("presentLimitWindow", () => {
 
   it("treats the reset instant itself as already elapsed", () => {
     const presented = presentLimitWindow({ ...window, resetsAt: new Date(NOW).toISOString() }, NOW);
-    expect(presented.note).toMatch(/^reset just now · \w{3} \d\d:\d\d · last seen 93%$/);
+    expect(presented.note).toMatch(/^reset just now · \w{3} \d\d:\d\d$/);
   });
 
   it("shows a window without a known reset as live, with no note", () => {
     const presented = presentLimitWindow({ ...window, usedPercent: 12, resetsAt: null }, NOW);
     expect(presented.text).toBe("12%");
     expect(presented.note).toBe("");
-    expect(presented.valueText).toBeUndefined();
     expect(presentLimitWindow({ ...window, resetsAt: "soon" }, NOW).text).toBe("93%");
   });
 });
