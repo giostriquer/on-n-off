@@ -178,8 +178,11 @@ Native Codex file, keyring, and auto storage are handled explicitly. Ephemeral o
 credential backends, selected Codex configuration profiles, custom native homes, environment auth
 and detected forced-login policies are refused with guidance to use the official CLI. Claude's
 isolated login uses the custom-home Keychain namespace on macOS; activation preserves shared MCP
-OAuth and all unrelated configuration fields. Known native client processes must be closed for
-activation/sign-out. Existing IDE and desktop sessions are not promised immediate adoption.
+OAuth and all unrelated configuration fields. Ordinary Claude activation allows running clients,
+relying on Claude Code's native credential-change handling while retaining native refresh locks,
+the protected journal and identity readback. Codex activation still requires closed clients.
+Sign-out and explicit crash recovery require closed clients for both providers. Existing IDE and
+desktop sessions are not promised immediate adoption.
 
 Saved credentials and interrupted-switch recovery live in an encrypted vault under
 `~/.on-n-off/accounts/`; the vault key is in macOS Keychain or Windows Credential Manager. No
