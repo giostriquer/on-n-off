@@ -159,7 +159,7 @@ function CardHeader({ entry, provider, updatedAt, subscription, profile, disting
   return (
     <header className="border-b border-[var(--hair)] px-3.5 py-2.5" title={updatedAt ? `Usage last checked ${updatedAt}` : undefined}>
       <div className="flex items-center gap-2.5">
-        <ProviderIcon provider={provider} className="size-3.5 shrink-0" />
+        <ProviderIcon provider={provider} className="size-3.5 shrink-0 translate-y-px" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-semibold" title={label ?? name}>{label ?? name}</div>
         </div>
