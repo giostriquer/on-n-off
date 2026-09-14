@@ -319,8 +319,8 @@ pub struct PrRingSegment {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct QuotaView {
-    /// `None` once the window reset or the figure is out of range, like the mac
-    /// `Quota.percent(at:)`; the ring then draws no arc and the label reads "—".
+    /// `None` only when the figure is out of range, like the mac `Quota.percent(at:)`; the ring
+    /// then draws no arc and the label reads "—". A window past its reset is `Some(0.0)`.
     pub percent: Option<f64>,
     pub reached: bool,
 }
@@ -1356,20 +1356,24 @@ fn ellipsize(text: &str, max_px: f64, size: f64, weight: TextWeight, scale: f64)
     format!("{cut}…")
 }
 
-/// The window's usable percent: `None` after the reset, `None` when out of range.
+/// The window's percent now: zero once its reset has passed, since that is where the provider
+/// restarts the quota; `None` only when the reported figure is unusable.
 fn quota_percent(window: &LimitWindowDto) -> Option<f64> {
-    let finite = window.used_percent.is_finite() && (0.0..=100.0).contains(&window.used_percent);
+    if !window.used_percent.is_finite() || !(0.0..=100.0).contains(&window.used_percent) {
+        return None;
+    }
     let expired = window
         .resets_at
         .as_deref()
         .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
         .is_some_and(|reset| reset <= chrono::Utc::now());
-    finite.then_some(window.used_percent).filter(|_| !expired)
+    Some(if expired { 0.0 } else { window.used_percent })
 }
 
-/// "Resets Tue 8:00 PM" while the window is pending; "Reset … · last seen 97%"
-/// afterwards; empty when the provider reported no reset. Minute-granular, computed
-/// when the host reads, so a re-render never happens for clock drift alone.
+/// "Resets Tue 8:00 PM" while the window is pending; "Reset Tue 8:00 PM" once it has,
+/// without the spent cycle's figure; empty when the provider reported no reset.
+/// Minute-granular, computed when the host reads, so a re-render never happens for
+/// clock drift alone.
 fn reset_note(window: &LimitWindowDto) -> String {
     let Some(reset) = window
         .resets_at
@@ -1384,7 +1388,7 @@ fn reset_note(window: &LimitWindowDto) -> String {
         .format("%a %-I:%M %p")
         .to_string();
     if reset <= now {
-        format!("Reset {clock} · last seen {}%", window.used_percent.round())
+        format!("Reset {clock}")
     } else {
         format!("Resets {clock}")
     }

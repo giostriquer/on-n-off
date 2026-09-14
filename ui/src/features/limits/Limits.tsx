@@ -264,14 +264,12 @@ function Meter({
   window,
   percent,
   tone,
-  valueText,
   provider,
   className,
 }: {
   window: LimitWindow;
   percent: number;
   tone: UsageTone;
-  valueText: string | undefined;
   provider: AgentId;
   className: string;
 }) {
@@ -283,7 +281,6 @@ function Meter({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(percent)}
-      aria-valuetext={valueText}
       data-tone={tone}
     >
       <div
@@ -311,7 +308,7 @@ function HeroWindow({
   provider: AgentId;
   now: number;
 }) {
-  const { percent, tone, note, text, color, valueText } = presentLimitWindow(window, now);
+  const { percent, tone, note, text, color } = presentLimitWindow(window, now);
   return (
     <div className="flex flex-col gap-2 p-3.5">
       <div className="flex items-center justify-between gap-2">
@@ -319,11 +316,9 @@ function HeroWindow({
         {active && <ActiveAccountDot />}
       </div>
       <div className="flex items-baseline gap-2">
-        {/* When the meter speaks for the window, the dash is decoration; the number otherwise reads. */}
         <span
           className="inline-block shrink-0 px-1 py-0.5 text-[34px] leading-[1.2] font-semibold tabular-nums"
           style={{ color }}
-          aria-hidden={valueText ? true : undefined}
         >
           {text}
         </span>
@@ -331,7 +326,7 @@ function HeroWindow({
           <span className="min-w-0 flex-1 pb-0.5 font-mono text-[12px] leading-snug text-[var(--mute)]">{note}</span>
         ) : null}
       </div>
-      <Meter window={window} percent={percent} tone={tone} valueText={valueText} provider={provider} className="h-1.5" />
+      <Meter window={window} percent={percent} tone={tone} provider={provider} className="h-1.5" />
     </div>
   );
 }
@@ -349,7 +344,7 @@ function WindowRow({
   provider: AgentId;
   now: number;
 }) {
-  const { percent, tone, note, text, color, valueText } = presentLimitWindow(window, now);
+  const { percent, tone, note, text, color } = presentLimitWindow(window, now);
   const awaitingFirstMessage = provider === "claude" && window.kind === "session"
     && window.usedPercent === 0 && window.resetsAt == null;
   const resetNote = note || (awaitingFirstMessage ? "Starts with your first message" : "Reset time unavailable");
@@ -363,11 +358,10 @@ function WindowRow({
         </span>
         <span className="font-mono text-[11px] leading-snug text-[var(--mute)]">{resetNote}</span>
       </div>
-      <Meter window={window} percent={percent} tone={tone} valueText={valueText} provider={provider} className="h-1 w-24 shrink-0" />
+      <Meter window={window} percent={percent} tone={tone} provider={provider} className="h-1 w-24 shrink-0" />
       <span
         className="w-11 shrink-0 text-right font-mono text-[12px]"
         style={{ color }}
-        aria-hidden={valueText ? true : undefined}
       >
         {text}
       </span>

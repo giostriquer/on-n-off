@@ -11,19 +11,14 @@ import {
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { formatAgo } from "$lib/timeFormat";
 
-/** The meter's spoken value once a reset has passed: the empty track is honest about why. */
-const RESET_VALUE_TEXT = "not observed since the reset";
-
 export type LimitWindowPresentation = {
   percent: number;
   tone: UsageTone;
-  /** The value slot: the percentage, or a dash once the window's reset has passed. */
+  /** The value slot: the window's percentage, which a passed reset puts back at zero. */
   text: string;
   /** Colour for the value slot; undefined leaves the default ink. */
   color: string | undefined;
   note: string;
-  /** What the meter announces instead of its (empty) percentage; undefined while the bar is true. */
-  valueText: string | undefined;
 };
 
 export type LimitAccountPresentation = {
@@ -52,39 +47,31 @@ export function visibleLimitWindows(entry: ProviderLimits): LimitWindow[] {
 }
 
 /**
- * Present one independently observed quota window. A value remains usable only until its own
- * known reset passes. Account status cannot make an observation from the prior cycle current.
+ * Present one independently observed quota window. An observation describes only the cycle it was
+ * taken in: once the window's own reset passes, the figure it carried belongs to a spent cycle and
+ * the quota it measured has renewed. Account status cannot keep a prior cycle's number current.
  *
- * Once the reset has passed, the window is presented as what it is — reset, unobserved since —
- * rather than as a missing value: when the reset happened, and what the window held when it was
- * last seen, so a remembered account still tells the user its quota has renewed.
+ * So a passed reset puts the window back at zero — which is where the provider starts it — and the
+ * note says when that happened. The spent cycle's number is not carried forward into the new one,
+ * even as a footnote: a remembered account reads as renewed, not as its old high-water mark.
  */
 export function presentLimitWindow(window: LimitWindow, now: number): LimitWindowPresentation {
   const resetAt = formatResetAt(window.resetsAt);
-  if (hasElapsed(window.resetsAt, now)) {
-    return {
-      percent: 0,
-      tone: "calm",
-      text: "—",
-      color: "var(--mute)",
-      note: elapsedNote(window, now, resetAt),
-      valueText: RESET_VALUE_TEXT,
-    };
-  }
-  const tone = usageTone(window.usedPercent);
+  const elapsed = hasElapsed(window.resetsAt, now);
+  const usedPercent = elapsed ? 0 : window.usedPercent;
+  const tone = usageTone(usedPercent);
   return {
-    percent: window.usedPercent,
+    percent: usedPercent,
     tone,
-    text: formatUsedPercent(window.usedPercent),
+    text: formatUsedPercent(usedPercent),
     color: usageToneColor(tone),
-    note: pendingNote(formatResetIn(window.resetsAt, now), resetAt),
-    valueText: undefined,
+    note: elapsed ? elapsedNote(window, now, resetAt) : pendingNote(formatResetIn(window.resetsAt, now), resetAt),
   };
 }
 
-/** "reset 1h ago · Mon 20:34 · last seen 97%": the number dates from the observation, not the reset. */
+/** "reset 1h ago · Mon 20:34": when the quota renewed, not what it held before it did. */
 function elapsedNote(window: LimitWindow, now: number, resetAt: string): string {
-  return `reset ${formatAgo(window.resetsAt, now)} · ${resetAt} · last seen ${formatUsedPercent(window.usedPercent)}`;
+  return `reset ${formatAgo(window.resetsAt, now)} · ${resetAt}`;
 }
 
 /** "resets in 6d 12h · Mon 11:00"; empty when the provider reported no reset. */

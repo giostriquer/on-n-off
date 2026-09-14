@@ -251,7 +251,7 @@ function PopoverWindow({
   provider: AgentId;
   now: number;
 }) {
-  const { percent, tone, note, text, color, valueText } = presentLimitWindow(window, now);
+  const { percent, tone, note, text, color } = presentLimitWindow(window, now);
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
@@ -261,7 +261,7 @@ function PopoverWindow({
         </span>
         {note ? <span className="mt-0.5 block text-[10px] leading-tight text-[var(--mute)] tabular-nums">{note}</span> : null}
       </div>
-      <span className="text-[13px] font-semibold tabular-nums" style={{ color }} aria-hidden={valueText ? true : undefined}>
+      <span className="text-[13px] font-semibold tabular-nums" style={{ color }}>
         {text}
       </span>
       <div
@@ -271,7 +271,6 @@ function PopoverWindow({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(percent)}
-        aria-valuetext={valueText}
       >
         <div
           className="h-full rounded-full transition-[width]"

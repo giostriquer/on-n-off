@@ -109,11 +109,11 @@ describe("LimitsPopover", () => {
     const account = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
     const session = within(account).getByRole("meter", { name: "5 hour · all models" });
     expect(session.getAttribute("aria-valuenow")).toBe("0");
-    expect(session.getAttribute("aria-valuetext")).toBe("not observed since the reset");
+    expect(session.getAttribute("aria-valuetext")).toBeNull();
     expect((session.firstElementChild as HTMLElement).style.background).not.toBe("var(--trip)");
-    expect(within(account).getByText("—").style.color).toBe("var(--mute)");
-    expect(within(account).getByText(/^reset 2m ago · \w{3} \d\d:\d\d · last seen 93%$/)).toBeTruthy();
-    // The live window keeps its number and does not get the reset voice-over.
+    expect(within(account).getByText("0%").style.color).toBe("");
+    expect(within(account).getByText(/^reset 2m ago · \w{3} \d\d:\d\d$/)).toBeTruthy();
+    // The live window keeps its number.
     const weekly = within(account).getByRole("meter", { name: "Weekly · all models" });
     expect(weekly.getAttribute("aria-valuenow")).toBe("24");
     expect(weekly.getAttribute("aria-valuetext")).toBeNull();
