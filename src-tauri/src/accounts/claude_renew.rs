@@ -5,7 +5,7 @@
 //! a night, a weekend — left the Limits screen reporting an expired login at a user who was
 //! signed in the whole time, with no way back except going to type in a terminal.
 //!
-//! This is the one place in `limits/` that reads Claude's refresh token, redeems it, and writes
+//! This is the one place that redeems Claude's active refresh token and writes
 //! the result back to Claude Code's own store. It cooperates rather than races: the same two lock
 //! directories in the same order, the same grant against the same client id, the same stored
 //! shape, and [`credentials::claude_login_document`] rather than a second opinion about which
@@ -31,13 +31,15 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::{json, Value};
 
-use super::credentials::{self, ClaudeCredential, ClaudeStore, CredentialLookup, KeychainProbe};
-use super::json::optional_string;
 use crate::http::{post_grant, HttpError};
+use crate::limits::credentials::{
+    self, ClaudeCredential, ClaudeStore, CredentialLookup, KeychainProbe,
+};
+use crate::limits::json::optional_string;
 
 /// Claude Code's own token endpoint and OAuth client. A refresh token is issued to one client and
 /// refused to any other, so these are not ours to choose.
-pub(super) const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
+pub(crate) const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 /// What Claude Code asks for when the stored login does not name its own scopes.
@@ -60,7 +62,7 @@ const LOCK_STALE: Duration = Duration::from_secs(60);
 const KEYCHAIN_WRITE_DEADLINE: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum RenewError {
+pub(crate) enum RenewError {
     /// Another process holds Claude Code's refresh lock. Its renewal is the one that should win,
     /// and the caller keeps the message it already had rather than redeeming the same token twice.
     Busy,
@@ -89,7 +91,7 @@ static REFUSED: RefusedLogin = RefusedLogin::new();
 /// refresh token's, when it states one.
 type LoginId = (ClaudeStore, i64, Option<i64>);
 
-pub(super) struct RefusedLogin(Mutex<Option<LoginId>>);
+pub(crate) struct RefusedLogin(Mutex<Option<LoginId>>);
 
 impl RefusedLogin {
     const fn new() -> Self {
@@ -129,7 +131,7 @@ fn identify(store: &ClaudeStore, oauth: &Value) -> LoginId {
 /// This is the whole answer to "what is the Claude login right now", so every caller gets the
 /// renewal — including the re-read that follows a rejected token, where the stored login may be a
 /// renewable expired one rather than a dead one.
-pub(super) fn current_login<P: Fn() -> KeychainProbe>(
+pub(crate) fn current_login<P: Fn() -> KeychainProbe>(
     home: &Path,
     keychain: &P,
     now_ms: i64,

@@ -582,6 +582,9 @@ pub struct LimitsCreditsDto {
 #[serde(rename_all = "camelCase")]
 pub struct LimitsAccountDto {
     pub id: String,
+    /// Previous unscoped cache key; used only to suppress superseded history, never transfer usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }

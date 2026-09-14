@@ -7,6 +7,7 @@
 use std::cmp::Reverse;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,9 @@ use crate::dto::{
 use crate::usage::cache_io::atomic_write;
 
 const SNAPSHOT_SCHEMA_VERSION: u8 = 2;
+// Sign-in and the live provider reader can publish concurrently. Protect the timestamp check
+// and replacement together; this lock covers only local snapshot I/O, never provider calls.
+static SNAPSHOT_WRITES: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +52,9 @@ impl SnapshotStore {
     /// trustworthy while refresh is unavailable; a successful credits-only read is dated when it
     /// reaches this storage boundary.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
+        let _write = SNAPSHOT_WRITES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let account = dto
             .account
             .as_ref()
@@ -73,6 +80,10 @@ impl SnapshotStore {
     /// Every remembered snapshot for `provider`, newest first. Unreadable files are skipped rather
     /// than failing the whole read. Files from obsolete snapshot schemas are ignored.
     pub fn load(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
+        without_superseded(self.load_all(provider))
+    }
+
+    fn load_all(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
         let prefix = format!("{}-", provider.key());
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return Vec::new();
@@ -96,8 +107,62 @@ impl SnapshotStore {
         snapshots.into_iter().map(|(_, dto)| dto).collect()
     }
 
+    /// Conditionally remove legacy history identified by a confirmed saved-account card.
+    /// Recheck the stored label: a workspace-only key may have been reused by another user.
+    pub fn forget_matching_email(
+        &self,
+        provider: AgentId,
+        account_id: &str,
+        email: &str,
+    ) -> Result<(), String> {
+        let _write = SNAPSHOT_WRITES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let changed = "Account history changed. Refresh accounts before removing it.";
+        if email.trim().is_empty() || account_id.starts_with("profile:") {
+            return Err(changed.into());
+        }
+        let path = self.dir.join(file_name(provider, account_id));
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(changed.into()),
+        };
+        let stored = decode(&raw).ok_or(changed)?;
+        if stored.provider != provider
+            || stored.account.id != account_id
+            || !stored
+                .account
+                .label
+                .as_deref()
+                .is_some_and(|label| label.trim().eq_ignore_ascii_case(email.trim()))
+        {
+            return Err(changed.into());
+        }
+        self.remove_file(provider, account_id)
+    }
+
     /// Delete one account's snapshot; unknown accounts are a no-op.
     pub fn forget(&self, provider: AgentId, account_id: &str) -> Result<(), String> {
+        let _write = SNAPSHOT_WRITES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let all = self.load_all(provider);
+        if let Some(target) = all
+            .iter()
+            .find(|dto| dto.account.as_ref().is_some_and(|a| a.id == account_id))
+        {
+            for legacy in all.iter().filter(|dto| supersedes(target, dto)) {
+                self.remove_file(
+                    provider,
+                    &legacy.account.as_ref().expect("matched account").id,
+                )?;
+            }
+        }
+        self.remove_file(provider, account_id)
+    }
+
+    fn remove_file(&self, provider: AgentId, account_id: &str) -> Result<(), String> {
         let path = self.dir.join(file_name(provider, account_id));
         match fs::remove_file(&path) {
             Ok(()) => Ok(()),
@@ -183,6 +248,44 @@ fn fnv1a(input: &str) -> u32 {
     input.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
         (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
     })
+}
+
+/// New scoped observations supersede the old card only when both its provider-specific legacy
+/// key and email match. Keep the old file until Forget; never import its unscoped quota windows.
+fn supersedes(scoped: &ProviderLimitsDto, legacy: &ProviderLimitsDto) -> bool {
+    if legacy.current_account
+        || scoped.provider != legacy.provider
+        || scoped.status != LimitsStatus::Ok
+    {
+        return false;
+    }
+    let (Some(new), Some(old)) = (&scoped.account, &legacy.account) else {
+        return false;
+    };
+    if !new.id.starts_with("profile:")
+        || old.id.starts_with("profile:")
+        || new.legacy_id.as_deref() != Some(old.id.as_str())
+    {
+        return false;
+    }
+    match (&new.label, &old.label) {
+        (Some(new), Some(old)) => {
+            !new.trim().is_empty() && new.trim().eq_ignore_ascii_case(old.trim())
+        }
+        _ => false,
+    }
+}
+
+pub(super) fn without_superseded(accounts: Vec<ProviderLimitsDto>) -> Vec<ProviderLimitsDto> {
+    let hidden: Vec<bool> = accounts
+        .iter()
+        .map(|old| accounts.iter().any(|new| supersedes(new, old)))
+        .collect();
+    accounts
+        .into_iter()
+        .zip(hidden)
+        .filter_map(|(dto, hidden)| (!hidden).then_some(dto))
+        .collect()
 }
 
 #[cfg(test)]

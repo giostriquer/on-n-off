@@ -366,35 +366,40 @@ fn normalizes_the_chatgpt_account_and_rate_limits_without_reading_a_token() {
         r#"{"tokens":{"account_id":"acct-1"}}"#,
     )
     .unwrap();
-    let parsed = normalize_app_server(AppServerResult {
-        codex_home,
-        account: typed(json!({
-            "account": {
-                "type": "chatgpt",
-                "email": "Me@Example.com",
-                "planType": "pro"
-            },
-            "requiresOpenaiAuth": true
-        })),
-        rate_limits: typed(json!({
-            "rateLimits": {
-                "limitId": "codex",
-                "primary": {
-                    "usedPercent": 42,
-                    "windowDurationMins": 10080,
-                    "resetsAt": 1787838960
+    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let parsed = normalize_app_server(
+        AppServerResult {
+            codex_home,
+            account: typed(json!({
+                "account": {
+                    "type": "chatgpt",
+                    "email": "Me@Example.com",
+                    "planType": "pro"
                 },
-                "secondary": null,
-                "credits": {"hasCredits": false, "unlimited": false, "balance": "0"},
-                "planType": "pro"
-            }
-        })),
-    })
+                "requiresOpenaiAuth": true
+            })),
+            rate_limits: typed(json!({
+                "rateLimits": {
+                    "limitId": "codex",
+                    "primary": {
+                        "usedPercent": 42,
+                        "windowDurationMins": 10080,
+                        "resetsAt": 1787838960
+                    },
+                    "secondary": null,
+                    "credits": {"hasCredits": false, "unlimited": false, "balance": "0"},
+                    "planType": "pro"
+                }
+            })),
+        },
+        before,
+    )
     .unwrap();
 
     assert_eq!(
         parsed.account,
         Some(crate::dto::LimitsAccountDto {
+            legacy_id: None,
             id: "acct-1".to_string(),
             label: Some("Me@Example.com".to_string()),
         })
@@ -407,23 +412,28 @@ fn normalizes_the_chatgpt_account_and_rate_limits_without_reading_a_token() {
 #[test]
 fn falls_back_to_a_normalized_email_identity_when_codex_has_no_account_id() {
     let codex_home = crate::paths::scratch_dir("codex-app-server-email");
-    let parsed = normalize_app_server(AppServerResult {
-        codex_home,
-        account: typed(json!({
-            "account": {
-                "type": "chatgpt",
-                "email": " Me@Example.com ",
-                "planType": "plus"
-            },
-            "requiresOpenaiAuth": true
-        })),
-        rate_limits: typed(json!({"rateLimits": {"planType": "plus"}})),
-    })
+    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let parsed = normalize_app_server(
+        AppServerResult {
+            codex_home,
+            account: typed(json!({
+                "account": {
+                    "type": "chatgpt",
+                    "email": " Me@Example.com ",
+                    "planType": "plus"
+                },
+                "requiresOpenaiAuth": true
+            })),
+            rate_limits: typed(json!({"rateLimits": {"planType": "plus"}})),
+        },
+        before,
+    )
     .unwrap();
 
     assert_eq!(
         parsed.account,
         Some(crate::dto::LimitsAccountDto {
+            legacy_id: None,
             id: "email:me@example.com".to_string(),
             label: Some("Me@Example.com".to_string()),
         })
@@ -432,18 +442,82 @@ fn falls_back_to_a_normalized_email_identity_when_codex_has_no_account_id() {
 
 #[test]
 fn api_key_accounts_are_explicitly_unsupported() {
-    let error = normalize_app_server(AppServerResult {
-        codex_home: crate::paths::scratch_dir("codex-app-server-api-key"),
-        account: typed(json!({
-            "account": {"type": "apiKey"},
-            "requiresOpenaiAuth": false
-        })),
-        rate_limits: typed(json!({"rateLimits": {}})),
-    })
+    let error = normalize_app_server(
+        AppServerResult {
+            codex_home: crate::paths::scratch_dir("codex-app-server-api-key"),
+            account: typed(json!({
+                "account": {"type": "apiKey"},
+                "requiresOpenaiAuth": false
+            })),
+            rate_limits: typed(json!({"rateLimits": {}})),
+        },
+        None,
+    )
     .unwrap_err();
 
     assert!(matches!(
         error,
         AppServerFailure::Unsupported(message) if message.contains("API key")
     ));
+}
+
+#[test]
+fn scoped_codex_observation_carries_its_previous_workspace_key() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let codex_home = crate::paths::scratch_dir("codex-app-server-scoped-legacy");
+    let payload = json!({"https://api.openai.com/auth": {"chatgpt_user_id":"user-1", "chatgpt_account_id":"workspace-1"}});
+    let token = format!(
+        "header.{}.signature",
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
+    );
+    std::fs::write(
+        codex_home.join("auth.json"),
+        json!({"tokens":{"account_id":"workspace-1", "id_token": token}}).to_string(),
+    )
+    .unwrap();
+    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let parsed = normalize_app_server(AppServerResult {
+        codex_home,
+        account: typed(json!({"account":{"type":"chatgpt", "email":"me@example.com", "planType":"pro"}, "requiresOpenaiAuth":true})),
+        rate_limits: typed(json!({"rateLimits":{"planType":"pro"}})),
+    }, before).unwrap();
+    let account = parsed.account.unwrap();
+    assert!(account.id.starts_with("profile:"));
+    assert_eq!(account.legacy_id.as_deref(), Some("workspace-1"));
+    assert_eq!(account.label.as_deref(), Some("me@example.com"));
+}
+
+#[test]
+fn rejects_native_identity_changes_during_an_app_server_read() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    for (user, workspace) in [("user-2", "workspace-1"), ("user-1", "workspace-2")] {
+        let codex_home = crate::paths::scratch_dir("codex-app-server-account-race");
+        let write_identity = |user: &str, workspace: &str| {
+            let payload = json!({"https://api.openai.com/auth": {"chatgpt_user_id":user, "chatgpt_account_id":workspace}});
+            let token = format!(
+                "header.{}.signature",
+                URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
+            );
+            std::fs::write(
+                codex_home.join("auth.json"),
+                json!({"tokens":{"account_id":workspace,"id_token":token}}).to_string(),
+            )
+            .unwrap();
+        };
+        write_identity("user-1", "workspace-1");
+        let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+        let mut transport = FakeTransport {
+            received: VecDeque::from([
+                json!({"id":1,"result":{"codexHome":codex_home}}),
+                json!({"id":2,"result":{"account":{"type":"chatgpt","email":"same@example.com","planType":"pro"}}}),
+                json!({"id":3,"result":{"rateLimits":{"primary":{"usedPercent":42,"windowDurationMins":10080}}}}),
+            ]),
+            sent: vec![],
+        };
+        let session = query_app_server(&codex_home, false, &mut transport).unwrap();
+        write_identity(user, workspace);
+        assert!(
+            matches!(normalize_app_server(session, before), Err(AppServerFailure::Failed(message)) if message.contains("changed"))
+        );
+    }
 }

@@ -80,6 +80,7 @@ impl Reading {
 /// there is no announcing a source nothing shares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
+    Accounts,
     LimitsClaude,
     LimitsCodex,
     GithubPrs,
@@ -91,6 +92,7 @@ impl Source {
     /// `ui/src/lib/types.ts`; change the two together.
     fn name(self) -> &'static str {
         match self {
+            Self::Accounts => "accounts",
             Self::LimitsClaude => "limits:claude",
             Self::LimitsCodex => "limits:codex",
             Self::SubscriptionCodex => "subscription:codex",

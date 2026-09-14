@@ -270,6 +270,9 @@ impl ClaudeAdapter {
 }
 
 impl AgentAdapter for ClaudeAdapter {
+    fn supports_accounts(&self) -> bool {
+        true
+    }
     fn info(&self) -> AgentInfo {
         agent_info(AgentId::Claude)
     }

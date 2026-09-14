@@ -283,6 +283,9 @@ impl CodexAdapter {
 }
 
 impl AgentAdapter for CodexAdapter {
+    fn supports_accounts(&self) -> bool {
+        true
+    }
     fn info(&self) -> AgentInfo {
         agent_info(AgentId::Codex)
     }

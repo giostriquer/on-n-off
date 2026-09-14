@@ -22,7 +22,7 @@ const CLAUDE: ProviderLimits[] = [
     status: "ok",
     account: { id: "claude-1", label: "you@example.com" },
     currentAccount: true,
-    plan: "max",
+    plan: "max ×20",
     windows: [
       { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 9, resetsAt: at(6 * 24 * 60 + 12 * 60), observedAt: OBSERVED },
       { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 10, resetsAt: at(3 * 60 + 20), observedAt: OBSERVED },
@@ -58,6 +58,18 @@ const CODEX: ProviderLimits[] = [
 ];
 
 const LIMITS: Partial<Record<AgentId, ProviderLimits[]>> = { claude: CLAUDE, codex: CODEX };
+
+/** A saved Claude account whose five-hour session has not started. */
+export function claudeWithoutReset(): ProviderLimits[] {
+  return [CLAUDE[0], {
+    ...CLAUDE[0],
+    account: { id: "claude-2", label: "other@example.com" },
+    currentAccount: false,
+    windows: CLAUDE[0].windows.map(window => window.kind === "session"
+      ? { ...window, usedPercent: 0, resetsAt: null }
+      : window),
+  }];
+}
 
 export function limitsFor(agentId: unknown): ProviderLimits[] {
   return (typeof agentId === "string" && LIMITS[agentId as AgentId]) || [];

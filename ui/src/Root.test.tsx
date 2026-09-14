@@ -22,8 +22,8 @@ vi.mock("$lib/api", () => ({
   onSharedReadChanged: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
-it("selects the lightweight Limits surface from the window query", () => {
+it("selects the lightweight Limits surface from the window query", async () => {
   render(<Root search="?surface=limits-popover" />);
 
-  expect(screen.getByRole("heading", { name: "Limits" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Limits" })).toBeTruthy();
 });

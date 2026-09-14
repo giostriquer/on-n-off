@@ -91,12 +91,14 @@ trait JsonLineTransport {
 
 pub(super) fn read(home: &Path, force: bool) -> Result<Parsed, AppServerFailure> {
     let expected_codex_home = home.join(".codex");
+    let before = crate::accounts::native::codex_metadata(&expected_codex_home)
+        .map_err(AppServerFailure::Failed)?;
     let mut transport =
         ProcessTransport::spawn(&expected_codex_home).map_err(AppServerFailure::Failed)?;
     let session = query_app_server(&expected_codex_home, force, &mut transport);
     let exit_status = transport.finish();
     let session = session.map_err(|error| classify_query_failure(error, exit_status))?;
-    normalize_app_server(session)
+    normalize_app_server(session, before)
 }
 
 struct ProcessTransport {
@@ -449,7 +451,10 @@ fn response_result<T: DeserializeOwned>(message: &Value, method: &str) -> Result
     ))
 }
 
-fn normalize_app_server(session: AppServerResult) -> Result<Parsed, AppServerFailure> {
+fn normalize_app_server(
+    session: AppServerResult,
+    before: Option<(String, Value)>,
+) -> Result<Parsed, AppServerFailure> {
     let Some(account) = session.account.account else {
         return Err(AppServerFailure::SignedOut);
     };
@@ -472,7 +477,23 @@ fn normalize_app_server(session: AppServerResult) -> Result<Parsed, AppServerFai
         .map(str::trim)
         .filter(|email| !email.is_empty())
         .map(str::to_string);
-    let account_id = read_account_id(&session.codex_home)
+    let after = crate::accounts::native::codex_metadata(&session.codex_home)
+        .map_err(AppServerFailure::Failed)?;
+    if before.as_ref().map(|(id, _)| id) != after.as_ref().map(|(id, _)| id) {
+        return Err(AppServerFailure::Failed(
+            "The signed-in account changed while reading usage. Retry after sign-in finishes."
+                .into(),
+        ));
+    }
+    // The identity captured before spawning owns this response. A token refresh may
+    // change claims, but a different user or workspace must never inherit its usage.
+    let metadata = before;
+    let legacy_id = metadata.as_ref().and_then(|(id, claims)| {
+        let workspace = claims.get("chatgpt_account_id")?.as_str()?;
+        (id != workspace).then(|| workspace.to_owned())
+    });
+    let account_id = metadata
+        .map(|(id, _)| id)
         .or_else(|| {
             email
                 .as_deref()
@@ -481,6 +502,7 @@ fn normalize_app_server(session: AppServerResult) -> Result<Parsed, AppServerFai
         .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string());
     let mut parsed = super::codex::parse_codex(&session.rate_limits);
     parsed.account = Some(crate::dto::LimitsAccountDto {
+        legacy_id,
         id: account_id,
         label: email,
     });
@@ -492,24 +514,6 @@ fn normalize_app_server(session: AppServerResult) -> Result<Parsed, AppServerFai
         .map(str::to_string)
         .or(parsed.plan);
     Ok(parsed)
-}
-
-fn read_account_id(codex_home: &Path) -> Option<String> {
-    #[derive(Deserialize)]
-    struct AuthMetadata {
-        tokens: Option<TokenMetadata>,
-    }
-
-    #[derive(Deserialize)]
-    struct TokenMetadata {
-        account_id: Option<String>,
-    }
-
-    let file = std::fs::File::open(codex_home.join("auth.json")).ok()?;
-    let metadata: AuthMetadata = serde_json::from_reader(file).ok()?;
-    let account_id = metadata.tokens?.account_id?;
-    let account_id = account_id.trim();
-    (!account_id.is_empty()).then(|| account_id.to_string())
 }
 
 fn paths_are_equivalent(left: &Path, right: &Path) -> bool {

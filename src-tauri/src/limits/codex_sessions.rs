@@ -67,7 +67,13 @@ pub(super) fn merge_recent(
         let matches: Vec<(usize, usize)> = accounts
             .iter()
             .enumerate()
-            .filter(|(_, account)| !account.current_account)
+            .filter(|(_, account)| {
+                !account.current_account
+                    && account
+                        .account
+                        .as_ref()
+                        .is_none_or(|a| !a.id.starts_with("profile:"))
+            })
             .flat_map(|(account_index, account)| {
                 account
                     .windows

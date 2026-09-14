@@ -1,5 +1,5 @@
-import { useRef } from "react";
-import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { keepPreviousData, useQuery, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import { useSharedRead } from "$lib/useSharedRead";
 import type { ProviderLimits } from "$lib/limitsTypes";
@@ -56,6 +56,13 @@ function useProviderLimits(
 
 /** Canonical Claude + Codex query state shared by the full screen and menu-bar surface. */
 export function useLimitsProviders(pollMinutes: LimitsPollMinutes = 5) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const update = () => setNow(Date.now());
+    const timer = window.setInterval(update, 60_000);
+    window.addEventListener("focus", update);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", update); };
+  }, []);
   const providers = [
     useProviderLimits("claude", pollMinutes),
     useProviderLimits("codex", pollMinutes),
@@ -68,5 +75,28 @@ export function useLimitsProviders(pollMinutes: LimitsPollMinutes = 5) {
     }
   }
 
-  return { providers, loading, now: Date.now(), refresh };
+  return { providers, loading, now, refresh };
+}
+
+/** The shell refresh uses the same query keys and backend cache as every Limits surface. */
+export async function refreshLimits(client: QueryClient) {
+  await Promise.allSettled((["claude", "codex"] as const).map(async provider => {
+    const queryKey = ["limits", provider];
+    // Joining a background read would discard the user's explicit force request.
+    let existing = client.getQueryCache().find({ queryKey, exact: true });
+    while (existing?.state.fetchStatus === "fetching" && existing.promise) {
+      await existing.promise.catch(() => {});
+      // Shared-read invalidation can cancel and replace the request we just awaited.
+      existing = client.getQueryCache().find({ queryKey, exact: true });
+    }
+    let forceNextRead = true;
+    return client.fetchQuery({
+      queryKey, staleTime: 0,
+      queryFn: () => {
+        const force = forceNextRead;
+        forceNextRead = false;
+        return api.readLimits(provider, force);
+      },
+    });
+  }));
 }

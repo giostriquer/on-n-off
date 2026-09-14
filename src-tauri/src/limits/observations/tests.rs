@@ -23,6 +23,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         status: LimitsStatus::Unauthenticated,
         message: Some("Refresh paused".to_string()),
         account: Some(LimitsAccountDto {
+            legacy_id: None,
             id: "uuid-1".to_string(),
             label: Some("me@example.com".to_string()),
         }),

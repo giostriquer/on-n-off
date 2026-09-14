@@ -9,5 +9,6 @@ export type SubscriptionReading = {
   /** No retained browser connection; kept for IPC compatibility. */
   connected: boolean;
   browserSupported?: boolean;
+  canConnect?: boolean;
   unavailable: boolean;
 };

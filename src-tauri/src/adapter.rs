@@ -11,6 +11,9 @@ pub struct ItemRoots {
 
 pub trait AgentAdapter: Send + Sync {
     fn info(&self) -> AgentInfo;
+    fn supports_accounts(&self) -> bool {
+        false
+    }
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError>;
     fn list_local_tab(&self) -> Result<AgentTabDto, AdapterError> {
         self.list_tab()

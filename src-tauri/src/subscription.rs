@@ -54,7 +54,11 @@ fn parse_billing(payload: &Value, now: DateTime<Utc>) -> Option<SubscriptionDate
     })
 }
 fn parse_claims(claims: &Value, account_id: &str, now: DateTime<Utc>) -> Option<SubscriptionDate> {
-    if claims.get("chatgpt_account_id")?.as_str()? != account_id {
+    if crate::accounts::model::codex_observation_key(
+        claims.get("chatgpt_account_id")?.as_str()?,
+        claims,
+    ) != account_id
+    {
         return None;
     }
     let date = claims
@@ -88,7 +92,7 @@ fn choose(
 
 const REFRESH_SECONDS: i64 = 24 * 60 * 60;
 
-mod browser;
+pub(crate) mod browser;
 #[cfg(target_os = "macos")]
 mod import_owner;
 mod store;
@@ -100,19 +104,74 @@ pub struct SubscriptionReading {
     pub connected: bool,
     pub unavailable: bool,
     pub browser_supported: bool,
+    pub can_connect: bool,
 }
 
-pub fn read(_app: &tauri::AppHandle, home: &std::path::Path, account: &str) -> SubscriptionReading {
-    let reading = browser::read_metadata(home, account, chrono::Utc::now());
-    browser::refresh_if_due(home, account);
-    reading
+pub fn read(
+    _app: &tauri::AppHandle,
+    home: &std::path::Path,
+    account: &str,
+) -> Result<SubscriptionReading, String> {
+    let (reading, context) = browser::read_metadata(home, account, chrono::Utc::now())?;
+    browser::refresh_if_due(home, account, context.as_ref());
+    Ok(reading)
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct BillingContext {
+    workspace: String,
+    user: String,
+    saved: bool,
+}
+fn with_billing_context<T>(
+    home: &std::path::Path,
+    account: &str,
+    consume: impl FnOnce(Result<Option<BillingContext>, String>) -> T,
+) -> T {
+    crate::accounts::with_saved_billing_identity(home, account, |saved| {
+        consume(saved.map(|saved| resolve_context(home, account, saved)))
+    })
+}
+fn billing_context(
+    home: &std::path::Path,
+    account: &str,
+) -> Result<Option<BillingContext>, String> {
+    with_billing_context(home, account, |context| context)
+}
+fn validate_context(context: Result<Option<BillingContext>, String>) -> Result<(), String> {
+    context?
+        .map(|_| ())
+        .ok_or_else(|| "Save this account or sign in with Codex before connecting billing.".into())
+}
+fn resolve_context(
+    home: &std::path::Path,
+    account: &str,
+    saved: Option<crate::accounts::model::Identity>,
+) -> Option<BillingContext> {
+    if let Some(identity) = saved
+        .filter(|id| id.provider == crate::dto::AgentId::Codex && id.observation_key() == account)
+    {
+        return Some(BillingContext {
+            workspace: identity.workspace_id,
+            user: identity.user_id,
+            saved: true,
+        });
+    }
+    let (key, claims) = store::identity(home)?;
+    if key != account {
+        return None;
+    }
+    Some(BillingContext {
+        workspace: claims.get("chatgpt_account_id")?.as_str()?.into(),
+        user: claims
+            .get("chatgpt_user_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .into(),
+        saved: false,
+    })
 }
 pub fn validate_account(home: &std::path::Path, account: &str) -> Result<(), String> {
-    if store::identity(home).is_some_and(|(id, _)| id == account) {
-        Ok(())
-    } else {
-        Err("Sign in to the matching Codex account before connecting billing.".into())
-    }
+    validate_context(billing_context(home, account))
 }
 pub use browser::{connect, disconnect};
 pub fn forget(home: &std::path::Path, account: &str) -> Result<(), String> {

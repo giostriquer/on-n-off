@@ -64,3 +64,17 @@ it.each([
   announce(source);
   expect(invalidate).toHaveBeenCalledWith({ queryKey: [...queryKey] });
 });
+
+it("rechecks billing eligibility when an account is saved after its date was cached", async () => {
+  calls.listeners.clear();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["accounts", "codex"], { profiles: [] });
+  client.setQueryData(["subscription", "codex", "profile:a"], { metadata: null });
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const hook = renderHook(() => useSharedRead("accounts"), { wrapper });
+  await waitFor(() => expect(calls.listeners.size).toBe(1));
+  announce("accounts");
+  expect(client.getQueryState(["accounts", "codex"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["subscription", "codex", "profile:a"])?.isInvalidated).toBe(true);
+  hook.unmount(); client.clear();
+});

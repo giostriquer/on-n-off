@@ -13,6 +13,7 @@ fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> Pr
         status,
         message: None,
         account: Some(LimitsAccountDto {
+            legacy_id: None,
             id: account_id.into(),
             label: None,
         }),

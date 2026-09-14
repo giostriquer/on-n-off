@@ -5,6 +5,7 @@ use crate::paths::scratch_dir;
 
 fn account(id: &str, label: &str) -> LimitsAccountDto {
     LimitsAccountDto {
+        legacy_id: None,
         id: id.to_string(),
         label: Some(label.to_string()),
     }
@@ -183,4 +184,141 @@ fn successful_endpoint_windows_persist_without_local_supplementation() {
     let persisted = store.load(AgentId::Claude);
     assert_eq!(persisted[0].windows.len(), 1);
     assert_eq!(persisted[0].windows[0].id, "weekly_all");
+}
+
+fn scoped_snapshot(
+    provider: AgentId,
+    id: &str,
+    legacy: &str,
+    email: &str,
+    used: f64,
+) -> ProviderLimitsDto {
+    let mut value = serde_json::to_value(ok_snapshot(provider, id, email, used)).unwrap();
+    value["account"]["legacyId"] = serde_json::json!(legacy);
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn upgraded_identity_shows_one_card_and_stays_deduplicated_after_reload() {
+    for provider in [AgentId::Claude, AgentId::Codex] {
+        let home = scratch_dir("limits-identity-upgrade");
+        let store = SnapshotStore::for_home(&home);
+        store
+            .save(&ok_snapshot(provider, "legacy-a", "a@x", 90.0))
+            .unwrap();
+        store
+            .save(&ok_snapshot(
+                provider,
+                "legacy-icloud",
+                "a@icloud.com",
+                70.0,
+            ))
+            .unwrap();
+        let current = scoped_snapshot(provider, "profile:scoped-a", "legacy-a", "a@x", 5.0);
+        let listed = aggregate_accounts(&store, current, None);
+        assert_eq!(
+            listed.len(),
+            2,
+            "one active card plus the other remembered account"
+        );
+        assert_eq!(
+            listed[0].windows[0].used_percent, 5.0,
+            "legacy windows are not transferred"
+        );
+        assert_eq!(
+            listed[1].account.as_ref().unwrap().label.as_deref(),
+            Some("a@icloud.com")
+        );
+        let reloaded = SnapshotStore::for_home(&home).load(provider);
+        assert_eq!(
+            reloaded.len(),
+            2,
+            "old identity stays superseded after restarting"
+        );
+        assert!(reloaded
+            .iter()
+            .all(|d| d.account.as_ref().unwrap().id != "legacy-a"));
+        store.forget(provider, "profile:scoped-a").unwrap();
+        let remaining = SnapshotStore::for_home(&home).load(provider);
+        assert_eq!(
+            remaining.len(),
+            1,
+            "Forget must not resurrect the superseded card"
+        );
+        assert_eq!(remaining[0].account.as_ref().unwrap().id, "legacy-icloud");
+    }
+}
+
+#[test]
+fn identity_upgrade_does_not_merge_accounts_by_email_or_workspace_alone() {
+    let home = scratch_dir("limits-identity-upgrade-isolation");
+    let store = SnapshotStore::for_home(&home);
+    // A different user in the same workspace, and the same email in a different workspace.
+    store
+        .save(&ok_snapshot(AgentId::Codex, "workspace-a", "other@x", 70.0))
+        .unwrap();
+    store
+        .save(&ok_snapshot(AgentId::Codex, "workspace-b", "a@x", 80.0))
+        .unwrap();
+    store
+        .save(&scoped_snapshot(
+            AgentId::Codex,
+            "profile:other-workspace",
+            "workspace-c",
+            "a@x",
+            60.0,
+        ))
+        .unwrap();
+    let current = scoped_snapshot(AgentId::Codex, "profile:current", "workspace-a", "a@x", 5.0);
+    let listed = aggregate_accounts(&store, current, None);
+    assert_eq!(listed.len(), 4);
+    assert_eq!(SnapshotStore::for_home(&home).load(AgentId::Codex).len(), 4);
+}
+
+#[test]
+fn failed_upgrade_keeps_unscoped_history_without_attributing_it_to_the_new_identity() {
+    let home = scratch_dir("limits-identity-upgrade-failed");
+    let store = SnapshotStore::for_home(&home);
+    store
+        .save(&ok_snapshot(AgentId::Codex, "workspace-a", "a@x", 70.0))
+        .unwrap();
+    let mut current = scoped_snapshot(AgentId::Codex, "profile:current", "workspace-a", "a@x", 5.0);
+    current.status = LimitsStatus::Failed;
+    current.windows.clear();
+    let listed = aggregate_accounts(&store, current, None);
+    assert_eq!(listed.len(), 2);
+    assert!(listed[0].windows.is_empty());
+    assert_eq!(listed[1].windows[0].used_percent, 70.0);
+}
+
+#[test]
+fn saved_scoped_history_never_hides_a_current_unscoped_error() {
+    let home = scratch_dir("limits-identity-incomplete-current");
+    let store = SnapshotStore::for_home(&home);
+    store
+        .save(&scoped_snapshot(
+            AgentId::Claude,
+            "profile:known",
+            "user-a",
+            "a@x",
+            70.0,
+        ))
+        .unwrap();
+    let mut current = ok_snapshot(AgentId::Claude, "user-a", "a@x", 0.0);
+    current.status = LimitsStatus::Failed;
+    current.message = Some("Current account could not be verified".into());
+    current.windows.clear();
+    let listed = aggregate_accounts(&store, current, None);
+    assert_eq!(
+        listed.len(),
+        2,
+        "current error must remain alongside remembered history"
+    );
+    assert!(listed[0].current_account);
+    assert_eq!(listed[0].status, LimitsStatus::Failed);
+    assert_eq!(
+        listed[0].message.as_deref(),
+        Some("Current account could not be verified")
+    );
+    assert!(listed[0].windows.is_empty());
 }

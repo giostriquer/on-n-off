@@ -16,9 +16,9 @@ use super::json::optional_string;
 use crate::dto::LimitsAccountDto;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ClaudeIdentity {
-    pub(super) account: LimitsAccountDto,
-    pub(super) organization_id: Option<String>,
+pub(crate) struct ClaudeIdentity {
+    pub(crate) account: LimitsAccountDto,
+    pub(crate) organization_id: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -32,11 +32,24 @@ pub struct ClaudeCredential {
     pub has_refresh_token: bool,
     /// `refreshTokenExpiresAt`, epoch milliseconds, when the login states one.
     pub refresh_expires_at_ms: Option<i64>,
-    /// `subscriptionType` ("pro", "max", ...), used as the plan label.
+    /// `subscriptionType` ("pro", "max", ...).
     pub subscription_type: Option<String>,
+    /// Claude Code's tier identifier; only recognized Max multipliers affect presentation.
+    pub rate_limit_tier: Option<String>,
 }
 
 impl ClaudeCredential {
+    pub(super) fn plan(&self) -> Option<String> {
+        match (
+            self.subscription_type.as_deref(),
+            self.rate_limit_tier.as_deref(),
+        ) {
+            (Some("max"), Some("default_claude_max_5x")) => Some("max ×5".to_string()),
+            (Some("max"), Some("default_claude_max_20x")) => Some("max ×20".to_string()),
+            _ => self.subscription_type.clone(),
+        }
+    }
+
     /// Whether Claude Code can renew this login by itself: it holds a refresh token that has not
     /// passed its own expiry. An access token past `expiresAt` is then only stale, not a lost
     /// login — the next `claude` run mints a new one without any sign-in.
@@ -54,6 +67,7 @@ impl fmt::Debug for ClaudeCredential {
             .field("has_refresh_token", &self.has_refresh_token)
             .field("refresh_expires_at_ms", &self.refresh_expires_at_ms)
             .field("subscription_type", &self.subscription_type)
+            .field("rate_limit_tier", &self.rate_limit_tier)
             .finish()
     }
 }
@@ -87,7 +101,7 @@ pub type KeychainProbe = Result<Option<String>, String>;
 /// Deliberately not gated to macOS. The renewal names the store it is writing to on every
 /// platform, and the stub that answers "there is no Keychain here" is chosen inside
 /// `write_keychain`, not by making the name itself disappear.
-pub(super) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+pub(crate) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 /// What one credential source (Keychain entry or file) yielded.
 enum Source {
@@ -100,7 +114,7 @@ enum Source {
 
 /// Where a stored login lives, so a renewal writes back to the entry the next read will consult.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum ClaudeStore {
+pub(crate) enum ClaudeStore {
     /// The `Claude Code-credentials` Keychain entry, which only macOS has.
     Keychain,
     /// `<home>/.claude/.credentials.json`: the only store on Windows, and the macOS fallback.
@@ -115,7 +129,7 @@ pub(super) enum ClaudeStore {
 /// renewal in [`super::claude_renew`] go through it, so the two can never disagree about which
 /// entry they are talking about — a second copy of this precedence would let a renewal redeem the
 /// file's refresh token and write it over a Keychain entry the next read prefers.
-pub(super) fn claude_login_document(
+pub(crate) fn claude_login_document(
     home: &Path,
     keychain: KeychainProbe,
 ) -> Result<Option<(ClaudeStore, Value)>, String> {
@@ -139,7 +153,7 @@ pub(super) fn claude_login_document(
 ///
 /// Callers outside this module want [`super::claude_renew::current_login`], which is this plus the
 /// renewal; reaching for the non-renewing one is how the expired-login message came back.
-pub(super) fn read_claude_credential(
+pub(crate) fn read_claude_credential(
     home: &Path,
     keychain: KeychainProbe,
     now_ms: i64,
@@ -190,7 +204,7 @@ fn found(store: ClaudeStore, document: Value) -> Source {
 }
 
 /// `{"claudeAiOauth": {"accessToken", "expiresAt", "refreshTokenExpiresAt", "subscriptionType", ...}}`.
-pub(super) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential> {
+pub(crate) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential> {
     let oauth = value.get("claudeAiOauth")?;
     let token = optional_string(oauth.get("accessToken"))?;
     Some(ClaudeCredential {
@@ -199,16 +213,20 @@ pub(super) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential>
         has_refresh_token: optional_string(oauth.get("refreshToken")).is_some(),
         refresh_expires_at_ms: oauth.get("refreshTokenExpiresAt").and_then(Value::as_i64),
         subscription_type: optional_string(oauth.get("subscriptionType")),
+        rate_limit_tier: optional_string(oauth.get("rateLimitTier")),
     })
 }
 
 /// Which Claude account the CLI is signed into, from `<home>/.claude.json`'s `oauthAccount`
 /// (Claude Code rewrites it on every login). `None` when the file or the fields are absent.
-pub(super) fn read_claude_identity(home: &Path) -> Option<ClaudeIdentity> {
-    let value = read_json_file(&home.join(".claude.json")).ok()??;
+pub(crate) fn read_claude_identity(home: &Path) -> Option<ClaudeIdentity> {
+    let native =
+        crate::accounts::native::NativeStore::resolve(crate::dto::AgentId::Claude, home).ok()?;
+    let value = read_json_file(&native.config_file).ok()??;
     let account = value.get("oauthAccount")?;
     Some(ClaudeIdentity {
         account: LimitsAccountDto {
+            legacy_id: None,
             id: optional_string(account.get("accountUuid"))?,
             label: optional_string(account.get("emailAddress")),
         },
@@ -221,7 +239,7 @@ pub(super) fn read_claude_identity(home: &Path) -> Option<ClaudeIdentity> {
 /// so a rejected `Memo` credential is worth re-reading the store for, and retrying if that hands
 /// back a login. A rejected `Stored` credential is the login's own problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LoginSource {
+pub(crate) enum LoginSource {
     Memo,
     Stored,
 }
@@ -241,7 +259,7 @@ impl ClaudeLoginMemo {
     /// login the provider has actually rejected. `read` is `Fn`, not `FnOnce`: one provider read
     /// can need two lookups, and the bound is what says so at the signature rather than leaving
     /// the second call to work by accident.
-    pub(super) fn lookup(
+    pub(crate) fn lookup(
         &self,
         force: bool,
         account_id: &str,
@@ -269,7 +287,7 @@ impl ClaudeLoginMemo {
     /// The stored login, read again, when it produced one worth a second attempt — the question
     /// a caller retrying past a rejected login is actually asking. Whatever it finds replaces
     /// what the memo holds, a miss included, so the next read starts from the store either way.
-    pub(super) fn refreshed(
+    pub(crate) fn refreshed(
         &self,
         account_id: &str,
         now_ms: i64,
@@ -331,12 +349,39 @@ fn interpret_security_outcome(success: bool, stdout: &str, stderr: &str) -> Keyc
 /// access" dialog, so the deadline is generous; on timeout the tool is killed.
 #[cfg(target_os = "macos")]
 pub fn keychain_claude_json() -> KeychainProbe {
+    isolated_keychain(
+        std::env::var_os("ON_N_OFF_HOME").is_some(),
+        system_keychain_claude_json,
+    )
+}
+#[cfg(any(target_os = "macos", test))]
+fn isolated_keychain(isolated: bool, probe: impl FnOnce() -> KeychainProbe) -> KeychainProbe {
+    if isolated {
+        Ok(None)
+    } else {
+        probe()
+    }
+}
+#[cfg(target_os = "macos")]
+fn system_keychain_claude_json() -> KeychainProbe {
+    keychain_json(CLAUDE_KEYCHAIN_SERVICE, None)
+}
+
+/// Native account operations use the same stable system reader as Limits. Each verification
+/// still reads the current item; no renewable login is cached to suppress authorization prompts.
+#[cfg(target_os = "macos")]
+pub(crate) fn keychain_json(service: &str, account: Option<&str>) -> KeychainProbe {
     use crate::process::{wait_with_deadline, CommandOutcome};
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
-    let child = Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"])
+    let mut command = Command::new("/usr/bin/security");
+    command.args(["find-generic-password", "-s", service]);
+    if let Some(account) = account {
+        command.args(["-a", account]);
+    }
+    let child = command
+        .arg("-w")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -366,7 +411,7 @@ pub fn keychain_claude_json() -> KeychainProbe {
 /// returns one of the two in no defined order — on-n-off and Claude Code reading different
 /// logins, with nothing on screen to say so. Asking the entry itself removes the guess.
 #[cfg(target_os = "macos")]
-pub(super) fn keychain_claude_account() -> Option<String> {
+pub(crate) fn keychain_claude_account() -> Option<String> {
     use crate::process::{wait_with_deadline, CommandOutcome};
     use std::process::{Command, Stdio};
     use std::time::Duration;
@@ -392,7 +437,7 @@ pub(super) fn keychain_claude_account() -> Option<String> {
 /// Pull `acct` out of `security find-generic-password`'s attribute dump. Kept pure so the parsing
 /// is testable on every platform; only the spawn above is macOS-specific.
 #[cfg(any(target_os = "macos", test))]
-pub(super) fn parse_keychain_account(attributes: &str) -> Option<String> {
+pub(crate) fn parse_keychain_account(attributes: &str) -> Option<String> {
     attributes
         .lines()
         .filter_map(|line| line.trim().strip_prefix("\"acct\"<blob>=\""))
