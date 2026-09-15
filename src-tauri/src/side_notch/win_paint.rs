@@ -1424,6 +1424,8 @@ fn measure(entries: &[(PopItem, R)], size_scale: f64, display_scale: f64, paddin
 // ---------------------------------------------------------------------------
 // Rendering.
 
+// The mac `NotchView.swift` palette, ported. That file carries the rationale, in particular why
+// Claude's accent and the inner Fable ring deliberately differ from the app window's `#e8944a`.
 const RAIL_INK: Color = [8, 8, 8, 255];
 const POPOVER_INK: Color = [14, 14, 17, 255];
 const MUTED_INK: Color = [153, 153, 153, 255];
@@ -1431,8 +1433,8 @@ const TRACK_INK: Color = [44, 44, 44, 255];
 const LIVE_GREEN: Color = [74, 200, 120, 255];
 const WARN_AMBER: Color = [224, 179, 65, 255];
 const TRIP_RED: Color = [226, 89, 76, 255];
-const FABLE_ORANGE: Color = [247, 173, 113, 255];
-const CLAUDE_ORANGE: Color = [232, 148, 74, 255];
+const FABLE_ORANGE: Color = [204, 98, 64, 255];
+const CLAUDE_ORANGE: Color = [217, 119, 87, 255];
 const CODEX_INK: Color = [238, 240, 242, 255];
 const CURSOR_BLUE: Color = [122, 162, 255, 255];
 const ANTIGRAVITY_MUTE: Color = [140, 147, 157, 255];
