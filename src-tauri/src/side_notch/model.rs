@@ -282,5 +282,52 @@ fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
     (value * scale).round() / scale
 }
 
+/// The side notch meter ramp, twin of `NotchCore/Meter.swift`.
+///
+/// It used to step to a warning amber at 70 %. That amber is far lighter than the accents it
+/// replaced and its hue points away from red, so a meter that was filling up went paler and
+/// yellower exactly as it ran out, which reads as cooling down. Interpolating the accent toward the
+/// trip red keeps the ramp monotonic: every step sits closer to red than the one before it. The
+/// blend is eased rather than linear so crossing 70 % announces itself instead of creeping.
+///
+/// It lives here rather than in `win_paint.rs` for the reason the layout maths does: that file has
+/// no test target, so a ramp kept there is tested on neither CI leg. The gate is `windows` plus
+/// `test` rather than both platforms, because the painter is the only consumer and an item cfg'd
+/// into a target that never calls it fails `-D warnings` as dead code. Under `test` it compiles on
+/// both legs, which is what lets one regression test cover the Windows ramp from either runner.
+/// The amber still means "pending" on CI rollups and badges, so it stays in the painter palette.
+#[cfg(any(target_os = "windows", test))]
+pub type Color = [u8; 4];
+
+#[cfg(any(target_os = "windows", test))]
+pub const TRIP_RED: Color = [226, 89, 76, 255];
+#[cfg(any(target_os = "windows", test))]
+pub const UNREADABLE_INK: Color = [77, 77, 77, 255];
+
+#[cfg(any(target_os = "windows", test))]
+pub fn meter_color(percent: Option<f64>, base: Color) -> Color {
+    match percent {
+        None => UNREADABLE_INK,
+        Some(percent) if percent >= 90.0 => TRIP_RED,
+        Some(percent) if percent > 70.0 => mix(base, TRIP_RED, ((percent - 70.0) / 20.0).sqrt()),
+        Some(_) => base,
+    }
+}
+
+/// Two palette entries blended in sRGB, `amount` clamped to 0...1. Alpha is blended with the rest
+/// rather than taken from `from`, so the helper is right for any pair and not only for the opaque
+/// ramp colours it is used on today.
+#[cfg(any(target_os = "windows", test))]
+fn mix(from: Color, to: Color, amount: f64) -> Color {
+    let t = amount.clamp(0.0, 1.0);
+    let channel = |a: u8, b: u8| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as u8;
+    [
+        channel(from[0], to[0]),
+        channel(from[1], to[1]),
+        channel(from[2], to[2]),
+        channel(from[3], to[3]),
+    ]
+}
+
 #[cfg(test)]
 mod tests;

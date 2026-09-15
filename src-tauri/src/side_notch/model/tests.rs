@@ -252,3 +252,67 @@ fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
         "an explicit choice stands"
     );
 }
+
+/// The twin of `NotchCoreChecks`' ramp group. The meter used to step to a light amber at 70 %, so
+/// a window that was filling up went paler and yellower exactly as it ran out. Whatever shape the
+/// ramp takes, a fuller window must never sit further from the trip red than a less full one, and
+/// inside the band each step must actually move.
+#[test]
+fn meter_ramp_only_ever_moves_toward_the_trip_red() {
+    fn distance_to_trip(color: Color) -> f64 {
+        let square = |a: u8, b: u8| (f64::from(a) - f64::from(b)).powi(2);
+        (square(color[0], TRIP_RED[0])
+            + square(color[1], TRIP_RED[1])
+            + square(color[2], TRIP_RED[2]))
+        .sqrt()
+    }
+    // Claude, Fable, Codex, Cursor and Antigravity: every accent the meter can be handed.
+    let accents: [Color; 5] = [
+        [217, 119, 87, 255],
+        [204, 98, 64, 255],
+        [238, 240, 242, 255],
+        [122, 162, 255, 255],
+        [140, 147, 157, 255],
+    ];
+    for base in accents {
+        let mut previous = f64::INFINITY;
+        for step in 0..=100 {
+            let distance = distance_to_trip(meter_color(Some(f64::from(step)), base));
+            assert!(
+                distance <= previous + f64::EPSILON,
+                "ramp backtracks at {step} %: {distance} > {previous}"
+            );
+            previous = distance;
+        }
+        // Sampled rather than per-point: the blend quantises to 8 bits, so two adjacent percentages
+        // can legitimately round to the same colour near the top of the band. Across these spans it
+        // must still move, which is what a ramp that stopped interpolating would fail.
+        for pair in [(71, 75), (75, 80), (80, 85), (85, 89)] {
+            let (low, high) = pair;
+            let nearer = distance_to_trip(meter_color(Some(f64::from(high)), base));
+            let farther = distance_to_trip(meter_color(Some(f64::from(low)), base));
+            assert!(
+                nearer < farther,
+                "ramp stalls between {low} % and {high} %: {nearer} is no closer than {farther}"
+            );
+        }
+        assert_eq!(
+            meter_color(Some(70.0), base),
+            base,
+            "70 % is still the accent"
+        );
+        assert_eq!(
+            meter_color(Some(90.0), base),
+            TRIP_RED,
+            "90 % is the trip red"
+        );
+        // Pins the easing: a quarter of the way through the band is half the way to red. A linear
+        // blend would put a quarter here, and nothing else in this test would notice.
+        assert_eq!(
+            meter_color(Some(75.0), base),
+            mix(base, TRIP_RED, 0.5),
+            "the blend is eased, not linear"
+        );
+    }
+    assert_eq!(meter_color(None, accents[0]), UNREADABLE_INK);
+}

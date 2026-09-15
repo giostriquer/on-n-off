@@ -35,6 +35,40 @@ final class NotchTests {
       workHeight: 1084, scale: scale, mirrored: mirrored)
   }
 
+  /// The ring used to jump to a light amber at 70 %, so a meter that was filling up went paler and
+  /// yellower exactly as it ran out. Whatever shape the ramp takes, the invariant is that a fuller
+  /// window never sits further from the trip red than a less full one.
+  func testTheMeterRampOnlyEverMovesTowardTheTripRed() {
+    func distanceToTrip(_ ink: Ink) -> Double {
+      let dr = ink.r - tripInk.r, dg = ink.g - tripInk.g, db = ink.b - tripInk.b
+      return (dr * dr + dg * dg + db * db).squareRoot()
+    }
+    // Every accent the meter can be handed, so a new provider is covered the day it lands.
+    for base in railProviderOrder.map(providerInk) + [fableInk] {
+      var previous = Double.infinity
+      for step in 0...100 {
+        let ink = meterInk(quota("weekly", Double(step)), base: base, at: now)
+        let distance = distanceToTrip(ink)
+        // Inside the band every step must move, not merely fail to retreat: a ramp that stopped
+        // interpolating would still satisfy a non-increasing check.
+        let strict = (71...89).contains(step) && base != tripInk
+        if distance > previous + 0.000_001 || (strict && distance >= previous) {
+          failures += 1
+          print("FAIL meter ramp stalls or backtracks at \(step) %: \(distance) vs \(previous)")
+        }
+        previous = distance
+      }
+      expectEqual(meterInk(quota("weekly", 70), base: base, at: now), base)
+      expectEqual(meterInk(quota("weekly", 90), base: base, at: now), tripInk)
+      // Pins the easing itself: a quarter of the way through the band is half the way to red.
+      // A linear blend would put 25 % here, and nothing else in this check would notice.
+      expectEqual(
+        meterInk(quota("weekly", 75), base: base, at: now), base.mixed(toward: tripInk, 0.5))
+    }
+    // An unreadable window stays grey rather than joining the ramp.
+    expectEqual(meterInk(nil, base: claudeInk, at: now), unreadableInk)
+  }
+
   func testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst() {
     for id in ["weekly_fable", "weekly_scoped:Fable"] {
       let entry = provider(windows: [
@@ -388,6 +422,7 @@ func expectThrows<T>(_ value: @autoclosure () throws -> T, line: Int = #line) {
   } catch {}
 }
 let checks = NotchTests()
+checks.testTheMeterRampOnlyEverMovesTowardTheTripRed()
 checks.testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst()
 checks.testUnavailableAndRememberedAccountsNeverPopulateRings()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
@@ -405,5 +440,5 @@ try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("17 native check groups; \(failures) failures")
+print("18 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)
