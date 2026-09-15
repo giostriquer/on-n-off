@@ -110,7 +110,7 @@ describe("LimitsPopover", () => {
     const session = within(account).getByRole("meter", { name: "5 hour · all models" });
     expect(session.getAttribute("aria-valuenow")).toBe("0");
     expect(session.getAttribute("aria-valuetext")).toBeNull();
-    expect((session.firstElementChild as HTMLElement).style.background).not.toBe("var(--trip)");
+    expect((session.firstElementChild as HTMLElement).style.backgroundColor).not.toBe("var(--trip)");
     expect(within(account).getByText("0%").style.color).toBe("");
     expect(within(account).getByText(/^reset 2m ago · \w{3} \d\d:\d\d$/)).toBeTruthy();
     // The live window keeps its number.
@@ -148,7 +148,7 @@ describe("LimitsPopover", () => {
 
     const meter = await screen.findByRole("meter", { name: "Weekly · all models" });
 
-    expect((meter.firstElementChild as HTMLElement).style.background).toBe("var(--trip)");
+    expect((meter.firstElementChild as HTMLElement).style.backgroundColor).toBe("var(--trip)");
   });
 
   it("hides internal reserve and Codex Spark windows while keeping other Codex model limits", async () => {

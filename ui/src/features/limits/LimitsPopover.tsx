@@ -5,7 +5,7 @@ import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
 import {
   planLabel,
-  usageFillColor,
+  usageFillStyle,
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
@@ -251,7 +251,7 @@ function PopoverWindow({
   provider: AgentId;
   now: number;
 }) {
-  const { percent, tone, note, text, color } = presentLimitWindow(window, now);
+  const { percent, note, text, color } = presentLimitWindow(window, now);
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
@@ -274,7 +274,7 @@ function PopoverWindow({
       >
         <div
           className="h-full rounded-full transition-[width]"
-          style={{ width: `${percent}%`, background: usageFillColor(provider, tone) }}
+          style={{ width: `${percent}%`, ...usageFillStyle(provider, percent) }}
         />
       </div>
     </div>

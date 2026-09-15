@@ -125,6 +125,11 @@ user data.
   read, and answer an announcement unforced — either one broken makes it a loop
   ([why](docs/architecture/shared-reads.md)).
 - `item_install/` never shells out to a provider CLI.
+- A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
+  side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
+  endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
+  accents it would replace, so a meter stepping into it reads as cooling down just as it runs out.
+  Change the shape and change all three, each of which has a test pinning it.
 
 **Performance.**
 

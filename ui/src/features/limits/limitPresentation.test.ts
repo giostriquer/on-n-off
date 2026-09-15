@@ -19,7 +19,6 @@ describe("presentLimitWindow", () => {
     const presented = presentLimitWindow(window, NOW);
     expect(presented).toEqual({
       percent: 0,
-      tone: "calm",
       text: "0%",
       color: undefined,
       note: `reset 1h ago · ${formatResetAt(window.resetsAt)}`,
@@ -30,11 +29,10 @@ describe("presentLimitWindow", () => {
     expect(presented.note).not.toContain(formatResetAt(window.observedAt));
   });
 
-  it("keeps a live window's number, tone and countdown", () => {
+  it("keeps a live window's number, colour and countdown", () => {
     const resetsAt = "2026-08-17T23:00:00Z";
     expect(presentLimitWindow({ ...window, resetsAt }, NOW)).toEqual({
       percent: 93,
-      tone: "trip",
       text: "93%",
       color: "var(--trip)",
       note: `resets in 3h 0m · ${formatResetAt(resetsAt)}`,

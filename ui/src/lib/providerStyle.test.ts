@@ -3,7 +3,7 @@ import { providerColor } from "./providerStyle";
 
 describe("providerColor", () => {
   it("gives Claude its orange and every provider a colour", () => {
-    expect(providerColor("claude")).toBe("#e8944a");
+    expect(providerColor("claude")).toBe("#d97757");
     for (const provider of ["claude", "codex", "antigravity", "cursor"] as const) {
       expect(providerColor(provider)).toBeTruthy();
     }
