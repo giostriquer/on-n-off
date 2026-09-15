@@ -112,8 +112,9 @@ describe("Overview", () => {
     expect(screen.getByText("No trips yet this session.")).toBeTruthy();
   });
 
-  // A long catalog made the live card run several screens tall. It is bounded by flowing into
-  // columns, not by dropping rows, so the fix is only correct while every row still renders.
+  // Not a regression test for the column layout — jsdom has no layout, and the screenshot scenes
+  // are what cover that. This guards the other half of the bargain: the card was shortened by
+  // reflowing the rows, so a later change must not shorten it by dropping them instead.
   it("keeps every live row when the catalog is long", () => {
     const rows = Array.from({ length: 60 }, (_, index) => ({
       kind: "skill" as const,

@@ -30,8 +30,15 @@ declare global {
 const params = new URLSearchParams(window.location.search);
 const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
-if (!Object.hasOwn(SCENARIOS, scenario) && !["subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked", "accountDuplicate", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog"].includes(scenario)) {
-  console.error(`[mock] unknown github scenario "${scenario}"; known: ${Object.keys(SCENARIOS).join(", ")}`);
+// Scenarios this file answers for itself. `SCENARIOS` holds the pull-request ones.
+const LOCAL_SCENARIOS = [
+  "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
+  "accountDuplicate", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
+];
+if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
+  console.error(
+    `[mock] unknown scenario "${scenario}"; known: ${[...Object.keys(SCENARIOS), ...LOCAL_SCENARIOS].join(", ")}`,
+  );
 }
 
 const vaultDenied = new Error("Could not unlock saved accounts.");
@@ -88,7 +95,18 @@ const fullTab = (): AgentTabDto => ({
     upstream: `0.${index + 12}.0`,
     enabled: true,
     togglable: true,
-    skills: [],
+    // The first plugin ships skills of its own. Those rows are not togglable, so they render the
+    // "with plugin" span rather than a Rocker — the variant whose height has to match it.
+    skills: index === 0
+      ? ["dispatch", "handoff"].map((skill) => ({
+          id: `${name}:${skill}`,
+          pluginId: `${name}@workshop`,
+          name: `${name}:${skill}`,
+          description: `${skill} from ${name}`,
+          enabled: true,
+          togglable: false,
+        }))
+      : [],
   })),
   userSkills: CATALOG_SKILLS.map((name) => ({
     id: name,
@@ -109,7 +127,7 @@ const fullTab = (): AgentTabDto => ({
   })),
 });
 
-const catalogTab = () => (scenario === "catalog" ? fullTab() : emptyTab());
+const catalogTab = scenario === "catalog" ? fullTab : emptyTab;
 
 let notch: NotchSnapshot = {
   revision: 0,
