@@ -56,7 +56,7 @@ export function ProviderIcon({
 }) {
   switch (provider) {
     case "claude":
-      return <ClaudeIcon className={className} title={title ?? "Claude"} style={{ color: "#e8944a" }} />;
+      return <ClaudeIcon className={className} title={title ?? "Claude"} style={{ color: "#d97757" }} />;
     case "codex":
       return <ChatGptIcon className={className} title={title ?? "ChatGPT"} style={{ color: "var(--silkscreen)" }} />;
     case "cursor":

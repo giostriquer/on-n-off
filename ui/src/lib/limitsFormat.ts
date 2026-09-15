@@ -7,7 +7,6 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
-export type UsageTone = "calm" | "warn" | "trip";
 
 function parseInstant(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -84,20 +83,44 @@ export function formatClock(iso: string | null | undefined, timeZone?: string): 
   }).format(at);
 }
 
-export function usageTone(usedPercent: number): UsageTone {
-  if (usedPercent >= 90) return "trip";
-  if (usedPercent >= 70) return "warn";
-  return "calm";
+/**
+ * The app's one usage ramp, shared by every surface that shows a quota filling up.
+ *
+ * A meter stays on its base colour while there is room, then hardens toward `--trip` as it fills,
+ * reaching it at 90 %. It never passes through `--warn`: that amber is lighter than the accents it
+ * would replace and its hue points away from red, so a meter stepping into it went paler and
+ * yellower exactly as it ran out, which reads as cooling down. `--warn` still means "pending" on CI
+ * rollups, badges and hints, where nothing is filling up.
+ *
+ * The blend is eased rather than linear — a quarter of the way through the band is half the way to
+ * red — so crossing 70 % announces itself instead of creeping. `color-mix` is used rather than
+ * numeric interpolation so the ramp follows whichever theme is active.
+ *
+ * The side notch runs the same ramp over the same endpoints, in Swift (`NotchCore/Meter.swift`) and
+ * in Rust (`side_notch/model.rs`). Change the shape here and change it in both of those.
+ */
+export function usageMeterColor(base: string, usedPercent: number): string {
+  if (usedPercent >= 90) return "var(--trip)";
+  if (usedPercent <= 70) return base;
+  const travelled = Math.sqrt((usedPercent - 70) / 20);
+  return `color-mix(in srgb, ${base}, var(--trip) ${(travelled * 100).toFixed(1)}%)`;
 }
 
-export function usageToneColor(tone: UsageTone): string | undefined {
-  if (tone === "warn") return "var(--warn)";
-  if (tone === "trip") return "var(--trip)";
-  return undefined;
+/** A quota bar: the provider's accent, hardening toward red as the window fills. */
+export function usageFillColor(provider: AgentId, usedPercent: number): string {
+  return usageMeterColor(providerColor(provider), usedPercent);
 }
 
-export function usageFillColor(provider: AgentId, tone: UsageTone): string {
-  return usageToneColor(tone) ?? providerColor(provider);
+/**
+ * The percent figure beside the bar: ordinary text until the window is spent, then `--trip`.
+ *
+ * It deliberately does not follow the bar through the band. The figure sits on the page's own ink,
+ * and blending white toward red gives a washed-out pink that is *less* legible at 75 % than the
+ * plain figure was at 50 % — the paling problem again, one surface over. The notch does the same
+ * thing: its ring carries the ramp while its label stays plain.
+ */
+export function usageTextColor(usedPercent: number): string | undefined {
+  return usedPercent >= 90 ? "var(--trip)" : undefined;
 }
 
 export function formatUsedPercent(usedPercent: number): string {

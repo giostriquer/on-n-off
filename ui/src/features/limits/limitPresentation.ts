@@ -4,16 +4,13 @@ import {
   formatResetIn,
   formatUsedPercent,
   hasElapsed,
-  usageTone,
-  usageToneColor,
-  type UsageTone,
+  usageTextColor,
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { formatAgo } from "$lib/timeFormat";
 
 export type LimitWindowPresentation = {
   percent: number;
-  tone: UsageTone;
   /** The value slot: the window's percentage, which a passed reset puts back at zero. */
   text: string;
   /** Colour for the value slot; undefined leaves the default ink. */
@@ -59,12 +56,10 @@ export function presentLimitWindow(window: LimitWindow, now: number): LimitWindo
   const resetAt = formatResetAt(window.resetsAt);
   const elapsed = hasElapsed(window.resetsAt, now);
   const usedPercent = elapsed ? 0 : window.usedPercent;
-  const tone = usageTone(usedPercent);
   return {
     percent: usedPercent,
-    tone,
     text: formatUsedPercent(usedPercent),
-    color: usageToneColor(tone),
+    color: usageTextColor(usedPercent),
     note: elapsed ? elapsedNote(window, now, resetAt) : pendingNote(formatResetIn(window.resetsAt, now), resetAt),
   };
 }

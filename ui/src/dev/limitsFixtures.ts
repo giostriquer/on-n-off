@@ -74,3 +74,25 @@ export function claudeWithoutReset(): ProviderLimits[] {
 export function limitsFor(agentId: unknown): ProviderLimits[] {
   return (typeof agentId === "string" && LIMITS[agentId as AgentId]) || [];
 }
+
+/**
+ * `?mock=limitsBand`: one account per rung of the usage ramp.
+ *
+ * The ordinary fixtures all sit well below 70 %, so the band where a meter hardens toward red is
+ * invisible in a capture — which is how an amber step that made a filling meter go paler survived
+ * review. These windows walk 50 / 75 / 85 / 95 % so the whole ramp is on screen at once.
+ */
+export function limitsBand(agentId: unknown): ProviderLimits[] {
+  if (agentId !== "claude") return [];
+  const base = LIMITS.claude?.[0];
+  if (!base?.account) return [];
+  return [50, 75, 85, 95].map((percent) => ({
+    ...base,
+    account: { ...base.account!, id: `band-${percent}`, label: `${percent}% of the week` },
+    currentAccount: percent === 50,
+    windows: [
+      { ...base.windows[0], usedPercent: percent },
+      { ...base.windows[1], usedPercent: percent },
+    ],
+  }));
+}

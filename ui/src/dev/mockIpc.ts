@@ -10,7 +10,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
 
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
-import { claudeWithoutReset, limitsFor } from "./limitsFixtures";
+import { claudeWithoutReset, limitsBand, limitsFor } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
@@ -34,6 +34,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
+  "limitsBand",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -227,6 +228,7 @@ const handlers: Record<string, Handler> = {
   },
   read_limits: (args) => {
     if (scenario === "subscriptionBadges" && args.agentId === "codex") return subscriptionBadgeLimits();
+    if (scenario === "limitsBand") return limitsBand(args.agentId);
     if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
     const entries = limitsFor(args.agentId);
     if (scenario !== "accountDuplicate" || args.agentId !== "codex") return entries;
