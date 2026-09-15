@@ -206,20 +206,20 @@ describe("Limits", () => {
     expect(claude.getAttribute("data-current-account")).toBe("true");
     const weekly = within(claude).getByRole("meter", { name: "Weekly · all models" });
     expect(weekly.getAttribute("aria-valuenow")).toBe("12");
-    expect((weekly.firstElementChild as HTMLElement).style.background).toBe("rgb(217, 119, 87)");
+    expect((weekly.firstElementChild as HTMLElement).style.backgroundColor).toBe("rgb(217, 119, 87)");
     expect(within(claude).getByText("12%")).toBeTruthy();
     expect(within(claude).getAllByText(/resets in 6d 17h/)).toHaveLength(2);
     expect(within(claude).getByText(/resets in 8h 59m/)).toBeTruthy();
     const opus = within(claude).getByRole("meter", { name: "Weekly · Opus" });
-    expect((opus.firstElementChild as HTMLElement).style.background).toBe("var(--trip)");
+    expect((opus.firstElementChild as HTMLElement).style.backgroundColor).toBe("var(--trip)");
     expect(within(claude).getByText("91%")).toBeTruthy();
     expect(within(claude).getByRole("meter", { name: "5 hour · all models" }).getAttribute("aria-valuenow")).toBe("7");
 
     const codex = card("Codex limits · work@codex.example");
     expect(
       (within(codex).getByRole("meter", { name: "Weekly · all models" }).firstElementChild as HTMLElement).style
-        .background,
-    ).toContain("color-mix");
+        .backgroundColor,
+    ).toBe("color-mix(in srgb, var(--silkscreen), var(--trip) 44.7%)");
     expect(within(codex).getByText(/12\.5 credits/)).toBeTruthy();
     // A current-account observation is still historical after its own reset instant passes.
     const luna = within(codex).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" });
@@ -265,8 +265,8 @@ describe("Limits", () => {
     const codex = screen.getByRole("region", { name: "Codex limits · work@codex.example" });
     const weekly = within(codex).getByRole("meter", { name: "Weekly · all models" });
 
-    expect((opus.firstElementChild as HTMLElement).style.background).toBe("var(--trip)");
-    const fill = (weekly.firstElementChild as HTMLElement).style.background;
+    expect((opus.firstElementChild as HTMLElement).style.backgroundColor).toBe("var(--trip)");
+    const fill = (weekly.firstElementChild as HTMLElement).style.backgroundColor;
     expect(fill).toContain("var(--trip)");
     expect(fill).not.toContain("var(--warn)");
   });
@@ -290,13 +290,11 @@ describe("Limits", () => {
     // Session window already reset since the snapshot: no stale percentage is shown.
     const session = within(stale).getByRole("meter", { name: "5 hour · all models" });
     expect(session.getAttribute("aria-valuenow")).toBe("0");
-    expect((session.firstElementChild as HTMLElement).style.background).toBe("var(--silkscreen)");
+    expect((session.firstElementChild as HTMLElement).style.backgroundColor).toBe("var(--silkscreen)");
     expect(within(stale).getByText("0%").style.color).toBe("");
     // 88 % is inside the band but not spent, so the figure keeps the page ink; the bar carries
     // the signal. It must never be the old amber.
-    const figure = within(stale).getByText("88%").style.color;
-    expect(figure).toBe("");
-    expect(figure).not.toContain("var(--warn)");
+    expect(within(stale).getByText("88%").style.color).toBe("");
     expect(within(stale).getByText(/^reset 22h ago · \w{3} \d\d:\d\d$/)).toBeTruthy();
     expect(within(stale).queryByText(/Current usage unknown/)).toBeNull();
     expect(within(stale).getByLabelText("More actions for personal@codex.example")).toBeTruthy();
@@ -312,9 +310,9 @@ describe("Limits", () => {
     const stale = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
     const weekly = within(stale).getByRole("meter", { name: "Weekly · all models" });
     expect(weekly.getAttribute("aria-valuenow")).toBe("0");
-    expect((weekly.firstElementChild as HTMLElement).style.background).toBe("var(--silkscreen)");
+    expect((weekly.firstElementChild as HTMLElement).style.backgroundColor).toBe("var(--silkscreen)");
     expect(weekly.getAttribute("aria-valuetext")).toBeNull();
-    expect((weekly.firstElementChild as HTMLElement).style.background).not.toBe("var(--trip)");
+    expect((weekly.firstElementChild as HTMLElement).style.backgroundColor).not.toBe("var(--trip)");
     const [hero] = within(stale).getAllByText("0%");
     expect(hero.style.color).toBe("");
     expect(within(stale).getByText(/^reset 1h ago · \w{3} \d\d:\d\d$/)).toBeTruthy();

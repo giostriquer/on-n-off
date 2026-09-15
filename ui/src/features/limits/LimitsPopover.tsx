@@ -5,7 +5,7 @@ import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
 import {
   planLabel,
-  usageFillColor,
+  usageFillStyle,
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
@@ -274,7 +274,7 @@ function PopoverWindow({
       >
         <div
           className="h-full rounded-full transition-[width]"
-          style={{ width: `${percent}%`, background: usageFillColor(provider, percent) }}
+          style={{ width: `${percent}%`, ...usageFillStyle(provider, percent) }}
         />
       </div>
     </div>

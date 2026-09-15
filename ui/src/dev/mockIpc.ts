@@ -10,7 +10,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
 
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
-import { claudeWithoutReset, limitsBand, limitsFor } from "./limitsFixtures";
+import { claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
@@ -228,7 +228,8 @@ const handlers: Record<string, Handler> = {
   },
   read_limits: (args) => {
     if (scenario === "subscriptionBadges" && args.agentId === "codex") return subscriptionBadgeLimits();
-    if (scenario === "limitsBand") return limitsBand(args.agentId);
+    if (scenario === "limitsBand" && args.agentId === "claude") return limitsBandClaude();
+    if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();
     if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
     const entries = limitsFor(args.agentId);
     if (scenario !== "accountDuplicate" || args.agentId !== "codex") return entries;
