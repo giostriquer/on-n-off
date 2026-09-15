@@ -8,7 +8,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
  * a screen that reaches for something unmocked says so instead of hanging.
  */
 
-import type { AppSettings, AgentInfo, AgentId } from "$lib/types";
+import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { claudeWithoutReset, limitsFor } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
@@ -30,8 +30,15 @@ declare global {
 const params = new URLSearchParams(window.location.search);
 const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
-if (!Object.hasOwn(SCENARIOS, scenario) && !["subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked", "accountDuplicate", "billingFailure", "claudeMissingReset", "subscriptionBadges"].includes(scenario)) {
-  console.error(`[mock] unknown github scenario "${scenario}"; known: ${Object.keys(SCENARIOS).join(", ")}`);
+// Scenarios this file answers for itself. `SCENARIOS` holds the pull-request ones.
+const LOCAL_SCENARIOS = [
+  "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
+  "accountDuplicate", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
+];
+if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
+  console.error(
+    `[mock] unknown scenario "${scenario}"; known: ${[...Object.keys(SCENARIOS), ...LOCAL_SCENARIOS].join(", ")}`,
+  );
 }
 
 const vaultDenied = new Error("Could not unlock saved accounts.");
@@ -60,6 +67,67 @@ let settings: AppSettings = {
 };
 
 const emptyTab = () => ({ plugins: [], userSkills: [], mcpServers: [] });
+
+// `?mock=catalog`: a real-sized catalog. The Overview's live list is the one surface whose layout
+// only misbehaves once it is long, so an empty tab cannot stand in for it.
+const CATALOG_PLUGINS = [
+  "workbench", "mattpocock-skills", "toolkit", "linear", "design", "dataviz", "artifact-design",
+  "artifact-capabilities", "update-config", "keybindings-help", "code-review", "simplify",
+  "schedule", "claude-api",
+];
+const CATALOG_SKILLS = [
+  "adopt-global-rules", "arch-map", "audit", "brainstorming", "claim-check", "code-quality-review",
+  "context7-mcp", "documents", "empirical-proof", "epic-implementation", "file-pr", "fix-ci",
+  "grilling", "model-reference", "qa-sweep", "receiving-code-review", "route-work",
+  "systematic-debugging", "test-driven-development", "using-workbench",
+  "verification-before-completion", "diagnosing-bugs", "domain-modeling", "codebase-design",
+  "prototype", "research", "resolving-merge-conflicts", "tdd", "wizard", "writing-for-agents",
+  "ui-demo-video", "get-pr-comments",
+];
+const CATALOG_MCPS = ["context7", "linear", "playwright", "sentry", "postgres"];
+
+const fullTab = (): AgentTabDto => ({
+  plugins: CATALOG_PLUGINS.map((name, index) => ({
+    id: `${name}@workshop`,
+    name,
+    source: "workshop",
+    version: `0.${index + 12}.0`,
+    upstream: `0.${index + 12}.0`,
+    enabled: true,
+    togglable: true,
+    // The first plugin ships skills of its own. Those rows are not togglable, so they render the
+    // "with plugin" span rather than a Rocker — the variant whose height has to match it.
+    skills: index === 0
+      ? ["dispatch", "handoff"].map((skill) => ({
+          id: `${name}:${skill}`,
+          pluginId: `${name}@workshop`,
+          name: `${name}:${skill}`,
+          description: `${skill} from ${name}`,
+          enabled: true,
+          togglable: false,
+        }))
+      : [],
+  })),
+  userSkills: CATALOG_SKILLS.map((name) => ({
+    id: name,
+    pluginId: null,
+    name,
+    description: `${name} skill`,
+    enabled: true,
+    togglable: true,
+  })),
+  // Two are off, so the gauge reads 3 on / 5 installed.
+  mcpServers: CATALOG_MCPS.map((name, index) => ({
+    id: name,
+    name,
+    system: "npx",
+    source: `npx -y @modelcontextprotocol/server-${name}`,
+    enabled: index < 3,
+    togglable: true,
+  })),
+});
+
+const catalogTab = scenario === "catalog" ? fullTab : emptyTab;
 
 let notch: NotchSnapshot = {
   revision: 0,
@@ -125,9 +193,9 @@ const handlers: Record<string, Handler> = {
   request_notification_permission: () => true,
   diagnose_providers: () => [],
   list_projects: () => [],
-  list_plugins: emptyTab,
-  list_local_plugins: emptyTab,
-  refresh: emptyTab,
+  list_plugins: catalogTab,
+  list_local_plugins: catalogTab,
+  refresh: catalogTab,
   read_account_preferences: () => rememberingMock,
   read_accounts: (args) => {
     if (vaultLocked) throw vaultDenied;

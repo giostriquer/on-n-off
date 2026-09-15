@@ -8,10 +8,12 @@
 //
 // A scene: { name, url, theme?: "dark"|"light", clock?: ISO instant, viewport?: {width,height},
 // steps?: Step[] }. Steps run in order: {click: selector} · {fill: selector, text} · {press: key}
-// · {hover: selector} · {wait: selector | {ms}} · {shot: name}. Selectors are Playwright selectors
-// ("role=button[name=…]", "text=…", CSS) and must match exactly one element. Every scene ends with
-// a screenshot named after the scene unless steps took one. The page clock is frozen (default: the
-// fixtures' instant) so relative ages are reproducible; a scene fails on any page or console error.
+// · {hover: selector} · {scroll: selector} · {wait: selector | {ms}} · {shot: name}. `scroll`
+// brings an element to the top of the frame, which is how a surface below the fold is captured.
+// Selectors are Playwright selectors ("role=button[name=…]", "text=…", CSS) and must match
+// exactly one element. Every scene ends with a screenshot named after the scene unless steps
+// took one. The page clock is frozen (default: the fixtures' instant) so relative ages are
+// reproducible; a scene fails on any page or console error.
 // Starts its own Vite on UI_PORT (default 1425) so a running `tauri dev` on :1420 is left alone;
 // set UI_BASE to point at an existing server instead.
 
@@ -32,7 +34,7 @@ const FIXTURE_CLOCK = "2026-08-24T20:00:00Z";
 // The saved screen is forced to "overview" because AppShell navigates to it on first route.
 const THEME_KEY = "on-n-off.theme";
 const SCREEN_KEY = "on-n-off.screen";
-const STEP_KEYS = ["click", "fill", "press", "hover", "wait", "shot"];
+const STEP_KEYS = ["click", "fill", "press", "hover", "scroll", "wait", "shot"];
 
 const SCENES = [
   { name: "github-ok", url: "/github?mock=ok" },
@@ -42,6 +44,11 @@ const SCENES = [
   { name: "github-many", url: "/github?mock=many" },
   // Scrolled into the review list so an owner band is stuck under its section header.
   { name: "github-scrolled", url: "/github?mock=ok", steps: [{ click: "role=searchbox[name='Search pull requests']" }, { press: "PageDown" }, { press: "PageDown" }] },
+  // The live list reflows into columns, so it is judged at two widths, in both themes, and empty.
+  { name: "overview-catalog", url: "/overview?mock=catalog", steps: [{ scroll: "text=Live on this scope" }] },
+  { name: "overview-catalog-wide", url: "/overview?mock=catalog", viewport: { width: 1440, height: 900 }, steps: [{ scroll: "text=Live on this scope" }] },
+  { name: "overview-catalog-light", url: "/overview?mock=catalog", theme: "light", steps: [{ scroll: "text=Live on this scope" }] },
+  { name: "overview-empty", url: "/overview?mock=ok", steps: [{ scroll: "text=Live on this scope" }] },
   { name: "settings-github", url: "/settings?mock=ok", steps: [{ wait: "role=region[name='Pull requests']" }] },
   { name: "limits-ok", url: "/limits?mock=ok", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
   { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
@@ -140,6 +147,7 @@ async function runScene(browser, scene) {
     else if (step.fill) await page.locator(step.fill).fill(step.text ?? "");
     else if (step.press) await page.keyboard.press(step.press);
     else if (step.hover) await page.locator(step.hover).hover();
+    else if (step.scroll) await scrollTo(page, step.scroll);
     else if (step.wait) {
       if (typeof step.wait === "string") await page.locator(step.wait).waitFor();
       else await page.waitForTimeout(step.wait.ms ?? 200);
@@ -149,6 +157,21 @@ async function runScene(browser, scene) {
   if (!shots) await shot(scene.name);
   await context.close();
   return problems;
+}
+
+// `scrollIntoView` puts the element flush against the frame, which crops the border of the card it
+// sits in. Back off a little afterwards, in whichever ancestor actually scrolls.
+async function scrollTo(page, selector) {
+  await page.locator(selector).evaluate((node) => {
+    node.scrollIntoView({ block: "start" });
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+      const overflow = getComputedStyle(parent).overflowY;
+      if (overflow === "auto" || overflow === "scroll") {
+        parent.scrollTop -= 14;
+        return;
+      }
+    }
+  });
 }
 
 async function main() {

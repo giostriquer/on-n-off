@@ -1,13 +1,18 @@
 import NotchCore
 import SwiftUI
 
-// The app's own palette (`providerStyle.ts` / `tokens.css`, dark theme): each provider's accent
-// for its ring and bars, amber from 70 % and red from 90 % like the Limits screen.
-let claudeOrange = Color(red: 232 / 255, green: 148 / 255, blue: 74 / 255)
+// Each provider's accent for its ring and bars. Codex and Antigravity resolve through
+// `providerStyle.ts` to `tokens.css`'s dark theme; Cursor is that file's own literal. Claude alone
+// diverges from the app window, which deliberately stays on `#e8944a`: the notch paints it in the
+// brand terracotta `#d97757`, because beside the amber it steps into at 70 % the app's lighter
+// orange reads as fading toward yellow rather than filling. Amber from 70 % and red from 90 %
+// follow the Limits screen. The inner Fable ring is a deeper shade of that same terracotta than the
+// outer weekly ring, so the two read as one family with the inner arc the firmer of the pair.
+let claudeOrange = Color(red: 217 / 255, green: 119 / 255, blue: 87 / 255)
 let codexInk = Color(red: 238 / 255, green: 240 / 255, blue: 242 / 255)
 let cursorBlue = Color(red: 122 / 255, green: 162 / 255, blue: 255 / 255)
 let antigravityMute = Color(red: 140 / 255, green: 147 / 255, blue: 157 / 255)
-let fableOrange = Color(red: 247 / 255, green: 173 / 255, blue: 113 / 255)
+let fableOrange = Color(red: 204 / 255, green: 98 / 255, blue: 64 / 255)
 let warnAmber = Color(red: 224 / 255, green: 179 / 255, blue: 65 / 255)
 let tripRed = Color(red: 226 / 255, green: 89 / 255, blue: 76 / 255)
 let railInk = Color(white: 0.03)
