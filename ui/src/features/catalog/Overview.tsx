@@ -114,22 +114,29 @@ export function Overview({
         </section>
       ) : null}
 
-      <div className="grid grid-cols-[1.15fr_0.85fr] items-start gap-3">
-        <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
-          <header className="flex items-baseline justify-between border-b border-[var(--hair)] px-3 py-2">
-            <span className="text-[12px] font-semibold tracking-[0.03em] uppercase">Live on this scope</span>
-            <span className="font-mono text-[12px] text-[var(--mute)]">{scopeLabel}</span>
+      <div className="flex flex-col gap-3">
+        {/* One column per ~320px of width. The list is as long as the catalog, so a single column
+            ran to several screens while the space beside it sat empty; columns keep it near one. */}
+        <section className="overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
+          <header className="flex items-baseline justify-between gap-3 border-b border-[var(--hair)] px-3 py-2">
+            <span className="shrink-0 text-[12px] font-semibold tracking-[0.03em] uppercase">Live on this scope</span>
+            <span className="min-w-0 truncate font-mono text-[12px] text-[var(--mute)]" title={scopeLabel}>
+              {scopeLabel}
+            </span>
           </header>
           {rows.length === 0 ? (
             <p className="px-3 py-3 text-[13px] text-[var(--mute)]">Nothing live on this circuit.</p>
           ) : (
-            rows.map((row) => (
-              <div key={row.id} className="flex items-center gap-2.5 border-b border-[var(--hair)] px-3 py-[7px] last:border-b-0">
+            <div className="-mb-px columns-[320px] gap-0">
+              {rows.map((row) => (
+              <div key={row.id} className="flex break-inside-avoid items-center gap-2.5 border-b border-[var(--hair)] px-3 py-[7px]">
                 <span
                   className="size-2 shrink-0 translate-y-px rounded-full bg-[var(--live)] shadow-[0_0_7px_var(--live)]"
                   aria-hidden="true"
                 />
-                <span className="min-w-[132px] text-[13px] font-semibold">{row.name}</span>
+                <span className="min-w-0 flex-[1.6] truncate text-[13px] font-semibold" title={row.name}>
+                  {row.name}
+                </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--mute)]" title={row.meta}>
                   {row.meta}
                 </span>
@@ -149,7 +156,8 @@ export function Overview({
                   </span>
                 )}
               </div>
-            ))
+              ))}
+            </div>
           )}
         </section>
 

@@ -111,4 +111,32 @@ describe("Overview", () => {
     expect(screen.getByText("Nothing live on this circuit.")).toBeTruthy();
     expect(screen.getByText("No trips yet this session.")).toBeTruthy();
   });
+
+  // A long catalog made the live card run several screens tall. It is bounded by flowing into
+  // columns, not by dropping rows, so the fix is only correct while every row still renders.
+  it("keeps every live row when the catalog is long", () => {
+    const rows = Array.from({ length: 60 }, (_, index) => ({
+      kind: "skill" as const,
+      id: `skill-${index}`,
+      name: `skill-${index}`,
+      meta: "skill · user",
+      enabled: true,
+      togglable: true,
+    }));
+    render(
+      <Overview
+        counts={{
+          plugins: { on: 0, total: 0 },
+          skills: { on: 60, total: 60 },
+          mcp: { on: 0, total: 0 },
+        }}
+        rows={rows}
+        log={[]}
+        onToggle={() => undefined}
+      />,
+    );
+    for (const row of rows) {
+      expect(screen.getByText(row.name)).toBeTruthy();
+    }
+  });
 });
