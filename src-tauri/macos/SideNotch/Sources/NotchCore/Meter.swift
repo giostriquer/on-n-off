@@ -8,7 +8,7 @@ public struct Ink: Equatable, Sendable {
   public let g: Double
   public let b: Double
 
-  public init(r: Double, g: Double, b: Double) {
+  init(r: Double, g: Double, b: Double) {
     self.r = r
     self.g = g
     self.b = b
@@ -23,11 +23,17 @@ public struct Ink: Equatable, Sendable {
 
 // Each provider's accent for its ring and bars. Codex and Antigravity resolve through
 // `providerStyle.ts` to `tokens.css`'s dark theme; Cursor is that file's own literal. Claude alone
-// diverges from the app window, which deliberately stays on `#e8944a`: the notch paints it in the
-// brand terracotta `#d97757`. The inner Fable ring is a deeper shade of that same terracotta than
-// the outer weekly ring, so the two read as one family with the inner arc the firmer of the pair.
+// diverges from the app window, which stays on `#e8944a`: the notch paints it in the brand
+// terracotta `#d97757`. The original reason was that the app's lighter orange read as fading into
+// the amber the meter used to step into; that amber is gone from this ramp, and the terracotta
+// stays because it is Claude's own colour and because the ramp now needs headroom to redden into.
+// The inner Fable ring is a deeper shade of that same terracotta than the outer weekly ring, so the
+// two read as one family with the inner arc the firmer of the pair.
+//
+// The Limits screen's own bars still use the three-step amber ramp (`ui/src/lib/limitsFormat.ts`).
+// The two surfaces deliberately disagree until that one is brought across.
 public let claudeInk = Ink(r: 217, g: 119, b: 87)
-public let codexAccentInk = Ink(r: 238, g: 240, b: 242)
+public let codexInk = Ink(r: 238, g: 240, b: 242)
 public let cursorInk = Ink(r: 122, g: 162, b: 255)
 public let antigravityInk = Ink(r: 140, g: 147, b: 157)
 public let fableInk = Ink(r: 204, g: 98, b: 64)
@@ -37,7 +43,7 @@ public let unreadableInk = Ink(r: 77, g: 77, b: 77)
 public func providerInk(_ id: ProviderId) -> Ink {
   switch id {
   case .claude: return claudeInk
-  case .codex: return codexAccentInk
+  case .codex: return codexInk
   case .cursor: return cursorInk
   case .antigravity: return antigravityInk
   }

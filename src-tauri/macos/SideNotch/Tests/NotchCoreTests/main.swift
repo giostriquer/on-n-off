@@ -43,20 +43,27 @@ final class NotchTests {
       let dr = ink.r - tripInk.r, dg = ink.g - tripInk.g, db = ink.b - tripInk.b
       return (dr * dr + dg * dg + db * db).squareRoot()
     }
-    for base in [claudeInk, fableInk, codexAccentInk, cursorInk] {
+    // Every accent the meter can be handed, so a new provider is covered the day it lands.
+    for base in railProviderOrder.map(providerInk) + [fableInk] {
       var previous = Double.infinity
       for step in 0...100 {
         let ink = meterInk(quota("weekly", Double(step)), base: base, at: now)
         let distance = distanceToTrip(ink)
-        if distance > previous + 0.000_001 {
+        // Inside the band every step must move, not merely fail to retreat: a ramp that stopped
+        // interpolating would still satisfy a non-increasing check.
+        let strict = (71...89).contains(step) && base != tripInk
+        if distance > previous + 0.000_001 || (strict && distance >= previous) {
           failures += 1
-          print("FAIL meter ramp backtracks at \(step) %: \(distance) > \(previous)")
+          print("FAIL meter ramp stalls or backtracks at \(step) %: \(distance) vs \(previous)")
         }
         previous = distance
       }
-      // It starts on the accent and finishes on the trip red, so the ramp spans the whole way.
-      expectEqual(meterInk(quota("weekly", 0), base: base, at: now), base)
-      expectEqual(meterInk(quota("weekly", 100), base: base, at: now), tripInk)
+      expectEqual(meterInk(quota("weekly", 70), base: base, at: now), base)
+      expectEqual(meterInk(quota("weekly", 90), base: base, at: now), tripInk)
+      // Pins the easing itself: a quarter of the way through the band is half the way to red.
+      // A linear blend would put 25 % here, and nothing else in this check would notice.
+      expectEqual(
+        meterInk(quota("weekly", 75), base: base, at: now), base.mixed(toward: tripInk, 0.5))
     }
     // An unreadable window stays grey rather than joining the ramp.
     expectEqual(meterInk(nil, base: claudeInk, at: now), unreadableInk)

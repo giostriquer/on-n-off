@@ -395,6 +395,10 @@ impl TextWeight {
 
 pub type Color = [u8; 4];
 
+// The ramp lives beside the layout maths in `model.rs`, which compiles on both platforms and under
+// `cfg(test)`, so the meter colours are exercised on either CI leg rather than on neither.
+use super::model::{meter_color, TRIP_RED, UNREADABLE_INK};
+
 /// What a popover interaction can ask for.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Zone {
@@ -1432,7 +1436,6 @@ const MUTED_INK: Color = [153, 153, 153, 255];
 const TRACK_INK: Color = [44, 44, 44, 255];
 const LIVE_GREEN: Color = [74, 200, 120, 255];
 const WARN_AMBER: Color = [224, 179, 65, 255];
-const TRIP_RED: Color = [226, 89, 76, 255];
 const FABLE_ORANGE: Color = [204, 98, 64, 255];
 const CLAUDE_ORANGE: Color = [217, 119, 87, 255];
 const CODEX_INK: Color = [238, 240, 242, 255];
@@ -1441,7 +1444,6 @@ const ANTIGRAVITY_MUTE: Color = [140, 147, 157, 255];
 const FABLE_TRACK: Color = [53, 42, 38, 255];
 /// The mac `ShowToggleCap`'s hovered fill: white at 11 %.
 const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
-const UNREADABLE_INK: Color = [77, 77, 77, 255];
 
 fn provider_color(provider: AgentId) -> Color {
     match provider {
@@ -1450,33 +1452,6 @@ fn provider_color(provider: AgentId) -> Color {
         AgentId::Cursor => CURSOR_BLUE,
         AgentId::Antigravity => ANTIGRAVITY_MUTE,
     }
-}
-
-/// The base accent, amber from 70 %, red from 90 %; grey when unreadable.
-/// The mac `meterColor`: the accent while there is room, hardening toward the trip red as the
-/// window fills. It does not step through `WARN_AMBER`, which is lighter and yellower than the
-/// accents, and so made a filling meter read as cooling down. The blend is eased for the same
-/// reason as on the mac, so crossing 70 % is visible rather than a creep.
-fn meter_color(percent: Option<f64>, base: Color) -> Color {
-    match percent {
-        None => UNREADABLE_INK,
-        Some(percent) if percent >= 90.0 => TRIP_RED,
-        Some(percent) if percent > 70.0 => mix(base, TRIP_RED, ((percent - 70.0) / 20.0).sqrt()),
-        Some(_) => base,
-    }
-}
-
-/// Two palette entries blended in sRGB, `amount` clamped to 0...1. Alpha follows `from`, because
-/// every ramp colour is opaque and a meter never fades.
-fn mix(from: Color, to: Color, amount: f64) -> Color {
-    let t = amount.clamp(0.0, 1.0);
-    let channel = |a: u8, b: u8| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as u8;
-    [
-        channel(from[0], to[0]),
-        channel(from[1], to[1]),
-        channel(from[2], to[2]),
-        from[3],
-    ]
 }
 
 /// The mac `formatPercent`: a used sliver reads "<1%" rather than rounding to zero.

@@ -7,11 +7,6 @@ extension Ink {
   var color: Color { Color(red: r / 255, green: g / 255, blue: b / 255) }
 }
 
-let claudeOrange = claudeInk.color
-let codexInk = codexAccentInk.color
-let cursorBlue = cursorInk.color
-let antigravityMute = antigravityInk.color
-let fableOrange = fableInk.color
 let tripRed = tripInk.color
 // Still "pending" on CI rollups, badges and hints, where nothing is filling up and yellow is the
 // right signal. It is deliberately no longer part of the quota ramp.
