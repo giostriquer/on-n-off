@@ -21,17 +21,15 @@ public struct Ink: Equatable, Sendable {
   }
 }
 
-// Each provider's accent for its ring and bars. Codex and Antigravity resolve through
-// `providerStyle.ts` to `tokens.css`'s dark theme; Cursor is that file's own literal. Claude alone
-// diverges from the app window, which stays on `#e8944a`: the notch paints it in the brand
-// terracotta `#d97757`. The original reason was that the app's lighter orange read as fading into
-// the amber the meter used to step into; that amber is gone from this ramp, and the terracotta
-// stays because it is Claude's own colour and because the ramp now needs headroom to redden into.
+// Each provider's accent for its ring and bars, the same values the app window uses: Codex and
+// Antigravity resolve through `providerStyle.ts` to `tokens.css`'s dark theme, Cursor and Claude are
+// that file's own literals. Claude is the brand terracotta `#d97757` on every surface.
+//
 // The inner Fable ring is a deeper shade of that same terracotta than the outer weekly ring, so the
 // two read as one family with the inner arc the firmer of the pair.
 //
-// The Limits screen's own bars still use the three-step amber ramp (`ui/src/lib/limitsFormat.ts`).
-// The two surfaces deliberately disagree until that one is brought across.
+// The Limits screen runs this ramp too, as `usageMeterColor` in `ui/src/lib/limitsFormat.ts`, over
+// the same endpoints. Change the shape here and change it there and in `side_notch/model.rs`.
 public let claudeInk = Ink(r: 217, g: 119, b: 87)
 public let codexInk = Ink(r: 238, g: 240, b: 242)
 public let cursorInk = Ink(r: 122, g: 162, b: 255)

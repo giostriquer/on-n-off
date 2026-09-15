@@ -7,7 +7,9 @@ import {
   hasElapsed,
   formatUsedPercent,
   planLabel,
-  usageTone,
+  usageFillColor,
+  usageMeterColor,
+  usageTextColor,
 } from "./limitsFormat";
 
 const NOW = Date.parse("2026-08-17T00:00:00Z");
@@ -79,14 +81,58 @@ describe("formatClock", () => {
   });
 });
 
-describe("usageTone", () => {
-  it("is calm below 70, warn from 70, trip from 90", () => {
-    expect(usageTone(0)).toBe("calm");
-    expect(usageTone(69.9)).toBe("calm");
-    expect(usageTone(70)).toBe("warn");
-    expect(usageTone(89.9)).toBe("warn");
-    expect(usageTone(90)).toBe("trip");
-    expect(usageTone(100)).toBe("trip");
+describe("usageMeterColor", () => {
+  // The bar used to step to `--warn` at 70 %, an amber lighter than the accents it replaced, so a
+  // filling meter went paler and yellower as it ran out. It now hardens toward `--trip` instead,
+  // matching the side notch. These cases are the ones that would catch a regression to a step.
+  it("holds the base colour while there is room", () => {
+    expect(usageMeterColor("red", 0)).toBe("red");
+    expect(usageMeterColor("red", 69.9)).toBe("red");
+    expect(usageMeterColor("red", 70)).toBe("red");
+  });
+
+  it("is fully tripped from 90", () => {
+    expect(usageMeterColor("red", 90)).toBe("var(--trip)");
+    expect(usageMeterColor("red", 100)).toBe("var(--trip)");
+  });
+
+  it("never passes through the warning amber", () => {
+    for (let percent = 0; percent <= 100; percent += 0.5) {
+      expect(usageMeterColor("red", percent)).not.toContain("--warn");
+    }
+  });
+
+  it("eases, so a quarter through the band is half the way to red", () => {
+    expect(usageMeterColor("red", 75)).toBe("color-mix(in srgb, red, var(--trip) 50.0%)");
+    // A linear blend would put 25 % here; this is the assertion that pins the easing.
+    expect(usageMeterColor("red", 75)).not.toContain("25.0%");
+  });
+
+  it("moves monotonically toward red across the band", () => {
+    const share = (percent: number) =>
+      Number(/var\(--trip\) ([\d.]+)%/.exec(usageMeterColor("red", percent))?.[1] ?? 0);
+    let previous = -1;
+    for (let percent = 70.5; percent < 90; percent += 0.5) {
+      const now = share(percent);
+      expect(now).toBeGreaterThan(previous);
+      previous = now;
+    }
+  });
+});
+
+describe("usageFillColor and usageTextColor", () => {
+  it("fills with the provider accent until the band", () => {
+    expect(usageFillColor("claude", 50)).toBe("#d97757");
+    expect(usageFillColor("claude", 95)).toBe("var(--trip)");
+  });
+
+  it("leaves the figure its ordinary colour until the window is spent", () => {
+    expect(usageTextColor(50)).toBeUndefined();
+    expect(usageTextColor(70)).toBeUndefined();
+    // Blending the page ink toward red would wash the figure out rather than sharpen it.
+    expect(usageTextColor(80)).toBeUndefined();
+    expect(usageTextColor(90)).toBe("var(--trip)");
+    expect(usageTextColor(95)).toBe("var(--trip)");
   });
 });
 

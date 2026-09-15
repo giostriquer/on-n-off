@@ -74,3 +74,35 @@ export function claudeWithoutReset(): ProviderLimits[] {
 export function limitsFor(agentId: unknown): ProviderLimits[] {
   return (typeof agentId === "string" && LIMITS[agentId as AgentId]) || [];
 }
+
+/**
+ * `?mock=limitsBand`: one account per rung of the usage ramp, for both providers.
+ *
+ * The ordinary fixtures all sit well below 70 %, so the band where a meter hardens toward red is
+ * invisible in a capture — which is how an amber step that made a filling meter go paler survived
+ * review. These windows walk 50 / 75 / 85 / 95 % so the whole ramp is on screen at once.
+ *
+ * Codex is here as well as Claude because its accent is the one that flips with the theme
+ * (`var(--silkscreen)`: near-white on dark, near-black on light), so it is the arm that shows what
+ * the ramp does from each end. Claude's `#d97757` is the same literal in both themes.
+ */
+const BAND = [50, 75, 85, 95];
+
+function band(source: ProviderLimits): ProviderLimits[] {
+  const { account, windows } = source;
+  if (!account) return [];
+  return BAND.map((percent) => ({
+    ...source,
+    account: { ...account, id: `band-${percent}`, label: `${percent}% of the week` },
+    currentAccount: percent === BAND[0],
+    windows: windows.slice(0, 2).map((window) => ({ ...window, usedPercent: percent })),
+  }));
+}
+
+export function limitsBandClaude(): ProviderLimits[] {
+  return band(CLAUDE[0]);
+}
+
+export function limitsBandCodex(): ProviderLimits[] {
+  return band(CODEX[0]);
+}
