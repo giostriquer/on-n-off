@@ -1453,13 +1453,30 @@ fn provider_color(provider: AgentId) -> Color {
 }
 
 /// The base accent, amber from 70 %, red from 90 %; grey when unreadable.
+/// The mac `meterColor`: the accent while there is room, hardening toward the trip red as the
+/// window fills. It does not step through `WARN_AMBER`, which is lighter and yellower than the
+/// accents, and so made a filling meter read as cooling down. The blend is eased for the same
+/// reason as on the mac, so crossing 70 % is visible rather than a creep.
 fn meter_color(percent: Option<f64>, base: Color) -> Color {
     match percent {
         None => UNREADABLE_INK,
         Some(percent) if percent >= 90.0 => TRIP_RED,
-        Some(percent) if percent >= 70.0 => WARN_AMBER,
+        Some(percent) if percent > 70.0 => mix(base, TRIP_RED, ((percent - 70.0) / 20.0).sqrt()),
         Some(_) => base,
     }
+}
+
+/// Two palette entries blended in sRGB, `amount` clamped to 0...1. Alpha follows `from`, because
+/// every ramp colour is opaque and a meter never fades.
+fn mix(from: Color, to: Color, amount: f64) -> Color {
+    let t = amount.clamp(0.0, 1.0);
+    let channel = |a: u8, b: u8| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as u8;
+    [
+        channel(from[0], to[0]),
+        channel(from[1], to[1]),
+        channel(from[2], to[2]),
+        from[3],
+    ]
 }
 
 /// The mac `formatPercent`: a used sliver reads "<1%" rather than rounding to zero.

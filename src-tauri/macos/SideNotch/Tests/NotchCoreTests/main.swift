@@ -35,6 +35,33 @@ final class NotchTests {
       workHeight: 1084, scale: scale, mirrored: mirrored)
   }
 
+  /// The ring used to jump to a light amber at 70 %, so a meter that was filling up went paler and
+  /// yellower exactly as it ran out. Whatever shape the ramp takes, the invariant is that a fuller
+  /// window never sits further from the trip red than a less full one.
+  func testTheMeterRampOnlyEverMovesTowardTheTripRed() {
+    func distanceToTrip(_ ink: Ink) -> Double {
+      let dr = ink.r - tripInk.r, dg = ink.g - tripInk.g, db = ink.b - tripInk.b
+      return (dr * dr + dg * dg + db * db).squareRoot()
+    }
+    for base in [claudeInk, fableInk, codexAccentInk, cursorInk] {
+      var previous = Double.infinity
+      for step in 0...100 {
+        let ink = meterInk(quota("weekly", Double(step)), base: base, at: now)
+        let distance = distanceToTrip(ink)
+        if distance > previous + 0.000_001 {
+          failures += 1
+          print("FAIL meter ramp backtracks at \(step) %: \(distance) > \(previous)")
+        }
+        previous = distance
+      }
+      // It starts on the accent and finishes on the trip red, so the ramp spans the whole way.
+      expectEqual(meterInk(quota("weekly", 0), base: base, at: now), base)
+      expectEqual(meterInk(quota("weekly", 100), base: base, at: now), tripInk)
+    }
+    // An unreadable window stays grey rather than joining the ramp.
+    expectEqual(meterInk(nil, base: claudeInk, at: now), unreadableInk)
+  }
+
   func testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst() {
     for id in ["weekly_fable", "weekly_scoped:Fable"] {
       let entry = provider(windows: [
@@ -388,6 +415,7 @@ func expectThrows<T>(_ value: @autoclosure () throws -> T, line: Int = #line) {
   } catch {}
 }
 let checks = NotchTests()
+checks.testTheMeterRampOnlyEverMovesTowardTheTripRed()
 checks.testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst()
 checks.testUnavailableAndRememberedAccountsNeverPopulateRings()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
@@ -405,5 +433,5 @@ try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("17 native check groups; \(failures) failures")
+print("18 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

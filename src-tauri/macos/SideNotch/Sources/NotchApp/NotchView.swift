@@ -1,43 +1,33 @@
 import NotchCore
 import SwiftUI
 
-// Each provider's accent for its ring and bars. Codex and Antigravity resolve through
-// `providerStyle.ts` to `tokens.css`'s dark theme; Cursor is that file's own literal. Claude alone
-// diverges from the app window, which deliberately stays on `#e8944a`: the notch paints it in the
-// brand terracotta `#d97757`, because beside the amber it steps into at 70 % the app's lighter
-// orange reads as fading toward yellow rather than filling. Amber from 70 % and red from 90 %
-// follow the Limits screen. The inner Fable ring is a deeper shade of that same terracotta than the
-// outer weekly ring, so the two read as one family with the inner arc the firmer of the pair.
-let claudeOrange = Color(red: 217 / 255, green: 119 / 255, blue: 87 / 255)
-let codexInk = Color(red: 238 / 255, green: 240 / 255, blue: 242 / 255)
-let cursorBlue = Color(red: 122 / 255, green: 162 / 255, blue: 255 / 255)
-let antigravityMute = Color(red: 140 / 255, green: 147 / 255, blue: 157 / 255)
-let fableOrange = Color(red: 204 / 255, green: 98 / 255, blue: 64 / 255)
+// The ramp itself — the `Ink` type, the provider accents and `meterInk` — lives in `NotchCore`,
+// where `NotchCoreChecks` can exercise it without SwiftUI. This file only binds it to `Color`.
+extension Ink {
+  var color: Color { Color(red: r / 255, green: g / 255, blue: b / 255) }
+}
+
+let claudeOrange = claudeInk.color
+let codexInk = codexAccentInk.color
+let cursorBlue = cursorInk.color
+let antigravityMute = antigravityInk.color
+let fableOrange = fableInk.color
+let tripRed = tripInk.color
+// Still "pending" on CI rollups, badges and hints, where nothing is filling up and yellow is the
+// right signal. It is deliberately no longer part of the quota ramp.
 let warnAmber = Color(red: 224 / 255, green: 179 / 255, blue: 65 / 255)
-let tripRed = Color(red: 226 / 255, green: 89 / 255, blue: 76 / 255)
 let railInk = Color(white: 0.03)
 let popoverInk = Color(red: 0.055, green: 0.055, blue: 0.065)
 let mutedInk = Color(white: 0.6)
 
-func providerColor(_ id: ProviderId) -> Color {
-  switch id {
-  case .claude: return claudeOrange
-  case .codex: return codexInk
-  case .cursor: return cursorBlue
-  case .antigravity: return antigravityMute
-  }
-}
+func providerColor(_ id: ProviderId) -> Color { providerInk(id).color }
 
-/// The provider's accent while there is room, amber from 70 %, red from 90 %; grey when unreadable.
 func meterColor(_ quota: Quota?, provider: ProviderId, at now: Date) -> Color {
-  meterColor(quota, base: providerColor(provider), at: now)
+  meterInk(quota, provider: provider, at: now).color
 }
 
-func meterColor(_ quota: Quota?, base: Color, at now: Date) -> Color {
-  guard let percent = quota?.percent(at: now) else { return Color(white: 0.3) }
-  if percent >= 90 { return tripRed }
-  if percent >= 70 { return warnAmber }
-  return base
+func meterColor(_ quota: Quota?, base: Ink, at now: Date) -> Color {
+  meterInk(quota, base: base, at: now).color
 }
 
 /// The colour of one pull request's CI rollup on the ring and in the popover.
@@ -256,7 +246,7 @@ private struct MeterCell: View {
           ).padding(CGFloat(layout.innerRingInset))
           Circle().trim(from: 0, to: CGFloat(fable.percent(at: now) ?? 0) / 100)
             .stroke(
-              meterColor(fable, base: fableOrange, at: now),
+              meterColor(fable, base: fableInk, at: now),
               style: StrokeStyle(lineWidth: CGFloat(layout.innerRingStroke), lineCap: .round)
             )
             .rotationEffect(.degrees(-90)).padding(CGFloat(layout.innerRingInset))
