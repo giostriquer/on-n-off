@@ -151,7 +151,9 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
             {"id": "sooner", "resetType": "codexRateLimits", "status": "available",
              "grantedAt": 1787500000, "expiresAt": 1789000000, "title": null, "description": null},
             {"id": "forever", "resetType": "unknown", "status": "available",
-             "grantedAt": 1787500000, "expiresAt": null, "title": null, "description": null}
+             "grantedAt": 1787500000, "expiresAt": null, "title": null, "description": null},
+            {"id": "garbled", "resetType": "codexRateLimits", "status": "available",
+             "grantedAt": 1787500000, "expiresAt": i64::MIN, "title": null, "description": null}
         ]}
     }))
     .unwrap();
@@ -160,7 +162,8 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
         parse_codex(&payload).reset_credits,
         Some(LimitsResetCreditsDto {
             available_count: 2,
-            // A redeemed credit's earlier expiry is not the next one to lapse.
+            // A redeemed credit's earlier expiry is not the next one to lapse, and an expiry that is
+            // not a real instant does not hide the valid ones.
             next_expires_at: expires(1_789_000_000),
         })
     );
@@ -177,7 +180,7 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
         })
     );
 
-    // Background reads may skip the detail rows; the count still stands on its own.
+    // A read that skips the detail rows (`excludeResetCreditDetails`) still reports the count.
     let count_only: RateLimitsResponse = serde_json::from_value(json!({
         "rateLimits": {"limitId": "codex"},
         "rateLimitResetCredits": {"availableCount": 1, "credits": null}

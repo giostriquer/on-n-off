@@ -99,4 +99,3 @@ describe("usageLeft", () => {
     expect(usageLeft(entry([]), NOW)).toBeNull();
   });
 });
-

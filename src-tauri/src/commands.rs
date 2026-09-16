@@ -376,9 +376,6 @@ pub async fn consume_codex_reset_credit(
     account_id: String,
     idempotency_key: String,
 ) -> Result<ResetCreditOutcome, AdapterError> {
-    if idempotency_key.trim().is_empty() || idempotency_key.len() > 128 {
-        return Err(AdapterError::message("Invalid banked reset attempt."));
-    }
     blocking("banked reset", move || {
         crate::limits_refresh::consume_codex_reset_credit(&account_id, &idempotency_key)
             .map_err(AdapterError::message)

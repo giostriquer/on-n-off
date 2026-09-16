@@ -63,9 +63,23 @@ enum QueryStage {
     ResetCredit,
 }
 
+/// The outcome stays a string on the wire: an outcome a newer Codex adds must not turn a request that
+/// went through into a malformed-response error.
 #[derive(Debug, Deserialize)]
 struct ConsumeResetCreditResponse {
-    outcome: ResetCreditOutcome,
+    outcome: String,
+}
+
+/// Why a reset was not spent: refused before the request was sent, or the session itself failed.
+enum SpendFailure {
+    Refused(String),
+    Query(QueryError),
+}
+
+impl From<QueryError> for SpendFailure {
+    fn from(error: QueryError) -> Self {
+        Self::Query(error)
+    }
 }
 
 #[derive(Debug)]
@@ -93,6 +107,10 @@ struct TransportError {
 trait JsonLineTransport {
     fn send(&mut self, message: &Value) -> Result<(), TransportError>;
     fn receive(&mut self) -> Result<Value, TransportError>;
+    /// Close the session and report how its process ended, when there is one.
+    fn finish(&mut self) -> Option<ExitStatus> {
+        None
+    }
 }
 
 /// Spend one banked reset on the signed-in Codex account, which must still be `account_id`: Codex
@@ -103,30 +121,92 @@ pub(super) fn consume_reset_credit(
     account_id: &str,
     idempotency_key: &str,
 ) -> Result<ResetCreditOutcome, String> {
-    let expected_codex_home = home.join(".codex");
-    reset_target_matches(
-        crate::accounts::native::codex_metadata(&expected_codex_home)?,
+    spend_reset_credit(
+        &home.join(".codex"),
         account_id,
-    )?;
-    let mut transport = ProcessTransport::spawn(&expected_codex_home)?;
-    let outcome = consume_query(&expected_codex_home, idempotency_key, &mut transport);
+        idempotency_key,
+        crate::accounts::native::codex_metadata,
+        ProcessTransport::spawn,
+    )
+}
+
+/// Every check before a reset is spent, in order: the native login is the card's account before
+/// the app-server starts, the app-server is signed in with ChatGPT, and the native login is still the
+/// card's account once the app-server has loaded it. Only then is the request sent.
+fn spend_reset_credit<T: JsonLineTransport>(
+    codex_home: &Path,
+    account_id: &str,
+    idempotency_key: &str,
+    identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
+    spawn: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<ResetCreditOutcome, String> {
+    reset_target_matches(identity(codex_home)?, account_id)?;
+    let mut transport = spawn(codex_home)?;
+    let spent = spend_in_session(
+        codex_home,
+        account_id,
+        idempotency_key,
+        &identity,
+        &mut transport,
+    );
     let exit_status = transport.finish();
-    outcome.map_err(|error| match classify_query_failure(error, exit_status) {
-        AppServerFailure::Failed(message) | AppServerFailure::Unsupported(message) => message,
-        AppServerFailure::SignedOut => "Codex is not signed in.".to_string(),
+    spent.map_err(|failure| match failure {
+        SpendFailure::Refused(message) => message,
+        SpendFailure::Query(error) => classify_query_failure(error, exit_status),
     })
 }
 
-fn reset_target_matches(before: Option<(String, Value)>, account_id: &str) -> Result<(), String> {
-    match before {
+fn spend_in_session(
+    codex_home: &Path,
+    account_id: &str,
+    idempotency_key: &str,
+    identity: &impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
+    transport: &mut impl JsonLineTransport,
+) -> Result<ResetCreditOutcome, SpendFailure> {
+    let (_, account) = handshake(codex_home, false, transport)?;
+    require_chatgpt(&account).map_err(|failure| {
+        SpendFailure::Refused(match failure {
+            AppServerFailure::SignedOut => {
+                "Codex is not signed in, so there is no banked reset to use.".to_string()
+            }
+            AppServerFailure::Unsupported(_) | AppServerFailure::Failed(_) => {
+                "Banked resets belong to a ChatGPT sign-in, and Codex is not using one.".to_string()
+            }
+        })
+    })?;
+    // Codex may have loaded a different login than the one checked before it started.
+    identity(codex_home)
+        .and_then(|current| reset_target_matches(current, account_id))
+        .map_err(SpendFailure::Refused)?;
+    query_step(
+        QueryStage::ResetCredit,
+        transport.send(&serde_json::json!({
+            "id": 3,
+            "method": "account/rateLimitResetCredit/consume",
+            "params": {"idempotencyKey": idempotency_key},
+        })),
+    )?;
+    let response: ConsumeResetCreditResponse = receive_response(
+        QueryStage::ResetCredit,
+        transport,
+        3,
+        "account/rateLimitResetCredit/consume",
+    )?;
+    Ok(match response.outcome.as_str() {
+        "reset" => ResetCreditOutcome::Reset,
+        "nothingToReset" => ResetCreditOutcome::NothingToReset,
+        "noCredit" => ResetCreditOutcome::NoCredit,
+        "alreadyRedeemed" => ResetCreditOutcome::AlreadyRedeemed,
+        _ => ResetCreditOutcome::Unknown,
+    })
+}
+
+/// A reset lands on whoever is signed in, so the native login must be the account the card names.
+fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> Result<(), String> {
+    match current {
         Some((id, _)) if id == account_id => Ok(()),
-        Some(_) => {
-            Err("The signed-in Codex account changed. Refresh Limits, then try again.".to_string())
-        }
-        None => Err(
-            "Codex is not signed in with ChatGPT. Sign in with `codex`, then refresh Limits."
-                .to_string(),
-        ),
+        Some(_) => Err("The signed-in Codex account changed. Try again on its card.".to_string()),
+        None => Err("on-n-off can't confirm which Codex account is signed in, so it won't spend a reset. Sign in again with `codex`.".to_string()),
     }
 }
 
@@ -138,7 +218,8 @@ pub(super) fn read(home: &Path, force: bool) -> Result<Parsed, AppServerFailure>
         ProcessTransport::spawn(&expected_codex_home).map_err(AppServerFailure::Failed)?;
     let session = query_app_server(&expected_codex_home, force, &mut transport);
     let exit_status = transport.finish();
-    let session = session.map_err(|error| classify_query_failure(error, exit_status))?;
+    let session = session
+        .map_err(|error| AppServerFailure::Failed(classify_query_failure(error, exit_status)))?;
     normalize_app_server(session, before)
 }
 
@@ -235,7 +316,7 @@ impl ProcessTransport {
         })
     }
 
-    fn finish(&mut self) -> Option<ExitStatus> {
+    fn finish_process(&mut self) -> Option<ExitStatus> {
         self.stdin.take();
         self.messages.take();
         let mut status = None;
@@ -270,6 +351,10 @@ impl ProcessTransport {
 }
 
 impl JsonLineTransport for ProcessTransport {
+    fn finish(&mut self) -> Option<ExitStatus> {
+        self.finish_process()
+    }
+
     fn send(&mut self, message: &Value) -> Result<(), TransportError> {
         let stdin = self.stdin.as_mut().ok_or_else(|| TransportError {
             kind: QueryErrorKind::TransportClosed,
@@ -388,56 +473,6 @@ fn query_app_server(
     })
 }
 
-#[cfg(test)]
-fn consume_reset_credit_with(
-    expected_codex_home: &Path,
-    idempotency_key: &str,
-    transport: &mut impl JsonLineTransport,
-) -> Result<ResetCreditOutcome, String> {
-    consume_query(expected_codex_home, idempotency_key, transport).map_err(|error| error.message)
-}
-
-fn consume_query(
-    expected_codex_home: &Path,
-    idempotency_key: &str,
-    transport: &mut impl JsonLineTransport,
-) -> Result<ResetCreditOutcome, QueryError> {
-    let (_, account) = handshake(expected_codex_home, false, transport)?;
-    let refusal = match account
-        .account
-        .as_ref()
-        .map(|account| account.kind.as_str())
-    {
-        Some("chatgpt") => None,
-        Some("apiKey") => {
-            Some("Codex is signed in with an API key; banked resets belong to a ChatGPT plan.")
-        }
-        _ => Some("Codex is not signed in with ChatGPT, so there is no banked reset to use."),
-    };
-    if let Some(message) = refusal {
-        return Err(QueryError {
-            stage: QueryStage::Account,
-            kind: QueryErrorKind::Protocol,
-            message: message.to_string(),
-        });
-    }
-    query_step(
-        QueryStage::ResetCredit,
-        transport.send(&serde_json::json!({
-            "id": 3,
-            "method": "account/rateLimitResetCredit/consume",
-            "params": {"idempotencyKey": idempotency_key},
-        })),
-    )?;
-    let response: ConsumeResetCreditResponse = receive_response(
-        QueryStage::ResetCredit,
-        transport,
-        3,
-        "account/rateLimitResetCredit/consume",
-    )?;
-    Ok(response.outcome)
-}
-
 /// `initialize` against the expected home, then `account/read`: the start of every app-server call.
 fn handshake(
     expected_codex_home: &Path,
@@ -495,17 +530,15 @@ fn query_step<T>(stage: QueryStage, result: Result<T, TransportError>) -> Result
     })
 }
 
-fn classify_query_failure(error: QueryError, exit_status: Option<ExitStatus>) -> AppServerFailure {
+fn classify_query_failure(error: QueryError, exit_status: Option<ExitStatus>) -> String {
     if error.stage == QueryStage::Initialize
         && error.kind == QueryErrorKind::TransportClosed
         && exit_status.is_some_and(|status| !status.success())
     {
-        return AppServerFailure::Failed(
-            "Codex CLI exited before app-server initialized. This version may not support `codex app-server`; update Codex CLI, then refresh here."
-                .to_string(),
-        );
+        return "Codex CLI exited before app-server initialized. This version may not support `codex app-server`; update Codex CLI, then refresh here."
+            .to_string();
     }
-    AppServerFailure::Failed(error.message)
+    error.message
 }
 
 fn receive_response<T: DeserializeOwned>(
@@ -560,22 +593,7 @@ fn normalize_app_server(
     session: AppServerResult,
     before: Option<(String, Value)>,
 ) -> Result<Parsed, AppServerFailure> {
-    let Some(account) = session.account.account else {
-        return Err(AppServerFailure::SignedOut);
-    };
-    match account.kind.as_str() {
-        "chatgpt" => {}
-        "apiKey" => {
-            return Err(AppServerFailure::Unsupported(
-                "Codex is signed in with an API key, which has no subscription limits.".to_string(),
-            ))
-        }
-        other => {
-            return Err(AppServerFailure::Unsupported(format!(
-                "Codex account type `{other}` has no subscription limits to show."
-            )))
-        }
-    }
+    let account = require_chatgpt(&session.account)?;
     let email = account
         .email
         .as_deref()
@@ -619,6 +637,22 @@ fn normalize_app_server(
         .map(str::to_string)
         .or(parsed.plan);
     Ok(parsed)
+}
+
+/// Subscription limits and banked resets exist only for a ChatGPT login.
+fn require_chatgpt(read: &AccountReadResponse) -> Result<&CodexAccount, AppServerFailure> {
+    let Some(account) = read.account.as_ref() else {
+        return Err(AppServerFailure::SignedOut);
+    };
+    match account.kind.as_str() {
+        "chatgpt" => Ok(account),
+        "apiKey" => Err(AppServerFailure::Unsupported(
+            "Codex is signed in with an API key, which has no subscription limits.".to_string(),
+        )),
+        other => Err(AppServerFailure::Unsupported(format!(
+            "Codex account type `{other}` has no subscription limits to show."
+        ))),
+    }
 }
 
 fn paths_are_equivalent(left: &Path, right: &Path) -> bool {

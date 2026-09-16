@@ -1,7 +1,7 @@
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
 import type { SavedProfile } from "$lib/accountTypes";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
@@ -19,6 +19,7 @@ import { CodexSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { accountCards } from "./accountCards";
 import { BankedResetsRow, UseBankedReset } from "./BankedResets";
+import { SummaryRow } from "./SummaryRow";
 
 export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
   return <AccountControllers><LimitsContent pollMinutes={pollMinutes} /></AccountControllers>;
@@ -251,7 +252,7 @@ function AccountCard({
       data-current-account={entry.currentAccount ? "true" : "false"}
     >
       {account ? <AccountCardActions accountId={account.id} label={label ?? account.id} current={profile?.active ?? entry.currentAccount} profile={profile} onForget={onForget} header={header}
-        footer={disabled => <UseBankedReset entry={entry} label={label} now={now} disabled={disabled} />}>
+        footer={entry.provider === "codex" ? ({ current, disabled }) => <UseBankedReset entry={entry} label={label ?? account.id} current={current} now={now} disabled={disabled} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
     </section>
@@ -366,15 +367,5 @@ function WindowRow({
 
 /** The credit balance as one more row under the windows, so it never crowds the header's identity. */
 function CreditsRow({ credits }: { credits: LimitsCredits }) {
-  const labelId = useId();
-  return (
-    <dl className="flex items-center gap-2.5 border-t border-[var(--hair)] px-3.5 py-2">
-      <dt id={labelId} className="min-w-0 flex-1 text-[10px] leading-4 font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
-        Credits
-      </dt>
-      <dd aria-labelledby={labelId} className="shrink-0 text-right font-mono text-[12px] tabular-nums">
-        {credits.unlimited ? "Unlimited" : credits.balance}
-      </dd>
-    </dl>
-  );
+  return <SummaryRow label="Credits" value={credits.unlimited ? "Unlimited" : credits.balance} />;
 }

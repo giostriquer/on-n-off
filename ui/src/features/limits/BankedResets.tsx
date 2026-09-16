@@ -1,5 +1,4 @@
-import { useId, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatResetIn, formatShortDate } from "$lib/limitsFormat";
@@ -7,6 +6,7 @@ import type { LimitsResetCredits, ProviderLimits, ResetCreditOutcome } from "$li
 import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import { usageLeft } from "./limitPresentation";
+import { SummaryRow } from "./SummaryRow";
 
 /** Below this much usage left a banked reset is doing what it is for, so it is spent without asking. */
 const SPEND_WITHOUT_ASKING_BELOW = 5;
@@ -16,49 +16,42 @@ const OUTCOME_MESSAGES: Record<ResetCreditOutcome, string> = {
   nothingToReset: "Nothing to reset: this account's usage is already at 0%.",
   noCredit: "This account has no banked reset left.",
   alreadyRedeemed: "That banked reset was already used.",
+  unknown: "Codex answered with a result on-n-off doesn't recognize. Check the reset count after the refresh.",
 };
 
 /** The banked reset count as one more row under the windows, with when the next one expires. */
 export function BankedResetsRow({ resetCredits, now }: { resetCredits?: LimitsResetCredits | null; now: number }) {
-  const labelId = useId();
   if (!resetCredits || resetCredits.availableCount <= 0) return null;
   const expiresIn = formatResetIn(resetCredits.nextExpiresAt, now);
   const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
-  const note = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : "";
-  return (
-    <dl className="flex items-center gap-2.5 border-t border-[var(--hair)] px-3.5 py-2">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <dt id={labelId} className="text-[10px] leading-4 font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
-          Banked resets
-        </dt>
-        {note ? <dd className="font-mono text-[11px] leading-snug text-[var(--mute)]">{note}</dd> : null}
-      </div>
-      <dd aria-labelledby={labelId} className="shrink-0 text-right font-mono text-[12px] tabular-nums">
-        {resetCredits.availableCount}
-      </dd>
-    </dl>
-  );
+  const note = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
+  return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
 }
 
 /**
  * Spends one banked reset on the signed-in Codex account. Codex applies a reset to whoever is signed
- * in, so only the live current card offers it. With less than 5% of usage left it spends straight
- * away; otherwise it asks first, naming what is left, because a reset used early is a reset wasted.
+ * in, so only the card that is both the live read and the account controls' current account offers
+ * it. With less than 5% of usage left it spends straight away; otherwise it asks first, naming the
+ * account and what is left, because a reset used early is a reset wasted.
+ *
+ * One attempt keeps one idempotency key until Codex gives a definite answer: a retry after an error
+ * may be retrying a request that already went through, and a new key would spend a second reset.
+ * The refreshed limits arrive through the shared read the backend replaces after every attempt.
  */
-export function UseBankedReset({ entry, label, now, disabled = false }: {
+export function UseBankedReset({ entry, label, current, now, disabled = false }: {
   entry: ProviderLimits;
   /** The name the card shows for this account, so the confirmation names the same one. */
-  label?: string | null;
+  label: string;
+  current: boolean;
   now: number;
   disabled?: boolean;
 }) {
-  const client = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ role: "status" | "alert"; message: string } | null>(null);
+  const attempt = useRef<string | null>(null);
   const accountId = entry.account?.id;
-  const available = entry.resetCredits?.availableCount ?? 0;
-  const offered = entry.provider === "codex" && entry.currentAccount && entry.status === "ok" && !!accountId && available > 0;
+  const offered = current && entry.currentAccount && entry.status === "ok" && (entry.resetCredits?.availableCount ?? 0) > 0;
   if (!accountId || (!offered && !result)) return null;
   const left = usageLeft(entry, now);
 
@@ -66,28 +59,29 @@ export function UseBankedReset({ entry, label, now, disabled = false }: {
     setConfirming(false);
     setBusy(true);
     setResult(null);
+    attempt.current ??= crypto.randomUUID();
     try {
-      const outcome = await api.consumeCodexResetCredit(account, crypto.randomUUID());
+      const outcome = await api.consumeCodexResetCredit(account, attempt.current);
+      attempt.current = null;
       setResult({ role: "status", message: OUTCOME_MESSAGES[outcome] });
     } catch (error) {
       setResult({ role: "alert", message: parseInvokeError(error).message });
     } finally {
       setBusy(false);
-      await client.invalidateQueries({ queryKey: ["limits", "codex"] });
     }
   }
 
   function request(account: string) {
+    if (busy) return;
     if (left !== null && left < SPEND_WITHOUT_ASKING_BELOW) void spend(account);
     else setConfirming(true);
   }
 
   // A non-breaking hyphen keeps "5-hour" on one line in the dialog.
-  const effect = "A banked reset puts the 5\u2011hour and weekly windows back to 0% and moves your weekly reset date. It can't be undone.";
-  const name = label || entry.account?.label;
+  const effect = "A banked reset puts the 5‑hour and weekly windows back to 0% and moves your weekly reset date. It can't be undone.";
   const body = left === null
-    ? `on-n-off can't tell how much Codex usage ${name || "this account"} has left. ${effect}`
-    : `${name || "This account"} still has ${Math.round(left)}% of its Codex usage left, so a reset is worth more once you run out. ${effect}`;
+    ? `on-n-off can't tell how much Codex usage ${label} has left. ${effect}`
+    : `${label} still has ${Math.round(left)}% of its Codex usage left, so a reset is worth more once you run out. ${effect}`;
   return (
     <>
       {offered ? (

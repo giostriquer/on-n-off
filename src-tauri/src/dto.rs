@@ -586,14 +586,16 @@ pub struct LimitsResetCreditsDto {
     pub next_expires_at: Option<String>,
 }
 
-/// What Codex did with a request to spend one banked reset, in its own wire names.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// What Codex did with a request to spend one banked reset. `Unknown` is an outcome this build does
+/// not recognise: the request still went through, so it is not reported as a failure.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ResetCreditOutcome {
     Reset,
     NothingToReset,
     NoCredit,
     AlreadyRedeemed,
+    Unknown,
 }
 
 /// Which subscription account a limits snapshot belongs to. `id` is the provider's stable account

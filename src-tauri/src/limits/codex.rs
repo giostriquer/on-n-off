@@ -205,9 +205,8 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
         .iter()
         .flatten()
         .filter(|credit| credit.status == "available")
-        .filter_map(|credit| credit.expires_at)
+        .filter_map(|credit| DateTime::<Utc>::from_timestamp(credit.expires_at?, 0))
         .min()
-        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
         .map(|at| at.to_rfc3339());
     Some(LimitsResetCreditsDto {
         available_count: u32::try_from(summary.available_count).unwrap_or(u32::MAX),

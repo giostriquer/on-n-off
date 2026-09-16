@@ -177,4 +177,3 @@ describe("formatShortDate", () => {
     expect(formatShortDate("not a date")).toBe("");
   });
 });
-

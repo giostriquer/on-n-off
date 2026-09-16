@@ -9,8 +9,12 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   onForget?: (id: string) => Promise<void>;
   header: (menu: ReactNode) => ReactNode;
-  /** More account actions beside the primary one, disabled while an account operation runs. */
-  footer?: (disabled: boolean) => ReactNode;
+  /**
+   * More account actions beside the primary one. `current` is the card's own notion of the signed-in
+   * account; `disabled` covers running account operations and a current card the native login no
+   * longer matches, the same conditions the primary action honours.
+   */
+  footer?: (state: { current: boolean; disabled: boolean }) => ReactNode;
   children?: ReactNode;
 }) {
   const manager = useAccountManagement();
@@ -92,7 +96,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
       {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : void action("use", profile.id).catch(() => {})}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
         : <button className={button} disabled={disabled || (current && !nativeMatches)} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
-      {footer?.(!!disabled)}
+      {footer?.({ current, disabled: !!disabled || (current && !nativeMatches) })}
       {provider === "codex" && <AccountBilling accountId={accountId} disabled={disabled} showDate={false} />}
     </footer>
   </>;

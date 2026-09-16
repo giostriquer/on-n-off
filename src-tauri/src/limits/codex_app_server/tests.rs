@@ -294,14 +294,13 @@ fn early_nonzero_exit_explains_that_the_cli_may_need_an_update() {
 
     let error = query_app_server(&root, false, &mut transport).unwrap_err();
     let status = transport.finish();
-    let failure = classify_query_failure(error, status);
+    let message = classify_query_failure(error, status);
 
-    assert!(matches!(
-        failure,
-        AppServerFailure::Failed(message)
-            if message.contains("may not support `codex app-server`")
-                && message.contains("update Codex CLI")
-    ));
+    assert!(
+        message.contains("may not support `codex app-server`"),
+        "{message}"
+    );
+    assert!(message.contains("update Codex CLI"), "{message}");
 }
 
 #[test]
@@ -315,14 +314,13 @@ fn early_broken_pipe_and_nonzero_exit_give_the_same_old_cli_guidance() {
         message: "Could not write to Codex app-server: Broken pipe".to_string(),
     };
 
-    let failure = classify_query_failure(error, Some(status));
+    let message = classify_query_failure(error, Some(status));
 
-    assert!(matches!(
-        failure,
-        AppServerFailure::Failed(message)
-            if message.contains("may not support `codex app-server`")
-                && message.contains("update Codex CLI")
-    ));
+    assert!(
+        message.contains("may not support `codex app-server`"),
+        "{message}"
+    );
+    assert!(message.contains("update Codex CLI"), "{message}");
 }
 
 #[test]
@@ -340,11 +338,9 @@ fn nonzero_exit_does_not_hide_typed_timeout_or_invalid_output_errors() {
             message: format!("Codex app-server {expected}."),
         };
 
-        let failure = classify_query_failure(error, Some(status));
-
         assert_eq!(
-            failure,
-            AppServerFailure::Failed(format!("Codex app-server {expected}."))
+            classify_query_failure(error, Some(status)),
+            format!("Codex app-server {expected}.")
         );
     }
 }
@@ -543,6 +539,41 @@ fn chatgpt_account() -> Value {
     json!({"account": {"type": "chatgpt", "email": "me@example.com", "planType": "pro"}})
 }
 
+fn signed_in_as(id: &str) -> Result<Option<(String, Value)>, String> {
+    Ok(Some((id.to_string(), json!({}))))
+}
+
+/// Spend through the real checks with a fake app-server; the transport comes back for inspection,
+/// or `None` when the checks refused before starting one.
+fn spend(
+    card: &str,
+    identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
+    transport: FakeTransport,
+) -> (Result<ResetCreditOutcome, String>, Option<FakeTransport>) {
+    let codex_home = PathBuf::from("/fixture/.codex");
+    let spawned = std::cell::RefCell::new(None);
+    struct Recording<'a>(FakeTransport, &'a std::cell::RefCell<Option<FakeTransport>>);
+    impl JsonLineTransport for Recording<'_> {
+        fn send(&mut self, message: &Value) -> Result<(), TransportError> {
+            self.0.send(message)
+        }
+        fn receive(&mut self) -> Result<Value, TransportError> {
+            self.0.receive()
+        }
+        fn finish(&mut self) -> Option<ExitStatus> {
+            *self.1.borrow_mut() = Some(FakeTransport {
+                received: std::mem::take(&mut self.0.received),
+                sent: std::mem::take(&mut self.0.sent),
+            });
+            None
+        }
+    }
+    let result = spend_reset_credit(&codex_home, card, "attempt-1", identity, |_| {
+        Ok(Recording(transport, &spawned))
+    });
+    (result, spawned.into_inner())
+}
+
 fn consume_requests(transport: &FakeTransport) -> Vec<&Value> {
     transport
         .sent
@@ -553,17 +584,18 @@ fn consume_requests(transport: &FakeTransport) -> Vec<&Value> {
 
 #[test]
 fn spending_a_reset_credit_completes_the_handshake_then_redeems_exactly_one() {
-    let codex_home = PathBuf::from("/fixture/.codex");
-    let mut transport = consume_transport(
-        chatgpt_account(),
-        Some(json!({"id": 3, "result": {"outcome": "reset"}})),
+    let (outcome, transport) = spend(
+        "acct-1",
+        |_| signed_in_as("acct-1"),
+        consume_transport(
+            chatgpt_account(),
+            Some(json!({"id": 3, "result": {"outcome": "reset"}})),
+        ),
     );
 
-    let outcome = consume_reset_credit_with(&codex_home, "attempt-1", &mut transport).unwrap();
-
-    assert_eq!(outcome, ResetCreditOutcome::Reset);
+    assert_eq!(outcome, Ok(ResetCreditOutcome::Reset));
     assert_eq!(
-        transport.sent,
+        transport.unwrap().sent,
         [
             json!({"id": 1, "method": "initialize", "params": {"clientInfo": {
                 "name": "on_n_off", "title": "on-n-off", "version": env!("CARGO_PKG_VERSION")
@@ -578,52 +610,110 @@ fn spending_a_reset_credit_completes_the_handshake_then_redeems_exactly_one() {
 }
 
 #[test]
-fn every_consume_outcome_reaches_the_caller() {
-    let codex_home = PathBuf::from("/fixture/.codex");
+fn every_consume_outcome_reaches_the_caller_and_a_new_one_is_not_a_failure() {
     for (wire, expected) in [
         ("reset", ResetCreditOutcome::Reset),
         ("nothingToReset", ResetCreditOutcome::NothingToReset),
         ("noCredit", ResetCreditOutcome::NoCredit),
         ("alreadyRedeemed", ResetCreditOutcome::AlreadyRedeemed),
+        // The request went through; an outcome this build does not know must not read as an error.
+        ("somethingCodexAddedLater", ResetCreditOutcome::Unknown),
     ] {
-        let mut transport = consume_transport(
-            chatgpt_account(),
-            Some(json!({"id": 3, "result": {"outcome": wire}})),
+        let (outcome, _) = spend(
+            "acct-1",
+            |_| signed_in_as("acct-1"),
+            consume_transport(
+                chatgpt_account(),
+                Some(json!({"id": 3, "result": {"outcome": wire}})),
+            ),
         );
-        assert_eq!(
-            consume_reset_credit_with(&codex_home, "attempt-1", &mut transport),
-            Ok(expected)
-        );
+        assert_eq!(outcome, Ok(expected), "{wire}");
     }
 }
 
 #[test]
+fn a_reset_is_not_spent_when_the_signed_in_account_is_not_the_cards() {
+    for native in [signed_in_as("acct-2"), Ok(None)] {
+        let (outcome, transport) = spend(
+            "acct-1",
+            move |_| native.clone(),
+            consume_transport(chatgpt_account(), None),
+        );
+
+        assert!(outcome.is_err(), "{outcome:?}");
+        // Refused before an app-server was ever started.
+        assert!(transport.is_none());
+    }
+    let (changed, _) = spend(
+        "acct-1",
+        |_| signed_in_as("acct-2"),
+        consume_transport(chatgpt_account(), None),
+    );
+    assert!(changed.unwrap_err().contains("changed"));
+    let (unknown, _) = spend(
+        "acct-1",
+        |_| Ok(None),
+        consume_transport(chatgpt_account(), None),
+    );
+    assert!(unknown
+        .unwrap_err()
+        .contains("can't confirm which Codex account"));
+}
+
+#[test]
+fn a_login_that_changes_while_the_app_server_starts_is_caught_before_the_request() {
+    let checks = std::cell::Cell::new(0);
+    let (outcome, transport) = spend(
+        "acct-1",
+        |_| {
+            checks.set(checks.get() + 1);
+            // The first check passes; by the time app-server has loaded, another login is active.
+            signed_in_as(if checks.get() == 1 {
+                "acct-1"
+            } else {
+                "acct-2"
+            })
+        },
+        consume_transport(
+            chatgpt_account(),
+            Some(json!({"id": 3, "result": {"outcome": "reset"}})),
+        ),
+    );
+
+    assert!(outcome.unwrap_err().contains("changed"));
+    assert_eq!(checks.get(), 2);
+    assert!(consume_requests(&transport.unwrap()).is_empty());
+}
+
+#[test]
 fn a_reset_credit_is_never_spent_without_a_chatgpt_login() {
-    let codex_home = PathBuf::from("/fixture/.codex");
     for account in [
         json!({"account": null}),
         json!({"account": {"type": "apiKey"}}),
     ] {
-        let mut transport = consume_transport(account, None);
+        let (outcome, transport) = spend(
+            "acct-1",
+            |_| signed_in_as("acct-1"),
+            consume_transport(account, None),
+        );
 
-        let error =
-            consume_reset_credit_with(&codex_home, "attempt-1", &mut transport).unwrap_err();
-
-        assert!(error.contains("ChatGPT"), "{error}");
-        assert!(consume_requests(&transport).is_empty());
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert!(consume_requests(&transport.unwrap()).is_empty());
     }
 }
 
 #[test]
 fn a_cli_without_banked_resets_is_asked_to_update() {
-    let codex_home = PathBuf::from("/fixture/.codex");
-    let mut transport = consume_transport(
-        chatgpt_account(),
-        Some(json!({"id": 3, "error": {"code": -32601, "message": "Method not found"}})),
+    let (outcome, _) = spend(
+        "acct-1",
+        |_| signed_in_as("acct-1"),
+        consume_transport(
+            chatgpt_account(),
+            Some(json!({"id": 3, "error": {"code": -32601, "message": "Method not found"}})),
+        ),
     );
 
-    let error = consume_reset_credit_with(&codex_home, "attempt-1", &mut transport).unwrap_err();
-
+    let error = outcome.unwrap_err();
     assert!(
         error.contains("account/rateLimitResetCredit/consume"),
         "{error}"
@@ -632,14 +722,38 @@ fn a_cli_without_banked_resets_is_asked_to_update() {
 }
 
 #[test]
-fn a_reset_is_spent_only_on_the_account_the_card_names() {
+fn the_card_account_id_from_a_read_is_the_id_a_spend_accepts() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let codex_home = crate::paths::scratch_dir("codex-app-server-reset-card-id");
+    let payload = json!({"https://api.openai.com/auth": {"chatgpt_user_id": "user-1", "chatgpt_account_id": "workspace-1"}});
+    let token = format!(
+        "header.{}.signature",
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
+    );
+    std::fs::write(
+        codex_home.join("auth.json"),
+        json!({"tokens": {"account_id": "workspace-1", "id_token": token}}).to_string(),
+    )
+    .unwrap();
+    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let card = normalize_app_server(
+        AppServerResult {
+            codex_home: codex_home.clone(),
+            account: typed(chatgpt_account()),
+            rate_limits: typed(json!({"rateLimits": {"planType": "pro"}})),
+        },
+        before,
+    )
+    .unwrap()
+    .account
+    .unwrap()
+    .id;
+
     assert_eq!(
-        reset_target_matches(Some(("acct-1".to_string(), json!({}))), "acct-1"),
+        reset_target_matches(
+            crate::accounts::native::codex_metadata(&codex_home).unwrap(),
+            &card
+        ),
         Ok(())
     );
-    let changed =
-        reset_target_matches(Some(("acct-2".to_string(), json!({}))), "acct-1").unwrap_err();
-    assert!(changed.contains("changed"), "{changed}");
-    let signed_out = reset_target_matches(None, "acct-1").unwrap_err();
-    assert!(signed_out.contains("signed in"), "{signed_out}");
 }
