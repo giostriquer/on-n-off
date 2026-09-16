@@ -2644,7 +2644,7 @@ dependencies = [
 
 [[package]]
 name = "on-n-off"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "base64 0.23.1",
  "block2",
