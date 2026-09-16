@@ -174,6 +174,11 @@ describe("formatShortDate", () => {
     expect(formatShortDate("2026-08-29T23:30:00Z", { timeZone: "America/Sao_Paulo" })).toBe("Aug 29");
     expect(formatShortDate("2026-08-30T01:30:00Z", { timeZone: "America/Sao_Paulo" })).toBe("Aug 29");
     expect(formatShortDate("2027-01-04T12:00:00Z", { timeZone: "UTC", withYear: true })).toBe("Jan 4, 2027");
+    // The year appears only outside the year of `yearUnlessSameAs`, judged in the same time zone.
+    const newYearsEve = "2026-12-31T23:30:00Z";
+    const justAfter = Date.parse("2027-01-01T01:00:00Z");
+    expect(formatShortDate(newYearsEve, { timeZone: "UTC", yearUnlessSameAs: justAfter })).toBe("Dec 31, 2026");
+    expect(formatShortDate(newYearsEve, { timeZone: "America/Sao_Paulo", yearUnlessSameAs: justAfter })).toBe("Dec 31");
     expect(formatShortDate(null)).toBe("");
     expect(formatShortDate("not a date")).toBe("");
   });

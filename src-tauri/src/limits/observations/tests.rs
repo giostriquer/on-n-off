@@ -158,3 +158,44 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         reset_credits
     );
 }
+
+#[test]
+fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
+    let account = Some(LimitsAccountDto {
+        legacy_id: None,
+        id: "acct-1".to_string(),
+        label: Some("me@example.com".to_string()),
+    });
+    let current = ProviderLimitsDto {
+        provider: AgentId::Codex,
+        status: LimitsStatus::Failed,
+        message: Some("Refresh paused".to_string()),
+        account: account.clone(),
+        current_account: true,
+        plan: None,
+        windows: Vec::new(),
+        credits: None,
+        reset_credits: None,
+    };
+    let reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 2,
+        next_expires_at: None,
+    });
+    let remembered = ObservedWindowSet::from_account(ProviderLimitsDto {
+        provider: AgentId::Codex,
+        status: LimitsStatus::Ok,
+        message: None,
+        account,
+        current_account: false,
+        plan: Some("pro".to_string()),
+        windows: Vec::new(),
+        credits: None,
+        reset_credits: reset_credits.clone(),
+    });
+
+    let merged = merge_windows(current, None, remembered);
+
+    assert_eq!(merged.reset_credits, reset_credits);
+    assert_eq!(merged.plan.as_deref(), Some("pro"));
+    assert!(merged.windows.is_empty());
+}

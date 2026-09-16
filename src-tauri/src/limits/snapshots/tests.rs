@@ -431,9 +431,78 @@ fn quota_windows_credits_and_banked_resets_each_count_as_an_observation() {
     });
     assert!(dto.has_observations());
     dto.credits = None;
+    // Every current Codex read reports a count, usually 0; on its own that observed nothing.
     dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 0,
         next_expires_at: None,
     });
+    assert!(!dto.has_observations());
+    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: None,
+    });
     assert!(dto.has_observations());
+}
+
+#[test]
+fn a_windowless_read_that_reports_no_banked_resets_keeps_the_remembered_windows() {
+    let home = scratch_dir("limits-snap-reset-credits-zero");
+    let store = SnapshotStore::for_home(&home);
+    let remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    store.save(&remembered).unwrap();
+    // The shape a current Codex CLI returns when it reports no windows: the count is still there.
+    let mut windowless = remembered.clone();
+    windowless.windows.clear();
+    windowless.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 0,
+        next_expires_at: None,
+    });
+
+    assert!(store.save(&windowless).is_err());
+
+    assert_eq!(store.load(AgentId::Codex)[0].windows, remembered.windows);
+}
+
+#[test]
+fn saving_after_a_merge_rewrites_only_the_accounts_the_merge_changed() {
+    let home = scratch_dir("limits-snap-save-changed");
+    let store = SnapshotStore::for_home(&home);
+    let mut credits_only = snapshot(
+        AgentId::Codex,
+        "acct-credits",
+        "c@x",
+        "2026-08-17T10:00:00.000Z",
+    );
+    credits_only.windows.clear();
+    credits_only.credits = Some(LimitsCreditsDto {
+        balance: "3".to_string(),
+        unlimited: false,
+    });
+    let windowed = snapshot(
+        AgentId::Codex,
+        "acct-windows",
+        "w@x",
+        "2026-08-17T10:00:00.000Z",
+    );
+    store.save(&credits_only).unwrap();
+    store.save(&windowed).unwrap();
+    let stored = |id: &str| {
+        fs::read_dir(store.dir())
+            .unwrap()
+            .flatten()
+            .map(|entry| fs::read_to_string(entry.path()).unwrap())
+            .find(|raw| raw.contains(id))
+            .unwrap()
+    };
+    let credits_before = stored("acct-credits");
+    let before = vec![credits_only.clone(), windowed.clone()];
+    let mut after = before.clone();
+    after[1].windows[0].used_percent = 60.0;
+    after[1].windows[0].observed_at = "2026-08-17T11:00:00.000Z".to_string();
+
+    store.save_changed(&before, &after);
+
+    // An untouched account keeps its own observation date instead of being re-dated now.
+    assert_eq!(stored("acct-credits"), credits_before);
+    assert!(stored("acct-windows").contains("\"usedPercent\":60.0"));
 }

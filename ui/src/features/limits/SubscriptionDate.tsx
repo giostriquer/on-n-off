@@ -4,8 +4,7 @@ import type { SubscriptionReading } from "$lib/subscriptionTypes";
 
 /** The date without its year when it falls in the current year; with it otherwise, or when `now` is unknown. */
 function dateLabel(value: string | null, now?: number) {
-  const year = value ? new Date(value).getFullYear() : Number.NaN;
-  return formatShortDate(value, { withYear: now === undefined || year !== new Date(now).getFullYear() }) || null;
+  return formatShortDate(value, now === undefined ? { withYear: true } : { yearUnlessSameAs: now }) || null;
 }
 
 export function SubscriptionDate({ reading, now = Date.now(), className = "" }: { reading: SubscriptionReading; now?: number; className?: string }) {

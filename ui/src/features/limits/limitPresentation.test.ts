@@ -107,7 +107,9 @@ describe("hasObservations", () => {
     expect(hasObservations(bare)).toBe(false);
     expect(hasObservations({ ...bare, windows: [window] })).toBe(true);
     expect(hasObservations({ ...bare, credits: { balance: "0", unlimited: false } })).toBe(true);
-    expect(hasObservations({ ...bare, resetCredits: { availableCount: 0, nextExpiresAt: null } })).toBe(true);
+    // Every current Codex read reports a count, usually 0; on its own that observed nothing.
+    expect(hasObservations({ ...bare, resetCredits: { availableCount: 0, nextExpiresAt: null } })).toBe(false);
+    expect(hasObservations({ ...bare, resetCredits: { availableCount: 1, nextExpiresAt: null } })).toBe(true);
   });
 
   it("lets a caller count only the windows it shows", () => {

@@ -640,13 +640,15 @@ impl ProviderLimitsDto {
     /// Whether this read observed anything about the account worth keeping: quota windows, a
     /// credit balance or banked resets. One definition for every place that decides that.
     pub fn has_observations(&self) -> bool {
-        !self.windows.is_empty() || self.has_account_figures()
+        !self.windows.is_empty() || self.credits.is_some() || self.has_banked_resets()
     }
 
-    /// Figures about the account that carry no observation time of their own, so a successful
-    /// read dates them when it stores them.
-    pub fn has_account_figures(&self) -> bool {
-        self.credits.is_some() || self.reset_credits.is_some()
+    /// Every current Codex read reports a reset count, usually 0, so only a positive count is an
+    /// observation; the 0 still matters when it replaces a remembered count.
+    pub fn has_banked_resets(&self) -> bool {
+        self.reset_credits
+            .as_ref()
+            .is_some_and(|resets| resets.available_count > 0)
     }
 }
 

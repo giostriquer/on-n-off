@@ -176,10 +176,10 @@ fn read_limits_in<P: Fn() -> KeychainProbe>(
     };
     let store = SnapshotStore::for_home(home);
     let mut accounts = aggregate_accounts(&store, current, supplemental);
-    if agent == AgentId::Codex && codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0
-    {
-        for account in &accounts {
-            let _ = store.save(account);
+    if agent == AgentId::Codex {
+        let before = accounts.clone();
+        if codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0 {
+            store.save_changed(&before, &accounts);
         }
     }
     accounts

@@ -56,16 +56,19 @@ export function formatResetAt(resetsAt: string | null | undefined, timeZone?: st
 }
 
 /**
- * "Aug 29" (or "Aug 29, 2027" with `withYear`) in the given or the viewer's time zone, for instants
- * weeks away where a weekday alone would be ambiguous; empty when unknown.
+ * "Aug 29" in the given or the viewer's time zone, for instants weeks away where a weekday alone
+ * would be ambiguous; empty when unknown. `withYear` always adds the year; `yearUnlessSameAs` adds
+ * it only when the date falls in another year than that instant, both judged in the same zone.
  */
 export function formatShortDate(
   iso: string | null | undefined,
-  { timeZone, withYear = false }: { timeZone?: string; withYear?: boolean } = {},
+  { timeZone, withYear = false, yearUnlessSameAs }: { timeZone?: string; withYear?: boolean; yearUnlessSameAs?: number } = {},
 ): string {
   const at = parseInstant(iso);
   if (at === null) return "";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: withYear ? "numeric" : undefined, timeZone }).format(at);
+  const yearOf = (ms: number) => new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone }).format(ms);
+  const year = withYear || (yearUnlessSameAs !== undefined && yearOf(at) !== yearOf(yearUnlessSameAs));
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: year ? "numeric" : undefined, timeZone }).format(at);
 }
 
 /** "Aug 19, 2026, 02:04" in the given (or viewer's) time zone; empty when unknown. */

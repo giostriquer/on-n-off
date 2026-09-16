@@ -16,7 +16,7 @@ function Cards() {
   return <>{manager?.query.data?.profiles.map(profile => <section key={profile.id} aria-label={profile.email ?? "account"}>
     <span>{profile.email}</span><span>{profile.category}</span>
     <AccountCardActions accountId={profile.observationId!} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>}
-      footer={({ busy }) => <AccountBilling accountId={profile.observationId!} disabled={busy} showDate={false} />} />
+      footer={({ blocked }) => <AccountBilling accountId={profile.observationId!} disabled={blocked} showDate={false} />} />
   </section>)}</>;
 }
 function setup(preferences = false) {

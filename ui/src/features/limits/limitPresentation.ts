@@ -92,7 +92,8 @@ export function usageLeft(entry: ProviderLimits, now: number): number | null {
  * `ProviderLimitsDto::has_observations` is the same rule.
  */
 export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = entry.windows): boolean {
-  return windows.length > 0 || entry.credits != null || entry.resetCredits != null;
+  // Every current Codex read reports a reset count, usually 0; only a positive count was observed.
+  return windows.length > 0 || entry.credits != null || (entry.resetCredits?.availableCount ?? 0) > 0;
 }
 
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {

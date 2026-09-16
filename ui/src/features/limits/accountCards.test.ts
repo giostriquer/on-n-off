@@ -26,6 +26,8 @@ it("does not discard current legacy observations", () => {
 });
 it.each([
   { ...scoped, windows: [] },
+  // The shape a current Codex read has when it reports no windows.
+  { ...scoped, windows: [], resetCredits: { availableCount: 0, nextExpiresAt: null } },
   { ...scoped, status: "failed" as const },
   { ...scoped, account: { id: "profile:other-user", label: profile.email } },
   { ...scoped, account: { id: profile.observationId!, label: "other@example.com" } },
