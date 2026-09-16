@@ -159,10 +159,7 @@ fn codex_reads_recent_rollouts_and_infers_work_from_task_boundaries() {
 
     let sessions = read_codex(&root, now);
     assert_eq!(sessions.len(), 2);
-    let working = sessions
-        .iter()
-        .find(|s| s.name == "webapp-42")
-        .unwrap();
+    let working = sessions.iter().find(|s| s.name == "webapp-42").unwrap();
     assert_eq!(working.status, SessionStatus::Working);
     assert_eq!(working.place, "Desktop");
     assert_eq!(working.project, "webapp");
