@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto, ResetCreditOutcome};
 use crate::read_revision::{self, Reading, Revision, Source};
 
 const MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(60 * 60);
@@ -119,6 +119,47 @@ pub fn forget_snapshot(
     // one already forgot, until its own poll comes round.
     announce(cache, reading);
     Ok(())
+}
+
+/// Spend one banked Codex reset, then replace the shared Codex read so every surface shows the
+/// renewed windows and the count that is left. An account change in progress refuses the attempt
+/// rather than spend a reset on an account that is being replaced.
+pub fn consume_codex_reset_credit(
+    account_id: &str,
+    idempotency_key: &str,
+) -> Result<ResetCreditOutcome, String> {
+    spend_then_refresh(
+        idempotency_key,
+        || crate::accounts::activity::read(AgentId::Codex),
+        || crate::limits::consume_codex_reset_credit(account_id, idempotency_key),
+        || {
+            let _ = read_limits(AgentId::Codex, true);
+        },
+    )
+}
+
+/// The shared read is replaced after every spend that got past the lease, failed ones included: a
+/// request that timed out may still have reached Codex, and a card left on the old numbers would
+/// offer that reset again. The lease is released first, because the refresh takes its own.
+fn spend_then_refresh<L, O>(
+    idempotency_key: &str,
+    lease: impl FnOnce() -> Option<L>,
+    spend: impl FnOnce() -> Result<O, String>,
+    refresh: impl FnOnce(),
+) -> Result<O, String> {
+    if idempotency_key.trim().is_empty() || idempotency_key.len() > 128 {
+        return Err("Invalid banked reset attempt.".to_string());
+    }
+    let spent = {
+        let Some(_lease) = lease() else {
+            return Err(
+                "A Codex account change is running. Try again when it finishes.".to_string(),
+            );
+        };
+        spend()
+    };
+    refresh();
+    spent
 }
 
 fn cache_for(agent: AgentId) -> Option<&'static Cache> {

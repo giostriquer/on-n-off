@@ -13,7 +13,8 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsStatus, ProviderLimitsDto,
+    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
+    LimitsStatus, ProviderLimitsDto,
 };
 use crate::usage::cache_io::atomic_write;
 
@@ -34,6 +35,8 @@ struct StoredSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     credits: Option<LimitsCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    reset_credits: Option<LimitsResetCreditsDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     observed_at: Option<String>,
 }
 
@@ -49,8 +52,8 @@ impl SnapshotStore {
     }
 
     /// Persist canonical account observations. Dated local or remembered windows remain
-    /// trustworthy while refresh is unavailable; a successful credits-only read is dated when it
-    /// reaches this storage boundary.
+    /// trustworthy while refresh is unavailable; a successful read with only credits or banked
+    /// resets is dated when it reaches this storage boundary.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
@@ -59,12 +62,13 @@ impl SnapshotStore {
             .account
             .as_ref()
             .ok_or_else(|| "snapshot has no account".to_string())?;
-        if dto.windows.is_empty() && dto.credits.is_none() {
+        if !dto.has_observations() {
             return Err("snapshot has no observations".to_string());
         }
         let path = self.dir.join(file_name(dto.provider, &account.id));
-        let incoming_latest = latest_observed_at(dto)
-            .or_else(|| (dto.status == LimitsStatus::Ok && dto.credits.is_some()).then(Utc::now));
+        let incoming_latest = latest_observed_at(dto).or_else(|| {
+            (dto.status == LimitsStatus::Ok && has_undated_figures(dto)).then(Utc::now)
+        });
         let incoming_latest =
             incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
         let existing_latest = fs::read_to_string(&path)
@@ -75,6 +79,16 @@ impl SnapshotStore {
             return Ok(());
         }
         write_stored(&path, StoredSnapshot::from_dto(dto, incoming_latest))
+    }
+
+    /// Persist the accounts a merge changed, leaving the others' files and dates alone: re-saving an
+    /// untouched account with no dated windows would date its old figures now.
+    pub fn save_changed(&self, before: &[ProviderLimitsDto], after: &[ProviderLimitsDto]) {
+        for (changed, previous) in after.iter().zip(before) {
+            if changed != previous {
+                let _ = self.save(changed);
+            }
+        }
     }
 
     /// Every remembered snapshot for `provider`, newest first. Unreadable files are skipped rather
@@ -181,6 +195,7 @@ impl StoredSnapshot {
             plan: dto.plan.clone(),
             windows: dto.windows.clone(),
             credits: dto.credits.clone(),
+            reset_credits: dto.reset_credits.clone(),
             observed_at: Some(observed_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
         }
     }
@@ -202,8 +217,14 @@ impl StoredSnapshot {
             plan: self.plan,
             windows: self.windows,
             credits: self.credits,
+            reset_credits: self.reset_credits,
         }
     }
+}
+
+/// Figures with no observation time of their own, which a successful read dates when it stores them.
+fn has_undated_figures(dto: &ProviderLimitsDto) -> bool {
+    dto.credits.is_some() || dto.has_banked_resets()
 }
 
 fn decode(raw: &str) -> Option<StoredSnapshot> {

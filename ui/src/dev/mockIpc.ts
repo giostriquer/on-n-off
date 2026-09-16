@@ -10,7 +10,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
 
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
-import { claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor } from "./limitsFixtures";
+import { bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
@@ -34,7 +34,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
-  "limitsBand",
+  "limitsBand", "bankedResets",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -231,6 +231,7 @@ const handlers: Record<string, Handler> = {
     if (scenario === "limitsBand" && args.agentId === "claude") return limitsBandClaude();
     if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();
     if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
+    if (scenario === "bankedResets" && args.agentId === "codex") return bankedResetsCodex();
     const entries = limitsFor(args.agentId);
     if (scenario !== "accountDuplicate" || args.agentId !== "codex") return entries;
     const legacy = { ...entries[1], currentAccount: false, account: {
@@ -252,6 +253,7 @@ const handlers: Record<string, Handler> = {
     },
     connected: false, browserSupported: true, canConnect: true, unavailable: scenario === "subscriptionStale",
   }),
+  consume_codex_reset_credit: () => "reset",
   connect_codex_billing: () => { if (scenario === "billingFailure") throw billingFailure; },
   disconnect_codex_billing: () => undefined,
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),

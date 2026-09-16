@@ -1,5 +1,6 @@
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
+import { formatShortDate } from "$lib/limitsFormat";
 import { SubscriptionDate } from "./SubscriptionDate";
 import type { SubscriptionReading } from "$lib/subscriptionTypes";
 afterEach(cleanup);
@@ -115,6 +116,11 @@ it("marks only near expiry dates as urgent and preserves overdue renewal uncerta
   expect(screen.getByText(/Renewal was due/)).toBeVisible();
   expect(screen.queryByText(/Expires|Expired/)).toBeNull();
 });
+it("names dates the way the rest of Limits does", () => {
+  render(<SubscriptionDate reading={reading("renews")} now={NOW} />);
+  expect(screen.getByText(/Renews/)).toHaveTextContent(`Renews ${formatShortDate("2026-10-10T12:00:00Z")}`);
+});
+
 it("omits invalid dates and retains the year for dates outside the current year", () => {
   const value = reading("expires"); value.metadata!.date = "invalid";
   const {container, rerender} = render(<SubscriptionDate reading={value} />);

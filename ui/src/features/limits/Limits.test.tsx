@@ -12,9 +12,14 @@ const accountAction = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
 const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
 
-const onSharedReadChanged = vi.hoisted(() => () => Promise.resolve(() => undefined));
+const sharedReadHandlers = vi.hoisted(() => new Set<(change: { source: string }) => void>());
+const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string }) => void) => {
+  sharedReadHandlers.add(handler);
+  return Promise.resolve(() => { sharedReadHandlers.delete(handler); });
+});
+const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
 
-vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), addAccount, cancelAccountLogin:vi.fn(), connectCodexBilling:vi.fn(), forgetLimitsSnapshot, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue({metadata:null,connected:false,unavailable:false}) }));
+vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), addAccount, cancelAccountLogin:vi.fn(), connectCodexBilling:vi.fn(), forgetLimitsSnapshot, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue({metadata:null,connected:false,unavailable:false}), consumeCodexResetCredit }));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -118,6 +123,7 @@ beforeEach(() => {
   addAccount.mockReset().mockResolvedValue(undefined);
   accountAction.mockReset().mockResolvedValue(undefined);
   readLimits.mockReset();
+  consumeCodexResetCredit.mockReset();
   forgetLimitsSnapshot.mockReset();
   forgetLimitsSnapshot.mockResolvedValue(undefined);
 });
@@ -474,6 +480,50 @@ describe("Limits", () => {
     await waitFor(() => expect(within(card("Claude limits")).getByText("Claude reported no rate-limit windows.")).toBeTruthy());
     expect(within(card("Claude limits")).queryByText("Max")).toBeNull();
     expect(within(card("Codex limits · work@codex.example")).getByRole("definition", { name: "Credits" }).textContent).toBe("Unlimited");
+  });
+
+  it("offers a banked reset beside the current Codex account's actions and lists the count as a row", async () => {
+    const remembered = { ...staleCodex(), resetCredits: { availableCount: 1, nextExpiresAt: null } };
+    const banked = { availableCount: 2, nextExpiresAt: null };
+    answer([okClaude({ resetCredits: banked })], [okCodex({ resetCredits: banked }), remembered]);
+    renderLimits();
+
+    const current = await waitFor(() => card("Codex limits · work@codex.example"));
+    const button = await within(current).findByRole("button", { name: "Use banked reset" });
+    expect(button.closest("footer")).toBe(within(current).getByRole("button", { name: "Save account" }).closest("footer"));
+    // Like Save account, it waits until the native login is confirmed to be this card's account.
+    expect(button).toHaveProperty("disabled", true);
+    expect(within(current).getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
+
+    // Codex spends a reset on whichever account is signed in, so a remembered card only reports its count.
+    const other = card("Codex limits · personal@codex.example");
+    expect(within(other).getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
+    expect(within(other).queryByRole("button", { name: "Use banked reset" })).toBeNull();
+    // Banked resets are a Codex feature, whatever another provider's read carries.
+    expect(within(card("Claude limits · me@claude.example")).queryByRole("button", { name: "Use banked reset" })).toBeNull();
+  });
+
+  it("shows the spent reset on the refreshed card the backend announces", async () => {
+    const spent = okCodex({ windows: okCodex().windows.map((window) => ({ ...window, usedPercent: 99 })), resetCredits: { availableCount: 1, nextExpiresAt: null } });
+    answer([okClaude()], [spent]);
+    consumeCodexResetCredit.mockImplementation(async () => {
+      // The backend replaces the shared Codex read before it answers, then announces it.
+      answer([okClaude()], [okCodex({ windows: okCodex().windows.map((window) => ({ ...window, usedPercent: 0 })), resetCredits: { availableCount: 0, nextExpiresAt: null } })]);
+      for (const handler of sharedReadHandlers) handler({ source: "limits:codex" });
+      return "reset";
+    });
+    // The native login is the card's account, so the account controls leave the button usable.
+    readAccounts.mockResolvedValue({ profiles: [], nativeObservationId: "acct-work", nativeAccount: null, recoveryRequired: false, notice: null });
+    renderLimits();
+
+    const current = await waitFor(() => card("Codex limits · work@codex.example"));
+    const button = await within(current).findByRole("button", { name: "Use banked reset" });
+    await waitFor(() => expect(button).toHaveProperty("disabled", false));
+    fireEvent.click(button);
+
+    await waitFor(() => expect(within(current).queryByRole("definition", { name: "Banked resets" })).toBeNull());
+    expect(within(current).getByRole("status").textContent).toBe("Banked reset used.");
+    expect(within(current).queryByRole("button", { name: "Use banked reset" })).toBeNull();
   });
 
   it("shows a checking state until the first answer arrives", async () => {

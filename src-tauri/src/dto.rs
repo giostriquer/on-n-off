@@ -576,6 +576,30 @@ pub struct LimitsCreditsDto {
     pub unlimited: bool,
 }
 
+/// Codex banked rate-limit resets: one-time resets saved to the account until used or expired.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsResetCreditsDto {
+    pub available_count: u32,
+    /// RFC 3339 instant when the soonest-expiring available reset lapses, when the provider says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_expires_at: Option<String>,
+}
+
+/// What Codex did with a request to spend one banked reset, in Codex's own wire names. `Unknown`
+/// catches an outcome this build does not recognise: the request still went through, so it is not
+/// reported as a failure.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ResetCreditOutcome {
+    Reset,
+    NothingToReset,
+    NoCredit,
+    AlreadyRedeemed,
+    #[serde(other)]
+    Unknown,
+}
+
 /// Which subscription account a limits snapshot belongs to. `id` is the provider's stable account
 /// id (or `default` when the CLI stores none); `label` is the human name (email) when known.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -608,6 +632,24 @@ pub struct ProviderLimitsDto {
     pub windows: Vec<LimitWindowDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credits: Option<LimitsCreditsDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_credits: Option<LimitsResetCreditsDto>,
+}
+
+impl ProviderLimitsDto {
+    /// Whether this read observed anything about the account worth keeping: quota windows, a
+    /// credit balance or banked resets. One definition for every place that decides that.
+    pub fn has_observations(&self) -> bool {
+        !self.windows.is_empty() || self.credits.is_some() || self.has_banked_resets()
+    }
+
+    /// Every current Codex read reports a reset count, usually 0, so only a positive count is an
+    /// observation; the 0 still matters when it replaces a remembered count.
+    pub fn has_banked_resets(&self) -> bool {
+        self.reset_credits
+            .as_ref()
+            .is_some_and(|resets| resets.available_count > 0)
+    }
 }
 
 // ---------------------------------------------------------------------------

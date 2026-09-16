@@ -74,9 +74,31 @@ function pendingNote(resetIn: string, resetAt: string): string {
   return resetIn ? `resets in ${resetIn}${resetAt ? ` · ${resetAt}` : ""}` : "";
 }
 
+/**
+ * How much of the account's usage is left, as a percentage: what its most-used main window (5-hour
+ * or weekly) has left, with a window whose reset has passed counted as renewed. Model-specific
+ * buckets do not count. `null` when no main window is known.
+ */
+export function usageLeft(entry: ProviderLimits, now: number): number | null {
+  const used = entry.windows
+    .filter((window) => window.kind === "session" || window.kind === "weekly")
+    .map((window) => presentLimitWindow(window, now).percent);
+  return used.length ? 100 - Math.max(...used) : null;
+}
+
+/**
+ * Whether a read observed anything about the account: quota windows, a credit balance or banked
+ * resets. `windows` lets a surface count only the windows it shows. The backend's
+ * `ProviderLimitsDto::has_observations` is the same rule.
+ */
+export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = entry.windows): boolean {
+  // Every current Codex read reports a reset count, usually 0; only a positive count was observed.
+  return windows.length > 0 || entry.credits != null || (entry.resetCredits?.availableCount ?? 0) > 0;
+}
+
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
   const windows = visibleLimitWindows(entry);
-  const hasObservations = windows.length > 0 || entry.credits != null;
+  const observed = hasObservations(entry, windows);
   const latestObservedAt = windows.reduce<number | null>((latest, window) => {
     const observedAt = Date.parse(window.observedAt);
     if (Number.isNaN(observedAt)) return latest;
@@ -84,8 +106,8 @@ export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: stri
   }, null);
   return {
     message: entry.status === "ok" ? null : (entry.message ?? fallbackMessage),
-    refreshPaused: entry.currentAccount && entry.status !== "ok" && hasObservations,
-    remembered: !entry.currentAccount && hasObservations,
+    refreshPaused: entry.currentAccount && entry.status !== "ok" && observed,
+    remembered: !entry.currentAccount && observed,
     updatedAt: latestObservedAt === null ? null : formatObservedAt(new Date(latestObservedAt).toISOString()),
   };
 }

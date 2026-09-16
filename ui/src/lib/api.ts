@@ -17,7 +17,7 @@ import type {
   UpdaterBuildInfo,
 } from "./types";
 import type { GithubPrs } from "./githubTypes";
-import type { ProviderLimits } from "./limitsTypes";
+import type { ProviderLimits, ResetCreditOutcome } from "./limitsTypes";
 import type { NotchChanged, NotchSettings, NotchSnapshot } from "./notchTypes";
 import type { UsageSummary, UsageSummaryInput } from "./usageTypes";
 
@@ -129,6 +129,11 @@ export function usageSummary(input: UsageSummaryInput): Promise<UsageSummary> {
 /** Live limits for the signed-in account first, then remembered snapshots of other accounts. */
 export function readLimits(agentId: AgentId, force = false): Promise<ProviderLimits[]> {
   return invoke("read_limits", { agentId, force });
+}
+
+/** Spends one banked Codex reset on the signed-in account `accountId` names; `attemptId` is one user attempt. */
+export function consumeCodexResetCredit(accountId: string, attemptId: string): Promise<ResetCreditOutcome> {
+  return invoke("consume_codex_reset_credit", { accountId, idempotencyKey: attemptId });
 }
 
 export function forgetLimitsSnapshot(agentId: AgentId, accountId: string, expectedEmail?: string): Promise<void> {

@@ -29,6 +29,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
             Some("2026-08-24T23:34:33+00:00".to_string()),
         )],
         credits: None,
+        reset_credits: None,
     };
     for window in &mut dto.windows {
         window.observed_at = observed_at.to_string();
@@ -191,6 +192,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
             balance: "3".to_string(),
             unlimited: false,
         }),
+        reset_credits: None,
     };
 
     store.save(&credits_only).unwrap();
@@ -361,4 +363,146 @@ fn simultaneous_store_instances_cannot_replace_a_newer_observation_with_an_older
             "concurrent publication lost the newest usage"
         );
     }
+}
+
+#[test]
+fn remembered_reset_credits_survive_a_reload_and_older_snapshots_load_without_them() {
+    let home = scratch_dir("limits-snap-reset-credits");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
+    });
+    store.save(&dto).unwrap();
+    assert_eq!(
+        store.load(AgentId::Codex)[0].reset_credits,
+        dto.reset_credits
+    );
+
+    // A snapshot written before on-n-off knew about reset credits has no such key.
+    let path = fs::read_dir(store.dir())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .unwrap();
+    let mut stored: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(stored
+        .as_object_mut()
+        .unwrap()
+        .remove("resetCredits")
+        .is_some());
+    fs::write(&path, stored.to_string()).unwrap();
+
+    let loaded = store.load(AgentId::Codex);
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].reset_credits, None);
+}
+
+#[test]
+fn a_successful_read_with_only_banked_resets_is_remembered_and_dated() {
+    let home = scratch_dir("limits-snap-reset-credits-only");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.windows.clear();
+    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: None,
+    });
+
+    store.save(&dto).unwrap();
+
+    let loaded = store.load(AgentId::Codex);
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].reset_credits, dto.reset_credits);
+}
+
+#[test]
+fn quota_windows_credits_and_banked_resets_each_count_as_an_observation() {
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    assert!(dto.has_observations());
+    dto.windows.clear();
+    assert!(!dto.has_observations());
+    dto.credits = Some(LimitsCreditsDto {
+        balance: "0".to_string(),
+        unlimited: false,
+    });
+    assert!(dto.has_observations());
+    dto.credits = None;
+    // Every current Codex read reports a count, usually 0; on its own that observed nothing.
+    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 0,
+        next_expires_at: None,
+    });
+    assert!(!dto.has_observations());
+    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: None,
+    });
+    assert!(dto.has_observations());
+}
+
+#[test]
+fn a_windowless_read_that_reports_no_banked_resets_keeps_the_remembered_windows() {
+    let home = scratch_dir("limits-snap-reset-credits-zero");
+    let store = SnapshotStore::for_home(&home);
+    let remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    store.save(&remembered).unwrap();
+    // The shape a current Codex CLI returns when it reports no windows: the count is still there.
+    let mut windowless = remembered.clone();
+    windowless.windows.clear();
+    windowless.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 0,
+        next_expires_at: None,
+    });
+
+    assert!(store.save(&windowless).is_err());
+
+    assert_eq!(store.load(AgentId::Codex)[0].windows, remembered.windows);
+}
+
+#[test]
+fn saving_after_a_merge_rewrites_only_the_accounts_the_merge_changed() {
+    let home = scratch_dir("limits-snap-save-changed");
+    let store = SnapshotStore::for_home(&home);
+    let mut credits_only = snapshot(
+        AgentId::Codex,
+        "acct-credits",
+        "c@x",
+        "2026-08-17T10:00:00.000Z",
+    );
+    credits_only.windows.clear();
+    credits_only.credits = Some(LimitsCreditsDto {
+        balance: "3".to_string(),
+        unlimited: false,
+    });
+    let windowed = snapshot(
+        AgentId::Codex,
+        "acct-windows",
+        "w@x",
+        "2026-08-17T10:00:00.000Z",
+    );
+    store.save(&credits_only).unwrap();
+    store.save(&windowed).unwrap();
+    let stored = |id: &str| {
+        fs::read_dir(store.dir())
+            .unwrap()
+            .flatten()
+            .map(|entry| fs::read_to_string(entry.path()).unwrap())
+            .find(|raw| raw.contains(id))
+            .unwrap()
+    };
+    let credits_before = stored("acct-credits");
+    let before = vec![credits_only.clone(), windowed.clone()];
+    let mut after = before.clone();
+    after[1].windows[0].used_percent = 60.0;
+    after[1].windows[0].observed_at = "2026-08-17T11:00:00.000Z".to_string();
+
+    store.save_changed(&before, &after);
+
+    // An untouched account keeps its own observation date instead of being re-dated now.
+    assert_eq!(stored("acct-credits"), credits_before);
+    assert!(stored("acct-windows").contains("\"usedPercent\":60.0"));
 }

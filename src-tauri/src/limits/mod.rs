@@ -27,7 +27,8 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::Utc;
 
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsStatus, ProviderLimitsDto,
+    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
+    LimitsStatus, ProviderLimitsDto, ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
@@ -56,6 +57,7 @@ struct Parsed {
     plan: Option<String>,
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
+    reset_credits: Option<LimitsResetCreditsDto>,
 }
 
 /// The three services one Claude read talks to, together so adding a fourth costs one field and
@@ -116,6 +118,17 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
     )
 }
 
+/// Spend one banked Codex reset on the signed-in account `account_id` names. Blocking: holds the
+/// Codex read lock for one bounded app-server call, so it never overlaps a limits read.
+pub fn consume_codex_reset_credit(
+    account_id: &str,
+    idempotency_key: &str,
+) -> Result<ResetCreditOutcome, String> {
+    let home = paths::user_home().map_err(|error| error.message)?;
+    let _provider_guard = provider_read_guard(AgentId::Codex);
+    codex_app_server::consume_reset_credit(&home, account_id, idempotency_key)
+}
+
 /// Drop the remembered snapshot of one account (the user's "Forget" on a remembered card).
 pub fn forget_snapshot(
     agent: AgentId,
@@ -163,10 +176,10 @@ fn read_limits_in<P: Fn() -> KeychainProbe>(
     };
     let store = SnapshotStore::for_home(home);
     let mut accounts = aggregate_accounts(&store, current, supplemental);
-    if agent == AgentId::Codex && codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0
-    {
-        for account in &accounts {
-            let _ = store.save(account);
+    if agent == AgentId::Codex {
+        let before = accounts.clone();
+        if codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0 {
+            store.save_changed(&before, &accounts);
         }
     }
     accounts
@@ -345,6 +358,7 @@ fn claude_limits(
                 plan: credential.plan(),
                 windows: claude::parse_claude(&payload),
                 credits: None,
+                reset_credits: None,
             })
         },
     )

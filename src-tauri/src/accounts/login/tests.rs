@@ -67,6 +67,7 @@ fn usage(identity: &Identity) -> ProviderLimitsDto {
         current_account: false,
         plan: Some("pro".into()),
         credits: None,
+        reset_credits: None,
         windows: vec![LimitWindowDto {
             id: "primary".into(),
             label: "Weekly · all models".into(),

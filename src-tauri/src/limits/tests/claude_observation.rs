@@ -66,6 +66,7 @@ impl ClaudeObservationRig {
                     )
                 }],
                 credits: None,
+                reset_credits: None,
             })
             .unwrap();
     }

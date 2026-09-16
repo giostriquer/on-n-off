@@ -26,11 +26,17 @@ it("does not discard current legacy observations", () => {
 });
 it.each([
   { ...scoped, windows: [] },
+  // The shape a current Codex read has when it reports no windows.
+  { ...scoped, windows: [], resetCredits: { availableCount: 0, nextExpiresAt: null } },
   { ...scoped, status: "failed" as const },
   { ...scoped, account: { id: "profile:other-user", label: profile.email } },
   { ...scoped, account: { id: profile.observationId!, label: "other@example.com" } },
 ])("retains history when scoped usage cannot be verified: %j", candidate => {
   expect(accountCards([candidate, legacy], [profile]).entries).toEqual([candidate, legacy]);
+});
+it("counts a scoped read that carries only banked resets as an observation", () => {
+  const resetsOnly = { ...scoped, windows: [], resetCredits: { availableCount: 1, nextExpiresAt: null } };
+  expect(accountCards([resetsOnly, legacy], [profile]).entries).toEqual([resetsOnly]);
 });
 it("does not infer identity from email without a saved profile", () => {
   expect(accountCards([scoped, legacy], []).entries).toEqual([scoped, legacy]);

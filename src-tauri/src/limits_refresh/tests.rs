@@ -21,6 +21,7 @@ fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> Pr
         plan: None,
         windows: Vec::new(),
         credits: None,
+        reset_credits: None,
     }
 }
 
@@ -233,4 +234,69 @@ fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_succes
         cache.read.lock().unwrap().as_ref().unwrap().entries.len(),
         1
     );
+}
+
+struct Lease<'a>(&'a std::cell::RefCell<Vec<&'static str>>);
+
+impl Drop for Lease<'_> {
+    fn drop(&mut self) {
+        self.0.borrow_mut().push("lease released");
+    }
+}
+
+#[test]
+fn a_spend_is_followed_by_one_refresh_after_the_lease_is_released_even_when_it_fails() {
+    for spent in [Ok("reset"), Err("Codex app-server timed out.".to_string())] {
+        let log = std::cell::RefCell::new(Vec::new());
+        let result = spend_then_refresh(
+            "attempt-1",
+            || {
+                log.borrow_mut().push("lease taken");
+                Some(Lease(&log))
+            },
+            || {
+                log.borrow_mut().push("spend");
+                spent.clone()
+            },
+            || log.borrow_mut().push("refresh"),
+        );
+
+        assert_eq!(result, spent);
+        assert_eq!(
+            log.into_inner(),
+            ["lease taken", "spend", "lease released", "refresh"]
+        );
+    }
+}
+
+#[test]
+fn nothing_is_spent_or_refreshed_during_an_account_change_or_for_an_invalid_attempt() {
+    let log = std::cell::RefCell::new(Vec::new());
+    let refused = spend_then_refresh(
+        "attempt-1",
+        || None::<()>,
+        || -> Result<(), String> {
+            log.borrow_mut().push("spend");
+            Ok(())
+        },
+        || log.borrow_mut().push("refresh"),
+    );
+    assert!(refused.unwrap_err().contains("account change"));
+
+    for key in ["", "   ", &"k".repeat(129)] {
+        let invalid = spend_then_refresh(
+            key,
+            || {
+                log.borrow_mut().push("lease taken");
+                Some(())
+            },
+            || -> Result<(), String> {
+                log.borrow_mut().push("spend");
+                Ok(())
+            },
+            || log.borrow_mut().push("refresh"),
+        );
+        assert!(invalid.is_err());
+    }
+    assert!(log.into_inner().is_empty());
 }

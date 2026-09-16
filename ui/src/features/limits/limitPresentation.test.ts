@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
+import { hasObservations, presentLimitAccount, presentLimitWindow, usageLeft, visibleLimitWindows } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -72,3 +72,54 @@ describe("visibleLimitWindows", () => {
     expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:team-reserve"]);
   });
 });
+
+describe("usageLeft", () => {
+  const entry = (windows: LimitWindow[]): ProviderLimits => ({ provider: "codex", status: "ok", currentAccount: true, windows });
+  const live = "2026-08-20T00:00:00Z";
+
+  it("is what the most-used main window has left; model buckets do not count", () => {
+    expect(
+      usageLeft(
+        entry([
+          { ...window, id: "secondary", kind: "weekly", usedPercent: 40, resetsAt: live },
+          { ...window, id: "primary", kind: "session", usedPercent: 96.5, resetsAt: live },
+          { ...window, id: "extra:spark", kind: "model", usedPercent: 100, resetsAt: live },
+        ]),
+        NOW,
+      ),
+    ).toBeCloseTo(3.5);
+  });
+
+  it("counts a window whose reset has passed as renewed", () => {
+    expect(usageLeft(entry([{ ...window, kind: "session", usedPercent: 99 }]), NOW)).toBe(100);
+  });
+
+  it("is unknown without a main window", () => {
+    expect(usageLeft(entry([{ ...window, id: "extra:spark", kind: "model", usedPercent: 99, resetsAt: live }]), NOW)).toBeNull();
+    expect(usageLeft(entry([]), NOW)).toBeNull();
+  });
+});
+
+describe("hasObservations", () => {
+  const bare: ProviderLimits = { provider: "codex", status: "ok", currentAccount: true, windows: [] };
+
+  it("counts quota windows, a credit balance and banked resets alike", () => {
+    expect(hasObservations(bare)).toBe(false);
+    expect(hasObservations({ ...bare, windows: [window] })).toBe(true);
+    expect(hasObservations({ ...bare, credits: { balance: "0", unlimited: false } })).toBe(true);
+    // Every current Codex read reports a count, usually 0; on its own that observed nothing.
+    expect(hasObservations({ ...bare, resetCredits: { availableCount: 0, nextExpiresAt: null } })).toBe(false);
+    expect(hasObservations({ ...bare, resetCredits: { availableCount: 1, nextExpiresAt: null } })).toBe(true);
+  });
+
+  it("lets a caller count only the windows it shows", () => {
+    expect(hasObservations({ ...bare, windows: [window] }, [])).toBe(false);
+  });
+
+  it("keeps a card with only banked resets as a paused refresh rather than an empty one", () => {
+    const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", resetCredits: { availableCount: 1, nextExpiresAt: null } };
+    expect(presentLimitAccount(failed, "unavailable").refreshPaused).toBe(true);
+    expect(presentLimitAccount({ ...failed, currentAccount: false }, "unavailable").remembered).toBe(true);
+  });
+});
+

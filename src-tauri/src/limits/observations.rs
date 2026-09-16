@@ -2,37 +2,46 @@
 
 use chrono::{DateTime, SecondsFormat, Utc};
 
-use crate::dto::{LimitWindowDto, LimitsCreditsDto, ProviderLimitsDto};
+use crate::dto::{LimitWindowDto, LimitsCreditsDto, LimitsResetCreditsDto, ProviderLimitsDto};
 
 pub(super) struct ObservedWindowSet {
-    observed_at: DateTime<Utc>,
+    /// When the windows were observed; `None` only for a set that carries figures and no windows.
+    observed_at: Option<DateTime<Utc>>,
     plan: Option<String>,
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
+    reset_credits: Option<LimitsResetCreditsDto>,
 }
 
 impl ObservedWindowSet {
     pub(super) fn local(observed_at: DateTime<Utc>, windows: Vec<LimitWindowDto>) -> Self {
         Self {
-            observed_at,
+            observed_at: Some(observed_at),
             plan: None,
             windows,
             credits: None,
+            reset_credits: None,
         }
     }
 
+    /// A remembered account's observations. Windows need a date to merge by; figures alone (a credit
+    /// balance, banked resets) are kept without one.
     pub(super) fn from_account(dto: ProviderLimitsDto) -> Option<Self> {
         let observed_at = dto
             .windows
             .iter()
             .filter_map(|window| DateTime::parse_from_rfc3339(&window.observed_at).ok())
-            .max()?
-            .with_timezone(&Utc);
+            .max()
+            .map(|at| at.with_timezone(&Utc));
+        if !dto.has_observations() || (observed_at.is_none() && !dto.windows.is_empty()) {
+            return None;
+        }
         Some(Self {
             observed_at,
             plan: dto.plan,
             windows: dto.windows,
             credits: dto.credits,
+            reset_credits: dto.reset_credits,
         })
     }
 }
@@ -51,14 +60,18 @@ pub(super) fn merge_windows(
         .as_ref()
         .and_then(|snapshot| snapshot.credits.clone());
     current.plan = current.plan.or(remembered_plan);
+    let remembered_reset_credits = remembered
+        .as_ref()
+        .and_then(|snapshot| snapshot.reset_credits.clone());
     current.credits = current.credits.or(remembered_credits);
+    current.reset_credits = current.reset_credits.or(remembered_reset_credits);
     for mut snapshot in [remembered, local].into_iter().flatten() {
         let observed_at = snapshot
             .observed_at
-            .to_rfc3339_opts(SecondsFormat::Millis, true);
+            .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true));
         for mut incoming in snapshot.windows.drain(..) {
-            if incoming.observed_at.is_empty() {
-                incoming.observed_at.clone_from(&observed_at);
+            if let (true, Some(observed_at)) = (incoming.observed_at.is_empty(), &observed_at) {
+                incoming.observed_at.clone_from(observed_at);
             }
             if let Some(index) = current
                 .windows

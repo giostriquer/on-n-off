@@ -33,6 +33,7 @@ fn snapshot(
             observed_at: "2026-08-19T12:00:00Z".into(),
         }],
         credits: None,
+        reset_credits: None,
     }
 }
 

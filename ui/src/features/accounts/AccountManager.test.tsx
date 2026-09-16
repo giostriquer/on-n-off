@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, it, expect, vi } from "vitest";
 import * as api from "$lib/api";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
+import { AccountBilling } from "./AccountBilling";
 import { AccountCardActions } from "./AccountCardActions";
 import { AccountPreferences } from "./AccountPreferences";
 vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn(), readCodexSubscription: vi.fn(), connectCodexBilling: vi.fn() }));
@@ -14,7 +15,8 @@ function Cards() {
   const manager = useAccountManagement();
   return <>{manager?.query.data?.profiles.map(profile => <section key={profile.id} aria-label={profile.email ?? "account"}>
     <span>{profile.email}</span><span>{profile.category}</span>
-    <AccountCardActions accountId={profile.observationId!} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>} />
+    <AccountCardActions accountId={profile.observationId!} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>}
+      footer={({ blocked }) => <AccountBilling accountId={profile.observationId!} disabled={blocked} showDate={false} />} />
   </section>)}</>;
 }
 function setup(preferences = false) {

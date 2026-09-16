@@ -2,13 +2,23 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
-import { AccountBilling } from "./AccountBilling";
 import { accountButton as button, useAccountManagement } from "./AccountManager";
 
-export function AccountCardActions({ accountId, label, current, profile, onForget, header, children }: {
+/**
+ * What more account actions beside the primary one can act on. `current` is the card's own notion of
+ * the signed-in account. `blocked` holds while the account controls cannot act: an operation is
+ * running, accounts are loading or failed to load, or recovery is required. `unconfirmedCurrent`
+ * marks a current card whose native login is not confirmed as this account. Each action decides
+ * which of them stop it.
+ */
+export type AccountFooterState = { current: boolean; blocked: boolean; unconfirmedCurrent: boolean };
+
+export function AccountCardActions({ accountId, label, current, profile, onForget, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   onForget?: (id: string) => Promise<void>;
   header: (menu: ReactNode) => ReactNode;
+  /** More account actions beside the primary one; see `AccountFooterState`. */
+  footer?: (state: AccountFooterState) => ReactNode;
   children?: ReactNode;
 }) {
   const manager = useAccountManagement();
@@ -41,6 +51,8 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   if (!manager) return <>{header(null)}{children}</>;
   const { provider, busy, query, action, add, cancel, loginTarget } = manager;
   const nativeMatches = !query.isFetching && query.data?.nativeObservationId === accountId;
+  // A current card whose native login is not confirmed as this account must not act on it.
+  const unconfirmedCurrent = current && !nativeMatches;
   const signingIn = loginTarget === accountId && (busy === "login" || busy === "cancelLogin");
   const disabled = !!busy || removing || query.isPending || !!query.error || query.data?.recoveryRequired;
   async function confirm() {
@@ -89,8 +101,8 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     {children}
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
       {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : void action("use", profile.id).catch(() => {})}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
-        : <button className={button} disabled={disabled || (current && !nativeMatches)} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
-      {provider === "codex" && <AccountBilling accountId={accountId} disabled={disabled} showDate={false} />}
+        : <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
+      {footer?.({ current, blocked: !!disabled, unconfirmedCurrent })}
     </footer>
   </>;
 }
