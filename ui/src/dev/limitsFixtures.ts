@@ -43,6 +43,7 @@ const CODEX: ProviderLimits[] = [
       { id: "extra:spark", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(5 * 60), windowSeconds: 18_000, observedAt: OBSERVED },
       { id: "extra:spark:secondary", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(7 * 24 * 60), windowSeconds: 604_800, observedAt: OBSERVED },
     ],
+    credits: { balance: "0", unlimited: false },
   },
   {
     provider: "codex",
@@ -95,6 +96,7 @@ function band(source: ProviderLimits): ProviderLimits[] {
     ...source,
     account: { ...account, id: `band-${percent}`, label: `${percent}% of the week` },
     currentAccount: percent === BAND[0],
+    credits: null,
     windows: windows.slice(0, 2).map((window) => ({ ...window, usedPercent: percent })),
   }));
 }
