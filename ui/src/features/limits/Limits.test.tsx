@@ -220,7 +220,11 @@ describe("Limits", () => {
       (within(codex).getByRole("meter", { name: "Weekly · all models" }).firstElementChild as HTMLElement).style
         .backgroundColor,
     ).toBe("color-mix(in srgb, var(--silkscreen), var(--trip) 44.7%)");
-    expect(within(codex).getByText(/12\.5 credits/)).toBeTruthy();
+    // Credits read as a row under the windows, not a chip crowding the header.
+    const header = codex.querySelector("header")!;
+    expect(within(header).queryByText(/credits/i)).toBeNull();
+    expect(header.textContent).not.toContain("12.5");
+    expect(within(codex).getByRole("definition", { name: "Credits" }).textContent).toBe("12.5");
     // A current-account observation is still historical after its own reset instant passes.
     const luna = within(codex).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" });
     expect(luna.getAttribute("aria-valuenow")).toBe("0");
@@ -469,7 +473,7 @@ describe("Limits", () => {
     renderLimits();
     await waitFor(() => expect(within(card("Claude limits")).getByText("Claude reported no rate-limit windows.")).toBeTruthy());
     expect(within(card("Claude limits")).queryByText("Max")).toBeNull();
-    expect(within(card("Codex limits · work@codex.example")).getByText("unlimited credits")).toBeTruthy();
+    expect(within(card("Codex limits · work@codex.example")).getByRole("definition", { name: "Credits" }).textContent).toBe("Unlimited");
   });
 
   it("shows a checking state until the first answer arrives", async () => {

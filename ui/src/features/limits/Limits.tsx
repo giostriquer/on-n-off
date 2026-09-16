@@ -1,7 +1,7 @@
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
 import type { SavedProfile } from "$lib/accountTypes";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
@@ -10,7 +10,7 @@ import {
   planLabel,
   usageFillStyle,
 } from "$lib/limitsFormat";
-import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsCredits, LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
@@ -154,7 +154,6 @@ function CardHeader({ entry, provider, updatedAt, subscription, profile, disting
   const name = providerLabel(provider);
   const label = profile?.email ?? entry?.account?.label ?? null;
   const plan = planLabel(entry?.plan, provider);
-  const credits = entry?.credits ?? null;
   return (
     <header className="border-b border-[var(--hair)] px-3.5 py-2.5" title={updatedAt ? `Usage last checked ${updatedAt}` : undefined}>
       <div className="flex items-center gap-2.5">
@@ -162,11 +161,6 @@ function CardHeader({ entry, provider, updatedAt, subscription, profile, disting
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-semibold" title={label ?? name}>{label ?? name}</div>
         </div>
-        {credits ? (
-          <span className="font-mono text-[11px] text-[var(--mute)]">
-            {credits.unlimited ? "unlimited credits" : `${credits.balance} credits`}
-          </span>
-        ) : null}
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         {activeWithoutUsage && <ActiveAccountDot />}
         {subscription}
@@ -244,6 +238,8 @@ function AccountCard({
       ) : entry.status === "ok" && !message ? (
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{profile ? "Usage unavailable." : `${name} reported no rate-limit windows.`}</p>
       ) : null}
+
+      {entry.credits ? <CreditsRow credits={entry.credits} /> : null}
   </>;
   return (
     <section
@@ -362,5 +358,20 @@ function WindowRow({
         {text}
       </span>
     </div>
+  );
+}
+
+/** The credit balance as one more row under the windows, so it never crowds the header's identity. */
+function CreditsRow({ credits }: { credits: LimitsCredits }) {
+  const labelId = useId();
+  return (
+    <dl className="flex items-center gap-2.5 border-t border-[var(--hair)] px-3.5 py-2">
+      <dt id={labelId} className="min-w-0 flex-1 text-[10px] leading-4 font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
+        Credits
+      </dt>
+      <dd aria-labelledby={labelId} className="shrink-0 text-right font-mono text-[12px] tabular-nums">
+        {credits.unlimited ? "Unlimited" : credits.balance}
+      </dd>
+    </dl>
   );
 }

@@ -17,7 +17,7 @@ const cases = [
 export function subscriptionBadgeLimits() {
   const template = limitsFor("codex")[0];
   return cases.map((item, index) => ({
-    ...template, account: {id: `badge:${item.id}`, label: `${item.id}@example.com`}, currentAccount: index === 0,
+    ...template, account: {id: `badge:${item.id}`, label: `${item.id}@example.com`}, currentAccount: index === 0, credits: null,
     windows: template.windows.filter(window => window.kind === "weekly").map(window => ({...window, usedPercent: 25 + index * 8})),
   }));
 }
