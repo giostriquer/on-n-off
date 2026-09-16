@@ -29,8 +29,10 @@ export type LimitsResetCredits = {
   nextExpiresAt?: string | null;
 };
 
-/** What Codex did with a request to spend one banked reset. */
-/** `unknown`: Codex answered with an outcome this build does not recognise; the request still went through. */
+/**
+ * What Codex did with a request to spend one banked reset. `unknown`: Codex answered with an outcome
+ * this build does not recognise; the request still went through.
+ */
 export type ResetCreditOutcome = "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed" | "unknown";
 
 /** The subscription account a snapshot belongs to; `label` is the email when the CLI stores one. */

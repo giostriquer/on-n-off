@@ -7,17 +7,18 @@ import { useId, type ReactNode } from "react";
  */
 export function SummaryRow({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
   const labelId = useId();
+  // One name–value group: the label, its value, then the note, laid out so the note sits under the label.
   return (
-    <dl className="flex items-center gap-2.5 border-t border-[var(--hair)] px-3.5 py-2">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <dt id={labelId} className="text-[10px] leading-4 font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
+    <dl className="border-t border-[var(--hair)] px-3.5 py-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1">
+        <dt id={labelId} className="col-start-1 row-start-1 text-[10px] leading-4 font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">
           {label}
         </dt>
-        {note ? <dd className="font-mono text-[11px] leading-snug text-[var(--mute)]">{note}</dd> : null}
+        <dd aria-labelledby={labelId} className="col-start-2 row-span-2 row-start-1 text-right font-mono text-[12px] tabular-nums">
+          {value}
+        </dd>
+        {note ? <dd className="col-start-1 row-start-2 font-mono text-[11px] leading-snug text-[var(--mute)]">{note}</dd> : null}
       </div>
-      <dd aria-labelledby={labelId} className="shrink-0 text-right font-mono text-[12px] tabular-nums">
-        {value}
-      </dd>
     </dl>
   );
 }

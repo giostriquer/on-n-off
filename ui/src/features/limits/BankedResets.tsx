@@ -78,7 +78,7 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
   }
 
   // A non-breaking hyphen keeps "5-hour" on one line in the dialog.
-  const effect = "A banked reset puts the 5‑hour and weekly windows back to 0% and moves your weekly reset date. It can't be undone.";
+  const effect = "A banked reset puts the 5\u2011hour and weekly windows back to 0% and moves your weekly reset date. It can't be undone.";
   const body = left === null
     ? `on-n-off can't tell how much Codex usage ${label} has left. ${effect}`
     : `${label} still has ${Math.round(left)}% of its Codex usage left, so a reset is worth more once you run out. ${effect}`;

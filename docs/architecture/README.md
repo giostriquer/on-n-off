@@ -151,7 +151,9 @@ Each provider is read the way that provider intends, and active login renewal re
   `account/rateLimitResetCredit/consume`, from an explicit click on the signed-in account's card,
   after checking that the native login is still that account, and never while an account change
   holds the Codex activity lease. With 5% or more usage left the UI asks first. A shared forced
-  read follows, so every surface shows the renewed windows.
+  read follows every attempt that got past that lease, a failed one included, since a request that
+  timed out may still have reached Codex; and the card reuses one idempotency key until Codex gives
+  a definite answer, so a retry cannot spend a second reset.
 
 Because each CLI stores one login at a time, successful reads are remembered per account (numbers
 only, under `~/.on-n-off/limits/`) so an account the user has switched away from stays visible

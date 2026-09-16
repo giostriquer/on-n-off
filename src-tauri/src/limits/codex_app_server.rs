@@ -63,11 +63,9 @@ enum QueryStage {
     ResetCredit,
 }
 
-/// The outcome stays a string on the wire: an outcome a newer Codex adds must not turn a request that
-/// went through into a malformed-response error.
 #[derive(Debug, Deserialize)]
 struct ConsumeResetCreditResponse {
-    outcome: String,
+    outcome: ResetCreditOutcome,
 }
 
 /// Why a reset was not spent: refused before the request was sent, or the session itself failed.
@@ -169,7 +167,7 @@ fn spend_in_session(
             AppServerFailure::SignedOut => {
                 "Codex is not signed in, so there is no banked reset to use.".to_string()
             }
-            AppServerFailure::Unsupported(_) | AppServerFailure::Failed(_) => {
+            _ => {
                 "Banked resets belong to a ChatGPT sign-in, and Codex is not using one.".to_string()
             }
         })
@@ -192,13 +190,7 @@ fn spend_in_session(
         3,
         "account/rateLimitResetCredit/consume",
     )?;
-    Ok(match response.outcome.as_str() {
-        "reset" => ResetCreditOutcome::Reset,
-        "nothingToReset" => ResetCreditOutcome::NothingToReset,
-        "noCredit" => ResetCreditOutcome::NoCredit,
-        "alreadyRedeemed" => ResetCreditOutcome::AlreadyRedeemed,
-        _ => ResetCreditOutcome::Unknown,
-    })
+    Ok(response.outcome)
 }
 
 /// A reset lands on whoever is signed in, so the native login must be the account the card names.
@@ -315,8 +307,10 @@ impl ProcessTransport {
             deadline: Instant::now() + timeout,
         })
     }
+}
 
-    fn finish_process(&mut self) -> Option<ExitStatus> {
+impl JsonLineTransport for ProcessTransport {
+    fn finish(&mut self) -> Option<ExitStatus> {
         self.stdin.take();
         self.messages.take();
         let mut status = None;
@@ -347,12 +341,6 @@ impl ProcessTransport {
             let _ = thread.join();
         }
         status
-    }
-}
-
-impl JsonLineTransport for ProcessTransport {
-    fn finish(&mut self) -> Option<ExitStatus> {
-        self.finish_process()
     }
 
     fn send(&mut self, message: &Value) -> Result<(), TransportError> {
