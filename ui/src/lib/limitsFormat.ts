@@ -55,6 +55,13 @@ export function formatResetAt(resetsAt: string | null | undefined, timeZone?: st
   }).format(at);
 }
 
+/** "Aug 29" in the given (or the viewer's) time zone, for instants weeks away; empty when unknown. */
+export function formatShortDate(iso: string | null | undefined, timeZone?: string): string {
+  const at = parseInstant(iso);
+  if (at === null) return "";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone }).format(at);
+}
+
 /** "Aug 19, 2026, 02:04" in the given (or viewer's) time zone; empty when unknown. */
 export function formatObservedAt(observedAt: string | null | undefined, timeZone?: string): string {
   const at = parseInstant(observedAt);

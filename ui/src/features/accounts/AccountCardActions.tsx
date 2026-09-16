@@ -5,10 +5,12 @@ import { parseInvokeError } from "$lib/error";
 import { AccountBilling } from "./AccountBilling";
 import { accountButton as button, useAccountManagement } from "./AccountManager";
 
-export function AccountCardActions({ accountId, label, current, profile, onForget, header, children }: {
+export function AccountCardActions({ accountId, label, current, profile, onForget, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   onForget?: (id: string) => Promise<void>;
   header: (menu: ReactNode) => ReactNode;
+  /** More account actions beside the primary one, disabled while an account operation runs. */
+  footer?: (disabled: boolean) => ReactNode;
   children?: ReactNode;
 }) {
   const manager = useAccountManagement();
@@ -90,6 +92,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
       {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : void action("use", profile.id).catch(() => {})}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
         : <button className={button} disabled={disabled || (current && !nativeMatches)} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
+      {footer?.(!!disabled)}
       {provider === "codex" && <AccountBilling accountId={accountId} disabled={disabled} showDate={false} />}
     </footer>
   </>;

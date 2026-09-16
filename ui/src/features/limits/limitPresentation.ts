@@ -74,6 +74,18 @@ function pendingNote(resetIn: string, resetAt: string): string {
   return resetIn ? `resets in ${resetIn}${resetAt ? ` · ${resetAt}` : ""}` : "";
 }
 
+/**
+ * How much of the account's usage is left, as a percentage: what its most-used main window (5-hour
+ * or weekly) has left, with a window whose reset has passed counted as renewed. Model-specific
+ * buckets do not count. `null` when no main window is known.
+ */
+export function usageLeft(entry: ProviderLimits, now: number): number | null {
+  const used = entry.windows
+    .filter((window) => window.kind === "session" || window.kind === "weekly")
+    .map((window) => presentLimitWindow(window, now).percent);
+  return used.length ? 100 - Math.max(...used) : null;
+}
+
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
   const windows = visibleLimitWindows(entry);
   const hasObservations = windows.length > 0 || entry.credits != null;

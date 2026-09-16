@@ -14,7 +14,7 @@ const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
 
 const onSharedReadChanged = vi.hoisted(() => () => Promise.resolve(() => undefined));
 
-vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), addAccount, cancelAccountLogin:vi.fn(), connectCodexBilling:vi.fn(), forgetLimitsSnapshot, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue({metadata:null,connected:false,unavailable:false}) }));
+vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), addAccount, cancelAccountLogin:vi.fn(), connectCodexBilling:vi.fn(), forgetLimitsSnapshot, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue({metadata:null,connected:false,unavailable:false}), consumeCodexResetCredit: vi.fn() }));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -474,6 +474,23 @@ describe("Limits", () => {
     await waitFor(() => expect(within(card("Claude limits")).getByText("Claude reported no rate-limit windows.")).toBeTruthy());
     expect(within(card("Claude limits")).queryByText("Max")).toBeNull();
     expect(within(card("Codex limits · work@codex.example")).getByRole("definition", { name: "Credits" }).textContent).toBe("Unlimited");
+  });
+
+  it("offers a banked reset beside the current Codex account's actions and lists the count as a row", async () => {
+    const remembered = { ...staleCodex(), resetCredits: { availableCount: 1, nextExpiresAt: null } };
+    answer([okClaude()], [okCodex({ resetCredits: { availableCount: 2, nextExpiresAt: null } }), remembered]);
+    renderLimits();
+
+    const current = await waitFor(() => card("Codex limits · work@codex.example"));
+    const button = await within(current).findByRole("button", { name: "Use banked reset" });
+    expect(button.closest("footer")).toBe(within(current).getByRole("button", { name: "Save account" }).closest("footer"));
+    expect(within(current).getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
+
+    // Codex spends a reset on whichever account is signed in, so a remembered card only reports its count.
+    const other = card("Codex limits · personal@codex.example");
+    expect(within(other).getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
+    expect(within(other).queryByRole("button", { name: "Use banked reset" })).toBeNull();
+    expect(within(card("Claude limits · me@claude.example")).queryByRole("button", { name: "Use banked reset" })).toBeNull();
   });
 
   it("shows a checking state until the first answer arrives", async () => {

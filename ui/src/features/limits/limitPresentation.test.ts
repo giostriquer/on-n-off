@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
+import { presentLimitWindow, usageLeft, visibleLimitWindows } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -72,3 +72,31 @@ describe("visibleLimitWindows", () => {
     expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:team-reserve"]);
   });
 });
+
+describe("usageLeft", () => {
+  const entry = (windows: LimitWindow[]): ProviderLimits => ({ provider: "codex", status: "ok", currentAccount: true, windows });
+  const live = "2026-08-20T00:00:00Z";
+
+  it("is what the most-used main window has left; model buckets do not count", () => {
+    expect(
+      usageLeft(
+        entry([
+          { ...window, id: "secondary", kind: "weekly", usedPercent: 40, resetsAt: live },
+          { ...window, id: "primary", kind: "session", usedPercent: 96.5, resetsAt: live },
+          { ...window, id: "extra:spark", kind: "model", usedPercent: 100, resetsAt: live },
+        ]),
+        NOW,
+      ),
+    ).toBeCloseTo(3.5);
+  });
+
+  it("counts a window whose reset has passed as renewed", () => {
+    expect(usageLeft(entry([{ ...window, kind: "session", usedPercent: 99 }]), NOW)).toBe(100);
+  });
+
+  it("is unknown without a main window", () => {
+    expect(usageLeft(entry([{ ...window, id: "extra:spark", kind: "model", usedPercent: 99, resetsAt: live }]), NOW)).toBeNull();
+    expect(usageLeft(entry([]), NOW)).toBeNull();
+  });
+});
+

@@ -2,13 +2,14 @@
 
 use chrono::{DateTime, SecondsFormat, Utc};
 
-use crate::dto::{LimitWindowDto, LimitsCreditsDto, ProviderLimitsDto};
+use crate::dto::{LimitWindowDto, LimitsCreditsDto, LimitsResetCreditsDto, ProviderLimitsDto};
 
 pub(super) struct ObservedWindowSet {
     observed_at: DateTime<Utc>,
     plan: Option<String>,
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
+    reset_credits: Option<LimitsResetCreditsDto>,
 }
 
 impl ObservedWindowSet {
@@ -18,6 +19,7 @@ impl ObservedWindowSet {
             plan: None,
             windows,
             credits: None,
+            reset_credits: None,
         }
     }
 
@@ -33,6 +35,7 @@ impl ObservedWindowSet {
             plan: dto.plan,
             windows: dto.windows,
             credits: dto.credits,
+            reset_credits: dto.reset_credits,
         })
     }
 }
@@ -51,7 +54,11 @@ pub(super) fn merge_windows(
         .as_ref()
         .and_then(|snapshot| snapshot.credits.clone());
     current.plan = current.plan.or(remembered_plan);
+    let remembered_reset_credits = remembered
+        .as_ref()
+        .and_then(|snapshot| snapshot.reset_credits.clone());
     current.credits = current.credits.or(remembered_credits);
+    current.reset_credits = current.reset_credits.or(remembered_reset_credits);
     for mut snapshot in [remembered, local].into_iter().flatten() {
         let observed_at = snapshot
             .observed_at

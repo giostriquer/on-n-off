@@ -13,7 +13,8 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsStatus, ProviderLimitsDto,
+    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
+    LimitsStatus, ProviderLimitsDto,
 };
 use crate::usage::cache_io::atomic_write;
 
@@ -33,6 +34,8 @@ struct StoredSnapshot {
     windows: Vec<LimitWindowDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     credits: Option<LimitsCreditsDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reset_credits: Option<LimitsResetCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observed_at: Option<String>,
 }
@@ -181,6 +184,7 @@ impl StoredSnapshot {
             plan: dto.plan.clone(),
             windows: dto.windows.clone(),
             credits: dto.credits.clone(),
+            reset_credits: dto.reset_credits.clone(),
             observed_at: Some(observed_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
         }
     }
@@ -202,6 +206,7 @@ impl StoredSnapshot {
             plan: self.plan,
             windows: self.windows,
             credits: self.credits,
+            reset_credits: self.reset_credits,
         }
     }
 }

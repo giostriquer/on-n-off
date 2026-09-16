@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::Parsed;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
-use crate::dto::AgentId;
+use crate::dto::{AgentId, ResetCreditOutcome};
 
 const APP_SERVER_TIMEOUT: Duration = Duration::from_secs(30);
 const STDOUT_LINE_LIMIT: usize = 1024 * 1024;
@@ -60,6 +60,12 @@ enum QueryStage {
     Initialize,
     Account,
     RateLimits,
+    ResetCredit,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConsumeResetCreditResponse {
+    outcome: ResetCreditOutcome,
 }
 
 #[derive(Debug)]
@@ -87,6 +93,41 @@ struct TransportError {
 trait JsonLineTransport {
     fn send(&mut self, message: &Value) -> Result<(), TransportError>;
     fn receive(&mut self) -> Result<Value, TransportError>;
+}
+
+/// Spend one banked reset on the signed-in Codex account, which must still be `account_id`: Codex
+/// applies a reset to whoever is signed in, so a card must never spend one on another account.
+/// Blocking: runs a bounded app-server process. `idempotency_key` names one user attempt.
+pub(super) fn consume_reset_credit(
+    home: &Path,
+    account_id: &str,
+    idempotency_key: &str,
+) -> Result<ResetCreditOutcome, String> {
+    let expected_codex_home = home.join(".codex");
+    reset_target_matches(
+        crate::accounts::native::codex_metadata(&expected_codex_home)?,
+        account_id,
+    )?;
+    let mut transport = ProcessTransport::spawn(&expected_codex_home)?;
+    let outcome = consume_query(&expected_codex_home, idempotency_key, &mut transport);
+    let exit_status = transport.finish();
+    outcome.map_err(|error| match classify_query_failure(error, exit_status) {
+        AppServerFailure::Failed(message) | AppServerFailure::Unsupported(message) => message,
+        AppServerFailure::SignedOut => "Codex is not signed in.".to_string(),
+    })
+}
+
+fn reset_target_matches(before: Option<(String, Value)>, account_id: &str) -> Result<(), String> {
+    match before {
+        Some((id, _)) if id == account_id => Ok(()),
+        Some(_) => {
+            Err("The signed-in Codex account changed. Refresh Limits, then try again.".to_string())
+        }
+        None => Err(
+            "Codex is not signed in with ChatGPT. Sign in with `codex`, then refresh Limits."
+                .to_string(),
+        ),
+    }
 }
 
 pub(super) fn read(home: &Path, force: bool) -> Result<Parsed, AppServerFailure> {
@@ -328,6 +369,81 @@ fn query_app_server(
     force: bool,
     transport: &mut impl JsonLineTransport,
 ) -> Result<AppServerResult, QueryError> {
+    let (codex_home, account) = handshake(expected_codex_home, force, transport)?;
+    query_step(
+        QueryStage::RateLimits,
+        transport
+            .send(&serde_json::json!({"id": 3, "method": "account/rateLimits/read", "params": {}})),
+    )?;
+    let rate_limits = receive_response(
+        QueryStage::RateLimits,
+        transport,
+        3,
+        "account/rateLimits/read",
+    )?;
+    Ok(AppServerResult {
+        codex_home,
+        account,
+        rate_limits,
+    })
+}
+
+#[cfg(test)]
+fn consume_reset_credit_with(
+    expected_codex_home: &Path,
+    idempotency_key: &str,
+    transport: &mut impl JsonLineTransport,
+) -> Result<ResetCreditOutcome, String> {
+    consume_query(expected_codex_home, idempotency_key, transport).map_err(|error| error.message)
+}
+
+fn consume_query(
+    expected_codex_home: &Path,
+    idempotency_key: &str,
+    transport: &mut impl JsonLineTransport,
+) -> Result<ResetCreditOutcome, QueryError> {
+    let (_, account) = handshake(expected_codex_home, false, transport)?;
+    let refusal = match account
+        .account
+        .as_ref()
+        .map(|account| account.kind.as_str())
+    {
+        Some("chatgpt") => None,
+        Some("apiKey") => {
+            Some("Codex is signed in with an API key; banked resets belong to a ChatGPT plan.")
+        }
+        _ => Some("Codex is not signed in with ChatGPT, so there is no banked reset to use."),
+    };
+    if let Some(message) = refusal {
+        return Err(QueryError {
+            stage: QueryStage::Account,
+            kind: QueryErrorKind::Protocol,
+            message: message.to_string(),
+        });
+    }
+    query_step(
+        QueryStage::ResetCredit,
+        transport.send(&serde_json::json!({
+            "id": 3,
+            "method": "account/rateLimitResetCredit/consume",
+            "params": {"idempotencyKey": idempotency_key},
+        })),
+    )?;
+    let response: ConsumeResetCreditResponse = receive_response(
+        QueryStage::ResetCredit,
+        transport,
+        3,
+        "account/rateLimitResetCredit/consume",
+    )?;
+    Ok(response.outcome)
+}
+
+/// `initialize` against the expected home, then `account/read`: the start of every app-server call.
+fn handshake(
+    expected_codex_home: &Path,
+    force: bool,
+    transport: &mut impl JsonLineTransport,
+) -> Result<(PathBuf, AccountReadResponse), QueryError> {
     query_step(
         QueryStage::Initialize,
         transport.send(&serde_json::json!({
@@ -368,22 +484,7 @@ fn query_app_server(
         })),
     )?;
     let account = receive_response(QueryStage::Account, transport, 2, "account/read")?;
-    query_step(
-        QueryStage::RateLimits,
-        transport
-            .send(&serde_json::json!({"id": 3, "method": "account/rateLimits/read", "params": {}})),
-    )?;
-    let rate_limits = receive_response(
-        QueryStage::RateLimits,
-        transport,
-        3,
-        "account/rateLimits/read",
-    )?;
-    Ok(AppServerResult {
-        codex_home,
-        account,
-        rate_limits,
-    })
+    Ok((codex_home, account))
 }
 
 fn query_step<T>(stage: QueryStage, result: Result<T, TransportError>) -> Result<T, QueryError> {
@@ -441,10 +542,14 @@ fn response_result<T: DeserializeOwned>(message: &Value, method: &str) -> Result
         .unwrap_or("unknown protocol error");
     let method_missing = code == Some(-32601);
     let code = code.map_or_else(String::new, |code| format!(" (code {code})"));
-    let guidance = if method == "account/rateLimits/read" && method_missing {
-        " Update Codex CLI to a version that supports subscription limits, then refresh here."
-    } else {
-        ""
+    let guidance = match method {
+        "account/rateLimits/read" if method_missing => {
+            " Update Codex CLI to a version that supports subscription limits, then refresh here."
+        }
+        "account/rateLimitResetCredit/consume" if method_missing => {
+            " Update Codex CLI to a version that supports banked resets, then try again."
+        }
+        _ => "",
     };
     Err(format!(
         "Codex app-server `{method}` failed{code}: {message}.{guidance}"

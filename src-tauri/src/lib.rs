@@ -124,6 +124,7 @@ pub fn run() {
             commands::connect_codex_billing,
             commands::disconnect_codex_billing,
             commands::forget_limits_snapshot,
+            commands::consume_codex_reset_credit,
             commands::read_github_prs,
             commands::hide_limits_popover,
             commands::open_limits_window,

@@ -18,6 +18,7 @@ import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./
 import { CodexSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { accountCards } from "./accountCards";
+import { BankedResetsRow, UseBankedReset } from "./BankedResets";
 
 export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
   return <AccountControllers><LimitsContent pollMinutes={pollMinutes} /></AccountControllers>;
@@ -240,6 +241,7 @@ function AccountCard({
       ) : null}
 
       {entry.credits ? <CreditsRow credits={entry.credits} /> : null}
+      <BankedResetsRow resetCredits={entry.resetCredits} now={now} />
   </>;
   return (
     <section
@@ -248,7 +250,8 @@ function AccountCard({
       data-status={entry.status}
       data-current-account={entry.currentAccount ? "true" : "false"}
     >
-      {account ? <AccountCardActions accountId={account.id} label={label ?? account.id} current={profile?.active ?? entry.currentAccount} profile={profile} onForget={onForget} header={header}>
+      {account ? <AccountCardActions accountId={account.id} label={label ?? account.id} current={profile?.active ?? entry.currentAccount} profile={profile} onForget={onForget} header={header}
+        footer={disabled => <UseBankedReset entry={entry} label={label} now={now} disabled={disabled} />}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
     </section>

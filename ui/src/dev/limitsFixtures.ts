@@ -108,3 +108,17 @@ export function limitsBandClaude(): ProviderLimits[] {
 export function limitsBandCodex(): ProviderLimits[] {
   return band(CODEX[0]);
 }
+
+/**
+ * `?mock=bankedResets`: the signed-in Codex account has two banked resets and plenty of usage left,
+ * so spending one asks first; the remembered account reports the one it had when last seen.
+ */
+export function bankedResetsCodex(): ProviderLimits[] {
+  return CODEX.map((entry) => ({
+    ...entry,
+    resetCredits: entry.currentAccount
+      ? { availableCount: 2, nextExpiresAt: at(11 * 24 * 60 + 19 * 60) }
+      : { availableCount: 1, nextExpiresAt: null },
+  }));
+}
+

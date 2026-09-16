@@ -521,3 +521,125 @@ fn rejects_native_identity_changes_during_an_app_server_read() {
         );
     }
 }
+
+fn consume_transport(account: Value, consume_reply: Option<Value>) -> FakeTransport {
+    let mut received = VecDeque::from([
+        json!({"id": 1, "result": {
+            "userAgent": "on_n_off/0.154.0",
+            "codexHome": "/fixture/.codex",
+            "platformFamily": "unix",
+            "platformOs": "macos"
+        }}),
+        json!({"id": 2, "result": account}),
+    ]);
+    received.extend(consume_reply);
+    FakeTransport {
+        received,
+        sent: Vec::new(),
+    }
+}
+
+fn chatgpt_account() -> Value {
+    json!({"account": {"type": "chatgpt", "email": "me@example.com", "planType": "pro"}})
+}
+
+fn consume_requests(transport: &FakeTransport) -> Vec<&Value> {
+    transport
+        .sent
+        .iter()
+        .filter(|message| message["method"] == "account/rateLimitResetCredit/consume")
+        .collect()
+}
+
+#[test]
+fn spending_a_reset_credit_completes_the_handshake_then_redeems_exactly_one() {
+    let codex_home = PathBuf::from("/fixture/.codex");
+    let mut transport = consume_transport(
+        chatgpt_account(),
+        Some(json!({"id": 3, "result": {"outcome": "reset"}})),
+    );
+
+    let outcome = consume_reset_credit_with(&codex_home, "attempt-1", &mut transport).unwrap();
+
+    assert_eq!(outcome, ResetCreditOutcome::Reset);
+    assert_eq!(
+        transport.sent,
+        [
+            json!({"id": 1, "method": "initialize", "params": {"clientInfo": {
+                "name": "on_n_off", "title": "on-n-off", "version": env!("CARGO_PKG_VERSION")
+            }}}),
+            json!({"method": "initialized", "params": {}}),
+            // Spending a reset never forces a token refresh of its own.
+            json!({"id": 2, "method": "account/read", "params": {"refreshToken": false}}),
+            json!({"id": 3, "method": "account/rateLimitResetCredit/consume",
+                   "params": {"idempotencyKey": "attempt-1"}}),
+        ]
+    );
+}
+
+#[test]
+fn every_consume_outcome_reaches_the_caller() {
+    let codex_home = PathBuf::from("/fixture/.codex");
+    for (wire, expected) in [
+        ("reset", ResetCreditOutcome::Reset),
+        ("nothingToReset", ResetCreditOutcome::NothingToReset),
+        ("noCredit", ResetCreditOutcome::NoCredit),
+        ("alreadyRedeemed", ResetCreditOutcome::AlreadyRedeemed),
+    ] {
+        let mut transport = consume_transport(
+            chatgpt_account(),
+            Some(json!({"id": 3, "result": {"outcome": wire}})),
+        );
+        assert_eq!(
+            consume_reset_credit_with(&codex_home, "attempt-1", &mut transport),
+            Ok(expected)
+        );
+    }
+}
+
+#[test]
+fn a_reset_credit_is_never_spent_without_a_chatgpt_login() {
+    let codex_home = PathBuf::from("/fixture/.codex");
+    for account in [
+        json!({"account": null}),
+        json!({"account": {"type": "apiKey"}}),
+    ] {
+        let mut transport = consume_transport(account, None);
+
+        let error =
+            consume_reset_credit_with(&codex_home, "attempt-1", &mut transport).unwrap_err();
+
+        assert!(error.contains("ChatGPT"), "{error}");
+        assert!(consume_requests(&transport).is_empty());
+    }
+}
+
+#[test]
+fn a_cli_without_banked_resets_is_asked_to_update() {
+    let codex_home = PathBuf::from("/fixture/.codex");
+    let mut transport = consume_transport(
+        chatgpt_account(),
+        Some(json!({"id": 3, "error": {"code": -32601, "message": "Method not found"}})),
+    );
+
+    let error = consume_reset_credit_with(&codex_home, "attempt-1", &mut transport).unwrap_err();
+
+    assert!(
+        error.contains("account/rateLimitResetCredit/consume"),
+        "{error}"
+    );
+    assert!(error.contains("Update Codex CLI"), "{error}");
+}
+
+#[test]
+fn a_reset_is_spent_only_on_the_account_the_card_names() {
+    assert_eq!(
+        reset_target_matches(Some(("acct-1".to_string(), json!({}))), "acct-1"),
+        Ok(())
+    );
+    let changed =
+        reset_target_matches(Some(("acct-2".to_string(), json!({}))), "acct-1").unwrap_err();
+    assert!(changed.contains("changed"), "{changed}");
+    let signed_out = reset_target_matches(None, "acct-1").unwrap_err();
+    assert!(signed_out.contains("signed in"), "{signed_out}");
+}

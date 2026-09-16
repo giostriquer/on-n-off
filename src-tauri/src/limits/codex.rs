@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use super::json::window;
 use super::Parsed;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsCreditsDto};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsResetCreditsDto};
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
@@ -16,6 +16,9 @@ pub(super) struct RateLimitsResponse {
     rate_limits: RateLimitBucket,
     #[serde(default)]
     rate_limits_by_limit_id: Option<BTreeMap<String, RateLimitBucket>>,
+    /// Absent from CLIs older than banked resets; `null` when the backend does not report them.
+    #[serde(default)]
+    rate_limit_reset_credits: Option<RateLimitResetCredits>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -43,6 +46,24 @@ struct RateLimitWindow {
     window_duration_mins: Option<u64>,
     #[serde(default)]
     resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitResetCredits {
+    available_count: u64,
+    /// Detail rows; `null` when only the count was read, and possibly capped below the count.
+    #[serde(default)]
+    credits: Option<Vec<RateLimitResetCredit>>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitResetCredit {
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    expires_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -84,6 +105,7 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
         plan: main.plan_type.clone(),
         windows,
         credits: credits(main.credits.as_ref()),
+        reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
     }
 }
 
@@ -172,6 +194,24 @@ fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
     Some(LimitsCreditsDto {
         balance: credits.balance.clone().unwrap_or_else(|| "0".to_string()),
         unlimited: credits.unlimited,
+    })
+}
+
+/// The count Codex reports, and when the soonest still-available reset expires.
+fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCreditsDto> {
+    let summary = value?;
+    let next_expires_at = summary
+        .credits
+        .iter()
+        .flatten()
+        .filter(|credit| credit.status == "available")
+        .filter_map(|credit| credit.expires_at)
+        .min()
+        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
+        .map(|at| at.to_rfc3339());
+    Some(LimitsResetCreditsDto {
+        available_count: u32::try_from(summary.available_count).unwrap_or(u32::MAX),
+        next_expires_at,
     })
 }
 

@@ -146,7 +146,12 @@ Each provider is read the way that provider intends, and active login renewal re
   because by then the old token is spent and only signing in again will clear it.
 - **Codex** — launch the official `codex app-server` and call `account/read` plus
   `account/rateLimits/read`. Codex owns its own login and refresh; on-n-off reads only
-  `account_id` metadata from the app-server's confirmed home.
+  `account_id` metadata from the app-server's confirmed home. The same read reports banked
+  rate-limit resets (`rateLimitResetCredits`). Spending one is the only write Limits makes:
+  `account/rateLimitResetCredit/consume`, from an explicit click on the signed-in account's card,
+  after checking that the native login is still that account, and never while an account change
+  holds the Codex activity lease. With 5% or more usage left the UI asks first. A shared forced
+  read follows, so every surface shows the renewed windows.
 
 Because each CLI stores one login at a time, successful reads are remembered per account (numbers
 only, under `~/.on-n-off/limits/`) so an account the user has switched away from stays visible

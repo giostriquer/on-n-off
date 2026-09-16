@@ -4,7 +4,7 @@ use crate::adapter::AgentAdapter;
 use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, GithubPrsDto, InstallItemsRequest,
     InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto, ProjectDto, ProviderLimitsDto,
-    UpdateItemMode, UsageSummaryDto, UsageSummaryInput,
+    ResetCreditOutcome, UpdateItemMode, UsageSummaryDto, UsageSummaryInput,
 };
 use crate::flags::FeatureFlags;
 use crate::item_install::ItemService;
@@ -365,6 +365,23 @@ pub async fn read_limits(
 ) -> Result<Vec<ProviderLimitsDto>, AdapterError> {
     blocking("limits read", move || {
         Ok(crate::limits_refresh::read_limits(agent_id, force))
+    })
+    .await
+}
+
+/// Spend one banked Codex rate-limit reset on the signed-in account a Limits card names, then
+/// refresh the shared Codex limits. Only an explicit user action in the UI calls this.
+#[tauri::command]
+pub async fn consume_codex_reset_credit(
+    account_id: String,
+    idempotency_key: String,
+) -> Result<ResetCreditOutcome, AdapterError> {
+    if idempotency_key.trim().is_empty() || idempotency_key.len() > 128 {
+        return Err(AdapterError::message("Invalid banked reset attempt."));
+    }
+    blocking("banked reset", move || {
+        crate::limits_refresh::consume_codex_reset_credit(&account_id, &idempotency_key)
+            .map_err(AdapterError::message)
     })
     .await
 }

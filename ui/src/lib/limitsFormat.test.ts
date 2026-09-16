@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatClock,
   formatObservedAt,
+  formatShortDate,
   formatResetAt,
   formatResetIn,
   hasElapsed,
@@ -166,3 +167,14 @@ it("distinguishes Codex Pro tiers without relabeling another provider's Pro", ()
   expect(planLabel("pro", "claude")).toBe("Pro");
   expect(planLabel("future_plan", "codex")).toBe("Future plan");
 });
+
+describe("formatShortDate", () => {
+  it("names the day of a date weeks away, where a weekday alone would be ambiguous", () => {
+    expect(formatShortDate("2026-08-29T15:00:00Z", "UTC")).toBe("Aug 29");
+    expect(formatShortDate("2026-08-29T23:30:00Z", "America/Sao_Paulo")).toBe("Aug 29");
+    expect(formatShortDate("2026-08-30T01:30:00Z", "America/Sao_Paulo")).toBe("Aug 29");
+    expect(formatShortDate(null)).toBe("");
+    expect(formatShortDate("not a date")).toBe("");
+  });
+});
+

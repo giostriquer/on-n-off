@@ -29,6 +29,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
             Some("2026-08-24T23:34:33+00:00".to_string()),
         )],
         credits: None,
+        reset_credits: None,
     };
     for window in &mut dto.windows {
         window.observed_at = observed_at.to_string();
@@ -191,6 +192,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
             balance: "3".to_string(),
             unlimited: false,
         }),
+        reset_credits: None,
     };
 
     store.save(&credits_only).unwrap();
@@ -361,4 +363,40 @@ fn simultaneous_store_instances_cannot_replace_a_newer_observation_with_an_older
             "concurrent publication lost the newest usage"
         );
     }
+}
+
+#[test]
+fn remembered_reset_credits_survive_a_reload_and_older_snapshots_load_without_them() {
+    let home = scratch_dir("limits-snap-reset-credits");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
+    });
+    store.save(&dto).unwrap();
+    assert_eq!(
+        store.load(AgentId::Codex)[0].reset_credits,
+        dto.reset_credits
+    );
+
+    // A snapshot written before on-n-off knew about reset credits has no such key.
+    let path = fs::read_dir(store.dir())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .unwrap();
+    let mut stored: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(stored
+        .as_object_mut()
+        .unwrap()
+        .remove("resetCredits")
+        .is_some());
+    fs::write(&path, stored.to_string()).unwrap();
+
+    let loaded = store.load(AgentId::Codex);
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].reset_credits, None);
 }

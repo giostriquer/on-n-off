@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto, ResetCreditOutcome};
 use crate::read_revision::{self, Reading, Revision, Source};
 
 const MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(60 * 60);
@@ -119,6 +119,25 @@ pub fn forget_snapshot(
     // one already forgot, until its own poll comes round.
     announce(cache, reading);
     Ok(())
+}
+
+/// Spend one banked Codex reset, then replace the shared Codex read so every surface shows the
+/// renewed windows and the count that is left. An account change in progress refuses the attempt
+/// rather than spend a reset on an account that is being replaced.
+pub fn consume_codex_reset_credit(
+    account_id: &str,
+    idempotency_key: &str,
+) -> Result<ResetCreditOutcome, String> {
+    let outcome = {
+        let Some(_account_read) = crate::accounts::activity::read(AgentId::Codex) else {
+            return Err(
+                "A Codex account change is running. Try again when it finishes.".to_string(),
+            );
+        };
+        crate::limits::consume_codex_reset_credit(account_id, idempotency_key)?
+    };
+    let _ = read_limits(AgentId::Codex, true);
+    Ok(outcome)
 }
 
 fn cache_for(agent: AgentId) -> Option<&'static Cache> {

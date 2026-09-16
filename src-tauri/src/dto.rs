@@ -576,6 +576,26 @@ pub struct LimitsCreditsDto {
     pub unlimited: bool,
 }
 
+/// Codex banked rate-limit resets: one-time resets saved to the account until used or expired.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsResetCreditsDto {
+    pub available_count: u32,
+    /// RFC 3339 instant when the soonest-expiring available reset lapses, when the provider says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_expires_at: Option<String>,
+}
+
+/// What Codex did with a request to spend one banked reset, in its own wire names.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ResetCreditOutcome {
+    Reset,
+    NothingToReset,
+    NoCredit,
+    AlreadyRedeemed,
+}
+
 /// Which subscription account a limits snapshot belongs to. `id` is the provider's stable account
 /// id (or `default` when the CLI stores none); `label` is the human name (email) when known.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -608,6 +628,8 @@ pub struct ProviderLimitsDto {
     pub windows: Vec<LimitWindowDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credits: Option<LimitsCreditsDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_credits: Option<LimitsResetCreditsDto>,
 }
 
 // ---------------------------------------------------------------------------

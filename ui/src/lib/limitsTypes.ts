@@ -22,6 +22,16 @@ export type LimitsCredits = {
   unlimited: boolean;
 };
 
+/** Codex banked rate-limit resets: one-time resets saved to the account until used or expired. */
+export type LimitsResetCredits = {
+  availableCount: number;
+  /** RFC 3339 instant the soonest-expiring available reset lapses, when Codex reports it. */
+  nextExpiresAt?: string | null;
+};
+
+/** What Codex did with a request to spend one banked reset. */
+export type ResetCreditOutcome = "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed";
+
 /** The subscription account a snapshot belongs to; `label` is the email when the CLI stores one. */
 export type LimitsAccount = {
   id: string;
@@ -41,4 +51,5 @@ export type ProviderLimits = {
   plan?: string | null;
   windows: LimitWindow[];
   credits?: LimitsCredits | null;
+  resetCredits?: LimitsResetCredits | null;
 };
