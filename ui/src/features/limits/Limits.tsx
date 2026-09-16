@@ -1,3 +1,4 @@
+import { AccountBilling } from "@/features/accounts/AccountBilling";
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
 import type { SavedProfile } from "$lib/accountTypes";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
@@ -252,7 +253,10 @@ function AccountCard({
       data-current-account={entry.currentAccount ? "true" : "false"}
     >
       {account ? <AccountCardActions accountId={account.id} label={label ?? account.id} current={profile?.active ?? entry.currentAccount} profile={profile} onForget={onForget} header={header}
-        footer={entry.provider === "codex" ? ({ current, disabled }) => <UseBankedReset entry={entry} label={label ?? account.id} current={current} now={now} disabled={disabled} /> : undefined}>
+        footer={entry.provider === "codex" ? ({ current, busy, unconfirmedCurrent }) => <>
+          <UseBankedReset entry={entry} label={label ?? account.id} current={current} now={now} disabled={busy || unconfirmedCurrent} />
+          <AccountBilling accountId={account.id} disabled={busy} showDate={false} />
+        </> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
     </section>

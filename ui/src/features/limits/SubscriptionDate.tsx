@@ -1,13 +1,11 @@
+import { formatShortDate } from "$lib/limitsFormat";
 import { useCodexSubscription } from "$lib/useCodexSubscription";
 import type { SubscriptionReading } from "$lib/subscriptionTypes";
 
+/** The date without its year when it falls in the current year; with it otherwise, or when `now` is unknown. */
 function dateLabel(value: string | null, now?: number) {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toLocaleDateString(undefined, {
-    year: now === undefined || date.getFullYear() !== new Date(now).getFullYear() ? "numeric" : undefined,
-    month: "short", day: "numeric",
-  }) : null;
+  const year = value ? new Date(value).getFullYear() : Number.NaN;
+  return formatShortDate(value, { withYear: now === undefined || year !== new Date(now).getFullYear() }) || null;
 }
 
 export function SubscriptionDate({ reading, now = Date.now(), className = "" }: { reading: SubscriptionReading; now?: number; className?: string }) {

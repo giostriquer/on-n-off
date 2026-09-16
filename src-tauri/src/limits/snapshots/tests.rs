@@ -400,3 +400,40 @@ fn remembered_reset_credits_survive_a_reload_and_older_snapshots_load_without_th
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].reset_credits, None);
 }
+
+#[test]
+fn a_successful_read_with_only_banked_resets_is_remembered_and_dated() {
+    let home = scratch_dir("limits-snap-reset-credits-only");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.windows.clear();
+    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: None,
+    });
+
+    store.save(&dto).unwrap();
+
+    let loaded = store.load(AgentId::Codex);
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].reset_credits, dto.reset_credits);
+}
+
+#[test]
+fn quota_windows_credits_and_banked_resets_each_count_as_an_observation() {
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    assert!(dto.has_observations());
+    dto.windows.clear();
+    assert!(!dto.has_observations());
+    dto.credits = Some(LimitsCreditsDto {
+        balance: "0".to_string(),
+        unlimited: false,
+    });
+    assert!(dto.has_observations());
+    dto.credits = None;
+    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 0,
+        next_expires_at: None,
+    });
+    assert!(dto.has_observations());
+}

@@ -32,6 +32,10 @@ it.each([
 ])("retains history when scoped usage cannot be verified: %j", candidate => {
   expect(accountCards([candidate, legacy], [profile]).entries).toEqual([candidate, legacy]);
 });
+it("counts a scoped read that carries only banked resets as an observation", () => {
+  const resetsOnly = { ...scoped, windows: [], resetCredits: { availableCount: 1, nextExpiresAt: null } };
+  expect(accountCards([resetsOnly, legacy], [profile]).entries).toEqual([resetsOnly]);
+});
 it("does not infer identity from email without a saved profile", () => {
   expect(accountCards([scoped, legacy], []).entries).toEqual([scoped, legacy]);
   expect(accountCards([legacy], [profile]).entries).toEqual([legacy]);

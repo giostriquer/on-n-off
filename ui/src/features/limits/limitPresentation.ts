@@ -86,9 +86,18 @@ export function usageLeft(entry: ProviderLimits, now: number): number | null {
   return used.length ? 100 - Math.max(...used) : null;
 }
 
+/**
+ * Whether a read observed anything about the account: quota windows, a credit balance or banked
+ * resets. `windows` lets a surface count only the windows it shows. The backend's
+ * `ProviderLimitsDto::has_observations` is the same rule.
+ */
+export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = entry.windows): boolean {
+  return windows.length > 0 || entry.credits != null || entry.resetCredits != null;
+}
+
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
   const windows = visibleLimitWindows(entry);
-  const hasObservations = windows.length > 0 || entry.credits != null;
+  const observed = hasObservations(entry, windows);
   const latestObservedAt = windows.reduce<number | null>((latest, window) => {
     const observedAt = Date.parse(window.observedAt);
     if (Number.isNaN(observedAt)) return latest;
@@ -96,8 +105,8 @@ export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: stri
   }, null);
   return {
     message: entry.status === "ok" ? null : (entry.message ?? fallbackMessage),
-    refreshPaused: entry.currentAccount && entry.status !== "ok" && hasObservations,
-    remembered: !entry.currentAccount && hasObservations,
+    refreshPaused: entry.currentAccount && entry.status !== "ok" && observed,
+    remembered: !entry.currentAccount && observed,
     updatedAt: latestObservedAt === null ? null : formatObservedAt(new Date(latestObservedAt).toISOString()),
   };
 }

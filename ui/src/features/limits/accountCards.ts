@@ -1,5 +1,6 @@
 import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
+import { hasObservations } from "./limitPresentation";
 
 const emailKey = (email?: string | null) => email?.trim().toLowerCase() || null;
 
@@ -12,7 +13,7 @@ export function accountCards(entries: ProviderLimits[], profiles: SavedProfile[]
     if (!email) return [];
     const scoped = entries.find(entry => entry.provider === profile.identity.provider &&
       entry.account?.id === profile.observationId && entry.account?.id.startsWith("profile:") &&
-      entry.status === "ok" && (entry.windows.length > 0 || entry.credits != null) &&
+      entry.status === "ok" && hasObservations(entry) &&
       emailKey(entry.account.label) === email);
     if (!scoped?.account) return [];
     const legacyId = profile.identity.provider === "codex" ? profile.identity.workspaceId :

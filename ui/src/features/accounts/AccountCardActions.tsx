@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
-import { AccountBilling } from "./AccountBilling";
 import { accountButton as button, useAccountManagement } from "./AccountManager";
 
 export function AccountCardActions({ accountId, label, current, profile, onForget, header, footer, children }: {
@@ -11,10 +10,10 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   header: (menu: ReactNode) => ReactNode;
   /**
    * More account actions beside the primary one. `current` is the card's own notion of the signed-in
-   * account; `disabled` covers running account operations and a current card the native login no
-   * longer matches, the same conditions the primary action honours.
+   * account; `busy` covers running account operations; `unconfirmedCurrent` marks a current card
+   * whose native login is not confirmed as this account. Each action decides which of them block it.
    */
-  footer?: (state: { current: boolean; disabled: boolean }) => ReactNode;
+  footer?: (state: { current: boolean; busy: boolean; unconfirmedCurrent: boolean }) => ReactNode;
   children?: ReactNode;
 }) {
   const manager = useAccountManagement();
@@ -98,8 +97,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
       {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : void action("use", profile.id).catch(() => {})}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
         : <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
-      {footer?.({ current, disabled: !!disabled || unconfirmedCurrent })}
-      {provider === "codex" && <AccountBilling accountId={accountId} disabled={disabled} showDate={false} />}
+      {footer?.({ current, busy: !!disabled, unconfirmedCurrent })}
     </footer>
   </>;
 }

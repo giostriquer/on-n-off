@@ -52,8 +52,8 @@ impl SnapshotStore {
     }
 
     /// Persist canonical account observations. Dated local or remembered windows remain
-    /// trustworthy while refresh is unavailable; a successful credits-only read is dated when it
-    /// reaches this storage boundary.
+    /// trustworthy while refresh is unavailable; a successful read with only credits or banked
+    /// resets is dated when it reaches this storage boundary.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
@@ -62,12 +62,13 @@ impl SnapshotStore {
             .account
             .as_ref()
             .ok_or_else(|| "snapshot has no account".to_string())?;
-        if dto.windows.is_empty() && dto.credits.is_none() {
+        if !dto.has_observations() {
             return Err("snapshot has no observations".to_string());
         }
         let path = self.dir.join(file_name(dto.provider, &account.id));
-        let incoming_latest = latest_observed_at(dto)
-            .or_else(|| (dto.status == LimitsStatus::Ok && dto.credits.is_some()).then(Utc::now));
+        let incoming_latest = latest_observed_at(dto).or_else(|| {
+            (dto.status == LimitsStatus::Ok && dto.has_account_figures()).then(Utc::now)
+        });
         let incoming_latest =
             incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
         let existing_latest = fs::read_to_string(&path)

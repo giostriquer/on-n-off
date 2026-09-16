@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { presentLimitWindow, usageLeft, visibleLimitWindows } from "./limitPresentation";
+import { hasObservations, presentLimitAccount, presentLimitWindow, usageLeft, visibleLimitWindows } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -99,3 +99,25 @@ describe("usageLeft", () => {
     expect(usageLeft(entry([]), NOW)).toBeNull();
   });
 });
+
+describe("hasObservations", () => {
+  const bare: ProviderLimits = { provider: "codex", status: "ok", currentAccount: true, windows: [] };
+
+  it("counts quota windows, a credit balance and banked resets alike", () => {
+    expect(hasObservations(bare)).toBe(false);
+    expect(hasObservations({ ...bare, windows: [window] })).toBe(true);
+    expect(hasObservations({ ...bare, credits: { balance: "0", unlimited: false } })).toBe(true);
+    expect(hasObservations({ ...bare, resetCredits: { availableCount: 0, nextExpiresAt: null } })).toBe(true);
+  });
+
+  it("lets a caller count only the windows it shows", () => {
+    expect(hasObservations({ ...bare, windows: [window] }, [])).toBe(false);
+  });
+
+  it("keeps a card with only banked resets as a paused refresh rather than an empty one", () => {
+    const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", resetCredits: { availableCount: 1, nextExpiresAt: null } };
+    expect(presentLimitAccount(failed, "unavailable").refreshPaused).toBe(true);
+    expect(presentLimitAccount({ ...failed, currentAccount: false }, "unavailable").remembered).toBe(true);
+  });
+});
+

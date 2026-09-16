@@ -636,6 +636,20 @@ pub struct ProviderLimitsDto {
     pub reset_credits: Option<LimitsResetCreditsDto>,
 }
 
+impl ProviderLimitsDto {
+    /// Whether this read observed anything about the account worth keeping: quota windows, a
+    /// credit balance or banked resets. One definition for every place that decides that.
+    pub fn has_observations(&self) -> bool {
+        !self.windows.is_empty() || self.has_account_figures()
+    }
+
+    /// Figures about the account that carry no observation time of their own, so a successful
+    /// read dates them when it stores them.
+    pub fn has_account_figures(&self) -> bool {
+        self.credits.is_some() || self.reset_credits.is_some()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Local items: skills and subagents copied out of a marketplace by on-n-off itself and
 // tracked in `~/.on-n-off/installed-items.json` (see `item_install`).
