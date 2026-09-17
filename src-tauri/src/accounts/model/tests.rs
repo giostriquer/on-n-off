@@ -50,3 +50,18 @@ fn claude_same_user_different_organizations_are_distinct() {
     )
     .is_err());
 }
+#[test]
+fn a_codex_login_renews_soon_within_ten_minutes_of_expiry_or_without_a_readable_one() {
+    let expiring_at = |exp: i64| {
+        let mut value = auth("user-a", "team");
+        let claims = json!({ "exp": exp });
+        value["tokens"]["access_token"] = json!(format!(
+            "e30.{}.sig",
+            URL_SAFE_NO_PAD.encode(claims.to_string())
+        ));
+        value
+    };
+    assert!(!codex_renews_soon(&expiring_at(1_000_600), 1_000_000));
+    assert!(codex_renews_soon(&expiring_at(1_000_599), 1_000_000));
+    assert!(codex_renews_soon(&auth("user-a", "team"), 1_000_000));
+}

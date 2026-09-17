@@ -110,6 +110,29 @@ desktop and IDE agent processes to be closed. The conservative process preflight
 user processes. It cannot prevent an external client starting afterward; keep clients closed until
 these operations finish. Restart Codex clients after switching.
 
+The preflight identifies a client by its executable, or by the script a JavaScript runtime
+launched (the first file after its flags, or the package's own entry script), never by an argument
+that merely names the provider, and names each client after the app bundle it runs in or was
+started from. Only the scan behind the prompt leaves out processes on-n-off started: the checks that
+gate a change run under the account-change lease, which already keeps on-n-off's own reads from
+running, and Windows keeps a dead parent's pid on its children and reuses pids.
+
+Before an ordinary Codex switch the account card lists those clients and lets the person switch
+anyway. Running Codex clients never pick up a replaced `auth.json`: they keep the previous account
+until restarted, and signing out or in from one can revoke saved logins, so the confirmation says
+both. Codex clients match a login by workspace and take no lock, so switching beside them refuses
+two accounts in one workspace and an outgoing access token within ten minutes of renewal.
+
+Every activation also re-reads the outgoing login once its journal is durable, saving a generation
+a client rotated and refusing to publish over another account; a failure before publication clears
+the journal. It reads the published bytes back under the native locks before verification, which
+refreshes whatever is on disk. When a client replaced them, or verification fails beside running
+clients, only bytes this change wrote or replaced are restored; anything else, including a login a
+client signed out, keeps the journal for explicit recovery with clients closed. These checks narrow
+the races, not close them: a client whose refresh was already in flight can still write during
+verification, and clients older than Codex 0.117 renew without checking the account on disk.
+Sign-out and recovery never offer the choice.
+
 Claude's [quickstart](https://code.claude.com/docs/en/quickstart) documents `/login` inside a running
 session. Its [2.1.178 changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21178)
 also records a fix for credentials refreshed outside a session. The exception applies only to ordinary activation;

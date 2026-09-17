@@ -31,6 +31,19 @@ function useController(provider: AccountProvider) {
     catch (error) { setError(parseInvokeError(error).message); throw error; }
     finally { try { await refresh(); } finally { setBusy(null); } }
   }
+  /**
+   * Starts an ordinary switch, or returns the running clients that would stop it so the person can
+   * switch anyway. A failed scan is no reason to ask: the switch checks again and reports it.
+   */
+  async function use(id: string): Promise<string[]> {
+    setBusy("use"); setError(null);
+    let running: string[] = [];
+    try { running = await api.readAccountActivationBlockers(provider); } catch { /* checked again by the switch */ }
+    finally { setBusy(null); }
+    if (running.length) return running;
+    await action("use", id);
+    return [];
+  }
   async function add(profileId?: string, accountId?: string) {
     if (operation.current) return;
     const id = crypto.randomUUID(); operation.current = id;
@@ -57,7 +70,7 @@ function useController(provider: AccountProvider) {
       }
     }
   }
-  return { provider, query, busy, error, action, add, cancel, loginTarget };
+  return { provider, query, busy, error, action, use, add, cancel, loginTarget };
 }
 const Controllers = createContext<Record<AccountProvider, ReturnType<typeof useController>> | null>(null);
 export function AccountControllers({ children }: { children: ReactNode }) {

@@ -518,6 +518,21 @@ pub async fn read_account_preferences() -> Result<bool, AdapterError> {
     .await
 }
 #[tauri::command]
+pub async fn read_account_activation_blockers(
+    agent: AgentId,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, AdapterError> {
+    if !state.adapter(agent).supports_accounts() {
+        return Err(AdapterError::message(
+            "Account profiles are unsupported for this provider.",
+        ));
+    }
+    blocking("account clients", move || {
+        crate::accounts::activation_blockers(agent).map_err(AdapterError::message)
+    })
+    .await
+}
+#[tauri::command]
 pub async fn account_action(
     agent: AgentId,
     action: String,
@@ -534,13 +549,15 @@ pub async fn account_action(
     }
     blocking("account action", move || {
         let id = profile_id.as_deref().unwrap_or("");
+        if let Some(activation) = crate::accounts::Activation::from_action(&action) {
+            return crate::accounts::use_profile(agent, id, activation)
+                .map_err(AdapterError::message);
+        }
         match action.as_str() {
             "unlock" => crate::accounts::unlock(),
             "remember" => crate::accounts::discovery::set_enabled(true),
             "stopRemembering" => crate::accounts::discovery::set_enabled(false),
             "save" => crate::accounts::save_current(agent),
-            "use" => crate::accounts::use_profile(agent, id, false),
-            "recover" => crate::accounts::use_profile(agent, id, true),
             "remove" => crate::accounts::remove(id),
             "category" | "rename" => crate::accounts::set_category(
                 id,

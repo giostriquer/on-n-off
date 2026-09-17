@@ -452,6 +452,12 @@ impl Native for NativeStore {
         }
         self.verify_codex(true)
     }
+    fn renews_soon(&self, login: &Login) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |v| i64::try_from(v.as_secs()).unwrap_or(i64::MAX));
+        self.provider == AgentId::Codex && model::codex_renews_soon(&login.auth, now)
+    }
     fn verify_observed(&self) -> Result<(), String> {
         if self.provider == AgentId::Codex && !self.custom {
             self.verify_codex(false)

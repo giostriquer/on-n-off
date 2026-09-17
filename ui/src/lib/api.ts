@@ -229,6 +229,10 @@ export function readAccounts(agent: import("./accountTypes").AccountProvider): P
 export function accountAction(agent: import("./accountTypes").AccountProvider, action: import("./accountTypes").AccountAction, profileId?: string, category?: string): Promise<void> {
   return invoke("account_action", { agent, action, profileId: profileId ?? null, category: category ?? null });
 }
+/** Clients that would stop an ordinary switch to another saved account; empty when none would. */
+export function readAccountActivationBlockers(agent: import("./accountTypes").AccountProvider): Promise<string[]> {
+  return invoke("read_account_activation_blockers", { agent });
+}
 export function addAccount(agent: import("./accountTypes").AccountProvider, operationId: string, profileId?: string): Promise<void> {
   return invoke("add_account", { agent, operationId, profileId: profileId ?? null });
 }

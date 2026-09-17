@@ -10,6 +10,7 @@ pub(crate) mod native;
 
 pub(crate) mod activity;
 mod clients;
+pub use clients::activation_blockers;
 
 use crate::dto::AgentId;
 use serde::Serialize;
@@ -159,41 +160,80 @@ pub fn remove(id: &str) -> Result<(), String> {
     crate::read_revision::announce(crate::read_revision::Source::Accounts);
     Ok(())
 }
-pub fn use_profile(provider: AgentId, id: &str, recover: bool) -> Result<(), String> {
+/// How an account change treats provider clients that are still running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Activation {
+    /// Refuse while clients that cannot take a native credential change are running.
+    Ordinary,
+    /// The person chose to switch beside running clients, which keep the previous account.
+    AlongsideClients,
+    /// Explicit crash recovery, which always requires closed clients.
+    Recover,
+}
+impl Activation {
+    /// The account action that asks for this change, if it is one.
+    pub fn from_action(action: &str) -> Option<Self> {
+        match action {
+            "use" => Some(Self::Ordinary),
+            "useAlongsideClients" => Some(Self::AlongsideClients),
+            "recover" => Some(Self::Recover),
+            _ => None,
+        }
+    }
+}
+fn check_clients(
+    activation: Activation,
+    provider: AgentId,
+    activation_safe: impl FnOnce(AgentId) -> Result<(), String>,
+    closed: impl FnOnce(AgentId) -> Result<(), String>,
+) -> Result<(), String> {
+    match activation {
+        Activation::Ordinary => activation_safe(provider),
+        Activation::AlongsideClients => Ok(()),
+        Activation::Recover => closed(provider),
+    }
+}
+pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Result<(), String> {
     let change = activity::change(provider)?;
     let home = home()?;
     let native = native::NativeStore::resolve(provider, &home)?;
     native.preflight()?;
-    if recover {
-        clients::require_closed(provider)?;
-    } else {
-        clients::require_activation_safe(provider)?;
-    }
+    check_clients(
+        activation,
+        provider,
+        clients::require_activation_safe,
+        clients::require_closed,
+    )?;
     let store = store::Store::open(&home, false)?;
     let mut db = store.load()?;
-    if recover {
-        let journal = db.recovery.as_ref().ok_or("No recovery is pending.")?;
-        let target = db
+    match activation {
+        Activation::Recover => {
+            let journal = db.recovery.as_ref().ok_or("No recovery is pending.")?;
+            let target = db
+                .profiles
+                .iter()
+                .find(|p| p.id == journal.target_id)
+                .ok_or("Recovery profile is missing.")?;
+            if target.identity.provider != provider {
+                return Err("Recovery belongs to the other provider.".into());
+            }
+        }
+        _ if !db
             .profiles
             .iter()
-            .find(|p| p.id == journal.target_id)
-            .ok_or("Recovery profile is missing.")?;
-        if target.identity.provider != provider {
-            return Err("Recovery belongs to the other provider.".into());
+            .any(|p| p.id == id && p.identity.provider == provider) =>
+        {
+            return Err("Profile does not belong to this provider.".into());
         }
-    } else if !db
-        .profiles
-        .iter()
-        .any(|p| p.id == id && p.identity.provider == provider)
-    {
-        return Err("Profile does not belong to this provider.".into());
+        _ => {}
     }
     db.invalidate_logins()?;
     store.persist(&db)?;
-    let result = if recover {
-        transaction::recover(&mut db, &native, &mut |db| store.persist(db))
-    } else {
-        transaction::activate(&mut db, &native, id, &mut |db| store.persist(db))
+    let persist = &mut |db: &store::Database| store.persist(db);
+    let result = match activation {
+        Activation::Recover => transaction::recover(&mut db, &native, persist),
+        Activation::Ordinary => transaction::activate(&mut db, &native, id, false, persist),
+        Activation::AlongsideClients => transaction::activate(&mut db, &native, id, true, persist),
     };
     drop(store);
     drop(change);
@@ -265,3 +305,6 @@ pub(crate) fn with_saved_billing_identity<T>(
         Err(error) => consume(Err(error)),
     }
 }
+
+#[cfg(test)]
+mod tests;
