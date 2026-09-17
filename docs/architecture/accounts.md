@@ -110,6 +110,18 @@ desktop and IDE agent processes to be closed. The conservative process preflight
 user processes. It cannot prevent an external client starting afterward; keep clients closed until
 these operations finish. Restart Codex clients after switching.
 
+The preflight identifies a client by its executable, or by the script a JavaScript runtime
+launched, never by an argument that merely names the provider, and names each one after the app
+bundle it runs in or was started from. Before an ordinary Codex switch the account card lists them
+and lets the person switch anyway. Running Codex clients never pick up a replaced `auth.json`: they
+keep the previous account until restarted, and signing out or in from one can revoke saved logins,
+so the confirmation says both. Codex has no cross-process lock, so activation also re-reads the
+outgoing login after its journal is durable, saving a generation a client rotated and refusing to
+publish over a different account, and reads the published bytes back before verification. If a
+client replaced them, only bytes this change wrote or replaced are restored; anything else keeps the
+journal for explicit recovery with clients closed, because verification would spend a login a
+client owns. Sign-out and recovery never offer this choice.
+
 Claude's [quickstart](https://code.claude.com/docs/en/quickstart) documents `/login` inside a running
 session. Its [2.1.178 changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21178)
 also records a fix for credentials refreshed outside a session. The exception applies only to ordinary activation;

@@ -1,7 +1,13 @@
 use super::*;
 
 fn process(executable: &str, args: &str) -> Process {
+    child("0", "0", executable, args)
+}
+
+fn child(pid: &str, parent: &str, executable: &str, args: &str) -> Process {
     Process {
+        pid: pid.into(),
+        parent: parent.into(),
         executable: executable.into(),
         args: args.into(),
     }
@@ -61,7 +67,7 @@ fn ignores_processes_that_only_mention_the_provider_in_arguments() {
 
 #[test]
 fn reads_ps_columns_by_pid_and_keeps_spaces_in_executables() {
-    let executables = "    1 /sbin/launchd\n  880 /Applications/Acme App.app/Contents/MacOS/Acme App\n 1262 codex\n";
+    let executables = "    1     0 /sbin/launchd\n  880     1 /Applications/Acme App.app/Contents/MacOS/Acme App\n 1262   880 codex\n";
     let args =
         "  880 /Applications/Acme App.app/Contents/MacOS/Acme App --flag\n    1 /sbin/launchd\n";
     let mut processes = ps_processes(executables, args);
@@ -69,29 +75,69 @@ fn reads_ps_columns_by_pid_and_keeps_spaces_in_executables() {
     assert_eq!(
         processes,
         [
-            process(
+            child(
+                "880",
+                "1",
                 "/Applications/Acme App.app/Contents/MacOS/Acme App",
                 "/Applications/Acme App.app/Contents/MacOS/Acme App --flag"
             ),
-            process("/sbin/launchd", "/sbin/launchd"),
-            process("codex", ""),
+            child("1", "0", "/sbin/launchd", "/sbin/launchd"),
+            child("1262", "880", "codex", ""),
         ]
     );
 }
 
 #[test]
 fn reads_cim_fields_and_falls_back_to_the_name_without_a_path() {
-    let output = "C:\\Program Files\\Acme\\acme.exe\tacme.exe\t\"C:\\Program Files\\Acme\\acme.exe\" --codex\r\n\tcodex.exe\t\r\n\r\n";
+    let output = "7\t4\tC:\\Program Files\\Acme\\acme.exe\tacme.exe\t\"C:\\Program Files\\Acme\\acme.exe\" --codex\r\n9\t7\t\tcodex.exe\t\r\n\r\n";
     assert_eq!(
         cim_processes(output),
         [
-            process(
+            child(
+                "7",
+                "4",
                 "C:\\Program Files\\Acme\\acme.exe",
                 "\"C:\\Program Files\\Acme\\acme.exe\" --codex"
             ),
-            process("codex.exe", ""),
+            child("9", "7", "codex.exe", ""),
         ]
     );
+}
+
+#[test]
+fn names_each_client_after_the_app_it_runs_in_or_was_started_from() {
+    let processes = [
+        child("10", "1", "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", ""),
+        child("11", "10", "/Applications/ChatGPT.app/Contents/Resources/codex", "/Applications/ChatGPT.app/Contents/Resources/codex app-server"),
+        child("12", "10", "/Applications/ChatGPT.app/Contents/Resources/codex", "/Applications/ChatGPT.app/Contents/Resources/codex app-server"),
+        child("20", "1", "/Applications/Acme Studio.app/Contents/MacOS/Acme Studio", ""),
+        child("21", "20", "/Users/me/.local/bin/codex", "/Users/me/.local/bin/codex app-server --stdio"),
+        child("30", "1", "/Applications/Terminal.app/Contents/MacOS/Terminal", ""),
+        child("31", "30", "-zsh", "-zsh"),
+        child("32", "31", "node", "node /Users/me/.nvm/versions/node/v24.0.0/bin/codex"),
+        child("40", "40", "codex", "codex exec"),
+        child("50", "1", "/Applications/Acme Studio.app/Contents/Frameworks/Codex Framework.framework/Helpers/browser_crashpad_handler", ""),
+    ];
+    assert_eq!(
+        clients(&processes, AgentId::Codex),
+        [
+            "Acme Studio (codex)",
+            "ChatGPT",
+            "Terminal (codex)",
+            "codex"
+        ]
+    );
+    let error = closed(&clients(&processes, AgentId::Codex)).unwrap_err();
+    assert!(
+        error.contains(": Acme Studio (codex), ChatGPT, Terminal (codex), codex."),
+        "{error}"
+    );
+    assert_eq!(closed(&[]), Ok(()));
+}
+
+#[test]
+fn claude_activation_is_never_blocked_by_running_clients() {
+    assert_eq!(activation_blockers(AgentId::Claude), Ok(Vec::new()));
 }
 
 #[test]

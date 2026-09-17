@@ -1,12 +1,18 @@
 //! Conservative native-writer preflight. Processes are inspected only, never terminated.
 use crate::dto::AgentId;
-use std::{process::Command, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    process::Command,
+    time::Duration,
+};
 
-/// A running process: what it was started as, and its whole command line. Only the executable
-/// (or the script a JavaScript runtime launched) identifies a client, so crash handlers under a
-/// framework named after the provider and tools that merely pass its name as an argument do not.
+/// A running process: what it was started as, its parent, and its whole command line. Only the
+/// executable (or the script a JavaScript runtime launched) identifies a client, so crash handlers
+/// under a framework named after the provider and tools that merely pass its name do not.
 #[derive(Debug, PartialEq)]
 struct Process {
+    pid: String,
+    parent: String,
     executable: String,
     args: String,
 }
@@ -17,6 +23,17 @@ const SCRIPT_HOSTS: [&str; 6] = ["node", "node.exe", "bun", "bun.exe", "deno", "
 /// Sign-out, crash recovery, and abandoned-login cleanup still require closed clients.
 pub fn require_activation_safe(provider: AgentId) -> Result<(), String> {
     activation_preflight(provider, require_closed)
+}
+
+/// Names the clients ordinary activation would refuse to run beside, so a person can choose to
+/// close them or switch anyway. Empty when activation would not refuse.
+pub fn activation_blockers(provider: AgentId) -> Result<Vec<String>, String> {
+    let mut found = Vec::new();
+    activation_preflight(provider, |provider| {
+        found = running_clients(provider)?;
+        Ok(())
+    })?;
+    Ok(found)
 }
 
 fn activation_preflight(
@@ -30,22 +47,78 @@ fn activation_preflight(
 }
 
 pub fn require_closed(provider: AgentId) -> Result<(), String> {
+    closed(&running_clients(provider)?)
+}
+
+fn closed(clients: &[String]) -> Result<(), String> {
+    if clients.is_empty() {
+        return Ok(());
+    }
+    Err(format!("Close this provider's CLI, desktop app and IDE agent sessions before changing its native login: {}. on-n-off will not stop them for you.", clients.join(", ")))
+}
+
+fn running_clients(provider: AgentId) -> Result<Vec<String>, String> {
     let processes = running_processes()
         .map_err(|_| "Could not check running clients. Close provider clients and retry.")?;
-    if processes.iter().any(|process| conflicts(process, provider)) {
-        return Err("Close this provider's CLI, desktop app and IDE agent sessions before changing its native login. on-n-off will not stop them for you.".into());
+    Ok(clients(&processes, provider))
+}
+
+fn clients(processes: &[Process], provider: AgentId) -> Vec<String> {
+    let by_pid: HashMap<_, _> = processes.iter().map(|p| (p.pid.as_str(), p)).collect();
+    processes
+        .iter()
+        .filter(|process| conflicts(process, provider))
+        .map(|process| label(process, &by_pid, provider))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Names a client after the app bundle it runs in or was started from, which is what a person
+/// closes; a client with no app around it keeps its own name.
+fn label(process: &Process, by_pid: &HashMap<&str, &Process>, provider: AgentId) -> String {
+    let own = process
+        .executable
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    let name = if SCRIPT_HOSTS.contains(&own.to_lowercase().as_str()) {
+        binary(provider)
+    } else {
+        own
+    };
+    let mut current = process;
+    for _ in 0..64 {
+        let bundle = current
+            .executable
+            .split(['/', '\\'])
+            .find_map(|part| part.strip_suffix(".app"));
+        if let Some(bundle) = bundle {
+            return if std::ptr::eq(current, process) {
+                bundle.into()
+            } else {
+                format!("{bundle} ({name})")
+            };
+        }
+        match by_pid.get(current.parent.as_str()) {
+            Some(parent) if parent.pid != current.pid => current = parent,
+            _ => break,
+        }
     }
-    Ok(())
+    name.into()
 }
 
 #[cfg(unix)]
 fn running_processes() -> Result<Vec<Process>, String> {
-    let list = |column: &str| {
+    let list = |columns: &str| {
         let mut command = Command::new("/bin/ps");
-        command.args(["-A", "-o", &format!("pid=,{column}=")]);
+        command.args(["-A", "-o", columns]);
         super::native::run(&mut command, Duration::from_secs(10))
     };
-    Ok(ps_processes(&list("comm")?, &list("args")?))
+    Ok(ps_processes(
+        &list("pid=,ppid=,comm=")?,
+        &list("pid=,args=")?,
+    ))
 }
 
 #[cfg(windows)]
@@ -55,7 +128,7 @@ fn running_processes() -> Result<Vec<Process>, String> {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process | ForEach-Object { [string]$_.ExecutablePath + [char]9 + $_.Name + [char]9 + $_.CommandLine }",
+        "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process | ForEach-Object { [string]$_.ProcessId + [char]9 + [string]$_.ParentProcessId + [char]9 + [string]$_.ExecutablePath + [char]9 + $_.Name + [char]9 + $_.CommandLine }",
     ]);
     Ok(cim_processes(&super::native::run(
         &mut command,
@@ -63,7 +136,8 @@ fn running_processes() -> Result<Vec<Process>, String> {
     )?))
 }
 
-/// Joins `ps -o pid=,comm=` and `ps -o pid=,args=` by pid. `comm` keeps spaces in the executable.
+/// Joins `ps -o pid=,ppid=,comm=` and `ps -o pid=,args=` by pid. `comm` keeps spaces in the
+/// executable.
 #[cfg(any(unix, test))]
 fn ps_processes(executables: &str, args: &str) -> Vec<Process> {
     let rows = |output: &str| {
@@ -71,42 +145,54 @@ fn ps_processes(executables: &str, args: &str) -> Vec<Process> {
             .lines()
             .filter_map(|line| line.trim_start().split_once(' '))
             .map(|(pid, rest)| (pid.to_owned(), rest.trim_start().to_owned()))
-            .collect::<std::collections::HashMap<_, _>>()
+            .collect::<HashMap<_, _>>()
     };
     let mut args = rows(args);
     rows(executables)
         .into_iter()
-        .map(|(pid, executable)| Process {
-            args: args.remove(&pid).unwrap_or_default(),
-            executable,
+        .filter_map(|(pid, rest)| {
+            let (parent, executable) = rest.split_once(' ')?;
+            Some(Process {
+                args: args.remove(&pid).unwrap_or_default(),
+                parent: parent.to_owned(),
+                executable: executable.trim_start().to_owned(),
+                pid,
+            })
         })
         .collect()
 }
 
-/// Parses `ExecutablePath<TAB>Name<TAB>CommandLine`; the path is empty for protected processes.
+/// Parses `ProcessId<TAB>ParentProcessId<TAB>ExecutablePath<TAB>Name<TAB>CommandLine`; the path
+/// is empty for protected processes.
 #[cfg(any(windows, test))]
 fn cim_processes(output: &str) -> Vec<Process> {
     output
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let mut fields = line.splitn(3, '\t');
-            let path = fields.next().unwrap_or_default();
-            let name = fields.next().unwrap_or_default();
+            let mut fields = line.splitn(5, '\t').map(str::to_owned);
+            let mut next = || fields.next().unwrap_or_default();
+            let (pid, parent, path, name) = (next(), next(), next(), next());
             Process {
-                executable: if path.is_empty() { name } else { path }.to_owned(),
-                args: fields.next().unwrap_or_default().to_owned(),
+                pid,
+                parent,
+                executable: if path.is_empty() { name } else { path },
+                args: next(),
             }
         })
         .collect()
 }
 
-fn conflicts(process: &Process, provider: AgentId) -> bool {
-    let name = if provider == AgentId::Claude {
+fn binary(provider: AgentId) -> &'static str {
+    if provider == AgentId::Claude {
         "claude"
     } else {
         "codex"
-    };
+    }
+}
+
+fn conflicts(process: &Process, provider: AgentId) -> bool {
+    let name = binary(provider);
     let executable = normalized(&process.executable);
     let base = executable.rsplit('/').next().unwrap_or("");
     base == name

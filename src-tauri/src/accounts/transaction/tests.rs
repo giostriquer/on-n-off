@@ -229,3 +229,96 @@ fn switching_away_from_a_removed_account_keeps_only_its_recovery_backup() {
     assert!(db.profiles.iter().all(|p| p.identity != identity));
     assert!(db.ignored_accounts.contains(&identity));
 }
+
+#[test]
+fn recaptures_an_outgoing_login_a_running_client_rotated_during_the_switch() {
+    let (mut db, native, a, b) = fixture(false);
+    activate(&mut db, &native, &b, &mut |db| {
+        if db.recovery.is_some() {
+            *native.live.borrow_mut() = Some(login("a", "client-rotated-a"));
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(native.read().unwrap().unwrap().auth["user"], "b");
+    let saved = db.profiles.iter().find(|p| p.id == a).unwrap();
+    assert_eq!(
+        saved.login.as_ref().unwrap().auth["refresh"],
+        "client-rotated-a"
+    );
+}
+
+#[test]
+fn never_publishes_over_a_login_that_changed_account_during_the_switch() {
+    let (mut db, native, _, b) = fixture(false);
+    let error = activate(&mut db, &native, &b, &mut |db| {
+        if db.recovery.is_some() {
+            *native.live.borrow_mut() = Some(login("c", "external-c"));
+        }
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(error.contains("changed"), "{error}");
+    assert_eq!(native.read().unwrap().unwrap().auth["user"], "c");
+    assert!(db.recovery.is_none());
+}
+
+struct ClientWritesAfterUs {
+    store: Store,
+    then: Login,
+    verified: std::cell::Cell<bool>,
+}
+impl Native for ClientWritesAfterUs {
+    fn read(&self) -> Result<Option<Login>, String> {
+        self.store.read()
+    }
+    fn identify(&self, login: &Login) -> Result<Identity, String> {
+        self.store.identify(login)
+    }
+    fn write(&self, login: Option<&Login>) -> Result<(), String> {
+        self.store.write(login)?;
+        if login.is_some_and(|l| l.auth["user"] == "b") {
+            *self.store.live.borrow_mut() = Some(self.then.clone());
+        }
+        Ok(())
+    }
+    fn verify(&self) -> Result<(), String> {
+        self.verified.set(true);
+        Ok(())
+    }
+}
+
+#[test]
+fn keeps_the_journal_without_verifying_when_a_client_overwrites_the_new_login() {
+    let (mut db, store, _, b) = fixture(false);
+    let native = ClientWritesAfterUs {
+        store,
+        then: login("a", "client-refreshed-a"),
+        verified: std::cell::Cell::new(false),
+    };
+    let error = activate(&mut db, &native, &b, &mut |_| Ok(())).unwrap_err();
+    assert!(error.contains("recover"), "{error}");
+    assert!(!native.verified.get());
+    assert!(db.recovery.is_some());
+    assert_eq!(
+        native.read().unwrap().unwrap().auth["refresh"],
+        "client-refreshed-a"
+    );
+}
+
+#[test]
+fn restores_known_outgoing_bytes_a_client_wrote_back_without_verifying() {
+    let (mut db, store, _, b) = fixture(false);
+    let native = ClientWritesAfterUs {
+        store,
+        then: login("a", "cli-rotated-a"),
+        verified: std::cell::Cell::new(false),
+    };
+    assert!(activate(&mut db, &native, &b, &mut |_| Ok(())).is_err());
+    assert!(!native.verified.get());
+    assert!(db.recovery.is_none());
+    assert_eq!(
+        native.read().unwrap().unwrap().auth["refresh"],
+        "cli-rotated-a"
+    );
+}

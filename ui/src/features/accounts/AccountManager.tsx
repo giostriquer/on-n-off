@@ -31,6 +31,10 @@ function useController(provider: AccountProvider) {
     catch (error) { setError(parseInvokeError(error).message); throw error; }
     finally { try { await refresh(); } finally { setBusy(null); } }
   }
+  /** A failed scan is not a reason to refuse: the switch itself checks again and reports it. */
+  async function activationBlockers() {
+    try { return await api.readAccountActivationBlockers(provider); } catch { return []; }
+  }
   async function add(profileId?: string, accountId?: string) {
     if (operation.current) return;
     const id = crypto.randomUUID(); operation.current = id;
@@ -57,7 +61,7 @@ function useController(provider: AccountProvider) {
       }
     }
   }
-  return { provider, query, busy, error, action, add, cancel, loginTarget };
+  return { provider, query, busy, error, action, activationBlockers, add, cancel, loginTarget };
 }
 const Controllers = createContext<Record<AccountProvider, ReturnType<typeof useController>> | null>(null);
 export function AccountControllers({ children }: { children: ReactNode }) {

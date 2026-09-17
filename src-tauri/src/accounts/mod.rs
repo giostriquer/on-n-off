@@ -10,6 +10,7 @@ pub(crate) mod native;
 
 pub(crate) mod activity;
 mod clients;
+pub use clients::activation_blockers;
 
 use crate::dto::AgentId;
 use serde::Serialize;
@@ -159,15 +160,26 @@ pub fn remove(id: &str) -> Result<(), String> {
     crate::read_revision::announce(crate::read_revision::Source::Accounts);
     Ok(())
 }
-pub fn use_profile(provider: AgentId, id: &str, recover: bool) -> Result<(), String> {
+/// How an account change treats provider clients that are still running.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Activation {
+    /// Refuse while clients that cannot take a native credential change are running.
+    Ordinary,
+    /// The person chose to switch beside running clients, which keep the previous account.
+    AlongsideClients,
+    /// Explicit crash recovery, which always requires closed clients.
+    Recover,
+}
+pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Result<(), String> {
     let change = activity::change(provider)?;
     let home = home()?;
     let native = native::NativeStore::resolve(provider, &home)?;
     native.preflight()?;
-    if recover {
-        clients::require_closed(provider)?;
-    } else {
-        clients::require_activation_safe(provider)?;
+    let recover = activation == Activation::Recover;
+    match activation {
+        Activation::Ordinary => clients::require_activation_safe(provider)?,
+        Activation::AlongsideClients => {}
+        Activation::Recover => clients::require_closed(provider)?,
     }
     let store = store::Store::open(&home, false)?;
     let mut db = store.load()?;

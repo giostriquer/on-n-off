@@ -6,7 +6,7 @@ import { AccountControllers, AccountManager, useAccountManagement } from "./Acco
 import { AccountBilling } from "./AccountBilling";
 import { AccountCardActions } from "./AccountCardActions";
 import { AccountPreferences } from "./AccountPreferences";
-vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn(), readCodexSubscription: vi.fn(), connectCodexBilling: vi.fn() }));
+vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn(), readCodexSubscription: vi.fn(), connectCodexBilling: vi.fn() }));
 vi.mock("$lib/useSharedRead", () => ({ useSharedRead: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "team" };
@@ -23,6 +23,7 @@ function setup(preferences = false) {
   vi.mocked(api.readAccountPreferences).mockResolvedValue(false);
   vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: false, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], nativeAccount: null, recoveryRequired: false, notice: null });
   vi.mocked(api.accountAction).mockResolvedValue();
+  vi.mocked(api.readAccountActivationBlockers).mockResolvedValue([]);
   vi.mocked(api.readCodexSubscription).mockResolvedValue({ metadata: null, connected: false, unavailable: false, browserSupported: true, canConnect: true });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}>{preferences ? <AccountPreferences /> : <AccountControllers><AccountManager provider="codex"><Cards /></AccountManager></AccountControllers>}</QueryClientProvider>);
@@ -33,6 +34,23 @@ it("reads accounts without changing login and switches only from the selected ca
   expect(api.accountAction).not.toHaveBeenCalled();
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
+});
+it("asks before switching beside running clients and switches only on confirmation", async () => {
+  setup(); vi.mocked(api.readAccountActivationBlockers).mockResolvedValue(["Acme Studio (codex)", "ChatGPT"]);
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
+  const confirm = await within(card).findByRole("group", { name: "Confirm switching while Codex is running" });
+  expect(confirm).toHaveTextContent("Acme Studio (codex), ChatGPT");
+  expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
+  fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+  expect(within(card).queryByRole("group", { name: "Confirm switching while Codex is running" })).toBeNull();
+  expect(within(card).getByRole("button", { name: "Use account" })).toHaveFocus();
+  expect(api.accountAction).not.toHaveBeenCalled();
+  fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
+  fireEvent.click(await within(card).findByRole("button", { name: "Switch anyway" }));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "useAlongsideClients", "profile-a", undefined));
+  expect(api.accountAction).not.toHaveBeenCalledWith("codex", "use", expect.anything(), expect.anything());
+  await waitFor(() => expect(within(card).queryByRole("group", { name: "Confirm switching while Codex is running" })).toBeNull());
 });
 it("removes saved login and its card only after confirmation without signing out", async () => {
   setup(); await screen.findByText("person@example.com");
