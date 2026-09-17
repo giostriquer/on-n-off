@@ -10,7 +10,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
 
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
-import { bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor } from "./limitsFixtures";
+import { bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor, sameEmailWorkspacesCodex } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
@@ -34,7 +34,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "accountClients", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
-  "limitsBand", "bankedResets",
+  "limitsBand", "bankedResets", "sameEmailWorkspaces",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -201,6 +201,13 @@ const handlers: Record<string, Handler> = {
   read_accounts: (args) => {
     if (vaultLocked) throw vaultDenied;
     if (scenario === "subscriptionBadges" && args.agent === "codex") return { profiles: subscriptionBadgeProfiles(), nativeObservationId: "badge:renewal", nativeAccount: null, recoveryRequired: false, notice: null };
+    if (scenario === "sameEmailWorkspaces" && args.agent === "codex") return {
+      profiles: [["personal", "0d6c1f3e-5b2a-4c8e-9f10-2a7b3c4d5e61"], ["business", "7e9a2b4c-1d3f-4a5b-8c6d-9e0f1a2b3c47"]].map(([id, workspaceId], index) => ({
+        id, observationId: `profile:${id}`, identity: { provider: "codex", userId: "user-shared", workspaceId },
+        label: "shared@example.com", email: "shared@example.com", category: null, savedAt: "2026-09-17T12:00:00Z", active: index === 0, needsLogin: false,
+      })),
+      nativeObservationId: "profile:personal", nativeAccount: null, recoveryRequired: false, notice: null,
+    };
     if (scenario === "accountDuplicate" && args.agent === "codex") return {
       profiles: [{ id: "saved", observationId: "profile:shared", identity: { provider: "codex", userId: "shared-user", workspaceId: "ca292064-c3f4-453c-b15a-43ef63c46478" }, label: "shared@example.com", email: "shared@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, needsLogin: false }],
       nativeObservationId: "codex-1", nativeAccount: null, recoveryRequired: false, notice: null,
@@ -233,6 +240,7 @@ const handlers: Record<string, Handler> = {
     if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();
     if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
     if (scenario === "bankedResets" && args.agentId === "codex") return bankedResetsCodex();
+    if (scenario === "sameEmailWorkspaces" && args.agentId === "codex") return sameEmailWorkspacesCodex();
     const entries = limitsFor(args.agentId);
     if (scenario !== "accountDuplicate" || args.agentId !== "codex") return entries;
     const legacy = { ...entries[1], currentAccount: false, account: {

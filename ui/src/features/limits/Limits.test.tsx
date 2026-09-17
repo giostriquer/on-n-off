@@ -605,16 +605,26 @@ it("places switching on the account usage card without a second account manager"
  await waitFor(()=>expect(accountAction).toHaveBeenCalledWith("codex","use","saved-personal",undefined));
 });
 
-it("keeps saved accounts available when usage cannot be read and never merges by email", async () => {
+it("keeps saved accounts available when usage cannot be read, never merges by email, and never shows workspace ids", async () => {
  answer([okClaude()], Promise.reject(new Error("usage offline")));
- readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?["one","two"].map(id=>({id,observationId:`profile:${id}`,identity:{provider:"codex",userId:"same-user",workspaceId:id},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false})):[],nativeAccount:null,recoveryRequired:false,notice:null}));
+ readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?["ws-personal-7f3a","ws-business-9c1e"].map(id=>({id,observationId:`profile:${id}`,identity:{provider:"codex",userId:"same-user",workspaceId:id},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false})):[],nativeAccount:null,recoveryRequired:false,notice:null}));
  renderLimits();
  const cards=await screen.findAllByRole("region",{name:"Codex limits · shared@example.com"});
  expect(cards).toHaveLength(2);
- expect(within(cards[0]).getByText("Workspace · one")).toBeVisible();
- expect(within(cards[1]).getByText("Workspace · two")).toBeVisible();
+ for (const card of cards) expect(card.textContent).not.toMatch(/ws-personal-7f3a|ws-business-9c1e/);
  expect(within(cards[0]).getByRole("button",{name:"Use account"})).toBeEnabled();
  expect(within(cards[1]).getByRole("button",{name:"Use account"})).toBeEnabled();
+});
+
+it("tells same-email accounts apart by plan without showing their workspace ids", async () => {
+ const accounts=[["personal","ws-personal-7f3a","prolite"],["business","ws-business-9c1e","business"]] as const;
+ answer([okClaude()], accounts.map(([id,,plan],index)=>okCodex({account:{id:`profile:${id}`,label:"shared@example.com"},currentAccount:index===0,plan})));
+ readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?accounts.map(([id,workspaceId],index)=>({id,observationId:`profile:${id}`,identity:{provider:"codex",userId:"same-user",workspaceId},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:index===0,needsLogin:false})):[],nativeAccount:null,recoveryRequired:false,notice:null}));
+ renderLimits();
+ await waitFor(()=>expect(screen.getAllByRole("region",{name:"Codex limits · shared@example.com"})).toHaveLength(2));
+ const cards=screen.getAllByRole("region",{name:"Codex limits · shared@example.com"});
+ expect(cards.map(card=>within(card).queryByText(/^(Pro ×5|Business)$/)?.textContent).sort()).toEqual(["Business","Pro ×5"]);
+ for (const card of cards) expect(card.textContent).not.toMatch(/ws-personal-7f3a|ws-business-9c1e/);
 });
 
 it("does not let an old current card save or sign out a different native account", async () => {
@@ -725,12 +735,11 @@ it("keeps explicit reload queued when an invalidation replaces the background ch
 });
 
 
-it("does not invent a workspace distinction between a legacy card and its saved login", async () => {
+it("keeps an unverified legacy card beside its saved login", async () => {
  answer([okClaude()], [okCodex({account:{id:"team",label:"shared@example.com"},currentAccount:false})]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved",observationId:"profile:user-team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
  renderLimits();
  await screen.findByRole("button",{name:"Use account"});
- expect(screen.queryByText("Workspace · team")).toBeNull();
  // Unverified legacy quotas stay historical until a fresh scoped observation arrives.
  expect(screen.getAllByRole("region",{name:"Codex limits · shared@example.com"})).toHaveLength(2);
 });
