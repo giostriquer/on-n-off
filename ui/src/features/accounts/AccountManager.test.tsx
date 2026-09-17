@@ -64,6 +64,7 @@ it("switches normally when running clients cannot be checked, and waits for the 
   const card = await screen.findByRole("region", { name: "person@example.com" });
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
   await waitFor(() => expect(within(card).getByRole("button", { name: "Use account" })).toBeDisabled());
+  expect(api.accountAction).not.toHaveBeenCalled();
   await act(async () => answer([]));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
   vi.mocked(api.accountAction).mockClear();

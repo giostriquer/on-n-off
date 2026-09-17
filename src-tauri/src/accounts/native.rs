@@ -452,14 +452,11 @@ impl Native for NativeStore {
         }
         self.verify_codex(true)
     }
-    /// Codex renews five minutes before expiry and the desktop app sooner, so ten minutes of
-    /// margin keeps a running client from renewing mid-switch. An unreadable expiry counts as soon.
     fn renews_soon(&self, login: &Login) -> bool {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |v| v.as_secs() as i64);
-        self.provider == AgentId::Codex
-            && model::codex_access_expiry(&login.auth).is_none_or(|expiry| expiry < now + 600)
+            .map_or(0, |v| i64::try_from(v.as_secs()).unwrap_or(i64::MAX));
+        self.provider == AgentId::Codex && model::codex_renews_soon(&login.auth, now)
     }
     fn verify_observed(&self) -> Result<(), String> {
         if self.provider == AgentId::Codex && !self.custom {

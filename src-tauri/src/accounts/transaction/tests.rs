@@ -515,3 +515,87 @@ fn switching_beside_clients_refuses_the_same_workspace_or_a_renewing_login() {
     assert!(error.contains("same workspace"), "{error}");
     assert_eq!(live_refresh(&native), "cli-rotated-a");
 }
+
+#[test]
+fn a_failed_verification_beside_clients_restores_bytes_it_owns() {
+    let (mut db, native, _, b) = running(Client {
+        fail_verify: true,
+        ..Default::default()
+    });
+    let error = switch(&mut db, &native, &b, true).0.unwrap_err();
+    assert!(error.contains("The previous login was restored"), "{error}");
+    assert_eq!(native.verified.get(), 1);
+    assert!(db.recovery.is_none());
+    assert_eq!(live_refresh(&native), "cli-rotated-a");
+}
+
+#[test]
+fn a_switch_from_signed_out_that_a_client_signs_out_again_ends_signed_out() {
+    let (mut db, native, _, b) = running(Client {
+        after_write: Some(None),
+        ..Default::default()
+    });
+    *native.store.live.borrow_mut() = None;
+    let error = switch(&mut db, &native, &b, true).0.unwrap_err();
+    assert!(error.contains("The previous login was restored"), "{error}");
+    assert!(db.recovery.is_none());
+    assert_eq!(live_refresh(&native), "none");
+}
+
+#[test]
+fn an_unreadable_read_back_is_not_blamed_on_a_client() {
+    struct Unreadable(Running);
+    impl Native for Unreadable {
+        fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
+            self.0.lock()
+        }
+        fn read(&self) -> Result<Option<Login>, String> {
+            if self.0.wrote.get() {
+                return Err("auth.json is malformed".into());
+            }
+            self.0.read()
+        }
+        fn identify(&self, login: &Login) -> Result<Identity, String> {
+            self.0.identify(login)
+        }
+        fn write(&self, login: Option<&Login>) -> Result<(), String> {
+            self.0.write(login)
+        }
+        fn verify(&self) -> Result<(), String> {
+            self.0.verify()
+        }
+    }
+    let (mut db, native, _, b) = running(Client::default());
+    let native = Unreadable(native);
+    let error = activate(&mut db, &native, &b, false, &mut |_| Ok(())).unwrap_err();
+    assert!(
+        error.starts_with("The new login could not be read back."),
+        "{error}"
+    );
+    assert_eq!(native.0.verified.get(), 0);
+    assert!(db.recovery.is_some());
+}
+
+#[test]
+fn a_journal_that_cannot_be_cleared_before_publication_says_so() {
+    let (mut db, native, _, b) = running(Client {
+        during: Some(Some(in_workspace("c", "external-c", "three"))),
+        ..Default::default()
+    });
+    let mut writes = 0;
+    let error = activate(&mut db, &native, &b, false, &mut |db| {
+        writes += 1;
+        if db.recovery.is_some() {
+            *native.store.live.borrow_mut() = native.client.during.clone().unwrap();
+            return Ok(());
+        }
+        Err("disk full".into())
+    })
+    .unwrap_err();
+    assert_eq!(writes, 2);
+    assert!(error.contains("could not be cleared"), "{error}");
+    assert_eq!(
+        native.store.live.borrow().as_ref().unwrap().auth["user"],
+        "c"
+    );
+}

@@ -58,6 +58,10 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   const signingIn = loginTarget === accountId && (busy === "login" || busy === "cancelLogin");
   const disabled = !!busy || removing || query.isPending || !!query.error || query.data?.recoveryRequired;
   const switchingAlongside = clients && profile && !profile.needsLogin ? { clients, profile } : null;
+  function startSwitch(profileId: string) {
+    setClients(null);
+    void use(profileId).then(running => setClients(running.length ? running : null)).catch(() => {});
+  }
   async function confirm() {
     if (confirmation === "signOut" && (!current || !nativeMatches || client.getQueryData<AccountsReading>(["accounts", provider])?.nativeObservationId !== accountId)) { setConfirmation(null); return; }
     setError(null); setRemoving(true);
@@ -103,7 +107,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     {header(menu)}
     {children}
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
-      {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : void use(profile.id).then(running => setClients(running.length ? running : null)).catch(() => {})}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
+      {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : startSwitch(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
         : <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
       {switchingAlongside
         ? <SwitchAlongsideConfirmation product={provider === "codex" ? "Codex" : "Claude"} clients={switchingAlongside.clients} disabled={!!disabled}

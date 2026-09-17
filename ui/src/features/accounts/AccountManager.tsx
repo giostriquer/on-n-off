@@ -37,8 +37,10 @@ function useController(provider: AccountProvider) {
    */
   async function use(id: string): Promise<string[]> {
     setBusy("use"); setError(null);
-    const running = await api.readAccountActivationBlockers(provider).catch(() => []);
-    if (running.length) { setBusy(null); return running; }
+    let running: string[] = [];
+    try { running = await api.readAccountActivationBlockers(provider); } catch { /* checked again by the switch */ }
+    finally { setBusy(null); }
+    if (running.length) return running;
     await action("use", id);
     return [];
   }

@@ -17,12 +17,14 @@ pub fn string<'a>(value: &'a Value, pointer: &str) -> Result<&'a str, String> {
 pub fn claims(auth: &Value) -> Result<Value, String> {
     token_claims(auth, "/tokens/id_token")
 }
-/// When a Codex access token expires, in Unix seconds, or `None` when it cannot be read.
-pub fn codex_access_expiry(auth: &Value) -> Option<i64> {
+/// Whether a running Codex client may renew this login within ten minutes of `now` (Unix
+/// seconds). Codex renews shortly before expiry, five minutes in its source, and the desktop app
+/// sooner. An unreadable expiry counts as soon.
+pub fn codex_renews_soon(auth: &Value, now: i64) -> bool {
     token_claims(auth, "/tokens/access_token")
-        .ok()?
-        .get("exp")?
-        .as_i64()
+        .ok()
+        .and_then(|claims| claims.get("exp")?.as_i64())
+        .is_none_or(|expiry| expiry < now + 600)
 }
 fn token_claims(auth: &Value, pointer: &str) -> Result<Value, String> {
     let token = string(auth, pointer)?;

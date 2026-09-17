@@ -103,21 +103,24 @@ pub fn activate(
     if let Err(error) = settle_outgoing(db, native, &profile.identity, persist) {
         // Nothing was published, so a retained journal would only demand recovery.
         db.recovery = None;
-        let _ = persist(db);
-        return Err(format!("{error} Nothing was replaced."));
+        return Err(match persist(db) {
+            Ok(()) => format!("{error} Nothing was replaced."),
+            Err(_) => format!("{error} Nothing was replaced, but the interrupted change could not be cleared; recover it before another action."),
+        });
     }
     let publication = native.write_locked(Some(incoming), locks.as_ref());
     // Verification refreshes whatever is on disk, so it must not run on a login a client wrote.
     // Reading back under the native locks, which Claude Code's own refresh honors, narrows that
     // window; an unreadable store counts as replaced.
-    let replaced = publication.is_ok()
-        && !matches!(native.read(), Ok(Some(live)) if live.auth == incoming.auth);
+    let replaced = match publication.as_ref().map(|()| native.read()) {
+        Ok(Ok(Some(live))) if live.auth == incoming.auth => None,
+        Ok(Ok(_)) => Some("A running client replaced the new login."),
+        Ok(Err(_)) => Some("The new login could not be read back."),
+        Err(_) => None,
+    };
     drop(locks);
-    if replaced {
-        return Err(restored(
-            "A running client replaced the new login.",
-            restore_known(db, native, persist),
-        ));
+    if let Some(reason) = replaced {
+        return Err(restored(reason, restore_known(db, native, persist)));
     }
     let result = publication.and_then(|()| native.verify()).and_then(|()| {
         let live = native
@@ -254,8 +257,8 @@ pub fn recover(
     finish(db, native, journal, locks, persist)
 }
 /// Restores the outgoing login only over bytes this change wrote or replaced. Anything else,
-/// including a missing login, may belong to a running client, so the journal waits for an
-/// explicit recovery with clients closed.
+/// including a login a client signed out, may belong to a running client, so the journal waits for
+/// an explicit recovery with clients closed.
 fn restore_known(
     db: &mut Database,
     native: &dyn Native,
@@ -263,10 +266,11 @@ fn restore_known(
 ) -> Result<(), String> {
     let (journal, target) = pending(db)?;
     let locks = native.lock()?;
-    if !native
-        .read()?
-        .is_some_and(|live| known(&journal, &target, &live))
-    {
+    let owned = match native.read()? {
+        Some(live) => known(&journal, &target, &live),
+        None => journal.outgoing.is_none(),
+    };
+    if !owned {
         return Err("The native login changed outside on-n-off.".into());
     }
     native.write_locked(journal.outgoing.as_ref(), locks.as_ref())?;

@@ -23,27 +23,37 @@ const SCRIPT_EXTENSIONS: [&str; 8] = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".mt
 
 /// Names the clients an ordinary switch refuses to run beside, so a person can close them or
 /// switch anyway. Claude Code handles native credential changes, so Claude has none.
+///
+/// This scan runs before the account-change lease, while on-n-off's own provider reads may be
+/// live, so it leaves out processes on-n-off started. The checks that gate a change never do:
+/// Windows keeps a dead parent's pid on its children and reuses pids, so the exclusion could hide
+/// a real client there, while the lease already keeps on-n-off's own reads from running.
 pub fn activation_blockers(provider: AgentId) -> Result<Vec<String>, String> {
-    blockers(provider, running_processes)
+    blockers(
+        provider,
+        running_processes,
+        Some(&std::process::id().to_string()),
+    )
 }
 
 /// Sign-out, crash recovery, and abandoned-login cleanup still require closed clients.
 pub fn require_activation_safe(provider: AgentId) -> Result<(), String> {
-    closed(&activation_blockers(provider)?)
+    closed(&blockers(provider, running_processes, None)?)
 }
 
 pub fn require_closed(provider: AgentId) -> Result<(), String> {
-    closed(&running_clients(provider, running_processes)?)
+    closed(&running_clients(provider, running_processes, None)?)
 }
 
 fn blockers(
     provider: AgentId,
     scan: impl FnOnce() -> Result<Vec<Process>, String>,
+    own: Option<&str>,
 ) -> Result<Vec<String>, String> {
     if provider == AgentId::Claude {
         return Ok(Vec::new());
     }
-    running_clients(provider, scan)
+    running_clients(provider, scan, own)
 }
 
 fn closed(clients: &[String]) -> Result<(), String> {
@@ -56,22 +66,19 @@ fn closed(clients: &[String]) -> Result<(), String> {
 fn running_clients(
     provider: AgentId,
     scan: impl FnOnce() -> Result<Vec<Process>, String>,
+    own: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let processes =
         scan().map_err(|_| "Could not check running clients. Close provider clients and retry.")?;
-    Ok(clients(
-        &processes,
-        provider,
-        &std::process::id().to_string(),
-    ))
+    Ok(clients(&processes, provider, own))
 }
 
-/// on-n-off's own provider reads run under its account-change lease, so only other processes count.
-fn clients(processes: &[Process], provider: AgentId, own: &str) -> Vec<String> {
+/// `own` leaves out the processes that pid started.
+fn clients(processes: &[Process], provider: AgentId, own: Option<&str>) -> Vec<String> {
     let by_pid: HashMap<_, _> = processes.iter().map(|p| (p.pid.as_str(), p)).collect();
     processes
         .iter()
-        .filter(|process| !lineage(process, &by_pid).any(|p| p.pid == own))
+        .filter(|process| own.is_none_or(|own| !lineage(process, &by_pid).any(|p| p.pid == own)))
         .filter_map(|process| {
             let name = client_name(process, provider)?;
             // Name a client after the app bundle it runs in or was started from, which is what

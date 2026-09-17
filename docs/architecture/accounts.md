@@ -112,9 +112,10 @@ these operations finish. Restart Codex clients after switching.
 
 The preflight identifies a client by its executable, or by the script a JavaScript runtime
 launched (the first file after its flags, or the package's own entry script), never by an argument
-that merely names the provider. It leaves out processes on-n-off started, whose provider reads run
-under the account-change lease, and names each client after the app bundle it runs in or was
-started from.
+that merely names the provider, and names each client after the app bundle it runs in or was
+started from. Only the scan behind the prompt leaves out processes on-n-off started: the checks that
+gate a change run under the account-change lease, which already keeps on-n-off's own reads from
+running, and Windows keeps a dead parent's pid on its children and reuses pids.
 
 Before an ordinary Codex switch the account card lists those clients and lets the person switch
 anyway. Running Codex clients never pick up a replaced `auth.json`: they keep the previous account
