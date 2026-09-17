@@ -32,11 +32,19 @@ pub trait Native {
     fn verify_observed(&self) -> Result<(), String> {
         self.verify()
     }
+    /// Whether a running client is about to renew this login, and so rewrite it.
+    fn renews_soon(&self, _login: &Login) -> bool {
+        false
+    }
 }
+/// `alongside_clients` means the person chose to switch while provider clients run. Those clients
+/// take no native lock and may write at any time, so a failure then restores only bytes this
+/// change wrote or replaced and never verifies a login a client may own.
 pub fn activate(
     db: &mut Database,
     native: &dyn Native,
     id: &str,
+    alongside_clients: bool,
     persist: &mut dyn FnMut(&Database) -> Result<(), String>,
 ) -> Result<(), String> {
     if db.recovery.is_some() {
@@ -66,50 +74,50 @@ pub fn activate(
         )?;
         return persist(db);
     }
-    if let (Some(login), Some(identity)) = (&outgoing, &outgoing_identity) {
-        if identity != &profile.identity {
-            db.capture_native(identity.clone(), login.clone())?;
+    if alongside_clients {
+        // Codex clients match a login by workspace, so one would adopt the new login mid-session;
+        // and one about to renew would write its account back.
+        if outgoing_identity
+            .as_ref()
+            .is_some_and(|v| v.workspace_id == profile.identity.workspace_id)
+        {
+            return Err("Both accounts use the same workspace, so running clients would pick up the new login mid-session. Close provider clients to switch.".into());
+        }
+        if outgoing.as_ref().is_some_and(|v| native.renews_soon(v)) {
+            return Err("A running client is about to renew the current login. Try again in a few minutes, or close provider clients to switch now.".into());
         }
     }
+    capture(
+        db,
+        outgoing.as_ref(),
+        outgoing_identity.as_ref(),
+        &profile.identity,
+    )?;
 
     db.recovery = Some(Recovery {
         target_id: id.into(),
-        outgoing: outgoing.clone(),
-        outgoing_identity: outgoing_identity.clone(),
+        outgoing,
+        outgoing_identity,
     });
     persist(db)?; // No native write before the protected journal is durable.
-
-    // Codex has no cross-process lock, so a client left running can rotate the outgoing login
-    // after capture. Save the generation it moved to, and never publish over another account.
-    let latest = native.read()?;
-    if latest.as_ref().map(|l| &l.auth) != outgoing.as_ref().map(|l| &l.auth) {
-        let identity = latest.as_ref().map(|v| native.identify(v)).transpose()?;
-        if identity != outgoing_identity {
-            db.recovery = None;
-            persist(db)?;
-            return Err("The native login changed during the switch. Nothing was replaced.".into());
-        }
-        if let (Some(login), Some(identity)) = (&latest, identity) {
-            if identity != profile.identity {
-                db.capture_native(identity, login.clone())?;
-            }
-        }
-        if let Some(journal) = db.recovery.as_mut() {
-            journal.outgoing = latest;
-        }
-        persist(db)?;
+    if let Err(error) = settle_outgoing(db, native, &profile.identity, persist) {
+        // Nothing was published, so a retained journal would only demand recovery.
+        db.recovery = None;
+        let _ = persist(db);
+        return Err(format!("{error} Nothing was replaced."));
     }
     let publication = native.write_locked(Some(incoming), locks.as_ref());
-    // Verification refreshes whatever is on disk, so it must never spend a login a client wrote.
-    // Read back under the native locks, which Claude Code's own refresh honors.
-    let replaced =
-        publication.is_ok() && native.read()?.is_none_or(|live| live.auth != incoming.auth);
+    // Verification refreshes whatever is on disk, so it must not run on a login a client wrote.
+    // Reading back under the native locks, which Claude Code's own refresh honors, narrows that
+    // window; an unreadable store counts as replaced.
+    let replaced = publication.is_ok()
+        && !matches!(native.read(), Ok(Some(live)) if live.auth == incoming.auth);
     drop(locks);
     if replaced {
-        return Err(match recover_known(db, native, persist) {
-            Ok(()) => "A running client replaced the new login. The previous login was restored; close provider clients before retrying.".into(),
-            Err(error) => format!("{error} Close provider clients, then recover the interrupted change."),
-        });
+        return Err(restored(
+            "A running client replaced the new login.",
+            restore_known(db, native, persist),
+        ));
     }
     let result = publication.and_then(|()| native.verify()).and_then(|()| {
         let live = native
@@ -122,6 +130,9 @@ pub fn activate(
         Ok(())
     });
     if let Err(error) = result {
+        if alongside_clients {
+            return Err(restored(&error, restore_known(db, native, persist)));
+        }
         recover(db, native, persist)?;
         return Err(format!(
             "{error} Recovery completed. Check the current account before retrying."
@@ -134,28 +145,53 @@ pub fn activate(
     }
     Ok(())
 }
-pub fn recover(
+fn capture(
     db: &mut Database,
-    native: &dyn Native,
-    persist: &mut dyn FnMut(&Database) -> Result<(), String>,
+    login: Option<&Login>,
+    identity: Option<&Identity>,
+    target: &Identity,
 ) -> Result<(), String> {
-    recover_with(db, native, persist, true)
+    match (login, identity) {
+        (Some(login), Some(identity)) if identity != target => {
+            db.capture_native(identity.clone(), login.clone())
+        }
+        _ => Ok(()),
+    }
 }
-/// Restores only bytes this change wrote or replaced. Anything else may belong to a running
-/// client, so it is left untouched and the journal waits for an explicit recovery.
-fn recover_known(
+/// Codex clients take no lock, so one left running can rotate the outgoing login after capture.
+/// Re-reading once the journal is durable saves the generation it moved to and refuses to publish
+/// over another account. This narrows the race; it cannot close it.
+fn settle_outgoing(
     db: &mut Database,
     native: &dyn Native,
+    target: &Identity,
     persist: &mut dyn FnMut(&Database) -> Result<(), String>,
 ) -> Result<(), String> {
-    recover_with(db, native, persist, false)
+    let journal = db
+        .recovery
+        .clone()
+        .ok_or("Protected recovery is missing.")?;
+    let latest = native.read()?;
+    if latest.as_ref().map(|v| &v.auth) == journal.outgoing.as_ref().map(|v| &v.auth) {
+        return Ok(());
+    }
+    let identity = latest.as_ref().map(|v| native.identify(v)).transpose()?;
+    if identity != journal.outgoing_identity {
+        return Err("The native login changed during the switch.".into());
+    }
+    capture(db, latest.as_ref(), identity.as_ref(), target)?;
+    if let Some(journal) = db.recovery.as_mut() {
+        journal.outgoing = latest;
+    }
+    persist(db)
 }
-fn recover_with(
-    db: &mut Database,
-    native: &dyn Native,
-    persist: &mut dyn FnMut(&Database) -> Result<(), String>,
-    verify_unknown: bool,
-) -> Result<(), String> {
+fn restored(error: &str, restore: Result<(), String>) -> String {
+    match restore {
+        Ok(()) => format!("{error} The previous login was restored; close provider clients before retrying."),
+        Err(reason) => format!("{error} {reason} The change is pending recovery: close provider clients, then recover."),
+    }
+}
+fn pending(db: &Database) -> Result<(Recovery, super::store::Profile), String> {
     let journal = db
         .recovery
         .clone()
@@ -166,27 +202,27 @@ fn recover_with(
         .find(|p| p.id == journal.target_id)
         .ok_or("Recovery target is missing.")?
         .clone();
-    let mut locks = Some(native.lock()?);
-    let live = native.read()?;
-    if let Some(live) = live {
-        let known_outgoing = journal
-            .outgoing
-            .as_ref()
-            .is_some_and(|previous| previous.auth == live.auth);
-        let known_incoming = target
+    Ok((journal, target))
+}
+fn known(journal: &Recovery, target: &super::store::Profile, live: &Login) -> bool {
+    journal
+        .outgoing
+        .as_ref()
+        .is_some_and(|previous| previous.auth == live.auth)
+        || target
             .login
             .as_ref()
-            .is_some_and(|incoming| incoming.auth == live.auth);
-        if known_outgoing || known_incoming {
-            // A crash can split Claude's identity/config write from its credential write.
-            // Known credential bytes establish ownership before consulting the partial identity.
-            native.write_locked(
-                journal.outgoing.as_ref(),
-                locks.as_ref().ok_or("Native lock is missing.")?.as_ref(),
-            )?;
-        } else if !verify_unknown {
-            return Err("The native login changed outside on-n-off. Protected recovery was retained; no credentials were overwritten.".into());
-        } else {
+            .is_some_and(|incoming| incoming.auth == live.auth)
+}
+pub fn recover(
+    db: &mut Database,
+    native: &dyn Native,
+    persist: &mut dyn FnMut(&Database) -> Result<(), String>,
+) -> Result<(), String> {
+    let (journal, target) = pending(db)?;
+    let mut locks = Some(native.lock()?);
+    match native.read()? {
+        Some(live) if !known(&journal, &target, &live) => {
             // Unknown bytes may be a newly rotated generation, or an unrelated external login.
             drop(locks.take());
             native.verify().map_err(|_|"Could not verify the changed native credential. Protected recovery was retained; no credentials were overwritten.")?;
@@ -208,12 +244,41 @@ fn recover_with(
                 return Err("Native identity changed outside on-n-off. Protected recovery was retained; no credentials were overwritten.".into());
             }
         }
-    } else {
-        native.write_locked(
+        // A crash can split Claude's identity/config write from its credential write.
+        // Known credential bytes establish ownership before consulting the partial identity.
+        _ => native.write_locked(
             journal.outgoing.as_ref(),
             locks.as_ref().ok_or("Native lock is missing.")?.as_ref(),
-        )?;
+        )?,
     }
+    finish(db, native, journal, locks, persist)
+}
+/// Restores the outgoing login only over bytes this change wrote or replaced. Anything else,
+/// including a missing login, may belong to a running client, so the journal waits for an
+/// explicit recovery with clients closed.
+fn restore_known(
+    db: &mut Database,
+    native: &dyn Native,
+    persist: &mut dyn FnMut(&Database) -> Result<(), String>,
+) -> Result<(), String> {
+    let (journal, target) = pending(db)?;
+    let locks = native.lock()?;
+    if !native
+        .read()?
+        .is_some_and(|live| known(&journal, &target, &live))
+    {
+        return Err("The native login changed outside on-n-off.".into());
+    }
+    native.write_locked(journal.outgoing.as_ref(), locks.as_ref())?;
+    finish(db, native, journal, Some(locks), persist)
+}
+fn finish(
+    db: &mut Database,
+    native: &dyn Native,
+    journal: Recovery,
+    locks: Option<Box<dyn NativeGuard>>,
+    persist: &mut dyn FnMut(&Database) -> Result<(), String>,
+) -> Result<(), String> {
     let restored = native.read()?;
     let identity = restored.as_ref().map(|v| native.identify(v)).transpose()?;
     if identity != journal.outgoing_identity {

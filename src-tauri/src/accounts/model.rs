@@ -15,7 +15,17 @@ pub fn string<'a>(value: &'a Value, pointer: &str) -> Result<&'a str, String> {
         .ok_or_else(|| "The native login is missing required identity or renewable credentials. Sign in again with the official CLI.".into())
 }
 pub fn claims(auth: &Value) -> Result<Value, String> {
-    let token = string(auth, "/tokens/id_token")?;
+    token_claims(auth, "/tokens/id_token")
+}
+/// When a Codex access token expires, in Unix seconds, or `None` when it cannot be read.
+pub fn codex_access_expiry(auth: &Value) -> Option<i64> {
+    token_claims(auth, "/tokens/access_token")
+        .ok()?
+        .get("exp")?
+        .as_i64()
+}
+fn token_claims(auth: &Value, pointer: &str) -> Result<Value, String> {
+    let token = string(auth, pointer)?;
     let encoded = token
         .split('.')
         .nth(1)

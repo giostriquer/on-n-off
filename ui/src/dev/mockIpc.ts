@@ -211,7 +211,7 @@ const handlers: Record<string, Handler> = {
       { id: "work", observationId: args.agent === "codex" ? "codex-2" : "claude-2", identity: { provider: args.agent, userId: "user-work", workspaceId: "Acme workspace" }, label: "person@acme.example", email: "person@acme.example", category: "Client A / research", savedAt: "2026-08-23T14:20:00Z", active: false, needsLogin: false },
     ], nativeObservationId: args.agent === "codex" ? "codex-1" : "claude-1", nativeAccount: { provider: args.agent, userId: "user-personal", workspaceId: "Personal workspace" }, recoveryRequired: false, notice: null,
   }); },
-  account_activation_blockers: (args) => scenario === "accountClients" && args.agent === "codex" ? ["Acme Studio (codex)", "ChatGPT"] : [],
+  read_account_activation_blockers: (args) => scenario === "accountClients" && args.agent === "codex" ? ["Acme Studio (codex)", "ChatGPT"] : [],
   account_action: (args) => {
     if (args.action === "unlock") vaultLocked = false;
     if (args.action === "remember") rememberingMock = true;

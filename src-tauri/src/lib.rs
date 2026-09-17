@@ -117,7 +117,7 @@ pub fn run() {
             commands::read_limits,
             commands::read_accounts,
             commands::read_account_preferences,
-            commands::account_activation_blockers,
+            commands::read_account_activation_blockers,
             commands::account_action,
             commands::add_account,
             commands::cancel_account_login,

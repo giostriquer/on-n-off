@@ -50,3 +50,14 @@ fn claude_same_user_different_organizations_are_distinct() {
     )
     .is_err());
 }
+#[test]
+fn reads_the_codex_access_token_expiry_only_from_a_readable_token() {
+    let mut value = auth("user-a", "team");
+    let expiring = json!({"exp": 1_900_000_000});
+    value["tokens"]["access_token"] = json!(format!(
+        "e30.{}.sig",
+        URL_SAFE_NO_PAD.encode(expiring.to_string())
+    ));
+    assert_eq!(codex_access_expiry(&value), Some(1_900_000_000));
+    assert_eq!(codex_access_expiry(&auth("user-a", "team")), None);
+}

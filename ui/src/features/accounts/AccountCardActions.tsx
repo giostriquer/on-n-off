@@ -30,10 +30,8 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [clients, setClients] = useState<string[] | null>(null);
-  const [checking, setChecking] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const keep = useRef<HTMLButtonElement>(null);
-  const switchButton = useRef<HTMLButtonElement>(null);
+  const useButton = useRef<HTMLButtonElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const id = useId();
   const open = menuOpen || editing || !!confirmation;
@@ -52,29 +50,14 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [open, editing, confirmation]);
-  const confirming = useRef(false);
-  useEffect(() => {
-    if (clients) keep.current?.focus();
-    // Canceling removes the focused control, so hand focus back to the button that asked.
-    else if (confirming.current) switchButton.current?.focus();
-    confirming.current = !!clients;
-  }, [clients]);
   if (!manager) return <>{header(null)}{children}</>;
-  const { provider, busy, query, action, activationBlockers, add, cancel, loginTarget } = manager;
+  const { provider, busy, query, action, use, add, cancel, loginTarget } = manager;
   const nativeMatches = !query.isFetching && query.data?.nativeObservationId === accountId;
   // A current card whose native login is not confirmed as this account must not act on it.
   const unconfirmedCurrent = current && !nativeMatches;
   const signingIn = loginTarget === accountId && (busy === "login" || busy === "cancelLogin");
-  const disabled = !!busy || removing || checking || query.isPending || !!query.error || query.data?.recoveryRequired;
-  async function use(profileId: string) {
-    setChecking(true);
-    try {
-      const running = await activationBlockers();
-      if (running.length) setClients(running);
-      else await action("use", profileId).catch(() => {});
-    } finally { setChecking(false); }
-  }
-  const product = provider === "codex" ? "Codex" : "Claude Code";
+  const disabled = !!busy || removing || query.isPending || !!query.error || query.data?.recoveryRequired;
+  const switchingAlongside = clients && profile && !profile.needsLogin ? { clients, profile } : null;
   async function confirm() {
     if (confirmation === "signOut" && (!current || !nativeMatches || client.getQueryData<AccountsReading>(["accounts", provider])?.nativeObservationId !== accountId)) { setConfirmation(null); return; }
     setError(null); setRemoving(true);
@@ -120,13 +103,26 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     {header(menu)}
     {children}
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
-      {clients && profile ? <div role="group" aria-label={`Confirm switching while ${product} is running`} className="flex w-full flex-col gap-2 text-[12px]" onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setClients(null); } }}>
-        <p className="m-0">{product} is still running in {clients.join(", ")}. Those sessions keep using the current account until you restart them. Don't sign out or sign in again from them: that can revoke saved logins.</p>
-        <div className="flex gap-2"><button className={button} disabled={disabled} onClick={() => { setClients(null); void action("useAlongsideClients", profile.id).catch(() => {}); }}>Switch anyway</button><button ref={keep} className={button} onClick={() => setClients(null)}>Cancel</button></div>
-      </div>
-      : signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button ref={switchButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : void use(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
+      {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : void use(profile.id).then(running => setClients(running.length ? running : null)).catch(() => {})}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
         : <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
-      {!clients && footer?.({ current, blocked: !!disabled, unconfirmedCurrent })}
+      {switchingAlongside
+        ? <SwitchAlongsideConfirmation product={provider === "codex" ? "Codex" : "Claude"} clients={switchingAlongside.clients} disabled={!!disabled}
+          onSwitch={() => { setClients(null); void action("useAlongsideClients", switchingAlongside.profile.id).catch(() => {}); }}
+          onCancel={() => { setClients(null); useButton.current?.focus(); }} />
+        : footer?.({ current, blocked: !!disabled, unconfirmedCurrent })}
     </footer>
   </>;
+}
+
+/** Asks before a switch that provider clients still running would not follow. */
+function SwitchAlongsideConfirmation({ product, clients, disabled, onSwitch, onCancel }: {
+  product: string; clients: string[]; disabled: boolean; onSwitch: () => void; onCancel: () => void;
+}) {
+  const keep = useRef<HTMLButtonElement>(null);
+  useEffect(() => { keep.current?.focus(); }, []);
+  return <div role="group" aria-label={`Confirm switching while ${product} is running`} className="flex w-full flex-col gap-2 text-[12px]"
+    onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onCancel(); } }}>
+    <p className="m-0">{product} is still running in {clients.join(", ")}. Those sessions keep using the current account until you restart them. Don't sign out or sign in again from them: that can revoke saved logins.</p>
+    <div className="flex gap-2"><button className={button} disabled={disabled} onClick={onSwitch}>Switch anyway</button><button ref={keep} className={button} onClick={onCancel}>Cancel</button></div>
+  </div>;
 }

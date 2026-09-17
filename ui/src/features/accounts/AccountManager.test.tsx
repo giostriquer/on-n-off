@@ -34,23 +34,44 @@ it("reads accounts without changing login and switches only from the selected ca
   expect(api.accountAction).not.toHaveBeenCalled();
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
+  expect(api.readAccountActivationBlockers).toHaveBeenCalledWith("codex");
 });
 it("asks before switching beside running clients and switches only on confirmation", async () => {
   setup(); vi.mocked(api.readAccountActivationBlockers).mockResolvedValue(["Acme Studio (codex)", "ChatGPT"]);
   const card = await screen.findByRole("region", { name: "person@example.com" });
+  const name = "Confirm switching while Codex is running";
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
-  const confirm = await within(card).findByRole("group", { name: "Confirm switching while Codex is running" });
+  const confirm = await within(card).findByRole("group", { name });
   expect(confirm).toHaveTextContent("Acme Studio (codex), ChatGPT");
+  expect(within(card).queryByRole("button", { name: "Connect billing" })).toBeNull();
   expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
   fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
-  expect(within(card).queryByRole("group", { name: "Confirm switching while Codex is running" })).toBeNull();
+  expect(within(card).queryByRole("group", { name })).toBeNull();
   expect(within(card).getByRole("button", { name: "Use account" })).toHaveFocus();
+  fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
+  fireEvent.keyDown(await within(card).findByRole("group", { name }), { key: "Escape" });
+  expect(within(card).queryByRole("group", { name })).toBeNull();
   expect(api.accountAction).not.toHaveBeenCalled();
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
   fireEvent.click(await within(card).findByRole("button", { name: "Switch anyway" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "useAlongsideClients", "profile-a", undefined));
-  expect(api.accountAction).not.toHaveBeenCalledWith("codex", "use", expect.anything(), expect.anything());
-  await waitFor(() => expect(within(card).queryByRole("group", { name: "Confirm switching while Codex is running" })).toBeNull());
+  expect(vi.mocked(api.accountAction).mock.calls.map(call => call[1])).toEqual(["useAlongsideClients"]);
+  await waitFor(() => expect(within(card).queryByRole("group", { name })).toBeNull());
+});
+it("switches normally when running clients cannot be checked, and waits for the check", async () => {
+  setup(); let answer!: (running: string[]) => void;
+  vi.mocked(api.readAccountActivationBlockers).mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
+  await waitFor(() => expect(within(card).getByRole("button", { name: "Use account" })).toBeDisabled());
+  await act(async () => answer([]));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
+  vi.mocked(api.accountAction).mockClear();
+  vi.mocked(api.readAccountActivationBlockers).mockRejectedValueOnce(new Error("Could not list processes"));
+  await waitFor(() => expect(within(card).getByRole("button", { name: "Use account" })).toBeEnabled());
+  fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
+  expect(within(card).queryByRole("group", { name: "Confirm switching while Codex is running" })).toBeNull();
 });
 it("removes saved login and its card only after confirmation without signing out", async () => {
   setup(); await screen.findByText("person@example.com");

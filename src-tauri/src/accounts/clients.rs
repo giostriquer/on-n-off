@@ -2,6 +2,7 @@
 use crate::dto::AgentId;
 use std::{
     collections::{BTreeSet, HashMap},
+    path::Path,
     process::Command,
     time::Duration,
 };
@@ -18,36 +19,31 @@ struct Process {
 }
 
 const SCRIPT_HOSTS: [&str; 6] = ["node", "node.exe", "bun", "bun.exe", "deno", "deno.exe"];
+const SCRIPT_EXTENSIONS: [&str; 8] = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"];
 
-/// Ordinary activation can rely on Claude Code's native credential-change handling.
+/// Names the clients an ordinary switch refuses to run beside, so a person can close them or
+/// switch anyway. Claude Code handles native credential changes, so Claude has none.
+pub fn activation_blockers(provider: AgentId) -> Result<Vec<String>, String> {
+    blockers(provider, running_processes)
+}
+
 /// Sign-out, crash recovery, and abandoned-login cleanup still require closed clients.
 pub fn require_activation_safe(provider: AgentId) -> Result<(), String> {
-    activation_preflight(provider, require_closed)
-}
-
-/// Names the clients ordinary activation would refuse to run beside, so a person can choose to
-/// close them or switch anyway. Empty when activation would not refuse.
-pub fn activation_blockers(provider: AgentId) -> Result<Vec<String>, String> {
-    let mut found = Vec::new();
-    activation_preflight(provider, |provider| {
-        found = running_clients(provider)?;
-        Ok(())
-    })?;
-    Ok(found)
-}
-
-fn activation_preflight(
-    provider: AgentId,
-    check_closed: impl FnOnce(AgentId) -> Result<(), String>,
-) -> Result<(), String> {
-    if provider == AgentId::Claude {
-        return Ok(());
-    }
-    check_closed(provider)
+    closed(&activation_blockers(provider)?)
 }
 
 pub fn require_closed(provider: AgentId) -> Result<(), String> {
-    closed(&running_clients(provider)?)
+    closed(&running_clients(provider, running_processes)?)
+}
+
+fn blockers(
+    provider: AgentId,
+    scan: impl FnOnce() -> Result<Vec<Process>, String>,
+) -> Result<Vec<String>, String> {
+    if provider == AgentId::Claude {
+        return Ok(Vec::new());
+    }
+    running_clients(provider, scan)
 }
 
 fn closed(clients: &[String]) -> Result<(), String> {
@@ -57,55 +53,63 @@ fn closed(clients: &[String]) -> Result<(), String> {
     Err(format!("Close this provider's CLI, desktop app and IDE agent sessions before changing its native login: {}. on-n-off will not stop them for you.", clients.join(", ")))
 }
 
-fn running_clients(provider: AgentId) -> Result<Vec<String>, String> {
-    let processes = running_processes()
-        .map_err(|_| "Could not check running clients. Close provider clients and retry.")?;
-    Ok(clients(&processes, provider))
+fn running_clients(
+    provider: AgentId,
+    scan: impl FnOnce() -> Result<Vec<Process>, String>,
+) -> Result<Vec<String>, String> {
+    let processes =
+        scan().map_err(|_| "Could not check running clients. Close provider clients and retry.")?;
+    Ok(clients(
+        &processes,
+        provider,
+        &std::process::id().to_string(),
+    ))
 }
 
-fn clients(processes: &[Process], provider: AgentId) -> Vec<String> {
+/// on-n-off's own provider reads run under its account-change lease, so only other processes count.
+fn clients(processes: &[Process], provider: AgentId, own: &str) -> Vec<String> {
     let by_pid: HashMap<_, _> = processes.iter().map(|p| (p.pid.as_str(), p)).collect();
     processes
         .iter()
-        .filter(|process| conflicts(process, provider))
-        .map(|process| label(process, &by_pid, provider))
+        .filter(|process| !lineage(process, &by_pid).any(|p| p.pid == own))
+        .filter_map(|process| {
+            let name = client_name(process, provider)?;
+            // Name a client after the app bundle it runs in or was started from, which is what
+            // a person closes; one with no app around it keeps its own name.
+            Some(
+                lineage(process, &by_pid)
+                    .enumerate()
+                    .find_map(|(depth, p)| {
+                        let bundle = p
+                            .executable
+                            .split(['/', '\\'])
+                            .find_map(|part| part.strip_suffix(".app"))?;
+                        Some(if depth == 0 {
+                            bundle.to_owned()
+                        } else {
+                            format!("{bundle} ({name})")
+                        })
+                    })
+                    .unwrap_or(name),
+            )
+        })
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
 }
 
-/// Names a client after the app bundle it runs in or was started from, which is what a person
-/// closes; a client with no app around it keeps its own name.
-fn label(process: &Process, by_pid: &HashMap<&str, &Process>, provider: AgentId) -> String {
-    let own = process
-        .executable
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or_default();
-    let name = if SCRIPT_HOSTS.contains(&own.to_lowercase().as_str()) {
-        binary(provider)
-    } else {
-        own
-    };
-    let mut current = process;
-    for _ in 0..64 {
-        let bundle = current
-            .executable
-            .split(['/', '\\'])
-            .find_map(|part| part.strip_suffix(".app"));
-        if let Some(bundle) = bundle {
-            return if std::ptr::eq(current, process) {
-                bundle.into()
-            } else {
-                format!("{bundle} ({name})")
-            };
-        }
-        match by_pid.get(current.parent.as_str()) {
-            Some(parent) if parent.pid != current.pid => current = parent,
-            _ => break,
-        }
-    }
-    name.into()
+/// The process and its ancestors, bounded so reused pids cannot cycle forever.
+fn lineage<'a>(
+    process: &'a Process,
+    by_pid: &'a HashMap<&str, &'a Process>,
+) -> impl Iterator<Item = &'a Process> {
+    std::iter::successors(Some(process), |p| {
+        by_pid
+            .get(p.parent.as_str())
+            .copied()
+            .filter(|parent| parent.pid != p.pid)
+    })
+    .take(by_pid.len().max(1))
 }
 
 #[cfg(unix)]
@@ -136,8 +140,7 @@ fn running_processes() -> Result<Vec<Process>, String> {
     )?))
 }
 
-/// Joins `ps -o pid=,ppid=,comm=` and `ps -o pid=,args=` by pid. `comm` keeps spaces in the
-/// executable.
+/// Joins `ps -o pid=,ppid=,comm=` and `ps -o pid=,args=` by pid. `comm` is argv[0] with its spaces.
 #[cfg(any(unix, test))]
 fn ps_processes(executables: &str, args: &str) -> Vec<Process> {
     let rows = |output: &str| {
@@ -183,39 +186,60 @@ fn cim_processes(output: &str) -> Vec<Process> {
         .collect()
 }
 
-fn binary(provider: AgentId) -> &'static str {
-    if provider == AgentId::Claude {
+/// The name a provider client goes by, or `None` for any other process.
+fn client_name(process: &Process, provider: AgentId) -> Option<String> {
+    let name = if provider == AgentId::Claude {
         "claude"
     } else {
         "codex"
+    };
+    let file = process.executable.rsplit(['/', '\\']).next()?;
+    let base = normalized(file);
+    if base == name || base == format!("{name}.exe") {
+        return Some(file.to_owned());
     }
+    let script = SCRIPT_HOSTS.contains(&base.as_str()) && launches_script(process, name);
+    (script || runs_package_entry(process, provider)).then(|| name.to_owned())
 }
 
-fn conflicts(process: &Process, provider: AgentId) -> bool {
-    let name = binary(provider);
-    let executable = normalized(&process.executable);
-    let base = executable.rsplit('/').next().unwrap_or("");
-    base == name
-        || base == format!("{name}.exe")
-        || (SCRIPT_HOSTS.contains(&base) && launches_script(process, name))
+/// The package's own entry script identifies a client whatever runs it, including an Electron
+/// helper acting as Node.
+fn runs_package_entry(process: &Process, provider: AgentId) -> bool {
+    let entry = if provider == AgentId::Claude {
+        "/@anthropic-ai/claude-code/cli.js"
+    } else {
+        "/@openai/codex/bin/codex.js"
+    };
+    process
+        .args
+        .split_whitespace()
+        .any(|token| normalized(token).ends_with(entry))
 }
 
-/// The script is the first argument after the runtime's own flags. Its path may contain spaces,
-/// so it grows one token at a time until it names the provider, ends in a JavaScript file, or
-/// reaches the next flag.
+/// The script is the first argument after the runtime's own flags. Windows quotes a path with
+/// spaces; `ps` does not, so there the script ends at the first prefix that is a file or has a
+/// script extension. Without either, only the first token can name it.
 fn launches_script(process: &Process, name: &str) -> bool {
     let args = process.args.trim();
-    let rest = args
+    let mut rest = args
         .strip_prefix(process.executable.as_str())
         .or_else(|| match args.strip_prefix('"') {
             Some(quoted) => quoted.split_once('"').map(|(_, rest)| rest),
             None => args.split_once(char::is_whitespace).map(|(_, rest)| rest),
         })
-        .unwrap_or_default();
-    let mut tokens = rest
-        .split_whitespace()
-        .skip_while(|token| token.starts_with('-'))
-        .peekable();
+        .unwrap_or_default()
+        .trim_start();
+    while rest.starts_with('-') {
+        rest = rest
+            .split_once(char::is_whitespace)
+            .map_or("", |(_, rest)| rest)
+            .trim_start();
+    }
+    if let Some(quoted) = rest.strip_prefix('"') {
+        return names(quoted.split('"').next().unwrap_or_default(), name);
+    }
+    let mut tokens = rest.split_whitespace().peekable();
+    let first = tokens.peek().copied().unwrap_or_default();
     let mut script = String::new();
     while let Some(token) = tokens.next() {
         if !script.is_empty() {
@@ -223,21 +247,20 @@ fn launches_script(process: &Process, name: &str) -> bool {
         }
         script.push_str(token);
         let path = normalized(&script);
-        let base = path.rsplit('/').next().unwrap_or("");
-        if base == name || base == format!("{name}.js") {
-            return true;
-        }
-        if [".js", ".mjs", ".cjs"]
-            .iter()
-            .any(|ext| base.ends_with(ext))
-        {
-            return path.contains(&format!("/{name}-code/"));
+        if Path::new(&script).is_file() || SCRIPT_EXTENSIONS.iter().any(|ext| path.ends_with(ext)) {
+            return names(&script, name);
         }
         if tokens.peek().is_none_or(|next| next.starts_with('-')) {
-            return false;
+            break;
         }
     }
-    false
+    names(first, name)
+}
+
+fn names(script: &str, name: &str) -> bool {
+    let path = normalized(script);
+    let base = path.rsplit('/').next().unwrap_or("");
+    base == name || base == format!("{name}.js")
 }
 
 fn normalized(path: &str) -> String {
