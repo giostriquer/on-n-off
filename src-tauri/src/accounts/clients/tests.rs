@@ -275,4 +275,3 @@ fn a_refusal_names_every_running_client() {
     );
     assert_eq!(closed(&[]), Ok(()));
 }
-
