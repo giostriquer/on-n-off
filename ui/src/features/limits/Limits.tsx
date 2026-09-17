@@ -123,17 +123,13 @@ function ProviderColumn({
     );
   }
 
-  const rows = entries.map(entry => {
-    const profile = profiles.find(profile => profile.observationId === entry.account?.id);
-    return { entry, profile };
-  });
   return (
     <div className="flex flex-col gap-3">
-      {rows.map(({ entry, profile }, index) => (
+      {entries.map((entry, index) => (
         <AccountCard
           key={`${entry.currentAccount ? "current" : "remembered"}-${entry.account?.id ?? index}`}
           entry={entry}
-          profile={profile}
+          profile={profiles.find(profile => profile.observationId === entry.account?.id)}
           now={now}
           error={index === 0 ? error : null}
           onForget={allowForget ? forget : undefined}
@@ -143,7 +139,7 @@ function ProviderColumn({
   );
 }
 
-/** Account identity stays prominent; workspace appears only when the email is ambiguous. */
+/** Account identity stays prominent; workspace ids are never displayed. */
 function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, activeWithoutUsage }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null; subscription?: ReactNode; profile?: SavedProfile; menu?: ReactNode; activeWithoutUsage?: boolean }) {
   const name = providerLabel(provider);
   const label = profile?.email ?? entry?.account?.label ?? null;
@@ -166,9 +162,7 @@ function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, a
         </div>
         {menu}
       </div>
-      <div className="pl-6">
-        {profile?.category && <div className="mt-0.5 break-words text-[11px] text-[var(--mute)]">{profile.category}</div>}
-      </div>
+      {profile?.category && <div className="mt-0.5 break-words pl-6 text-[11px] text-[var(--mute)]">{profile.category}</div>}
       {updatedAt ? <p className="sr-only">Latest observation {updatedAt}</p> : null}
     </header>
   );

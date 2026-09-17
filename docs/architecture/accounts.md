@@ -189,8 +189,9 @@ latest known native observation key before invoking the provider action.
 A failed account-list unlock exposes a Retry action beside the error. It unlocks the existing
 vault and reloads accounts; it does not start sign-in, create a vault, or change a CLI login.
 
-Cards never display workspace IDs. Saved profiles keep their verified workspace identity, and
-accounts that share an email are told apart by their plan badge.
+Card headers never display workspace IDs. Saved profiles keep their verified workspace identity;
+accounts that share an email are told apart by their plan badge when usage reports one, and by the
+optional category otherwise.
 When a saved profile has an actual scoped usage observation, the card list also suppresses its
 legacy observation using the verified provider, legacy identity key and matching email. This
 join does not depend on the snapshot's optional `legacyId`, which older app versions can drop
