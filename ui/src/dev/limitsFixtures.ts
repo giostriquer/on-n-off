@@ -121,3 +121,16 @@ export function bankedResetsCodex(): ProviderLimits[] {
       : { availableCount: 1, nextExpiresAt: null },
   }));
 }
+
+/**
+ * `?mock=sameEmailWorkspaces`: one email signed in to a personal and a business workspace, which
+ * the cards tell apart by plan.
+ */
+export function sameEmailWorkspacesCodex(): ProviderLimits[] {
+  return [["personal", "prolite"], ["business", "self_serve_business_prolite"]].map(([id, plan], index) => ({
+    ...CODEX[0],
+    account: { id: `profile:${id}`, label: "shared@example.com" },
+    currentAccount: index === 0,
+    plan,
+  }));
+}
