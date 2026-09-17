@@ -125,24 +125,15 @@ function ProviderColumn({
 
   const rows = entries.map(entry => {
     const profile = profiles.find(profile => profile.observationId === entry.account?.id);
-    return { entry, profile, label: profile?.email ?? entry.account?.label };
+    return { entry, profile };
   });
-  const workspacesByEmail = new Map<string, Set<string>>();
-  for (const profile of profiles) {
-    if (!profile.email) continue;
-    const email = profile.email.trim().toLowerCase();
-    const workspaces = workspacesByEmail.get(email) ?? new Set<string>();
-    workspaces.add(profile.identity.workspaceId);
-    workspacesByEmail.set(email, workspaces);
-  }
   return (
     <div className="flex flex-col gap-3">
-      {rows.map(({ entry, profile, label }, index) => (
+      {rows.map(({ entry, profile }, index) => (
         <AccountCard
           key={`${entry.currentAccount ? "current" : "remembered"}-${entry.account?.id ?? index}`}
           entry={entry}
           profile={profile}
-          distinguishWorkspace={!!label && (workspacesByEmail.get(label.trim().toLowerCase())?.size ?? 0) > 1}
           now={now}
           error={index === 0 ? error : null}
           onForget={allowForget ? forget : undefined}
@@ -153,7 +144,7 @@ function ProviderColumn({
 }
 
 /** Account identity stays prominent; workspace appears only when the email is ambiguous. */
-function CardHeader({ entry, provider, updatedAt, subscription, profile, distinguishWorkspace, menu, activeWithoutUsage }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null; subscription?: ReactNode; profile?: SavedProfile; distinguishWorkspace?: boolean; menu?: ReactNode; activeWithoutUsage?: boolean }) {
+function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, activeWithoutUsage }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null; subscription?: ReactNode; profile?: SavedProfile; menu?: ReactNode; activeWithoutUsage?: boolean }) {
   const name = providerLabel(provider);
   const label = profile?.email ?? entry?.account?.label ?? null;
   const plan = planLabel(entry?.plan, provider);
@@ -177,7 +168,6 @@ function CardHeader({ entry, provider, updatedAt, subscription, profile, disting
       </div>
       <div className="pl-6">
         {profile?.category && <div className="mt-0.5 break-words text-[11px] text-[var(--mute)]">{profile.category}</div>}
-        {distinguishWorkspace && profile && <div className="mt-0.5 break-all text-[11px] text-[var(--mute)]">Workspace · {profile.identity.workspaceId}</div>}
       </div>
       {updatedAt ? <p className="sr-only">Latest observation {updatedAt}</p> : null}
     </header>
@@ -187,14 +177,12 @@ function CardHeader({ entry, provider, updatedAt, subscription, profile, disting
 function AccountCard({
   entry,
   profile,
-  distinguishWorkspace,
   now,
   error,
   onForget,
 }: {
   entry: ProviderLimits;
   profile?: SavedProfile;
-  distinguishWorkspace?: boolean;
   now: number;
   error: string | null;
   onForget?: (accountId: string) => Promise<void>;
@@ -210,7 +198,7 @@ function AccountCard({
   const subscription = entry.provider === "codex" && account
     ? <CodexSubscriptionBadge accountId={account.id} current={entry.currentAccount} now={now} />
     : null;
-  const header = (menu: ReactNode) => <CardHeader activeWithoutUsage={active && !hero} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} distinguishWorkspace={distinguishWorkspace} />;
+  const header = (menu: ReactNode) => <CardHeader activeWithoutUsage={active && !hero} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
   const content = <>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 

@@ -605,14 +605,14 @@ it("places switching on the account usage card without a second account manager"
  await waitFor(()=>expect(accountAction).toHaveBeenCalledWith("codex","use","saved-personal",undefined));
 });
 
-it("keeps saved accounts available when usage cannot be read and never merges by email", async () => {
+it("keeps saved accounts available when usage cannot be read, never merges by email, and never shows workspace ids", async () => {
  answer([okClaude()], Promise.reject(new Error("usage offline")));
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?["one","two"].map(id=>({id,observationId:`profile:${id}`,identity:{provider:"codex",userId:"same-user",workspaceId:id},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false})):[],nativeAccount:null,recoveryRequired:false,notice:null}));
  renderLimits();
  const cards=await screen.findAllByRole("region",{name:"Codex limits · shared@example.com"});
  expect(cards).toHaveLength(2);
- expect(within(cards[0]).getByText("Workspace · one")).toBeVisible();
- expect(within(cards[1]).getByText("Workspace · two")).toBeVisible();
+ // Plans tell same-email workspaces apart; the raw workspace id is stored but never displayed.
+ expect(screen.queryByText(/Workspace ·/)).toBeNull();
  expect(within(cards[0]).getByRole("button",{name:"Use account"})).toBeEnabled();
  expect(within(cards[1]).getByRole("button",{name:"Use account"})).toBeEnabled();
 });
@@ -725,12 +725,11 @@ it("keeps explicit reload queued when an invalidation replaces the background ch
 });
 
 
-it("does not invent a workspace distinction between a legacy card and its saved login", async () => {
+it("keeps an unverified legacy card beside its saved login", async () => {
  answer([okClaude()], [okCodex({account:{id:"team",label:"shared@example.com"},currentAccount:false})]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved",observationId:"profile:user-team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
  renderLimits();
  await screen.findByRole("button",{name:"Use account"});
- expect(screen.queryByText("Workspace · team")).toBeNull();
  // Unverified legacy quotas stay historical until a fresh scoped observation arrives.
  expect(screen.getAllByRole("region",{name:"Codex limits · shared@example.com"})).toHaveLength(2);
 });
