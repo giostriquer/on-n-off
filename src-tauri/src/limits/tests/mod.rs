@@ -3,7 +3,7 @@ mod claude_renewal;
 mod memory;
 
 use super::*;
-use crate::dto::LimitWindowKind;
+use crate::dto::{LimitWindowKind, LimitsPriceDto, LimitsResetOfferDto};
 use crate::http::{head_header, refused_url, serve_once, serve_sequence, HttpError};
 use crate::paths::scratch_dir;
 use credentials::read_claude_credential;
@@ -31,6 +31,7 @@ fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
         windows,
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     }
 }
 
@@ -829,6 +830,12 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             available_count: 1,
             next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
         }),
+        reset_offer: Some(LimitsResetOfferDto {
+            price: Some(LimitsPriceDto {
+                amount_minor_units: 800,
+                currency: "USD".to_string(),
+            }),
+        }),
     };
     assert_eq!(
         serde_json::to_value(&ok).unwrap(),
@@ -840,7 +847,8 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             "plan": "pro",
             "windows": [{"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5, "observedAt": "2026-08-17T20:00:00.000Z"}],
             "credits": {"balance": "3", "unlimited": false},
-            "resetCredits": {"availableCount": 1, "nextExpiresAt": "2026-09-01T12:00:00+00:00"}
+            "resetCredits": {"availableCount": 1, "nextExpiresAt": "2026-09-01T12:00:00+00:00"},
+            "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
         })
     );
     let signed_out = finish(
@@ -856,6 +864,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
     assert!(value.get("plan").is_none());
     assert!(value.get("credits").is_none());
     assert!(value.get("resetCredits").is_none());
+    assert!(value.get("resetOffer").is_none());
     assert!(value.get("account").is_none());
     assert_eq!(value["currentAccount"], true);
 }

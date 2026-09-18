@@ -630,6 +630,29 @@ pub struct LimitsResetCreditsDto {
     pub next_expires_at: Option<String>,
 }
 
+/// A paid reset Codex is offering this account right now, read from the backend-owned banner on a
+/// usage read. It is an offer in flight, not a standing entitlement: it appears only once a limit
+/// is reached, so its absence never means the account could not buy one. on-n-off shows it and
+/// never sells it; the purchase lives on the provider's own site.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsResetOfferDto {
+    /// What it costs, when the provider named a price. An offer without one is still an offer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price: Option<LimitsPriceDto>,
+}
+
+/// A price the way the provider states it: minor units and the currency they belong to. Both or
+/// neither, so an amount can never be shown without knowing what it counts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsPriceDto {
+    /// Cents, or whatever the currency's minor unit is. The UI divides by that currency's exponent.
+    pub amount_minor_units: u64,
+    /// An ISO 4217 code, upper-cased: exactly three letters, or the price is not read at all.
+    pub currency: String,
+}
+
 /// What Codex did with a request to spend one banked reset, in Codex's own wire names. `Unknown`
 /// catches an outcome this build does not recognise: the request still went through, so it is not
 /// reported as a failure.
@@ -678,6 +701,9 @@ pub struct ProviderLimitsDto {
     pub credits: Option<LimitsCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_credits: Option<LimitsResetCreditsDto>,
+    /// Never remembered: an offer withdrawn between reads must disappear with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_offer: Option<LimitsResetOfferDto>,
 }
 
 impl ProviderLimitsDto {

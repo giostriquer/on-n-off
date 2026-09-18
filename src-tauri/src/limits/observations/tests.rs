@@ -32,6 +32,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         windows: Vec::new(),
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     };
     let remembered = ObservedWindowSet::from_account(ProviderLimitsDto {
         provider: AgentId::Claude,
@@ -60,6 +61,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         ],
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     });
     let local = ObservedWindowSet::local(
         DateTime::parse_from_rfc3339("2026-08-18T03:07:53Z")
@@ -129,6 +131,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         windows: Vec::new(),
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     };
     let reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
@@ -151,6 +154,13 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         )],
         credits: None,
         reset_credits: reset_credits.clone(),
+        // A remembered account can carry no offer, and merging must not invent one either.
+        reset_offer: Some(crate::dto::LimitsResetOfferDto {
+            price: Some(crate::dto::LimitsPriceDto {
+                amount_minor_units: 800,
+                currency: "USD".to_string(),
+            }),
+        }),
     });
 
     assert_eq!(
@@ -176,6 +186,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         windows: Vec::new(),
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     };
     let reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 2,
@@ -191,11 +202,14 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         windows: Vec::new(),
         credits: None,
         reset_credits: reset_credits.clone(),
+        reset_offer: None,
     });
 
     let merged = merge_windows(current, None, remembered);
 
     assert_eq!(merged.reset_credits, reset_credits);
+    // The banked count is remembered; a price the provider may already have withdrawn is not.
+    assert_eq!(merged.reset_offer, None);
     assert_eq!(merged.plan.as_deref(), Some("pro"));
     assert!(merged.windows.is_empty());
 }

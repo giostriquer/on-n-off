@@ -28,6 +28,7 @@ fn ok_snapshot(provider: AgentId, id: &str, label: &str, used: f64) -> ProviderL
             )],
             credits: None,
             reset_credits: None,
+            reset_offer: None,
         },
     );
     let observed_at = format!("2026-08-17T{:02}:00:00.000Z", used as u32 % 24);

@@ -30,6 +30,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
         )],
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     };
     for window in &mut dto.windows {
         window.observed_at = observed_at.to_string();
@@ -193,6 +194,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
             unlimited: false,
         }),
         reset_credits: None,
+        reset_offer: None,
     };
 
     store.save(&credits_only).unwrap();
@@ -442,6 +444,39 @@ fn quota_windows_credits_and_banked_resets_each_count_as_an_observation() {
         next_expires_at: None,
     });
     assert!(dto.has_observations());
+    dto.reset_credits = None;
+    // An offer is what the provider is selling right now, not something observed about the account.
+    dto.reset_offer = Some(crate::dto::LimitsResetOfferDto { price: None });
+    assert!(!dto.has_observations());
+}
+
+#[test]
+fn a_paid_reset_offer_is_never_written_to_a_snapshot_or_read_back_from_one() {
+    let home = scratch_dir("limits-snap-reset-offer");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.reset_offer = Some(crate::dto::LimitsResetOfferDto {
+        price: Some(crate::dto::LimitsPriceDto {
+            amount_minor_units: 800,
+            currency: "USD".to_string(),
+        }),
+    });
+    store.save(&dto).unwrap();
+
+    // Not in the file, so no later version can start reading a price the provider has withdrawn.
+    let written: Vec<String> = fs::read_dir(store.dir())
+        .unwrap()
+        .filter_map(|entry| fs::read_to_string(entry.ok()?.path()).ok())
+        .collect();
+    assert!(!written.is_empty());
+    for file in &written {
+        assert!(!file.contains("resetOffer"), "{file}");
+        assert!(!file.contains("800"), "{file}");
+    }
+    assert!(store
+        .load(AgentId::Codex)
+        .iter()
+        .all(|remembered| remembered.reset_offer.is_none()));
 }
 
 #[test]

@@ -218,6 +218,8 @@ impl StoredSnapshot {
             windows: self.windows,
             credits: self.credits,
             reset_credits: self.reset_credits,
+            // A live offer belongs to the read that saw it and is never remembered.
+            reset_offer: None,
         }
     }
 }

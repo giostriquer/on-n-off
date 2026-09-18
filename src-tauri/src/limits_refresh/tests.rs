@@ -22,6 +22,7 @@ fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> Pr
         windows: Vec::new(),
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     }
 }
 

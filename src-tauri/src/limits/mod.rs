@@ -58,6 +58,7 @@ struct Parsed {
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
     reset_credits: Option<LimitsResetCreditsDto>,
+    reset_offer: Option<crate::dto::LimitsResetOfferDto>,
 }
 
 /// The three services one Claude read talks to, together so adding a fourth costs one field and
@@ -359,6 +360,7 @@ fn claude_limits(
                 windows: claude::parse_claude(&payload),
                 credits: None,
                 reset_credits: None,
+                reset_offer: None,
             })
         },
     )

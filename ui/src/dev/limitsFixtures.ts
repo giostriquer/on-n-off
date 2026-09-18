@@ -119,6 +119,9 @@ export function bankedResetsCodex(): ProviderLimits[] {
     resetCredits: entry.currentAccount
       ? { availableCount: 2, nextExpiresAt: at(11 * 24 * 60 + 19 * 60) }
       : { availableCount: 1, nextExpiresAt: null },
+    // Codex offers a paid reset only while an account sits at its limit, so the live card is at 100%.
+    windows: entry.currentAccount ? entry.windows.map((window) => ({ ...window, usedPercent: 100 })) : entry.windows,
+    resetOffer: entry.currentAccount ? { price: { currency: "USD", amountMinorUnits: 800 } } : null,
   }));
 }
 

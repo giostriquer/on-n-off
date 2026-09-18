@@ -592,6 +592,18 @@ it.each([true, false])("shows subscription timing through a header badge (usage 
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
+it("shows a paid reset offer on the live Codex card and on no other", async () => {
+ answer([okClaude({ resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } } } as never)],
+        [okCodex({ resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } } }), staleCodex()]);
+ renderLimits();
+ const live = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+ expect(within(live).getByRole("definition", { name: "Paid reset" })).toHaveTextContent("$8.00");
+ // A remembered card never carries one, and Claude has no such offer to show at all.
+ const remembered = screen.getByRole("region", { name: "Codex limits · personal@codex.example" });
+ expect(within(remembered).queryByText("Paid reset")).toBeNull();
+ expect(within(await screen.findByRole("region", { name: /^Claude limits/ })).queryByText("Paid reset")).toBeNull();
+});
+
 it("places switching on the account usage card without a second account manager", async()=>{
  answer([okClaude()], [okCodex(),staleCodex()]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved-personal",observationId:"acct-personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",category:"Personal",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));

@@ -34,6 +34,7 @@ fn snapshot(
         }],
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     }
 }
 

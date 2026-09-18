@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatShortDate } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { BankedResetsRow, UseBankedReset } from "./BankedResets";
+import { BankedResetsRow, ResetOfferRow, UseBankedReset } from "./BankedResets";
 
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
 vi.mock("$lib/api", () => ({ consumeCodexResetCredit }));
@@ -237,5 +237,29 @@ describe("UseBankedReset", () => {
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toBe("The signed-in Codex account changed. Try again on its card."),
     );
+  });
+});
+
+describe("ResetOfferRow", () => {
+  it("names the price the provider is offering and says where buying happens", () => {
+    render(<ResetOfferRow offer={{ price: { currency: "USD", amountMinorUnits: 800 } }} />);
+    expect(screen.getByRole("definition", { name: "Paid reset" })).toHaveTextContent("$8.00");
+    expect(screen.getByText("offered by Codex · buy it on chatgpt.com")).toBeVisible();
+  });
+
+  it("still shows the offer when the provider names no price", () => {
+    render(<ResetOfferRow offer={{}} />);
+    expect(screen.getByRole("definition", { name: "Paid reset" })).toHaveTextContent(/^offered$/);
+  });
+
+  it("shows nothing when no reset is offered, which is most of the time", () => {
+    const { container } = render(<ResetOfferRow offer={null} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("is shown, never sold: the row carries no way to buy anything", () => {
+    render(<ResetOfferRow offer={{ price: { currency: "USD", amountMinorUnits: 800 } }} />);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

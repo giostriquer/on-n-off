@@ -6,7 +6,10 @@ use std::collections::BTreeMap;
 
 use super::json::window;
 use super::Parsed;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsResetCreditsDto};
+use crate::dto::{
+    LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
+    LimitsResetOfferDto,
+};
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
@@ -19,6 +22,10 @@ pub(super) struct RateLimitsResponse {
     /// Absent from CLIs older than banked resets; `null` when the backend does not report them.
     #[serde(default)]
     rate_limit_reset_credits: Option<RateLimitResetCredits>,
+    /// A banner the backend owns entirely, including whether it is there at all. Kept opaque:
+    /// only the one call to action that names a paid reset is read out of it.
+    #[serde(default)]
+    rate_limit_upsell: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -106,6 +113,7 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
         windows,
         credits: credits(main.credits.as_ref()),
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
+        reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
     }
 }
 
@@ -194,6 +202,46 @@ fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
     Some(LimitsCreditsDto {
         balance: credits.balance.clone().unwrap_or_else(|| "0".to_string()),
         unlimited: credits.unlimited,
+    })
+}
+
+/// Codex's own name for the paid reset in a banner's calls to action. Anything else the backend
+/// offers there — more credits, a bigger plan — is not this, and is left alone.
+const BUY_RESET: &str = "buy_reset";
+
+/// Well past any reset ever sold, and far below the point where a count stops surviving the trip
+/// through JavaScript intact. A number beyond it is a backend the app does not understand.
+const MAX_MINOR_UNITS: u64 = 1_000_000;
+
+/// The banner is forwarded to clients as the backend wrote it — `rate_limit_upsell` is an untyped
+/// value on the app-server response, so its keys stay snake_case — and only this one call to
+/// action is read out of it.
+fn reset_offer(banner: Option<&serde_json::Value>) -> Option<LimitsResetOfferDto> {
+    let cta = banner?
+        .get("ctas")?
+        .as_array()?
+        .iter()
+        .find(|cta| cta.get("action").and_then(serde_json::Value::as_str) == Some(BUY_RESET))?;
+    Some(LimitsResetOfferDto {
+        price: price(cta.get("price")),
+    })
+}
+
+fn price(price: Option<&serde_json::Value>) -> Option<LimitsPriceDto> {
+    let price = price?;
+    let currency = price.get("currency").and_then(serde_json::Value::as_str)?;
+    let currency = currency.trim();
+    // ISO 4217 is three letters. Anything else is not a currency this app will put beside a number.
+    if currency.len() != 3 || !currency.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let amount = price
+        .get("amount_minor_units")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|amount| *amount <= MAX_MINOR_UNITS)?;
+    Some(LimitsPriceDto {
+        amount_minor_units: amount,
+        currency: currency.to_uppercase(),
     })
 }
 

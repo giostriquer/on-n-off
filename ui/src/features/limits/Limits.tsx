@@ -18,7 +18,7 @@ import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./
 import { CodexSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { accountCards } from "./accountCards";
-import { BankedResetsRow } from "./BankedResets";
+import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
 import { SummaryRow } from "./SummaryRow";
 
@@ -226,6 +226,7 @@ function AccountCard({
 
       {entry.credits ? <CreditsRow credits={entry.credits} /> : null}
       <BankedResetsRow resetCredits={entry.resetCredits} now={now} />
+      {entry.provider === "codex" ? <ResetOfferRow offer={entry.resetOffer} /> : null}
   </>;
   return (
     <section

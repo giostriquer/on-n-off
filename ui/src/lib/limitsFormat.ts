@@ -172,3 +172,21 @@ export function planLabel(plan: string | null | undefined, provider?: string): s
   }
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
+
+/**
+ * A price the provider stated in minor units, in its own currency. `Intl` knows how many minor
+ * units each ISO code carries — yen has none, dinars have three — so the exponent is never guessed.
+ */
+export function formatPrice({ amountMinorUnits, currency }: { amountMinorUnits: number; currency: string }): string {
+  try {
+    const format = new Intl.NumberFormat("en-US", { style: "currency", currency });
+    // Every currency resolves its own exponent; two decimals is the ISO default if one ever does not.
+    const digits = format.resolvedOptions().maximumFractionDigits ?? 2;
+    // `Intl` separates a code from its number with a non-breaking space; the card's monospace
+    // column wants an ordinary one.
+    return format.format(amountMinorUnits / 10 ** digits).replace(/\u00a0/g, " ");
+  } catch {
+    // A code `Intl` refuses outright: show the number beside it rather than nothing at all.
+    return `${currency} ${amountMinorUnits / 100}`;
+  }
+}
