@@ -93,6 +93,8 @@ pub fn inspect_project(path: &Path, agent: AgentId) -> ProjectDto {
         plugins: vec![],
         user_skills: vec![],
         mcp_servers: vec![],
+        // Hooks are read from user settings only, never from a project overlay.
+        hooks: vec![],
     };
     overlay_project(&mut tab, &resolved, agent);
     ProjectDto {

@@ -50,6 +50,29 @@ export type McpServerDto = {
   origin?: string;
 };
 
+/**
+ * One hook handler a provider would run, as the backend found it. Read-only: on-n-off lists
+ * these, never runs or edits them. `event` is the provider's own vocabulary (Claude's
+ * `PreToolUse`, Codex's `notification`) and stays opaque here, and `command` stays unexpanded —
+ * `${CLAUDE_PLUGIN_ROOT}/…` is what the user would see in their own settings file.
+ */
+export type HookDto = {
+  id: string;
+  event: string;
+  /** "" when the entry has none, which for most events means "every tool". */
+  matcher: string;
+  /** "command" | "mcp_tool" | "http" | "prompt" | "agent", or whatever a newer CLI adds. */
+  handler: string;
+  /** The command line, `<server> · <tool>` for an mcp_tool handler, or "" when there is none. */
+  command: string;
+  /** Where it comes from: a plugin's display name, or the settings file that holds it. */
+  source: string;
+  pluginId: string | null;
+  description: string;
+  /** Codex's `[hooks.state]` switch. Claude has none, so its entries are always on. */
+  enabled: boolean;
+};
+
 export type ProjectDto = {
   id: string;
   label: string;
@@ -63,6 +86,8 @@ export type AgentTabDto = {
   plugins: PluginDto[];
   userSkills: SkillDto[];
   mcpServers: McpServerDto[];
+  /** Absent on a tab serialized before hooks existed; read it through `allHooks`/`catalogCounts`. */
+  hooks?: HookDto[];
 };
 
 export type FeatureFlags = {

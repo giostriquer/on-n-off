@@ -9,6 +9,7 @@ import {
   Settings2,
   Sparkles,
   Sun,
+  Webhook,
   type LucideIcon,
 } from "lucide-react";
 import { Rocker } from "@/features/agents/Rocker";
@@ -106,6 +107,12 @@ export function LeftRail({
       label: "MCP servers",
       count: `${counts.mcp.on}/${counts.mcp.total}`,
       Icon: McpGlyph,
+    },
+    {
+      id: "hooks" as const,
+      label: "Hooks",
+      count: `${counts.hooks.on}/${counts.hooks.total}`,
+      Icon: Webhook,
     },
     { id: "config" as const, label: "Agent config", count: "", Icon: Settings2 },
   ];

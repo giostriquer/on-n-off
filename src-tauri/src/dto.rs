@@ -146,6 +146,38 @@ pub struct McpServerDto {
     pub origin: String,
 }
 
+/// One hook handler a provider would run: one row on the Hooks screen, which is read-only —
+/// it says what is configured and never switches anything on or off. `event` and `handler`
+/// stay in the provider's own vocabulary (Claude fires `PreToolUse`, Codex `session_start`)
+/// because the two do not agree and a translation would hide what the file actually says.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HookDto {
+    /// Stable and unique within a provider; `hooks.rs` documents the shape it encodes.
+    pub id: String,
+    pub event: String,
+    /// `""` when the entry has none, which is the same as matching everything the event fires for.
+    #[serde(default)]
+    pub matcher: String,
+    /// `command`, `mcp_tool`, `http`, `prompt`, `agent` — or whatever else the file says.
+    pub handler: String,
+    /// The command line as written, `${CLAUDE_PLUGIN_ROOT}` and all: expanding it would show a
+    /// path that is not in the file. `<server> · <tool>` for an `mcp_tool` handler, `""` when
+    /// the handler names neither.
+    #[serde(default)]
+    pub command: String,
+    /// Where the row comes from: the plugin's name, or the settings file's name.
+    pub source: String,
+    #[serde(default)]
+    pub plugin_id: Option<String>,
+    #[serde(default)]
+    pub description: String,
+    /// Codex's `[hooks.state]` can switch one entry off; Claude has no such switch, so its rows
+    /// are always true.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTabDto {
@@ -153,6 +185,8 @@ pub struct AgentTabDto {
     pub user_skills: Vec<SkillDto>,
     #[serde(default)]
     pub mcp_servers: Vec<McpServerDto>,
+    #[serde(default)]
+    pub hooks: Vec<HookDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

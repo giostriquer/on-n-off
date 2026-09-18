@@ -43,6 +43,12 @@ const mcpRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/mcp"), "McpRoute"),
 });
 
+const hooksRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/hooks",
+  component: lazyRouteComponent(() => import("@/routes/hooks"), "HooksRoute"),
+});
+
 const usageRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/usage",
@@ -79,6 +85,7 @@ const routeTree = rootRoute.addChildren([
   pluginsRoute,
   skillsRoute,
   mcpRoute,
+  hooksRoute,
   usageRoute,
   limitsRoute,
   githubRoute,

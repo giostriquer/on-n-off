@@ -148,6 +148,16 @@ impl CodexAdapter {
         })
     }
 
+    /// The text of a file under the provider home, empty when it is not there. `config.toml`
+    /// is read a second time this way because `CodexConfig` deliberately does not carry the
+    /// `[hooks]` and `[hooks.state]` tables: the hook reader owns their shape (see `hooks.rs`).
+    fn home_text(&self, name: &str) -> String {
+        self.root()
+            .ok()
+            .and_then(|root| fs::read_to_string(root.join(name)).ok())
+            .unwrap_or_default()
+    }
+
     fn marketplace_roots(&self, config: &CodexConfig) -> HashMap<String, (PathBuf, String)> {
         let Ok(root) = self.root() else {
             return HashMap::new();
@@ -192,12 +202,21 @@ impl CodexAdapter {
                 (name, hints)
             })
             .collect();
+        let config_text = self.home_text("config.toml");
+        let mut hooks = crate::hooks::codex_hooks_file(&self.home_text("hooks.json"));
+        hooks.extend(crate::hooks::codex_config_hooks(&config_text));
         let mut plugins = Vec::new();
         let plugin_rows: Vec<_> = config.plugins.iter().collect();
         let mut plugin_skill_paths = HashSet::new();
         for (id, entry) in plugin_rows {
             let (name, source) = plugin_id_parts(id);
             let cache = self.plugin_cache_dir(id);
+            // A disabled plugin's hooks do not run, so they are not rows.
+            if entry.enabled {
+                if let Some(dir) = cache.as_deref() {
+                    hooks.extend(crate::hooks::codex_plugin_hooks(id, &name, dir));
+                }
+            }
             let installed = cache
                 .as_ref()
                 .map(|dir| crate::plugin_meta::installed_hint(dir, None))
@@ -272,10 +291,13 @@ impl CodexAdapter {
             }
             user_skills.push(codex_skill(None, skill, &enable_by_path));
         }
+        // Enablement is keyed positionally, so it can only be applied once every row exists.
+        crate::hooks::apply_codex_state(&mut hooks, &config_text);
         let mut tab = AgentTabDto {
             plugins,
             user_skills,
             mcp_servers: parse_codex_map(&config.mcp_servers),
+            hooks,
         };
         sort_tab(&mut tab);
         Ok(tab)

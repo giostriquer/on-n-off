@@ -7,6 +7,7 @@ const counts = {
   plugins: { on: 3, total: 4 },
   skills: { on: 4, total: 6 },
   mcp: { on: 0, total: 0 },
+  hooks: { on: 5, total: 6 },
 };
 
 describe("LeftRail", () => {
@@ -28,6 +29,7 @@ describe("LeftRail", () => {
     expect(screen.getByRole("button", { name: /Plugins\s*3\/4/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Skills\s*4\/6/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /MCP servers\s*0\/0/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Hooks\s*5\/6/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Usage$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Pull requests$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Settings$/i })).toBeTruthy();
@@ -126,5 +128,31 @@ describe("LeftRail", () => {
     expect(onScreen).toHaveBeenCalledWith("limits");
     await user.click(screen.getByRole("button", { name: /^Pull requests$/i }));
     expect(onScreen).toHaveBeenCalledWith("github");
+  });
+
+  it("puts Hooks after MCP servers and navigates to it", async () => {
+    const user = userEvent.setup();
+    const onScreen = vi.fn();
+    render(
+      <LeftRail
+        screen="hooks"
+        counts={counts}
+        theme="dark"
+        masterOn={false}
+        masterNote=""
+        onScreen={onScreen}
+        onThemeChange={() => undefined}
+        onMaster={() => undefined}
+      />,
+    );
+    const names = screen.getAllByRole("button").map((button) => button.textContent?.trim() ?? "");
+    const mcpIndex = names.findIndex((name) => name.includes("MCP servers"));
+    const hooksIndex = names.findIndex((name) => name.startsWith("Hooks"));
+    expect(mcpIndex).toBeGreaterThan(-1);
+    expect(hooksIndex).toBe(mcpIndex + 1);
+    const hooks = screen.getByRole("button", { name: /Hooks\s*5\/6/i });
+    expect(hooks.getAttribute("aria-current")).toBe("page");
+    await user.click(hooks);
+    expect(onScreen).toHaveBeenCalledWith("hooks");
   });
 });

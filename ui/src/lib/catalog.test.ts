@@ -4,18 +4,22 @@ import {
   canUninstallPlugin,
   comparePluginThenName,
   driftRows,
+  emptyTabDto,
+  filterHookList,
   formatPluginVersion,
   globalItemCount,
   liveRows,
   masterAllOn,
   pluginOutOfSync,
   pluginVersionNote,
+  providerReadsHooks,
   skillIsLive,
+  sortHooks,
   sortPlugins,
   sortSkills,
   tallyLine,
 } from "./catalog";
-import type { AgentTabDto } from "./types";
+import type { AgentTabDto, HookDto } from "./types";
 
 const tab: AgentTabDto = {
   plugins: [
@@ -283,5 +287,79 @@ describe("catalog", () => {
         mcpServers: tab.mcpServers.map((server) => ({ ...server, enabled: true })),
       }),
     ).toBe(true);
+  });
+});
+
+const hooks: HookDto[] = [
+  {
+    id: "claude:settings.json:PreToolUse:0:0",
+    event: "PreToolUse",
+    matcher: "Bash",
+    handler: "command",
+    command: "~/.claude/bin/guard.sh",
+    source: "settings.json",
+    pluginId: null,
+    description: "",
+    enabled: true,
+  },
+  {
+    id: "claude:acme-guardrails:PostToolUse:0:0",
+    event: "PostToolUse",
+    matcher: "",
+    handler: "mcp_tool",
+    command: "acme-review · lint_diff",
+    source: "acme-guardrails",
+    pluginId: "acme-guardrails@webapp",
+    description: "Lints every diff the agent writes.",
+    enabled: true,
+  },
+  {
+    id: "claude:acme-guardrails:PostToolUse:0:1",
+    event: "PostToolUse",
+    matcher: "Write",
+    handler: "command",
+    command: "${CLAUDE_PLUGIN_ROOT}/bin/notify.sh",
+    source: "acme-guardrails",
+    pluginId: "acme-guardrails@webapp",
+    description: "",
+    enabled: false,
+  },
+];
+
+const hookTab: AgentTabDto = { ...tab, hooks };
+
+describe("catalog hooks", () => {
+  it("sorts by source, then event, matcher and id", () => {
+    expect(sortHooks(hooks).map((entry) => entry.id)).toEqual([
+      "claude:acme-guardrails:PostToolUse:0:0",
+      "claude:acme-guardrails:PostToolUse:0:1",
+      "claude:settings.json:PreToolUse:0:0",
+    ]);
+  });
+
+  it("counts every handler, and only the enabled ones as on", () => {
+    expect(catalogCounts(hookTab).hooks).toEqual({ on: 2, total: 3 });
+    expect(catalogCounts({ ...tab, hooks: undefined }).hooks).toEqual({ on: 0, total: 0 });
+  });
+
+  it("filters on event, matcher, handler, command, source and description", () => {
+    expect(filterHookList(hookTab, "").map((entry) => entry.id)).toEqual(sortHooks(hooks).map((entry) => entry.id));
+    expect(filterHookList(hookTab, "guard.sh").map((entry) => entry.event)).toEqual(["PreToolUse"]);
+    expect(filterHookList(hookTab, "acme-guardrails")).toHaveLength(2);
+    expect(filterHookList(hookTab, "lints every diff")).toHaveLength(1);
+    expect(filterHookList(hookTab, "mcp_tool")).toHaveLength(1);
+    expect(filterHookList(hookTab, "bash").map((entry) => entry.matcher)).toEqual(["Bash"]);
+    expect(filterHookList(hookTab, "nothing here")).toEqual([]);
+  });
+
+  it("knows which providers on-n-off reads hooks for", () => {
+    expect(providerReadsHooks("claude")).toBe(true);
+    expect(providerReadsHooks("codex")).toBe(true);
+    expect(providerReadsHooks("antigravity")).toBe(false);
+    expect(providerReadsHooks("cursor")).toBe(false);
+  });
+
+  it("starts an empty tab with no hooks", () => {
+    expect(emptyTabDto().hooks).toEqual([]);
   });
 });

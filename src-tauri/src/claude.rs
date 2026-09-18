@@ -173,6 +173,19 @@ impl ClaudeAdapter {
         Ok(plugins)
     }
 
+    /// The `hooks` key of the user's own `settings.json`. Claude merges hooks across its
+    /// settings files instead of letting one override another, so this is one contributor
+    /// beside the plugins; project and managed settings stay out of scope (see `hooks.rs`).
+    fn settings_hooks(&self) -> Vec<crate::dto::HookDto> {
+        let Ok(root) = self.root() else {
+            return Vec::new();
+        };
+        let Ok(text) = fs::read_to_string(root.join("settings.json")) else {
+            return Vec::new();
+        };
+        crate::hooks::claude_settings_hooks(&text)
+    }
+
     fn mcp_servers(&self) -> Vec<crate::dto::McpServerDto> {
         let Some(path) = self.claude_json.as_ref() else {
             return Vec::new();
@@ -219,6 +232,7 @@ impl ClaudeAdapter {
             })
             .collect();
         let mut plugins = Vec::new();
+        let mut hooks = self.settings_hooks();
         for (id, install_path, inventory_version) in self.installed()? {
             let (name, source) = plugin_id_parts(&id);
             let enabled = settings
@@ -226,6 +240,10 @@ impl ClaudeAdapter {
                 .get(&id)
                 .copied()
                 .unwrap_or_else(|| plugin_default_enabled(&install_path));
+            // A disabled plugin's hooks do not run, so they are not rows.
+            if enabled {
+                hooks.extend(crate::hooks::claude_plugin_hooks(&id, &name, &install_path));
+            }
             let skills = scan_plugin_skills(&install_path)
                 .into_iter()
                 .map(|skill| claude_plugin_skill(&id, skill))
@@ -263,6 +281,7 @@ impl ClaudeAdapter {
             plugins,
             user_skills,
             mcp_servers: self.mcp_servers(),
+            hooks,
         };
         sort_tab(&mut tab);
         Ok(tab)
