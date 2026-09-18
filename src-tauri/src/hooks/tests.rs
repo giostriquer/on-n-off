@@ -783,4 +783,3 @@ fn a_description_becomes_one_line_and_a_command_keeps_the_one_it_has() {
     // of it in a tooltip, so collapsing here would only destroy what the tooltip is for.
     assert_eq!(hooks[0].command, "acme run \\\n  --quiet");
 }
-
