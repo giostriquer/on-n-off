@@ -39,6 +39,20 @@ fn mcp(name: &str, system: &str) -> McpServerDto {
     }
 }
 
+fn hook(source: &str, event: &str, command: &str, plugin_id: Option<&str>) -> HookDto {
+    HookDto {
+        id: format!("{}:{source}:{event}:0:0", plugin_id.unwrap_or("")),
+        event: event.to_string(),
+        matcher: String::new(),
+        handler: "command".to_string(),
+        command: command.to_string(),
+        source: source.to_string(),
+        plugin_id: plugin_id.map(str::to_string),
+        description: String::new(),
+        enabled: true,
+    }
+}
+
 #[test]
 fn plugins_sort_by_source_then_name_case_insensitive() {
     let mut plugins = vec![
@@ -102,5 +116,55 @@ fn mcps_sort_by_name_then_transport() {
     assert_eq!(
         keys,
         [("Docs", "http"), ("docs", "stdio"), ("github", "stdio")]
+    );
+}
+
+#[test]
+fn hooks_sort_by_source_then_event_and_keep_their_file_order() {
+    let mut hooks = vec![
+        hook("settings.json", "Stop", "user one", None),
+        hook("acme", "Stop", "plugin stop", Some("acme@webapp")),
+        hook("settings.json", "Stop", "user two", None),
+        hook("settings.json", "PreToolUse", "guard", None),
+        hook("Acme", "SessionStart", "other start", Some("acme@other")),
+    ];
+    sort_hooks(&mut hooks);
+    let keys: Vec<_> = hooks
+        .iter()
+        .map(|hook| (hook.source.as_str(), hook.command.as_str()))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            ("Acme", "other start"),
+            ("acme", "plugin stop"),
+            ("settings.json", "guard"),
+            // Two rows of one event stay in the order the file has them.
+            ("settings.json", "user one"),
+            ("settings.json", "user two"),
+        ]
+    );
+}
+
+#[test]
+fn hooks_of_two_plugins_that_share_a_name_sort_by_plugin_id() {
+    // Source is the plugin's *name*, so two marketplaces shipping an `acme` both land here; the
+    // id is what separates them, and without it the two would interleave by whichever adapter
+    // walked first.
+    let mut hooks = vec![
+        hook("acme", "Stop", "from webapp", Some("acme@webapp")),
+        hook("acme", "Stop", "from other", Some("acme@other")),
+    ];
+    sort_hooks(&mut hooks);
+    let keys: Vec<_> = hooks
+        .iter()
+        .map(|hook| (hook.plugin_id.as_deref(), hook.command.as_str()))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            (Some("acme@other"), "from other"),
+            (Some("acme@webapp"), "from webapp"),
+        ]
     );
 }

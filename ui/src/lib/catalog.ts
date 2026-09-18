@@ -1,12 +1,13 @@
 import { copy } from "./copy";
 import { isProjectOrigin } from "./project";
-import type { AgentId, AgentTabDto, McpServerDto, PluginDto, SkillDto } from "./types";
+import type { AgentId, AgentTabDto, HookDto, McpServerDto, PluginDto, SkillDto } from "./types";
 
 export type Screen =
   | "overview"
   | "plugins"
   | "skills"
   | "mcp"
+  | "hooks"
   | "usage"
   | "limits"
   | "github"
@@ -19,6 +20,8 @@ export type CatalogCounts = {
   plugins: KindCounts;
   skills: KindCounts;
   mcp: KindCounts;
+  /** `on` is the handlers that would actually run: Codex can switch one off, Claude cannot. */
+  hooks: KindCounts;
 };
 
 export type LiveRow = {
@@ -150,6 +153,17 @@ export function sortMcps(servers: McpServerDto[]): McpServerDto[] {
   return [...servers].sort((a, b) => comparePluginThenName(a.name, a.system, b.name, b.system));
 }
 
+/**
+ * Hooks read as a list of *places they come from*, so they group by source — a plugin's name or
+ * the settings file — and then by the provider's event, which is how the backend already listed
+ * them. Nothing else breaks a tie: within one event the rows are in the order the file declares
+ * them, which is the order the user is reading in their own editor, and `Array.prototype.sort` is
+ * stable, so ties come out exactly as they came in.
+ */
+export function sortHooks(hooks: HookDto[]): HookDto[] {
+  return [...hooks].sort((a, b) => comparePluginThenName(a.source, a.event, b.source, b.event));
+}
+
 export function allSkills(tab: AgentTabDto): SkillDto[] {
   return sortSkills([...tab.plugins.flatMap((plugin) => plugin.skills), ...tab.userSkills], tab.plugins);
 }
@@ -170,10 +184,12 @@ export function catalogCounts(tab: AgentTabDto | null): CatalogCounts {
       plugins: { on: 0, total: 0 },
       skills: { on: 0, total: 0 },
       mcp: { on: 0, total: 0 },
+      hooks: { on: 0, total: 0 },
     };
   }
   const skills = allSkills(tab);
   const mcps = tab.mcpServers ?? [];
+  const hooks = tab.hooks ?? [];
   return {
     plugins: {
       on: tab.plugins.filter((plugin) => plugin.enabled).length,
@@ -186,6 +202,10 @@ export function catalogCounts(tab: AgentTabDto | null): CatalogCounts {
     mcp: {
       on: mcps.filter((server) => server.enabled).length,
       total: mcps.length,
+    },
+    hooks: {
+      on: hooks.filter((hook) => hook.enabled).length,
+      total: hooks.length,
     },
   };
 }
@@ -332,5 +352,5 @@ export function globalItemCount(tab: AgentTabDto | null | undefined): number {
 }
 
 export function emptyTabDto(): AgentTabDto {
-  return { plugins: [], userSkills: [], mcpServers: [] };
+  return { plugins: [], userSkills: [], mcpServers: [], hooks: [] };
 }

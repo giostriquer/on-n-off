@@ -50,6 +50,15 @@ const SCENES = [
   { name: "overview-catalog-light", url: "/overview?mock=catalog", theme: "light", steps: [{ scroll: "text=Live on this scope" }] },
   { name: "overview-empty", url: "/overview?mock=ok", steps: [{ scroll: "text=Live on this scope" }] },
   { name: "settings-github", url: "/settings?mock=ok", steps: [{ wait: "role=region[name='Pull requests']" }] },
+  // Claude's rows carry the plugin descriptions and the long commands; Codex's carry the one
+  // switched off in [hooks.state], which is the row that has to read as inactive.
+  { name: "hooks", url: "/hooks?mock=hooks", steps: [
+    { wait: "role=heading[name='Hooks']" },
+    { shot: "hooks" },
+    { click: "role=tab[name='Codex']" },
+    { wait: "text=acme-webapp-tools" },
+    { shot: "hooks-codex" },
+  ] },
   // Walks the usage ramp, which the ordinary fixtures never reach.
   { name: "limits-band", url: "/limits?mock=limitsBand", steps: [{ wait: "role=region[name='Codex limits · 50% of the week']" }] },
   { name: "limits-band-light", url: "/limits?mock=limitsBand", theme: "light", steps: [{ wait: "role=region[name='Codex limits · 50% of the week']" }] },

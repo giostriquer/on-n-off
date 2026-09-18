@@ -18,6 +18,7 @@ export const LOCKED_AGENTS: AgentInfo[] = [
     installGit: false,
     installFolder: false,
     pluginToggle: false,
+    readsHooks: false,
   },
   {
     id: "codex",
@@ -27,6 +28,7 @@ export const LOCKED_AGENTS: AgentInfo[] = [
     installGit: false,
     installFolder: false,
     pluginToggle: false,
+    readsHooks: false,
   },
   {
     id: "antigravity",
@@ -36,6 +38,7 @@ export const LOCKED_AGENTS: AgentInfo[] = [
     installGit: false,
     installFolder: false,
     pluginToggle: false,
+    readsHooks: false,
   },
   {
     id: "cursor",
@@ -45,6 +48,7 @@ export const LOCKED_AGENTS: AgentInfo[] = [
     installGit: false,
     installFolder: false,
     pluginToggle: false,
+    readsHooks: false,
   },
 ];
 
@@ -85,6 +89,7 @@ export function overlayAgents(health: AgentInfo[]): AgentInfo[] {
       installGit: hit.installGit,
       installFolder: hit.installFolder,
       pluginToggle: hit.pluginToggle,
+      readsHooks: hit.readsHooks,
     };
   });
 }

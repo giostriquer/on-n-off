@@ -219,6 +219,7 @@ impl ClaudeAdapter {
             })
             .collect();
         let mut plugins = Vec::new();
+        let mut hook_plugins = Vec::new();
         for (id, install_path, inventory_version) in self.installed()? {
             let (name, source) = plugin_id_parts(&id);
             let enabled = settings
@@ -226,6 +227,14 @@ impl ClaudeAdapter {
                 .get(&id)
                 .copied()
                 .unwrap_or_else(|| plugin_default_enabled(&install_path));
+            // A disabled plugin's hooks do not run, so they are not rows.
+            if enabled {
+                hook_plugins.push(crate::hooks::PluginSource {
+                    id: id.clone(),
+                    name: name.clone(),
+                    root: install_path.clone(),
+                });
+            }
             let skills = scan_plugin_skills(&install_path)
                 .into_iter()
                 .map(|skill| claude_plugin_skill(&id, skill))
@@ -263,6 +272,7 @@ impl ClaudeAdapter {
             plugins,
             user_skills,
             mcp_servers: self.mcp_servers(),
+            hooks: crate::hooks::claude_hooks(self.root()?, &hook_plugins),
         };
         sort_tab(&mut tab);
         Ok(tab)
@@ -273,8 +283,13 @@ impl AgentAdapter for ClaudeAdapter {
     fn supports_accounts(&self) -> bool {
         true
     }
+    fn reads_hooks(&self) -> bool {
+        true
+    }
     fn info(&self) -> AgentInfo {
-        agent_info(AgentId::Claude)
+        let mut info = agent_info(AgentId::Claude);
+        info.reads_hooks = self.reads_hooks();
+        info
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {

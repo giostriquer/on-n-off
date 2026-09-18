@@ -32,6 +32,7 @@ describe("Overview", () => {
           plugins: { on: 1, total: 2 },
           skills: { on: 2, total: 4 },
           mcp: { on: 1, total: 2 },
+          hooks: { on: 0, total: 0 },
         }}
         rows={[
           {
@@ -102,6 +103,7 @@ describe("Overview", () => {
           plugins: { on: 0, total: 0 },
           skills: { on: 0, total: 0 },
           mcp: { on: 0, total: 0 },
+          hooks: { on: 0, total: 0 },
         }}
         rows={[]}
         log={[]}
@@ -130,6 +132,7 @@ describe("Overview", () => {
           plugins: { on: 0, total: 0 },
           skills: { on: 60, total: 60 },
           mcp: { on: 0, total: 0 },
+          hooks: { on: 0, total: 0 },
         }}
         rows={rows}
         log={[]}

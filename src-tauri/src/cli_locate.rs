@@ -496,6 +496,9 @@ pub fn agent_info(id: AgentId) -> AgentInfo {
             AgentId::Antigravity => cli_ok,
             AgentId::Cursor => false,
         },
+        // Nothing here can tell: whether an adapter reads hooks is the adapter's own answer, and
+        // the two that do overwrite this in their `info()`.
+        reads_hooks: false,
     }
 }
 

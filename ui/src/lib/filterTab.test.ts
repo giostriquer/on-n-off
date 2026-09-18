@@ -44,6 +44,32 @@ const tab: AgentTabDto = {
       togglable: true,
     },
   ],
+  // One token per searchable field, shared with nothing else, so a query can only match through
+  // the field it is meant to: drop one from the haystack and exactly one assertion below fails.
+  hooks: [
+    {
+      id: ":settings.json:pre_tool_use:0:0",
+      event: "PreToolUse",
+      matcher: "Bash",
+      handler: "command",
+      command: "~/.claude/hooks/guard.sh",
+      source: "settings.json",
+      pluginId: null,
+      description: "",
+      enabled: true,
+    },
+    {
+      id: "acme-guardrails@webapp:hooks/hooks.json:post_tool_use:0:0",
+      event: "PostToolUse",
+      matcher: "Edit",
+      handler: "mcp_tool",
+      command: "acme-review · lint_diff",
+      source: "acme-guardrails",
+      pluginId: "acme-guardrails@webapp",
+      description: "Lints every diff the agent produces.",
+      enabled: true,
+    },
+  ],
 };
 
 describe("filterTab", () => {
@@ -75,6 +101,36 @@ describe("filterSkillList", () => {
     expect(filterSkillList(tab, "workshop").map((skill) => skill.name)).toEqual(["brainstorming"]);
     expect(filterSkillList(tab, "status").map((skill) => skill.name)).toEqual(["statusline"]);
     expect(filterSkillList(tab, "designs").map((skill) => skill.name)).toEqual(["brainstorming"]);
+  });
+});
+
+describe("filterTab hooks", () => {
+  const ids = (query: string) => filterTab(tab, query).hooks.map((entry) => entry.id);
+  const plugin = "acme-guardrails@webapp:hooks/hooks.json:post_tool_use:0:0";
+  const settings = ":settings.json:pre_tool_use:0:0";
+
+  it("returns every hook, in the backend's order, when the query is empty", () => {
+    expect(ids("  ")).toEqual([plugin, settings]);
+  });
+
+  it("matches event, matcher, handler, command, source, description and plugin id", () => {
+    expect(ids("posttooluse")).toEqual([plugin]);
+    expect(ids("edit")).toEqual([plugin]);
+    expect(ids("mcp_tool")).toEqual([plugin]);
+    expect(ids("lint_diff")).toEqual([plugin]);
+    expect(ids("webapp")).toEqual([plugin]);
+    expect(ids("produces")).toEqual([plugin]);
+    expect(ids("settings.json")).toEqual([settings]);
+    expect(ids("bash")).toEqual([settings]);
+    expect(ids("guard.sh")).toEqual([settings]);
+    expect(ids("nothing here")).toEqual([]);
+  });
+
+  it("leaves the synthetic id out of the haystack", () => {
+    // `…:<event>:<group>:<index>` is a key, not something a user types: searching its digits or
+    // its snake_cased event would otherwise match rows that show neither.
+    expect(ids("0")).toEqual([]);
+    expect(ids("pre_tool_use")).toEqual([]);
   });
 });
 

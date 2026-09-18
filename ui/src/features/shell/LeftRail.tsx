@@ -9,6 +9,7 @@ import {
   Settings2,
   Sparkles,
   Sun,
+  Webhook,
   type LucideIcon,
 } from "lucide-react";
 import { Rocker } from "@/features/agents/Rocker";
@@ -18,6 +19,8 @@ import type { Theme } from "@/features/session/SessionProvider";
 type LeftRailProps = {
   screen: Screen;
   counts: CatalogCounts;
+  /** False for a provider whose hooks on-n-off never read, whose count would be a claim, not a tally. */
+  readsHooks: boolean;
   theme: Theme;
   masterOn: boolean;
   masterNote: string;
@@ -76,6 +79,7 @@ function McpGlyph({ className }: { className?: string }) {
 export function LeftRail({
   screen,
   counts,
+  readsHooks,
   theme,
   masterOn,
   masterNote,
@@ -106,6 +110,14 @@ export function LeftRail({
       label: "MCP servers",
       count: `${counts.mcp.on}/${counts.mcp.total}`,
       Icon: McpGlyph,
+    },
+    {
+      id: "hooks" as const,
+      label: "Hooks",
+      // A provider on-n-off never read hooks for gets the bare label Agent config has: "0/0"
+      // would read as "this provider has none", which is the one thing the screen denies.
+      count: readsHooks ? `${counts.hooks.on}/${counts.hooks.total}` : "",
+      Icon: Webhook,
     },
     { id: "config" as const, label: "Agent config", count: "", Icon: Settings2 },
   ];

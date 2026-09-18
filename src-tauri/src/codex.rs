@@ -193,11 +193,22 @@ impl CodexAdapter {
             })
             .collect();
         let mut plugins = Vec::new();
+        let mut hook_plugins = Vec::new();
         let plugin_rows: Vec<_> = config.plugins.iter().collect();
         let mut plugin_skill_paths = HashSet::new();
         for (id, entry) in plugin_rows {
             let (name, source) = plugin_id_parts(id);
             let cache = self.plugin_cache_dir(id);
+            // A disabled plugin's hooks do not run, so they are not rows.
+            if entry.enabled {
+                if let Some(dir) = cache.as_deref() {
+                    hook_plugins.push(crate::hooks::PluginSource {
+                        id: id.clone(),
+                        name: name.clone(),
+                        root: dir.to_path_buf(),
+                    });
+                }
+            }
             let installed = cache
                 .as_ref()
                 .map(|dir| crate::plugin_meta::installed_hint(dir, None))
@@ -276,6 +287,7 @@ impl CodexAdapter {
             plugins,
             user_skills,
             mcp_servers: parse_codex_map(&config.mcp_servers),
+            hooks: crate::hooks::codex_hooks(self.root()?, &hook_plugins),
         };
         sort_tab(&mut tab);
         Ok(tab)
@@ -286,8 +298,13 @@ impl AgentAdapter for CodexAdapter {
     fn supports_accounts(&self) -> bool {
         true
     }
+    fn reads_hooks(&self) -> bool {
+        true
+    }
     fn info(&self) -> AgentInfo {
-        agent_info(AgentId::Codex)
+        let mut info = agent_info(AgentId::Codex);
+        info.reads_hooks = self.reads_hooks();
+        info
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {

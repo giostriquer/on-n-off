@@ -22,6 +22,7 @@ const agent = {
   installGit: true,
   installFolder: true,
   pluginToggle: true,
+  readsHooks: true,
 };
 
 const session = {
@@ -43,6 +44,7 @@ const session = {
     plugins: { on: 0, total: 0 },
     skills: { on: 0, total: 0 },
     mcp: { on: 0, total: 0 },
+    hooks: { on: 0, total: 0 },
   },
   allOn: false,
   cliLine: "codex · ~/.codex",

@@ -7,6 +7,7 @@ const counts = {
   plugins: { on: 3, total: 4 },
   skills: { on: 4, total: 6 },
   mcp: { on: 0, total: 0 },
+  hooks: { on: 5, total: 6 },
 };
 
 describe("LeftRail", () => {
@@ -15,6 +16,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="overview"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={false}
         masterNote="cuts every item for Claude"
@@ -28,6 +30,7 @@ describe("LeftRail", () => {
     expect(screen.getByRole("button", { name: /Plugins\s*3\/4/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Skills\s*4\/6/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /MCP servers\s*0\/0/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Hooks\s*5\/6/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Usage$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Pull requests$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Settings$/i })).toBeTruthy();
@@ -48,6 +51,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="plugins"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={true}
         masterNote="everything live on Claude"
@@ -75,6 +79,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="overview"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={false}
         masterNote=""
@@ -101,6 +106,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="limits"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={false}
         masterNote=""
@@ -126,5 +132,51 @@ describe("LeftRail", () => {
     expect(onScreen).toHaveBeenCalledWith("limits");
     await user.click(screen.getByRole("button", { name: /^Pull requests$/i }));
     expect(onScreen).toHaveBeenCalledWith("github");
+  });
+
+  it("puts Hooks after MCP servers and navigates to it", async () => {
+    const user = userEvent.setup();
+    const onScreen = vi.fn();
+    render(
+      <LeftRail
+        screen="hooks"
+        counts={counts}
+        readsHooks={true}
+        theme="dark"
+        masterOn={false}
+        masterNote=""
+        onScreen={onScreen}
+        onThemeChange={() => undefined}
+        onMaster={() => undefined}
+      />,
+    );
+    const names = screen.getAllByRole("button").map((button) => button.textContent?.trim() ?? "");
+    const mcpIndex = names.findIndex((name) => name.includes("MCP servers"));
+    const hooksIndex = names.findIndex((name) => name.startsWith("Hooks"));
+    expect(mcpIndex).toBeGreaterThan(-1);
+    expect(hooksIndex).toBe(mcpIndex + 1);
+    const hooks = screen.getByRole("button", { name: /Hooks\s*5\/6/i });
+    expect(hooks.getAttribute("aria-current")).toBe("page");
+    await user.click(hooks);
+    expect(onScreen).toHaveBeenCalledWith("hooks");
+  });
+
+  it("shows no Hooks count for a provider whose hooks are never read", () => {
+    render(
+      <LeftRail
+        screen="overview"
+        counts={{ ...counts, hooks: { on: 0, total: 0 } }}
+        readsHooks={false}
+        theme="dark"
+        masterOn={false}
+        masterNote=""
+        onScreen={() => undefined}
+        onThemeChange={() => undefined}
+        onMaster={() => undefined}
+      />,
+    );
+    // "0/0" would read as a fact about the provider; Agent config shows a bare label the same way.
+    expect(screen.getByRole("button", { name: /^Hooks$/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Hooks\s*0\/0/i })).toBeNull();
   });
 });

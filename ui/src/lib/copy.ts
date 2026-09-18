@@ -5,6 +5,10 @@ export const copy = {
   emptyPlugins: "No plugins on this circuit.",
   emptyUserSkills: "No user skills.",
   emptyMcps: "No MCP servers on this circuit.",
+  emptyHooks: "No hooks on this circuit.",
+  hooksScope: "user settings + plugins · listed, never run",
+  hooksUnread: (agent: string) =>
+    `on-n-off doesn’t read hooks for ${agent}. Claude and Codex only, for now — this is not the same as ${agent} having none.`,
   cursorMcpReadOnly:
     "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`.",
   filterMiss: (q: string) => `Nothing matches “${q}”.`,
@@ -20,7 +24,7 @@ export const copy = {
     `Removes it from ${agent}. This does not delete your backup.`,
   installHelper: "HTTPS git, owner/repo, name@marketplace, or npx skills add. SSH later.",
   installInvalid: "Use an HTTPS git URL, owner/repo, name@marketplace, or npx skills add.",
-  filterPlaceholder: "plugins, skills, mcps…",
+  filterPlaceholder: "plugins, skills, mcps, hooks…",
   refresh: "Refresh all providers",
   install: "Install",
   installing: "Installing…",

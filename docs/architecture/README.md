@@ -14,16 +14,17 @@ Where files are, how to run them, and the constraints the code must respect all 
 
 A Tauri 2 desktop app for Windows and macOS (Apple Silicon) that reads what your coding agents —
 Claude, Codex, Antigravity, Cursor — have on disk, and shows it in one place: installed plugins,
-skills, MCP servers, token usage and cost, subscription rate limits, and your GitHub pull
-requests. It is overwhelmingly a **reader**; the narrow set of things it writes is listed under
-"Constraints" in AGENTS.md.
+skills, MCP servers, the hooks a provider would run (Claude and Codex, listed and never run),
+token usage and cost, subscription rate limits, and your GitHub pull requests. It is
+overwhelmingly a **reader**; the narrow set of things it writes is listed under "Constraints" in
+AGENTS.md.
 
 ## The shape of the process
 
 ```mermaid
 flowchart TB
     subgraph webviews["WebViews (React 19 + TanStack Query)"]
-        main["Main window<br/>Overview · Plugins · Skills · MCP<br/>Usage · Limits · Pull requests · Settings"]
+        main["Main window<br/>Overview · Plugins · Skills · MCP · Hooks<br/>Usage · Limits · Pull requests · Settings"]
         popover["Menu-bar popover<br/>?surface=limits-popover"]
     end
 

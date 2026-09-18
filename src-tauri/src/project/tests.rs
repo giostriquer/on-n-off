@@ -100,6 +100,7 @@ fn overlays_project_skills_and_mcp_read_only() {
             origin: String::new(),
         }],
         mcp_servers: vec![],
+        hooks: vec![],
     };
     overlay_project(&mut tab, &root, AgentId::Claude);
     assert_eq!(tab.user_skills.len(), 2);
@@ -212,6 +213,7 @@ fn overlay_collapses_same_name_across_skill_roots() {
             origin: String::new(),
         }],
         mcp_servers: vec![],
+        hooks: vec![],
     };
     overlay_project(&mut tab, &root, AgentId::Claude);
     let names: Vec<_> = tab

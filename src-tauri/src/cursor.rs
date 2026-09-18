@@ -167,6 +167,8 @@ impl AgentAdapter for CursorAdapter {
             plugins,
             user_skills,
             mcp_servers: self.mcp_servers(),
+            // This provider has no hook mechanism on disk; the screen says so.
+            hooks: Vec::new(),
         };
         sort_tab(&mut tab);
         Ok(tab)

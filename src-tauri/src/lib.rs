@@ -17,6 +17,7 @@ mod fake;
 mod flags;
 mod github;
 mod github_monitor;
+mod hooks;
 mod http;
 mod install_source;
 mod item_install;

@@ -4,6 +4,7 @@ import {
   canUninstallPlugin,
   comparePluginThenName,
   driftRows,
+  emptyTabDto,
   formatPluginVersion,
   globalItemCount,
   liveRows,
@@ -11,11 +12,12 @@ import {
   pluginOutOfSync,
   pluginVersionNote,
   skillIsLive,
+  sortHooks,
   sortPlugins,
   sortSkills,
   tallyLine,
 } from "./catalog";
-import type { AgentTabDto } from "./types";
+import type { AgentTabDto, HookDto } from "./types";
 
 const tab: AgentTabDto = {
   plugins: [
@@ -283,5 +285,64 @@ describe("catalog", () => {
         mcpServers: tab.mcpServers.map((server) => ({ ...server, enabled: true })),
       }),
     ).toBe(true);
+  });
+});
+
+function hook(overrides: Partial<HookDto>): HookDto {
+  return {
+    id: ":settings.json:pre_tool_use:0:0",
+    event: "PreToolUse",
+    matcher: "",
+    handler: "command",
+    command: "~/.claude/hooks/guard.sh",
+    source: "settings.json",
+    pluginId: null,
+    description: "",
+    enabled: true,
+    ...overrides,
+  };
+}
+
+/**
+ * The backend's own order: source, then event, then the order the file lists them in. The two
+ * `settings.json` PreToolUse rows are the trap — "Write" sorts before "Bash" only because the
+ * file says so, and `:10:` sorts before `:2:` only as a string — so any tiebreak beyond source
+ * and event reorders them.
+ */
+const hooks: HookDto[] = [
+  hook({ id: ":settings.json:pre_tool_use:2:0", matcher: "Write" }),
+  hook({ id: ":settings.json:pre_tool_use:10:0", matcher: "Bash" }),
+  hook({ id: ":settings.json:stop:0:0", event: "Stop", command: "~/.claude/hooks/say-done.sh" }),
+  hook({
+    id: "acme-guardrails@webapp:hooks/hooks.json:post_tool_use:0:0",
+    event: "PostToolUse",
+    handler: "mcp_tool",
+    command: "acme-review · lint_diff",
+    source: "acme-guardrails",
+    pluginId: "acme-guardrails@webapp",
+    description: "Lints every diff the agent writes.",
+    enabled: false,
+  }),
+];
+
+const hookTab: AgentTabDto = { ...tab, hooks };
+
+describe("catalog hooks", () => {
+  it("sorts by source then event, and leaves the backend's order alone within one event", () => {
+    expect(sortHooks(hooks).map((entry) => entry.id)).toEqual([
+      "acme-guardrails@webapp:hooks/hooks.json:post_tool_use:0:0",
+      ":settings.json:pre_tool_use:2:0",
+      ":settings.json:pre_tool_use:10:0",
+      ":settings.json:stop:0:0",
+    ]);
+  });
+
+  it("counts every handler, and only the enabled ones as on", () => {
+    expect(catalogCounts(hookTab).hooks).toEqual({ on: 3, total: 4 });
+    expect(catalogCounts({ ...tab, hooks: undefined }).hooks).toEqual({ on: 0, total: 0 });
+  });
+
+  it("starts an empty tab with no hooks", () => {
+    expect(emptyTabDto().hooks).toEqual([]);
   });
 });

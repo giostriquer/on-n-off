@@ -14,6 +14,12 @@ pub trait AgentAdapter: Send + Sync {
     fn supports_accounts(&self) -> bool {
         false
     }
+    /// Whether this adapter fills `AgentTabDto::hooks`. An adapter that does not is not one
+    /// whose user has no hooks configured — it is one on-n-off does not read them for — and
+    /// `info()` carries the difference to the screen (see `hooks.rs`).
+    fn reads_hooks(&self) -> bool {
+        false
+    }
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError>;
     fn list_local_tab(&self) -> Result<AgentTabDto, AdapterError> {
         self.list_tab()

@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use crate::adapter::AgentAdapter;
 use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, McpServerDto, PluginDto, SkillDto,
+    AdapterError, AgentId, AgentInfo, AgentTabDto, HookDto, McpServerDto, PluginDto, SkillDto,
 };
 use crate::sort::sort_tab;
 
@@ -47,6 +47,12 @@ impl FakeAdapter {
 }
 
 impl AgentAdapter for FakeAdapter {
+    /// The same two providers the real adapters read hooks for, which is what the seeds below
+    /// give rows to.
+    fn reads_hooks(&self) -> bool {
+        matches!(self.id, AgentId::Claude | AgentId::Codex)
+    }
+
     fn info(&self) -> AgentInfo {
         AgentInfo {
             id: self.id,
@@ -56,6 +62,7 @@ impl AgentAdapter for FakeAdapter {
             install_git: self.install_git,
             install_folder: self.install_folder,
             plugin_toggle: self.cli_ok,
+            reads_hooks: self.reads_hooks(),
         }
     }
 
@@ -222,6 +229,21 @@ fn skill(
     }
 }
 
+/// Ids here are spelled the way `hooks` builds them: `<plugin>:<source>:<event>:<group>:<index>`.
+fn hook(id: &str, event: &str, command: &str, source: &str, plugin_id: Option<&str>) -> HookDto {
+    HookDto {
+        id: id.to_string(),
+        event: event.to_string(),
+        matcher: String::new(),
+        handler: "command".to_string(),
+        command: command.to_string(),
+        source: source.to_string(),
+        plugin_id: plugin_id.map(str::to_string),
+        description: String::new(),
+        enabled: true,
+    }
+}
+
 fn plugin(id: &str, name: &str, source: &str, enabled: bool, skills: Vec<SkillDto>) -> PluginDto {
     PluginDto {
         id: id.to_string(),
@@ -302,6 +324,22 @@ fn claude_seed() -> AgentTabDto {
             togglable: true,
             origin: String::new(),
         }],
+        hooks: vec![
+            hook(
+                ":settings.json:session_start:0:0",
+                "SessionStart",
+                "statusline --refresh",
+                "settings.json",
+                None,
+            ),
+            hook(
+                "workbench@workshop:hooks/hooks.json:stop:0:0",
+                "Stop",
+                "${CLAUDE_PLUGIN_ROOT}/scripts/on-stop.sh",
+                "workbench",
+                Some("workbench@workshop"),
+            ),
+        ],
     }
 }
 
@@ -344,6 +382,17 @@ fn codex_seed() -> AgentTabDto {
             ),
         ],
         mcp_servers: vec![],
+        hooks: vec![HookDto {
+            // Codex is the only provider that can switch one entry off; the seed shows it.
+            enabled: false,
+            ..hook(
+                "workbench@workshop:hooks/codex.json:session_start:0:0",
+                "SessionStart",
+                "workbench hook SessionStart --tool codex",
+                "workbench",
+                Some("workbench@workshop"),
+            )
+        }],
     }
 }
 

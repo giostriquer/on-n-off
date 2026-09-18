@@ -10,6 +10,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
 
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
+import { hooksFor } from "./hooksFixtures";
 import { bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor, sameEmailWorkspacesCodex } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
@@ -34,7 +35,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "accountClients", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
-  "limitsBand", "bankedResets", "sameEmailWorkspaces",
+  "limitsBand", "bankedResets", "sameEmailWorkspaces", "hooks",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -49,10 +50,10 @@ let duplicateReconnected = false;
 const pendingLogins = new Map<string, () => void>();
 
 const AGENTS: AgentInfo[] = [
-  { id: "claude", displayName: "Claude", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true },
-  { id: "codex", displayName: "Codex", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true },
-  { id: "antigravity", displayName: "Antigravity", cliOk: false, cliError: "Antigravity CLI not found.", installGit: false, installFolder: false, pluginToggle: false },
-  { id: "cursor", displayName: "Cursor", cliOk: false, cliError: "Cursor CLI not found.", installGit: false, installFolder: false, pluginToggle: false },
+  { id: "claude", displayName: "Claude", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true, readsHooks: true },
+  { id: "codex", displayName: "Codex", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true, readsHooks: true },
+  { id: "antigravity", displayName: "Antigravity", cliOk: false, cliError: "Antigravity CLI not found.", installGit: false, installFolder: false, pluginToggle: false, readsHooks: false },
+  { id: "cursor", displayName: "Cursor", cliOk: false, cliError: "Cursor CLI not found.", installGit: false, installFolder: false, pluginToggle: false, readsHooks: false },
 ];
 
 let settings: AppSettings = {
@@ -67,7 +68,7 @@ let settings: AppSettings = {
   closeToTray: false,
 };
 
-const emptyTab = () => ({ plugins: [], userSkills: [], mcpServers: [] });
+const emptyTab = (): AgentTabDto => ({ plugins: [], userSkills: [], mcpServers: [], hooks: [] });
 
 // `?mock=catalog`: a real-sized catalog. The Overview's live list is the one surface whose layout
 // only misbehaves once it is long, so an empty tab cannot stand in for it.
@@ -128,7 +129,12 @@ const fullTab = (): AgentTabDto => ({
   })),
 });
 
-const catalogTab = scenario === "catalog" ? fullTab : emptyTab;
+// `?mock=hooks`: the Hooks screen's rows, which are per provider — Antigravity and Cursor get
+// none, and say so rather than reading as unconfigured.
+const catalogTab = (args: Record<string, unknown> = {}): AgentTabDto => {
+  const tab = scenario === "catalog" ? fullTab() : emptyTab();
+  return scenario === "hooks" ? { ...tab, hooks: hooksFor(args.agentId as AgentId) } : tab;
+};
 
 let notch: NotchSnapshot = {
   revision: 0,
