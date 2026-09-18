@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 
 use super::json::window;
 use super::Parsed;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsResetCreditsDto};
+use crate::dto::{
+    LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsResetCreditsDto, LimitsResetOfferDto,
+};
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
@@ -19,6 +21,10 @@ pub(super) struct RateLimitsResponse {
     /// Absent from CLIs older than banked resets; `null` when the backend does not report them.
     #[serde(default)]
     rate_limit_reset_credits: Option<RateLimitResetCredits>,
+    /// A banner the backend owns entirely, including whether it is there at all. Kept opaque:
+    /// only the one call to action that names a paid reset is read out of it.
+    #[serde(default)]
+    rate_limit_upsell: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -106,6 +112,7 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
         windows,
         credits: credits(main.credits.as_ref()),
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
+        reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
     }
 }
 
@@ -198,6 +205,30 @@ fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
 }
 
 /// The count Codex reports, and when the soonest still-available reset expires.
+/// Codex's own name for the paid reset in a banner's calls to action. Anything else the backend
+/// offers there — more credits, a bigger plan — is not this, and is left alone.
+const BUY_RESET: &str = "buy_reset";
+
+fn reset_offer(banner: Option<&serde_json::Value>) -> Option<LimitsResetOfferDto> {
+    let cta = banner?
+        .get("ctas")?
+        .as_array()?
+        .iter()
+        .find(|cta| cta.get("action").and_then(serde_json::Value::as_str) == Some(BUY_RESET))?;
+    let price = cta.get("price");
+    Some(LimitsResetOfferDto {
+        currency: price
+            .and_then(|price| price.get("currency"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|code| !code.is_empty() && code.len() <= 8)
+            .map(str::to_uppercase),
+        amount_minor_units: price
+            .and_then(|price| price.get("amount_minor_units"))
+            .and_then(serde_json::Value::as_u64),
+    })
+}
+
 fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCreditsDto> {
     let summary = value?;
     let next_expires_at = summary

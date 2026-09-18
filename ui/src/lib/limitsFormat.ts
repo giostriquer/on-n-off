@@ -172,3 +172,21 @@ export function planLabel(plan: string | null | undefined, provider?: string): s
   }
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
+
+/** Symbols for the currencies this app is likely to meet; anything else prints its ISO code. */
+const CURRENCY_SYMBOLS: Record<string, string> = { USD: "$", EUR: "€", GBP: "£", JPY: "¥" };
+
+/**
+ * A provider's price for a paid reset, in the currency's minor units (cents). Returns null when
+ * the provider named no amount, which is an offer without a price rather than a free one.
+ */
+export function formatOfferPrice(offer: { currency?: string | null; amountMinorUnits?: number | null }): string | null {
+  const minor = offer.amountMinorUnits;
+  if (typeof minor !== "number" || !Number.isFinite(minor) || minor < 0) return null;
+  const code = offer.currency?.trim().toUpperCase();
+  // JPY and its kind have no minor unit; every other currency here carries two digits.
+  const amount = code === "JPY" ? String(Math.round(minor)) : (minor / 100).toFixed(2);
+  if (!code) return amount;
+  const symbol = CURRENCY_SYMBOLS[code];
+  return symbol ? `${symbol}${amount}` : `${code} ${amount}`;
+}

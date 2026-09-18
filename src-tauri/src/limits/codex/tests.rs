@@ -202,3 +202,68 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
         assert_eq!(parse_codex(&payload).reset_credits, None);
     }
 }
+
+#[test]
+fn a_paid_reset_offer_is_read_from_the_backend_banner_and_nothing_else_is() {
+    let offered: RateLimitsResponse = serde_json::from_value(json!({
+        "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 100, "windowDurationMins": 10080}},
+        "rateLimitUpsell": {
+            "banner_type": "plus_rate_limit_reached",
+            "title": "You have run out of Codex usage",
+            "ctas": [
+                {"action": "view_usage", "label": "See usage"},
+                {"action": "buy_reset", "label": "Reset now",
+                 "price": {"currency": "USD", "amount_minor_units": 800}}
+            ]
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        parse_codex(&offered).reset_offer,
+        Some(LimitsResetOfferDto {
+            currency: Some("USD".into()),
+            amount_minor_units: Some(800),
+        })
+    );
+
+    // A banner without the purchase call to action says nothing about buying one.
+    let other: RateLimitsResponse = serde_json::from_value(json!({
+        "rateLimits": {"limitId": "codex"},
+        "rateLimitUpsell": {"banner_type": "usage_limit", "ctas": [{"action": "view_usage", "label": "See usage"}]}
+    }))
+    .unwrap();
+    assert_eq!(parse_codex(&other).reset_offer, None);
+
+    // The backend owns this blob, so a shape this build does not expect is not an offer, and a
+    // priceless or garbled offer is still an offer.
+    for (payload, expected) in [
+        (json!({"rateLimits": {"limitId": "codex"}}), None),
+        (
+            json!({"rateLimits": {"limitId": "codex"}, "rateLimitUpsell": null}),
+            None,
+        ),
+        (
+            json!({"rateLimits": {"limitId": "codex"}, "rateLimitUpsell": {"ctas": "soon"}}),
+            None,
+        ),
+        (
+            json!({"rateLimits": {"limitId": "codex"}, "rateLimitUpsell": {"ctas": [{"action": "buy_reset"}]}}),
+            Some(LimitsResetOfferDto {
+                currency: None,
+                amount_minor_units: None,
+            }),
+        ),
+        (
+            json!({"rateLimits": {"limitId": "codex"}, "rateLimitUpsell": {"ctas": [
+                {"action": "buy_reset", "price": {"currency": "usd", "amount_minor_units": -1}}
+            ]}}),
+            Some(LimitsResetOfferDto {
+                currency: Some("USD".into()),
+                amount_minor_units: None,
+            }),
+        ),
+    ] {
+        let payload: RateLimitsResponse = serde_json::from_value(payload).unwrap();
+        assert_eq!(parse_codex(&payload).reset_offer, expected);
+    }
+}

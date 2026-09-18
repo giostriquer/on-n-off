@@ -41,6 +41,12 @@ export type LimitsAccount = {
   label?: string | null;
 };
 
+/** What the provider says a reset costs while it is offering one. */
+export type LimitsResetOffer = {
+  currency?: string | null;
+  amountMinorUnits?: number | null;
+};
+
 /**
  * Mirrors `ProviderLimitsDto`: provider-side problems arrive as a status, not an error.
  * `currentAccount: false` is an account remembered independently of the CLI's current login.
@@ -55,4 +61,6 @@ export type ProviderLimits = {
   windows: LimitWindow[];
   credits?: LimitsCredits | null;
   resetCredits?: LimitsResetCredits | null;
+  /** A paid reset offered right now. Absent whenever the account is not at its limit. */
+  resetOffer?: LimitsResetOffer | null;
 };

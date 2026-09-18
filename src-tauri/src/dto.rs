@@ -630,6 +630,21 @@ pub struct LimitsResetCreditsDto {
     pub next_expires_at: Option<String>,
 }
 
+/// A paid reset Codex is offering this account right now, read from the backend-owned banner on a
+/// usage read. It is an offer in flight, not a standing entitlement: it appears only once a limit
+/// is reached, so its absence never means the account could not buy one. on-n-off shows it and
+/// never sells it; the purchase lives on the provider's own site.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsResetOfferDto {
+    /// ISO 4217 code as the backend spells it, upper-cased. `None` when it named no price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    /// Cents, or the currency's own minor unit. `None` when the price was absent or not a count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_minor_units: Option<u64>,
+}
+
 /// What Codex did with a request to spend one banked reset, in Codex's own wire names. `Unknown`
 /// catches an outcome this build does not recognise: the request still went through, so it is not
 /// reported as a failure.
@@ -678,6 +693,9 @@ pub struct ProviderLimitsDto {
     pub credits: Option<LimitsCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_credits: Option<LimitsResetCreditsDto>,
+    /// Never remembered: an offer withdrawn between reads must disappear with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_offer: Option<LimitsResetOfferDto>,
 }
 
 impl ProviderLimitsDto {

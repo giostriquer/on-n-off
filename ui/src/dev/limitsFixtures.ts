@@ -119,6 +119,8 @@ export function bankedResetsCodex(): ProviderLimits[] {
     resetCredits: entry.currentAccount
       ? { availableCount: 2, nextExpiresAt: at(11 * 24 * 60 + 19 * 60) }
       : { availableCount: 1, nextExpiresAt: null },
+    // Codex offers a paid reset only while an account sits at its limit, so only the live one has it.
+    resetOffer: entry.currentAccount ? { currency: "USD", amountMinorUnits: 800 } : null,
   }));
 }
 

@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
-import { formatResetIn, formatShortDate } from "$lib/limitsFormat";
-import type { LimitsResetCredits, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
+import { formatOfferPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
+import type { LimitsResetCredits, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
 import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import { usageLeft } from "./limitPresentation";
@@ -20,6 +20,15 @@ const OUTCOME_MESSAGES: Record<ResetCreditOutcome, string> = {
 };
 
 /** The banked reset count as one more row under the windows, with when the next one expires. */
+/**
+ * A paid reset the provider is offering while the account sits at its limit. It is shown, never
+ * sold: the purchase happens on the provider's own site, so this row carries no action.
+ */
+export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
+  if (!offer) return null;
+  return <SummaryRow label="Paid reset offered" value={formatOfferPrice(offer) ?? "offered"} note="offered by Codex · buy it on chatgpt.com" />;
+}
+
 export function BankedResetsRow({ resetCredits, now }: { resetCredits?: LimitsResetCredits | null; now: number }) {
   if (!resetCredits || resetCredits.availableCount <= 0) return null;
   const expiresIn = formatResetIn(resetCredits.nextExpiresAt, now);

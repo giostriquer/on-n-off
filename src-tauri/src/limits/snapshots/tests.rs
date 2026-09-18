@@ -30,6 +30,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
         )],
         credits: None,
         reset_credits: None,
+        reset_offer: None,
     };
     for window in &mut dto.windows {
         window.observed_at = observed_at.to_string();
@@ -193,6 +194,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
             unlimited: false,
         }),
         reset_credits: None,
+        reset_offer: None,
     };
 
     store.save(&credits_only).unwrap();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatClock,
+  formatOfferPrice,
   formatObservedAt,
   formatShortDate,
   formatResetAt,
@@ -181,5 +182,23 @@ describe("formatShortDate", () => {
     expect(formatShortDate(newYearsEve, { timeZone: "America/Sao_Paulo", yearUnlessSameAs: justAfter })).toBe("Dec 31");
     expect(formatShortDate(null)).toBe("");
     expect(formatShortDate("not a date")).toBe("");
+  });
+});
+
+describe("formatOfferPrice", () => {
+  it("prints minor units as money, with a symbol only for a currency it knows", () => {
+    expect(formatOfferPrice({ currency: "USD", amountMinorUnits: 800 })).toBe("$8.00");
+    expect(formatOfferPrice({ currency: "usd", amountMinorUnits: 1250 })).toBe("$12.50");
+    expect(formatOfferPrice({ currency: "BRL", amountMinorUnits: 4250 })).toBe("BRL 42.50");
+    // Yen has no minor unit, so its amount is whole.
+    expect(formatOfferPrice({ currency: "JPY", amountMinorUnits: 1200 })).toBe("¥1200");
+    expect(formatOfferPrice({ amountMinorUnits: 800 })).toBe("8.00");
+  });
+
+  it("reports no price rather than a free one when the amount is missing or impossible", () => {
+    expect(formatOfferPrice({ currency: "USD" })).toBeNull();
+    expect(formatOfferPrice({ currency: "USD", amountMinorUnits: null })).toBeNull();
+    expect(formatOfferPrice({ currency: "USD", amountMinorUnits: -100 })).toBeNull();
+    expect(formatOfferPrice({ currency: "USD", amountMinorUnits: Number.NaN })).toBeNull();
   });
 });
