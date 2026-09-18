@@ -41,10 +41,15 @@ export type LimitsAccount = {
   label?: string | null;
 };
 
-/** What the provider says a reset costs while it is offering one. */
+/** A price as the provider states it: minor units and the currency they count. */
+export type LimitsPrice = {
+  amountMinorUnits: number;
+  currency: string;
+};
+
+/** A paid reset the provider is offering right now. It may name no price. */
 export type LimitsResetOffer = {
-  currency?: string | null;
-  amountMinorUnits?: number | null;
+  price?: LimitsPrice | null;
 };
 
 /**

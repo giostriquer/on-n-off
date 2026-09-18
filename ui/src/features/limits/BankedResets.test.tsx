@@ -242,15 +242,14 @@ describe("UseBankedReset", () => {
 
 describe("ResetOfferRow", () => {
   it("names the price the provider is offering and says where buying happens", () => {
-    render(<ResetOfferRow offer={{ currency: "USD", amountMinorUnits: 800 }} />);
-    const row = screen.getByRole("definition", { name: "Paid reset offered" });
-    expect(row).toHaveTextContent("$8.00");
+    render(<ResetOfferRow offer={{ price: { currency: "USD", amountMinorUnits: 800 } }} />);
+    expect(screen.getByRole("definition", { name: "Paid reset" })).toHaveTextContent("$8.00");
     expect(screen.getByText("offered by Codex · buy it on chatgpt.com")).toBeVisible();
   });
 
   it("still shows the offer when the provider names no price", () => {
     render(<ResetOfferRow offer={{}} />);
-    expect(screen.getByRole("definition", { name: "Paid reset offered" })).toHaveTextContent("offered");
+    expect(screen.getByRole("definition", { name: "Paid reset" })).toHaveTextContent(/^offered$/);
   });
 
   it("shows nothing when no reset is offered, which is most of the time", () => {
@@ -258,8 +257,9 @@ describe("ResetOfferRow", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("prints a currency it does not know the symbol for beside the amount", () => {
-    render(<ResetOfferRow offer={{ currency: "BRL", amountMinorUnits: 4250 }} />);
-    expect(screen.getByRole("definition", { name: "Paid reset offered" })).toHaveTextContent("BRL 42.50");
+  it("is shown, never sold: the row carries no way to buy anything", () => {
+    render(<ResetOfferRow offer={{ price: { currency: "USD", amountMinorUnits: 800 } }} />);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

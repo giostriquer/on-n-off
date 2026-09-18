@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatClock,
-  formatOfferPrice,
+  formatPrice,
   formatObservedAt,
   formatShortDate,
   formatResetAt,
@@ -185,20 +185,21 @@ describe("formatShortDate", () => {
   });
 });
 
-describe("formatOfferPrice", () => {
-  it("prints minor units as money, with a symbol only for a currency it knows", () => {
-    expect(formatOfferPrice({ currency: "USD", amountMinorUnits: 800 })).toBe("$8.00");
-    expect(formatOfferPrice({ currency: "usd", amountMinorUnits: 1250 })).toBe("$12.50");
-    expect(formatOfferPrice({ currency: "BRL", amountMinorUnits: 4250 })).toBe("BRL 42.50");
-    // Yen has no minor unit, so its amount is whole.
-    expect(formatOfferPrice({ currency: "JPY", amountMinorUnits: 1200 })).toBe("¥1200");
-    expect(formatOfferPrice({ amountMinorUnits: 800 })).toBe("8.00");
+describe("formatPrice", () => {
+  it("divides by the minor units the currency actually has", () => {
+    expect(formatPrice({ currency: "USD", amountMinorUnits: 800 })).toBe("$8.00");
+    expect(formatPrice({ currency: "EUR", amountMinorUnits: 1250 })).toBe("€12.50");
+    // Yen has no minor unit and dinars have three, so neither is two decimal places.
+    expect(formatPrice({ currency: "JPY", amountMinorUnits: 1200 })).toBe("¥1,200");
+    expect(formatPrice({ currency: "KRW", amountMinorUnits: 12000 })).toBe("₩12,000");
+    expect(formatPrice({ currency: "BHD", amountMinorUnits: 3000 })).toBe("BHD 3.000");
+    expect(formatPrice({ currency: "BRL", amountMinorUnits: 4250 })).toBe("R$42.50");
   });
 
-  it("reports no price rather than a free one when the amount is missing or impossible", () => {
-    expect(formatOfferPrice({ currency: "USD" })).toBeNull();
-    expect(formatOfferPrice({ currency: "USD", amountMinorUnits: null })).toBeNull();
-    expect(formatOfferPrice({ currency: "USD", amountMinorUnits: -100 })).toBeNull();
-    expect(formatOfferPrice({ currency: "USD", amountMinorUnits: Number.NaN })).toBeNull();
+  it("shows the number beside a code with no symbol, and never disappears on a bad one", () => {
+    // A well-formed code this runtime has no symbol for still formats, with two decimals.
+    expect(formatPrice({ currency: "ZZZ", amountMinorUnits: 800 })).toBe("ZZZ 8.00");
+    // A code Intl rejects outright falls back rather than throwing into the card.
+    expect(formatPrice({ currency: "US", amountMinorUnits: 800 })).toBe("US 8");
   });
 });

@@ -205,6 +205,8 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
 
 #[test]
 fn a_paid_reset_offer_is_read_from_the_backend_banner_and_nothing_else_is() {
+    // The banner reaches clients as the backend wrote it: `rate_limit_upsell` is an untyped value
+    // on the app-server response, so its nested keys keep the backend's snake_case.
     let offered: RateLimitsResponse = serde_json::from_value(json!({
         "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 100, "windowDurationMins": 10080}},
         "rateLimitUpsell": {
@@ -213,7 +215,7 @@ fn a_paid_reset_offer_is_read_from_the_backend_banner_and_nothing_else_is() {
             "ctas": [
                 {"action": "view_usage", "label": "See usage"},
                 {"action": "buy_reset", "label": "Reset now",
-                 "price": {"currency": "USD", "amount_minor_units": 800}}
+                 "price": {"currency": "usd", "amount_minor_units": 800}}
             ]
         }
     }))
@@ -221,8 +223,11 @@ fn a_paid_reset_offer_is_read_from_the_backend_banner_and_nothing_else_is() {
     assert_eq!(
         parse_codex(&offered).reset_offer,
         Some(LimitsResetOfferDto {
-            currency: Some("USD".into()),
-            amount_minor_units: Some(800),
+            price: Some(LimitsPriceDto {
+                amount_minor_units: 800,
+                // Upper-cased once, here, so no other layer has to.
+                currency: "USD".into(),
+            }),
         })
     );
 
@@ -233,37 +238,90 @@ fn a_paid_reset_offer_is_read_from_the_backend_banner_and_nothing_else_is() {
     }))
     .unwrap();
     assert_eq!(parse_codex(&other).reset_offer, None);
+}
 
-    // The backend owns this blob, so a shape this build does not expect is not an offer, and a
-    // priceless or garbled offer is still an offer.
-    for (payload, expected) in [
-        (json!({"rateLimits": {"limitId": "codex"}}), None),
-        (
-            json!({"rateLimits": {"limitId": "codex"}, "rateLimitUpsell": null}),
-            None,
-        ),
-        (
-            json!({"rateLimits": {"limitId": "codex"}, "rateLimitUpsell": {"ctas": "soon"}}),
-            None,
-        ),
-        (
-            json!({"rateLimits": {"limitId": "codex"}, "rateLimitUpsell": {"ctas": [{"action": "buy_reset"}]}}),
-            Some(LimitsResetOfferDto {
-                currency: None,
-                amount_minor_units: None,
+#[test]
+fn an_offer_survives_a_price_this_app_will_not_show() {
+    let priced = |price: serde_json::Value| {
+        let payload: RateLimitsResponse = serde_json::from_value(json!({
+            "rateLimits": {"limitId": "codex"},
+            "rateLimitUpsell": {"ctas": [{"action": "buy_reset", "label": "Reset now", "price": price}]}
+        }))
+        .unwrap();
+        parse_codex(&payload).reset_offer
+    };
+    let priceless = Some(LimitsResetOfferDto { price: None });
+
+    assert_eq!(
+        priced(json!({"currency": "  eur  ", "amount_minor_units": 500})),
+        Some(LimitsResetOfferDto {
+            price: Some(LimitsPriceDto {
+                amount_minor_units: 500,
+                currency: "EUR".into()
             }),
-        ),
-        (
-            json!({"rateLimits": {"limitId": "codex"}, "rateLimitUpsell": {"ctas": [
-                {"action": "buy_reset", "price": {"currency": "usd", "amount_minor_units": -1}}
-            ]}}),
-            Some(LimitsResetOfferDto {
-                currency: Some("USD".into()),
-                amount_minor_units: None,
+        })
+    );
+    // Not an ISO 4217 code, so there is nothing to print the number beside.
+    assert_eq!(
+        priced(json!({"currency": "US", "amount_minor_units": 800})),
+        priceless
+    );
+    assert_eq!(
+        priced(json!({"currency": "US DOLLARS", "amount_minor_units": 800})),
+        priceless
+    );
+    assert_eq!(
+        priced(json!({"currency": "US$", "amount_minor_units": 800})),
+        priceless
+    );
+    // An amount that is not a whole count of minor units, or beyond any reset ever sold.
+    assert_eq!(
+        priced(json!({"currency": "USD", "amount_minor_units": 800.5})),
+        priceless
+    );
+    assert_eq!(
+        priced(json!({"currency": "USD", "amount_minor_units": "800"})),
+        priceless
+    );
+    assert_eq!(
+        priced(json!({"currency": "USD", "amount_minor_units": -1})),
+        priceless
+    );
+    assert_eq!(
+        priced(json!({"currency": "USD", "amount_minor_units": u64::MAX})),
+        priceless
+    );
+    assert_eq!(priced(json!({"currency": "USD"})), priceless);
+    assert_eq!(priced(json!(null)), priceless);
+
+    // Whole yen is a whole count of minor units, and stays one.
+    assert_eq!(
+        priced(json!({"currency": "JPY", "amount_minor_units": 1200})),
+        Some(LimitsResetOfferDto {
+            price: Some(LimitsPriceDto {
+                amount_minor_units: 1200,
+                currency: "JPY".into()
             }),
-        ),
+        })
+    );
+}
+
+#[test]
+fn a_banner_shaped_unlike_the_one_this_app_knows_offers_nothing() {
+    for banner in [
+        json!(null),
+        json!({"ctas": "soon"}),
+        json!({"banner_type": "usage_limit"}),
+        json!({"ctas": [{"label": "Reset now"}]}),
+        json!({"ctas": [42]}),
     ] {
-        let payload: RateLimitsResponse = serde_json::from_value(payload).unwrap();
-        assert_eq!(parse_codex(&payload).reset_offer, expected);
+        let payload: RateLimitsResponse = serde_json::from_value(json!({
+            "rateLimits": {"limitId": "codex"}, "rateLimitUpsell": banner
+        }))
+        .unwrap();
+        assert_eq!(parse_codex(&payload).reset_offer, None);
     }
+    let absent: RateLimitsResponse =
+        serde_json::from_value(json!({"rateLimits": {"limitId": "codex"}})).unwrap();
+    assert_eq!(parse_codex(&absent).reset_offer, None);
 }

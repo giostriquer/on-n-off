@@ -154,7 +154,13 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         )],
         credits: None,
         reset_credits: reset_credits.clone(),
-        reset_offer: None,
+        // A remembered account can carry no offer, and merging must not invent one either.
+        reset_offer: Some(crate::dto::LimitsResetOfferDto {
+            price: Some(crate::dto::LimitsPriceDto {
+                amount_minor_units: 800,
+                currency: "USD".to_string(),
+            }),
+        }),
     });
 
     assert_eq!(
@@ -202,6 +208,8 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
     let merged = merge_windows(current, None, remembered);
 
     assert_eq!(merged.reset_credits, reset_credits);
+    // The banked count is remembered; a price the provider may already have withdrawn is not.
+    assert_eq!(merged.reset_offer, None);
     assert_eq!(merged.plan.as_deref(), Some("pro"));
     assert!(merged.windows.is_empty());
 }

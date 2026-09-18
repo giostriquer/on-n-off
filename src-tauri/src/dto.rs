@@ -637,12 +637,20 @@ pub struct LimitsResetCreditsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsResetOfferDto {
-    /// ISO 4217 code as the backend spells it, upper-cased. `None` when it named no price.
+    /// What it costs, when the provider named a price. An offer without one is still an offer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub currency: Option<String>,
-    /// Cents, or the currency's own minor unit. `None` when the price was absent or not a count.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub amount_minor_units: Option<u64>,
+    pub price: Option<LimitsPriceDto>,
+}
+
+/// A price the way the provider states it: minor units and the currency they belong to. Both or
+/// neither, so an amount can never be shown without knowing what it counts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsPriceDto {
+    /// Cents, or whatever the currency's minor unit is. The UI divides by that currency's exponent.
+    pub amount_minor_units: u64,
+    /// An ISO 4217 code, upper-cased: exactly three letters, or the price is not read at all.
+    pub currency: String,
 }
 
 /// What Codex did with a request to spend one banked reset, in Codex's own wire names. `Unknown`

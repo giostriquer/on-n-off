@@ -173,20 +173,20 @@ export function planLabel(plan: string | null | undefined, provider?: string): s
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
-/** Symbols for the currencies this app is likely to meet; anything else prints its ISO code. */
-const CURRENCY_SYMBOLS: Record<string, string> = { USD: "$", EUR: "€", GBP: "£", JPY: "¥" };
-
 /**
- * A provider's price for a paid reset, in the currency's minor units (cents). Returns null when
- * the provider named no amount, which is an offer without a price rather than a free one.
+ * A price the provider stated in minor units, in its own currency. `Intl` knows how many minor
+ * units each ISO code carries — yen has none, dinars have three — so the exponent is never guessed.
  */
-export function formatOfferPrice(offer: { currency?: string | null; amountMinorUnits?: number | null }): string | null {
-  const minor = offer.amountMinorUnits;
-  if (typeof minor !== "number" || !Number.isFinite(minor) || minor < 0) return null;
-  const code = offer.currency?.trim().toUpperCase();
-  // JPY and its kind have no minor unit; every other currency here carries two digits.
-  const amount = code === "JPY" ? String(Math.round(minor)) : (minor / 100).toFixed(2);
-  if (!code) return amount;
-  const symbol = CURRENCY_SYMBOLS[code];
-  return symbol ? `${symbol}${amount}` : `${code} ${amount}`;
+export function formatPrice({ amountMinorUnits, currency }: { amountMinorUnits: number; currency: string }): string {
+  try {
+    const format = new Intl.NumberFormat("en-US", { style: "currency", currency });
+    // Every currency resolves its own exponent; two decimals is the ISO default if one ever does not.
+    const digits = format.resolvedOptions().maximumFractionDigits ?? 2;
+    // `Intl` separates a code from its number with a non-breaking space; the card's monospace
+    // column wants an ordinary one.
+    return format.format(amountMinorUnits / 10 ** digits).replace(/\u00a0/g, " ");
+  } catch {
+    // A code `Intl` refuses outright: show the number beside it rather than nothing at all.
+    return `${currency} ${amountMinorUnits / 100}`;
+  }
 }
