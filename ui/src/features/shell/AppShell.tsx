@@ -240,6 +240,7 @@ export function AppShell() {
         <LeftRail
           screen={screen}
           counts={counts}
+          readsHooks={currentAgent.readsHooks}
           theme={theme}
           masterOn={allOn}
           masterNote={masterNote}

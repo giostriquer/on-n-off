@@ -96,6 +96,13 @@ pub struct AgentInfo {
     pub install_git: bool,
     pub install_folder: bool,
     pub plugin_toggle: bool,
+    /// Whether on-n-off reads this provider's hooks at all. The Hooks screen asks the provider
+    /// rather than keeping a list of its own, so a provider that grows hooks needs no second
+    /// change in the UI — and one that has none says so instead of showing an empty list as if
+    /// nothing were configured. Defaulted, because a snapshot written before it existed has no
+    /// such key and the two that read hooks say so for themselves.
+    #[serde(default)]
+    pub reads_hooks: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -153,7 +160,9 @@ pub struct McpServerDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HookDto {
-    /// Stable and unique within a provider; `hooks.rs` documents the shape it encodes.
+    /// Stable within a provider, and unique except where the files themselves collide — two
+    /// event keys that snake_case alike share one key in Codex's own state table too, so both
+    /// rows carry it. `hooks.rs` documents the shape it encodes.
     pub id: String,
     pub event: String,
     /// `""` when the entry has none, which is the same as matching everything the event fires for.
@@ -161,9 +170,10 @@ pub struct HookDto {
     pub matcher: String,
     /// `command`, `mcp_tool`, `http`, `prompt`, `agent` — or whatever else the file says.
     pub handler: String,
-    /// The command line as written, `${CLAUDE_PLUGIN_ROOT}` and all: expanding it would show a
-    /// path that is not in the file. `<server> · <tool>` for an `mcp_tool` handler, `""` when
-    /// the handler names neither.
+    /// The command line as written, `${CLAUDE_PLUGIN_ROOT}`, line continuations and all:
+    /// expanding it would show a path that is not in the file, and collapsing its lines would
+    /// leave nothing able to show what runs. The row truncates it; the tooltip has the whole of
+    /// it. `<server> · <tool>` for an `mcp_tool` handler, `""` when the handler names neither.
     #[serde(default)]
     pub command: String,
     /// Where the row comes from: the plugin's name, or the settings file's name.

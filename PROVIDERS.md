@@ -25,10 +25,20 @@ adapter assumes today (change the adapter and this file together).
   repository. Event names stay in each provider's own vocabulary (Claude's `PreToolUse`, Codex's
   `pre_tool_use`) because the two do not agree. Ids have Codex's `[hooks.state]` shape for both
   providers — `<plugin-id>:<source>:<event_snake_case>:<group>:<index>`, with an empty plugin
-  segment for user settings — so Codex's enablement is a lookup rather than a reconstruction.
-  Rows sort by source, then event, then their place in the file. A file that will not parse
-  contributes no rows instead of failing the tab. Claude and Codex only; the other two say the
-  provider has no hooks.
+  segment for user settings — so Codex's enablement is a lookup rather than a reconstruction. The
+  index counts within its event, so an id survives every edit that does not move its entry; two
+  event keys that snake_case alike (`Stop` and `stop`) share one key here exactly as they do in
+  Codex, and both rows are still listed. A row's command is the raw text of the file, newlines and
+  all — the row truncates it and the tooltip shows the whole of it — while a description is
+  collapsed to the single line that labels a row. Rows are ordered in Rust and the UI presents that
+  order rather than re-sorting: source, then event — both compared lower-cased, with the exact
+  spellings breaking a remaining tie (`sort::cmp_plugin_then_name`) — then plugin id, since two
+  marketplaces can ship a plugin of one name, then their place in the file, which needs no key of
+  its own because the sort is stable and every reader emits rows in file order. A file that will not
+  parse contributes no rows instead of failing the tab. Claude and Codex only, which each adapter
+  answers for itself through `AgentAdapter::reads_hooks`, carried to the screen as
+  `AgentInfo.readsHooks`; the other two say the provider has no hooks rather than showing an empty
+  list as if none were configured.
 - Project scope: `project.rs` reads `.claude/`, `.codex/`, `.cursor/` inside a project for skills
   and `.cursor/mcp.json` for project MCP.
 - Local items (`item_install/`): on-n-off can copy individual skills (and, for Claude, subagents)

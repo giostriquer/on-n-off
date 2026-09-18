@@ -5,7 +5,7 @@ import type { AgentTabDto, HookDto } from "$lib/types";
 
 type HookListProps = {
   tab: AgentTabDto;
-  /** Already sorted and filtered by the route; this component never derives the list again. */
+  /** Already sorted and filtered by the session's one filter pass; never derived again here. */
   hooks: HookDto[];
   filterQuery?: string;
   /** Set for a provider whose hooks on-n-off does not read, which is not the same as none. */

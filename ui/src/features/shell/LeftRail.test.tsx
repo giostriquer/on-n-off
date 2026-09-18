@@ -16,6 +16,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="overview"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={false}
         masterNote="cuts every item for Claude"
@@ -50,6 +51,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="plugins"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={true}
         masterNote="everything live on Claude"
@@ -77,6 +79,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="overview"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={false}
         masterNote=""
@@ -103,6 +106,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="limits"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={false}
         masterNote=""
@@ -137,6 +141,7 @@ describe("LeftRail", () => {
       <LeftRail
         screen="hooks"
         counts={counts}
+        readsHooks={true}
         theme="dark"
         masterOn={false}
         masterNote=""
@@ -154,5 +159,24 @@ describe("LeftRail", () => {
     expect(hooks.getAttribute("aria-current")).toBe("page");
     await user.click(hooks);
     expect(onScreen).toHaveBeenCalledWith("hooks");
+  });
+
+  it("shows no Hooks count for a provider whose hooks are never read", () => {
+    render(
+      <LeftRail
+        screen="overview"
+        counts={{ ...counts, hooks: { on: 0, total: 0 } }}
+        readsHooks={false}
+        theme="dark"
+        masterOn={false}
+        masterNote=""
+        onScreen={() => undefined}
+        onThemeChange={() => undefined}
+        onMaster={() => undefined}
+      />,
+    );
+    // "0/0" would read as a fact about the provider; Agent config shows a bare label the same way.
+    expect(screen.getByRole("button", { name: /^Hooks$/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Hooks\s*0\/0/i })).toBeNull();
   });
 });

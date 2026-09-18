@@ -28,6 +28,7 @@ const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as con
   installGit: id !== "cursor",
   installFolder: id !== "cursor",
   pluginToggle: id !== "cursor",
+  readsHooks: id === "claude" || id === "codex",
 }));
 
 function entry(name: string, path: string, extra: Partial<MarketplaceEntry> = {}): MarketplaceEntry {

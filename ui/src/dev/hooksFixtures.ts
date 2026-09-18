@@ -7,7 +7,11 @@ import type { AgentId, HookDto } from "$lib/types";
  * with no command at all, a command long enough to need truncating, and a Codex entry switched off
  * in `[hooks.state]`. Claude's and Codex's event names come from different vocabularies on
  * purpose: the screen prints whatever the provider calls it. Ids follow the backend's shape,
- * `<plugin-id>:<source>:<event>:<group>:<index>`, with an empty plugin segment for user settings.
+ * `<plugin-id>:<source>:<event>:<group>:<index>`, with an empty plugin segment for user settings:
+ * a plugin row is keyed by the hook file its manifest names — `hooks/hooks.json` where Claude
+ * falls back to its default, `plugin.json#hooks[0]` where a Codex manifest holds its events
+ * inline — and the legacy `notify` key, which predates events, keeps the fixed id and the
+ * description the backend mints for it.
  */
 
 const CLAUDE: HookDto[] = [
@@ -34,7 +38,7 @@ const CLAUDE: HookDto[] = [
     enabled: true,
   },
   {
-    id: "acme-guardrails@webapp:hooks.json:pre_tool_use:0:0",
+    id: "acme-guardrails@webapp:hooks/hooks.json:pre_tool_use:0:0",
     event: "PreToolUse",
     matcher: "Write|Edit",
     handler: "command",
@@ -45,7 +49,7 @@ const CLAUDE: HookDto[] = [
     enabled: true,
   },
   {
-    id: "acme-guardrails@webapp:hooks.json:post_tool_use:0:0",
+    id: "acme-guardrails@webapp:hooks/hooks.json:post_tool_use:0:0",
     event: "PostToolUse",
     matcher: "",
     handler: "mcp_tool",
@@ -56,7 +60,7 @@ const CLAUDE: HookDto[] = [
     enabled: true,
   },
   {
-    id: "webapp-house-rules@webapp:hooks.json:session_start:0:0",
+    id: "webapp-house-rules@webapp:hooks/hooks.json:session_start:0:0",
     event: "SessionStart",
     matcher: "",
     handler: "prompt",
@@ -92,18 +96,18 @@ const CODEX: HookDto[] = [
     enabled: true,
   },
   {
-    id: ":config.toml:notify:0:0",
+    id: ":notify:notification:0:0",
     event: "Notification",
     matcher: "",
     handler: "command",
     command: "~/.codex/notify.py",
-    source: "config.toml · legacy notify",
+    source: "config.toml",
     pluginId: null,
-    description: "",
+    description: "Legacy notify key.",
     enabled: true,
   },
   {
-    id: "acme-webapp-tools@webapp:plugin.json:stop:0:0",
+    id: "acme-webapp-tools@webapp:plugin.json#hooks[0]:stop:0:0",
     event: "Stop",
     matcher: "",
     handler: "mcp_tool",

@@ -145,3 +145,26 @@ fn hooks_sort_by_source_then_event_and_keep_their_file_order() {
         ]
     );
 }
+
+#[test]
+fn hooks_of_two_plugins_that_share_a_name_sort_by_plugin_id() {
+    // Source is the plugin's *name*, so two marketplaces shipping an `acme` both land here; the
+    // id is what separates them, and without it the two would interleave by whichever adapter
+    // walked first.
+    let mut hooks = vec![
+        hook("acme", "Stop", "from webapp", Some("acme@webapp")),
+        hook("acme", "Stop", "from other", Some("acme@other")),
+    ];
+    sort_hooks(&mut hooks);
+    let keys: Vec<_> = hooks
+        .iter()
+        .map(|hook| (hook.plugin_id.as_deref(), hook.command.as_str()))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            (Some("acme@other"), "from other"),
+            (Some("acme@webapp"), "from webapp"),
+        ]
+    );
+}

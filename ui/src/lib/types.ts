@@ -16,6 +16,12 @@ export type AgentInfo = {
   installGit: boolean;
   installFolder: boolean;
   pluginToggle: boolean;
+  /**
+   * Whether on-n-off reads this provider's hooks at all. `false` gets an empty Hooks screen that
+   * says so, because "no hooks" and "we never looked" are different facts — and no rail count,
+   * because there is no number to be right about.
+   */
+  readsHooks: boolean;
 };
 
 export type SkillDto = {
@@ -86,7 +92,7 @@ export type AgentTabDto = {
   plugins: PluginDto[];
   userSkills: SkillDto[];
   mcpServers: McpServerDto[];
-  /** Absent on a tab serialized before hooks existed; read it through `allHooks`/`catalogCounts`. */
+  /** Absent on a tab serialized before hooks existed; read it through `filterTab`/`catalogCounts`. */
   hooks?: HookDto[];
 };
 

@@ -50,10 +50,10 @@ let duplicateReconnected = false;
 const pendingLogins = new Map<string, () => void>();
 
 const AGENTS: AgentInfo[] = [
-  { id: "claude", displayName: "Claude", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true },
-  { id: "codex", displayName: "Codex", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true },
-  { id: "antigravity", displayName: "Antigravity", cliOk: false, cliError: "Antigravity CLI not found.", installGit: false, installFolder: false, pluginToggle: false },
-  { id: "cursor", displayName: "Cursor", cliOk: false, cliError: "Cursor CLI not found.", installGit: false, installFolder: false, pluginToggle: false },
+  { id: "claude", displayName: "Claude", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true, readsHooks: true },
+  { id: "codex", displayName: "Codex", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true, readsHooks: true },
+  { id: "antigravity", displayName: "Antigravity", cliOk: false, cliError: "Antigravity CLI not found.", installGit: false, installFolder: false, pluginToggle: false, readsHooks: false },
+  { id: "cursor", displayName: "Cursor", cliOk: false, cliError: "Cursor CLI not found.", installGit: false, installFolder: false, pluginToggle: false, readsHooks: false },
 ];
 
 let settings: AppSettings = {

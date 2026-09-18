@@ -18,6 +18,7 @@ const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as con
   installGit: true,
   installFolder: true,
   pluginToggle: true,
+  readsHooks: id === "claude" || id === "codex",
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({

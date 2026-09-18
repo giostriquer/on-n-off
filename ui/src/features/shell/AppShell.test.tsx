@@ -22,6 +22,7 @@ const agent = {
   installGit: true,
   installFolder: true,
   pluginToggle: true,
+  readsHooks: true,
 };
 
 const session = {

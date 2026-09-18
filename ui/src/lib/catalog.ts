@@ -155,51 +155,13 @@ export function sortMcps(servers: McpServerDto[]): McpServerDto[] {
 
 /**
  * Hooks read as a list of *places they come from*, so they group by source — a plugin's name or
- * the settings file — and only then by the provider's event, the matcher and the id the backend
- * minted. The id breaks ties because two handlers of one event can be identical but for their
- * position in the array, and a row order that moves between refreshes is worse than an arbitrary
- * one. Sorting here rather than trusting the backend's order is what `sortMcps` does too.
+ * the settings file — and then by the provider's event, which is how the backend already listed
+ * them. Nothing else breaks a tie: within one event the rows are in the order the file declares
+ * them, which is the order the user is reading in their own editor, and `Array.prototype.sort` is
+ * stable, so ties come out exactly as they came in.
  */
 export function sortHooks(hooks: HookDto[]): HookDto[] {
-  return [...hooks].sort(
-    (a, b) =>
-      comparePluginThenName(a.source, a.event, b.source, b.event) ||
-      a.matcher.localeCompare(b.matcher, undefined, { sensitivity: "accent" }) ||
-      a.id.localeCompare(b.id),
-  );
-}
-
-export function allHooks(tab: AgentTabDto | null | undefined): HookDto[] {
-  return sortHooks(tab?.hooks ?? []);
-}
-
-export function filterHookList(tab: AgentTabDto, query: string): HookDto[] {
-  const q = query.trim().toLowerCase();
-  const hooks = allHooks(tab);
-  if (!q) {
-    return hooks;
-  }
-  return hooks.filter((hook) =>
-    [hook.event, hook.matcher, hook.handler, hook.command, hook.source, hook.description, hook.id]
-      .join(" ")
-      .toLowerCase()
-      .includes(q),
-  );
-}
-
-/**
- * Whether on-n-off reads this provider's hooks at all. A provider that answers `false` gets an
- * empty screen that says so, because "no hooks" and "we never looked" are different facts.
- */
-export function providerReadsHooks(agentId: AgentId): boolean {
-  switch (agentId) {
-    case "claude":
-    case "codex":
-      return true;
-    case "antigravity":
-    case "cursor":
-      return false;
-  }
+  return [...hooks].sort((a, b) => comparePluginThenName(a.source, a.event, b.source, b.event));
 }
 
 export function allSkills(tab: AgentTabDto): SkillDto[] {

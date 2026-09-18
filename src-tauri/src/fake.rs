@@ -47,6 +47,12 @@ impl FakeAdapter {
 }
 
 impl AgentAdapter for FakeAdapter {
+    /// The same two providers the real adapters read hooks for, which is what the seeds below
+    /// give rows to.
+    fn reads_hooks(&self) -> bool {
+        matches!(self.id, AgentId::Claude | AgentId::Codex)
+    }
+
     fn info(&self) -> AgentInfo {
         AgentInfo {
             id: self.id,
@@ -56,6 +62,7 @@ impl AgentAdapter for FakeAdapter {
             install_git: self.install_git,
             install_folder: self.install_folder,
             plugin_toggle: self.cli_ok,
+            reads_hooks: self.reads_hooks(),
         }
     }
 

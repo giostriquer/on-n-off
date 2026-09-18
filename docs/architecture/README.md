@@ -15,8 +15,9 @@ Where files are, how to run them, and the constraints the code must respect all 
 A Tauri 2 desktop app for Windows and macOS (Apple Silicon) that reads what your coding agents —
 Claude, Codex, Antigravity, Cursor — have on disk, and shows it in one place: installed plugins,
 skills, MCP servers, the hooks a provider would run (Claude and Codex, listed and never run),
-token usage and cost, subscription rate limits, and your GitHub pull requests. It is overwhelmingly a **reader**; the narrow set of things it writes is listed under
-"Constraints" in AGENTS.md.
+token usage and cost, subscription rate limits, and your GitHub pull requests. It is
+overwhelmingly a **reader**; the narrow set of things it writes is listed under "Constraints" in
+AGENTS.md.
 
 ## The shape of the process
 

@@ -1,13 +1,12 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HooksRoute } from "./hooks";
 import { emptyTabDto } from "$lib/catalog";
+import { filterTab } from "$lib/filterTab";
 import type { AgentId, HookDto } from "$lib/types";
 
-const session = vi.hoisted(() => ({ provider: "claude" as AgentId, displayName: "Claude", filter: "" }));
-
 const hook: HookDto = {
-  id: "claude:acme-guardrails:PreToolUse:0:0",
+  id: "acme-guardrails@webapp:hooks/hooks.json:pre_tool_use:0:0",
   event: "PreToolUse",
   matcher: "Bash",
   handler: "command",
@@ -18,23 +17,56 @@ const hook: HookDto = {
   enabled: true,
 };
 
+/** Mutated per test, so every field it holds is reset in `beforeEach` before the next one reads it. */
+const session = vi.hoisted(() => ({
+  provider: "claude" as AgentId,
+  displayName: "Claude",
+  readsHooks: true,
+  filter: "",
+}));
+
 vi.mock("@/features/session/SessionProvider", () => ({
-  useAgentSession: () => ({
-    currentAgent: { id: session.provider, displayName: session.displayName },
-    currentTab: { dto: { ...emptyTabDto(), hooks: [hook] }, filter: session.filter, inFlight: false, loading: false, error: null },
-    emptyTabDto,
-  }),
+  useAgentSession: () => {
+    const dto = { ...emptyTabDto(), hooks: [hook] };
+    return {
+      currentAgent: {
+        id: session.provider,
+        displayName: session.displayName,
+        readsHooks: session.readsHooks,
+      },
+      currentTab: { dto, filter: session.filter, inFlight: false, loading: false, error: null },
+      // The shell filters once, for every screen; the route only picks its slice out.
+      filtered: filterTab(dto, session.filter),
+      emptyTabDto,
+    };
+  },
 }));
 
 describe("HooksRoute", () => {
-  it("lists the provider's hooks, filtered by the shell's filter box", () => {
+  beforeEach(() => {
     session.provider = "claude";
+    session.displayName = "Claude";
+    session.readsHooks = true;
     session.filter = "";
-    const { rerender } = render(<HooksRoute />);
-    expect(screen.getByText("PreToolUse")).toBeInTheDocument();
+  });
 
+  it("lists the provider's hooks", () => {
+    render(<HooksRoute />);
+    expect(screen.getByText("PreToolUse")).toBeInTheDocument();
+  });
+
+  it("keeps a row the shell's filter matches", () => {
+    session.filter = "guard.sh";
+    render(<HooksRoute />);
+
+    expect(screen.getByText("PreToolUse")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing matches/)).toBeNull();
+  });
+
+  it("drops a row the shell's filter misses", () => {
     session.filter = "postoolu";
-    rerender(<HooksRoute />);
+    render(<HooksRoute />);
+
     expect(screen.queryByText("PreToolUse")).toBeNull();
     expect(screen.getByText(/Nothing matches/)).toBeInTheDocument();
   });
@@ -42,7 +74,7 @@ describe("HooksRoute", () => {
   it("says so for a provider whose hooks on-n-off does not read", () => {
     session.provider = "cursor";
     session.displayName = "Cursor";
-    session.filter = "";
+    session.readsHooks = false;
     render(<HooksRoute />);
 
     expect(screen.getByText(/doesn’t read hooks for Cursor/)).toBeInTheDocument();

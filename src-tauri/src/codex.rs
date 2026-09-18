@@ -148,16 +148,6 @@ impl CodexAdapter {
         })
     }
 
-    /// The text of a file under the provider home, empty when it is not there. `config.toml`
-    /// is read a second time this way because `CodexConfig` deliberately does not carry the
-    /// `[hooks]` and `[hooks.state]` tables: the hook reader owns their shape (see `hooks.rs`).
-    fn home_text(&self, name: &str) -> String {
-        self.root()
-            .ok()
-            .and_then(|root| fs::read_to_string(root.join(name)).ok())
-            .unwrap_or_default()
-    }
-
     fn marketplace_roots(&self, config: &CodexConfig) -> HashMap<String, (PathBuf, String)> {
         let Ok(root) = self.root() else {
             return HashMap::new();
@@ -202,10 +192,8 @@ impl CodexAdapter {
                 (name, hints)
             })
             .collect();
-        let config_text = self.home_text("config.toml");
-        let mut hooks = crate::hooks::codex_hooks_file(&self.home_text("hooks.json"));
-        hooks.extend(crate::hooks::codex_config_hooks(&config_text));
         let mut plugins = Vec::new();
+        let mut hook_plugins = Vec::new();
         let plugin_rows: Vec<_> = config.plugins.iter().collect();
         let mut plugin_skill_paths = HashSet::new();
         for (id, entry) in plugin_rows {
@@ -214,7 +202,11 @@ impl CodexAdapter {
             // A disabled plugin's hooks do not run, so they are not rows.
             if entry.enabled {
                 if let Some(dir) = cache.as_deref() {
-                    hooks.extend(crate::hooks::codex_plugin_hooks(id, &name, dir));
+                    hook_plugins.push(crate::hooks::PluginSource {
+                        id: id.clone(),
+                        name: name.clone(),
+                        root: dir.to_path_buf(),
+                    });
                 }
             }
             let installed = cache
@@ -291,13 +283,11 @@ impl CodexAdapter {
             }
             user_skills.push(codex_skill(None, skill, &enable_by_path));
         }
-        // Enablement is keyed positionally, so it can only be applied once every row exists.
-        crate::hooks::apply_codex_state(&mut hooks, &config_text);
         let mut tab = AgentTabDto {
             plugins,
             user_skills,
             mcp_servers: parse_codex_map(&config.mcp_servers),
-            hooks,
+            hooks: crate::hooks::codex_hooks(self.root()?, &hook_plugins),
         };
         sort_tab(&mut tab);
         Ok(tab)
@@ -308,8 +298,13 @@ impl AgentAdapter for CodexAdapter {
     fn supports_accounts(&self) -> bool {
         true
     }
+    fn reads_hooks(&self) -> bool {
+        true
+    }
     fn info(&self) -> AgentInfo {
-        agent_info(AgentId::Codex)
+        let mut info = agent_info(AgentId::Codex);
+        info.reads_hooks = self.reads_hooks();
+        info
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {

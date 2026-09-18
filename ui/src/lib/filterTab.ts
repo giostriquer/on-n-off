@@ -1,5 +1,5 @@
-import { allSkills, sortMcps, sortPlugins, sortSkills } from "./catalog";
-import type { AgentTabDto, McpServerDto, PluginDto, SkillDto } from "./types";
+import { allSkills, sortHooks, sortMcps, sortPlugins, sortSkills } from "./catalog";
+import type { AgentTabDto, HookDto, McpServerDto, PluginDto, SkillDto } from "./types";
 
 function matches(query: string, ...parts: string[]): boolean {
   return parts.join(" ").toLowerCase().includes(query);
@@ -9,6 +9,7 @@ export type FilteredTab = {
   plugins: PluginDto[];
   skills: SkillDto[];
   mcpServers: McpServerDto[];
+  hooks: HookDto[];
   expandIds: string[];
 };
 
@@ -16,11 +17,13 @@ export function filterTab(tab: AgentTabDto, query: string): FilteredTab {
   const q = query.trim().toLowerCase();
   const mcpServers = tab.mcpServers ?? [];
   const skills = filterSkillList(tab, q);
+  const hooks = filterHookList(tab, q);
   if (!q) {
     return {
       plugins: sortPlugins(tab.plugins),
       skills,
       mcpServers: sortMcps(mcpServers),
+      hooks,
       expandIds: [],
     };
   }
@@ -47,8 +50,33 @@ export function filterTab(tab: AgentTabDto, query: string): FilteredTab {
     plugins,
     skills,
     mcpServers: filteredMcps,
+    hooks,
     expandIds,
   };
+}
+
+/**
+ * Hooks match on everything the row shows, plus the plugin that brought them. The id stays out:
+ * it is the backend's key, `<plugin>:<source>:<event>:<group>:<index>`, so searching it would let
+ * a digit or a snake_cased event match rows that show neither.
+ */
+function filterHookList(tab: AgentTabDto, query: string): HookDto[] {
+  const hooks = sortHooks(tab.hooks ?? []);
+  if (!query) {
+    return hooks;
+  }
+  return hooks.filter((hook) =>
+    matches(
+      query,
+      hook.event,
+      hook.matcher,
+      hook.handler,
+      hook.command,
+      hook.source,
+      hook.description,
+      hook.pluginId ?? "",
+    ),
+  );
 }
 
 export function filterSkillList(tab: AgentTabDto, query: string): SkillDto[] {

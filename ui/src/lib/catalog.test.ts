@@ -5,14 +5,12 @@ import {
   comparePluginThenName,
   driftRows,
   emptyTabDto,
-  filterHookList,
   formatPluginVersion,
   globalItemCount,
   liveRows,
   masterAllOn,
   pluginOutOfSync,
   pluginVersionNote,
-  providerReadsHooks,
   skillIsLive,
   sortHooks,
   sortPlugins,
@@ -290,73 +288,58 @@ describe("catalog", () => {
   });
 });
 
-const hooks: HookDto[] = [
-  {
-    id: "claude:settings.json:PreToolUse:0:0",
+function hook(overrides: Partial<HookDto>): HookDto {
+  return {
+    id: ":settings.json:pre_tool_use:0:0",
     event: "PreToolUse",
-    matcher: "Bash",
+    matcher: "",
     handler: "command",
-    command: "~/.claude/bin/guard.sh",
+    command: "~/.claude/hooks/guard.sh",
     source: "settings.json",
     pluginId: null,
     description: "",
     enabled: true,
-  },
-  {
-    id: "claude:acme-guardrails:PostToolUse:0:0",
+    ...overrides,
+  };
+}
+
+/**
+ * The backend's own order: source, then event, then the order the file lists them in. The two
+ * `settings.json` PreToolUse rows are the trap — "Write" sorts before "Bash" only because the
+ * file says so, and `:10:` sorts before `:2:` only as a string — so any tiebreak beyond source
+ * and event reorders them.
+ */
+const hooks: HookDto[] = [
+  hook({ id: ":settings.json:pre_tool_use:2:0", matcher: "Write" }),
+  hook({ id: ":settings.json:pre_tool_use:10:0", matcher: "Bash" }),
+  hook({ id: ":settings.json:stop:0:0", event: "Stop", command: "~/.claude/hooks/say-done.sh" }),
+  hook({
+    id: "acme-guardrails@webapp:hooks/hooks.json:post_tool_use:0:0",
     event: "PostToolUse",
-    matcher: "",
     handler: "mcp_tool",
     command: "acme-review · lint_diff",
     source: "acme-guardrails",
     pluginId: "acme-guardrails@webapp",
     description: "Lints every diff the agent writes.",
-    enabled: true,
-  },
-  {
-    id: "claude:acme-guardrails:PostToolUse:0:1",
-    event: "PostToolUse",
-    matcher: "Write",
-    handler: "command",
-    command: "${CLAUDE_PLUGIN_ROOT}/bin/notify.sh",
-    source: "acme-guardrails",
-    pluginId: "acme-guardrails@webapp",
-    description: "",
     enabled: false,
-  },
+  }),
 ];
 
 const hookTab: AgentTabDto = { ...tab, hooks };
 
 describe("catalog hooks", () => {
-  it("sorts by source, then event, matcher and id", () => {
+  it("sorts by source then event, and leaves the backend's order alone within one event", () => {
     expect(sortHooks(hooks).map((entry) => entry.id)).toEqual([
-      "claude:acme-guardrails:PostToolUse:0:0",
-      "claude:acme-guardrails:PostToolUse:0:1",
-      "claude:settings.json:PreToolUse:0:0",
+      "acme-guardrails@webapp:hooks/hooks.json:post_tool_use:0:0",
+      ":settings.json:pre_tool_use:2:0",
+      ":settings.json:pre_tool_use:10:0",
+      ":settings.json:stop:0:0",
     ]);
   });
 
   it("counts every handler, and only the enabled ones as on", () => {
-    expect(catalogCounts(hookTab).hooks).toEqual({ on: 2, total: 3 });
+    expect(catalogCounts(hookTab).hooks).toEqual({ on: 3, total: 4 });
     expect(catalogCounts({ ...tab, hooks: undefined }).hooks).toEqual({ on: 0, total: 0 });
-  });
-
-  it("filters on event, matcher, handler, command, source and description", () => {
-    expect(filterHookList(hookTab, "").map((entry) => entry.id)).toEqual(sortHooks(hooks).map((entry) => entry.id));
-    expect(filterHookList(hookTab, "guard.sh").map((entry) => entry.event)).toEqual(["PreToolUse"]);
-    expect(filterHookList(hookTab, "acme-guardrails")).toHaveLength(2);
-    expect(filterHookList(hookTab, "lints every diff")).toHaveLength(1);
-    expect(filterHookList(hookTab, "mcp_tool")).toHaveLength(1);
-    expect(filterHookList(hookTab, "bash").map((entry) => entry.matcher)).toEqual(["Bash"]);
-    expect(filterHookList(hookTab, "nothing here")).toEqual([]);
-  });
-
-  it("knows which providers on-n-off reads hooks for", () => {
-    expect(providerReadsHooks("claude")).toBe(true);
-    expect(providerReadsHooks("codex")).toBe(true);
-    expect(providerReadsHooks("antigravity")).toBe(false);
-    expect(providerReadsHooks("cursor")).toBe(false);
   });
 
   it("starts an empty tab with no hooks", () => {

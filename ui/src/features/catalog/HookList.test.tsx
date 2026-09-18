@@ -88,6 +88,24 @@ describe("HookList", () => {
     expect(screen.queryByText("Stop")).toBeNull();
   });
 
+  it("counts the whole pool, not the filtered rows, and says what the pool covers", () => {
+    const shown = hook();
+    const pool = [shown, hook({ id: "claude:settings.json:Stop:0:0", event: "Stop" }), hook({ id: "off", enabled: false })];
+    render(<HookList tab={tabWith(pool)} hooks={[shown]} filterQuery="pretool" />);
+
+    // Two of the three are live, and the filter narrows the rows without moving the tally.
+    expect(screen.getByText(/2 active/)).toHaveTextContent("2 active · user settings + plugins · listed, never run");
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+  });
+
+  it("offers nothing to switch: the screen reads hooks and never writes them", () => {
+    const hooks = [hook(), hook({ id: "off", enabled: false })];
+    render(<HookList tab={tabWith(hooks)} hooks={hooks} />);
+
+    expect(screen.queryAllByRole("switch")).toHaveLength(0);
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
   it("says a provider's hooks are not read instead of showing it as unconfigured", () => {
     render(<HookList tab={emptyTabDto()} hooks={[]} unread="on-n-off doesn’t read hooks for Cursor yet." />);
 

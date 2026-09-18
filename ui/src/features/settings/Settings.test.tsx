@@ -53,6 +53,7 @@ const agents: AgentInfo[] = [
     installGit: false,
     installFolder: false,
     pluginToggle: false,
+    readsHooks: true,
   },
   {
     id: "codex",
@@ -62,6 +63,7 @@ const agents: AgentInfo[] = [
     installGit: true,
     installFolder: true,
     pluginToggle: true,
+    readsHooks: true,
   },
   {
     id: "antigravity",
@@ -71,6 +73,7 @@ const agents: AgentInfo[] = [
     installGit: false,
     installFolder: false,
     pluginToggle: false,
+    readsHooks: false,
   },
   {
     id: "cursor",
@@ -80,6 +83,7 @@ const agents: AgentInfo[] = [
     installGit: false,
     installFolder: false,
     pluginToggle: false,
+    readsHooks: false,
   },
 ];
 
