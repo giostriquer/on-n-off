@@ -80,11 +80,50 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
         );
     };
     let interval = poll_interval();
-    let (entries, reading) = read_through_cache(cache, interval, force, |force| {
+    read_provider(cache, agent, interval, force, &|force| {
         crate::limits::read_limits(agent, force)
+    })
+}
+
+/// Common composition boundary: active native results and saved-account results share one cache.
+fn read_provider(
+    cache: &Cache,
+    agent: AgentId,
+    interval: Duration,
+    force: bool,
+    native: &dyn Fn(bool) -> Vec<ProviderLimitsDto>,
+) -> (Vec<ProviderLimitsDto>, u64) {
+    let (entries, reading) = read_through_cache(cache, interval, force, |force| {
+        let mut entries = native(force);
+        crate::accounts::usage::refresh(agent, force, &mut entries);
+        entries
     });
     announce(cache, reading);
     (entries, reading.revision())
+}
+
+#[cfg(test)]
+pub(crate) fn test_saved_reader(
+    native: &dyn Fn(bool) -> Vec<ProviderLimitsDto>,
+) -> (Vec<ProviderLimitsDto>, Vec<ProviderLimitsDto>) {
+    let cache = Cache::new(Source::LimitsClaude);
+    let first = read_provider(
+        &cache,
+        AgentId::Claude,
+        Duration::from_secs(300),
+        false,
+        native,
+    )
+    .0;
+    let cached = read_provider(
+        &cache,
+        AgentId::Claude,
+        Duration::from_secs(300),
+        false,
+        native,
+    )
+    .0;
+    (first, cached)
 }
 
 /// Tells the windows about a replacement, outside the lock the read held, so neither a provider

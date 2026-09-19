@@ -35,7 +35,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "accountClients", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
-  "limitsBand", "bankedResets", "sameEmailWorkspaces", "hooks",
+  "savedRefreshPaused", "limitsBand", "bankedResets", "sameEmailWorkspaces", "hooks",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -241,6 +241,10 @@ const handlers: Record<string, Handler> = {
     pendingLogins.delete(id);
   },
   read_limits: (args) => {
+    if (scenario === "savedRefreshPaused") return limitsFor(args.agentId).slice(0, 1).flatMap(entry => [entry, {
+      ...entry, currentAccount: false, status: "failed", account: {id: `${entry.provider}-saved`, label: "other@example.com"},
+      message: "Saved usage access has expired. The last reading is retained.",
+    }]);
     if (scenario === "subscriptionBadges" && args.agentId === "codex") return subscriptionBadgeLimits();
     if (scenario === "limitsBand" && args.agentId === "claude") return limitsBandClaude();
     if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();

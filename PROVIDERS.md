@@ -212,7 +212,11 @@ desktop sessions are not promised immediate adoption.
 Saved credentials and interrupted-switch recovery live in an encrypted vault under
 `~/.on-n-off/accounts/`; the vault key is in macOS Keychain or Windows Credential Manager. No
 plaintext fallback exists. Active native credentials are authoritative, and inactive profiles are
-not automatically renewed. Sign-out can revoke all saved workspace logins for that user; removal
+not independently renewed after native activation. Saved-account usage polling reads both Claude
+and Codex with access tokens; only never-activated isolated sign-ins own automatic vault renewal.
+Saved Codex profiles use the account-scoped ChatGPT usage endpoint separately from the native
+app-server reader; saved Claude profiles verify user and organization before requesting usage.
+Renewal uses an encrypted intent/reply journal and blocks activation after an ambiguous outcome. Sign-out can revoke all saved workspace logins for that user; removal
 only removes on-n-off's saved copy. Abandoned isolated-login directories are cleaned only after
 their lease is free and provider processes are gone.
 

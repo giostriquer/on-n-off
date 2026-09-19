@@ -809,3 +809,26 @@ it("updates the expiry warning on the local minute clock without rereading billi
   expect(badge).toHaveClass("subscription-badge--expired");
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
+
+it.each(["claude", "codex"] as const)("quietly identifies last-known %s usage and reveals the reason on focus", async provider => {
+  const reason = "Saved usage credential is no longer accepted.";
+  const saved = (provider === "claude" ? okClaude : okCodex)({currentAccount:false, status:"failed", message:reason});
+  answer(provider === "claude" ? [saved] : [okClaude()], provider === "codex" ? [saved] : [okCodex()]);
+  renderLimits();
+  const region = await screen.findByRole("region", {name: `${provider === "claude" ? "Claude" : "Codex"} limits · ${saved.account!.label}`});
+  const badge = within(region).getByRole("button", {name:"Usage status: Last known usage"});
+  expect(within(region).queryByText(reason)).toBeNull();
+  expect(within(region).getAllByRole("meter").length).toBeGreaterThan(0);
+  expect(within(region).getByText(/Latest observation/)).toBeInTheDocument();
+  fireEvent.focus(badge);
+  expect(screen.getByRole("tooltip")).toHaveTextContent(reason);
+  fireEvent.keyDown(document, {key:"Escape"});
+  expect(screen.queryByRole("tooltip")).toBeNull();
+});
+
+it("keeps an inactive account error visible when no saved usage exists", async () => {
+  answer([okClaude({currentAccount:false, status:"failed", windows:[], message:"Usage request failed."})], [okCodex()]);
+  renderLimits();
+  expect(await screen.findByText("Usage request failed.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", {name:"Usage status: Last known usage"})).toBeNull();
+});

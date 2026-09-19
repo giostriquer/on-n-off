@@ -225,6 +225,22 @@ fn renew<P: Fn() -> KeychainProbe>(
         .ok_or_else(|| RenewError::Stranded("the renewed login did not parse".to_string()))
 }
 
+/// The saved-account owner has already persisted an encrypted renewal intent and proved
+/// exclusive ownership of this never-activated login. Native renewal remains under its locks.
+pub(super) fn renew_private(auth: &Value, now_ms: i64, token_url: &str) -> Result<Value, String> {
+    let oauth = auth
+        .get("claudeAiOauth")
+        .ok_or("Missing private Claude login.")?;
+    let token =
+        optional_string(oauth.get("refreshToken")).ok_or("Missing private renewal token.")?;
+    let reply = post_grant(token_url, &request_body(&token, &scopes(oauth)))
+        .map_err(|_| "Could not renew the private Claude login. Sign in again if needed.")?;
+    let mut auth = auth.clone();
+    apply(&mut auth, &reply, now_ms)
+        .map_err(|_| "The private renewal reply was incomplete. Sign in again.")?;
+    Ok(auth)
+}
+
 /// A store write resolved and proven before anything is redeemed.
 ///
 /// `prepare` does the parts that can fail on their own account: reading the Keychain entry's

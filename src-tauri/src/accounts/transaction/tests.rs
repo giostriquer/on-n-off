@@ -599,3 +599,37 @@ fn a_journal_that_cannot_be_cleared_before_publication_says_so() {
         "c"
     );
 }
+
+#[test]
+fn activation_revokes_private_ownership_in_the_durable_journal_before_native_publication() {
+    let (mut db, native, _, b) = fixture(false);
+    db.profiles
+        .iter_mut()
+        .find(|p| p.id == b)
+        .unwrap()
+        .usage_renewal_owned = true;
+    let mut journaled = false;
+    activate(&mut db, &native, &b, false, &mut |db| {
+        if db.recovery.is_some() {
+            assert!(
+                !db.profiles
+                    .iter()
+                    .find(|p| p.id == b)
+                    .unwrap()
+                    .usage_renewal_owned
+            );
+            assert_eq!(native.read().unwrap().unwrap().auth["user"], "a");
+            journaled = true;
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert!(journaled);
+    assert!(
+        !db.profiles
+            .iter()
+            .find(|p| p.id == b)
+            .unwrap()
+            .usage_renewal_owned
+    );
+}

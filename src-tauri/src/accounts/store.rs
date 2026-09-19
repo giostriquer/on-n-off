@@ -19,6 +19,9 @@ pub struct Profile {
     pub login: Option<Login>,
     #[serde(default)]
     pub pending_activation: bool,
+    /// True only while an isolated app sign-in has never been published to a native client.
+    #[serde(default)]
+    pub usage_renewal_owned: bool,
 }
 #[derive(Default, Serialize, Deserialize)]
 pub struct Database {
@@ -166,6 +169,7 @@ impl Database {
                 .clone()
                 .unwrap_or_else(|| "Email unavailable".into());
             profile.pending_activation = false;
+            profile.usage_renewal_owned = false;
             profile.login = Some(login);
             profile.saved_at = chrono::Utc::now().to_rfc3339();
             return Ok(profile.id.clone());
@@ -180,6 +184,7 @@ impl Database {
             saved_at: chrono::Utc::now().to_rfc3339(),
             login: Some(login),
             pending_activation: false,
+            usage_renewal_owned: false,
         });
         Ok(id)
     }
@@ -187,7 +192,7 @@ impl Database {
 
 pub struct Store {
     pub root: std::path::PathBuf,
-    key: [u8; 32],
+    pub(super) key: [u8; 32],
     _lease: std::fs::File,
 }
 impl Store {
@@ -241,7 +246,7 @@ impl Store {
             super::vault::key(root, create, false)
         })
     }
-    fn open_with_key(
+    pub(super) fn open_with_key(
         home: &std::path::Path,
         create: bool,
         unlock: impl FnOnce(&std::path::Path, bool) -> Result<[u8; 32], String>,

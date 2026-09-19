@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { UsageStatusBadge } from "./UsageStatusBadge";
 import { RefreshCw } from "lucide-react";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
@@ -192,7 +193,7 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
   const label = entry.account?.label ?? name;
   const plan = planLabel(entry.plan, entry.provider);
   const windows = visibleLimitWindows(entry);
-  const { message, refreshPaused, remembered, updatedAt } = presentLimitAccount(entry, `${name} limits are unavailable.`);
+  const { message, refreshPaused, remembered, updatedAt, savedRefreshDetail } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   return (
     <article
@@ -204,7 +205,7 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
       <header className="mb-1.5 min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
-          {remembered ? (
+          {savedRefreshDetail ? <UsageStatusBadge detail={savedRefreshDetail} /> : remembered ? (
             <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">
               Remembered account
             </span>

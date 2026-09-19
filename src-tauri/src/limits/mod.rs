@@ -19,6 +19,7 @@ pub(crate) mod json;
 pub(crate) mod login;
 mod observations;
 mod pipeline;
+pub(crate) mod saved;
 mod snapshots;
 
 use std::path::{Path, PathBuf};

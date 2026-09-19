@@ -21,6 +21,7 @@ export type LimitWindowPresentation = {
 export type LimitAccountPresentation = {
   message: string | null;
   refreshPaused: boolean;
+  savedRefreshDetail: string | null;
   remembered: boolean;
   updatedAt: string | null;
 };
@@ -104,8 +105,11 @@ export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: stri
     if (Number.isNaN(observedAt)) return latest;
     return latest === null ? observedAt : Math.max(latest, observedAt);
   }, null);
+  const savedRefreshPaused = !entry.currentAccount && observed && (entry.status === "failed" || entry.status === "unauthenticated");
+  const detail = entry.message ?? fallbackMessage;
   return {
-    message: entry.status === "ok" ? null : (entry.message ?? fallbackMessage),
+    message: entry.status === "ok" || savedRefreshPaused ? null : detail,
+    savedRefreshDetail: savedRefreshPaused ? detail : null,
     refreshPaused: entry.currentAccount && entry.status !== "ok" && observed,
     remembered: !entry.currentAccount && observed,
     updatedAt: latestObservedAt === null ? null : formatObservedAt(new Date(latestObservedAt).toISOString()),

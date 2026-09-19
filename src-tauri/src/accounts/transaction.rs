@@ -94,6 +94,10 @@ pub fn activate(
         &profile.identity,
     )?;
 
+    // Revoke private renewal ownership before any credential can reach a native client.
+    if let Some(target) = db.profiles.iter_mut().find(|p| p.id == id) {
+        target.usage_renewal_owned = false;
+    }
     db.recovery = Some(Recovery {
         target_id: id.into(),
         outgoing,

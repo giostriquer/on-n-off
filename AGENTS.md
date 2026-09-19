@@ -102,10 +102,11 @@ user data.
   changes. Automatic remembering verifies native logins and never activates a profile. Its encrypted
   vault stores renewable logins; only the small vault key enters the OS credential store. No
   secret enters DTOs, ordinary config backups, logs or plaintext fallback storage. The active
-  native login remains authoritative. Saved shadows never refresh independently. Switching
+  native login remains authoritative. Saved native shadows never refresh independently. Never-activated isolated sign-ins can renew
+  in the encrypted vault under the saved-account renewal journal. Switching
   captures the latest outgoing native credential before replacement; logout is a separate action
-  that can revoke it. Claude renewal lives only in `accounts/claude_renew.rs`, only after expiry
-  and under the native refresh locks, and writes only the active native store. Account identity
+  that can revoke it. Claude grants live only in `accounts/claude_renew.rs`. Native renewal runs after expiry under
+  native refresh locks; private saved renewal requires recorded ownership and its encrypted journal. Account identity
   configuration writes still go through `ConfigIo`, with the protected account journal as their
   backup participant. See [account ownership](docs/architecture/accounts.md).
   `github/` never writes to GitHub; `usage/` and `side_notch/` remain read-only.
