@@ -216,6 +216,7 @@ not independently renewed after native activation. Saved-account usage polling r
 and Codex with access tokens; only never-activated isolated sign-ins own automatic vault renewal.
 Saved Codex profiles use the account-scoped ChatGPT usage endpoint separately from the native
 app-server reader; saved Claude profiles verify user and organization before requesting usage.
+Native and saved reads order limit windows consistently: weekly, then session, then per-model.
 Renewal uses an encrypted intent/reply journal and blocks activation after an ambiguous outcome. Sign-out can revoke all saved workspace logins for that user; removal
 only removes on-n-off's saved copy. Abandoned isolated-login directories are cleaned only after
 their lease is free and provider processes are gone.

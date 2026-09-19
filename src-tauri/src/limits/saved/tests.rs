@@ -39,6 +39,53 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
 }
 
 #[test]
+fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
+    use crate::dto::LimitWindowKind::{Model, Session, Weekly};
+
+    for session_percent in [0, 67] {
+        let payloads = [
+            json!({
+                "five_hour": {"utilization": session_percent},
+                "seven_day": {"utilization": 99},
+                "seven_day_opus": {"utilization": 100}
+            }),
+            json!({"limits": [
+                {"kind": "session", "group": "session", "percent": session_percent},
+                {"kind": "weekly_opus", "group": "weekly", "percent": 100},
+                {"kind": "weekly_all", "group": "weekly", "percent": 99}
+            ]}),
+        ];
+        for payload in payloads {
+            let (profile, p) = serve_once(
+                "200 OK",
+                r#"{"account":{"uuid":"user"},"organization":{"uuid":"team"}}"#,
+            );
+            let (usage, u) = serve_once("200 OK", &payload.to_string());
+            let dto = read_at(
+                &identity(AgentId::Claude),
+                &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
+                &profile,
+                &usage,
+                "unused",
+            )
+            .unwrap();
+            p.join().unwrap();
+            u.join().unwrap();
+
+            assert!(!dto.current_account);
+            assert_eq!(
+                dto.windows
+                    .iter()
+                    .map(|window| (window.kind, window.used_percent))
+                    .collect::<Vec<_>>(),
+                vec![(Weekly, 99.0), (Session, f64::from(session_percent)), (Model, 100.0)],
+                "saved Claude window priority must not depend on usage or response order: {payload}"
+            );
+        }
+    }
+}
+
+#[test]
 fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
     let (url, request) = serve_once_capturing(
         "200 OK",

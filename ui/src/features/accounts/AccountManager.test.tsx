@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, it, expect, vi } from "vitest";
 import * as api from "$lib/api";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
-import { AccountBilling } from "./AccountBilling";
 import { AccountCardActions } from "./AccountCardActions";
 import { AccountPreferences } from "./AccountPreferences";
 vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn(), readCodexSubscription: vi.fn(), connectCodexBilling: vi.fn() }));
@@ -15,8 +14,7 @@ function Cards() {
   const manager = useAccountManagement();
   return <>{manager?.query.data?.profiles.map(profile => <section key={profile.id} aria-label={profile.email ?? "account"}>
     <span>{profile.email}</span><span>{profile.category}</span>
-    <AccountCardActions accountId={profile.observationId!} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>}
-      footer={({ blocked }) => <AccountBilling accountId={profile.observationId!} disabled={blocked} showDate={false} />} />
+    <AccountCardActions accountId={profile.observationId!} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>} />
   </section>)}</>;
 }
 function setup(preferences = false) {
@@ -64,6 +62,9 @@ it("switches normally when running clients cannot be checked, and waits for the 
   const card = await screen.findByRole("region", { name: "person@example.com" });
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
   await waitFor(() => expect(within(card).getByRole("button", { name: "Use account" })).toBeDisabled());
+  fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
+  expect(await within(card).findByRole("button", { name: "Connect billing" })).toBeDisabled();
+  fireEvent.keyDown(within(card).getByRole("group", { name: "Actions for person@example.com" }), { key: "Escape" });
   expect(api.accountAction).not.toHaveBeenCalled();
   await act(async () => answer([]));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
@@ -88,6 +89,7 @@ it("keeps email as the account name and allows a free-text category to be edited
   setup(); await screen.findByText("person@example.com");
   expect(screen.queryByText("Legacy name")).toBeNull();
   fireEvent.click(screen.getByText("•••")); fireEvent.click(screen.getByRole("button", { name: "Edit category" }));
+  expect(screen.getByRole("textbox", { name: "Category (optional)" })).toHaveFocus();
   fireEvent.change(screen.getByRole("textbox", { name: "Category (optional)" }), { target: { value: "Research / client blue" } });
   fireEvent.click(screen.getByRole("button", { name: "Save category" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "category", "profile-a", "Research / client blue"));
@@ -116,6 +118,7 @@ it("can disable automatic saving even when the profile vault cannot be read", as
 it("checks billing for the card's saved identity without activating it", async () => {
   setup(); vi.mocked(api.connectCodexBilling).mockResolvedValue();
   const card = await screen.findByRole("region", { name: "person@example.com" });
+  fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
   fireEvent.click(await within(card).findByRole("button", { name: "Connect billing" }));
   await waitFor(() => expect(api.connectCodexBilling).toHaveBeenCalledWith("profile:billing-a"));
   expect(api.accountAction).not.toHaveBeenCalled();
@@ -202,9 +205,13 @@ it("retries a denied vault unlock without starting sign-in or changing accounts"
 it("offers a retry after a billing failure and clears the error when it succeeds", async () => {
   setup();
   vi.mocked(api.connectCodexBilling).mockRejectedValueOnce(new Error("Could not read the browser session."));
+  fireEvent.click(await screen.findByRole("button", {name:"More actions for person@example.com"}));
   fireEvent.click(await screen.findByRole("button", {name:"Connect billing"}));
   expect(await screen.findByRole("alert")).toHaveTextContent("Could not read the browser session.");
   expect(screen.getByRole("button", {name:"Use account"})).toBeEnabled();
+  fireEvent.keyDown(screen.getByRole("group", {name:"Actions for person@example.com"}), {key:"Escape"});
+  fireEvent.click(screen.getByRole("button", {name:"More actions for person@example.com"}));
+  expect(screen.getByRole("alert")).toHaveTextContent("Could not read the browser session.");
   vi.mocked(api.connectCodexBilling).mockResolvedValueOnce();
   fireEvent.click(screen.getByRole("button", {name:"Retry billing"}));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());

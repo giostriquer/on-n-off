@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { CodexAccountActions } from "./CodexAccountActions";
@@ -36,24 +36,21 @@ beforeEach(() => {
 });
 
 describe("CodexAccountActions", () => {
-  it("offers the banked reset and billing on a Codex card", async () => {
+  it("offers the banked reset on a Codex card", async () => {
     renderActions({ current: true, blocked: false, unconfirmedCurrent: false });
 
     expect(screen.getByRole("button", { name: "Use banked reset" })).toHaveProperty("disabled", false);
-    expect(await screen.findByRole("button", { name: "Connect billing" })).toHaveProperty("disabled", false);
   });
 
-  it("holds the banked reset until the native login is confirmed, without holding billing", async () => {
+  it("holds the banked reset until the native login is confirmed", async () => {
     renderActions({ current: true, blocked: false, unconfirmedCurrent: true });
 
     expect(screen.getByRole("button", { name: "Use banked reset" })).toHaveProperty("disabled", true);
-    expect(await screen.findByRole("button", { name: "Connect billing" })).toHaveProperty("disabled", false);
   });
 
-  it("blocks both while the account controls cannot act", async () => {
+  it("blocks the banked reset while the account controls cannot act", async () => {
     renderActions({ current: true, blocked: true, unconfirmedCurrent: false });
 
     expect(screen.getByRole("button", { name: "Use banked reset" })).toHaveProperty("disabled", true);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Connect billing" })).toHaveProperty("disabled", true));
   });
 });

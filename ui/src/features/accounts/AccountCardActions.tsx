@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
 import { accountButton as button, useAccountManagement } from "./AccountManager";
+import { AccountBilling } from "./AccountBilling";
 
 /**
  * What more account actions beside the primary one can act on. `current` is the card's own notion of
@@ -43,7 +44,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   }
   useEffect(() => {
     if (!open) return;
-    root.current?.querySelector<HTMLElement>("[role=group] input, [role=group] button:not(:disabled)")?.focus();
+    root.current?.querySelector<HTMLElement>("[role=group]:not([hidden]) input, [role=group]:not([hidden]) button:not(:disabled)")?.focus();
     const outside = (event: PointerEvent) => {
       if (!root.current?.contains(event.target as Node)) dismiss();
     };
@@ -84,14 +85,16 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     <button ref={trigger} type="button" aria-label={`More actions for ${label}`} aria-expanded={open} aria-controls={open ? id : undefined}
       className="flex size-6 items-center justify-center rounded-md text-[var(--mute)] hover:bg-[var(--wash)] hover:text-[var(--silkscreen)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)]"
       onClick={() => open ? close() : setMenuOpen(true)}>•••</button>
-    {open && <div id={id} className="absolute right-0 top-full z-20 mt-2 w-64 max-w-[calc(100vw-3rem)] rounded-lg border border-[var(--hair)] bg-[var(--plate)] p-2 shadow-lg">
-    {menuOpen && <div role="group" aria-label={`Actions for ${label}`} className="flex flex-col gap-1">
+    {/* Keep billing state mounted so closing the menu does not discard a pending read or retry. */}
+    <div id={id} hidden={!open} className="absolute right-0 top-full z-20 mt-2 w-64 max-w-[calc(100vw-3rem)] rounded-lg border border-[var(--hair)] bg-[var(--plate)] p-2 shadow-lg">
+    <div hidden={!menuOpen} role="group" aria-label={`Actions for ${label}`} className={menuOpen ? "flex flex-col gap-1" : "hidden"}>
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setCategory(profile.category ?? ""); setEditing(true); }}>Edit category</button>}
+      {provider === "codex" && <AccountBilling accountId={accountId} disabled={!!disabled || !!switchingAlongside} />}
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void add(profile.id, accountId); }}>Sign in again</button>}
       {current && profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("removeLogin"); }}>Remove saved login</button>}
       {current ? <button className={`${button} border-transparent text-left`} disabled={disabled || !nativeMatches} onClick={() => { setMenuOpen(false); setConfirmation("signOut"); }}>Sign out</button>
         : onForget && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("remove"); }}>Remove account</button>}
-    </div>}
+    </div>
     {editing && profile && <form role="group" aria-label="Edit account category" className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void action("category", profile.id, category).then(complete).catch(() => {}); }}>
       <input aria-label="Category (optional)" placeholder="Category (optional)" maxLength={100} value={category} onChange={event => setCategory(event.target.value)} className="w-full min-w-0 rounded border border-[var(--hair)] bg-transparent px-2 py-1.5 text-[12px]" />
       <button className={button} disabled={disabled}>Save category</button><button type="button" className={button} onClick={close}>Cancel</button>
@@ -101,7 +104,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
       <div className="flex gap-2"><button className={button} disabled={disabled || (confirmation === "signOut" && (!current || !nativeMatches))} onClick={() => void confirm()}>{confirmation === "signOut" ? "Confirm sign out" : "Confirm removal"}</button><button className={button} onClick={close}>Cancel</button></div>
     </div>}
     {error && <p role="alert" className="text-[12px] text-[var(--trip)]">{error}</p>}
-    </div>}
+    </div>
   </div>;
   return <>
     {header(menu)}
