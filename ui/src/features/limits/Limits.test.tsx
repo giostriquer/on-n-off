@@ -572,7 +572,33 @@ describe("Limits", () => {
   });
 });
 
-import { readCodexSubscription } from "$lib/api";
+import { connectCodexBilling, readCodexSubscription } from "$lib/api";
+
+it("connects billing only from the card's more-actions menu", async () => {
+  vi.mocked(readCodexSubscription).mockClear().mockResolvedValue({
+    metadata: null, connected: false, unavailable: false, browserSupported: true, canConnect: true,
+  });
+  answer([okClaude()], [okCodex({ currentAccount: false })]);
+  renderLimits();
+  const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+  await waitFor(() => expect(readCodexSubscription).toHaveBeenCalledWith("acct-work"));
+  expect(within(region).queryByRole("button", { name: "Connect billing" })).toBeNull();
+  fireEvent.click(within(region).getByRole("button", { name: "More actions for work@codex.example" }));
+  const menu = within(region).getByRole("group", { name: "Actions for work@codex.example" });
+  fireEvent.click(await within(menu).findByRole("button", { name: "Connect billing" }));
+  await waitFor(() => expect(connectCodexBilling).toHaveBeenCalledWith("acct-work"));
+  expect(accountAction).not.toHaveBeenCalled();
+  fireEvent.keyDown(menu, { key: "Escape" });
+  expect(within(region).queryByRole("button", { name: "Connect billing" })).toBeNull();
+  expect(within(region).getByRole("button", { name: "More actions for work@codex.example" })).toHaveFocus();
+  const claude = screen.getByRole("region", { name: "Claude limits · me@claude.example" });
+  fireEvent.click(within(claude).getByRole("button", { name: "More actions for me@claude.example" }));
+  expect(within(claude).getByRole("group", { name: "Actions for me@claude.example" })).toBeVisible();
+  expect(within(claude).queryByRole("button", { name: /billing/i })).toBeNull();
+  expect(readCodexSubscription).not.toHaveBeenCalledWith("uuid-1");
+  vi.mocked(readCodexSubscription).mockResolvedValue({ metadata: null, connected: false, unavailable: false });
+});
+
 it.each([true, false])("shows subscription timing through a header badge (usage available: %s)", async (hasUsage) => {
   vi.mocked(readCodexSubscription).mockClear().mockResolvedValueOnce({
     metadata: {date:"2026-10-10T12:00:00Z",kind:"expires",source:"billing",checkedAt:NOW,stale:false},

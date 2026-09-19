@@ -67,13 +67,10 @@ pub(super) fn resolve_provider<T>(
         }
     };
     match load(&credential) {
-        Ok(mut parsed) => {
-            parsed.windows.sort_by_key(|window| kind_rank(window.kind));
-            ResolveOutcome {
-                dto: finish(provider, LimitsStatus::Ok, None, parsed),
-                failure: None,
-            }
-        }
+        Ok(parsed) => ResolveOutcome {
+            dto: finish(provider, LimitsStatus::Ok, None, parsed),
+            failure: None,
+        },
         Err(ProviderLoadError::Http(HttpError::Unauthorized)) => ResolveOutcome {
             dto: finish(
                 provider,
@@ -115,6 +112,8 @@ pub(super) fn finish(
     message: Option<String>,
     mut parsed: Parsed,
 ) -> ProviderLimitsDto {
+    // Native and saved reads share the same card priority, regardless of endpoint order.
+    parsed.windows.sort_by_key(|window| kind_rank(window.kind));
     let observed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     for window in &mut parsed.windows {
         if window.observed_at.is_empty() {
