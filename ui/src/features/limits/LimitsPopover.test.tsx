@@ -329,3 +329,17 @@ describe("LimitsPopover", () => {
     expect(document.documentElement.style.colorScheme).toBe("light");
   });
 });
+
+it("marks saved usage quietly in the popover and exposes its failure on focus", async () => {
+  const reason = "Saved usage credential is no longer accepted.";
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [{...limits("claude", "saved", "you@example.com", false), status:"unauthenticated", message:reason}] : []));
+  renderPopover();
+  const account = await screen.findByRole("article", {name:"Claude limits · you@example.com"});
+  const badge = within(account).getByRole("button", {name:"Usage status: Last known usage"});
+  expect(within(account).queryByText(reason)).toBeNull();
+  expect(within(account).getByRole("meter")).toBeInTheDocument();
+  expect(within(account).getByText(/Latest observation/)).toBeInTheDocument();
+  fireEvent.focus(badge);
+  expect(screen.getByRole("tooltip")).toHaveTextContent(reason);
+});

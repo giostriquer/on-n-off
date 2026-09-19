@@ -337,3 +337,25 @@ fn unlocking_an_existing_vault_does_not_hold_the_shared_account_lease() {
     assert!(Store::lease_with_timeout(home.path(), std::time::Duration::ZERO).is_err());
     drop(opened);
 }
+
+#[test]
+fn capturing_a_native_login_revokes_private_renewal_ownership() {
+    let mut db = Database::default();
+    let id = db.save(identity("a"), login("old"), None).unwrap();
+    db.profiles[0].usage_renewal_owned = true;
+    db.save(identity("a"), login("native"), Some(&id)).unwrap();
+    assert!(!db.profiles[0].usage_renewal_owned);
+}
+
+#[test]
+fn old_vaults_do_not_assume_renewal_ownership() {
+    let mut db = Database::default();
+    db.save(identity("a"), login("old"), None).unwrap();
+    let mut encoded = serde_json::to_value(&db).unwrap();
+    encoded["profiles"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("usage_renewal_owned");
+    let restored: Database = serde_json::from_value(encoded).unwrap();
+    assert!(!restored.profiles[0].usage_renewal_owned);
+}

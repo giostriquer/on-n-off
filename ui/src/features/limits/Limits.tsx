@@ -20,6 +20,7 @@ import { useLimitsProviders } from "./useLimitsProviders";
 import { accountCards } from "./accountCards";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
+import { UsageStatusBadge } from "./UsageStatusBadge";
 import { SummaryRow } from "./SummaryRow";
 
 export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
@@ -140,7 +141,7 @@ function ProviderColumn({
 }
 
 /** Account identity stays prominent; workspace ids are never displayed. */
-function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, activeWithoutUsage }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null; subscription?: ReactNode; profile?: SavedProfile; menu?: ReactNode; activeWithoutUsage?: boolean }) {
+function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, activeWithoutUsage, savedRefreshDetail }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null; subscription?: ReactNode; profile?: SavedProfile; menu?: ReactNode; activeWithoutUsage?: boolean; savedRefreshDetail?: string | null }) {
   const name = providerLabel(provider);
   const label = profile?.email ?? entry?.account?.label ?? null;
   const plan = planLabel(entry?.plan, provider);
@@ -154,6 +155,7 @@ function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, a
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         {activeWithoutUsage && <ActiveAccountDot />}
         {subscription}
+        {savedRefreshDetail && <UsageStatusBadge detail={savedRefreshDetail} />}
         {plan ? (
           <span className="rounded-md border border-[var(--hair)] px-1.5 py-0.5 type-badge uppercase">
             {plan}
@@ -187,12 +189,12 @@ function AccountCard({
   const title = label ? `${name} limits · ${label}` : `${name} limits`;
   const [hero, ...rest] = visibleLimitWindows(entry);
   const active = !!account && (profile?.active ?? entry.currentAccount);
-  const { message, refreshPaused, updatedAt } = presentLimitAccount(entry, `${name} limits are unavailable.`);
+  const { message, refreshPaused, updatedAt, savedRefreshDetail } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   const subscription = entry.provider === "codex" && account
     ? <CodexSubscriptionBadge accountId={account.id} current={entry.currentAccount} now={now} />
     : null;
-  const header = (menu: ReactNode) => <CardHeader activeWithoutUsage={active && !hero} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
+  const header = (menu: ReactNode) => <CardHeader savedRefreshDetail={savedRefreshDetail} activeWithoutUsage={active && !hero} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
   const content = <>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 

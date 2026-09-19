@@ -9,7 +9,30 @@ account rotation.
 A profile has a random local UUID and a stable provider/user/workspace identity. Email is the account name; an optional free-text category is separate display metadata.
 Neither field is an identity key. Active native storage is authoritative. A saved active credential is a
 non-refreshing shadow; switching away captures the latest native generation. Inactive access-token
-expiry does not discard a renewable login. The first version does not refresh inactive profiles.
+expiry does not discard a renewable login. Limits polls saved Claude and Codex accounts with
+access-only HTTP requests without changing the active native login. At most two saved reads per provider run
+at once, with per-account backoff and provider retry-after handling. Rejected shared credentials
+wait for a changed generation; the previous numeric reading and its observation time remain visible.
+
+Only a login created by Add / sign in again in an isolated home has private renewal ownership.
+The flag defaults to false in older vaults. Capturing a native login clears it; activation clears
+it durably before publishing any credential to a native client, including failed activation.
+A private login can renew in the encrypted vault, using the provider's OAuth grant. This is
+separate from native renewal: shared credentials, including inactive native shadows, never renew
+independently. A running client can therefore retain its credential generation.
+
+Each private renewal holds a per-profile cross-process lease and first writes an encrypted intent.
+An ambiguous response or crash leaves that intent, preventing another redemption of the same
+possibly consumed token. A complete reply is encrypted before vault publication; the next poll
+can recover it without another grant. Publication checks profile identity, credential generation
+and ownership. An unfinished renewal blocks activation of its source generation until recovery
+or a new sign-in. No renewal secret enters ordinary backups or DTOs. Usage publication separately
+checks the account epoch and current login while holding the vault lease briefly; HTTP runs
+without the vault publication lock. Removal, logout and reauthentication reject late usage.
+
+Ownership covers credentials issued and managed through the app's normal flows. It cannot
+coordinate copies manually exported to an unrelated client or machine. Profiles saved from a
+native login and profiles already activated remain access-only until explicitly signed in again.
 
 The account vault is XChaCha20-Poly1305 authenticated ciphertext, atomically replaced using private
 staging files. A fresh random nonce protects each write. A 32-byte key is stored with the OS:
@@ -23,8 +46,11 @@ registry, including recovery records, is encrypted. This feature never uses Conf
 backup store for tokens.
 
 `accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
-existing expiry, native-lock, preflight and stranded-token behavior, writing only the active native
-store. Limits consumes access-only projections. Codex delegates renewal to its official app-server.
+existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
+store under its locks. The same grant/parser implementation also serves private vault renewal
+under the saved-account journal. Limits consumes access-only projections. Native Codex delegates
+renewal to its official app-server; private saved Codex credentials use the JSON refresh grant
+without starting a CLI or writing auth.json.
 
 ## Operations
 

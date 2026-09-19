@@ -1,8 +1,11 @@
-//! Opt-in saved native logins. Native stores own active generations; the vault never refreshes.
+//! Opt-in saved logins. Native stores own shared generations; only never-activated private
+//! sign-ins can renew in the vault. Saved usage reads never activate an account.
 pub(crate) mod model;
 pub(crate) mod vault;
 
 mod store;
+pub(crate) mod usage;
+mod usage_renew;
 
 mod transaction;
 
@@ -226,6 +229,14 @@ pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Resul
             return Err("Profile does not belong to this provider.".into());
         }
         _ => {}
+    }
+    if activation != Activation::Recover {
+        let target = db
+            .profiles
+            .iter()
+            .find(|p| p.id == id)
+            .ok_or("Profile no longer exists.")?;
+        usage_renew::activation_ready(&store, target)?;
     }
     db.invalidate_logins()?;
     store.persist(&db)?;

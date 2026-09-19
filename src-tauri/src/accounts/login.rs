@@ -230,11 +230,13 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         db.invalidate_logins()?;
         db.reenroll(&identity);
         let saved_id = db.save(identity, login, expected.as_deref())?;
-        db.profiles
+        let profile = db
+            .profiles
             .iter_mut()
             .find(|p| p.id == saved_id)
-            .ok_or("Saved profile disappeared.")?
-            .pending_activation = true;
+            .ok_or("Saved profile disappeared.")?;
+        profile.pending_activation = true;
+        profile.usage_renewal_owned = true;
         store.persist(&db)?;
         if let Some(usage) = usage {
             // Only a successfully published login may add observations. Quota storage failure

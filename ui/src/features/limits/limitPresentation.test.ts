@@ -123,3 +123,21 @@ describe("hasObservations", () => {
   });
 });
 
+
+describe.each(["failed", "unauthenticated"] as const)("saved %s usage status", status => {
+  const message = "Saved usage refresh is paused.";
+  it.each([
+    {name:"windows", windows:[window]},
+    {name:"credits", windows:[], credits:{balance:"0", unlimited:false}},
+    {name:"banked resets", windows:[], resetCredits:{availableCount:1, nextExpiresAt:null}},
+  ])("quietly identifies retained $name", observation => {
+    const presented = presentLimitAccount({provider:"codex", currentAccount:false, status, message, ...observation}, "fallback");
+    expect(presented.message).toBeNull();
+    expect(presented.savedRefreshDetail).toBe(message);
+  });
+  it("keeps the error visible without any retained observation", () => {
+    const presented = presentLimitAccount({provider:"codex", currentAccount:false, status, message, windows:[], resetCredits:{availableCount:0, nextExpiresAt:null}}, "fallback");
+    expect(presented.message).toBe(message);
+    expect(presented.savedRefreshDetail).toBeNull();
+  });
+});
