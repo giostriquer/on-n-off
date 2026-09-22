@@ -128,3 +128,59 @@ pub(super) fn output_tokens(summary: &UsageSummaryDto) -> u64 {
 pub(super) fn record_count(summary: &UsageSummaryDto) -> u64 {
     summary.buckets.iter().map(|bucket| bucket.records).sum()
 }
+
+/// One Codex rollout with a single turn: its session, its model, and one usage event.
+pub(super) fn write_codex_rollout(dir: &Path, name: &str, session: &str, output_tokens: u64) {
+    std::fs::create_dir_all(dir).unwrap();
+    let lines = [
+        serde_json::json!({
+            "type": "session_meta",
+            "timestamp": "2026-08-07T04:00:00.000Z",
+            "payload": { "id": session }
+        }),
+        serde_json::json!({
+            "type": "turn_context",
+            "timestamp": "2026-08-07T04:00:01.000Z",
+            "payload": { "model": "gpt-5.6-sol" }
+        }),
+        serde_json::json!({
+            "type": "event_msg",
+            "timestamp": "2026-08-07T04:05:13.944Z",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": 100,
+                        "cached_input_tokens": 0,
+                        "output_tokens": output_tokens
+                    }
+                }
+            }
+        }),
+    ];
+    let body: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    std::fs::write(dir.join(name), body).unwrap();
+}
+
+/// Claude lines for `summary_line_claude`: one assistant message's usage, as Claude Code writes it.
+pub(super) fn claude_usage_line(
+    message_id: &str,
+    session: &str,
+    timestamp: &str,
+    usage: serde_json::Value,
+) -> String {
+    serde_json::json!({
+        "type": "assistant",
+        "timestamp": timestamp,
+        "sessionId": session,
+        "requestId": "req_1",
+        "message": { "id": message_id, "model": "claude-fable-5", "usage": usage }
+    })
+    .to_string()
+}
+
+pub(super) fn write_claude_lines(home: &Path, name: &str, lines: &[String]) {
+    let dir = home.join(".claude").join("projects").join("proj");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(name), lines.join("\n") + "\n").unwrap();
+}

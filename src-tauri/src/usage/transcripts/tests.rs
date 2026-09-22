@@ -41,6 +41,192 @@ fn parse_claude_same_dedupe_key_across_content_blocks() {
     assert_eq!(text.totals, tool.totals);
 }
 
+fn claude_usage_line(model: &str, usage: serde_json::Value) -> String {
+    serde_json::json!({
+        "type": "assistant",
+        "timestamp": "2026-08-07T04:05:13.944Z",
+        "sessionId": "session-a",
+        "requestId": "req_1",
+        "message": { "id": "msg_1", "model": model, "usage": usage }
+    })
+    .to_string()
+}
+
+/// Claude Code splits cache writes by lifetime; a one-hour write costs 2x input against the
+/// five-minute write's 1.25x, so the split has to survive parsing.
+#[test]
+fn parse_claude_keeps_the_one_hour_share_of_cache_writes() {
+    let usage = |one_hour: u64| {
+        serde_json::json!({
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 1000,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 5,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 1000 - one_hour.min(1000),
+                "ephemeral_1h_input_tokens": one_hour
+            }
+        })
+    };
+    let record = parse_claude_line(&claude_usage_line("claude-opus-5", usage(600))).unwrap();
+    assert_eq!(record.totals.cache_creation_tokens, 1000);
+    assert_eq!(record.totals.cache_creation_1h_tokens, 600);
+
+    let inconsistent = parse_claude_line(&claude_usage_line("claude-opus-5", usage(5000))).unwrap();
+    assert_eq!(
+        inconsistent.totals.cache_creation_1h_tokens, 1000,
+        "the one-hour share never exceeds the writes it is a share of"
+    );
+
+    let unsplit = parse_claude_line(&claude_line("msg_3", "text")).unwrap();
+    assert_eq!(unsplit.totals.cache_creation_1h_tokens, 0);
+}
+
+/// Claude Code writes locally generated assistant lines (API errors, interrupts) as
+/// `<synthetic>` with an all-zero usage object; they are not model usage.
+#[test]
+fn parse_claude_skips_records_without_tokens() {
+    let zero = serde_json::json!({
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0
+    });
+    assert!(parse_claude_line(&claude_usage_line("<synthetic>", zero)).is_none());
+}
+
+#[test]
+fn parse_claude_keeps_a_line_with_input_but_no_output() {
+    let input_only = serde_json::json!({
+        "input_tokens": 5,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0
+    });
+    let record = parse_claude_line(&claude_usage_line("claude-opus-5", input_only)).unwrap();
+    assert_eq!(record.totals.uncached_input_tokens, 5);
+}
+
+fn usage_record(
+    provider: UsageProvider,
+    key: Option<&str>,
+    session: &str,
+    input: u64,
+    output: u64,
+) -> UsageRecord {
+    UsageRecord {
+        provider,
+        timestamp_ms: 1_000,
+        model: "claude-opus-5".into(),
+        session_id: session.into(),
+        totals: TokenTotals {
+            uncached_input_tokens: input,
+            output_tokens: output,
+            ..TokenTotals::default()
+        },
+        reported_cost_usd: None,
+        dedupe_key: key.map(str::to_string),
+    }
+}
+
+/// A resumed or forked Claude session copies a message into another transcript, sometimes only its
+/// partial first line; whichever file the scan meets first, the billed copy is the one kept.
+#[test]
+fn richest_copies_keeps_one_record_per_message_whichever_file_holds_it_first() {
+    let partial = usage_record(
+        UsageProvider::Claude,
+        Some("msg_1:req_1"),
+        "original",
+        100,
+        1,
+    );
+    let billed = usage_record(UsageProvider::Claude, Some("msg_1:req_1"), "fork", 100, 50);
+    for files in [
+        [vec![partial.clone()], vec![billed.clone()]],
+        [vec![billed.clone()], vec![partial.clone()]],
+    ] {
+        let kept = richest_copies(files.iter().map(Vec::as_slice));
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].totals.output_tokens, 50);
+        assert_eq!(kept[0].session_id, "fork");
+    }
+}
+
+#[test]
+fn richest_copies_breaks_output_ties_by_total_tokens_and_keeps_the_held_copy_on_a_full_tie() {
+    let held = usage_record(UsageProvider::Claude, Some("k"), "held", 100, 50);
+    let same_usage = usage_record(UsageProvider::Claude, Some("k"), "later", 100, 50);
+    let more_input = usage_record(UsageProvider::Claude, Some("k"), "richer", 200, 50);
+
+    let tie = [held.clone(), same_usage];
+    let kept = richest_copies([&tie[..]]);
+    assert_eq!(kept[0].session_id, "held");
+    let richer = [held, more_input];
+    let kept = richest_copies([&richer[..]]);
+    assert_eq!(kept[0].session_id, "richer");
+}
+
+/// Codex rollouts carry no message id. A rollout moved to `archived_sessions/` can be listed under
+/// both roots in one scan (a rename between the two walks, or a stale entry kept after an
+/// incomplete walk); it still counts once, while repeated identical events inside one rollout,
+/// and another session's identical events, stay distinct.
+#[test]
+fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() {
+    let event = |timestamp_ms: i64| UsageRecord {
+        timestamp_ms,
+        model: "gpt-5.6-sol".into(),
+        ..usage_record(UsageProvider::Codex, None, "session-a", 100, 20)
+    };
+    let rollout = vec![event(1_000), event(5_000), event(1_000)];
+
+    let kept = richest_copies([rollout.as_slice(), rollout.as_slice()]);
+    assert_eq!(kept.len(), 3);
+
+    let kept = richest_copies([&rollout[..2], rollout.as_slice()]);
+    assert_eq!(kept.len(), 3, "a stale, shorter listing adds nothing");
+
+    let other_session: Vec<UsageRecord> = rollout
+        .iter()
+        .map(|record| UsageRecord {
+            session_id: "session-b".into(),
+            ..record.clone()
+        })
+        .collect();
+    let kept = richest_copies([rollout.as_slice(), other_session.as_slice()]);
+    assert_eq!(kept.len(), 6);
+
+    let later_elsewhere = [event(9_000)];
+    let kept = richest_copies([rollout.as_slice(), &later_elsewhere[..]]);
+    assert_eq!(
+        kept.len(),
+        4,
+        "the same session's identical tokens at another instant are another event"
+    );
+    let other_model = [UsageRecord {
+        model: "gpt-6-sol".into(),
+        ..event(1_000)
+    }];
+    let kept = richest_copies([rollout.as_slice(), &other_model[..]]);
+    assert_eq!(kept.len(), 4, "and so are they under another model");
+
+    let anonymous = [
+        UsageRecord {
+            session_id: String::new(),
+            ..event(1_000)
+        },
+        UsageRecord {
+            session_id: String::new(),
+            ..event(1_000)
+        },
+    ];
+    let kept = richest_copies([&anonymous[..], &anonymous[..]]);
+    assert_eq!(
+        kept.len(),
+        4,
+        "without a session there is nothing to tie copies together"
+    );
+}
+
 #[test]
 fn parse_claude_ignores_non_assistant_and_garbage() {
     assert!(parse_claude_line(r#"{"type":"user","message":{}}"#).is_none());

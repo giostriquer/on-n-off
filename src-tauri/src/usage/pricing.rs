@@ -32,6 +32,8 @@ pub struct ModelRate {
     pub output_cost_per_token: f64,
     pub cache_read_cost_per_token: f64,
     pub cache_creation_cost_per_token: f64,
+    /// A one-hour cache write (`TokenTotals::cache_creation_1h_tokens`).
+    pub cache_creation_1h_cost_per_token: f64,
 }
 
 pub type RateTable = HashMap<String, ModelRate>;
@@ -137,12 +139,16 @@ fn finite_number(value: &Value) -> Option<f64> {
     value.as_f64().filter(|v| v.is_finite())
 }
 
-/// Strip `provider/` prefix and lowercase for table lookup.
+/// Strip a `provider/` prefix and a bracketed variant suffix, and lowercase, for table lookup.
+/// Claude Code can name a context tier after the model (`claude-fable-5-1[1m]`); the table only
+/// knows the base name, so such a request is priced at base rates. Any long-context premium
+/// (LiteLLM's `*_above_200k_tokens`) is not applied: an under-priced request, not an unpriced one.
 pub fn normalize_model_name(model: &str) -> String {
     let trimmed = model.trim().to_lowercase();
-    match trimmed.rfind('/') {
-        Some(i) => trimmed[i + 1..].to_string(),
-        None => trimmed,
+    let base = trimmed.split('[').next().unwrap_or("").trim_end();
+    match base.rfind('/') {
+        Some(i) => base[i + 1..].to_string(),
+        None => base.to_string(),
     }
 }
 
@@ -168,6 +174,9 @@ fn unpriceable_models() -> &'static HashSet<&'static str> {
 /// zero write tokens, so the 1.25× write default has no priced traffic.
 const DERIVED_CACHE_READ_MULTIPLIER: f64 = 0.1;
 const DERIVED_CACHE_CREATION_MULTIPLIER: f64 = 1.25;
+/// Anthropic's one-hour cache write, when an entry omits
+/// `cache_creation_input_token_cost_above_1hr`. Only Claude reports one-hour writes.
+const DERIVED_CACHE_CREATION_1H_MULTIPLIER: f64 = 2.0;
 
 /// Drop half-priced models; derive omitted cache rates. Several LiteLLM keys
 /// can normalize to one model name (`claude-fable-5`, `vertex_ai/…`,
@@ -198,6 +207,10 @@ pub fn parse_rate_table(document: &Value) -> RateTable {
             .get("cache_creation_input_token_cost")
             .and_then(finite_number)
             .unwrap_or(input * DERIVED_CACHE_CREATION_MULTIPLIER);
+        let cache_creation_1h = entry
+            .get("cache_creation_input_token_cost_above_1hr")
+            .and_then(finite_number)
+            .unwrap_or(input * DERIVED_CACHE_CREATION_1H_MULTIPLIER);
         let rank = if !name.contains('/') {
             2 // canonical bare key
         } else if explicit_cache_read.is_some() {
@@ -217,6 +230,7 @@ pub fn parse_rate_table(document: &Value) -> RateTable {
                 output_cost_per_token: output,
                 cache_read_cost_per_token: cache_read,
                 cache_creation_cost_per_token: cache_creation,
+                cache_creation_1h_cost_per_token: cache_creation_1h,
             },
         );
     }
@@ -253,9 +267,14 @@ pub fn price_usage(
             cost_source: CostSource::Unpriced,
         };
     };
+    let one_hour_writes = totals
+        .cache_creation_1h_tokens
+        .min(totals.cache_creation_tokens);
     let cost_usd = totals.uncached_input_tokens as f64 * rate.input_cost_per_token
         + totals.cached_input_tokens as f64 * rate.cache_read_cost_per_token
-        + totals.cache_creation_tokens as f64 * rate.cache_creation_cost_per_token
+        + (totals.cache_creation_tokens - one_hour_writes) as f64
+            * rate.cache_creation_cost_per_token
+        + one_hour_writes as f64 * rate.cache_creation_1h_cost_per_token
         + totals.output_tokens as f64 * rate.output_cost_per_token;
     PricedUsage {
         cost_usd,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatTokens, formatUsd, makeWindow } from "./usageFormat";
-import { foldModelsByDay, foldUsage, PROVIDERS, providerLabel } from "./usageMerge";
+import { foldModelsByDay, foldUsage, isUnpriced, PROVIDERS, providerLabel, usagePricingNote } from "./usageMerge";
 import { buildChartSeries, toChartRows } from "./usageChart";
 import type { UsageSummary } from "./usageTypes";
 
@@ -97,6 +97,21 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
   };
 }
 
+function unpricedBucket(model: string, records: number, unpricedRecords: number): UsageSummary["buckets"][number] {
+  return {
+    day: "2026-08-07",
+    provider: "codex",
+    model,
+    totals: { uncachedInputTokens: 40, cachedInputTokens: 0, cacheCreationTokens: 0, outputTokens: 2, reasoningTokens: 0 },
+    costUsd: unpricedRecords === records ? 0 : 0.5,
+    cacheSavingsUsd: 0,
+    costSource: unpricedRecords === records ? "unpriced" : "modelPriced",
+    records,
+    unpricedRecords,
+    sessions: 1,
+  };
+}
+
 describe("foldUsage", () => {
   it("sums cost and tokens and ranks models", () => {
     const folded = foldUsage(summary());
@@ -117,6 +132,48 @@ describe("foldUsage", () => {
   it("labels providers for display", () => {
     expect(providerLabel("claude")).toBe("Claude");
     expect(providerLabel("codex")).toBe("Codex");
+  });
+
+  it("keeps each model's and provider's unpriced records", () => {
+    const base = summary();
+    const folded = foldUsage(summary({ buckets: [...base.buckets, unpricedBucket("codex-auto-review", 3, 3)] }));
+
+    const row = folded.models.find((model) => model.model === "codex-auto-review");
+    expect(row?.records).toBe(3);
+    expect(row?.unpricedRecords).toBe(3);
+    expect(folded.models.find((model) => model.model === "claude-fable-5")?.unpricedRecords).toBe(0);
+    expect(folded.providers.find((provider) => provider.provider === "codex")?.unpricedRecords).toBe(3);
+    const day = foldModelsByDay(summary({ buckets: [...base.buckets, unpricedBucket("codex-auto-review", 3, 3)] })).get("2026-08-07") ?? [];
+    expect(day.find((model) => model.model === "codex-auto-review")?.unpricedRecords).toBe(3);
+  });
+
+  it("calls a row unpriced only when none of its records had a price", () => {
+    expect(isUnpriced({ records: 3, unpricedRecords: 3 })).toBe(true);
+    expect(isUnpriced({ records: 3, unpricedRecords: 1 })).toBe(false);
+    expect(isUnpriced({ records: 3, unpricedRecords: 0 })).toBe(false);
+  });
+
+  it("notes what the headline cost assumes and how many models it leaves out", () => {
+    const base = summary();
+    const withBuckets = (...extra: UsageSummary["buckets"]) => summary({ buckets: [...base.buckets, ...extra] });
+    const note = (value: UsageSummary | null) => usagePricingNote(value, foldUsage(value));
+    const cases: [string, UsageSummary | null, string][] = [
+      ["no summary yet", null, ""],
+      ["every model priced", base, "if billed at full API rate"],
+      ["a partly priced model is still priced", withBuckets(unpricedBucket("gpt-5.6", 3, 1)), "if billed at full API rate"],
+      ["one model without a price", withBuckets(unpricedBucket("codex-auto-review", 3, 3)), "if billed at full API rate · 1 model has no price yet"],
+      [
+        "two models without a price",
+        withBuckets(unpricedBucket("codex-auto-review", 3, 3), unpricedBucket("gpt-daybreak", 1, 1)),
+        "if billed at full API rate · 2 models have no price yet",
+      ],
+      [
+        "no pricing table at all",
+        { ...withBuckets(unpricedBucket("codex-auto-review", 3, 3)), pricing: { status: "unavailable", source: "fixture", knownModels: 0 } },
+        "Token counts only · pricing table unavailable",
+      ],
+    ];
+    for (const [name, value, expected] of cases) expect(note(value), name).toBe(expected);
   });
 
   it("aggregates token breakdown and active days", () => {

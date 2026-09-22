@@ -3,12 +3,15 @@
 //! Line-at-a-time so callers can stream large files. Port of T3 Code's
 //! `usageTranscripts.ts` (algorithm only).
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 /// Increment whenever transcript parsing semantics change.
-pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 1;
+/// v2: the one-hour share of Claude cache writes, and zero-token Claude lines dropped.
+pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UsageProvider {
     Claude,
@@ -29,6 +32,9 @@ pub struct TokenTotals {
     pub uncached_input_tokens: u64,
     pub cached_input_tokens: u64,
     pub cache_creation_tokens: u64,
+    /// The part of `cache_creation_tokens` written with a one-hour lifetime, which Anthropic bills
+    /// at 2x input against the five-minute write's 1.25x. Never more than `cache_creation_tokens`.
+    pub cache_creation_1h_tokens: u64,
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
 }
@@ -47,6 +53,8 @@ impl TokenTotals {
             uncached_input_tokens: self.uncached_input_tokens + other.uncached_input_tokens,
             cached_input_tokens: self.cached_input_tokens + other.cached_input_tokens,
             cache_creation_tokens: self.cache_creation_tokens + other.cache_creation_tokens,
+            cache_creation_1h_tokens: self.cache_creation_1h_tokens
+                + other.cache_creation_1h_tokens,
             output_tokens: self.output_tokens + other.output_tokens,
             reasoning_tokens: self.reasoning_tokens + other.reasoning_tokens,
         }
@@ -63,6 +71,75 @@ pub struct UsageRecord {
     pub reported_cost_usd: Option<f64>,
     /// Cross-file de-duplication key; `None` means unique / no dedupe.
     pub dedupe_key: Option<String>,
+}
+
+impl UsageRecord {
+    /// Whether this copy of a de-duplicated record should replace `kept`. Claude Code writes one
+    /// line per content block of a message, and the early lines carry a partial `output_tokens`
+    /// (often 1 for a thinking block), so the copy with the most output is the message as billed.
+    /// Ties keep the copy already held.
+    pub fn is_richer_than(&self, kept: &Self) -> bool {
+        (self.totals.output_tokens, self.totals.total_tokens())
+            > (kept.totals.output_tokens, kept.totals.total_tokens())
+    }
+}
+
+/// One record per group of copies: the richest copy (see `UsageRecord::is_richer_than`) in the
+/// first copy's place.
+///
+/// A Claude message's copies share its `dedupe_key`. A Codex rollout carries no id, but one listed
+/// twice (moved to `archived_sessions/` between two walks, or kept stale after an incomplete walk)
+/// repeats its session's events at the same instants, so a Codex event is keyed by its session,
+/// instant, model and tokens, counted per file so repeated identical events inside one rollout stay
+/// apart. Records with neither key are all kept.
+pub fn richest_copies<'a>(
+    files: impl IntoIterator<Item = &'a [UsageRecord]>,
+) -> Vec<&'a UsageRecord> {
+    let mut kept: Vec<&UsageRecord> = Vec::new();
+    let mut slot_of: HashMap<String, usize> = HashMap::new();
+    for records in files {
+        let mut occurrences: HashMap<String, u32> = HashMap::new();
+        for record in records {
+            let key = match (&record.dedupe_key, record.provider) {
+                (Some(key), _) => key.clone(),
+                (None, UsageProvider::Codex) if !record.session_id.is_empty() => {
+                    let event = codex_event_key(record);
+                    let occurrence = occurrences.entry(event.clone()).or_insert(0);
+                    *occurrence += 1;
+                    format!("{event}#{occurrence}")
+                }
+                _ => {
+                    kept.push(record);
+                    continue;
+                }
+            };
+            if let Some(&slot) = slot_of.get(&key) {
+                if record.is_richer_than(kept[slot]) {
+                    kept[slot] = record;
+                }
+            } else {
+                slot_of.insert(key, kept.len());
+                kept.push(record);
+            }
+        }
+    }
+    kept
+}
+
+fn codex_event_key(record: &UsageRecord) -> String {
+    let t = &record.totals;
+    format!(
+        "codex\0{}\0{}\0{}\0{}:{}:{}:{}:{}:{}",
+        record.session_id,
+        record.timestamp_ms,
+        record.model,
+        t.uncached_input_tokens,
+        t.cached_input_tokens,
+        t.cache_creation_tokens,
+        t.cache_creation_1h_tokens,
+        t.output_tokens,
+        t.reasoning_tokens
+    )
 }
 
 pub fn might_carry_usage(line: &str, provider: UsageProvider) -> bool {
@@ -126,6 +203,31 @@ pub fn parse_claude_line(line: &str) -> Option<UsageRecord> {
         .and_then(|v| v.as_f64())
         .filter(|v| v.is_finite());
 
+    let cache_creation_tokens = positive_int(
+        usage
+            .get("cache_creation_input_tokens")
+            .unwrap_or(&Value::Null),
+    );
+    let cache_creation_1h_tokens = usage
+        .get("cache_creation")
+        .and_then(|split| split.get("ephemeral_1h_input_tokens"))
+        .map_or(0, positive_int)
+        .min(cache_creation_tokens);
+    let totals = TokenTotals {
+        uncached_input_tokens: positive_int(usage.get("input_tokens").unwrap_or(&Value::Null)),
+        cached_input_tokens: positive_int(
+            usage.get("cache_read_input_tokens").unwrap_or(&Value::Null),
+        ),
+        cache_creation_tokens,
+        cache_creation_1h_tokens,
+        output_tokens: positive_int(usage.get("output_tokens").unwrap_or(&Value::Null)),
+        reasoning_tokens: 0,
+    };
+    // Locally generated lines (API errors, interrupts) come as `<synthetic>` with zero usage.
+    if totals.total_tokens() == 0 {
+        return None;
+    }
+
     Some(UsageRecord {
         provider: UsageProvider::Claude,
         timestamp_ms,
@@ -135,19 +237,7 @@ pub fn parse_claude_line(line: &str) -> Option<UsageRecord> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
-        totals: TokenTotals {
-            uncached_input_tokens: positive_int(usage.get("input_tokens").unwrap_or(&Value::Null)),
-            cached_input_tokens: positive_int(
-                usage.get("cache_read_input_tokens").unwrap_or(&Value::Null),
-            ),
-            cache_creation_tokens: positive_int(
-                usage
-                    .get("cache_creation_input_tokens")
-                    .unwrap_or(&Value::Null),
-            ),
-            output_tokens: positive_int(usage.get("output_tokens").unwrap_or(&Value::Null)),
-            reasoning_tokens: 0,
-        },
+        totals,
         reported_cost_usd,
         dedupe_key,
     })
@@ -283,6 +373,7 @@ pub fn parse_codex_line(line: &str, state: &mut CodexScanState) -> Option<UsageR
             .saturating_sub(cache_creation_tokens),
         cached_input_tokens,
         cache_creation_tokens,
+        cache_creation_1h_tokens: 0,
         output_tokens,
         reasoning_tokens: reasoning_raw.min(output_tokens),
     };

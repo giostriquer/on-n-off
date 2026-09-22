@@ -1,6 +1,6 @@
 //! Orchestrates transcript scan + pricing into a UsageSummaryDto.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Arc;
@@ -30,7 +30,7 @@ use super::source_index::{
     unchanged_snapshot, SourceRoot,
 };
 use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_for, summary_key};
-use super::transcripts::UsageProvider as Provider;
+use super::transcripts::{richest_copies, UsageProvider as Provider};
 
 const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
 const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
@@ -113,6 +113,12 @@ fn resolve_claude_transcript_dir() -> Result<PathBuf, AdapterError> {
 
 fn resolve_codex_transcript_dir() -> Result<PathBuf, AdapterError> {
     Ok(codex_root()?.join("sessions"))
+}
+
+/// Where Codex moves a session's rollout when the session is archived, mtime intact. The usage it
+/// recorded is still Codex usage, reported under the same source as `sessions/`.
+fn resolve_codex_archive_dir() -> Result<PathBuf, AdapterError> {
+    Ok(codex_root()?.join("archived_sessions"))
 }
 
 fn parse_iso_ms(value: &str) -> Option<i64> {
@@ -259,16 +265,26 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
     // parsed table is memoised on the file, so this costs one metadata read on the fast path.
     let rates = ensure_rates(&home, started_ms, input.force);
     let key = summary_key(&input, rates.fetched_at_ms);
-    let dirs = [
-        (Provider::Claude, resolve_claude_transcript_dir()?),
-        (Provider::Codex, resolve_codex_transcript_dir()?),
-    ];
-    let roots: Vec<SourceRoot> = dirs
+    // One source per provider, shown under its first root; a source may scan several roots.
+    let claude_dir = resolve_claude_transcript_dir()?;
+    let codex_dir = resolve_codex_transcript_dir()?;
+    let source_roots = [
+        (Provider::Claude, vec![claude_dir]),
+        (
+            Provider::Codex,
+            vec![codex_dir, resolve_codex_archive_dir()?],
+        ),
+    ]
+    .map(|(provider, paths)| {
+        let roots: Vec<SourceRoot> = paths
+            .into_iter()
+            .map(|path| SourceRoot { provider, path })
+            .collect();
+        (provider, roots)
+    });
+    let roots: Vec<SourceRoot> = source_roots
         .iter()
-        .map(|(provider, path)| SourceRoot {
-            provider: *provider,
-            path: path.clone(),
-        })
+        .flat_map(|(_, roots)| roots.iter().cloned())
         .collect();
     let (signature_start_ms, signature_end_ms) = source_window_bounds(&input);
     let window_start_ms = since_time_ms.unwrap_or_else(|| {
@@ -340,42 +356,48 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
     })
     .map_err(AdapterError::message)?;
 
-    let mut sources = Vec::new();
+    // Copies of one record across files (resumed Claude sessions, a Codex rollout listed under
+    // both roots) collapse before anything is counted, so the totals and the session counts both
+    // follow the copy that is counted.
+    let records = richest_copies(
+        prepared_sources
+            .files
+            .iter()
+            .map(|file| file.records.as_slice()),
+    );
+    let mut session_ids: HashMap<Provider, HashSet<&str>> = HashMap::new();
+    for record in records {
+        if aggregator.add(record) && !record.session_id.is_empty() {
+            session_ids
+                .entry(record.provider)
+                .or_default()
+                .insert(&record.session_id);
+        }
+    }
 
-    for ((provider, dir), root) in dirs.iter().zip(&roots) {
-        if !source_snapshot.root_is_present(root) {
+    let mut sources = Vec::new();
+    for (provider, roots) in &source_roots {
+        let dir = &roots[0].path;
+        if !roots
+            .iter()
+            .any(|root| source_snapshot.root_is_present(root))
+        {
             sources.push(missing_source(*provider, dir));
             continue;
         }
-
-        let mut scanned_files = 0u64;
-        let mut skipped_files = 0u64;
-        let mut session_ids = HashSet::new();
-
-        for file in prepared_sources
+        let files = prepared_sources
             .files
             .iter()
-            .filter(|file| file.provider == *provider)
-        {
-            if file.records.is_empty() {
-                skipped_files += 1;
-                continue;
-            }
-            scanned_files += 1;
-            for record in file.records.iter() {
-                if aggregator.add(record) && !record.session_id.is_empty() {
-                    session_ids.insert(record.session_id.clone());
-                }
-            }
-        }
-
+            .filter(|file| file.provider == *provider);
+        let skipped_files = files.clone().filter(|file| file.records.is_empty()).count() as u64;
+        let scanned_files = files.count() as u64 - skipped_files;
         sources.push(UsageSourceDto {
             provider: provider_agent(*provider),
             status: UsageSourceStatus::Ok,
             scanned_files,
             skipped_files,
             malformed_records: 0,
-            distinct_sessions: session_ids.len() as u64,
+            distinct_sessions: session_ids.get(provider).map_or(0, HashSet::len) as u64,
             message: None,
             resolved_path: dir.to_string_lossy().to_string(),
         });

@@ -265,6 +265,204 @@ fn cache_write_failures_do_not_fail_correct_summary() {
     let _ = std::fs::remove_dir_all(home);
 }
 
+/// Archiving a Codex session moves its rollout from `sessions/` to `archived_sessions/`, keeping
+/// its mtime; the usage it recorded is still usage, and still Codex's one source.
+#[test]
+fn archived_codex_sessions_still_count() {
+    let _guard = env_lock().lock().unwrap();
+    let home = scratch_dir("usage-archived-codex");
+    let codex = home.join(".codex");
+    write_codex_rollout(
+        &codex.join("sessions").join("2026").join("08").join("07"),
+        "rollout-live.jsonl",
+        "session-live",
+        20,
+    );
+    write_codex_rollout(
+        &codex.join("archived_sessions"),
+        "rollout-archived.jsonl",
+        "session-archived",
+        30,
+    );
+    std::env::set_var("ON_N_OFF_HOME", &home);
+
+    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+
+    let codex_output: u64 = summary
+        .buckets
+        .iter()
+        .filter(|bucket| bucket.provider == AgentId::Codex)
+        .map(|bucket| bucket.totals.output_tokens)
+        .sum();
+    assert_eq!(codex_output, 50);
+    let sources: Vec<_> = summary
+        .sources
+        .iter()
+        .filter(|source| source.provider == AgentId::Codex)
+        .collect();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].status, UsageSourceStatus::Ok);
+    assert_eq!(sources[0].scanned_files, 2);
+    assert_eq!(sources[0].distinct_sessions, 2);
+    std::env::remove_var("ON_N_OFF_HOME");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
+    let _guard = env_lock().lock().unwrap();
+    let home = scratch_dir("usage-archived-only");
+    write_codex_rollout(
+        &home.join(".codex").join("archived_sessions"),
+        "rollout-archived.jsonl",
+        "session-archived",
+        30,
+    );
+    std::env::set_var("ON_N_OFF_HOME", &home);
+
+    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+
+    let codex = summary
+        .sources
+        .iter()
+        .find(|source| source.provider == AgentId::Codex)
+        .unwrap();
+    assert_eq!(codex.status, UsageSourceStatus::Ok);
+    assert_eq!(codex.scanned_files, 1);
+    assert_eq!(output_tokens(&summary), 30);
+    std::env::remove_var("ON_N_OFF_HOME");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A rename between the two walks, or a stale entry kept after an incomplete walk, lists one
+/// rollout under both Codex roots; it is still one rollout.
+#[test]
+fn a_codex_rollout_listed_under_both_roots_counts_once() {
+    let _guard = env_lock().lock().unwrap();
+    let home = scratch_dir("usage-archived-twice");
+    let codex = home.join(".codex");
+    for dir in [
+        codex.join("sessions").join("2026").join("08").join("07"),
+        codex.join("archived_sessions"),
+    ] {
+        write_codex_rollout(&dir, "rollout-moved.jsonl", "session-moved", 20);
+    }
+    std::env::set_var("ON_N_OFF_HOME", &home);
+
+    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+
+    assert_eq!(output_tokens(&summary), 20);
+    let codex_source = summary
+        .sources
+        .iter()
+        .find(|source| source.provider == AgentId::Codex)
+        .unwrap();
+    assert_eq!(codex_source.distinct_sessions, 1);
+    std::env::remove_var("ON_N_OFF_HOME");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// The session count follows the copy of a message that is counted: here a resumed session
+/// holds the partial first line inside the window and the original the billed line after it.
+#[test]
+fn a_message_counted_outside_the_window_adds_no_session() {
+    let _guard = env_lock().lock().unwrap();
+    let home = scratch_dir("usage-session-follows-copy");
+    let usage = |output: u64| {
+        serde_json::json!({
+            "input_tokens": 1,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": output
+        })
+    };
+    write_claude_lines(
+        &home,
+        "1-resumed.jsonl",
+        &[claude_usage_line(
+            "msg_edge",
+            "resumed",
+            "2026-08-31T23:59:59.500Z",
+            usage(1),
+        )],
+    );
+    write_claude_lines(
+        &home,
+        "2-original.jsonl",
+        &[claude_usage_line(
+            "msg_edge",
+            "original",
+            "2026-09-01T00:00:03.000Z",
+            usage(50),
+        )],
+    );
+    std::env::set_var("ON_N_OFF_HOME", &home);
+
+    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+
+    assert!(summary.buckets.is_empty(), "{:?}", summary.buckets);
+    let claude = summary
+        .sources
+        .iter()
+        .find(|source| source.provider == AgentId::Claude)
+        .unwrap();
+    assert_eq!(claude.distinct_sessions, 0);
+    std::env::remove_var("ON_N_OFF_HOME");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A one-hour cache write travels parse, scan cache and reload intact, and is priced at the
+/// one-hour rate both times.
+#[test]
+fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
+    let _guard = env_lock().lock().unwrap();
+    let home = scratch_dir("usage-one-hour-writes");
+    write_claude_lines(
+        &home,
+        "session.jsonl",
+        &[claude_usage_line(
+            "msg_1",
+            "sess",
+            "2026-08-07T04:05:13.944Z",
+            serde_json::json!({
+                "input_tokens": 0,
+                "cache_creation_input_tokens": 1000,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 10,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": 600,
+                    "ephemeral_1h_input_tokens": 400
+                }
+            }),
+        )],
+    );
+    std::env::set_var("ON_N_OFF_HOME", &home);
+    let rates = serde_json::json!({
+        "claude-fable-5": {
+            "input_cost_per_token": 1e-5,
+            "output_cost_per_token": 5e-5,
+            "cache_read_input_token_cost": 1e-6,
+            "cache_creation_input_token_cost": 1.25e-5,
+            "cache_creation_input_token_cost_above_1hr": 2e-5
+        }
+    });
+    let expected = 600.0 * 1.25e-5 + 400.0 * 2e-5 + 10.0 * 5e-5;
+
+    for force in [false, true] {
+        let summary =
+            pricing::with_test_fetch(Some(rates.clone()), || read_summary(august_input(force)))
+                .unwrap();
+        assert_eq!(summary.buckets.len(), 1);
+        assert!(
+            (summary.buckets[0].cost_usd - expected).abs() < 1e-12,
+            "force={force}: {}",
+            summary.buckets[0].cost_usd
+        );
+    }
+    std::env::remove_var("ON_N_OFF_HOME");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 #[test]
 fn missing_dirs_report_missing_sources() {
     let _guard = env_lock().lock().unwrap();

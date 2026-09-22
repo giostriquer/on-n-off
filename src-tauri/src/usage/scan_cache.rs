@@ -11,9 +11,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
-use super::transcripts::{TokenTotals, UsageProvider, UsageRecord};
+use super::transcripts::{richest_copies, TokenTotals, UsageProvider, UsageRecord};
 
-pub const USAGE_SCAN_CACHE_VERSION: u32 = 3;
+/// v4: rows carry the one-hour cache-write share at index 10.
+pub const USAGE_SCAN_CACHE_VERSION: u32 = 4;
 
 #[cfg(test)]
 thread_local! {
@@ -91,6 +92,7 @@ pub fn encode_scan_cache(cache: &ScanCache) -> Value {
                     record.totals.reasoning_tokens,
                     record.dedupe_key,
                     record.reported_cost_usd,
+                    record.totals.cache_creation_1h_tokens,
                 ])
             })
             .collect();
@@ -144,7 +146,7 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
                 corrupt = true;
                 break;
             };
-            if arr.len() < 10 {
+            if arr.len() < 11 {
                 corrupt = true;
                 break;
             }
@@ -179,8 +181,14 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
                     .as_u64()
                     .or_else(|| arr.get(i)?.as_f64().map(|f| f as u64))
             };
-            let (Some(uncached), Some(cached), Some(cache_creation), Some(output), Some(reasoning)) =
-                (nums(3), nums(4), nums(5), nums(6), nums(7))
+            let (
+                Some(uncached),
+                Some(cached),
+                Some(cache_creation),
+                Some(output),
+                Some(reasoning),
+                Some(cache_creation_1h),
+            ) = (nums(3), nums(4), nums(5), nums(6), nums(7), nums(10))
             else {
                 corrupt = true;
                 break;
@@ -207,6 +215,7 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
                     uncached_input_tokens: uncached,
                     cached_input_tokens: cached,
                     cache_creation_tokens: cache_creation,
+                    cache_creation_1h_tokens: cache_creation_1h.min(cache_creation),
                     output_tokens: output,
                     reasoning_tokens: reasoning,
                 },
@@ -261,18 +270,10 @@ fn path_under_root(path: &str, root: &str) -> bool {
     Path::new(path).starts_with(Path::new(root))
 }
 
+/// One file's records with each Claude message's lines collapsed to its richest copy (see
+/// `richest_copies`), which keeps the cache small; the scan collapses copies across files again.
 pub fn dedupe_within_file(records: &[UsageRecord]) -> Vec<UsageRecord> {
-    let mut seen = HashSet::new();
-    let mut kept = Vec::new();
-    for record in records {
-        if let Some(key) = &record.dedupe_key {
-            if !seen.insert(key.clone()) {
-                continue;
-            }
-        }
-        kept.push(record.clone());
-    }
-    kept
+    richest_copies([records]).into_iter().cloned().collect()
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ fn record(overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
             uncached_input_tokens: 100,
             cached_input_tokens: 1000,
             cache_creation_tokens: 10,
+            cache_creation_1h_tokens: 0,
             output_tokens: 50,
             reasoning_tokens: 0,
         },
@@ -31,6 +32,7 @@ fn sample_rates() -> Arc<RateTable> {
             output_cost_per_token: 5e-5,
             cache_read_cost_per_token: 1e-6,
             cache_creation_cost_per_token: 1.25e-5,
+            cache_creation_1h_cost_per_token: 2e-5,
         },
     );
     Arc::new(table)
@@ -87,27 +89,67 @@ fn hourly_requires_bounds() {
 }
 
 #[test]
-fn dedupe_keeps_first() {
+fn add_says_whether_the_record_was_counted() {
+    let mut agg = UsageAggregator::new(AggregateOptions {
+        time_zone: "UTC".into(),
+        since_day: "2026-08-01".into(),
+        until_day: "2026-08-31".into(),
+        resolution: Resolution::Day,
+        since_time_ms: None,
+        until_time_ms: None,
+        rates: sample_rates(),
+    })
+    .unwrap();
+    assert!(agg.add(&record(|r| r.dedupe_key = Some("msg_1:".into()))));
+    assert!(!agg.add(&record(|r| {
+        r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+    })));
+    let result = agg.finish();
+    assert_eq!(result.buckets.len(), 1);
+    assert_eq!(result.out_of_window, 1);
+}
+
+/// The hourly window is `[since, until)`: its first instant counts, its end does not.
+#[test]
+fn hourly_window_includes_its_start_and_excludes_its_end() {
+    let since = chrono::DateTime::parse_from_rfc3339("2026-08-06T04:37:00.000Z")
+        .unwrap()
+        .timestamp_millis();
+    let until = chrono::DateTime::parse_from_rfc3339("2026-08-07T04:37:00.000Z")
+        .unwrap()
+        .timestamp_millis();
+    // Distinct output per instant, so a window shifted by a millisecond at both ends cannot
+    // count the same total.
+    let at = |timestamp_ms: i64, output: u64| {
+        record(|r| {
+            r.timestamp_ms = timestamp_ms;
+            r.totals.output_tokens = output;
+        })
+    };
     let result = aggregate(
         &[
-            record(|r| r.dedupe_key = Some("msg_1:".into())),
-            record(|r| r.dedupe_key = Some("msg_1:".into())),
-            record(|r| r.dedupe_key = Some("msg_1:".into())),
+            at(since - 1, 1),
+            at(since, 10),
+            at(until - 1, 100),
+            at(until, 1000),
         ],
         "UTC",
-        Resolution::Day,
+        Resolution::Hour,
     );
-    assert_eq!(result.duplicates_dropped, 2);
-    assert_eq!(result.buckets.len(), 1);
-    assert_eq!(result.buckets[0].records, 1);
-    assert_eq!(result.buckets[0].totals.output_tokens, 50);
-    assert_eq!(result.buckets[0].cost_source, CostSource::ModelPriced);
+    let counted: u64 = result
+        .buckets
+        .iter()
+        .map(|bucket| bucket.totals.output_tokens)
+        .sum();
+    assert_eq!(counted, 110);
+    assert_eq!(result.out_of_window, 2);
 }
 
 #[test]
-fn sums_records_without_dedupe_key() {
+fn folds_every_record_it_is_given() {
     let result = aggregate(&[record(|_| {}), record(|_| {})], "UTC", Resolution::Day);
-    assert_eq!(result.duplicates_dropped, 0);
     assert_eq!(result.buckets[0].totals.output_tokens, 100);
 }
 

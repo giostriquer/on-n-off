@@ -6,11 +6,17 @@
 import type { AgentId } from "./types";
 import type { UsageBucket, UsageSummary } from "./usageTypes";
 
-export type ProviderTotals = {
-  provider: AgentId;
+/** What a model or provider row adds up across its buckets. */
+export type CostTally = {
   costUsd: number;
   totalTokens: number;
   records: number;
+  /** Records the rate table had no price for; their tokens count, their cost is not in `costUsd`. */
+  unpricedRecords: number;
+};
+
+export type ProviderTotals = CostTally & {
+  provider: AgentId;
   costShare: number;
   tokenShare: number;
 };
@@ -18,12 +24,9 @@ export type ProviderTotals = {
 /** A model's totals within one day. Shares belong to the caller, which holds the denominator. */
 export type ModelDayTotals = Omit<ModelTotals, "costShare" | "tokenShare">;
 
-export type ModelTotals = {
+export type ModelTotals = CostTally & {
   model: string;
   provider: AgentId;
-  costUsd: number;
-  totalTokens: number;
-  records: number;
   costShare: number;
   tokenShare: number;
 };
@@ -113,16 +116,8 @@ export function foldModelsByDay(
   for (const bucket of summary?.buckets ?? []) {
     const day = byDay.get(bucket.day) ?? new Map<string, ModelDayTotals>();
     const key = `${bucket.provider}\0${bucket.model}`;
-    const row = day.get(key) ?? {
-      model: bucket.model,
-      provider: bucket.provider,
-      costUsd: 0,
-      totalTokens: 0,
-      records: 0,
-    };
-    row.costUsd += bucket.costUsd;
-    row.totalTokens += bucketTokens(bucket);
-    row.records += bucket.records;
+    const row = day.get(key) ?? { model: bucket.model, provider: bucket.provider, ...emptyTally() };
+    tallyBucket(row, bucket);
     day.set(key, row);
     byDay.set(bucket.day, day);
   }
@@ -143,8 +138,8 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
   let records = 0;
   let cacheSavingsUsd = 0;
   const tokenAcc: TokenBreakdown = { ...EMPTY_TOKENS };
-  const providerAcc = new Map<AgentId, { costUsd: number; totalTokens: number; records: number }>();
-  const modelAcc = new Map<string, { provider: AgentId; costUsd: number; totalTokens: number; records: number }>();
+  const providerAcc = new Map<AgentId, CostTally>();
+  const modelAcc = new Map<string, CostTally & { provider: AgentId }>();
   const dailyAcc = new Map<string, { costUsd: number; totalTokens: number; byProvider: Record<AgentId, PeriodProviderSlice> }>();
   const hourlyAcc = new Map<
     string,
@@ -163,22 +158,13 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
     tokenAcc.outputTokens += bucket.totals.outputTokens;
     tokenAcc.reasoningTokens += bucket.totals.reasoningTokens;
 
-    const provider = providerAcc.get(bucket.provider) ?? { costUsd: 0, totalTokens: 0, records: 0 };
-    provider.costUsd += bucket.costUsd;
-    provider.totalTokens += tokens;
-    provider.records += bucket.records;
+    const provider = providerAcc.get(bucket.provider) ?? emptyTally();
+    tallyBucket(provider, bucket);
     providerAcc.set(bucket.provider, provider);
 
     const modelKey = `${bucket.provider}\0${bucket.model}`;
-    const model = modelAcc.get(modelKey) ?? {
-      provider: bucket.provider,
-      costUsd: 0,
-      totalTokens: 0,
-      records: 0,
-    };
-    model.costUsd += bucket.costUsd;
-    model.totalTokens += tokens;
-    model.records += bucket.records;
+    const model = modelAcc.get(modelKey) ?? { provider: bucket.provider, ...emptyTally() };
+    tallyBucket(model, bucket);
     modelAcc.set(modelKey, model);
 
     const day = dailyAcc.get(bucket.day) ?? {
@@ -212,9 +198,7 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
   const providers: ProviderTotals[] = [...providerAcc.entries()]
     .map(([provider, totals]) => ({
       provider,
-      costUsd: totals.costUsd,
-      totalTokens: totals.totalTokens,
-      records: totals.records,
+      ...totals,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
       tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
     }))
@@ -223,10 +207,7 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
   const models: ModelTotals[] = [...modelAcc.entries()]
     .map(([key, totals]) => ({
       model: key.split("\0")[1] ?? "",
-      provider: totals.provider,
-      costUsd: totals.costUsd,
-      totalTokens: totals.totalTokens,
-      records: totals.records,
+      ...totals,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
       tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
     }))
@@ -261,6 +242,31 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
     daily,
     hourly,
   };
+}
+
+function emptyTally(): CostTally {
+  return { costUsd: 0, totalTokens: 0, records: 0, unpricedRecords: 0 };
+}
+
+function tallyBucket(row: CostTally, bucket: UsageBucket): void {
+  row.costUsd += bucket.costUsd;
+  row.totalTokens += bucketTokens(bucket);
+  row.records += bucket.records;
+  row.unpricedRecords += bucket.unpricedRecords;
+}
+
+/** Whether none of a row's records had a price: its cost is unknown, not zero. */
+export function isUnpriced(row: Pick<CostTally, "records" | "unpricedRecords">): boolean {
+  return row.records > 0 && row.unpricedRecords === row.records;
+}
+
+/** The line under the headline cost: what the figure assumes, and what it leaves out. */
+export function usagePricingNote(summary: UsageSummary | null, folded: FoldedUsage): string {
+  if (!summary) return "";
+  if (summary.pricing.status === "unavailable") return "Token counts only · pricing table unavailable";
+  const unpriced = folded.models.filter(isUnpriced).length;
+  if (unpriced === 0) return "if billed at full API rate";
+  return `if billed at full API rate · ${unpriced === 1 ? "1 model has" : `${unpriced} models have`} no price yet`;
 }
 
 export function providerLabel(provider: AgentId): string {

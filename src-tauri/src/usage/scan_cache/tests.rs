@@ -6,12 +6,14 @@ fn sample_record() -> UsageRecord {
         timestamp_ms: 1_000,
         model: "claude-fable-5".into(),
         session_id: "session-a".into(),
+        // Every field distinct, so a column swapped in the row format cannot round-trip.
         totals: TokenTotals {
             uncached_input_tokens: 1,
             cached_input_tokens: 2,
-            cache_creation_tokens: 3,
+            cache_creation_tokens: 5,
+            cache_creation_1h_tokens: 3,
             output_tokens: 4,
-            reasoning_tokens: 0,
+            reasoning_tokens: 6,
         },
         reported_cost_usd: Some(1.5),
         dedupe_key: Some("msg_1:".into()),
@@ -36,6 +38,26 @@ fn encode_decode_round_trip() {
         restored.get("/a.jsonl").unwrap().records[0],
         sample_record()
     );
+}
+
+#[test]
+fn a_one_hour_share_larger_than_its_cache_writes_decodes_clamped() {
+    let mut cache = ScanCache::new();
+    cache.insert(
+        "/a.jsonl".into(),
+        CachedFile {
+            size: 100,
+            mtime_ms: 50,
+            provider: UsageProvider::Claude,
+            records: Arc::new(vec![sample_record()]),
+        },
+    );
+    let mut encoded = encode_scan_cache(&cache);
+    encoded["files"]["/a.jsonl"]["r"][0][10] = serde_json::json!(99);
+
+    let restored = decode_scan_cache(&encoded);
+    let totals = &restored.get("/a.jsonl").unwrap().records[0].totals;
+    assert_eq!(totals.cache_creation_1h_tokens, 5);
 }
 
 #[test]
@@ -70,14 +92,37 @@ fn parser_incompatible_cache_drops_stale_records() {
     assert!(decode_scan_cache(&encoded).is_empty());
 }
 
+/// Claude Code writes one line per content block, all under one message id and request id, and
+/// the early lines carry a partial `output_tokens` (often 1 for a thinking block): the copy with
+/// the most output is the message as billed. It keeps the first copy's place.
 #[test]
-fn dedupe_within_file_keeps_first() {
-    let a = sample_record();
-    let mut b = sample_record();
-    b.totals.output_tokens = 99;
-    let kept = dedupe_within_file(&[a.clone(), b]);
-    assert_eq!(kept.len(), 1);
-    assert_eq!(kept[0].totals.output_tokens, 4);
+fn dedupe_within_file_keeps_the_copy_with_the_most_output() {
+    let partial = sample_record();
+    let mut billed = sample_record();
+    billed.totals.output_tokens = 99;
+    let mut later_partial = sample_record();
+    later_partial.totals.output_tokens = 7;
+    let mut unkeyed = sample_record();
+    unkeyed.dedupe_key = None;
+    let mut other = sample_record();
+    other.dedupe_key = Some("msg_2:".into());
+
+    let kept = dedupe_within_file(&[
+        partial,
+        unkeyed.clone(),
+        billed,
+        other.clone(),
+        later_partial,
+    ]);
+
+    let outputs: Vec<(Option<&str>, u64)> = kept
+        .iter()
+        .map(|record| (record.dedupe_key.as_deref(), record.totals.output_tokens))
+        .collect();
+    assert_eq!(
+        outputs,
+        [(Some("msg_1:"), 99), (None, 4), (Some("msg_2:"), 4)]
+    );
 }
 
 #[test]

@@ -48,7 +48,6 @@ pub struct AggregateOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregateResult {
     pub buckets: Vec<UsageBucket>,
-    pub duplicates_dropped: u64,
     pub out_of_window: u64,
 }
 
@@ -62,13 +61,12 @@ struct MutableBucket {
     sessions: HashSet<String>,
 }
 
+/// Folds records that are already de-duplicated (`transcripts::richest_copies`) into buckets.
 pub struct UsageAggregator {
     buckets: HashMap<String, MutableBucket>,
-    seen: HashSet<String>,
     zone: Tz,
     hourly: Option<(i64, i64)>,
     options: AggregateOptions,
-    duplicates_dropped: u64,
     out_of_window: u64,
 }
 
@@ -89,27 +87,18 @@ impl UsageAggregator {
         let zone: Tz = options.time_zone.parse().unwrap_or(chrono_tz::UTC);
         Ok(Self {
             buckets: HashMap::new(),
-            seen: HashSet::new(),
             zone,
             hourly,
             options,
-            duplicates_dropped: 0,
             out_of_window: 0,
         })
     }
 
-    pub fn add(&mut self, record: &UsageRecord) -> bool {
-        if let Some(key) = &record.dedupe_key {
-            if !self.seen.insert(key.clone()) {
-                self.duplicates_dropped += 1;
-                return false;
-            }
-        }
-
+    /// The `(day, hour, provider, model)` bucket a record belongs to, or `None` outside the window.
+    fn bucket_key(&self, record: &UsageRecord) -> Option<String> {
         if let Some((since, until)) = self.hourly {
             if record.timestamp_ms < since || record.timestamp_ms >= until {
-                self.out_of_window += 1;
-                return false;
+                return None;
             }
         }
 
@@ -118,8 +107,7 @@ impl UsageAggregator {
             && (day.as_str() < self.options.since_day.as_str()
                 || day.as_str() > self.options.until_day.as_str())
         {
-            self.out_of_window += 1;
-            return false;
+            return None;
         }
 
         let hour_start = self.hourly.map(|(since, _)| {
@@ -127,13 +115,21 @@ impl UsageAggregator {
             ms_to_iso(since + offset)
         });
 
-        let key = format!(
+        Some(format!(
             "{}\0{}\0{}\0{}",
             day,
             hour_start.as_deref().unwrap_or(""),
             record.provider.as_str(),
             record.model
-        );
+        ))
+    }
+
+    /// Counts one record into its bucket; `false` when it falls outside the window.
+    pub fn add(&mut self, record: &UsageRecord) -> bool {
+        let Some(key) = self.bucket_key(record) else {
+            self.out_of_window += 1;
+            return false;
+        };
 
         let bucket = self.buckets.entry(key).or_insert_with(|| MutableBucket {
             totals: TokenTotals::default(),
@@ -206,7 +202,6 @@ impl UsageAggregator {
         });
         AggregateResult {
             buckets,
-            duplicates_dropped: self.duplicates_dropped,
             out_of_window: self.out_of_window,
         }
     }
