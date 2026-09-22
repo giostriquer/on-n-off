@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { displayError, parseInvokeError } from "$lib/error";
-import { PROVIDERS, foldModelsByDay, foldUsage, providerLabel } from "$lib/usageMerge";
+import { PROVIDERS, foldModelsByDay, foldUsage, providerLabel, usagePricingNote } from "$lib/usageMerge";
+import { ModelCost } from "./ModelCost";
 import {
   formatCount,
   formatDayRange,
@@ -142,11 +143,7 @@ export function Usage() {
     [breakdown, summary],
   );
 
-  const pricingNote = !summary
-    ? ""
-    : summary.pricing.status === "unavailable"
-      ? "Token counts only · pricing table unavailable"
-      : "if billed at full API rate";
+  const pricingNote = usagePricingNote(summary, folded);
 
   const activityDays = [...folded.daily]
     .filter((period) => period.costUsd > 0 || period.totalTokens > 0)
@@ -354,7 +351,7 @@ export function Usage() {
                       <ProviderIcon provider={row.provider} className="size-3.5 shrink-0 translate-y-px" />
                       <span className="truncate text-[13px] font-medium">{row.model}</span>
                     </div>
-                    <span className="font-mono text-right text-[12px]">{formatUsd(row.costUsd)}</span>
+                    <ModelCost row={row} className="font-mono text-right text-[12px]" />
                     <span className="font-mono text-right text-[12px] text-[var(--mute)]">
                       {formatPercent(metric === "cost" ? row.costShare : row.tokenShare)}
                     </span>
@@ -424,7 +421,7 @@ export function Usage() {
                                 <ProviderIcon provider={row.provider} className="size-3 shrink-0 translate-y-px" />
                                 <span className="truncate text-[12px] text-[var(--mute)]">{row.model}</span>
                               </div>
-                              <span className="font-mono text-right text-[11px] text-[var(--mute)]">{formatUsd(row.costUsd)}</span>
+                              <ModelCost row={row} className="font-mono text-right text-[11px] text-[var(--mute)]" />
                               <span className="font-mono text-right text-[11px] text-[var(--mute)]">
                                 {formatPercent(
                                   metric === "cost"

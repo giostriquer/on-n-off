@@ -265,6 +265,49 @@ fn cache_write_failures_do_not_fail_correct_summary() {
     let _ = std::fs::remove_dir_all(home);
 }
 
+/// Archiving a Codex session moves its rollout from `sessions/` to `archived_sessions/`, keeping
+/// its mtime; the usage it recorded is still usage, and still Codex's one source.
+#[test]
+fn archived_codex_sessions_still_count() {
+    let _guard = env_lock().lock().unwrap();
+    let home = scratch_dir("usage-archived-codex");
+    let codex = home.join(".codex");
+    write_codex_rollout(
+        &codex.join("sessions").join("2026").join("08").join("07"),
+        "rollout-live.jsonl",
+        "session-live",
+        20,
+    );
+    write_codex_rollout(
+        &codex.join("archived_sessions"),
+        "rollout-archived.jsonl",
+        "session-archived",
+        30,
+    );
+    std::env::set_var("ON_N_OFF_HOME", &home);
+
+    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+
+    let codex_output: u64 = summary
+        .buckets
+        .iter()
+        .filter(|bucket| bucket.provider == AgentId::Codex)
+        .map(|bucket| bucket.totals.output_tokens)
+        .sum();
+    assert_eq!(codex_output, 50);
+    let sources: Vec<_> = summary
+        .sources
+        .iter()
+        .filter(|source| source.provider == AgentId::Codex)
+        .collect();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].status, UsageSourceStatus::Ok);
+    assert_eq!(sources[0].scanned_files, 2);
+    assert_eq!(sources[0].distinct_sessions, 2);
+    std::env::remove_var("ON_N_OFF_HOME");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 #[test]
 fn missing_dirs_report_missing_sources() {
     let _guard = env_lock().lock().unwrap();

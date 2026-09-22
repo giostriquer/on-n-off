@@ -4,8 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { displayError, parseInvokeError } from "$lib/error";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { markStartup } from "$lib/startupTiming";
-import { foldUsage, providerLabel } from "$lib/usageMerge";
+import { foldUsage, providerLabel, usagePricingNote } from "$lib/usageMerge";
 import { formatDayRange, formatPercent, formatTokens, formatUsd, makeWindow } from "$lib/usageFormat";
+import { ModelCost } from "./ModelCost";
 import type { UsageMetric } from "$lib/usageTypes";
 import { LazyUsageChart, preloadUsageChart } from "@/features/usage/LazyUsageChart";
 import { loadUsageWindow } from "./usageQuery";
@@ -52,11 +53,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
     [folded.models, metric],
   );
 
-  const pricingNote = !summary
-    ? ""
-    : summary.pricing.status === "unavailable"
-      ? "Token counts only · pricing table unavailable"
-      : "if billed at full API rate";
+  const pricingNote = usagePricingNote(summary, folded);
 
   return (
     <section
@@ -148,9 +145,13 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
                         style={{ width: `${Math.max(0, Math.min(100, share * 100))}%` }}
                       />
                     </span>
-                    <span className="font-mono min-w-[5.5rem] shrink-0 text-right text-[12px] tabular-nums">
-                      {metric === "cost" ? formatUsd(row.costUsd) : formatTokens(row.totalTokens)}
-                    </span>
+                    {metric === "cost" ? (
+                      <ModelCost row={row} className="font-mono min-w-[5.5rem] shrink-0 text-right text-[12px] tabular-nums" />
+                    ) : (
+                      <span className="font-mono min-w-[5.5rem] shrink-0 text-right text-[12px] tabular-nums">
+                        {formatTokens(row.totalTokens)}
+                      </span>
+                    )}
                     <span className="font-mono w-12 shrink-0 text-right text-[11px] text-[var(--mute)] tabular-nums">
                       {formatPercent(share)}
                     </span>

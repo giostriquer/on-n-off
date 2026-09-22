@@ -115,6 +115,12 @@ fn resolve_codex_transcript_dir() -> Result<PathBuf, AdapterError> {
     Ok(codex_root()?.join("sessions"))
 }
 
+/// Where Codex moves a session's rollout when the session is archived, mtime intact. The usage it
+/// recorded is still Codex usage, reported under the same source as `sessions/`.
+fn resolve_codex_archive_dir() -> Result<PathBuf, AdapterError> {
+    Ok(codex_root()?.join("archived_sessions"))
+}
+
 fn parse_iso_ms(value: &str) -> Option<i64> {
     DateTime::parse_from_rfc3339(value)
         .ok()
@@ -269,6 +275,10 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
             provider: *provider,
             path: path.clone(),
         })
+        .chain(std::iter::once(SourceRoot {
+            provider: Provider::Codex,
+            path: resolve_codex_archive_dir()?,
+        }))
         .collect();
     let (signature_start_ms, signature_end_ms) = source_window_bounds(&input);
     let window_start_ms = since_time_ms.unwrap_or_else(|| {
@@ -342,8 +352,12 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
 
     let mut sources = Vec::new();
 
-    for ((provider, dir), root) in dirs.iter().zip(&roots) {
-        if !source_snapshot.root_is_present(root) {
+    for (provider, dir) in &dirs {
+        let present = roots
+            .iter()
+            .filter(|root| root.provider == *provider)
+            .any(|root| source_snapshot.root_is_present(root));
+        if !present {
             sources.push(missing_source(*provider, dir));
             continue;
         }

@@ -113,6 +113,54 @@ fn missing_cache_rates_use_standard_discount_multipliers() {
     assert!((rate.cache_creation_cost_per_token - 1.25e-5).abs() < 1e-18);
 }
 
+/// Anthropic bills a one-hour cache write at 2x input and a five-minute one at 1.25x; LiteLLM
+/// publishes the former as `cache_creation_input_token_cost_above_1hr`.
+#[test]
+fn one_hour_cache_writes_use_the_one_hour_rate() {
+    let doc = serde_json::json!({
+        "claude-opus-5": {
+            "input_cost_per_token": 5e-6,
+            "output_cost_per_token": 2.5e-5,
+            "cache_read_input_token_cost": 5e-7,
+            "cache_creation_input_token_cost": 6.25e-6,
+            "cache_creation_input_token_cost_above_1hr": 1e-5
+        },
+        "model-z": {
+            "input_cost_per_token": 1e-6,
+            "output_cost_per_token": 5e-6,
+            "cache_creation_input_token_cost": 1.25e-6
+        }
+    });
+    let table = parse_rate_table(&doc);
+    let totals = TokenTotals {
+        uncached_input_tokens: 0,
+        cached_input_tokens: 0,
+        cache_creation_tokens: 1000,
+        cache_creation_1h_tokens: 400,
+        output_tokens: 0,
+        reasoning_tokens: 0,
+    };
+
+    let priced = price_usage(&table, "claude-opus-5", &totals, None);
+    assert!((priced.cost_usd - (600.0 * 6.25e-6 + 400.0 * 1e-5)).abs() < 1e-15);
+
+    let derived = price_usage(&table, "model-z", &totals, None);
+    assert!(
+        (derived.cost_usd - (600.0 * 1.25e-6 + 400.0 * 2e-6)).abs() < 1e-15,
+        "without a published one-hour rate, a one-hour write costs twice the input rate"
+    );
+}
+
+/// Claude Code can name a context tier after the model (`claude-fable-5-1[1m]`); the table
+/// only knows the base name.
+#[test]
+fn lookup_ignores_a_bracketed_variant_suffix() {
+    let table = parse_rate_table(&sample_doc());
+    assert!(lookup_rate(&table, "claude-fable-5[1m]").is_some());
+    assert!(lookup_rate(&table, "Anthropic/Claude-Fable-5[1M]").is_some());
+    assert!(lookup_rate(&table, "claude-fable-5-1[1m]").is_none());
+}
+
 #[test]
 fn normalize_strips_provider_prefix() {
     assert_eq!(
@@ -129,6 +177,7 @@ fn reported_cost_wins_over_table() {
         uncached_input_tokens: 100,
         cached_input_tokens: 0,
         cache_creation_tokens: 0,
+        cache_creation_1h_tokens: 0,
         output_tokens: 50,
         reasoning_tokens: 0,
     };
@@ -144,6 +193,7 @@ fn model_priced_matches_hand_calc() {
         uncached_input_tokens: 100,
         cached_input_tokens: 1000,
         cache_creation_tokens: 10,
+        cache_creation_1h_tokens: 0,
         output_tokens: 50,
         reasoning_tokens: 0,
     };

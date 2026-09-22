@@ -12,6 +12,7 @@ fn record(overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
             uncached_input_tokens: 100,
             cached_input_tokens: 1000,
             cache_creation_tokens: 10,
+            cache_creation_1h_tokens: 0,
             output_tokens: 50,
             reasoning_tokens: 0,
         },
@@ -31,6 +32,7 @@ fn sample_rates() -> Arc<RateTable> {
             output_cost_per_token: 5e-5,
             cache_read_cost_per_token: 1e-6,
             cache_creation_cost_per_token: 1.25e-5,
+            cache_creation_1h_cost_per_token: 2e-5,
         },
     );
     Arc::new(table)
@@ -86,22 +88,29 @@ fn hourly_requires_bounds() {
     }
 }
 
+/// A resumed or forked session copies a message into another transcript, sometimes only its
+/// partial first line, so across files the copy with the most output wins too, whichever file
+/// the scan meets first.
 #[test]
-fn dedupe_keeps_first() {
-    let result = aggregate(
-        &[
-            record(|r| r.dedupe_key = Some("msg_1:".into())),
-            record(|r| r.dedupe_key = Some("msg_1:".into())),
-            record(|r| r.dedupe_key = Some("msg_1:".into())),
-        ],
-        "UTC",
-        Resolution::Day,
-    );
-    assert_eq!(result.duplicates_dropped, 2);
-    assert_eq!(result.buckets.len(), 1);
-    assert_eq!(result.buckets[0].records, 1);
-    assert_eq!(result.buckets[0].totals.output_tokens, 50);
-    assert_eq!(result.buckets[0].cost_source, CostSource::ModelPriced);
+fn dedupe_keeps_the_richest_copy_in_either_order() {
+    let partial = record(|r| {
+        r.dedupe_key = Some("msg_1:".into());
+        r.totals.output_tokens = 1;
+    });
+    let billed = record(|r| r.dedupe_key = Some("msg_1:".into()));
+    for copies in [
+        [partial.clone(), billed.clone(), partial.clone()],
+        [billed.clone(), partial.clone(), partial.clone()],
+    ] {
+        let result = aggregate(&copies, "UTC", Resolution::Day);
+        assert_eq!(result.duplicates_dropped, 2);
+        assert_eq!(result.buckets.len(), 1);
+        assert_eq!(result.buckets[0].records, 1);
+        assert_eq!(result.buckets[0].totals.output_tokens, 50);
+        let expected = 100.0 * 1e-5 + 1000.0 * 1e-6 + 10.0 * 1.25e-5 + 50.0 * 5e-5;
+        assert!((result.buckets[0].cost_usd - expected).abs() < 1e-12);
+        assert_eq!(result.buckets[0].cost_source, CostSource::ModelPriced);
+    }
 }
 
 #[test]

@@ -119,6 +119,32 @@ describe("foldUsage", () => {
     expect(providerLabel("codex")).toBe("Codex");
   });
 
+  it("keeps each model's unpriced records and counts the models with no price at all", () => {
+    const unpriced = {
+      day: "2026-08-07",
+      provider: "codex" as const,
+      model: "codex-auto-review",
+      totals: { uncachedInputTokens: 40, cachedInputTokens: 0, cacheCreationTokens: 0, outputTokens: 2, reasoningTokens: 0 },
+      costUsd: 0,
+      cacheSavingsUsd: 0,
+      costSource: "unpriced" as const,
+      records: 3,
+      unpricedRecords: 3,
+      sessions: 1,
+    };
+    const base = summary();
+    const folded = foldUsage(summary({ buckets: [...base.buckets, unpriced] }));
+
+    const row = folded.models.find((model) => model.model === "codex-auto-review");
+    expect(row?.records).toBe(3);
+    expect(row?.unpricedRecords).toBe(3);
+    expect(folded.models.find((model) => model.model === "claude-fable-5")?.unpricedRecords).toBe(0);
+    expect(folded.unpricedModels).toBe(1);
+    expect(foldUsage(base).unpricedModels).toBe(0);
+    const day = foldModelsByDay(summary({ buckets: [...base.buckets, unpriced] })).get("2026-08-07") ?? [];
+    expect(day.find((model) => model.model === "codex-auto-review")?.unpricedRecords).toBe(3);
+  });
+
   it("aggregates token breakdown and active days", () => {
     const folded = foldUsage(summary());
     expect(folded.tokens.uncachedInputTokens).toBe(310);

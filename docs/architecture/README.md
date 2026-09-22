@@ -189,6 +189,26 @@ priceable-looking model the table lacks lets the next scan re-fetch after an hou
 refresh button re-fetches at once. The summary cache key carries the table's fetch time, so a new
 table can never serve costs computed from an old one.
 
+Three reading rules carry the accuracy, each pinned by a test:
+
+- **One Claude message, one record: its richest copy.** Claude Code writes one line per content
+  block of a message, all under one `message.id` and `requestId`, and the early lines carry a
+  partial `output_tokens` (often 1 for a thinking block). A resumed or forked session copies
+  messages into other transcripts too. The copy with the most output is counted, within a file
+  and across files, whichever the scan meets first.
+- **Cache writes by lifetime.** A one-hour Claude cache write
+  (`usage.cache_creation.ephemeral_1h_input_tokens`) is priced at LiteLLM's
+  `cache_creation_input_token_cost_above_1hr`, 2x input when the table omits it; a five-minute
+  write at `cache_creation_input_token_cost`.
+- **Archived Codex sessions still count.** Codex moves an archived session's rollout to
+  `~/.codex/archived_sessions/`, mtime intact; it is scanned as a second Codex root under the one
+  Codex source.
+
+A model the table has no price for is shown as **unpriced**, never as `$0.00`: its tokens count
+and its cost is left out of the total, which says how many models it leaves out. Any change to
+what a transcript parses to bumps `USAGE_TRANSCRIPT_PARSER_VERSION`, which invalidates every
+cache, so history is re-read from the transcripts; nothing in an agent home is ever written.
+
 ## Cross-cutting plumbing
 
 | Module | Why it exists |

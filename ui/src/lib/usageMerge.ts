@@ -24,6 +24,8 @@ export type ModelTotals = {
   costUsd: number;
   totalTokens: number;
   records: number;
+  /** Records the rate table had no price for; their tokens count, their cost is not in `costUsd`. */
+  unpricedRecords: number;
   costShare: number;
   tokenShare: number;
 };
@@ -58,6 +60,8 @@ export type FoldedUsage = {
   activeDays: number;
   tokens: TokenBreakdown;
   providers: readonly ProviderTotals[];
+  /** Models none of whose records the rate table could price. */
+  unpricedModels: number;
   models: readonly ModelTotals[];
   daily: readonly PeriodTotals[];
   hourly: readonly PeriodTotals[];
@@ -96,6 +100,7 @@ const EMPTY: FoldedUsage = {
   activeDays: 0,
   tokens: EMPTY_TOKENS,
   providers: [],
+  unpricedModels: 0,
   models: [],
   daily: [],
   hourly: [],
@@ -119,10 +124,12 @@ export function foldModelsByDay(
       costUsd: 0,
       totalTokens: 0,
       records: 0,
+      unpricedRecords: 0,
     };
     row.costUsd += bucket.costUsd;
     row.totalTokens += bucketTokens(bucket);
     row.records += bucket.records;
+    row.unpricedRecords += bucket.unpricedRecords;
     day.set(key, row);
     byDay.set(bucket.day, day);
   }
@@ -144,7 +151,10 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
   let cacheSavingsUsd = 0;
   const tokenAcc: TokenBreakdown = { ...EMPTY_TOKENS };
   const providerAcc = new Map<AgentId, { costUsd: number; totalTokens: number; records: number }>();
-  const modelAcc = new Map<string, { provider: AgentId; costUsd: number; totalTokens: number; records: number }>();
+  const modelAcc = new Map<
+    string,
+    { provider: AgentId; costUsd: number; totalTokens: number; records: number; unpricedRecords: number }
+  >();
   const dailyAcc = new Map<string, { costUsd: number; totalTokens: number; byProvider: Record<AgentId, PeriodProviderSlice> }>();
   const hourlyAcc = new Map<
     string,
@@ -175,10 +185,12 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
       costUsd: 0,
       totalTokens: 0,
       records: 0,
+      unpricedRecords: 0,
     };
     model.costUsd += bucket.costUsd;
     model.totalTokens += tokens;
     model.records += bucket.records;
+    model.unpricedRecords += bucket.unpricedRecords;
     modelAcc.set(modelKey, model);
 
     const day = dailyAcc.get(bucket.day) ?? {
@@ -227,6 +239,7 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
       costUsd: totals.costUsd,
       totalTokens: totals.totalTokens,
       records: totals.records,
+      unpricedRecords: totals.unpricedRecords,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
       tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
     }))
@@ -257,10 +270,25 @@ export function foldUsage(summary: UsageSummary | null): FoldedUsage {
     activeDays,
     tokens: tokenAcc,
     providers,
+    unpricedModels: models.filter(isUnpriced).length,
     models,
     daily,
     hourly,
   };
+}
+
+/** Whether none of a model's records had a price: its cost is unknown, not zero. */
+export function isUnpriced(row: Pick<ModelTotals, "records" | "unpricedRecords">): boolean {
+  return row.records > 0 && row.unpricedRecords === row.records;
+}
+
+/** The line under the headline cost: what the figure assumes, and what it leaves out. */
+export function usagePricingNote(summary: UsageSummary | null, folded: FoldedUsage): string {
+  if (!summary) return "";
+  if (summary.pricing.status === "unavailable") return "Token counts only · pricing table unavailable";
+  const unpriced = folded.unpricedModels;
+  if (unpriced === 0) return "if billed at full API rate";
+  return `if billed at full API rate · ${unpriced === 1 ? "1 model has" : `${unpriced} models have`} no price yet`;
 }
 
 export function providerLabel(provider: AgentId): string {

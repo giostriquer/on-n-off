@@ -292,3 +292,37 @@ describe("Usage day breakdown", () => {
     expect(within(models as HTMLElement).getByText("20.0%")).toBeTruthy();
   });
 });
+
+describe("Usage prices", () => {
+  it("shows a model without a public price as unpriced rather than as free", async () => {
+    const base = twoDaySummary();
+    usageSummary.mockResolvedValue({
+      ...base,
+      buckets: [
+        ...base.buckets,
+        {
+          ...base.buckets[0],
+          day: "2026-08-15",
+          model: "codex-auto-review",
+          costUsd: 0,
+          costSource: "unpriced" as const,
+          records: 3,
+          unpricedRecords: 3,
+        },
+      ],
+    });
+    renderUsage();
+    const totals = await screen.findByRole("region", { name: "Usage totals" });
+
+    expect(within(totals).getByText("if billed at full API rate · 1 model has no price yet")).toBeTruthy();
+    const row = screen.getByText("codex-auto-review").closest("div")?.parentElement as HTMLElement;
+    expect(within(row).getByText("unpriced")).toBeTruthy();
+    expect(within(row).queryByText("$0.00")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Day" }));
+    fireEvent.click(screen.getAllByRole("button", { expanded: false }).find((day) => /Aug 15/.test(day.textContent ?? "")) as HTMLElement);
+    const models = document.getElementById(screen.getByRole("button", { expanded: true }).getAttribute("aria-controls") ?? "") as HTMLElement;
+    const dayRow = within(models).getByText("codex-auto-review").closest("div")?.parentElement as HTMLElement;
+    expect(within(dayRow).getByText("unpriced")).toBeTruthy();
+  });
+});

@@ -41,6 +41,60 @@ fn parse_claude_same_dedupe_key_across_content_blocks() {
     assert_eq!(text.totals, tool.totals);
 }
 
+fn claude_usage_line(model: &str, usage: serde_json::Value) -> String {
+    serde_json::json!({
+        "type": "assistant",
+        "timestamp": "2026-08-07T04:05:13.944Z",
+        "sessionId": "session-a",
+        "requestId": "req_1",
+        "message": { "id": "msg_1", "model": model, "usage": usage }
+    })
+    .to_string()
+}
+
+/// Claude Code splits cache writes by lifetime; a one-hour write costs 2x input against the
+/// five-minute write's 1.25x, so the split has to survive parsing.
+#[test]
+fn parse_claude_keeps_the_one_hour_share_of_cache_writes() {
+    let usage = |one_hour: u64| {
+        serde_json::json!({
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 1000,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 5,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 1000 - one_hour.min(1000),
+                "ephemeral_1h_input_tokens": one_hour
+            }
+        })
+    };
+    let record = parse_claude_line(&claude_usage_line("claude-opus-5", usage(600))).unwrap();
+    assert_eq!(record.totals.cache_creation_tokens, 1000);
+    assert_eq!(record.totals.cache_creation_1h_tokens, 600);
+
+    let inconsistent = parse_claude_line(&claude_usage_line("claude-opus-5", usage(5000))).unwrap();
+    assert_eq!(
+        inconsistent.totals.cache_creation_1h_tokens, 1000,
+        "the one-hour share never exceeds the writes it is a share of"
+    );
+
+    let unsplit = parse_claude_line(&claude_line("msg_3", "text")).unwrap();
+    assert_eq!(unsplit.totals.cache_creation_1h_tokens, 0);
+}
+
+/// Claude Code writes locally generated assistant lines (API errors, interrupts) as
+/// `<synthetic>` with an all-zero usage object; they are not model usage.
+#[test]
+fn parse_claude_skips_records_without_tokens() {
+    let zero = serde_json::json!({
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0
+    });
+    assert!(parse_claude_line(&claude_usage_line("<synthetic>", zero)).is_none());
+}
+
 #[test]
 fn parse_claude_ignores_non_assistant_and_garbage() {
     assert!(parse_claude_line(r#"{"type":"user","message":{}}"#).is_none());

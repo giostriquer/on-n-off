@@ -18,6 +18,7 @@ function emptyFolded(overrides: Partial<FoldedUsage> = {}): FoldedUsage {
       reasoningTokens: 0,
     },
     providers: [],
+    unpricedModels: 0,
     models: [],
     daily: [],
     hourly: [],

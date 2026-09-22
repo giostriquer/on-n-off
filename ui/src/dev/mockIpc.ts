@@ -174,6 +174,11 @@ function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: 
         cacheSavingsUsd: costUsd * 1.3, costSource: "modelPriced", records: 40, unpricedRecords: 0, sessions: 3,
       });
     }
+    // A model the rate table has no price for yet: its tokens count, its cost is unknown.
+    buckets.push({
+      day, provider: "codex", model: "codex-auto-review", totals: totals(900), costUsd: 0,
+      cacheSavingsUsd: 0, costSource: "unpriced", records: 12, unpricedRecords: 12, sessions: 2,
+    });
   }
   return {
     readAt: `${input.untilDay}T12:00:00Z`, timeZone: input.timeZone, sinceDay: input.sinceDay, untilDay: input.untilDay,
