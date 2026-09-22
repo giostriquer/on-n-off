@@ -379,7 +379,7 @@ fn a_lock_left_behind_by_a_dead_process_is_broken_once_it_goes_stale() {
 #[cfg(target_os = "macos")]
 #[test]
 fn the_keychain_write_deadline_fits_inside_the_lock_it_is_held_under() {
-    assert!(KEYCHAIN_WRITE_DEADLINE < LOCK_STALE);
+    assert!(crate::accounts::keychain::DEADLINE < LOCK_STALE);
 }
 
 /// The renewed login lands in a file only this user can read.
@@ -401,88 +401,4 @@ fn the_credentials_file_is_written_private() {
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "the file holds a refresh token");
     }
-}
-
-/// The token reaches `security` on stdin, hex-encoded. Nothing about the login can then be read
-/// out of the process table, and no quoting in the JSON can escape into the command.
-#[test]
-fn the_keychain_write_hex_encodes_the_login_instead_of_quoting_it() {
-    let service = credentials::CLAUDE_KEYCHAIN_SERVICE;
-    let command = keychain_command("me", service, r#"{"a":"b\"c"}"#);
-    assert!(
-        command.starts_with(&format!(
-            r#"add-generic-password -U -a "me" -s "{service}" -X ""#
-        )),
-        "{command}"
-    );
-    let hex = command
-        .rsplit_once("-X \"")
-        .unwrap()
-        .1
-        .trim_end()
-        .trim_end_matches('"');
-    assert!(hex.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    assert!(
-        !command.contains(r#"b\"c"#),
-        "no JSON reaches the command line"
-    );
-}
-
-/// The production write, driven against a throwaway entry of our own so the real login is never at
-/// stake. This calls `write_keychain` itself rather than re-implementing its spawn, so the two
-/// cannot drift, and it covers the account lookup the renewal resolves before it spends anything.
-///
-/// `cargo test --manifest-path src-tauri/Cargo.toml rehearse_the_keychain_write -- --ignored`
-#[cfg(target_os = "macos")]
-#[test]
-#[ignore = "writes a throwaway Keychain entry; not part of CI"]
-fn rehearse_the_keychain_write() {
-    use std::process::Command;
-
-    const SERVICE: &str = "on-n-off keychain write rehearsal";
-    let account = "on-n-off-test";
-    let read = || {
-        let output = Command::new("/usr/bin/security")
-            .args(["find-generic-password", "-a", account, "-s", SERVICE, "-w"])
-            .output()
-            .unwrap();
-        output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-    };
-
-    // A quote and a space in the payload: the two things hex encoding exists to survive.
-    let first = r#"{"claudeAiOauth":{"accessToken":"one","note":"a \"quoted\" word"}}"#;
-    let second = r#"{"claudeAiOauth":{"accessToken":"two"}}"#;
-    write_keychain(account, SERVICE, first).unwrap();
-    assert_eq!(
-        read().as_deref(),
-        Some(first),
-        "the entry round-trips byte for byte"
-    );
-    write_keychain(account, SERVICE, second).unwrap();
-    assert_eq!(
-        read().as_deref(),
-        Some(second),
-        "-U replaces an entry that already exists rather than failing or duplicating it"
-    );
-
-    // The account lookup, against output `security` really produced rather than a fixture.
-    let attributes = Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", SERVICE])
-        .output()
-        .unwrap();
-    assert_eq!(
-        credentials::parse_keychain_account(&String::from_utf8_lossy(&attributes.stdout))
-            .as_deref(),
-        Some(account),
-        "the parser reads `security`'s own output, not just a hand-written fixture"
-    );
-
-    Command::new("/usr/bin/security")
-        .args(["delete-generic-password", "-a", account, "-s", SERVICE])
-        .output()
-        .unwrap();
-    assert_eq!(read(), None, "the rehearsal cleans up after itself");
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, presentLimitAccount, presentLimitWindow, usageLeft, visibleLimitWindows } from "./limitPresentation";
+import { hasObservations, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -97,6 +97,36 @@ describe("usageLeft", () => {
   it("is unknown without a main window", () => {
     expect(usageLeft(entry([{ ...window, id: "extra:spark", kind: "model", usedPercent: 99, resetsAt: live }]), NOW)).toBeNull();
     expect(usageLeft(entry([]), NOW)).toBeNull();
+  });
+});
+
+describe("usableAgainAt", () => {
+  const entry = (windows: LimitWindow[]): ProviderLimits => ({ provider: "claude", status: "ok", currentAccount: false, windows });
+  const soon = "2026-08-17T21:00:00Z";
+  const later = "2026-08-20T00:00:00Z";
+  const opus = "2026-08-24T00:00:00Z";
+
+  it("is the reset of the last full main window, whatever a full model bucket says", () => {
+    expect(usableAgainAt(entry([
+      { ...window, id: "session", kind: "session", usedPercent: 100, resetsAt: soon },
+      { ...window, id: "weekly", kind: "weekly", usedPercent: 100, resetsAt: later },
+      { ...window, id: "opus", kind: "model", usedPercent: 100, resetsAt: opus },
+    ]), NOW)).toBe(Date.parse(later));
+    expect(usableAgainAt(entry([
+      { ...window, id: "session", kind: "session", usedPercent: 100, resetsAt: soon },
+      { ...window, id: "weekly", kind: "weekly", usedPercent: 40, resetsAt: later },
+    ]), NOW)).toBe(Date.parse(soon));
+  });
+
+  it("is never, as far as is known, when a full window reports no reset", () => {
+    expect(usableAgainAt(entry([{ ...window, kind: "session", usedPercent: 100, resetsAt: null }]), NOW)).toBe(Infinity);
+  });
+
+  it("ignores a full window whose reset has already passed", () => {
+    expect(usableAgainAt(entry([
+      { ...window, id: "session", kind: "session", usedPercent: 100 },
+      { ...window, id: "weekly", kind: "weekly", usedPercent: 100, resetsAt: later },
+    ]), NOW)).toBe(Date.parse(later));
   });
 });
 

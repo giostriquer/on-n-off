@@ -120,7 +120,9 @@ profiles, ephemeral/alternate Codex backends, environment credentials and detect
 policies currently defer to the official client. Existing model/endpoints/API-key configuration is
 never rewritten to simulate a switch. Native Codex file/keyring/auto backends are selected from
 config; unreadable protected storage is not treated as a missing login. macOS native account reads use the same system `security` reader as Limits, with the exact
-resolved service and account and a bounded subprocess deadline. Claude uses scoped Keychain
+resolved service and account and a bounded subprocess deadline, and native account writes and
+removals go through the same tool (`accounts/keychain.rs`), never the process's own ad-hoc-signed
+Keychain identity, so one "Always Allow" survives updates and Claude Code's own refreshes. Claude uses scoped Keychain
 entries only for isolated sign-in, deriving their names from the raw NFC-normalized home path.
 On macOS, real Claude sign-ins retain the OS home so Security can locate the login Keychain;
 `CLAUDE_CONFIG_DIR` isolates the CLI configuration and selects its scoped credential entry.

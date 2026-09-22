@@ -84,16 +84,28 @@ impl Target {
                 }
             }
             Self::Keyring { service, account } => {
-                let entry = keyring::Entry::new(service, account)
-                    .map_err(|_| "Cannot open native credential store.")?;
-                if let Some(bytes) = bytes {
-                    entry
-                        .set_secret(&bytes)
-                        .map_err(|_| "Cannot update native credential store.".into())
-                } else {
-                    match entry.delete_credential() {
-                        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                        Err(_) => Err("Cannot remove native credentials.".into()),
+                // Through `security`, the identity the item already trusts for reads, never this
+                // ad-hoc-signed process: `keychain.rs` says what the latter cost.
+                #[cfg(target_os = "macos")]
+                {
+                    match bytes {
+                        Some(bytes) => super::keychain::write(service, account, &bytes),
+                        None => super::keychain::delete(service, account),
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let entry = keyring::Entry::new(service, account)
+                        .map_err(|_| "Cannot open native credential store.")?;
+                    if let Some(bytes) = bytes {
+                        entry
+                            .set_secret(&bytes)
+                            .map_err(|_| "Cannot update native credential store.".into())
+                    } else {
+                        match entry.delete_credential() {
+                            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                            Err(_) => Err("Cannot remove native credentials.".into()),
+                        }
                     }
                 }
             }

@@ -199,6 +199,15 @@ matching legacy card; it never imports old unscoped quotas. Use changes the defa
 login after preserving its latest credential; it does not call logout. Native readback decides
 which profile is active. A new sign-in for an already active identity is shown as ready to use.
 
+Limits and the tray popover order one provider's cards the same way: the active login first; then
+every account with usage left, the most usable capacity first, where the plan's multiplier weighs
+the percentage its fuller main window has left (a Max ×20 at 30% outranks an untouched Max ×5);
+then the accounts that are out of usage, the one whose last full window resets soonest first;
+accounts with no usage known last. Usage left always outranks waiting for a reset, and equal
+ranks keep the backend's order, newest observation first. The rule lives in
+`ui/src/features/limits/accountCards.ts` on the shared `usageLeft` / `usableAgainAt` /
+`planMultiplier` helpers; the backend itself still hands accounts over newest first.
+
 Native Codex file, keyring, and auto storage are handled explicitly. Ephemeral or alternate
 credential backends, selected Codex configuration profiles, custom native homes, environment auth
 and detected forced-login policies are refused with guidance to use the official CLI. Claude's
@@ -250,7 +259,12 @@ billing date. Cached legacy cards without a native or saved identity are display
 
 Account reads use the same `/usr/bin/security` reader as Limits, scoped to the resolved service
 and account. Each native verification still rereads the credential; no native login is cached
-for this purpose. The account vault's encryption key is unlocked once per storage root and app
+for this purpose. Account writes go through the same tool: activation publishes a login with
+`security add-generic-password -U`, and removing an isolated sign-in's scoped entry uses
+`security delete-generic-password`. The app never opens a provider's item with its own Keychain
+identity, which is ad-hoc signed and so changes with every build: an item the app had written
+itself asked the user again on the next `security` read, and again after each update. The vault
+key is the one item the app opens itself. The account vault's encryption key is unlocked once per storage root and app
 session, in memory only. Concurrent account/billing reads share the pending unlock. A denied
 unlock is retained for background reads; an explicit account operation can retry it. Existing
 vaults unlock before taking the shared storage lease, so an authorization prompt cannot cause

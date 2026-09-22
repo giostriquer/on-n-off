@@ -101,6 +101,33 @@ function band(source: ProviderLimits): ProviderLimits[] {
   }));
 }
 
+/**
+ * `?mock=limitsOrder`: five Claude accounts listed in the order the backend hands them over, which
+ * the screen must not keep. The active login comes first whatever its usage; then the two with
+ * usage left, the Max ×20 at 30% ahead of the untouched-looking Max ×5 because its percentage is
+ * worth four times as much; then the two that are out of usage, the one usable again in forty
+ * minutes ahead of the one waiting four days for its weekly window.
+ */
+export function limitsOrderClaude(): ProviderLimits[] {
+  const source = CLAUDE[0];
+  const rung = (id: string, label: string, plan: string, weekly: number, session: number, weeklyResetsIn: number, sessionResetsIn: number, currentAccount = false): ProviderLimits => ({
+    ...source,
+    account: { id: `order-${id}`, label },
+    currentAccount,
+    plan,
+    windows: source.windows.slice(0, 2).map((window) => window.kind === "weekly"
+      ? { ...window, usedPercent: weekly, resetsAt: at(weeklyResetsIn) }
+      : { ...window, usedPercent: session, resetsAt: at(sessionResetsIn) }),
+  });
+  return [
+    rung("current", "you@example.com", "max ×5", 60, 45, 3 * 24 * 60, 2 * 60, true),
+    rung("waiting", "waiting@example.com", "max ×5", 100, 100, 4 * 24 * 60, 2 * 60),
+    rung("soon", "soon@example.com", "max ×5", 35, 100, 5 * 24 * 60, 40),
+    rung("spare", "spare@example.com", "max ×5", 20, 10, 6 * 24 * 60, 4 * 60),
+    rung("bigger", "bigger@example.com", "max ×20", 70, 60, 2 * 24 * 60, 60),
+  ];
+}
+
 export function limitsBandClaude(): ProviderLimits[] {
   return band(CLAUDE[0]);
 }

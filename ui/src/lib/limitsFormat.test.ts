@@ -9,6 +9,7 @@ import {
   hasElapsed,
   formatUsedPercent,
   planLabel,
+  planMultiplier,
   usageFillColor,
   usageMeterColor,
   usageTextColor,
@@ -157,6 +158,27 @@ describe("planLabel", () => {
     expect(planLabel("enterprise_x")).toBe("Enterprise x");
     expect(planLabel(null)).toBe("");
     expect(planLabel(undefined)).toBe("");
+  });
+});
+
+describe("planMultiplier", () => {
+  it("reads the tier's ×N, gives a bare Max Claude's five, and everything else one", () => {
+    expect(planMultiplier("max ×20", "claude")).toBe(20);
+    expect(planMultiplier("max ×5", "claude")).toBe(5);
+    expect(planMultiplier("Max x20")).toBe(20);
+    expect(planMultiplier("Max × 20")).toBe(20);
+    expect(planMultiplier("max", "claude")).toBe(5);
+    expect(planMultiplier("pro", "claude")).toBe(1);
+    expect(planMultiplier("plus", "codex")).toBe(1);
+    expect(planMultiplier(null)).toBe(1);
+    expect(planMultiplier(undefined, "codex")).toBe(1);
+  });
+
+  it("weighs Codex Pro tiers exactly as the badge names them", () => {
+    expect(planMultiplier("pro", "codex")).toBe(20);
+    for (const value of ["prolite", "pro_lite", "pro-lite", " Pro Lite "]) {
+      expect(planMultiplier(value, "codex")).toBe(5);
+    }
   });
 });
 

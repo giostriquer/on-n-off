@@ -11,7 +11,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
-import { bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor, sameEmailWorkspacesCodex } from "./limitsFixtures";
+import { bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
@@ -35,7 +35,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "accountClients", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
-  "savedRefreshPaused", "limitsBand", "bankedResets", "sameEmailWorkspaces", "hooks",
+  "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "hooks",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -214,6 +214,7 @@ const handlers: Record<string, Handler> = {
       })),
       nativeObservationId: "profile:personal", nativeAccount: null, recoveryRequired: false, notice: null,
     };
+    if (scenario === "limitsOrder" && args.agent === "claude") return { profiles: [], nativeObservationId: "order-current", nativeAccount: null, recoveryRequired: false, notice: null };
     if (scenario === "accountDuplicate" && args.agent === "codex") return {
       profiles: [{ id: "saved", observationId: "profile:shared", identity: { provider: "codex", userId: "shared-user", workspaceId: "ca292064-c3f4-453c-b15a-43ef63c46478" }, label: "shared@example.com", email: "shared@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, needsLogin: false }],
       nativeObservationId: "codex-1", nativeAccount: null, recoveryRequired: false, notice: null,
@@ -248,6 +249,7 @@ const handlers: Record<string, Handler> = {
     if (scenario === "subscriptionBadges" && args.agentId === "codex") return subscriptionBadgeLimits();
     if (scenario === "limitsBand" && args.agentId === "claude") return limitsBandClaude();
     if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();
+    if (scenario === "limitsOrder" && args.agentId === "claude") return limitsOrderClaude();
     if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
     if (scenario === "bankedResets" && args.agentId === "codex") return bankedResetsCodex();
     if (scenario === "sameEmailWorkspaces" && args.agentId === "codex") return sameEmailWorkspacesCodex();

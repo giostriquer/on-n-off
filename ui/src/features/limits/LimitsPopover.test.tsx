@@ -138,6 +138,28 @@ describe("LimitsPopover", () => {
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
   });
 
+  it("orders remembered accounts by usage left, then by when their usage returns", async () => {
+    const weekly = (entry: ProviderLimits, usedPercent: number, resetsAt: string): ProviderLimits =>
+      ({ ...entry, windows: [{ ...entry.windows[0], usedPercent, resetsAt }] });
+    readLimits.mockImplementation((provider: AgentId) =>
+      Promise.resolve(provider === "claude" ? [
+        limits("claude", "claude-current", "current@claude.example", true),
+        weekly(limits("claude", "claude-out", "out@claude.example", false), 100, "2026-08-25T12:00:00Z"),
+        weekly(limits("claude", "claude-soon", "soon@claude.example", false), 100, "2026-08-18T15:00:00Z"),
+        weekly(limits("claude", "claude-spare", "spare@claude.example", false), 90, "2026-08-18T14:00:00Z"),
+      ] : []),
+    );
+    renderPopover();
+
+    const claude = await screen.findByRole("region", { name: "Claude accounts" });
+    expect((await within(claude).findAllByRole("article")).map((entry) => entry.getAttribute("aria-label"))).toEqual([
+      "Claude limits · current@claude.example",
+      "Claude limits · spare@claude.example",
+      "Claude limits · soon@claude.example",
+      "Claude limits · out@claude.example",
+    ]);
+  });
+
   it("uses the critical tone for a nearly exhausted meter fill", async () => {
     const claude = limits("claude", "claude-current", "current@claude.example", true);
     claude.windows[0].usedPercent = 90;

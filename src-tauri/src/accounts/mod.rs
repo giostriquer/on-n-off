@@ -9,6 +9,7 @@ mod usage_renew;
 
 mod transaction;
 
+mod keychain;
 pub(crate) mod native;
 
 pub(crate) mod activity;
