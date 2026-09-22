@@ -28,12 +28,22 @@ export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
   return <SummaryRow label="Paid reset" value={offer.price ? formatPrice(offer.price) : "offered"} note="offered by Codex · buy it on chatgpt.com" />;
 }
 
-/** The banked reset count as one more row under the windows, with when the next one expires. */
-export function BankedResetsRow({ resetCredits, now }: { resetCredits?: LimitsResetCredits | null; now: number }) {
+/**
+ * Where a Claude reset is spent. on-n-off only reports Claude's, and Claude Code spends the reset of
+ * whoever it is signed in as, so only the signed-in account's card names the command.
+ */
+export const CLAUDE_RESET_HINT = "/limit-reset in Claude Code";
+
+/**
+ * The banked reset count as one more row under the windows, with when the next one expires and,
+ * when the card is given one, where the reset is spent.
+ */
+export function BankedResetsRow({ resetCredits, hint, now }: { resetCredits?: LimitsResetCredits | null; hint?: string; now: number }) {
   if (!resetCredits || resetCredits.availableCount <= 0) return null;
   const expiresIn = formatResetIn(resetCredits.nextExpiresAt, now);
   const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
-  const note = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
+  const expiry = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
+  const note = [expiry, hint].filter(Boolean).join(" · ");
   return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
 }
 

@@ -2,13 +2,16 @@
 //!
 //! The payload carries a normalized `limits[]` array (kind/group/percent/resets_at) plus the
 //! older top-level `five_hour` / `seven_day` / `seven_day_<model>` objects. The array wins when
-//! it has usable entries; the legacy keys are the fallback.
+//! it has usable entries; the legacy keys are the fallback. Asked with `?cedar_ember=1`, the same
+//! payload also reports the account's saved resets.
 
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use super::credentials::ClaudeIdentity;
 use super::json::{humanize, optional_string, percent, window};
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto};
+use super::Parsed;
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsResetCreditsDto};
 
 pub(super) fn parse_profile(payload: &Value) -> Result<ClaudeIdentity, String> {
     let account = payload
@@ -31,7 +34,16 @@ pub(super) fn parse_profile(payload: &Value) -> Result<ClaudeIdentity, String> {
     })
 }
 
-pub fn parse_claude(payload: &Value) -> Vec<LimitWindowDto> {
+/// Everything one usage payload says about the account: its windows and its saved resets.
+pub(super) fn parse_usage(payload: &Value, now: DateTime<Utc>) -> Parsed {
+    Parsed {
+        windows: parse_claude(payload),
+        reset_credits: parse_reset_credits(payload, now),
+        ..Parsed::default()
+    }
+}
+
+fn parse_claude(payload: &Value) -> Vec<LimitWindowDto> {
     let normalized: Vec<LimitWindowDto> = payload
         .get("limits")
         .and_then(Value::as_array)
@@ -77,6 +89,79 @@ fn scope_name(scope: Option<&Value>) -> Option<String> {
             .and_then(|model| model.get("display_name")),
     )
     .or_else(|| optional_string(scope.get("surface")))
+}
+
+/// Why Claude Code's saved-reset status can report no reset for reasons about the account or the
+/// program itself, so no grants really means none. Any other reason (`surface`, `cli_version`,
+/// `mobile`, `unknown`, or one added later) describes who is asking; on-n-off is not Claude Code, so
+/// those leave the count unknown.
+const ACCOUNT_HOLDS_NONE: [&str; 6] = [
+    "no_grant",
+    "tier",
+    "seat",
+    "tenure",
+    "other_experiment",
+    "config_off",
+];
+/// The status could not be read at all; Claude Code treats it as a failed read.
+const UNANSWERED: &str = "unavailable";
+
+/// Anthropic's saved rate-limit resets, which Claude Code spends with `/limit-reset`: the
+/// `cedar_ember` block the usage read carries when asked with `?cedar_ember=1`. The count sums
+/// `resets_left` over every grant, as Claude Code's own count does, and the expiry is the soonest
+/// `ends_at` still ahead of `now` among grants holding a reset.
+///
+/// `None` is "unknown", never zero: no block, an `unavailable` one, grants that were sent but
+/// cannot be read, or no grants for a reason about the asker. Zero is only reported when the block
+/// says the account holds none.
+fn parse_reset_credits(payload: &Value, now: DateTime<Utc>) -> Option<LimitsResetCreditsDto> {
+    let block = payload.get("cedar_ember")?.as_object()?;
+    let reason = block.get("ineligible_reason").and_then(Value::as_str);
+    if reason == Some(UNANSWERED) {
+        return None;
+    }
+    let sent: &[Value] = match block.get("grants") {
+        None | Some(Value::Null) => &[],
+        Some(grants) => grants.as_array()?,
+    };
+    let grants: Vec<(u32, Option<DateTime<Utc>>)> = sent.iter().filter_map(grant).collect();
+    if grants.is_empty() {
+        let holds_none = sent.is_empty()
+            && (block.get("eligible").and_then(Value::as_bool) == Some(true)
+                || reason.is_some_and(|reason| ACCOUNT_HOLDS_NONE.contains(&reason)));
+        return holds_none.then_some(LimitsResetCreditsDto {
+            available_count: 0,
+            next_expires_at: None,
+        });
+    }
+    Some(LimitsResetCreditsDto {
+        available_count: grants
+            .iter()
+            .map(|(left, _)| *left)
+            .fold(0, u32::saturating_add),
+        next_expires_at: grants
+            .iter()
+            .filter(|(left, _)| *left > 0)
+            .filter_map(|(_, ends_at)| *ends_at)
+            .filter(|ends_at| *ends_at > now)
+            .min()
+            .map(|at| at.to_rfc3339()),
+    })
+}
+
+/// One grant's `resets_left` and `ends_at`. The count must be a whole number of at least zero, as
+/// Claude Code's reader requires; `1.0` is one, since JSON does not tell integers from floats.
+fn grant(grant: &Value) -> Option<(u32, Option<DateTime<Utc>>)> {
+    let left = grant.get("resets_left")?;
+    let left = left.as_u64().or_else(|| {
+        left.as_f64()
+            .filter(|left| left.fract() == 0.0 && *left >= 0.0)
+            .map(|left| left as u64)
+    })?;
+    let ends_at = optional_string(grant.get("ends_at"))
+        .and_then(|at| DateTime::parse_from_rfc3339(&at).ok())
+        .map(|at| at.with_timezone(&Utc));
+    Some((u32::try_from(left).unwrap_or(u32::MAX), ends_at))
 }
 
 fn legacy_windows(payload: &Value) -> Vec<LimitWindowDto> {

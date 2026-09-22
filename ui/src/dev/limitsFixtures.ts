@@ -152,6 +152,11 @@ export function bankedResetsCodex(): ProviderLimits[] {
   }));
 }
 
+/** `?mock=bankedResets` on Claude: one saved reset, reported with where Claude Code spends it. */
+export function bankedResetsClaude(): ProviderLimits[] {
+  return CLAUDE.map((entry) => ({ ...entry, resetCredits: { availableCount: 1, nextExpiresAt: at(13 * 24 * 60 + 4 * 60) } }));
+}
+
 /**
  * `?mock=sameEmailWorkspaces`: one email signed in to a personal and a business workspace, which
  * the cards tell apart by plan.

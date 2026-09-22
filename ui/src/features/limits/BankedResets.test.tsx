@@ -74,9 +74,22 @@ describe("BankedResetsRow", () => {
     }
   });
 
+  it("adds where the reset is spent after its expiry when the card is given one", () => {
+    render(<BankedResetsRow resetCredits={{ availableCount: 1, nextExpiresAt: "2026-08-29T15:00:00Z" }} hint="/limit-reset in Claude Code" now={NOW} />);
+
+    expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
+    expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")} · /limit-reset in Claude Code`)).toBeTruthy();
+  });
+
+  it("keeps the hint as the whole note when the expiry is unknown", () => {
+    render(<BankedResetsRow resetCredits={{ availableCount: 1, nextExpiresAt: null }} hint="/limit-reset in Claude Code" now={NOW} />);
+
+    expect(screen.getByText("/limit-reset in Claude Code")).toBeTruthy();
+  });
+
   it("stays out of the card when nothing is banked", () => {
     for (const resetCredits of [null, undefined, { availableCount: 0, nextExpiresAt: null }]) {
-      const { container, unmount } = render(<BankedResetsRow resetCredits={resetCredits} now={NOW} />);
+      const { container, unmount } = render(<BankedResetsRow resetCredits={resetCredits} hint="/limit-reset in Claude Code" now={NOW} />);
       expect(container.innerHTML).toBe("");
       unmount();
     }

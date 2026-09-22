@@ -44,6 +44,10 @@ use pipeline::{finish, resolve_provider, LoadFailureKind, ProviderLoadError, Res
 use snapshots::SnapshotStore;
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+/// Asks the usage read for the saved-reset block too. The query is the one Claude Code sends on
+/// demand for `/limit-reset`; its regular read is the plain URL, which is why [`claude_usage`] falls
+/// back to it. `skip_spend` leaves out the extra-usage spend figures, which on-n-off does not show.
+const CLAUDE_USAGE_QUERY: &str = "cedar_ember=1&skip_spend=1";
 const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 /// Account id used when the CLI stores no identity; keeps single-account behaviour intact.
 const DEFAULT_ACCOUNT: &str = "default";
@@ -224,6 +228,10 @@ fn aggregate_accounts(
             .map(|index| remembered.remove(index))
     });
     let current = if current.status == LimitsStatus::Ok {
+        let mut current = current;
+        if let Some(prior) = &prior {
+            current.keep_reset_credits_from(prior);
+        }
         current
     } else {
         observations::merge_windows(
@@ -347,7 +355,7 @@ fn claude_limits(
             }) {
                 return Err(ProviderLoadError::AccountMismatch);
             }
-            let payload = get_json(
+            let usage = claude_usage(
                 usage_url,
                 &[
                     ("Authorization", &bearer),
@@ -358,13 +366,23 @@ fn claude_limits(
             Ok(Parsed {
                 account: Some(profile.account),
                 plan: credential.plan(),
-                windows: claude::parse_claude(&payload),
-                credits: None,
-                reset_credits: None,
-                reset_offer: None,
+                ..usage
             })
         },
     )
+}
+
+/// Claude's usage read with its saved resets. The resets are optional, so a refusal of the reset
+/// query never decides the read: any answer other than a transport failure retries the plain URL,
+/// whose answer (a rejected login included) stands, with the resets unknown. A transport failure
+/// is not retried, since the plain read would only wait on the same network.
+fn claude_usage(usage_url: &str, headers: &[(&str, &str)]) -> Result<Parsed, HttpError> {
+    let payload = match get_json(&format!("{usage_url}?{CLAUDE_USAGE_QUERY}"), headers) {
+        Err(HttpError::Network(error)) => return Err(HttpError::Network(error)),
+        Err(_) => get_json(usage_url, headers)?,
+        Ok(payload) => payload,
+    };
+    Ok(claude::parse_usage(&payload, Utc::now()))
 }
 
 /// Codex owns login, token refresh and usage requests through its documented app-server APIs.

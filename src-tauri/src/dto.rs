@@ -620,7 +620,8 @@ pub struct LimitsCreditsDto {
     pub unlimited: bool,
 }
 
-/// Codex banked rate-limit resets: one-time resets saved to the account until used or expired.
+/// Banked rate-limit resets: one-time resets saved to the account until used or expired. Codex's
+/// can be spent from on-n-off; Claude's are only reported, and spent with Claude Code's `/limit-reset`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsResetCreditsDto {
@@ -713,12 +714,20 @@ impl ProviderLimitsDto {
         !self.windows.is_empty() || self.credits.is_some() || self.has_banked_resets()
     }
 
-    /// Every current Codex read reports a reset count, usually 0, so only a positive count is an
-    /// observation; the 0 still matters when it replaces a remembered count.
+    /// Every current Codex read and most Claude reads report a reset count, usually 0, so only a
+    /// positive count is an observation; the 0 still matters when it replaces a remembered count.
     pub fn has_banked_resets(&self) -> bool {
         self.reset_credits
             .as_ref()
             .is_some_and(|resets| resets.available_count > 0)
+    }
+
+    /// A successful read that could not tell how many resets are banked keeps the count `previous`
+    /// knew; one that answered, 0 included, replaces it.
+    pub fn keep_reset_credits_from(&mut self, previous: &Self) {
+        if self.reset_credits.is_none() {
+            self.reset_credits.clone_from(&previous.reset_credits);
+        }
     }
 }
 
