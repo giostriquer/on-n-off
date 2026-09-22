@@ -426,9 +426,11 @@ pub fn prepare_sources(
             _ => {
                 let path = Path::new(&entry.path);
                 match read_stable_records(path, entry.provider, entry.size, entry.mtime_ms) {
-                    StableRead::Stable(size, mtime_ms, records)
-                        if size == entry.size && mtime_ms == entry.mtime_ms =>
-                    {
+                    TranscriptRead::Stable {
+                        size,
+                        mtime_ms,
+                        records,
+                    } if size == entry.size && mtime_ms == entry.mtime_ms => {
                         let records = Arc::new(records);
                         scan_cache.insert(
                             entry.path.clone(),
@@ -444,12 +446,12 @@ pub fn prepare_sources(
                     }
                     // Changed since the inventory, or still being written (a live session): what
                     // it holds now counts, uncached, and the read is not final.
-                    StableRead::Stable(_, _, records) | StableRead::Moving(records) => {
+                    TranscriptRead::Stable { records, .. } | TranscriptRead::Moving(records) => {
                         complete = false;
                         Some(Arc::new(records))
                     }
-                    // Unreadable right now: its last parse, if any, for this read only.
-                    StableRead::Failed => {
+                    // Unreadable right now: its last cached parse, if any, for this read only.
+                    TranscriptRead::Failed => {
                         complete = false;
                         cached.map(|cached| Arc::clone(&cached.records))
                     }
@@ -519,8 +521,12 @@ fn inspect_changed_file(
 
     let parsed =
         match read_stable_records(&observed.path, provider, observed.size, observed.mtime_ms) {
-            StableRead::Stable(size, mtime_ms, records) => Some((size, mtime_ms, records)),
-            StableRead::Moving(_) | StableRead::Failed => None,
+            TranscriptRead::Stable {
+                size,
+                mtime_ms,
+                records,
+            } => Some((size, mtime_ms, records)),
+            TranscriptRead::Moving(_) | TranscriptRead::Failed => None,
         };
     let parsed_ok = parsed.is_some();
     let (size, mtime_ms, records) =
@@ -554,13 +560,17 @@ fn inspect_changed_file(
 
 /// What reading one transcript saw.
 #[derive(Debug)]
-pub enum StableRead {
-    /// The file held still across a read: its identity and the records it holds.
-    Stable(u64, i64, Vec<UsageRecord>),
-    /// The file kept changing across both attempts (a live session writing): the records the last
-    /// attempt read, which are everything the file held up to that point.
+pub enum TranscriptRead {
+    /// The file held still across a parse: its identity and the records it holds.
+    Stable {
+        size: u64,
+        mtime_ms: i64,
+        records: Vec<UsageRecord>,
+    },
+    /// The file never held still across a parse (a live session writing), or went away after one:
+    /// the records of the last parse that succeeded, everything the file held up to that point.
     Moving(Vec<UsageRecord>),
-    /// The file could not be read.
+    /// No parse of the file succeeded.
     Failed,
 }
 
@@ -569,7 +579,7 @@ pub fn read_stable_records(
     provider: UsageProvider,
     initial_size: u64,
     initial_mtime_ms: i64,
-) -> StableRead {
+) -> TranscriptRead {
     read_stable_records_with(
         initial_size,
         initial_mtime_ms,
@@ -591,25 +601,30 @@ fn read_stable_records_with(
     initial_mtime_ms: i64,
     mut read: impl FnMut() -> Option<Vec<UsageRecord>>,
     mut identity: impl FnMut() -> Option<(u64, i64)>,
-) -> StableRead {
+) -> TranscriptRead {
     let mut size = initial_size;
     let mut mtime_ms = initial_mtime_ms;
-    let mut last = Vec::new();
+    let mut last = None;
     for _ in 0..=1 {
         let Some(records) = read() else {
-            return StableRead::Failed;
+            break;
         };
         let Some((after_size, after_mtime_ms)) = identity() else {
-            return StableRead::Failed;
+            last = Some(records);
+            break;
         };
         if after_size == size && after_mtime_ms == mtime_ms {
-            return StableRead::Stable(size, mtime_ms, records);
+            return TranscriptRead::Stable {
+                size,
+                mtime_ms,
+                records,
+            };
         }
         size = after_size;
         mtime_ms = after_mtime_ms;
-        last = records;
+        last = Some(records);
     }
-    StableRead::Moving(last)
+    last.map_or(TranscriptRead::Failed, TranscriptRead::Moving)
 }
 
 fn file_identity(path: &Path) -> Option<(u64, i64)> {

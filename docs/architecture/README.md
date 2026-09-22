@@ -208,9 +208,13 @@ Three reading rules carry the accuracy, each pinned by a test:
 
 A transcript still being written while it is read (a live session) counts what it holds at that
 moment instead of dropping out of the total. `source_index::read_stable_records` parses a file
-up to twice and reports whether its size and mtime held still (`StableRead`). One that kept moving
-counts the last parse. One that cannot be read at all counts its last cached parse, if there is
-one. Neither result is cached, and the summary is not stored as final, so the next refresh reads
+up to twice and reports whether its size and mtime held still (`TranscriptRead`):
+
+- A file that held still but no longer matches the inventory counts what it holds now.
+- One that kept moving, or went away after a parse, counts the last parse that succeeded.
+- One no parse succeeded on counts its last cached parse, if there is one.
+
+None of these parses is cached, and the summary is not stored as final, so the next refresh reads
 the file again.
 
 A model the table has no price for is shown as **unpriced**, never as `$0.00`: its tokens count

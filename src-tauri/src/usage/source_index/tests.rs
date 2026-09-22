@@ -319,108 +319,214 @@ fn unresolved_file_is_pending_and_retried_on_next_reconciliation() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-#[test]
-fn file_that_changes_during_both_parse_attempts_reads_as_moving_with_what_it_held() {
-    let identities = std::cell::RefCell::new(vec![(2, 2), (3, 3)].into_iter());
-    let attempts = std::cell::Cell::new(0u64);
-    let result = read_stable_records_with(
-        1,
-        1,
-        || {
-            attempts.set(attempts.get() + 1);
-            Some(vec![parse_claude_line(&record(
-                "2026-08-07T04:05:13.944Z",
-                "msg-1",
-                attempts.get(),
-            ))
-            .unwrap()])
-        },
-        || identities.borrow_mut().next(),
-    );
-    match result {
-        StableRead::Moving(records) => assert_eq!(
-            records[0].totals.output_tokens, 2,
-            "the latest attempt is what the file held last"
-        ),
+fn parsed(output_tokens: u64) -> UsageRecord {
+    parse_claude_line(&record("2026-08-07T04:05:13.944Z", "msg-1", output_tokens)).unwrap()
+}
+
+fn outputs_of(read: TranscriptRead) -> Vec<u64> {
+    match read {
+        TranscriptRead::Moving(records) => records
+            .iter()
+            .map(|record| record.totals.output_tokens)
+            .collect(),
         other => panic!("expected Moving, got {other:?}"),
     }
 }
 
 #[test]
-fn a_transcript_unreadable_mid_read_reads_as_failed() {
-    let result = read_stable_records_with(1, 1, || None, || Some((1, 1)));
-    assert!(matches!(result, StableRead::Failed));
+fn a_file_that_changes_during_both_parse_attempts_reads_as_moving_with_its_last_parse() {
+    let identities = std::cell::RefCell::new(vec![(2, 2), (3, 3)].into_iter());
+    let attempts = std::cell::Cell::new(0);
+    let read = read_stable_records_with(
+        1,
+        1,
+        || {
+            attempts.set(attempts.get() + 1);
+            Some(vec![parsed(attempts.get())])
+        },
+        || identities.borrow_mut().next(),
+    );
+    assert_eq!(
+        outputs_of(read),
+        [2],
+        "the last attempt is what it held last"
+    );
 }
 
-/// A live session's transcript changes while every read looks at it. Dropping it from the read
-/// took an always-active session out of the total; it now counts what it holds, and the summary is
-/// marked incomplete so it is neither cached nor trusted as final.
+/// Growth with an unchanged mtime is still movement: filesystems with coarse timestamps see an
+/// append only through the size.
 #[test]
-fn a_transcript_still_being_written_counts_what_it_holds_instead_of_dropping_out() {
-    let home = scratch_dir("usage-source-index-live");
-    let path = transcript_path(&home, "live.jsonl");
-    write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
-    let mut cache = ScanCache::new();
-    assert!(reconcile_home(&home, &mut cache).snapshot.is_complete());
-    let growth = record("2026-08-07T04:06:00.000Z", "msg-live", 5);
+fn a_size_change_alone_reads_as_moving() {
+    let identities = std::cell::RefCell::new(vec![(2, 1), (3, 1)].into_iter());
+    let read = read_stable_records_with(
+        1,
+        1,
+        || Some(vec![parsed(20)]),
+        || identities.borrow_mut().next(),
+    );
+    assert_eq!(outputs_of(read), [20]);
+}
 
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&path)
-        .unwrap()
-        .write_all(format!("{}\n", record("2026-08-07T04:05:30.000Z", "msg-2", 30)).as_bytes())
+#[test]
+fn a_file_gone_after_a_parse_keeps_that_parse() {
+    let read = read_stable_records_with(1, 1, || Some(vec![parsed(20)]), || None);
+    assert_eq!(outputs_of(read), [20]);
+}
+
+#[test]
+fn a_failed_second_attempt_keeps_the_first_parse() {
+    let attempts = std::cell::Cell::new(0);
+    let read = read_stable_records_with(
+        1,
+        1,
+        || {
+            attempts.set(attempts.get() + 1);
+            (attempts.get() == 1).then(|| vec![parsed(20)])
+        },
+        || Some((2, 2)),
+    );
+    assert_eq!(outputs_of(read), [20]);
+}
+
+#[test]
+fn a_transcript_that_cannot_be_read_reads_as_failed() {
+    let read = read_stable_records_with(1, 1, || None, || Some((1, 1)));
+    assert!(matches!(read, TranscriptRead::Failed));
+}
+
+fn append_record(path: &Path, record: &str) {
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(file, "{record}").unwrap();
+}
+
+/// Rewrites `path` with a record of the same length and moves its mtime five seconds on, so only
+/// the mtime tells the two versions apart.
+fn rewrite_same_size_later(path: &Path, record: &str) {
+    let before = std::fs::metadata(path).unwrap();
+    write_records(path, &[record.to_string()]);
+    let file = std::fs::File::options().write(true).open(path).unwrap();
+    file.set_modified(before.modified().unwrap() + Duration::from_secs(5))
         .unwrap();
-    let prepared = with_live_transcript(&path, &growth, || {
-        let reconciled = reconcile_home(&home, &mut cache);
-        assert!(
-            !reconciled.snapshot.is_complete(),
-            "the live file is pending"
-        );
-        prepare_sources(&reconciled.snapshot, &mut cache, 0)
-    });
+    assert_eq!(file.metadata().unwrap().len(), before.len());
+}
 
-    assert!(!prepared.complete);
-    let outputs: Vec<u64> = prepared
+fn complete_snapshot(home: &Path) -> SourceSnapshot {
+    let snapshot = reconcile_home(home, &mut ScanCache::new()).snapshot;
+    assert!(snapshot.is_complete());
+    snapshot
+}
+
+fn output_tokens(prepared: &PreparedSources) -> Vec<u64> {
+    prepared
         .files
         .iter()
         .flat_map(|file| file.records.iter())
         .map(|record| record.totals.output_tokens)
-        .collect();
-    assert!(
-        outputs.starts_with(&[20, 30]),
-        "the live file still counts, appended lines included: {outputs:?}"
-    );
+        .collect()
+}
+
+/// A transcript that changed since the inventory, or is still being written while it is read (a
+/// live session), used to drop out of the total. It now counts what it holds; that parse is never
+/// cached, and the read is not final, so the summary is not stored and the next refresh reads again.
+#[test]
+fn a_changed_or_live_transcript_counts_what_it_holds_uncached_and_not_final() {
+    for live in [false, true] {
+        let home = scratch_dir(if live {
+            "usage-source-index-live"
+        } else {
+            "usage-source-index-changed"
+        });
+        let path = transcript_path(&home, "session.jsonl");
+        write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
+        let snapshot = complete_snapshot(&home);
+        append_record(&path, &record("2026-08-07T04:05:30.000Z", "msg-2", 30));
+        let growth = record("2026-08-07T04:06:00.000Z", "msg-live", 5);
+        let mut cache = ScanCache::new();
+
+        let prepared = if live {
+            with_live_transcript(&path, &growth, || prepare_sources(&snapshot, &mut cache, 0))
+        } else {
+            prepare_sources(&snapshot, &mut cache, 0)
+        };
+
+        let expected: &[u64] = if live { &[20, 30, 5] } else { &[20, 30] };
+        assert_eq!(output_tokens(&prepared), expected, "live: {live}");
+        assert!(!prepared.complete, "live: {live}");
+        assert!(!prepared.scan_cache_dirty, "live: {live}");
+        assert!(cache.is_empty(), "live: {live}");
+        let _ = std::fs::remove_dir_all(home);
+    }
+}
+
+#[test]
+fn a_same_size_rewrite_since_the_inventory_counts_uncached_and_not_final() {
+    let home = scratch_dir("usage-source-index-rewritten");
+    let path = transcript_path(&home, "session.jsonl");
+    write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
+    let snapshot = complete_snapshot(&home);
+    rewrite_same_size_later(&path, &record("2026-08-07T04:05:13.944Z", "msg-1", 21));
+    let mut cache = ScanCache::new();
+
+    let prepared = prepare_sources(&snapshot, &mut cache, 0);
+
+    assert_eq!(output_tokens(&prepared), [21]);
+    assert!(!prepared.complete);
+    assert!(cache.is_empty());
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A file that cannot be read at all mid-scan (removed, locked) keeps its last parse for this read.
+/// A file that cannot be read when the summary is prepared (removed, locked) counts its last cached
+/// parse, even one older than the inventory, and that is never final.
 #[test]
-fn a_transcript_that_vanishes_mid_read_keeps_its_last_parse() {
-    let home = scratch_dir("usage-source-index-vanished");
-    let path = transcript_path(&home, "vanishing.jsonl");
+fn an_unreadable_transcript_counts_its_last_cached_parse_and_is_not_final() {
+    let home = scratch_dir("usage-source-index-unreadable");
+    let path = transcript_path(&home, "session.jsonl");
     write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
-    let mut cache = ScanCache::new();
-    reconcile_home(&home, &mut cache);
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&path)
-        .unwrap()
-        .write_all(format!("{}\n", record("2026-08-07T04:05:30.000Z", "msg-2", 30)).as_bytes())
-        .unwrap();
-    let growth = record("2026-08-07T04:06:00.000Z", "msg-live", 5);
-    let reconciled = with_live_transcript(&path, &growth, || reconcile_home(&home, &mut cache));
+    let mut stale = ScanCache::new();
+    reconcile_home(&home, &mut stale);
+    append_record(&path, &record("2026-08-07T04:05:30.000Z", "msg-2", 30));
+    let snapshot = complete_snapshot(&home);
     std::fs::remove_file(&path).unwrap();
 
-    let prepared = prepare_sources(&reconciled.snapshot, &mut cache, 0);
+    let prepared = prepare_sources(&snapshot, &mut stale, 0);
 
+    assert_eq!(output_tokens(&prepared), [20]);
     assert!(!prepared.complete);
-    let outputs: Vec<u64> = prepared
-        .files
-        .iter()
-        .flat_map(|file| file.records.iter())
-        .map(|record| record.totals.output_tokens)
-        .collect();
-    assert_eq!(outputs, [20], "its last stable parse");
+    assert!(!prepared.scan_cache_dirty);
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn an_unchanged_transcript_missing_from_the_cache_is_read_cached_and_final() {
+    let home = scratch_dir("usage-source-index-cache-miss");
+    let path = transcript_path(&home, "session.jsonl");
+    write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
+    let snapshot = complete_snapshot(&home);
+    let mut cache = ScanCache::new();
+
+    let prepared = prepare_sources(&snapshot, &mut cache, 0);
+
+    assert_eq!(output_tokens(&prepared), [20]);
+    assert!(prepared.complete);
+    assert!(prepared.scan_cache_dirty);
+    assert_eq!(cache.get(&normalize_path(&path)).unwrap().records.len(), 1);
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn a_cached_parse_serves_only_when_both_size_and_mtime_match() {
+    let home = scratch_dir("usage-source-index-cache-hit");
+    let path = transcript_path(&home, "session.jsonl");
+    write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
+    let mut stale = ScanCache::new();
+    reconcile_home(&home, &mut stale);
+    rewrite_same_size_later(&path, &record("2026-08-07T04:05:13.944Z", "msg-1", 21));
+    let snapshot = complete_snapshot(&home);
+
+    let prepared = prepare_sources(&snapshot, &mut stale, 0);
+
+    assert_eq!(output_tokens(&prepared), [21], "not the stale parse");
+    assert!(prepared.complete);
     let _ = std::fs::remove_dir_all(home);
 }
 
