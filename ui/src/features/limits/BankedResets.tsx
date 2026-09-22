@@ -3,6 +3,7 @@ import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
 import type { LimitsResetCredits, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
+import type { AgentId } from "$lib/types";
 import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import { usageLeft } from "./limitPresentation";
@@ -28,12 +29,16 @@ export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
   return <SummaryRow label="Paid reset" value={offer.price ? formatPrice(offer.price) : "offered"} note="offered by Codex · buy it on chatgpt.com" />;
 }
 
+/** Where a provider's banked reset is spent, for the providers whose resets on-n-off only reports. */
+const SPENT_ELSEWHERE: Partial<Record<AgentId, string>> = { claude: "/limit-reset in Claude Code" };
+
 /** The banked reset count as one more row under the windows, with when the next one expires. */
-export function BankedResetsRow({ resetCredits, now }: { resetCredits?: LimitsResetCredits | null; now: number }) {
+export function BankedResetsRow({ resetCredits, provider, now }: { resetCredits?: LimitsResetCredits | null; provider: AgentId; now: number }) {
   if (!resetCredits || resetCredits.availableCount <= 0) return null;
   const expiresIn = formatResetIn(resetCredits.nextExpiresAt, now);
   const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
-  const note = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
+  const expiry = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
+  const note = [expiry, SPENT_ELSEWHERE[provider]].filter(Boolean).join(" · ") || undefined;
   return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
 }
 

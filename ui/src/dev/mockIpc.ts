@@ -11,7 +11,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
-import { bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex } from "./limitsFixtures";
+import { bankedResetsClaude, bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
 
@@ -251,6 +251,7 @@ const handlers: Record<string, Handler> = {
     if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();
     if (scenario === "limitsOrder" && args.agentId === "claude") return limitsOrderClaude();
     if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
+    if (scenario === "bankedResets" && args.agentId === "claude") return bankedResetsClaude();
     if (scenario === "bankedResets" && args.agentId === "codex") return bankedResetsCodex();
     if (scenario === "sameEmailWorkspaces" && args.agentId === "codex") return sameEmailWorkspacesCodex();
     const entries = limitsFor(args.agentId);

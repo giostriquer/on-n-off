@@ -228,7 +228,7 @@ function AccountCard({
       ) : null}
 
       {entry.credits ? <CreditsRow credits={entry.credits} /> : null}
-      <BankedResetsRow resetCredits={entry.resetCredits} now={now} />
+      <BankedResetsRow resetCredits={entry.resetCredits} provider={entry.provider} now={now} />
       {entry.provider === "codex" ? <ResetOfferRow offer={entry.resetOffer} /> : null}
   </>;
   return (

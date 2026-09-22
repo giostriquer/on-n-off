@@ -136,3 +136,102 @@ fn empty_limits_array_falls_back_to_legacy_fields() {
     assert_eq!(windows.len(), 1);
     assert_eq!(windows[0].id, "session");
 }
+
+/// The saved-reset block as Claude Code 2.1.280's own reader expects it under `cedar_ember` on
+/// `GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. Reconstructed from that reader's schema, not
+/// captured: no live answer has been observed on this machine yet.
+fn with_saved_resets(block: serde_json::Value) -> serde_json::Value {
+    json!({
+        "limits": [{"kind": "session", "group": "session", "percent": 100}],
+        "cedar_ember": block
+    })
+}
+
+fn grant(id: &str, resets_left: u32, ends_at: Option<&str>) -> serde_json::Value {
+    json!({
+        "id": id, "label": "Saved reset", "resets_total": 1, "resets_left": resets_left,
+        "starts_at": "2026-09-01T00:00:00Z", "ends_at": ends_at,
+        "clears": ["five_hour", "seven_day"], "paused": false, "usable_now": true,
+        "use_requires_limit": false, "percent_used": {"five_hour": 100}, "blocking": ["five_hour"]
+    })
+}
+
+#[test]
+fn saved_resets_count_every_grant_and_expire_with_the_soonest_one_still_holding_a_reset() {
+    let payload = with_saved_resets(json!({
+        "eligible": true,
+        "at_limit": true,
+        "grants": [
+            grant("later", 1, Some("2026-10-30T00:00:00Z")),
+            grant("spent", 0, Some("2026-09-25T00:00:00Z")),
+            grant("sooner", 2, Some("2026-10-05T12:00:00+02:00")),
+            grant("undated", 1, None)
+        ],
+        "next_grant_id": "sooner"
+    }));
+
+    assert_eq!(
+        parse_reset_credits(&payload),
+        Some(LimitsResetCreditsDto {
+            available_count: 4,
+            next_expires_at: Some("2026-10-05T10:00:00+00:00".to_string()),
+        })
+    );
+}
+
+#[test]
+fn a_read_without_a_usable_saved_reset_block_is_unknown_rather_than_zero() {
+    let windows_only = json!({"limits": [{"kind": "session", "group": "session", "percent": 5}]});
+    assert_eq!(parse_reset_credits(&windows_only), None);
+    assert_eq!(parse_reset_credits(&with_saved_resets(json!(null))), None);
+    assert_eq!(parse_reset_credits(&with_saved_resets(json!("on"))), None);
+    let unanswered = with_saved_resets(json!({
+        "eligible": false, "ineligible_reason": "unavailable", "grants": []
+    }));
+    assert_eq!(
+        parse_reset_credits(&unanswered),
+        None,
+        "Claude Code treats `unavailable` as a failed read, not as holding nothing"
+    );
+}
+
+#[test]
+fn an_answered_block_without_resets_reports_zero_so_a_remembered_count_is_replaced() {
+    for block in [
+        json!({"eligible": false, "ineligible_reason": "no_grant"}),
+        json!({"eligible": true, "grants": []}),
+        json!({"eligible": true, "grants": [grant("used", 0, Some("2026-10-05T00:00:00Z"))]}),
+    ] {
+        assert_eq!(
+            parse_reset_credits(&with_saved_resets(block.clone())),
+            Some(LimitsResetCreditsDto {
+                available_count: 0,
+                next_expires_at: None,
+            }),
+            "{block}"
+        );
+    }
+}
+
+#[test]
+fn malformed_grants_are_skipped_without_losing_the_well_formed_ones() {
+    let payload = with_saved_resets(json!({
+        "eligible": true,
+        "grants": [
+            "not an object",
+            {"id": "no-count", "ends_at": "2026-09-30T00:00:00Z"},
+            {"id": "negative", "resets_left": -1, "ends_at": "2026-09-30T00:00:00Z"},
+            {"id": "fraction", "resets_left": 1.5, "ends_at": "2026-09-30T00:00:00Z"},
+            grant("bad-date", 1, Some("next tuesday")),
+            grant("good", 1, Some("2026-10-01T00:00:00Z"))
+        ]
+    }));
+
+    assert_eq!(
+        parse_reset_credits(&payload),
+        Some(LimitsResetCreditsDto {
+            available_count: 2,
+            next_expires_at: Some("2026-10-01T00:00:00+00:00".to_string()),
+        })
+    );
+}

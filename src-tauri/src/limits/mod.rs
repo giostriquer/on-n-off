@@ -44,6 +44,9 @@ use pipeline::{finish, resolve_provider, LoadFailureKind, ProviderLoadError, Res
 use snapshots::SnapshotStore;
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+/// Asks the usage read for the saved-reset block too, exactly as Claude Code's own status read does.
+/// `skip_spend` leaves out the extra-usage spend figures, which on-n-off does not show.
+const CLAUDE_USAGE_QUERY: &str = "cedar_ember=1&skip_spend=1";
 const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 /// Account id used when the CLI stores no identity; keeps single-account behaviour intact.
 const DEFAULT_ACCOUNT: &str = "default";
@@ -348,7 +351,7 @@ fn claude_limits(
                 return Err(ProviderLoadError::AccountMismatch);
             }
             let payload = get_json(
-                usage_url,
+                &format!("{usage_url}?{CLAUDE_USAGE_QUERY}"),
                 &[
                     ("Authorization", &bearer),
                     ("anthropic-beta", "oauth-2025-04-20"),
@@ -360,7 +363,7 @@ fn claude_limits(
                 plan: credential.plan(),
                 windows: claude::parse_claude(&payload),
                 credits: None,
-                reset_credits: None,
+                reset_credits: claude::parse_reset_credits(&payload),
                 reset_offer: None,
             })
         },

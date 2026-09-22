@@ -39,6 +39,40 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
 }
 
 #[test]
+fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
+    let (profile, p) = serve_once(
+        "200 OK",
+        r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team"}}"#,
+    );
+    let (usage, u) = serve_once_capturing(
+        "200 OK",
+        &[],
+        r#"{"seven_day":{"utilization":61},"cedar_ember":{"eligible":true,"grants":[{"id":"launch","resets_left":1,"ends_at":"2026-10-05T00:00:00Z"}]}}"#,
+    );
+    let auth = json!({"claudeAiOauth":{"accessToken":"fixture-access"}});
+    let dto = read_at(
+        &identity(AgentId::Claude),
+        &auth,
+        &profile,
+        &usage,
+        "unused",
+    )
+    .unwrap();
+    p.join().unwrap();
+    let request = u.join().unwrap();
+    let request_line = request.head.lines().next().unwrap_or_default();
+    assert!(
+        request_line.contains("?cedar_ember=1&skip_spend=1 "),
+        "{request_line}"
+    );
+    assert_eq!(dto.windows[0].used_percent, 61.0);
+    assert_eq!(
+        dto.reset_credits.map(|resets| resets.available_count),
+        Some(1)
+    );
+}
+
+#[test]
 fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
     use crate::dto::LimitWindowKind::{Model, Session, Weekly};
 

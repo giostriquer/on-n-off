@@ -1,3 +1,4 @@
+mod claude_banked_resets;
 mod claude_observation;
 mod claude_renewal;
 mod memory;

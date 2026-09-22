@@ -516,7 +516,7 @@ describe("Limits", () => {
     expect(within(card("Codex limits · work@codex.example")).getByRole("definition", { name: "Credits" }).textContent).toBe("Unlimited");
   });
 
-  it("offers a banked reset beside the current Codex account's actions and lists the count as a row", async () => {
+  it("offers a banked reset beside the current Codex account's actions and lists every provider's count as a row", async () => {
     const remembered = { ...staleCodex(), resetCredits: { availableCount: 1, nextExpiresAt: null } };
     const banked = { availableCount: 2, nextExpiresAt: null };
     answer([okClaude({ resetCredits: banked })], [okCodex({ resetCredits: banked }), remembered]);
@@ -533,8 +533,11 @@ describe("Limits", () => {
     const other = card("Codex limits · personal@codex.example");
     expect(within(other).getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
     expect(within(other).queryByRole("button", { name: "Use banked reset" })).toBeNull();
-    // Banked resets are a Codex feature, whatever another provider's read carries.
-    expect(within(card("Claude limits · me@claude.example")).queryByRole("button", { name: "Use banked reset" })).toBeNull();
+    // on-n-off spends only Codex resets. A Claude card reports its count and where to spend it.
+    const claude = card("Claude limits · me@claude.example");
+    expect(within(claude).getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
+    expect(within(claude).getByText("/limit-reset in Claude Code")).toBeTruthy();
+    expect(within(claude).queryByRole("button", { name: "Use banked reset" })).toBeNull();
   });
 
   it("shows the spent reset on the refreshed card the backend announces", async () => {
