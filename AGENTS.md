@@ -217,6 +217,13 @@ branch as `.worktrees/<change-type>-<task-slug>`. The primary checkout, the one 
 `.worktrees/` lives, is for creating, inspecting and integrating them, not for implementing
 changes. Integrate from it with fast-forward-only updates to `main`.
 
+Sync local `main` before any work. In the primary checkout, run
+`git fetch origin && git merge --ff-only origin/main` before cutting a worktree, inspecting a
+branch or integrating one. A stale `main` cuts branches from the wrong base and hides what other
+sessions have already shipped. If the fast-forward is refused by an uncommitted change, set that
+change aside (a patch file, or `git stash push -m <tag>` restored with `apply`) and put it back
+afterwards, rather than working on a stale base.
+
 Two things worktrees do **not** isolate, both of which have caused trouble: the repository's
 object database, refs, remotes and stash are shared — so `git stash` is not cross-session storage
 and another session's branch is not yours to rewrite; and ports, running processes, dependency
