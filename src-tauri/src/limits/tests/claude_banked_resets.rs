@@ -91,6 +91,28 @@ fn a_refused_reset_query_falls_back_to_the_plain_read_instead_of_failing_the_log
     );
 }
 
+/// Offline, the plain read would only wait on the same network, so a transport failure is final.
+#[test]
+fn a_network_failure_on_the_reset_query_is_not_retried() {
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/usage", listener.local_addr().unwrap());
+    let hang_up = std::thread::spawn(move || {
+        drop(listener.accept().unwrap());
+        listener
+    });
+
+    let result = claude_usage(&url, &[]);
+
+    let listener = hang_up.join().unwrap();
+    assert!(matches!(result, Err(HttpError::Network(_))), "{result:?}");
+    listener.set_nonblocking(true).unwrap();
+    assert!(
+        listener.accept().is_err(),
+        "a second request went out after the connection dropped"
+    );
+}
+
 #[test]
 fn a_login_the_plain_read_also_rejects_is_still_reported_as_one() {
     let home = scratch_dir("limits-claude-saved-resets-rejected");

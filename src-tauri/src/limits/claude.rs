@@ -120,9 +120,9 @@ fn parse_reset_credits(payload: &Value, now: DateTime<Utc>) -> Option<LimitsRese
     if reason == Some(UNANSWERED) {
         return None;
     }
-    let sent = match block.get("grants") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(grants) => grants.as_array()?.clone(),
+    let sent: &[Value] = match block.get("grants") {
+        None | Some(Value::Null) => &[],
+        Some(grants) => grants.as_array()?,
     };
     let grants: Vec<(u32, Option<DateTime<Utc>>)> = sent.iter().filter_map(grant).collect();
     if grants.is_empty() {

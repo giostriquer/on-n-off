@@ -242,6 +242,9 @@ fn a_read_without_a_usable_saved_reset_block_is_unknown_rather_than_zero() {
         // Grants that were sent but cannot be read are not an answer either.
         json!({"eligible": true, "grants": "none"}),
         json!({"eligible": true, "grants": [{"id": "no-count"}, {"id": "text", "resets_left": "1"}]}),
+        json!({"eligible": true, "grants": [{"id": "negative", "resets_left": -1}]}),
+        // An unanswered status stays unknown even when it lists grants.
+        json!({"eligible": false, "ineligible_reason": "unavailable", "grants": [grant("g", 1, None)]}),
     ] {
         assert_eq!(
             parse_reset_credits(&with_saved_resets(block.clone()), now()),
@@ -306,11 +309,12 @@ fn a_count_too_large_for_the_card_saturates_instead_of_wrapping_or_dropping_a_gr
     let payload = with_saved_resets(json!({
         "eligible": true,
         "grants": [
-            {"id": "max", "resets_left": 4_294_967_295_u64},
-            {"id": "one", "resets_left": 1},
-            {"id": "huge", "resets_left": 1_099_511_627_776_u64}
+            {"id": "huge", "resets_left": 1_099_511_627_776_u64},
+            {"id": "one", "resets_left": 1}
         ]
     }));
 
+    // The oversized grant comes first, so dropping it or zeroing it leaves 1, and wrapping the sum
+    // leaves 0; only a clamp and a saturating sum reach u32::MAX.
     assert_eq!(parse_reset_credits(&payload, now()), resets(u32::MAX, None));
 }
