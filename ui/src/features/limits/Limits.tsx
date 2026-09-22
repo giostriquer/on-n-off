@@ -17,7 +17,7 @@ import { providerLabel } from "$lib/usageMerge";
 import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
 import { CodexSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
-import { accountCards } from "./accountCards";
+import { accountCards, orderAccountCards } from "./accountCards";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
 import { UsageStatusBadge } from "./UsageStatusBadge";
@@ -83,12 +83,13 @@ function ProviderColumn({
   const manager = useAccountManagement();
   const profiles = manager?.query.data?.profiles ?? [];
   const cards = accountCards(query.data ?? [], profiles);
-  const entries = query.data || profiles.length ? cards.entries : null;
-  if (entries) for (const profile of profiles) {
-    if (profile.observationId && !entries.some(entry => entry.account?.id === profile.observationId)) {
-      entries.push({ provider, status: "ok", account: { id: profile.observationId, label: profile.email }, currentAccount: profile.active, windows: [], message: "Usage unavailable." });
+  const known = query.data || profiles.length ? cards.entries : null;
+  if (known) for (const profile of profiles) {
+    if (profile.observationId && !known.some(entry => entry.account?.id === profile.observationId)) {
+      known.push({ provider, status: "ok", account: { id: profile.observationId, label: profile.email }, currentAccount: profile.active, windows: [], message: "Usage unavailable." });
     }
   }
+  const entries = known ? orderAccountCards(known, now) : null;
   const [forgetError, setForgetError] = useState<string | null>(null);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
 

@@ -311,6 +311,40 @@ describe("Limits", () => {
     expect(within(stale).getAllByText(/Latest observation/)).toHaveLength(1);
   });
 
+  it("orders remembered accounts by usage left, then by when their usage returns", async () => {
+    const window = (kind: "weekly" | "session", usedPercent: number, resetsAt: string) => ({
+      id: kind, label: kind === "weekly" ? "Weekly · all models" : "5 hour · all models", kind, usedPercent, resetsAt, observedAt: NOW,
+    });
+    const remembered = (id: string, label: string, windows: ProviderLimits["windows"]) =>
+      ({ ...staleCodex(), account: { id, label }, windows });
+    // Out of usage until the weekly window resets in three days; the session reset in between does not help.
+    const out = remembered("acct-out", "out@codex.example", [window("weekly", 100, "2026-08-20T10:00:00Z"), window("session", 100, "2026-08-18T01:00:00Z")]);
+    // Out of usage for three more hours only.
+    const soon = remembered("acct-soon", "soon@codex.example", [window("weekly", 20, "2026-08-20T10:00:00Z"), window("session", 100, "2026-08-17T23:00:00Z")]);
+    // Has usage left, so it outranks both, however soon they reset.
+    const spare = remembered("acct-spare", "spare@codex.example", [window("weekly", 30, "2026-08-20T10:00:00Z"), window("session", 95, "2026-08-17T21:00:00Z")]);
+    answer([okClaude()], [okCodex(), out, soon, spare]);
+    // A saved profile with no usage read yet is a card too, and it is ordered like the rest: as
+    // the active login it belongs at the top, ahead of every account with usage left, however
+    // late the profile list adds it.
+    const ghost = { id: "ghost", observationId: "profile:ghost", identity: { provider: "codex", userId: "ghost", workspaceId: "ws" },
+      email: "ghost@codex.example", label: "ghost@codex.example", savedAt: "2026-08-16T12:00:00Z", active: true, needsLogin: false };
+    readAccounts.mockResolvedValue({ profiles: [ghost], nativeAccount: null, recoveryRequired: false, notice: null });
+    renderLimits();
+    await waitFor(() => expect(card("Codex limits · ghost@codex.example")).toBeTruthy());
+
+    const codexCards = () => screen.getAllByRole("region")
+      .map((region) => region.getAttribute("aria-label"))
+      .filter((label) => label?.startsWith("Codex limits"));
+    expect(codexCards()).toEqual([
+      "Codex limits · work@codex.example",
+      "Codex limits · ghost@codex.example",
+      "Codex limits · spare@codex.example",
+      "Codex limits · soon@codex.example",
+      "Codex limits · out@codex.example",
+    ]);
+  });
+
   it("presents an elapsed hero window as reset, never as its old 97% in red", async () => {
     const renewed = staleCodex();
     renewed.windows[0] = { ...renewed.windows[0], usedPercent: 97, resetsAt: "2026-08-17T18:35:00Z" };

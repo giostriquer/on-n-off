@@ -4,6 +4,7 @@ import {
   formatResetIn,
   formatUsedPercent,
   hasElapsed,
+  parseInstant,
   usageTextColor,
 } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
@@ -75,16 +76,32 @@ function pendingNote(resetIn: string, resetAt: string): string {
   return resetIn ? `resets in ${resetIn}${resetAt ? ` · ${resetAt}` : ""}` : "";
 }
 
+/** The 5-hour and weekly windows: the two that gate every request. Model-specific buckets do not. */
+function mainWindows(entry: ProviderLimits): LimitWindow[] {
+  return entry.windows.filter((window) => window.kind === "session" || window.kind === "weekly");
+}
+
 /**
  * How much of the account's usage is left, as a percentage: what its most-used main window (5-hour
  * or weekly) has left, with a window whose reset has passed counted as renewed. Model-specific
  * buckets do not count. `null` when no main window is known.
  */
 export function usageLeft(entry: ProviderLimits, now: number): number | null {
-  const used = entry.windows
-    .filter((window) => window.kind === "session" || window.kind === "weekly")
-    .map((window) => presentLimitWindow(window, now).percent);
+  const used = mainWindows(entry).map((window) => presentLimitWindow(window, now).percent);
   return used.length ? 100 - Math.max(...used) : null;
+}
+
+/**
+ * When an account that is out of usage has it again: the instant the last of its full main windows
+ * resets, `Infinity` when one of them reports no reset. Meaningful only when `usageLeft` is zero;
+ * with no full main window it is `-Infinity`, which is to say already.
+ */
+export function usableAgainAt(entry: ProviderLimits, now: number): number {
+  return Math.max(
+    ...mainWindows(entry)
+      .filter((window) => presentLimitWindow(window, now).percent >= 100)
+      .map((window) => parseInstant(window.resetsAt) ?? Infinity),
+  );
 }
 
 /**

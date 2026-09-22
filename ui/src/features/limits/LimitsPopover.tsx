@@ -14,6 +14,7 @@ import { applyStoredTheme } from "$lib/theme";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
+import { orderAccountCards } from "./accountCards";
 import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
 import { limitsRefreshMs, useLimitsProviders } from "./useLimitsProviders";
 
@@ -141,7 +142,7 @@ function PopoverProviderSection({
   now: number;
 }) {
   const name = providerLabel(provider);
-  const entries = query.data ?? null;
+  const entries = query.data ? orderAccountCards(query.data, now) : null;
   const error = query.error ? displayError(parseInvokeError(query.error), name) : null;
   const errorBanner = error ? (
     <p

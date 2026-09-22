@@ -7,7 +7,7 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
-function parseInstant(value: string | null | undefined): number | null {
+export function parseInstant(value: string | null | undefined): number | null {
   if (!value) return null;
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
@@ -161,16 +161,35 @@ export function formatUsedPercent(usedPercent: number): string {
   return `${Math.round(usedPercent)}%`;
 }
 
+/** Codex's Pro tiers, by how many Plus-sized plans each is worth; the badge and the order share it. */
+const CODEX_PRO_TIERS: Record<string, number> = { pro: 20, prolite: 5 };
+
+function codexProTier(plan: string, provider?: string): number | undefined {
+  if (provider !== "codex") return undefined;
+  return CODEX_PRO_TIERS[plan.toLowerCase().replaceAll(/[ _-]/g, "")];
+}
+
 /** "max" → "Max", "enterprise_x" → "Enterprise x"; empty when unknown. */
 export function planLabel(plan: string | null | undefined, provider?: string): string {
   const raw = plan?.trim().replaceAll("_", " ") ?? "";
   if (!raw) return "";
-  if (provider === "codex") {
-    const code = raw.toLowerCase().replaceAll(/[ _-]/g, "");
-    if (code === "pro") return "Pro ×20";
-    if (code === "prolite") return "Pro ×5";
-  }
+  const proTier = codexProTier(raw, provider);
+  if (proTier) return `Pro ×${proTier}`;
   return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+/**
+ * How many base-sized plans a plan is worth, for comparing one account's percentage against
+ * another's: the ×N the tier carries ("max ×20" as the backend writes it, Codex Pro as the badge
+ * says), a bare "max" the five Claude gives one, anything else one.
+ */
+export function planMultiplier(plan: string | null | undefined, provider?: string): number {
+  const raw = plan?.trim() ?? "";
+  const proTier = codexProTier(raw, provider);
+  if (proTier) return proTier;
+  const multiplier = /[×x]\s*(\d+)/i.exec(raw)?.[1];
+  if (multiplier) return Number(multiplier);
+  return raw.toLowerCase() === "max" ? 5 : 1;
 }
 
 /**
