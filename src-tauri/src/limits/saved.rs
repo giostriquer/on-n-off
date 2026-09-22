@@ -3,13 +3,19 @@ use super::*;
 use crate::accounts::model::Identity;
 use serde_json::Value;
 
+const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+/// Each banked reset's status and expiry; the usage body carries only the count.
+const CODEX_RESET_CREDITS_URL: &str =
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
+
 pub(crate) fn read(identity: &Identity, auth: &Value) -> Result<ProviderLimitsDto, HttpError> {
     read_at(
         identity,
         auth,
         CLAUDE_PROFILE_URL,
         CLAUDE_USAGE_URL,
-        "https://chatgpt.com/backend-api/wham/usage",
+        CODEX_USAGE_URL,
+        CODEX_RESET_CREDITS_URL,
     )
 }
 
@@ -19,6 +25,7 @@ fn read_at(
     profile: &str,
     claude_url: &str,
     codex_url: &str,
+    codex_reset_credits_url: &str,
 ) -> Result<ProviderLimitsDto, HttpError> {
     let mut parsed = match identity.provider {
         AgentId::Claude => {
@@ -54,13 +61,12 @@ fn read_at(
         AgentId::Codex => {
             let token = crate::accounts::model::string(auth, "/tokens/access_token")
                 .map_err(|_| HttpError::Unauthorized)?;
-            let payload = get_json(
-                codex_url,
-                &[
-                    ("Authorization", &format!("Bearer {token}")),
-                    ("ChatGPT-Account-Id", &identity.workspace_id),
-                ],
-            )?;
+            let bearer = format!("Bearer {token}");
+            let headers = [
+                ("Authorization", bearer.as_str()),
+                ("ChatGPT-Account-Id", identity.workspace_id.as_str()),
+            ];
+            let payload = get_json(codex_url, &headers)?;
             if payload
                 .get("account_id")
                 .or_else(|| payload.get("accountId"))
@@ -69,7 +75,13 @@ fn read_at(
             {
                 return Err(HttpError::Unauthorized);
             }
-            parse_codex_usage(&payload)?
+            // As in Codex's own app-server, the detail read never decides the read: without it the
+            // count still stands, only without an expiry.
+            let details = (banked_reset_count(&payload["rate_limit_reset_credits"])
+                .is_some_and(|count| count > 0))
+            .then(|| get_json(codex_reset_credits_url, &headers).ok())
+            .flatten();
+            parse_codex_usage(&payload, details.as_ref())?
         }
         _ => return Err(HttpError::Unauthorized),
     };
@@ -94,8 +106,9 @@ fn read_at(
 }
 
 /// The HTTP response uses seconds and snake_case; the existing app-server parser uses minutes
-/// and camelCase. Map only the documented quota buckets. Missing reset inventory is unknown.
-fn parse_codex_usage(payload: &Value) -> Result<Parsed, HttpError> {
+/// and camelCase. Map only the documented quota buckets and the banked resets. Missing reset
+/// inventory is unknown.
+fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Parsed, HttpError> {
     use serde_json::json;
     fn window(value: &Value) -> Value {
         if value.is_null() {
@@ -134,9 +147,43 @@ fn parse_codex_usage(payload: &Value) -> Result<Parsed, HttpError> {
         entry["limitName"] = extra["limit_name"].clone();
         buckets.insert(id.to_owned(), entry);
     }
-    let response = serde_json::from_value(json!({"rateLimits":main,"rateLimitsByLimitId":buckets}))
-        .map_err(|_| HttpError::Parse("Unrecognized Codex quota response.".into()))?;
+    let response = serde_json::from_value(json!({"rateLimits":main,"rateLimitsByLimitId":buckets,
+        "rateLimitResetCredits":reset_credits(&payload["rate_limit_reset_credits"], reset_details)}))
+    .map_err(|_| HttpError::Parse("Unrecognized Codex quota response.".into()))?;
     Ok(codex::parse_codex(&response))
+}
+
+/// `available_count` as Codex's own client reads it: a whole number, and here at least zero.
+fn banked_reset_count(summary: &Value) -> Option<u64> {
+    summary.get("available_count").and_then(Value::as_u64)
+}
+
+/// Banked resets in app-server shape. The usage body's `rate_limit_reset_credits` holds only the
+/// count; the detail read, when it answered in full, holds each reset's status and expiry and wins,
+/// as it does in Codex's app-server. A count that cannot be read is unknown, never zero.
+fn reset_credits(summary: &Value, details: Option<&Value>) -> Option<Value> {
+    use serde_json::json;
+    let detailed = details.and_then(|details| {
+        let credits = details
+            .get("credits")?
+            .as_array()?
+            .iter()
+            .map(|credit| {
+                let expires_at = match credit.get("expires_at") {
+                    None | Some(Value::Null) => None,
+                    Some(at) => Some(
+                        chrono::DateTime::parse_from_rfc3339(at.as_str()?)
+                            .ok()?
+                            .timestamp(),
+                    ),
+                };
+                Some(json!({"status": credit.get("status")?.as_str()?, "expiresAt": expires_at}))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(json!({"availableCount": banked_reset_count(details)?, "credits": credits}))
+    });
+    detailed
+        .or_else(|| Some(json!({"availableCount": banked_reset_count(summary)?, "credits": null})))
 }
 
 #[cfg(test)]

@@ -67,5 +67,11 @@ pub(crate) fn remember(home: &Path, usage: &ProviderLimitsDto) -> Result<(), Str
     SnapshotStore::for_home(home).save(usage)
 }
 
+/// What [`remember`] left on disk for `provider`, as the next read loads it.
+#[cfg(test)]
+pub(crate) fn remembered(home: &Path, provider: AgentId) -> Vec<ProviderLimitsDto> {
+    SnapshotStore::for_home(home).load(provider)
+}
+
 #[cfg(test)]
 mod tests;

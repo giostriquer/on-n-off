@@ -541,3 +541,32 @@ fn saving_after_a_merge_rewrites_only_the_accounts_the_merge_changed() {
     assert_eq!(stored("acct-credits"), credits_before);
     assert!(stored("acct-windows").contains("\"usedPercent\":60.0"));
 }
+
+/// Every writer stores whatever its read returned, and a read that could not tell the banked-reset
+/// count must not erase the one on disk: the next reload would lose it from the card.
+#[test]
+fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_answer_replaces_it() {
+    let home = scratch_dir("limits-snap-reset-credits-unknown");
+    let store = SnapshotStore::for_home(&home);
+    let banked = |available_count| {
+        Some(crate::dto::LimitsResetCreditsDto {
+            available_count,
+            next_expires_at: Some("2026-10-01T00:00:00+00:00".to_string()),
+        })
+    };
+    let mut remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    remembered.reset_credits = banked(1);
+    store.save(&remembered).unwrap();
+
+    let unknown = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T11:00:00.000Z");
+    store.save(&unknown).unwrap();
+    let loaded = store.load(AgentId::Codex);
+    assert_eq!(loaded[0].windows, unknown.windows);
+    assert_eq!(loaded[0].reset_credits, banked(1));
+
+    // An answer replaces the stored count, even one observed at the same moment.
+    let mut answered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T11:00:00.000Z");
+    answered.reset_credits = banked(0);
+    store.save(&answered).unwrap();
+    assert_eq!(store.load(AgentId::Codex)[0].reset_credits, banked(0));
+}

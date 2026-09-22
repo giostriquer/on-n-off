@@ -53,7 +53,8 @@ impl SnapshotStore {
 
     /// Persist canonical account observations. Dated local or remembered windows remain
     /// trustworthy while refresh is unavailable; a successful read with only credits or banked
-    /// resets is dated when it reaches this storage boundary.
+    /// resets is dated when it reaches this storage boundary. A read that could not tell the
+    /// banked-reset count keeps the one already stored for the account.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
@@ -71,14 +72,21 @@ impl SnapshotStore {
         });
         let incoming_latest =
             incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
-        let existing_latest = fs::read_to_string(&path)
-            .ok()
-            .and_then(|raw| decode(&raw))
-            .and_then(|existing| existing.latest_observed_at());
-        if existing_latest.is_some_and(|existing| existing > incoming_latest) {
+        let existing = fs::read_to_string(&path).ok().and_then(|raw| decode(&raw));
+        if existing
+            .as_ref()
+            .and_then(StoredSnapshot::latest_observed_at)
+            .is_some_and(|existing| existing > incoming_latest)
+        {
             return Ok(());
         }
-        write_stored(&path, StoredSnapshot::from_dto(dto, incoming_latest))
+        let mut stored = StoredSnapshot::from_dto(dto, incoming_latest);
+        // `ProviderLimitsDto::keep_reset_credits_from`, applied to what is on disk: every writer
+        // stores its own read, and one that could not tell the banked-reset count must not erase it.
+        if stored.reset_credits.is_none() {
+            stored.reset_credits = existing.and_then(|existing| existing.reset_credits);
+        }
+        write_stored(&path, stored)
     }
 
     /// Persist the accounts a merge changed, leaving the others' files and dates alone: re-saving an

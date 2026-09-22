@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::LimitsResetCreditsDto;
 use crate::http::{serve_once, serve_once_capturing};
 use serde_json::json;
 
@@ -23,6 +24,7 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
         &auth,
         &profile,
         &usage,
+        "unused",
         "unused",
     )
     .unwrap();
@@ -55,6 +57,7 @@ fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
         &auth,
         &profile,
         &usage,
+        "unused",
         "unused",
     )
     .unwrap();
@@ -89,6 +92,7 @@ fn saved_claude_falls_back_to_the_plain_read_when_the_reset_query_is_refused() {
         &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
         &profile,
         &usage,
+        "unused",
         "unused",
     )
     .unwrap();
@@ -133,6 +137,7 @@ fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
                 &profile,
                 &usage,
                 "unused",
+                "unused",
             )
             .unwrap();
             p.join().unwrap();
@@ -164,6 +169,7 @@ fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
         "unused",
         "unused",
         &url,
+        "unused",
     )
     .unwrap();
     let request = request.join().unwrap();
@@ -183,6 +189,161 @@ fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
     assert_eq!(dto.credits.unwrap().balance, "12");
     assert!(!dto.current_account);
     assert!(dto.reset_offer.is_none());
+    assert_eq!(
+        dto.reset_credits, None,
+        "no count in the body is unknown, not zero"
+    );
+}
+
+const CODEX_USAGE_WITH_RESETS: &str = r#"{"rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":18000}},"rate_limit_reset_credits":{"available_count":2}}"#;
+
+/// Two endpoints on one loopback server, which answers in request order whatever the path.
+fn codex_endpoints(
+    responses: &[(&str, &[&str], &str)],
+) -> (
+    String,
+    String,
+    std::thread::JoinHandle<Vec<crate::http::CapturedRequest>>,
+) {
+    let (url, requests) = crate::http::serve_sequence(responses);
+    let base = url.trim_end_matches("/graphql").to_owned();
+    (
+        format!("{base}/wham/usage"),
+        format!("{base}/wham/rate-limit-reset-credits"),
+        requests,
+    )
+}
+
+fn read_codex(usage: &str, resets: &str) -> Result<ProviderLimitsDto, HttpError> {
+    read_at(
+        &identity(AgentId::Codex),
+        &json!({"tokens":{"access_token":"fixture-access"}}),
+        "unused",
+        "unused",
+        usage,
+        resets,
+    )
+}
+
+#[test]
+fn saved_codex_reads_the_banked_reset_count_and_the_soonest_expiry_of_an_available_one() {
+    let (usage, resets, requests) = codex_endpoints(&[
+        ("200 OK", &[], CODEX_USAGE_WITH_RESETS),
+        (
+            "200 OK",
+            &[],
+            r#"{"available_count":3,"total_earned_count":4,"credits":[
+                {"id":"a","reset_type":"codex_rate_limits","status":"available","granted_at":"2026-09-01T00:00:00Z","expires_at":"2026-10-20T00:00:00Z"},
+                {"id":"b","reset_type":"codex_rate_limits","status":"redeemed","granted_at":"2026-09-01T00:00:00Z","expires_at":"2026-09-30T00:00:00Z"},
+                {"id":"c","reset_type":"codex_rate_limits","status":"available","granted_at":"2026-09-02T00:00:00+00:00","expires_at":"2026-10-10T12:00:00+00:00"},
+                {"id":"d","reset_type":"codex_rate_limits","status":"available","granted_at":"2026-09-03T00:00:00Z","expires_at":null},
+                {"id":"e","reset_type":"codex_rate_limits","status":"available","granted_at":"2026-09-03T00:00:00Z"}]}"#,
+        ),
+    ]);
+    let dto = read_codex(&usage, &resets).unwrap();
+    let requests = requests.join().unwrap();
+
+    let detail = &requests[1].head;
+    assert!(
+        detail
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .contains("/wham/rate-limit-reset-credits "),
+        "{detail}"
+    );
+    assert!(detail.contains("Bearer fixture-access"));
+    assert!(detail.to_lowercase().contains("chatgpt-account-id: team"));
+    // The detail read answered in full, so its count wins over the usage body's 2, as in Codex.
+    assert_eq!(
+        dto.reset_credits,
+        Some(LimitsResetCreditsDto {
+            available_count: 3,
+            next_expires_at: Some("2026-10-10T12:00:00+00:00".to_owned()),
+        })
+    );
+    assert_eq!(dto.windows[0].used_percent, 42.0);
+}
+
+/// Codex's own app-server keeps the usage body's count when the detail read fails, and one credit
+/// it cannot read fails the whole detail read; so does this.
+#[test]
+fn saved_codex_keeps_the_count_when_the_expiry_read_fails() {
+    for detail in [
+        ("500 Internal Server Error", "{}"),
+        (
+            "200 OK",
+            r#"{"available_count":5,"credits":[
+                {"status":"available","expires_at":"2026-10-10T12:00:00Z"},
+                {"status":"available","expires_at":"not a date"}]}"#,
+        ),
+    ] {
+        let (usage, resets, requests) = codex_endpoints(&[
+            ("200 OK", &[], CODEX_USAGE_WITH_RESETS),
+            (detail.0, &[], detail.1),
+        ]);
+        let dto = read_codex(&usage, &resets).unwrap();
+        requests.join().unwrap();
+
+        assert_eq!(
+            dto.reset_credits,
+            Some(LimitsResetCreditsDto {
+                available_count: 2,
+                next_expires_at: None,
+            }),
+            "{detail:?}"
+        );
+        assert_eq!(dto.windows[0].used_percent, 42.0);
+    }
+}
+
+#[test]
+fn saved_codex_reports_zero_banked_resets_without_asking_for_their_detail() {
+    let (usage, _, requests) = codex_endpoints(&[(
+        "200 OK",
+        &[],
+        r#"{"rate_limit":{"primary_window":{"used_percent":42}},"rate_limit_reset_credits":{"available_count":0}}"#,
+    )]);
+    // A listener that never answers: a detail request would sit in its backlog, where `accept`
+    // finds it, rather than being refused and swallowed like a failed detail read.
+    let detail = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    detail.set_nonblocking(true).unwrap();
+    let resets = format!(
+        "http://{}/wham/rate-limit-reset-credits",
+        detail.local_addr().unwrap()
+    );
+    let dto = read_codex(&usage, &resets).unwrap();
+    requests.join().unwrap();
+
+    assert_eq!(
+        detail.accept().map(|_| ()).map_err(|error| error.kind()),
+        Err(std::io::ErrorKind::WouldBlock),
+        "a count of 0 has no detail worth a request"
+    );
+
+    assert_eq!(
+        dto.reset_credits,
+        Some(LimitsResetCreditsDto {
+            available_count: 0,
+            next_expires_at: None,
+        })
+    );
+}
+
+/// A count Codex's own client would refuse leaves the resets unknown and never costs the windows.
+#[test]
+fn saved_codex_treats_a_malformed_banked_reset_count_as_unknown() {
+    for count in ["-1", "1.5", "\"2\"", "null"] {
+        let body = format!(
+            r#"{{"rate_limit":{{"primary_window":{{"used_percent":42}}}},"rate_limit_reset_credits":{{"available_count":{count}}}}}"#
+        );
+        let (usage, resets, requests) = codex_endpoints(&[("200 OK", &[], &body)]);
+        let dto = read_codex(&usage, &resets).unwrap();
+        requests.join().unwrap();
+
+        assert_eq!(dto.reset_credits, None, "{count}");
+        assert_eq!(dto.windows[0].used_percent, 42.0, "{count}");
+    }
 }
 
 #[test]
@@ -196,6 +357,7 @@ fn wrong_claude_identity_stops_before_usage() {
         &json!({"claudeAiOauth":{"accessToken":"fixture"}}),
         &profile,
         &crate::http::refused_url(),
+        "unused",
         "unused",
     );
     p.join().unwrap();
@@ -214,6 +376,7 @@ fn matching_claude_user_in_another_workspace_is_rejected_before_usage() {
         &url,
         &crate::http::refused_url(),
         "unused",
+        "unused",
     );
     request.join().unwrap();
     assert!(matches!(result, Err(HttpError::Unauthorized)));
@@ -231,6 +394,7 @@ fn codex_quota_for_another_account_is_rejected() {
         "unused",
         "unused",
         &url,
+        "unused",
     );
     request.join().unwrap();
     assert!(matches!(result, Err(HttpError::Unauthorized)));
