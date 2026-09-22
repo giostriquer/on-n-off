@@ -38,8 +38,8 @@ fn read_at(
             {
                 return Err(HttpError::Unauthorized);
             }
-            let payload = get_json(
-                &format!("{claude_url}?{CLAUDE_USAGE_QUERY}"),
+            let usage = claude_usage(
+                claude_url,
                 &[
                     ("Authorization", &bearer),
                     ("anthropic-beta", "oauth-2025-04-20"),
@@ -48,9 +48,7 @@ fn read_at(
             Parsed {
                 account: Some(profile.account),
                 plan: credential.plan(),
-                windows: claude::parse_claude(&payload),
-                reset_credits: claude::parse_reset_credits(&payload),
-                ..Parsed::default()
+                ..usage
             }
         }
         AgentId::Codex => {

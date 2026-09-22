@@ -72,6 +72,38 @@ fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
     );
 }
 
+/// On this path a rejected login renews the saved profile and spends its refresh token, so a
+/// refusal of the optional reset query must never be read as one.
+#[test]
+fn saved_claude_falls_back_to_the_plain_read_when_the_reset_query_is_refused() {
+    let (profile, p) = serve_once(
+        "200 OK",
+        r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team"}}"#,
+    );
+    let (usage, u) = crate::http::serve_sequence(&[
+        ("403 Forbidden", &[], "{}"),
+        ("200 OK", &[], r#"{"seven_day":{"utilization":61}}"#),
+    ]);
+    let dto = read_at(
+        &identity(AgentId::Claude),
+        &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
+        &profile,
+        &usage,
+        "unused",
+    )
+    .unwrap();
+    p.join().unwrap();
+    let requests = u.join().unwrap();
+    assert!(!requests[1]
+        .head
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .contains('?'));
+    assert_eq!(dto.windows[0].used_percent, 61.0);
+    assert_eq!(dto.reset_credits, None);
+}
+
 #[test]
 fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
     use crate::dto::LimitWindowKind::{Model, Session, Weekly};

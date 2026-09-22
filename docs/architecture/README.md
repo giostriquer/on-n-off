@@ -128,8 +128,9 @@ Each provider is read the way that provider intends, and active login renewal re
 - **Claude** — read the stored access token (macOS Keychain via `/usr/bin/security`, else
   `~/.claude/.credentials.json`), verify it against `/api/oauth/profile`, then read
   `/api/oauth/usage?cedar_ember=1&skip_spend=1`. The query adds the saved rate-limit resets
-  (`cedar_ember`) to the same answer. They are reported, never spent: Claude Code's
-  `/limit-reset` spends them.
+  (`cedar_ember`) to the same answer. It is optional: a refused query falls back to the plain read
+  rather than failing it, and a read that cannot tell keeps the remembered count. The resets are
+  reported, never spent: Claude Code's `/limit-reset` spends the signed-in account's.
 
   That token lives eight hours and Claude Code renews it only while Claude Code is running, so
   on-n-off — which runs continuously — renews it too rather than reporting an expired login at a

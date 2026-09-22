@@ -721,6 +721,14 @@ impl ProviderLimitsDto {
             .as_ref()
             .is_some_and(|resets| resets.available_count > 0)
     }
+
+    /// A successful read that could not tell how many resets are banked keeps the count `previous`
+    /// knew; one that answered, 0 included, replaces it.
+    pub fn keep_reset_credits_from(&mut self, previous: &Self) {
+        if self.reset_credits.is_none() {
+            self.reset_credits.clone_from(&previous.reset_credits);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

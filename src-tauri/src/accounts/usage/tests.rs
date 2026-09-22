@@ -40,6 +40,31 @@ fn a_failed_inactive_read_preserves_its_last_numbers_and_timestamp() {
     assert!(!entries[0].current_account);
 }
 #[test]
+fn a_saved_read_that_cannot_tell_keeps_the_banked_reset_count_and_an_answer_replaces_it() {
+    use crate::dto::LimitsResetCreditsDto;
+    let profile = profile();
+    let banked = |available_count| {
+        Some(LimitsResetCreditsDto {
+            available_count,
+            next_expires_at: None,
+        })
+    };
+    let read = |reset_credits| {
+        let mut dto = reading(&profile);
+        dto.reset_credits = reset_credits;
+        Some(Ok(dto))
+    };
+    let mut entries = vec![];
+
+    merge(&mut entries, &profile, read(banked(1)));
+    merge(&mut entries, &profile, read(None));
+    assert_eq!(entries[0].reset_credits, banked(1));
+
+    merge(&mut entries, &profile, read(banked(0)));
+    assert_eq!(entries[0].reset_credits, banked(0));
+}
+
+#[test]
 fn inactive_results_never_replace_the_active_account() {
     let profile = profile();
     let mut entries = vec![];

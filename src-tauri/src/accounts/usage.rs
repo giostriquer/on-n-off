@@ -325,7 +325,12 @@ fn merge(
         return;
     }
     let dto = match result {
-        Ok(dto) => dto,
+        Ok(mut dto) => {
+            if let Some(i) = existing {
+                dto.keep_reset_credits_from(&entries[i]);
+            }
+            dto
+        }
         Err(error) => {
             let mut dto =
                 existing
