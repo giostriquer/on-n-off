@@ -210,10 +210,13 @@ const TAG = "v1.1.0";
 const VERSION = "1.1.0";
 const EXE = "webapp_1.1.0_x64-setup.exe";
 const DMG = "webapp_1.1.0_aarch64.dmg";
+const APP = "webapp_1.1.0_aarch64.app.tar.gz";
 const PREVIOUS_ASSETS = [
   "LICENSE",
   "SHA256SUMS.txt",
   "latest.json",
+  "webapp_1.0.0_aarch64.app.tar.gz",
+  "webapp_1.0.0_aarch64.app.tar.gz.sig",
   "webapp_1.0.0_aarch64.dmg",
   "webapp_1.0.0_x64-setup.exe",
   "webapp_1.0.0_x64-setup.exe.sig",
@@ -222,17 +225,28 @@ const NOTES = "## What's Changed\n* one change";
 const releaseSigner = throwawayKey();
 const releaseKey = parseUpdaterPublicKey(releaseSigner.conf);
 
+/** Both platforms a real release ships, each with its `.sig`; the macOS one named as Tauri signed it, before the rename. */
+function releaseSignature(bytes, signedAs) {
+  return releaseSigner.signFile(bytes, `timestamp:1\tfile:${signedAs}`);
+}
+
 /**
- * A complete, valid release signed with a throwaway key. `tamper` edits the files, the feed and the
- * draft body before SHA256SUMS.txt is written; `tamperSums` edits that text afterwards.
+ * A complete, valid release signed with a throwaway key. `tamper` edits the files, the feed (or its
+ * raw text, `latestText`) and the draft body before SHA256SUMS.txt is written; `tamperSums` edits
+ * that text afterwards.
  */
 function buildRelease({ tamper = () => {}, tamperSums = (text) => text, allowChange = false } = {}) {
   const files = new Map([
     ["LICENSE", Buffer.from("license text")],
+    [APP, Buffer.from("app bundle bytes")],
     [DMG, Buffer.from("disk image bytes")],
     [EXE, Buffer.from("installer bytes")],
   ]);
-  const sigs = new Map([[`${EXE}.sig`, releaseSigner.signFile(files.get(EXE), `timestamp:1\tfile:${EXE}`)]]);
+  const sigs = new Map([
+    [`${APP}.sig`, releaseSignature(files.get(APP), "webapp.app.tar.gz")],
+    [`${EXE}.sig`, releaseSignature(files.get(EXE), EXE)],
+  ]);
+  const url = (asset) => `https://github.com/${REPO}/releases/download/${TAG}/${asset}`;
   const release = {
     files,
     sigs,
@@ -240,15 +254,20 @@ function buildRelease({ tamper = () => {}, tamperSums = (text) => text, allowCha
       version: VERSION,
       notes: NOTES,
       pub_date: "2026-09-22T00:00:00Z",
-      platforms: { "windows-x86_64-nsis": { url: `https://github.com/${REPO}/releases/download/${TAG}/${EXE}`, signature: sigs.get(`${EXE}.sig`) } },
+      platforms: {
+        "darwin-aarch64": { url: url(APP), signature: sigs.get(`${APP}.sig`) },
+        "windows-x86_64-nsis": { url: url(EXE), signature: sigs.get(`${EXE}.sig`) },
+      },
     },
-    previousLatest: { version: "1.0.0", platforms: { "windows-x86_64-nsis": {} } },
+    latestText: null,
+    previousLatest: { version: "1.0.0", platforms: { "darwin-aarch64": {}, "windows-x86_64-nsis": {} } },
     body: `${NOTES.replaceAll("\n", "\r\n")}\r\n`,
   };
   tamper(release);
+  const latestText = release.latestText ?? JSON.stringify(release.latest);
   const bytesByName = new Map(release.files);
   for (const [name, text] of release.sigs) bytesByName.set(name, Buffer.from(text));
-  bytesByName.set("latest.json", Buffer.from(JSON.stringify(release.latest)));
+  bytesByName.set("latest.json", Buffer.from(latestText));
   const sums = [...bytesByName].map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join("\r\n");
   const assets = [...bytesByName.keys(), "SHA256SUMS.txt"].sort();
   const expected = expectedAssetNames(PREVIOUS_ASSETS, "1.0.0", VERSION);
@@ -256,7 +275,7 @@ function buildRelease({ tamper = () => {}, tamperSums = (text) => text, allowCha
     checkAssetSet(assets, expected, allowChange),
     checkSums(tamperSums(sums), bytesByName),
     checkSignatures(release.sigs, bytesByName, VERSION, releaseKey),
-    checkFeed(JSON.stringify(release.latest), JSON.stringify(release.previousLatest), {
+    checkFeed(latestText, JSON.stringify(release.previousLatest), {
       repo: REPO,
       tag: TAG,
       version: VERSION,
@@ -310,6 +329,54 @@ test("a valid release passes every group, and each tamper fails its own check", 
       `windows-x86_64-nsis signature equals ${EXE}.sig`,
     ],
     ["changed notes", { tamper: (r) => (r.body = `${NOTES}\n* a line added after publish-draft\n`) }, "latest.json notes match the release body (installed apps show these)"],
+    // A SHA256SUMS the parser refuses must fail its group, not switch every hash check off.
+    ["a SUMS line listed twice", { tamperSums: (text) => `${text}\r\n${text.split("\r\n")[0]}` }, "SHA256SUMS.txt is readable"],
+    ["a SUMS line for no asset", { tamperSums: (text) => `${text}\r\n${sha256("ghost")}  webapp_1.1.0_ghost.zip` }, "SHA256SUMS.txt lists every other asset, and nothing else"],
+    [
+      "a .sig that is not a minisign signature, copied into the feed",
+      {
+        tamper: (r) => {
+          r.sigs.set(`${EXE}.sig`, b64("not a signature"));
+          r.latest.platforms["windows-x86_64-nsis"].signature = b64("not a signature");
+        },
+      },
+      `${EXE}.sig is a minisign signature`,
+    ],
+    [
+      "an older installer's signature replayed under the new name",
+      {
+        tamper: (r) => {
+          const replayed = releaseSignature(r.files.get(EXE), "webapp_1.0.0_x64-setup.exe");
+          r.sigs.set(`${EXE}.sig`, replayed);
+          r.latest.platforms["windows-x86_64-nsis"].signature = replayed;
+        },
+      },
+      `${EXE}.sig trusted comment names ${EXE}`,
+    ],
+    [
+      "a bad second .sig",
+      {
+        tamper: (r) => {
+          const wrong = releaseSignature(r.files.get(DMG), "webapp.app.tar.gz");
+          r.sigs.set(`${APP}.sig`, wrong);
+          r.latest.platforms["darwin-aarch64"].signature = wrong;
+        },
+      },
+      `${APP}.sig signs ${APP}`,
+    ],
+    ["an unreadable latest.json", { tamper: (r) => (r.latestText = "{") }, "latest.json is readable"],
+    ["a feed naming the previous version", { tamper: (r) => (r.latest.version = "1.0.0") }, `latest.json version is ${VERSION}`],
+    ["a feed pub_date that is not a date", { tamper: (r) => (r.latest.pub_date = "not a date") }, "latest.json pub_date is a date"],
+    [
+      "the second platform's URL under the previous tag",
+      { tamper: (r) => (r.latest.platforms["darwin-aarch64"].url = `https://github.com/${REPO}/releases/download/v1.0.0/${APP}`) },
+      `darwin-aarch64 url points at an asset of ${TAG}`,
+    ],
+    [
+      "a platform the previous feed did not have",
+      { tamper: (r) => (r.latest.platforms["linux-x86_64"] = { url: `https://github.com/${REPO}/releases/download/${TAG}/${EXE}`, signature: r.sigs.get(`${EXE}.sig`) }) },
+      "latest.json platforms match the previous release",
+    ],
   ];
   for (const [name, options, failure] of rows) {
     const failures = failuresOf(...buildRelease(options));
@@ -332,8 +399,8 @@ test("--allow-asset-change relaxes only the set check, and names each difference
   });
   assert.ok(failuresOf(...forged).includes(`${EXE}.sig signs ${EXE}`), "a bad signature still fails with the flag");
 
-  const platforms = buildRelease({ tamper: (r) => (r.previousLatest.platforms["darwin-aarch64"] = {}), allowChange: true });
-  assert.deepEqual(platforms[3].warnings, ["missing platform darwin-aarch64"]);
-  const strict = buildRelease({ tamper: (r) => (r.previousLatest.platforms["darwin-aarch64"] = {}) });
+  const platforms = buildRelease({ tamper: (r) => (r.previousLatest.platforms["linux-x86_64"] = {}), allowChange: true });
+  assert.deepEqual(platforms[3].warnings, ["missing platform linux-x86_64"]);
+  const strict = buildRelease({ tamper: (r) => (r.previousLatest.platforms["linux-x86_64"] = {}) });
   assert.ok(failuresOf(...strict).includes("latest.json platforms match the previous release"));
 });

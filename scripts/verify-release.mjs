@@ -20,7 +20,7 @@
 // gathers the inputs with `gh` and `git`, reads the files, and prints.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -102,6 +102,8 @@ if (!values["no-download"]) {
 }
 const assets = readdirSync(dir).sort();
 const text = (path) => readFileSync(path, "utf8");
+/** A file the run may lack (an asset removed under --allow-asset-change, a partial --no-download directory): its check reports it. */
+const textIfPresent = (path) => (existsSync(path) ? text(path) : "");
 const previousAssets = JSON.parse(text(join(root, `${previousTag}.assets.json`)));
 const bytesByName = new Map(assets.filter((name) => name !== "SHA256SUMS.txt").map((name) => [name, readFileSync(join(dir, name))]));
 const sigTextByName = new Map(assets.filter((name) => name.endsWith(".sig")).map((name) => [name, text(join(dir, name))]));
@@ -128,13 +130,13 @@ report("signatures", checkSignatures(sigTextByName, bytesByName, version, keys.p
 // 4. latest.json.
 report(
   "latest.json",
-  checkFeed(text(join(dir, "latest.json")), text(join(previousDir, "latest.json")), {
+  checkFeed(textIfPresent(join(dir, "latest.json")), textIfPresent(join(previousDir, "latest.json")), {
     repo,
     tag,
     version,
     assets,
     sigTextByName,
-    body: draftBody(text(join(root, `${tag}.body.md`))),
+    body: draftBody(textIfPresent(join(root, `${tag}.body.md`))),
     allowChange,
   }),
 );
