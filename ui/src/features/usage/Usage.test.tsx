@@ -315,14 +315,43 @@ describe("Usage prices", () => {
     const totals = await screen.findByRole("region", { name: "Usage totals" });
 
     expect(within(totals).getByText("if billed at full API rate · 1 model has no price yet")).toBeTruthy();
-    const row = screen.getByText("codex-auto-review").closest("div")?.parentElement as HTMLElement;
+    const modelRow = (name: string, scope: HTMLElement = document.body) =>
+      within(scope).getByText(name).closest("div")?.parentElement as HTMLElement;
+    const row = modelRow("codex-auto-review");
     expect(within(row).getByText("unpriced")).toBeTruthy();
     expect(within(row).queryByText("$0.00")).toBeNull();
+    const priced = modelRow("gpt-5.6-sol");
+    expect(within(priced).getByText("$4.00")).toBeTruthy();
+    expect(within(priced).queryByText("unpriced")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Day" }));
     fireEvent.click(screen.getAllByRole("button", { expanded: false }).find((day) => /Aug 15/.test(day.textContent ?? "")) as HTMLElement);
     const models = document.getElementById(screen.getByRole("button", { expanded: true }).getAttribute("aria-controls") ?? "") as HTMLElement;
-    const dayRow = within(models).getByText("codex-auto-review").closest("div")?.parentElement as HTMLElement;
-    expect(within(dayRow).getByText("unpriced")).toBeTruthy();
+    expect(within(modelRow("codex-auto-review", models)).getByText("unpriced")).toBeTruthy();
+    const pricedDayRow = modelRow("gpt-5.6-sol", models);
+    expect(within(pricedDayRow).getByText("$3.00")).toBeTruthy();
+    expect(within(pricedDayRow).queryByText("unpriced")).toBeNull();
+  });
+
+  it("shows a provider whose every model lacks a price as unpriced", async () => {
+    const base = twoDaySummary();
+    const claudeOnly = base.buckets.filter((bucket) => bucket.provider === "claude");
+    usageSummary.mockResolvedValue({
+      ...base,
+      buckets: [
+        ...claudeOnly,
+        { ...base.buckets[0], model: "codex-auto-review", costUsd: 0, costSource: "unpriced" as const, records: 2, unpricedRecords: 2 },
+      ],
+    });
+    renderUsage();
+    const totals = await screen.findByRole("region", { name: "Usage totals" });
+
+    const providerRow = (label: string) =>
+      within(totals)
+        .getAllByText(label)
+        .find((element) => element.tagName === "SPAN")?.parentElement as HTMLElement;
+    expect(within(providerRow("Codex")).getByText("unpriced")).toBeTruthy();
+    expect(within(providerRow("Codex")).queryByText("$0.00")).toBeNull();
+    expect(within(providerRow("Claude")).getByText("$1.00")).toBeTruthy();
   });
 });

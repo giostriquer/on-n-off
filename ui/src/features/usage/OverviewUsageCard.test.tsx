@@ -186,4 +186,28 @@ describe("OverviewUsageCard", () => {
 
     expect(renderUsageChart).toHaveBeenCalledTimes(1);
   });
+
+  it("shows a model without a price as unpriced and says so under the total", async () => {
+    usageSummary.mockResolvedValue({
+      ...modelSummary,
+      buckets: [
+        ...modelSummary.buckets,
+        { ...modelSummary.buckets[0], model: "codex-auto-review", costUsd: 0, costSource: "unpriced", records: 2, unpricedRecords: 2 },
+      ],
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <OverviewUsageCard />
+      </QueryClientProvider>,
+    );
+
+    const unpricedRow = (await screen.findByText("codex-auto-review")).closest("div") as HTMLElement;
+    expect(unpricedRow.textContent).toContain("unpriced");
+    expect(unpricedRow.textContent).not.toContain("$0.00");
+    const pricedRow = screen.getByText("gpt-5.6-sol").closest("div") as HTMLElement;
+    expect(pricedRow.textContent).toContain("$1.00");
+    expect(pricedRow.textContent).not.toContain("unpriced");
+    expect(screen.getByText("if billed at full API rate · 1 model has no price yet")).toBeTruthy();
+  });
 });

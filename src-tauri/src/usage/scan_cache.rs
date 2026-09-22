@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
-use super::transcripts::{TokenTotals, UsageProvider, UsageRecord};
+use super::transcripts::{richest_copies, TokenTotals, UsageProvider, UsageRecord};
 
 /// v4: rows carry the one-hour cache-write share at index 10.
 pub const USAGE_SCAN_CACHE_VERSION: u32 = 4;
@@ -270,24 +270,10 @@ fn path_under_root(path: &str, root: &str) -> bool {
     Path::new(path).starts_with(Path::new(root))
 }
 
-/// One record per de-duplication key, the richest copy (see `UsageRecord::is_richer_than`) in the
-/// first copy's place; records without a key are all kept.
+/// One file's records with each Claude message's lines collapsed to its richest copy (see
+/// `richest_copies`), which keeps the cache small; the scan collapses copies across files again.
 pub fn dedupe_within_file(records: &[UsageRecord]) -> Vec<UsageRecord> {
-    let mut slot_of: HashMap<&str, usize> = HashMap::new();
-    let mut kept: Vec<UsageRecord> = Vec::new();
-    for record in records {
-        if let Some(key) = record.dedupe_key.as_deref() {
-            if let Some(&slot) = slot_of.get(key) {
-                if record.is_richer_than(&kept[slot]) {
-                    kept[slot] = record.clone();
-                }
-                continue;
-            }
-            slot_of.insert(key, kept.len());
-        }
-        kept.push(record.clone());
-    }
-    kept
+    richest_copies([records]).0.into_iter().cloned().collect()
 }
 
 #[cfg(test)]

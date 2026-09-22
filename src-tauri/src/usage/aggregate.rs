@@ -48,7 +48,6 @@ pub struct AggregateOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregateResult {
     pub buckets: Vec<UsageBucket>,
-    pub duplicates_dropped: u64,
     pub out_of_window: u64,
 }
 
@@ -62,16 +61,12 @@ struct MutableBucket {
     sessions: HashSet<String>,
 }
 
+/// Folds records that are already de-duplicated (`transcripts::richest_copies`) into buckets.
 pub struct UsageAggregator {
     buckets: HashMap<String, MutableBucket>,
-    /// Records that carry a de-duplication key, one per key, held until `finish`; `slot_of` maps
-    /// a key to its place, which keeps the fold order that of first arrival.
-    keyed: Vec<UsageRecord>,
-    slot_of: HashMap<String, usize>,
     zone: Tz,
     hourly: Option<(i64, i64)>,
     options: AggregateOptions,
-    duplicates_dropped: u64,
     out_of_window: u64,
 }
 
@@ -92,34 +87,11 @@ impl UsageAggregator {
         let zone: Tz = options.time_zone.parse().unwrap_or(chrono_tz::UTC);
         Ok(Self {
             buckets: HashMap::new(),
-            keyed: Vec::new(),
-            slot_of: HashMap::new(),
             zone,
             hourly,
             options,
-            duplicates_dropped: 0,
             out_of_window: 0,
         })
-    }
-
-    /// Takes one record and says whether it is new and inside the window. De-duplication is
-    /// global across the scan: a resumed or forked Claude session copies messages into other
-    /// transcripts, sometimes only a message's partial first line, so records sharing a key are
-    /// held until `finish` and the richest copy is the one counted, whichever file came first.
-    pub fn add(&mut self, record: &UsageRecord) -> bool {
-        let Some(key) = &record.dedupe_key else {
-            return self.fold(record);
-        };
-        if let Some(&slot) = self.slot_of.get(key) {
-            self.duplicates_dropped += 1;
-            if record.is_richer_than(&self.keyed[slot]) {
-                self.keyed[slot] = record.clone();
-            }
-            return false;
-        }
-        self.slot_of.insert(key.clone(), self.keyed.len());
-        self.keyed.push(record.clone());
-        self.bucket_key(record).is_some()
     }
 
     /// The `(day, hour, provider, model)` bucket a record belongs to, or `None` outside the window.
@@ -153,7 +125,7 @@ impl UsageAggregator {
     }
 
     /// Counts one record into its bucket; `false` when it falls outside the window.
-    fn fold(&mut self, record: &UsageRecord) -> bool {
+    pub fn add(&mut self, record: &UsageRecord) -> bool {
         let Some(key) = self.bucket_key(record) else {
             self.out_of_window += 1;
             return false;
@@ -191,10 +163,7 @@ impl UsageAggregator {
         true
     }
 
-    pub fn finish(mut self) -> AggregateResult {
-        for record in std::mem::take(&mut self.keyed) {
-            self.fold(&record);
-        }
+    pub fn finish(self) -> AggregateResult {
         let mut buckets = Vec::with_capacity(self.buckets.len());
         for (key, bucket) in self.buckets {
             let mut parts = key.split('\0');
@@ -233,7 +202,6 @@ impl UsageAggregator {
         });
         AggregateResult {
             buckets,
-            duplicates_dropped: self.duplicates_dropped,
             out_of_window: self.out_of_window,
         }
     }

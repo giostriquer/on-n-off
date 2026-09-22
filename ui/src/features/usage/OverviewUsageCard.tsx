@@ -6,7 +6,7 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { markStartup } from "$lib/startupTiming";
 import { foldUsage, providerLabel, usagePricingNote } from "$lib/usageMerge";
 import { formatDayRange, formatPercent, formatTokens, formatUsd, makeWindow } from "$lib/usageFormat";
-import { ModelCost } from "./ModelCost";
+import { UsageCost } from "./UsageCost";
 import type { UsageMetric } from "$lib/usageTypes";
 import { LazyUsageChart, preloadUsageChart } from "@/features/usage/LazyUsageChart";
 import { loadUsageWindow } from "./usageQuery";
@@ -146,7 +146,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
                       />
                     </span>
                     {metric === "cost" ? (
-                      <ModelCost row={row} className="font-mono min-w-[5.5rem] shrink-0 text-right text-[12px] tabular-nums" />
+                      <UsageCost row={row} className="font-mono min-w-[5.5rem] shrink-0 text-right text-[12px] tabular-nums" />
                     ) : (
                       <span className="font-mono min-w-[5.5rem] shrink-0 text-right text-[12px] tabular-nums">
                         {formatTokens(row.totalTokens)}

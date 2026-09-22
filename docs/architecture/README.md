@@ -191,11 +191,13 @@ table can never serve costs computed from an old one.
 
 Three reading rules carry the accuracy, each pinned by a test:
 
-- **One Claude message, one record: its richest copy.** Claude Code writes one line per content
-  block of a message, all under one `message.id` and `requestId`, and the early lines carry a
-  partial `output_tokens` (often 1 for a thinking block). A resumed or forked session copies
-  messages into other transcripts too. The copy with the most output is counted, within a file
-  and across files, whichever the scan meets first.
+- **One record per copy group, its richest copy, before anything is counted.** Claude Code writes
+  one line per content block of a message, all under one `message.id` and `requestId`, and the
+  early lines carry a partial `output_tokens` (often 1 for a thinking block); a resumed or forked
+  session copies messages into other transcripts too. A Codex rollout listed under both roots (a
+  rename between the walks, or a stale entry after an incomplete walk) repeats its session's events
+  at the same instants. `transcripts::richest_copies` collapses both over every file of the scan,
+  so the totals and the session counts follow the copy that is counted.
 - **Cache writes by lifetime.** A one-hour Claude cache write
   (`usage.cache_creation.ephemeral_1h_input_tokens`) is priced at LiteLLM's
   `cache_creation_input_token_cost_above_1hr`, 2x input when the table omits it; a five-minute

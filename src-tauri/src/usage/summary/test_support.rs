@@ -161,3 +161,26 @@ pub(super) fn write_codex_rollout(dir: &Path, name: &str, session: &str, output_
     let body: String = lines.iter().map(|line| format!("{line}\n")).collect();
     std::fs::write(dir.join(name), body).unwrap();
 }
+
+/// Claude lines for `summary_line_claude`: one assistant message's usage, as Claude Code writes it.
+pub(super) fn claude_usage_line(
+    message_id: &str,
+    session: &str,
+    timestamp: &str,
+    usage: serde_json::Value,
+) -> String {
+    serde_json::json!({
+        "type": "assistant",
+        "timestamp": timestamp,
+        "sessionId": session,
+        "requestId": "req_1",
+        "message": { "id": message_id, "model": "claude-fable-5", "usage": usage }
+    })
+    .to_string()
+}
+
+pub(super) fn write_claude_lines(home: &Path, name: &str, lines: &[String]) {
+    let dir = home.join(".claude").join("projects").join("proj");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(name), lines.join("\n") + "\n").unwrap();
+}

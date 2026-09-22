@@ -141,7 +141,8 @@ fn finite_number(value: &Value) -> Option<f64> {
 
 /// Strip a `provider/` prefix and a bracketed variant suffix, and lowercase, for table lookup.
 /// Claude Code can name a context tier after the model (`claude-fable-5-1[1m]`); the table only
-/// knows the base name, which is also the tier priced here.
+/// knows the base name, so such a request is priced at base rates. Any long-context premium
+/// (LiteLLM's `*_above_200k_tokens`) is not applied: an under-priced request, not an unpriced one.
 pub fn normalize_model_name(model: &str) -> String {
     let trimmed = model.trim().to_lowercase();
     let base = trimmed.split('[').next().unwrap_or("").trim_end();

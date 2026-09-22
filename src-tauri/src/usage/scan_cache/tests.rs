@@ -6,13 +6,14 @@ fn sample_record() -> UsageRecord {
         timestamp_ms: 1_000,
         model: "claude-fable-5".into(),
         session_id: "session-a".into(),
+        // Every field distinct, so a column swapped in the row format cannot round-trip.
         totals: TokenTotals {
             uncached_input_tokens: 1,
             cached_input_tokens: 2,
-            cache_creation_tokens: 3,
-            cache_creation_1h_tokens: 2,
+            cache_creation_tokens: 5,
+            cache_creation_1h_tokens: 3,
             output_tokens: 4,
-            reasoning_tokens: 0,
+            reasoning_tokens: 6,
         },
         reported_cost_usd: Some(1.5),
         dedupe_key: Some("msg_1:".into()),
@@ -37,6 +38,26 @@ fn encode_decode_round_trip() {
         restored.get("/a.jsonl").unwrap().records[0],
         sample_record()
     );
+}
+
+#[test]
+fn a_one_hour_share_larger_than_its_cache_writes_decodes_clamped() {
+    let mut cache = ScanCache::new();
+    cache.insert(
+        "/a.jsonl".into(),
+        CachedFile {
+            size: 100,
+            mtime_ms: 50,
+            provider: UsageProvider::Claude,
+            records: Arc::new(vec![sample_record()]),
+        },
+    );
+    let mut encoded = encode_scan_cache(&cache);
+    encoded["files"]["/a.jsonl"]["r"][0][10] = serde_json::json!(99);
+
+    let restored = decode_scan_cache(&encoded);
+    let totals = &restored.get("/a.jsonl").unwrap().records[0].totals;
+    assert_eq!(totals.cache_creation_1h_tokens, 5);
 }
 
 #[test]

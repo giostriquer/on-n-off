@@ -88,35 +88,52 @@ fn hourly_requires_bounds() {
     }
 }
 
-/// A resumed or forked session copies a message into another transcript, sometimes only its
-/// partial first line, so across files the copy with the most output wins too, whichever file
-/// the scan meets first.
 #[test]
-fn dedupe_keeps_the_richest_copy_in_either_order() {
-    let partial = record(|r| {
-        r.dedupe_key = Some("msg_1:".into());
-        r.totals.output_tokens = 1;
-    });
-    let billed = record(|r| r.dedupe_key = Some("msg_1:".into()));
-    for copies in [
-        [partial.clone(), billed.clone(), partial.clone()],
-        [billed.clone(), partial.clone(), partial.clone()],
-    ] {
-        let result = aggregate(&copies, "UTC", Resolution::Day);
-        assert_eq!(result.duplicates_dropped, 2);
-        assert_eq!(result.buckets.len(), 1);
-        assert_eq!(result.buckets[0].records, 1);
-        assert_eq!(result.buckets[0].totals.output_tokens, 50);
-        let expected = 100.0 * 1e-5 + 1000.0 * 1e-6 + 10.0 * 1.25e-5 + 50.0 * 5e-5;
-        assert!((result.buckets[0].cost_usd - expected).abs() < 1e-12);
-        assert_eq!(result.buckets[0].cost_source, CostSource::ModelPriced);
-    }
+fn add_says_whether_the_record_was_counted() {
+    let mut agg = UsageAggregator::new(AggregateOptions {
+        time_zone: "UTC".into(),
+        since_day: "2026-08-01".into(),
+        until_day: "2026-08-31".into(),
+        resolution: Resolution::Day,
+        since_time_ms: None,
+        until_time_ms: None,
+        rates: sample_rates(),
+    })
+    .unwrap();
+    assert!(agg.add(&record(|r| r.dedupe_key = Some("msg_1:".into()))));
+    assert!(!agg.add(&record(|r| {
+        r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+    })));
+    let result = agg.finish();
+    assert_eq!(result.buckets.len(), 1);
+    assert_eq!(result.out_of_window, 1);
+}
+
+/// The hourly window is `[since, until)`: its first instant counts, its end does not.
+#[test]
+fn hourly_window_includes_its_start_and_excludes_its_end() {
+    let since = chrono::DateTime::parse_from_rfc3339("2026-08-06T04:37:00.000Z")
+        .unwrap()
+        .timestamp_millis();
+    let until = chrono::DateTime::parse_from_rfc3339("2026-08-07T04:37:00.000Z")
+        .unwrap()
+        .timestamp_millis();
+    let at = |timestamp_ms: i64| record(|r| r.timestamp_ms = timestamp_ms);
+    let result = aggregate(
+        &[at(since - 1), at(since), at(until - 1), at(until)],
+        "UTC",
+        Resolution::Hour,
+    );
+    let counted: u64 = result.buckets.iter().map(|bucket| bucket.records).sum();
+    assert_eq!(counted, 2);
+    assert_eq!(result.out_of_window, 2);
 }
 
 #[test]
-fn sums_records_without_dedupe_key() {
+fn folds_every_record_it_is_given() {
     let result = aggregate(&[record(|_| {}), record(|_| {})], "UTC", Resolution::Day);
-    assert_eq!(result.duplicates_dropped, 0);
     assert_eq!(result.buckets[0].totals.output_tokens, 100);
 }
 

@@ -3,13 +3,15 @@
 //! Line-at-a-time so callers can stream large files. Port of T3 Code's
 //! `usageTranscripts.ts` (algorithm only).
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 /// Increment whenever transcript parsing semantics change.
 /// v2: the one-hour share of Claude cache writes, and zero-token Claude lines dropped.
 pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UsageProvider {
     Claude,
@@ -80,6 +82,66 @@ impl UsageRecord {
         (self.totals.output_tokens, self.totals.total_tokens())
             > (kept.totals.output_tokens, kept.totals.total_tokens())
     }
+}
+
+/// One record per group of copies: the richest copy (see `UsageRecord::is_richer_than`) in the
+/// first copy's place, plus how many copies were dropped.
+///
+/// A Claude message's copies share its `dedupe_key`. A Codex rollout carries no id, but one listed
+/// twice (moved to `archived_sessions/` between two walks, or kept stale after an incomplete walk)
+/// repeats its session's events at the same instants, so a Codex event is keyed by its session,
+/// instant, model and tokens, counted per file so repeated identical events inside one rollout stay
+/// apart. Records with neither key are all kept.
+pub fn richest_copies<'a>(
+    files: impl IntoIterator<Item = &'a [UsageRecord]>,
+) -> (Vec<&'a UsageRecord>, u64) {
+    let mut kept: Vec<&UsageRecord> = Vec::new();
+    let mut slot_of: HashMap<String, usize> = HashMap::new();
+    let mut dropped = 0;
+    for records in files {
+        let mut occurrences: HashMap<String, u32> = HashMap::new();
+        for record in records {
+            let key = match (&record.dedupe_key, record.provider) {
+                (Some(key), _) => key.clone(),
+                (None, UsageProvider::Codex) if !record.session_id.is_empty() => {
+                    let event = codex_event_key(record);
+                    let occurrence = occurrences.entry(event.clone()).or_insert(0);
+                    *occurrence += 1;
+                    format!("{event}#{occurrence}")
+                }
+                _ => {
+                    kept.push(record);
+                    continue;
+                }
+            };
+            if let Some(&slot) = slot_of.get(&key) {
+                dropped += 1;
+                if record.is_richer_than(kept[slot]) {
+                    kept[slot] = record;
+                }
+            } else {
+                slot_of.insert(key, kept.len());
+                kept.push(record);
+            }
+        }
+    }
+    (kept, dropped)
+}
+
+fn codex_event_key(record: &UsageRecord) -> String {
+    let t = &record.totals;
+    format!(
+        "codex\0{}\0{}\0{}\0{}:{}:{}:{}:{}:{}",
+        record.session_id,
+        record.timestamp_ms,
+        record.model,
+        t.uncached_input_tokens,
+        t.cached_input_tokens,
+        t.cache_creation_tokens,
+        t.cache_creation_1h_tokens,
+        t.output_tokens,
+        t.reasoning_tokens
+    )
 }
 
 pub fn might_carry_usage(line: &str, provider: UsageProvider) -> bool {
