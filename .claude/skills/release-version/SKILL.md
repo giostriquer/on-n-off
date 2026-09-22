@@ -127,7 +127,7 @@ names and `latest.json`. Then it checks:
   on a GitHub-hosted runner, so an older release's build cannot pass as this one.
 
 Then read the notes for leaks: email addresses, local paths, and names the placeholder rules keep
-out. Read them in `latest.json` (`jq -r .notes .tmp/release-check/vX.Y.Z/latest.json`), because
+out. Read them in `latest.json` (`bun -p "require('./.tmp/release-check/vX.Y.Z/latest.json').notes"`), because
 that copy is what installed apps show in their update prompt. The release page shows the draft body.
 
 Fixing a leak, or any other notes change:
@@ -146,7 +146,9 @@ release. To accept one:
 
 1. Confirm the new names against `release.yml`, whose `$expectedNames` list and nine-asset count
    are authoritative.
-2. Re-run with `--allow-asset-change`.
+2. Re-run with `--allow-asset-change`. It prints each difference as its own `warn   missing …` or
+   `warn   unexpected …` line; confirm every one of them is intended. A `missing` installer is never
+   intended. Every other check still runs and must pass.
 
 **Done:** the script ends with `vX.Y.Z verified against vP.Q.R.` and the notes are clean. Any other
 `FAIL` stops the release: report it and leave the draft unpublished.

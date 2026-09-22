@@ -7,7 +7,7 @@
 // Downloads the release's assets and body with `gh` (drafts included), plus the previous release's
 // asset names and latest.json, and checks:
 //   1. the asset set is the previous release's, renamed to the new version;
-//   2. SHA256SUMS.txt lists every other asset, and each hash matches;
+//   2. SHA256SUMS.txt lists exactly the other assets, each with its own hash;
 //   3. every `.sig` is a minisign signature (Ed25519 over BLAKE2b-512) for the file it names, under
 //      the updater key both tags' src-tauri/tauri.conf.json carry (installed apps trust the old one);
 //   4. latest.json names this version, the previous release's platforms, URLs under this tag,
@@ -16,22 +16,23 @@
 // `--no-download` re-checks what an earlier run saved, e.g. after deliberately tampering with a
 // file. `--allow-asset-change` accepts an intentional change to the asset set or platforms, after
 // confirming the new names against release.yml's expected list. Exits 1 on the first failed group.
+// Every pass/fail decision lives in release-verification.mjs, where it is tested; this file only
+// gathers the inputs with `gh` and `git`, reads the files, and prints.
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import {
+  checkAssetSet,
+  checkFeed,
+  checkSignatures,
+  checkSums,
+  checkUpdaterKeys,
+  draftBody,
   expectedAssetNames,
-  notesMatch,
-  parseMinisignSignature,
-  parseSums,
-  parseUpdaterPublicKey,
-  trustedCommentNames,
-  verifyMinisign,
 } from "./release-verification.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -64,28 +65,28 @@ const repo = values.repo;
 const root = resolve(values.dir);
 const version = tag.slice(1);
 const previousVersion = previousTag.slice(1);
+const allowChange = values["allow-asset-change"];
 
-const failures = [];
-const check = (ok, message, detail) => {
+let failed = 0;
+const print = ({ ok, message, detail }) => {
   console.log(`${ok ? "ok  " : "FAIL"} ${message}${!ok && detail ? `\n       ${detail}` : ""}`);
-  if (!ok) failures.push(message);
+  if (!ok) failed += 1;
 };
-const attempt = (message, work) => {
-  try {
-    work();
-  } catch (error) {
-    check(false, message, error.message);
+/** Print one group's checks and accepted differences; stop at the first group that failed. */
+const report = (name, { checks, warnings }) => {
+  if (warnings.length > 0) {
+    console.log(`warn ${name} differs from ${previousTag}, accepted by --allow-asset-change; confirm each against release.yml:`);
+    for (const warning of warnings) console.log(`warn   ${warning}`);
   }
-};
-const finishGroup = (name) => {
-  if (failures.length > 0) {
-    console.error(`\n${name} failed; ${failures.length} problem(s). The release is NOT verified.`);
+  checks.forEach(print);
+  if (failed > 0) {
+    console.error(`\n${name} failed; ${failed} problem(s). The release is NOT verified.`);
     process.exit(1);
   }
 };
 const gh = (args, options = {}) => execFileSync("gh", args, { encoding: "utf8", ...options });
 
-// Inputs: this release in full, the previous one's asset names and latest.json.
+// Inputs: this release in full and its draft body; the previous one's asset names and latest.json.
 const dir = join(root, tag);
 const previousDir = join(root, previousTag);
 if (!values["no-download"]) {
@@ -100,89 +101,46 @@ if (!values["no-download"]) {
   writeFileSync(join(root, `${previousTag}.assets.json`), JSON.stringify(names));
 }
 const assets = readdirSync(dir).sort();
-const previousAssets = JSON.parse(readFileSync(join(root, `${previousTag}.assets.json`), "utf8"));
-const read = (name) => readFileSync(join(dir, name));
+const text = (path) => readFileSync(path, "utf8");
+const previousAssets = JSON.parse(text(join(root, `${previousTag}.assets.json`)));
+const bytesByName = new Map(assets.filter((name) => name !== "SHA256SUMS.txt").map((name) => [name, readFileSync(join(dir, name))]));
+const sigTextByName = new Map(assets.filter((name) => name.endsWith(".sig")).map((name) => [name, text(join(dir, name))]));
 
 // 1. Asset set.
-const expected = expectedAssetNames(previousAssets, previousVersion, version);
-const sameSet = JSON.stringify(assets) === JSON.stringify(expected);
-if (sameSet || !values["allow-asset-change"]) {
-  check(sameSet, `asset set matches ${previousTag} renamed (${assets.length} assets)`);
-  for (const name of expected.filter((name) => !assets.includes(name))) check(false, `missing asset ${name}`);
-  for (const name of assets.filter((name) => !expected.includes(name))) check(false, `unexpected asset ${name}`);
-} else {
-  console.log(`warn asset set differs from ${previousTag}; accepted by --allow-asset-change: ${assets.join(", ")}`);
-}
-finishGroup("Asset set");
+report("asset set", checkAssetSet(assets, expectedAssetNames(previousAssets, previousVersion, version), allowChange));
 
 // 2. SHA256SUMS.txt.
-attempt("SHA256SUMS.txt is readable", () => {
-  const sums = parseSums(read("SHA256SUMS.txt").toString("utf8"));
-  const summed = assets.filter((name) => name !== "SHA256SUMS.txt");
-  check(JSON.stringify([...sums.keys()].sort()) === JSON.stringify(summed), "SHA256SUMS.txt lists every other asset");
-  for (const name of summed) {
-    check(sums.get(name) === createHash("sha256").update(read(name)).digest("hex"), `sha256 ${name}`);
-  }
-});
-finishGroup("SHA256SUMS");
+report("SHA256SUMS", checkSums(assets.includes("SHA256SUMS.txt") ? text(join(dir, "SHA256SUMS.txt")) : "", bytesByName));
 
 // 3. Minisign signatures under the updater key installed apps already trust.
 const configAt = (ref) =>
   execFileSync("git", ["show", `${ref}:src-tauri/tauri.conf.json`], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-let publicKey;
-attempt(`updater key is read from ${previousTag} and ${tag} (git fetch --tags if a tag is missing)`, () => {
-  const trusted = parseUpdaterPublicKey(configAt(previousTag));
-  const current = parseUpdaterPublicKey(configAt(tag));
-  check(trusted.encoded === current.encoded, `${tag} keeps the updater key installed ${previousTag} apps trust`);
-  publicKey = trusted;
-});
-finishGroup("Updater key");
-for (const sigName of assets.filter((name) => name.endsWith(".sig"))) {
-  const target = sigName.slice(0, -".sig".length);
-  attempt(`${sigName} is a minisign signature of ${target}`, () => {
-    const signature = parseMinisignSignature(read(sigName).toString("utf8"));
-    const result = verifyMinisign(signature, read(target), publicKey);
-    check(result.madeWithKey, `${sigName} was made with the updater key`);
-    check(result.signsFile, `${sigName} signs ${target}`);
-    check(result.trustedCommentSigned, `${sigName} trusted comment is signed`);
-    check(trustedCommentNames(signature.trustedComment, target, version), `${sigName} trusted comment names ${target}`);
-  });
+let configs;
+try {
+  configs = [configAt(previousTag), configAt(tag)];
+} catch (error) {
+  report("updater key", { checks: [{ ok: false, message: `tauri.conf.json is readable at ${previousTag} and ${tag}`, detail: `${error.message.split("\n")[0]} (git fetch --tags)` }], warnings: [] });
 }
-finishGroup("Signatures");
+const keys = checkUpdaterKeys(...configs);
+report("updater key", keys);
+report("signatures", checkSignatures(sigTextByName, bytesByName, version, keys.publicKey));
 
 // 4. latest.json.
-attempt("latest.json is readable", () => {
-  const latest = JSON.parse(read("latest.json").toString("utf8"));
-  const previousLatest = JSON.parse(readFileSync(join(previousDir, "latest.json"), "utf8"));
-  check(latest.version === version, `latest.json version is ${version}`);
-  check(!Number.isNaN(Date.parse(latest.pub_date)), "latest.json pub_date is a date");
-  const platforms = Object.keys(latest.platforms ?? {}).sort();
-  const samePlatforms = JSON.stringify(platforms) === JSON.stringify(Object.keys(previousLatest.platforms ?? {}).sort());
-  if (samePlatforms || !values["allow-asset-change"]) {
-    check(samePlatforms, `latest.json platforms match ${previousTag}: ${platforms.join(", ")}`);
-  } else {
-    console.log(`warn latest.json platforms differ from ${previousTag}; accepted by --allow-asset-change: ${platforms.join(", ")}`);
-  }
-  const prefix = `https://github.com/${repo}/releases/download/${tag}/`;
-  for (const [platform, entry] of Object.entries(latest.platforms ?? {})) {
-    const asset = String(entry?.url ?? "").startsWith(prefix) ? entry.url.slice(prefix.length) : null;
-    check(asset !== null && assets.includes(asset), `${platform} url points at an asset of ${tag}`);
-    if (asset && assets.includes(`${asset}.sig`)) {
-      check(String(entry.signature ?? "").trim() === read(`${asset}.sig`).toString("utf8").trim(), `${platform} signature equals ${asset}.sig`);
-    } else {
-      check(false, `${platform} has a .sig asset`);
-    }
-  }
-  const body = readFileSync(join(root, `${tag}.body.md`), "utf8");
-  check(
-    notesMatch(latest.notes, body.replace(/\n$/, "")),
-    "latest.json notes match the release body (installed apps show these)",
-    "the draft notes changed after publish-draft ran: re-run that job so latest.json carries them",
-  );
-});
-finishGroup("latest.json");
+report(
+  "latest.json",
+  checkFeed(text(join(dir, "latest.json")), text(join(previousDir, "latest.json")), {
+    repo,
+    tag,
+    version,
+    assets,
+    sigTextByName,
+    body: draftBody(text(join(root, `${tag}.body.md`))),
+    allowChange,
+  }),
+);
 
 // 5. Build provenance: this repo's Release workflow, at this tag, on GitHub-hosted runners.
+const attestations = [];
 for (const name of assets.filter((name) => /\.(exe|dmg|app\.tar\.gz)$/.test(name))) {
   let error = null;
   try {
@@ -199,8 +157,8 @@ for (const name of assets.filter((name) => /\.(exe|dmg|app\.tar\.gz)$/.test(name
   } catch (caught) {
     error = String(caught.stderr ?? caught.message).trim().split(/\r?\n/).slice(-3).join(" | ");
   }
-  check(error === null, `attestation ${name} (release.yml at refs/tags/${tag})`, error);
+  attestations.push({ ok: error === null, message: `attestation ${name} (release.yml at refs/tags/${tag})`, detail: error });
 }
-finishGroup("Attestations");
+report("attestations", { checks: attestations, warnings: [] });
 
 console.log(`\n${tag} verified against ${previousTag}.`);
