@@ -489,3 +489,37 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
         }
     }
 }
+
+/// Refreshes rebuild the cards from the snapshots on disk, so the count has to survive there, not
+/// only in the card the first poll after switching away merges into.
+#[test]
+fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_refreshes() {
+    use crate::dto::LimitsResetCreditsDto;
+    use crate::limits::login::{remember, remembered};
+    let home = tempfile::tempdir().unwrap();
+    let p = stored(home.path());
+    let banked = Some(LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: None,
+    });
+    let mut reading_with_count = reading(&p);
+    reading_with_count.reset_credits.clone_from(&banked);
+    remember(home.path(), &reading_with_count).unwrap();
+
+    for (refresh, observed_at) in ["2026-09-20T00:00:00Z", "2026-09-21T00:00:00Z"]
+        .into_iter()
+        .enumerate()
+    {
+        let mut entries = remembered(home.path(), AgentId::Claude);
+        let result = poll_with(home.path(), &p, 0, true, &|| Ok(open(home.path())), &|p| {
+            let mut dto = reading(p);
+            dto.windows[0].observed_at = observed_at.into();
+            FetchResult {
+                login: p.login.clone(),
+                result: Ok(dto),
+            }
+        });
+        merge(&mut entries, &p, result);
+        assert_eq!(entries[0].reset_credits, banked, "refresh {refresh}");
+    }
+}
