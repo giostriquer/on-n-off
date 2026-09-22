@@ -12,6 +12,7 @@ deliberately short.
 | touch `cli_locate.rs`, `process.rs`, `scripts/`, or CI | [`OS.md`](OS.md) |
 | change a provider adapter | [`PROVIDERS.md`](PROVIDERS.md) — update it in the same change |
 | hand off or smoke-test a build | [`HANDOFF.md`](HANDOFF.md) |
+| cut a release | [`/release-version`](.claude/skills/release-version/SKILL.md) |
 
 ## Project map
 
@@ -47,6 +48,9 @@ of the file — start there, not here.
 - `build-bundle.ps1` — builds, validates and stages one installer format (`nsis`, `dmg`).
 - `read-rust-toolchain.ps1`, `prune-rust-toolchains.ps1` — see "Toolchain pinning" below.
 - `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
+- `verify-release.mjs` — checks a drafted release's assets, checksums, updater signatures, feed
+  and attestations against the previous release before it is published. Its pure checks live in
+  `release-verification.mjs`.
 
 ## Toolchain pinning
 
@@ -180,6 +184,7 @@ Run from the repository root, in PowerShell on Windows or bash/zsh on macOS.
 bun install
 bun run test
 bun run check
+bun test scripts/                          # release verifier
 bun run build
 bun run tauri dev
 
