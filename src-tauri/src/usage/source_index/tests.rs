@@ -1,7 +1,10 @@
 use super::*;
 use crate::paths::scratch_dir;
+use crate::usage::transcripts::parse_claude_line;
+use std::io::Write;
 use std::thread;
 use std::time::Duration;
+use test_support::with_live_transcript;
 
 const JULY_START: i64 = 1_783_036_800_000;
 const AUGUST_START: i64 = 1_785_715_200_000;
@@ -317,11 +320,108 @@ fn unresolved_file_is_pending_and_retried_on_next_reconciliation() {
 }
 
 #[test]
-fn file_that_changes_during_both_parse_attempts_remains_pending() {
+fn file_that_changes_during_both_parse_attempts_reads_as_moving_with_what_it_held() {
     let identities = std::cell::RefCell::new(vec![(2, 2), (3, 3)].into_iter());
-    let result =
-        read_stable_records_with(1, 1, || Some(Vec::new()), || identities.borrow_mut().next());
-    assert!(result.is_none());
+    let attempts = std::cell::Cell::new(0u64);
+    let result = read_stable_records_with(
+        1,
+        1,
+        || {
+            attempts.set(attempts.get() + 1);
+            Some(vec![parse_claude_line(&record(
+                "2026-08-07T04:05:13.944Z",
+                "msg-1",
+                attempts.get(),
+            ))
+            .unwrap()])
+        },
+        || identities.borrow_mut().next(),
+    );
+    match result {
+        StableRead::Moving(records) => assert_eq!(
+            records[0].totals.output_tokens, 2,
+            "the latest attempt is what the file held last"
+        ),
+        other => panic!("expected Moving, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_transcript_unreadable_mid_read_reads_as_failed() {
+    let result = read_stable_records_with(1, 1, || None, || Some((1, 1)));
+    assert!(matches!(result, StableRead::Failed));
+}
+
+/// A live session's transcript changes while every read looks at it. Dropping it from the read
+/// took an always-active session out of the total; it now counts what it holds, and the summary is
+/// marked incomplete so it is neither cached nor trusted as final.
+#[test]
+fn a_transcript_still_being_written_counts_what_it_holds_instead_of_dropping_out() {
+    let home = scratch_dir("usage-source-index-live");
+    let path = transcript_path(&home, "live.jsonl");
+    write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
+    let mut cache = ScanCache::new();
+    assert!(reconcile_home(&home, &mut cache).snapshot.is_complete());
+    let growth = record("2026-08-07T04:06:00.000Z", "msg-live", 5);
+
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(format!("{}\n", record("2026-08-07T04:05:30.000Z", "msg-2", 30)).as_bytes())
+        .unwrap();
+    let prepared = with_live_transcript(&path, &growth, || {
+        let reconciled = reconcile_home(&home, &mut cache);
+        assert!(
+            !reconciled.snapshot.is_complete(),
+            "the live file is pending"
+        );
+        prepare_sources(&reconciled.snapshot, &mut cache, 0)
+    });
+
+    assert!(!prepared.complete);
+    let outputs: Vec<u64> = prepared
+        .files
+        .iter()
+        .flat_map(|file| file.records.iter())
+        .map(|record| record.totals.output_tokens)
+        .collect();
+    assert!(
+        outputs.starts_with(&[20, 30]),
+        "the live file still counts, appended lines included: {outputs:?}"
+    );
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// A file that cannot be read at all mid-scan (removed, locked) keeps its last parse for this read.
+#[test]
+fn a_transcript_that_vanishes_mid_read_keeps_its_last_parse() {
+    let home = scratch_dir("usage-source-index-vanished");
+    let path = transcript_path(&home, "vanishing.jsonl");
+    write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
+    let mut cache = ScanCache::new();
+    reconcile_home(&home, &mut cache);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(format!("{}\n", record("2026-08-07T04:05:30.000Z", "msg-2", 30)).as_bytes())
+        .unwrap();
+    let growth = record("2026-08-07T04:06:00.000Z", "msg-live", 5);
+    let reconciled = with_live_transcript(&path, &growth, || reconcile_home(&home, &mut cache));
+    std::fs::remove_file(&path).unwrap();
+
+    let prepared = prepare_sources(&reconciled.snapshot, &mut cache, 0);
+
+    assert!(!prepared.complete);
+    let outputs: Vec<u64> = prepared
+        .files
+        .iter()
+        .flat_map(|file| file.records.iter())
+        .map(|record| record.totals.output_tokens)
+        .collect();
+    assert_eq!(outputs, [20], "its last stable parse");
+    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]

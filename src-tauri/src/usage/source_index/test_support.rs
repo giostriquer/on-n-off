@@ -15,3 +15,36 @@ pub(crate) fn reset_transcript_parse_count() {
 pub(crate) fn transcript_parse_count() -> usize {
     TRANSCRIPT_PARSE_COUNT.get()
 }
+
+thread_local! {
+    /// A transcript a test treats as live: every parse of it is followed by one more appended line,
+    /// the way an agent session keeps writing while the scan reads.
+    static LIVE_TRANSCRIPT: std::cell::RefCell<Option<(std::path::PathBuf, String)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` while `path` grows by `line` after every parse of it.
+pub(crate) fn with_live_transcript<R>(
+    path: &std::path::Path,
+    line: &str,
+    f: impl FnOnce() -> R,
+) -> R {
+    LIVE_TRANSCRIPT.set(Some((path.to_path_buf(), line.to_string())));
+    let result = f();
+    LIVE_TRANSCRIPT.set(None);
+    result
+}
+
+pub(super) fn keep_writing_if_live(path: &std::path::Path) {
+    LIVE_TRANSCRIPT.with_borrow(|live| {
+        if let Some((live_path, line)) = live {
+            if live_path == path {
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+                writeln!(file, "{line}").unwrap();
+                // Keep the mtime moving too on filesystems with coarse timestamps.
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    });
+}

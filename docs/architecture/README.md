@@ -206,6 +206,13 @@ Three reading rules carry the accuracy, each pinned by a test:
   `~/.codex/archived_sessions/`, mtime intact; it is scanned as a second Codex root under the one
   Codex source.
 
+A transcript still being written while it is read (a live session) counts what it holds at that
+moment instead of dropping out of the total. `source_index::read_stable_records` parses a file
+up to twice and reports whether its size and mtime held still (`StableRead`). One that kept moving
+counts the last parse. One that cannot be read at all counts its last cached parse, if there is
+one. Neither result is cached, and the summary is not stored as final, so the next refresh reads
+the file again.
+
 A model the table has no price for is shown as **unpriced**, never as `$0.00`: its tokens count
 and its cost is left out of the total, which says how many models it leaves out. Any change to
 what a transcript parses to bumps `USAGE_TRANSCRIPT_PARSER_VERSION`, which invalidates every
