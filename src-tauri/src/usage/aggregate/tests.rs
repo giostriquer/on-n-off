@@ -120,14 +120,30 @@ fn hourly_window_includes_its_start_and_excludes_its_end() {
     let until = chrono::DateTime::parse_from_rfc3339("2026-08-07T04:37:00.000Z")
         .unwrap()
         .timestamp_millis();
-    let at = |timestamp_ms: i64| record(|r| r.timestamp_ms = timestamp_ms);
+    // Distinct output per instant, so a window shifted by a millisecond at both ends cannot
+    // count the same total.
+    let at = |timestamp_ms: i64, output: u64| {
+        record(|r| {
+            r.timestamp_ms = timestamp_ms;
+            r.totals.output_tokens = output;
+        })
+    };
     let result = aggregate(
-        &[at(since - 1), at(since), at(until - 1), at(until)],
+        &[
+            at(since - 1, 1),
+            at(since, 10),
+            at(until - 1, 100),
+            at(until, 1000),
+        ],
         "UTC",
         Resolution::Hour,
     );
-    let counted: u64 = result.buckets.iter().map(|bucket| bucket.records).sum();
-    assert_eq!(counted, 2);
+    let counted: u64 = result
+        .buckets
+        .iter()
+        .map(|bucket| bucket.totals.output_tokens)
+        .sum();
+    assert_eq!(counted, 110);
     assert_eq!(result.out_of_window, 2);
 }
 

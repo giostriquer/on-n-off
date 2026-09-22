@@ -359,7 +359,7 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
     // Copies of one record across files (resumed Claude sessions, a Codex rollout listed under
     // both roots) collapse before anything is counted, so the totals and the session counts both
     // follow the copy that is counted.
-    let (records, _) = richest_copies(
+    let records = richest_copies(
         prepared_sources
             .files
             .iter()

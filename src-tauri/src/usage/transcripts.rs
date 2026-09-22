@@ -85,7 +85,7 @@ impl UsageRecord {
 }
 
 /// One record per group of copies: the richest copy (see `UsageRecord::is_richer_than`) in the
-/// first copy's place, plus how many copies were dropped.
+/// first copy's place.
 ///
 /// A Claude message's copies share its `dedupe_key`. A Codex rollout carries no id, but one listed
 /// twice (moved to `archived_sessions/` between two walks, or kept stale after an incomplete walk)
@@ -94,10 +94,9 @@ impl UsageRecord {
 /// apart. Records with neither key are all kept.
 pub fn richest_copies<'a>(
     files: impl IntoIterator<Item = &'a [UsageRecord]>,
-) -> (Vec<&'a UsageRecord>, u64) {
+) -> Vec<&'a UsageRecord> {
     let mut kept: Vec<&UsageRecord> = Vec::new();
     let mut slot_of: HashMap<String, usize> = HashMap::new();
-    let mut dropped = 0;
     for records in files {
         let mut occurrences: HashMap<String, u32> = HashMap::new();
         for record in records {
@@ -115,7 +114,6 @@ pub fn richest_copies<'a>(
                 }
             };
             if let Some(&slot) = slot_of.get(&key) {
-                dropped += 1;
                 if record.is_richer_than(kept[slot]) {
                     kept[slot] = record;
                 }
@@ -125,7 +123,7 @@ pub fn richest_copies<'a>(
             }
         }
     }
-    (kept, dropped)
+    kept
 }
 
 fn codex_event_key(record: &UsageRecord) -> String {

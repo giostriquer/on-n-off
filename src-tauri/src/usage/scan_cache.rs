@@ -273,7 +273,7 @@ fn path_under_root(path: &str, root: &str) -> bool {
 /// One file's records with each Claude message's lines collapsed to its richest copy (see
 /// `richest_copies`), which keeps the cache small; the scan collapses copies across files again.
 pub fn dedupe_within_file(records: &[UsageRecord]) -> Vec<UsageRecord> {
-    richest_copies([records]).0.into_iter().cloned().collect()
+    richest_copies([records]).into_iter().cloned().collect()
 }
 
 #[cfg(test)]

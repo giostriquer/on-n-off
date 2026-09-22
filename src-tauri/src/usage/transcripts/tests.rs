@@ -145,11 +145,10 @@ fn richest_copies_keeps_one_record_per_message_whichever_file_holds_it_first() {
         [vec![partial.clone()], vec![billed.clone()]],
         [vec![billed.clone()], vec![partial.clone()]],
     ] {
-        let (kept, dropped) = richest_copies(files.iter().map(Vec::as_slice));
+        let kept = richest_copies(files.iter().map(Vec::as_slice));
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].totals.output_tokens, 50);
         assert_eq!(kept[0].session_id, "fork");
-        assert_eq!(dropped, 1);
     }
 }
 
@@ -160,10 +159,10 @@ fn richest_copies_breaks_output_ties_by_total_tokens_and_keeps_the_held_copy_on_
     let more_input = usage_record(UsageProvider::Claude, Some("k"), "richer", 200, 50);
 
     let tie = [held.clone(), same_usage];
-    let (kept, _) = richest_copies([&tie[..]]);
+    let kept = richest_copies([&tie[..]]);
     assert_eq!(kept[0].session_id, "held");
     let richer = [held, more_input];
-    let (kept, _) = richest_copies([&richer[..]]);
+    let kept = richest_copies([&richer[..]]);
     assert_eq!(kept[0].session_id, "richer");
 }
 
@@ -180,10 +179,10 @@ fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() 
     };
     let rollout = vec![event(1_000), event(5_000), event(1_000)];
 
-    let (kept, dropped) = richest_copies([rollout.as_slice(), rollout.as_slice()]);
-    assert_eq!((kept.len(), dropped), (3, 3));
+    let kept = richest_copies([rollout.as_slice(), rollout.as_slice()]);
+    assert_eq!(kept.len(), 3);
 
-    let (kept, _) = richest_copies([&rollout[..2], rollout.as_slice()]);
+    let kept = richest_copies([&rollout[..2], rollout.as_slice()]);
     assert_eq!(kept.len(), 3, "a stale, shorter listing adds nothing");
 
     let other_session: Vec<UsageRecord> = rollout
@@ -193,8 +192,22 @@ fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() 
             ..record.clone()
         })
         .collect();
-    let (kept, _) = richest_copies([rollout.as_slice(), other_session.as_slice()]);
+    let kept = richest_copies([rollout.as_slice(), other_session.as_slice()]);
     assert_eq!(kept.len(), 6);
+
+    let later_elsewhere = [event(9_000)];
+    let kept = richest_copies([rollout.as_slice(), &later_elsewhere[..]]);
+    assert_eq!(
+        kept.len(),
+        4,
+        "the same session's identical tokens at another instant are another event"
+    );
+    let other_model = [UsageRecord {
+        model: "gpt-6-sol".into(),
+        ..event(1_000)
+    }];
+    let kept = richest_copies([rollout.as_slice(), &other_model[..]]);
+    assert_eq!(kept.len(), 4, "and so are they under another model");
 
     let anonymous = [
         UsageRecord {
@@ -206,7 +219,7 @@ fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() 
             ..event(1_000)
         },
     ];
-    let (kept, _) = richest_copies([&anonymous[..], &anonymous[..]]);
+    let kept = richest_copies([&anonymous[..], &anonymous[..]]);
     assert_eq!(
         kept.len(),
         4,
