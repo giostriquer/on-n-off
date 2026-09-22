@@ -458,6 +458,27 @@ fn a_changed_or_live_transcript_counts_what_it_holds_uncached_and_not_final() {
     }
 }
 
+/// Reconcile leaves a live file pending: a parse of a file that never held still neither resolves
+/// its entry nor enters the scan cache, so the next reconcile reads it again.
+#[test]
+fn reconcile_leaves_a_live_transcript_pending_and_uncached() {
+    let home = scratch_dir("usage-source-index-live-reconcile");
+    let path = transcript_path(&home, "session.jsonl");
+    write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
+    let growth = record("2026-08-07T04:06:00.000Z", "msg-live", 5);
+    let mut cache = ScanCache::new();
+
+    let reconciled = with_live_transcript(&path, &growth, || reconcile_home(&home, &mut cache));
+
+    assert!(
+        !reconciled.snapshot.is_complete(),
+        "a moving file is pending"
+    );
+    assert!(!reconciled.scan_cache_dirty);
+    assert!(cache.is_empty());
+    let _ = std::fs::remove_dir_all(home);
+}
+
 #[test]
 fn a_same_size_rewrite_since_the_inventory_counts_uncached_and_not_final() {
     let home = scratch_dir("usage-source-index-rewritten");
