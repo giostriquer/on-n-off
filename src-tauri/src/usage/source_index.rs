@@ -416,34 +416,48 @@ pub fn prepare_sources(
         .values()
         .filter(|entry| entry.mtime_ms >= window_start_ms)
     {
-        let records = scan_cache
+        let cached = scan_cache
             .get(&entry.path)
-            .filter(|cached| {
-                cached.provider == entry.provider
-                    && cached.size == entry.size
-                    && cached.mtime_ms == entry.mtime_ms
-            })
-            .map(|cached| Arc::clone(&cached.records))
-            .or_else(|| {
+            .filter(|cached| cached.provider == entry.provider);
+        let records = match cached {
+            Some(cached) if cached.size == entry.size && cached.mtime_ms == entry.mtime_ms => {
+                Some(Arc::clone(&cached.records))
+            }
+            _ => {
                 let path = Path::new(&entry.path);
-                let (size, mtime_ms, records) =
-                    read_stable_records(path, entry.provider, entry.size, entry.mtime_ms)?;
-                if size != entry.size || mtime_ms != entry.mtime_ms {
-                    return None;
-                }
-                let records = Arc::new(records);
-                scan_cache.insert(
-                    entry.path.clone(),
-                    CachedFile {
+                match read_stable_records(path, entry.provider, entry.size, entry.mtime_ms) {
+                    TranscriptRead::Stable {
                         size,
                         mtime_ms,
-                        provider: entry.provider,
-                        records: Arc::clone(&records),
-                    },
-                );
-                scan_cache_dirty = true;
-                Some(records)
-            });
+                        records,
+                    } if size == entry.size && mtime_ms == entry.mtime_ms => {
+                        let records = Arc::new(records);
+                        scan_cache.insert(
+                            entry.path.clone(),
+                            CachedFile {
+                                size,
+                                mtime_ms,
+                                provider: entry.provider,
+                                records: Arc::clone(&records),
+                            },
+                        );
+                        scan_cache_dirty = true;
+                        Some(records)
+                    }
+                    // Changed since the inventory, or still being written (a live session): what
+                    // it holds now counts, uncached, and the read is not final.
+                    TranscriptRead::Stable { records, .. } | TranscriptRead::Moving(records) => {
+                        complete = false;
+                        Some(Arc::new(records))
+                    }
+                    // Unreadable right now: its last cached parse, if any, for this read only.
+                    TranscriptRead::Failed => {
+                        complete = false;
+                        cached.map(|cached| Arc::clone(&cached.records))
+                    }
+                }
+            }
+        };
 
         let Some(records) = records else {
             complete = false;
@@ -505,7 +519,15 @@ fn inspect_changed_file(
         }
     }
 
-    let parsed = read_stable_records(&observed.path, provider, observed.size, observed.mtime_ms);
+    let parsed =
+        match read_stable_records(&observed.path, provider, observed.size, observed.mtime_ms) {
+            TranscriptRead::Stable {
+                size,
+                mtime_ms,
+                records,
+            } => Some((size, mtime_ms, records)),
+            TranscriptRead::Moving(_) | TranscriptRead::Failed => None,
+        };
     let parsed_ok = parsed.is_some();
     let (size, mtime_ms, records) =
         parsed.unwrap_or((observed.size, observed.mtime_ms, Vec::new()));
@@ -536,19 +558,39 @@ fn inspect_changed_file(
     )
 }
 
+/// What reading one transcript saw.
+#[derive(Debug)]
+pub enum TranscriptRead {
+    /// The file held still across a parse: its identity and the records it holds.
+    Stable {
+        size: u64,
+        mtime_ms: i64,
+        records: Vec<UsageRecord>,
+    },
+    /// The file never held still across a parse (a live session writing), or went away after one:
+    /// the records of the last parse that succeeded, everything the file held up to that point.
+    Moving(Vec<UsageRecord>),
+    /// No parse of the file succeeded.
+    Failed,
+}
+
 pub fn read_stable_records(
     path: &Path,
     provider: UsageProvider,
     initial_size: u64,
     initial_mtime_ms: i64,
-) -> Option<(u64, i64, Vec<UsageRecord>)> {
+) -> TranscriptRead {
     read_stable_records_with(
         initial_size,
         initial_mtime_ms,
         || {
             #[cfg(test)]
             test_support::note_transcript_parse();
-            read_transcript_records(path, provider).map(|records| dedupe_within_file(&records))
+            let records =
+                read_transcript_records(path, provider).map(|records| dedupe_within_file(&records));
+            #[cfg(test)]
+            test_support::keep_writing_if_live(path);
+            records
         },
         || file_identity(path),
     )
@@ -559,19 +601,30 @@ fn read_stable_records_with(
     initial_mtime_ms: i64,
     mut read: impl FnMut() -> Option<Vec<UsageRecord>>,
     mut identity: impl FnMut() -> Option<(u64, i64)>,
-) -> Option<(u64, i64, Vec<UsageRecord>)> {
+) -> TranscriptRead {
     let mut size = initial_size;
     let mut mtime_ms = initial_mtime_ms;
+    let mut last = None;
     for _ in 0..=1 {
-        let records = read()?;
-        let (after_size, after_mtime_ms) = identity()?;
+        let Some(records) = read() else {
+            break;
+        };
+        let Some((after_size, after_mtime_ms)) = identity() else {
+            last = Some(records);
+            break;
+        };
         if after_size == size && after_mtime_ms == mtime_ms {
-            return Some((size, mtime_ms, records));
+            return TranscriptRead::Stable {
+                size,
+                mtime_ms,
+                records,
+            };
         }
         size = after_size;
         mtime_ms = after_mtime_ms;
+        last = Some(records);
     }
-    None
+    last.map_or(TranscriptRead::Failed, TranscriptRead::Moving)
 }
 
 fn file_identity(path: &Path) -> Option<(u64, i64)> {
