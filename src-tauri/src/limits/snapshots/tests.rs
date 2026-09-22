@@ -374,7 +374,7 @@ fn remembered_reset_credits_survive_a_reload_and_older_snapshots_load_without_th
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
     dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
-        next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
+        next_expires_at: Some("2100-09-01T12:00:00+00:00".to_string()),
     });
     store.save(&dto).unwrap();
     assert_eq!(
@@ -551,7 +551,7 @@ fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_an
     let banked = |available_count| {
         Some(crate::dto::LimitsResetCreditsDto {
             available_count,
-            next_expires_at: Some("2026-10-01T00:00:00+00:00".to_string()),
+            next_expires_at: Some("2100-10-01T00:00:00+00:00".to_string()),
         })
     };
     let mut remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
@@ -569,4 +569,49 @@ fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_an
     answered.reset_credits = banked(0);
     store.save(&answered).unwrap();
     assert_eq!(store.load(AgentId::Codex)[0].reset_credits, banked(0));
+}
+
+/// A remembered count stops at its soonest known expiry: by then at least one reset has lapsed and
+/// what is left is not known until a read answers again. The windows beside it stay remembered, and
+/// a snapshot left with nothing observed is not loaded, as none would be saved.
+#[test]
+fn a_remembered_banked_reset_count_past_its_soonest_expiry_loads_as_unknown() {
+    let home = scratch_dir("limits-snap-reset-credits-lapsed");
+    let store = SnapshotStore::for_home(&home);
+    let save = |id: &str, windows: bool, next_expires_at: Option<&str>| {
+        let mut dto = snapshot(AgentId::Codex, id, "a@x", "2026-08-17T10:00:00.000Z");
+        if !windows {
+            dto.windows.clear();
+        }
+        dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+            available_count: 2,
+            next_expires_at: next_expires_at.map(str::to_owned),
+        });
+        store.save(&dto).unwrap();
+        dto
+    };
+    let lapsed = save("lapsed", true, Some("2020-01-01T00:00:00+00:00"));
+    let ahead = save("ahead", true, Some("2100-01-01T00:00:00+00:00"));
+    let undated = save("undated", true, None);
+    save(
+        "lapsed-count-only",
+        false,
+        Some("2020-01-01T00:00:00+00:00"),
+    );
+
+    let loaded = store.load(AgentId::Codex);
+    let find = |id: &str| {
+        loaded
+            .iter()
+            .find(|dto| dto.account.as_ref().is_some_and(|account| account.id == id))
+    };
+    assert_eq!(find("lapsed").unwrap().reset_credits, None);
+    assert_eq!(find("lapsed").unwrap().windows, lapsed.windows);
+    assert_eq!(find("ahead").unwrap().reset_credits, ahead.reset_credits);
+    assert_eq!(
+        find("undated").unwrap().reset_credits,
+        undated.reset_credits
+    );
+    assert!(find("lapsed-count-only").is_none());
+    assert_eq!(loaded.len(), 3);
 }

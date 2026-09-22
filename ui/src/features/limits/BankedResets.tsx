@@ -5,7 +5,7 @@ import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
 import type { LimitsResetCredits, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
 import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
-import { usageLeft } from "./limitPresentation";
+import { unexpiredBankedResets, usageLeft } from "./limitPresentation";
 import { SummaryRow } from "./SummaryRow";
 
 /** Below this much usage left a banked reset is doing what it is for, so it is spent without asking. */
@@ -39,12 +39,13 @@ export const CLAUDE_RESET_HINT = "/limit-reset in Claude Code";
  * when the card is given one, where the reset is spent.
  */
 export function BankedResetsRow({ resetCredits, hint, now }: { resetCredits?: LimitsResetCredits | null; hint?: string; now: number }) {
-  if (!resetCredits || resetCredits.availableCount <= 0) return null;
-  const expiresIn = formatResetIn(resetCredits.nextExpiresAt, now);
-  const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
-  const expiry = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
+  const banked = unexpiredBankedResets(resetCredits, now);
+  if (!banked) return null;
+  const expiresIn = formatResetIn(banked.nextExpiresAt, now);
+  const lead = banked.availableCount > 1 ? "next expires" : "expires";
+  const expiry = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(banked.nextExpiresAt)}` : undefined;
   const note = [expiry, hint].filter(Boolean).join(" · ");
-  return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
+  return <SummaryRow label="Banked resets" value={banked.availableCount} note={note} />;
 }
 
 /**
@@ -70,7 +71,7 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
   const [result, setResult] = useState<{ role: "status" | "alert"; message: string } | null>(null);
   const attempt = useRef<string | null>(null);
   const accountId = entry.account?.id;
-  const offered = current && entry.currentAccount && entry.status === "ok" && (entry.resetCredits?.availableCount ?? 0) > 0;
+  const offered = current && entry.currentAccount && entry.status === "ok" && unexpiredBankedResets(entry.resetCredits, now) !== null;
   if (!accountId || (!offered && !result)) return null;
   const left = usageLeft(entry, now);
 

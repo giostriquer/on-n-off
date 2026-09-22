@@ -7,7 +7,7 @@ import {
   parseInstant,
   usageTextColor,
 } from "$lib/limitsFormat";
-import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitWindow, LimitsResetCredits, ProviderLimits } from "$lib/limitsTypes";
 import { formatAgo } from "$lib/timeFormat";
 
 export type LimitWindowPresentation = {
@@ -102,6 +102,18 @@ export function usableAgainAt(entry: ProviderLimits, now: number): number {
       .filter((window) => presentLimitWindow(window, now).percent >= 100)
       .map((window) => parseInstant(window.resetsAt) ?? Infinity),
   );
+}
+
+/**
+ * The banked resets a card can still show: a positive count whose soonest known expiry is ahead of
+ * `now`. Once that expiry passes, at least one reset has lapsed and what is left is not known, so the
+ * count stays off the card until a read answers again. The backend drops such a count from
+ * remembered snapshots by the same rule.
+ */
+export function unexpiredBankedResets(resetCredits: LimitsResetCredits | null | undefined, now: number): LimitsResetCredits | null {
+  if (!resetCredits || resetCredits.availableCount <= 0) return null;
+  const expiresAt = parseInstant(resetCredits.nextExpiresAt);
+  return expiresAt !== null && expiresAt <= now ? null : resetCredits;
 }
 
 /**

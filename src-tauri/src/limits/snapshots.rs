@@ -106,6 +106,7 @@ impl SnapshotStore {
     }
 
     fn load_all(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
+        let now = Utc::now();
         let prefix = format!("{}-", provider.key());
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return Vec::new();
@@ -121,9 +122,10 @@ impl SnapshotStore {
                 let path = entry.path();
                 let raw = fs::read_to_string(&path).ok()?;
                 let stored = decode(&raw)?;
-                Some((stored.latest_observed_at(), stored.into_dto()))
+                Some((stored.latest_observed_at(), stored.into_dto(now)))
             })
-            .filter(|(_, dto)| dto.provider == provider)
+            // A banked-reset count past its expiry can leave nothing observed, which is never saved.
+            .filter(|(_, dto)| dto.provider == provider && dto.has_observations())
             .collect();
         snapshots.sort_by_key(|(observed_at, _)| Reverse(*observed_at));
         snapshots.into_iter().map(|(_, dto)| dto).collect()
@@ -215,7 +217,7 @@ impl StoredSnapshot {
             .or_else(|| latest_window_observed_at(&self.windows))
     }
 
-    fn into_dto(self) -> ProviderLimitsDto {
+    fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
         ProviderLimitsDto {
             provider: self.provider,
             status: LimitsStatus::Ok,
@@ -225,11 +227,22 @@ impl StoredSnapshot {
             plan: self.plan,
             windows: self.windows,
             credits: self.credits,
-            reset_credits: self.reset_credits,
+            reset_credits: self.reset_credits.filter(|resets| !lapsed(resets, now)),
             // A live offer belongs to the read that saw it and is never remembered.
             reset_offer: None,
         }
     }
+}
+
+/// Whether a remembered banked-reset count has reached its soonest known expiry. By then at least
+/// one reset has lapsed and what is left is not known, so the count is unknown until a read answers
+/// again. The UI applies the same rule to a card already on screen (`unexpiredBankedResets`).
+fn lapsed(resets: &LimitsResetCreditsDto, now: DateTime<Utc>) -> bool {
+    resets
+        .next_expires_at
+        .as_deref()
+        .and_then(parse_observed_at)
+        .is_some_and(|expires_at| expires_at <= now)
 }
 
 /// Figures with no observation time of their own, which a successful read dates when it stores them.
