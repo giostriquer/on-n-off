@@ -56,11 +56,6 @@ const DEFAULT_SCOPES: [&str; 5] = [
 /// budget everything between `acquire` and release has to fit inside.
 const LOCK_STALE: Duration = Duration::from_secs(60);
 
-/// Deadline for the one `security` call made while the lock is held. Comfortably inside
-/// [`LOCK_STALE`], because a write that outlives the lock is a write racing whoever broke it.
-#[cfg(target_os = "macos")]
-const KEYCHAIN_WRITE_DEADLINE: Duration = Duration::from_secs(20);
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RenewError {
     /// Another process holds Claude Code's refresh lock. Its renewal is the one that should win,
@@ -278,9 +273,11 @@ impl Writer {
 
     fn commit(self, raw: &str) -> Result<(), String> {
         match &self.target {
-            WriterTarget::Keychain { account } => {
-                write_keychain(account, credentials::CLAUDE_KEYCHAIN_SERVICE, raw)
-            }
+            WriterTarget::Keychain { account } => super::keychain::write(
+                credentials::CLAUDE_KEYCHAIN_SERVICE,
+                account,
+                raw.as_bytes(),
+            ),
             WriterTarget::File { path, temporary } => {
                 write_private(temporary, raw)
                     .map_err(|error| format!("{}: {error}", temporary.display()))?;
@@ -415,55 +412,6 @@ fn keychain_account() -> Result<String, String> {
 #[cfg(not(target_os = "macos"))]
 fn keychain_account() -> Result<String, String> {
     Err("this platform has no Claude Code Keychain entry".to_string())
-}
-
-/// `security -i` reads the command from stdin, which is the whole point: the token would otherwise
-/// sit in the process table for every other user on the machine to read. `-U` updates the entry in
-/// place, and `-X` takes the JSON hex-encoded, as Claude Code writes it.
-#[cfg(target_os = "macos")]
-fn write_keychain(account: &str, service: &str, raw: &str) -> Result<(), String> {
-    use crate::process::{wait_with_deadline, CommandOutcome};
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let command = keychain_command(account, service, raw);
-    let mut child = Command::new("/usr/bin/security")
-        .arg("-i")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("could not run /usr/bin/security: {error}"))?;
-    // Bound and dropped explicitly: `security` reads commands until stdin closes, so the handle
-    // has to go before the wait. One command of a few kilobytes cannot fill a pipe buffer, so
-    // writing it before the drainers start cannot deadlock.
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "security took no stdin".to_string())?;
-    let written = stdin.write_all(command.as_bytes());
-    drop(stdin);
-    written.map_err(|error| format!("could not write to security: {error}"))?;
-    match wait_with_deadline(child, KEYCHAIN_WRITE_DEADLINE) {
-        Ok(CommandOutcome::Exited { success: true, .. }) => Ok(()),
-        Ok(CommandOutcome::Exited { stderr, .. }) => {
-            Err(format!("Keychain write failed ({})", stderr.trim()))
-        }
-        Ok(CommandOutcome::TimedOut) => Err("Keychain write was not answered in time".to_string()),
-        Err(error) => Err(format!("Keychain write failed: {error}")),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn write_keychain(_account: &str, _service: &str, _raw: &str) -> Result<(), String> {
-    Err("this platform has no Claude Code Keychain entry".to_string())
-}
-
-/// Kept pure so the quoting is testable on every platform; only the spawn above is macOS-only.
-#[cfg(any(target_os = "macos", test))]
-fn keychain_command(account: &str, service: &str, raw: &str) -> String {
-    let hex: String = raw.bytes().map(|byte| format!("{byte:02x}")).collect();
-    format!("add-generic-password -U -a \"{account}\" -s \"{service}\" -X \"{hex}\"\n")
 }
 
 /// Claude Code's two refresh locks, held for one renewal and released when this value drops.

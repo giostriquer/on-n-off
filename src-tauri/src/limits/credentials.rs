@@ -100,7 +100,7 @@ pub type KeychainProbe = Result<Option<String>, String>;
 ///
 /// Deliberately not gated to macOS. The renewal names the store it is writing to on every
 /// platform, and the stub that answers "there is no Keychain here" is chosen inside
-/// `write_keychain`, not by making the name itself disappear.
+/// `accounts::keychain::write`, not by making the name itself disappear.
 pub(crate) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 /// What one credential source (Keychain entry or file) yielded.

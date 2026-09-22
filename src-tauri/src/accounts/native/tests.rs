@@ -143,3 +143,95 @@ fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
         request.join().unwrap();
     }
 }
+
+/// Activation's Keychain path on macOS sends `security` exactly the commands the shared writer
+/// builds, and nothing else: the login as one `add-generic-password -U` with the secret
+/// hex-encoded, a removal as one `delete-generic-password` naming account and service. A write
+/// back through the `keyring` crate — this process's own identity, which is what prompted on
+/// every switch — would send nothing here and fail this test.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_keyring_target_writes_and_deletes_through_security() {
+    use crate::accounts::keychain::{with_test_runner, Runner};
+    use crate::process::CommandOutcome;
+
+    let ok: Runner = |_| CommandOutcome::Exited {
+        success: true,
+        stdout: String::new(),
+        stderr: String::new(),
+    };
+    // Synthetic names on purpose: anyone re-checking this guard by putting the `keyring` crate
+    // back would otherwise file a second item under Claude Code's own service, which the
+    // service-only read could then return instead of the real login.
+    let target = Target::Keyring {
+        service: "on-n-off seam rehearsal".into(),
+        account: "on-n-off-test".into(),
+    };
+    let login = json!({"claudeAiOauth": {"accessToken": "one", "note": "a \"quoted\" word"}});
+    let hex: String = serde_json::to_vec(&login)
+        .unwrap()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+
+    let (result, sent) = with_test_runner(ok, || target.write(Some(&login)));
+    assert_eq!(result, Ok(()));
+    assert_eq!(
+        sent,
+        vec![format!(
+            "add-generic-password -U -a \"on-n-off-test\" -s \"on-n-off seam rehearsal\" -X \"{hex}\"\n"
+        )]
+    );
+
+    let (result, sent) = with_test_runner(ok, || target.write(None));
+    assert_eq!(result, Ok(()));
+    assert_eq!(
+        sent,
+        vec![
+            "delete-generic-password -a \"on-n-off-test\" -s \"on-n-off seam rehearsal\"\n"
+                .to_string()
+        ]
+    );
+
+    let refused: Runner = |_| CommandOutcome::Exited {
+        success: false,
+        stdout: String::new(),
+        stderr: "User interaction is not allowed.".to_string(),
+    };
+    let (result, _) = with_test_runner(refused, || target.write(Some(&login)));
+    assert_eq!(
+        result,
+        Err("Keychain write failed (User interaction is not allowed).".to_string()),
+        "the refusal reads as a sentence, for the transaction to prefix its own"
+    );
+}
+
+/// The same path against the real tool, on a throwaway entry: publish, read back, remove, remove
+/// again. What it proves beyond the test above is the wiring to `security` itself.
+///
+/// `cargo test --manifest-path src-tauri/Cargo.toml rehearse_the_keyring_target -- --ignored`
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "writes a throwaway Keychain entry; not part of CI"]
+fn rehearse_the_keyring_target_through_security() {
+    let entry = crate::accounts::keychain::ThrowawayEntry {
+        service: "on-n-off native keychain rehearsal",
+        account: "on-n-off-test",
+    };
+    let target = Target::Keyring {
+        service: entry.service.into(),
+        account: entry.account.into(),
+    };
+    let login = json!({"claudeAiOauth": {"accessToken": "one", "note": "a \"quoted\" word"}});
+    target.write(Some(&login)).unwrap();
+    assert_eq!(target.read().unwrap(), Some(login));
+    target.write(None).unwrap();
+    assert_eq!(target.read().unwrap(), None);
+    target.write(None).unwrap();
+    assert_eq!(
+        target.read().unwrap(),
+        None,
+        "removing an entry already gone is not an error"
+    );
+    drop(entry);
+}
