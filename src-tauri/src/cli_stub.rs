@@ -17,8 +17,9 @@
 //!
 //! A link keeps everything else as it was. `$0` and `%~dp0` still name the test's own directory,
 //! so argument logs and copies stay private to it. On Unix the shared file is read-only, so no
-//! test can change another test's stub by writing through its link. Where no link can be made,
-//! the launcher is a private copy, as before.
+//! test can change another test's stub by writing through its link, and on every platform a stub
+//! written again under one name replaces its link or fails, never writing through it. Where no
+//! link can be made, the launcher is a private copy, as before.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -111,8 +112,15 @@ impl CliStub {
         let path = dir.join(launcher_file_name(&self.name));
         let body = self.body();
         // An earlier stub of this name may be a link to a shared launcher: replace the link rather
-        // than write through it.
-        let _ = fs::remove_file(&path);
+        // than write through it. A link that stays (one the OS still holds on Windows, where the
+        // shared file is writable) would carry this body into every stub sharing it, so stop.
+        if let Err(error) = fs::remove_file(&path) {
+            assert!(
+                error.kind() == io::ErrorKind::NotFound,
+                "cannot replace the earlier stub at {}: {error}",
+                path.display()
+            );
+        }
         let linked =
             shared_launcher(&body).is_some_and(|shared| fs::hard_link(shared, &path).is_ok());
         if !linked {

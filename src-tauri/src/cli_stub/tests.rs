@@ -1,6 +1,49 @@
 use super::*;
 use crate::paths::scratch_dir;
 
+/// A name no earlier run has used. A stub whose body carries it is this test's alone: this run
+/// creates and warms its shared launcher, and a test that breaks that launcher breaks no other.
+fn fresh_token(dir: &Path) -> String {
+    dir.file_name().unwrap().to_string_lossy().into_owned()
+}
+
+/// Removes the shared launcher made for a body only this test uses.
+fn discard_shared(stub: &CliStub) {
+    let _ = fs::remove_file(shared_launcher_path(&stub.body()));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stub_that_cannot_replace_the_old_one_never_writes_through_its_link() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch_dir("cli-stub-stuck");
+    let token = fresh_token(&dir);
+    let old = CliStub::new("tool").stdout(&format!("{token}-old"));
+    old.write(&dir);
+    let shared = shared_launcher_path(&old.body());
+    // Stands in for Windows, where a shared launcher stays writable and a link the OS still holds
+    // cannot be removed.
+    mark_executable(&shared, PRIVATE_MODE).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let new = CliStub::new("tool").stdout(&format!("{token}-new"));
+    let replaced = std::panic::catch_unwind(|| new.write(&dir));
+
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+    let shared_now = fs::read_to_string(&shared).unwrap();
+    discard_shared(&old);
+    discard_shared(&new);
+    assert_eq!(
+        shared_now,
+        old.body(),
+        "every stub linked to the old launcher would run the new body"
+    );
+    assert!(
+        replaced.is_err(),
+        "a stub that cannot replace the old one must fail, not leave the old body in place"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn repeated_stubs_share_the_launcher_file_the_first_one_warmed() {
