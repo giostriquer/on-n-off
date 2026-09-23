@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
@@ -126,7 +126,8 @@ function SwitchAlongsideConfirmation({ product, clients, disabled, onSwitch, onC
   product: string; clients: string[]; disabled: boolean; onSwitch: () => void; onCancel: () => void;
 }) {
   const keep = useRef<HTMLButtonElement>(null);
-  useEffect(() => { keep.current?.focus(); }, []);
+  // Before paint: the first frame that shows the question already has focus on the safe answer.
+  useLayoutEffect(() => { keep.current?.focus(); }, []);
   return <div role="group" aria-label={`Confirm switching while ${product} is running`} className="flex w-full flex-col gap-2 text-[12px]"
     onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onCancel(); } }}>
     <p className="m-0">{product} is still running in {clients.join(", ")}. Those sessions keep using the current account until you restart them. Don't sign out or sign in again from them: that can revoke saved logins.</p>
