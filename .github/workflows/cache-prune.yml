@@ -1,7 +1,7 @@
 name: Prune caches
 
 # GitHub caps Actions cache at 10 GB for the whole repository and evicts least-recently-used
-# entries once that is reached. Each Rust key generation costs roughly 1.9 GB across the four
+# entries once that is reached. Each Rust key generation costs roughly 2.7 GB across the six
 # shared keys, so a few compiler rolls or lockfile changes are enough to start evicting caches
 # that jobs are still restoring from. On 2026-08-20 the store sat at 9.85 GB across 20 entries.
 # The macOS jobs' Swift build caches (v0-swiftpm-*, one debug and one release family) add a
