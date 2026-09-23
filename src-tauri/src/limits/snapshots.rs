@@ -99,11 +99,11 @@ impl SnapshotStore {
         }
     }
 
-    /// Every remembered snapshot for `provider`, newest first. Unreadable files are skipped rather
-    /// than failing the whole read. Files from obsolete snapshot schemas are ignored.
+    /// The remembered snapshots the cards show for `provider`, newest first: `stored` less
+    /// any left with nothing observed once a lapsed banked-reset count is dropped (as `save` would
+    /// refuse to write it, and which so no longer hides the legacy history it superseded), less the
+    /// legacy history a remaining scoped observation supersedes.
     pub fn load(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
-        // A banked-reset count past its expiry can leave a snapshot with nothing observed, which is
-        // never saved, and which then no longer replaces the history it superseded.
         without_superseded(
             self.stored(provider)
                 .into_iter()
@@ -112,8 +112,10 @@ impl SnapshotStore {
         )
     }
 
-    /// Every readable snapshot for `provider`, newest first, whatever it still observes. Forget
-    /// works from this list, so an account whose count lapsed still takes the history it replaced.
+    /// Every readable snapshot for `provider`, newest first, whatever it still observes. Unreadable
+    /// files are skipped rather than failing the whole read, and files from obsolete snapshot
+    /// schemas are ignored. Forget works from this list, so an account whose count lapsed still
+    /// takes the history it replaced.
     fn stored(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
         let now = Utc::now();
         let prefix = format!("{}-", provider.key());
