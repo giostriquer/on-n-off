@@ -14,6 +14,10 @@ fn login(refresh: &str) -> Login {
         account: Value::Null,
     }
 }
+fn held(root: &std::path::Path) -> FileLease {
+    let file = std::fs::File::create(root.join("lock")).unwrap();
+    FileLease::acquire(file, std::fs::File::try_lock).unwrap()
+}
 #[test]
 fn adopts_the_latest_native_generation_without_duplicate_profiles() {
     let mut db = Database::default();
@@ -49,7 +53,7 @@ fn persisted_vault_roundtrip_never_exposes_tokens_in_plaintext() {
     let store = Store {
         root: root.path().into(),
         key: [3; 32],
-        _lease: std::fs::File::create(root.path().join("lock")).unwrap(),
+        _lease: held(root.path()),
     };
     let mut db = Database::default();
     db.save(identity("a"), login("never-plaintext"), None)
@@ -118,7 +122,7 @@ fn category_survives_credential_updates_and_can_be_cleared() {
     let store = Store {
         root: root.path().into(),
         key: [9; 32],
-        _lease: std::fs::File::create(root.path().join("lock")).unwrap(),
+        _lease: held(root.path()),
     };
     let mut db = Database::default();
     let user = Identity {
@@ -161,7 +165,7 @@ fn older_profile_names_load_as_categories_without_becoming_the_email() {
     let store = Store {
         root: root.path().into(),
         key: [7; 32],
-        _lease: std::fs::File::create(root.path().join("lock")).unwrap(),
+        _lease: held(root.path()),
     };
     let old = json!({"profiles":[{"id":"old","identity":{"provider":"claude","userId":"a","workspaceId":"team"},"label":"Client A","saved_at":"2026-09-13T00:00:00Z","login":{"auth":{},"account":{"emailAddress":"a@example.com"}}}]});
     let sealed = super::super::vault::seal(&[7; 32], &serde_json::to_vec(&old).unwrap()).unwrap();
@@ -178,7 +182,7 @@ fn billing_projects_only_the_exact_saved_codex_identity_after_vault_reload() {
     let store = Store {
         root: root.path().into(),
         key: [9; 32],
-        _lease: std::fs::File::create(root.path().join("lock")).unwrap(),
+        _lease: held(root.path()),
     };
     let mut db = Database::default();
     let saved = identity("inactive");
@@ -336,6 +340,55 @@ fn unlocking_an_existing_vault_does_not_hold_the_shared_account_lease() {
     .unwrap();
     assert!(Store::lease_with_timeout(home.path(), std::time::Duration::ZERO).is_err());
     drop(opened);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_finished_operation_frees_the_vault_lease_while_a_spawned_child_still_shares_it() {
+    // A child that another thread spawns meanwhile inherits the descriptor until it execs; the
+    // next operation must not wait on it.
+    let home = tempfile::tempdir().unwrap();
+    let (_, lease) = Store::lease(home.path()).unwrap();
+    let inherited = lease.duplicate().unwrap();
+    assert!(Store::lease_with_timeout(home.path(), std::time::Duration::ZERO).is_err());
+    drop(lease);
+    assert!(Store::lease_with_timeout(home.path(), std::time::Duration::ZERO).is_ok());
+    drop(inherited);
+}
+
+#[test]
+fn a_lease_timeout_override_lasts_only_as_long_as_its_guard() {
+    use std::time::Duration;
+    assert_eq!(lease_timeout(), Duration::from_secs(10));
+    {
+        let _short = lease_timeout_override::set(Duration::from_millis(50));
+        assert_eq!(lease_timeout(), Duration::from_millis(50));
+        let busy = std::thread::spawn(lease_timeout).join().unwrap();
+        assert_eq!(
+            busy,
+            Duration::from_secs(10),
+            "other threads keep the production wait"
+        );
+    }
+    assert_eq!(lease_timeout(), Duration::from_secs(10));
+}
+
+#[test]
+fn a_busy_vault_lease_gives_up_after_the_overridden_wait() {
+    use std::time::{Duration, Instant};
+    let home = tempfile::tempdir().unwrap();
+    let (_, holder) = Store::lease(home.path()).unwrap();
+    let _short = lease_timeout_override::set(Duration::from_millis(20));
+    let started = Instant::now();
+    assert_eq!(
+        Store::lease(home.path()).unwrap_err(),
+        "Another account operation is running. Retry when it finishes."
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "Store::lease must wait the overridden timeout, not the production one"
+    );
+    drop(holder);
 }
 
 #[test]

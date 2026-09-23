@@ -1,4 +1,5 @@
 use super::model::Identity;
+use crate::file_lease::FileLease;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -190,24 +191,63 @@ impl Database {
     }
 }
 
+/// How long an account operation waits for another one to finish before reporting it running.
+const LEASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn lease_timeout() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(timeout) = lease_timeout_override::current() {
+        return timeout;
+    }
+    LEASE_TIMEOUT
+}
+
+/// Shortens `Store::lease`'s wait on the current thread until the guard drops, so a test of a
+/// busy vault does not sit out the production timeout.
+#[cfg(test)]
+pub(crate) mod lease_timeout_override {
+    use std::{cell::Cell, time::Duration};
+
+    thread_local! {
+        static OVERRIDE: Cell<Option<Duration>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn current() -> Option<Duration> {
+        OVERRIDE.get()
+    }
+
+    #[must_use]
+    pub(crate) struct Guard(Option<Duration>);
+
+    pub(crate) fn set(timeout: Duration) -> Guard {
+        Guard(OVERRIDE.replace(Some(timeout)))
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            OVERRIDE.set(self.0);
+        }
+    }
+}
+
 pub struct Store {
     pub root: std::path::PathBuf,
     pub(super) key: [u8; 32],
-    _lease: std::fs::File,
+    _lease: FileLease,
 }
 impl Store {
-    pub fn lease(home: &std::path::Path) -> Result<(std::path::PathBuf, std::fs::File), String> {
-        Self::lease_with_timeout(home, std::time::Duration::from_secs(10))
+    pub fn lease(home: &std::path::Path) -> Result<(std::path::PathBuf, FileLease), String> {
+        Self::lease_with_timeout(home, lease_timeout())
     }
     fn lease_with_timeout(
         home: &std::path::Path,
         timeout: std::time::Duration,
-    ) -> Result<(std::path::PathBuf, std::fs::File), String> {
+    ) -> Result<(std::path::PathBuf, FileLease), String> {
         use std::fs::{self, OpenOptions, TryLockError};
         use std::time::{Duration, Instant};
         let root = home.join(".on-n-off/accounts");
         fs::create_dir_all(&root).map_err(|_| "Cannot create profile storage.")?;
-        let lease = OpenOptions::new()
+        let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
@@ -215,9 +255,9 @@ impl Store {
             .open(root.join("operation.lock"))
             .map_err(|_| "Cannot coordinate account changes.")?;
         let started = Instant::now();
-        loop {
-            match lease.try_lock() {
-                Ok(()) => break,
+        let lease = FileLease::acquire(file, |file| loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(()),
                 Err(TryLockError::WouldBlock) if started.elapsed() < timeout => {
                     // Blocking workers serialize reads and writes; brief contention is not an error.
                     std::thread::sleep(
@@ -225,15 +265,11 @@ impl Store {
                     );
                 }
                 Err(TryLockError::WouldBlock) => {
-                    return Err(
-                        "Another account operation is running. Retry when it finishes.".into(),
-                    )
+                    return Err("Another account operation is running. Retry when it finishes.")
                 }
-                Err(TryLockError::Error(_)) => {
-                    return Err("Cannot coordinate account changes.".into())
-                }
+                Err(TryLockError::Error(_)) => return Err("Cannot coordinate account changes."),
             }
-        }
+        })?;
         Ok((root, lease))
     }
     pub fn open(home: &std::path::Path, create: bool) -> Result<Self, String> {
