@@ -150,24 +150,25 @@ jobs:
       # below. Cargo's package-cache lock makes clippy wait if it is still running, and clippy
       # unpacks whatever it left undone, so a failure here costs time and never a verdict.
       # "Finish fetching Rust dependencies" waits for it and prints its output.
+      # `--target host-tuple` keeps the fetch to the host's dependencies, the set clippy compiles;
+      # without it, cargo fetch unpacks every platform's.
       - name: Start fetching Rust dependencies
         if: runner.os == 'Windows'
         run: |
           $fetch = Join-Path $env:RUNNER_TEMP 'cargo-fetch'
           New-Item -ItemType Directory -Force -Path $fetch | Out-Null
-          $hostTriple = (rustc -vV | Select-String '^host: (.+)$').Matches[0].Groups[1].Value
           Set-Content -LiteralPath (Join-Path $fetch 'fetch.ps1') -Value @'
-          param([string] $Target, [string] $Directory)
+          param([string] $Directory)
           $clock = [Diagnostics.Stopwatch]::StartNew()
-          cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target $Target *> (Join-Path $Directory 'output.log')
+          cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target host-tuple *> (Join-Path $Directory 'output.log')
           $code = $LASTEXITCODE ?? 'none'
           Set-Content -LiteralPath (Join-Path $Directory 'result.tmp') -Value "$code $([math]::Round($clock.Elapsed.TotalSeconds, 1))"
           Move-Item -LiteralPath (Join-Path $Directory 'result.tmp') -Destination (Join-Path $Directory 'result')
           '@
           $process = Start-Process pwsh -PassThru -WindowStyle Hidden -WorkingDirectory $env:GITHUB_WORKSPACE `
-            -ArgumentList '-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $fetch 'fetch.ps1'), $hostTriple, $fetch
+            -ArgumentList '-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $fetch 'fetch.ps1'), $fetch
           Set-Content -LiteralPath (Join-Path $fetch 'pid') -Value $process.Id
-          "Started cargo fetch for $hostTriple in the background (process $($process.Id))."
+          "Started cargo fetch in the background (process $($process.Id))."
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile

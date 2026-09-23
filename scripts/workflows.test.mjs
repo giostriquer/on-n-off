@@ -142,7 +142,9 @@ test("the Windows verify leg unpacks Rust dependencies in the background before 
   const finish = step(verify, "Finish fetching Rust dependencies");
   for (const candidate of [start, finish]) assert.equal(candidate.if, "runner.os == 'Windows'", candidate.name);
   assert.match(start.run, /Start-Process pwsh/);
-  assert.match(start.run, /cargo fetch --manifest-path src-tauri\/Cargo\.toml --locked --target \$Target/);
+  // host-tuple limits the fetch to the host's dependencies, the set clippy compiles.
+  assert.match(start.run, /cargo fetch --manifest-path src-tauri\/Cargo\.toml --locked --target host-tuple /);
+  assert.doesNotMatch(start.run, /rustc -vV/, "cargo resolves the host itself");
   assert.ok(start.index > step(verify, "Cache Rust dependencies").index, "the fetch needs the restored registry");
   assert.ok(start.index < step(verify, "Install frontend dependencies").index, "the fetch overlaps the frontend steps");
   assert.ok(finish.index > step(verify, "Build frontend").index, "nothing is left to overlap after the frontend build");
