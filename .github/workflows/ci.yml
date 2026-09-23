@@ -89,6 +89,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # EXPERIMENT W4: bun's cache on the workspace drive, so it can hardlink into node_modules.
+      - name: Keep the bun cache on the workspace drive
+        if: runner.os == 'Windows'
+        run: |
+          "BUN_INSTALL_CACHE_DIR=$(Join-Path $env:RUNNER_TEMP 'bun-install-cache')" >> $env:GITHUB_ENV
+
       # Defender scans every object file cargo writes. Excluding the build directories is worth
       # measurable minutes on the Rust steps and costs nothing when it fails, so it never gates
       # the job. Runner-only: never run this on a development machine.
@@ -96,10 +102,15 @@ jobs:
         if: runner.os == 'Windows'
         continue-on-error: true
         run: |
+          # EXPERIMENT W4 diagnostics
+          Get-MpComputerStatus | Format-List AMRunningMode, AntivirusEnabled, RealTimeProtectionEnabled, OnAccessProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled
           Add-MpPreference -ExclusionPath `
             $env:GITHUB_WORKSPACE, `
+            $env:RUNNER_TEMP, `
+            (Join-Path $env:USERPROFILE '.bun'), `
             (Join-Path $env:USERPROFILE '.cargo'), `
             (Join-Path $env:USERPROFILE '.rustup')
+          (Get-MpPreference).ExclusionPath
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -148,8 +159,42 @@ jobs:
           shared-key: verify-${{ matrix.platform }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # EXPERIMENT W5 step 1: does unpacking the registry sources account for clippy's slow start?
+      - name: Fetch Rust dependencies
+        if: runner.os == 'Windows'
+        run: |
+          $src = Join-Path $env:CARGO_HOME 'registry/src'
+          function Measure-Src {
+            if (-not (Test-Path -LiteralPath $src)) { return '0 0' }
+            $crates = (Get-ChildItem -LiteralPath $src -Directory | ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Directory }).Count
+            $files = (Get-ChildItem -LiteralPath $src -Recurse -File -Force).Count
+            "$crates $files"
+          }
+          $before = (Measure-Src) -split ' '
+          "W45 src_crates_before=$($before[0])"
+          "W45 src_files_before=$($before[1])"
+          "W45 bun_cache=$(bun pm cache)"
+          $hostTriple = (rustc -vV | Select-String '^host: (.+)$').Matches[0].Groups[1].Value
+          "host $hostTriple"
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target $hostTriple
+          if ($LASTEXITCODE -ne 0) { throw "cargo fetch failed with exit code $LASTEXITCODE." }
+          "W45 fetch_s=$($clock.Elapsed.TotalSeconds)"
+          $after = (Measure-Src) -split ' '
+          "W45 src_crates_after=$($after[0])"
+          "W45 src_files_after=$($after[1])"
+
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
+
+      # EXPERIMENT W4 diagnostics: did bun hardlink from its cache?
+      - name: Diagnose bun install
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          fsutil hardlink list node_modules/react/package.json
+          "W45 bun_cache_files=$((Get-ChildItem -LiteralPath $env:BUN_INSTALL_CACHE_DIR -Recurse -File -Force).Count)"
+          "W45 node_modules_files=$((Get-ChildItem -LiteralPath node_modules -Recurse -File -Force).Count)"
 
       - name: Test release version contract
         run: ./scripts/check-release-version.test.ps1
