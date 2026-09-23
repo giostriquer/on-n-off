@@ -96,10 +96,27 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   every Windows job that runs `bun install` points `BUN_INSTALL_CACHE_DIR` at `RUNNER_TEMP` and
   bun links instead of copying.
   Unpacking the cargo registry sources, which rust-cache makes every run redo, is also slow there
-  (about 17 s), so `ci.yml` does it in the background while the frontend steps run.
+  (about 17 s), so both Windows jobs of `verify.yml` do it in the background while their frontend
+  steps run.
   Platform-neutral frontend checks (`bun run test`, `bun run check`) run once on `ubuntu-24.04`
   instead of on both native legs; `bun run build` stays native because `tauri-build` needs
   `ui/dist` before the Rust steps.
+- Each native leg is two jobs of `verify.yml`, which `ci.yml` calls once per OS. `lint` runs
+  rustfmt, clippy, every `scripts/*.test.ps1`, and then the Windows debug build or the macOS native
+  checks, which run the notch helper that clippy's build script stages. `test` runs `cargo test`.
+  They start together, so a leg takes the longer of the two instead of their sum. Both compile the
+  crate, so each installs bun packages, builds `ui/dist`, and on macOS restores the Swift build
+  cache, which only `lint` saves; `test` takes each of those setup steps from `lint` by YAML alias,
+  so the two cannot drift. Each has a rust-cache key of its own (`verify-lint-<platform>`,
+  `verify-test-<platform>`), so neither overwrites what the other built. The ruleset requires checks
+  named `verify-windows` and `verify-macos`, so those are small ubuntu jobs. Each needs only its
+  own OS's call, runs with `if: always()` (a skipped required check would count as passing), and
+  fails unless every needed result is exactly `success`. They use bash and jq, because pwsh's first
+  start on a fresh ubuntu runner took 4-16 s at the end of every run. Measured in the same hour, a
+  warm run went from 222 s to 184 s (medians), for about 11 minutes of job time instead of about 7
+  and two macOS jobs at once instead of one. GitHub's free plan runs at most 5 macOS jobs at once
+  for the whole account, so three pull request runs at once, or two beside a main push (its CI run
+  and Bundle's dmg job hold 3), leave a macOS job queued, and the queue eats into that gain.
 - On macOS the Rust build script builds the two Swift helpers (`native_build.rs`,
   `native_billing_build.rs`), and building them cold, SDK modules and SweetCookieKit included, was
   most of the macOS `Lint Rust` step. The macOS jobs cache both packages' `.build` directories
@@ -113,10 +130,11 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   through a `-sectcreate` linker flag, which the runner's native SwiftPM build does not track, so
   a restored helper would keep the old plist; `native_build.rs` removes the helper before every
   build to force the link (about 1 s on the runner), and `check-native-notch.mjs` fails a helper
-  that embeds another Info.plist. A restored cache takes about 30 s of Swift work out of the macOS
-  `Lint Rust` step, which ran at about 75 s cold and 40-50 s restored, depending on the runner. What
-  it cannot remove is SwiftPM's first start on a fresh runner, 10-20 s of launching the
-  tools and compiling manifests, paid by whichever Swift command runs first. SwiftPM's own
+  that embeds another Info.plist. A restored cache takes about 30 s of Swift work out of each macOS
+  job's first cargo step (`Lint Rust` in one, `Test Rust` in the other); `Lint Rust` ran at about
+  75 s cold and 40-50 s restored, depending on the runner. What it cannot remove is SwiftPM's first
+  start on a fresh runner, 10-20 s of launching the tools and compiling manifests, which each macOS
+  job pays in its first Swift command. SwiftPM's own
   `~/Library/Caches/org.swift.swiftpm` stays uncached (see `scripts/resolve-swift-packages.ps1`).
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves

@@ -22,14 +22,6 @@ defaults:
   run:
     shell: pwsh
 
-env:
-  # Keep this block identical to bundle.yml and release.yml (rust-cache hashes CARGO*/RUST* variables
-  # into its key). Incremental artifacts bloat the cache and do not help one-shot CI builds; dropping dev
-  # debug info keeps the Windows target directory (PDBs) small and speeds up linking.
-  CARGO_INCREMENTAL: 0
-  CARGO_PROFILE_DEV_DEBUG: 0
-  CARGO_TERM_COLOR: always
-
 jobs:
   # Platform-neutral frontend checks. Neither vitest nor tsc can fail on one platform and pass on
   # another, so running them once on Linux keeps roughly 40s off both native legs and off the
@@ -73,201 +65,54 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
-  verify:
-    name: verify-${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            os: windows-2025-vs2026
-          - platform: macos
-            os: macos-26
+  # The native legs, one call of verify.yml per OS: a lint job and a test job each, in parallel.
+  # Their check runs are `windows / lint`, `windows / test` and so on; no job here or in verify.yml
+  # is named like a required check apart from frontend and the two below.
+  windows:
+    name: windows
+    uses: ./.github/workflows/verify.yml
+    with:
+      platform: windows
+      os: windows-2025-vs2026
+
+  macos:
+    name: macos
+    uses: ./.github/workflows/verify.yml
+    with:
+      platform: macos
+      os: macos-26
+
+  # The required checks are named verify-windows and verify-macos, from when each OS ran one job,
+  # and the ruleset still asks for exactly those names. Each one needs only its own OS's jobs, runs
+  # even when they failed or were cancelled, and fails unless every one of them succeeded: a
+  # skipped required check counts as passing, so this job must never be skipped itself.
+  verify-windows:
+    name: verify-windows
+    needs: windows
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # bun hardlinks packages from its install cache into node_modules, which only works on one
-      # drive. Its default cache is on C: and the workspace on D:, so it copied every file instead:
-      # 16-20 s here against 2-3 s on macOS. RUNNER_TEMP is on the workspace drive.
-      - name: Keep the bun cache on the workspace drive
-        if: runner.os == 'Windows'
+      # bash and jq, not the workflow's pwsh: pwsh's first start on a fresh ubuntu runner took 4-16 s,
+      # and this step is the last one of every run.
+      - &require-success
+        name: Require every needed job to succeed
+        shell: bash
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          "BUN_INSTALL_CACHE_DIR=$(Join-Path $env:RUNNER_TEMP 'bun-install-cache')" >> $env:GITHUB_ENV
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          jq -r 'to_entries[] | select(.value.result != "success") | "::error title=\(.key)::\(.key) finished as \(.value.result | tojson), not \"success\"."' <<< "$NEEDS"
+          if ! jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null; then
+            echo "::error::Not every needed job succeeded, or this job needs none."
+            exit 1
+          fi
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      # rust-toolchain.toml is the single source of truth. Reading the channel here stops the
-      # action from installing a `stable` that rustup would then ignore in favour of the pin,
-      # which would pay for two toolchain downloads on every release day.
-      - name: Read pinned Rust toolchain
-        id: toolchain
-        run: ./scripts/read-rust-toolchain.ps1
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch, pinned 2026-08-05
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-          components: rustfmt, clippy
-
-      # rust-cache hashes the rustc version of EVERY installed toolchain into its environment
-      # key (it runs `rustup toolchain list`), not just the active one. The runner images carry
-      # their own `stable`, so the pin alone left two toolchains present and the key still moved
-      # whenever the image's stable moved -- which is what rotated it to b6ac5207 on the first
-      # run of this change. Reducing the set to the pin makes the hash depend only on
-      # rust-toolchain.toml.
-      - name: Drop unpinned toolchains
-        run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
-
-      # rustfmt needs neither the cache nor the registry, and it is the most common reason this job
-      # fails, so it runs before everything slow and reports in well under a minute.
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-
-      # The build scripts build two Swift packages, whose .build directories are cached. The action
-      # says what it restores, what the key holds, and why it stamps the sources (with bun, so after
-      # Set up Bun). As with rust-cache, only main saves, as the job's last step. Bundle and Release
-      # build the release configuration and keep a `release` key family of their own; cache-prune.yml
-      # prunes both.
-      - name: Restore Swift build cache
-        id: swift-cache
-        if: runner.os == 'macOS'
-        uses: ./.github/actions/restore-swift-build
-        with:
-          configuration: debug
-
-      # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
-      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached. With the cache
-      # restored, it fetches nothing; its 10-20 s is SwiftPM's first start on the runner (launching
-      # the tools and compiling manifests), which the cache does not hold.
-      - name: Resolve Swift package dependencies
-        if: runner.os == 'macOS'
-        run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
-
-      # Only pushes to main write the cache so pull requests cannot evict it; every ref can
-      # restore the cache that main saved. `cache-on-failure` is deliberately off: the store is
-      # capped at 10 GB for the whole repository and a failed run's half-built target directory
-      # is not worth a slot. See .github/workflows/cache-prune.yml.
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: src-tauri
-          shared-key: verify-${{ matrix.platform }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      # rust-cache deletes the registry sources it restored before it saves, so the first cargo
-      # command of every run unpacks them again: about 350 crates, and 17 s on Windows before
-      # clippy compiled anything. This unpacks them in the background, behind the frontend steps
-      # below. "Finish fetching Rust dependencies" waits for it, or ends it after 10 minutes, and
-      # prints its output before clippy starts; cargo's package-cache lock is only a fallback.
-      # Clippy unpacks whatever the fetch left undone, so a failure here costs time and never a
-      # verdict. `--target host-tuple` keeps the fetch to the host's dependencies, the set clippy
-      # compiles; without it, cargo fetch unpacks every platform's.
-      - name: Start fetching Rust dependencies
-        if: runner.os == 'Windows'
-        run: |
-          $fetch = Join-Path $env:RUNNER_TEMP 'cargo-fetch'
-          New-Item -ItemType Directory -Force -Path $fetch | Out-Null
-          Set-Content -LiteralPath (Join-Path $fetch 'fetch.ps1') -Value @'
-          param([string] $Directory)
-          $clock = [Diagnostics.Stopwatch]::StartNew()
-          $code = 'none'
-          try {
-            cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target host-tuple *> (Join-Path $Directory 'output.log')
-            $code = $LASTEXITCODE ?? 'none'
-          } finally {
-            Set-Content -LiteralPath (Join-Path $Directory 'result.tmp') -Value "$code $([math]::Round($clock.Elapsed.TotalSeconds, 1))"
-            Move-Item -LiteralPath (Join-Path $Directory 'result.tmp') -Destination (Join-Path $Directory 'result')
-          }
-          '@
-          $process = Start-Process pwsh -PassThru -WindowStyle Hidden -WorkingDirectory $env:GITHUB_WORKSPACE `
-            -ArgumentList '-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $fetch 'fetch.ps1'), $fetch
-          # The start time tells this process apart from a later one that is given the same id.
-          Set-Content -LiteralPath (Join-Path $fetch 'pid') -Value "$($process.Id) $($process.StartTime.Ticks)"
-          "Started cargo fetch in the background (process $($process.Id))."
-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Test release version contract
-        run: ./scripts/check-release-version.test.ps1
-
-      - name: Test bundle helper
-        run: ./scripts/build-bundle.test.ps1
-
-      - name: Test updater feed generator
-        run: ./scripts/new-update-feed.test.ps1
-
-      - name: Test Rust toolchain reader
-        run: ./scripts/read-rust-toolchain.test.ps1
-
-      - name: Test Rust toolchain pruner
-        run: ./scripts/prune-rust-toolchains.test.ps1
-
-      - name: Test Swift package resolver
-        run: ./scripts/resolve-swift-packages.test.ps1
-
-      - name: Build frontend
-        run: bun run build
-
-      # Waits for the background fetch so its output lands here, not after the job, and so clippy
-      # never starts beside it. A fetch still running after 10 minutes is ended so it cannot hold
-      # cargo's lock through clippy. Its outcome is a warning, never a failure: clippy fetches
-      # anything still missing itself and fails on anything real.
-      - name: Finish fetching Rust dependencies
-        if: runner.os == 'Windows'
-        run: |
-          $fetch = Join-Path $env:RUNNER_TEMP 'cargo-fetch'
-          $result = Join-Path $fetch 'result'
-          $processId, $started = (Get-Content -LiteralPath (Join-Path $fetch 'pid')) -split ' '
-          # A process with this id but another start time is not the fetch, which has ended.
-          $process = Get-Process -Id $processId -ErrorAction SilentlyContinue |
-            Where-Object { try { $_.StartTime.Ticks -eq $started } catch { $false } }
-          $clock = [Diagnostics.Stopwatch]::StartNew()
-          if ($process -and -not $process.WaitForExit(600000)) { taskkill /T /F /PID $processId }
-          Get-Content -LiteralPath (Join-Path $fetch 'output.log') -ErrorAction SilentlyContinue
-          $code, $seconds = (Test-Path -LiteralPath $result) ? ((Get-Content -LiteralPath $result) -split ' ') : @('none', '?')
-          "Waited $([math]::Round($clock.Elapsed.TotalSeconds, 1)) s for cargo fetch, which ran for $seconds s."
-          if ($code -ne '0') {
-            "::warning title=Background cargo fetch::cargo fetch did not succeed (exit code: $code); clippy fetches what it needs itself."
-          }
-          exit 0
-
-      - name: Lint Rust
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-
-      # This step takes one to two minutes warm and a few more cold. A test blocked on a request
-      # that never comes should fail here, not at the job's 45-minute limit.
-      - name: Test Rust
-        timeout-minutes: 15
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
-
-      - name: Build Windows application
-        if: runner.os == 'Windows'
-        run: bun run tauri build --debug --no-bundle
-
-      - name: Check native notch models and lifecycle
-        if: runner.os == 'macOS'
-        run: |
-          xcrun swift run --package-path src-tauri/macos/SideNotch -Xswiftc -warnings-as-errors NotchCoreChecks
-          if ($LASTEXITCODE -ne 0) { throw "Native notch model checks failed." }
-          bun scripts/check-native-notch.mjs src-tauri/target/debug/on-n-off-notch
-          if ($LASTEXITCODE -ne 0) { throw "Native notch lifecycle checks failed." }
-          xcrun swift run --package-path src-tauri/macos/BrowserBilling -Xswiftc -warnings-as-errors BrowserBillingChecks
-          if ($LASTEXITCODE -ne 0) { throw "Browser billing checks failed." }
-          bun scripts/check-billing-resources.mjs
-          if ($LASTEXITCODE -ne 0) { throw "Billing resource signing checks failed." }
-
-      # Last, so the entry holds what the native checks built as well. A job that failed saves
-      # nothing, and an exact hit has nothing new to save.
-      - name: Save Swift build cache
-        if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            src-tauri/macos/SideNotch/.build
-            src-tauri/macos/BrowserBilling/.build
-          key: ${{ steps.swift-cache.outputs.cache-primary-key }}
+  verify-macos:
+    name: verify-macos
+    needs: macos
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - *require-success

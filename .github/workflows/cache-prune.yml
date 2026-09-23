@@ -1,7 +1,7 @@
 name: Prune caches
 
 # GitHub caps Actions cache at 10 GB for the whole repository and evicts least-recently-used
-# entries once that is reached. Each Rust key generation costs roughly 1.9 GB across the four
+# entries once that is reached. Each Rust key generation costs roughly 2.7 GB across the six
 # shared keys, so a few compiler rolls or lockfile changes are enough to start evicting caches
 # that jobs are still restoring from. On 2026-08-20 the store sat at 9.85 GB across 20 entries.
 # The macOS jobs' Swift build caches (v0-swiftpm-*, one debug and one release family) add a
@@ -86,13 +86,12 @@ jobs:
             exit 0
           }
 
-          # A key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>, where the shared
-          # key is itself two fields (verify-macos), or v0-swiftpm-<configuration>-<os>-<arch>-
-          # <toolchain>-<package inputs>. The first five fields name the group: they end at the OS
-          # for a Rust key, whose arch follows and never varies within a job, and at the arch for a
-          # Swift key. The two trailing hashes are the generation.
+          # A key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>, or v0-swiftpm-
+          # <configuration>-<os>-<arch>-<toolchain>-<package inputs>. The two trailing hashes are the
+          # generation and every field before them names the group, so a shared key may be two
+          # fields (bundle-macos) or three (verify-lint-macos) without two jobs' keys sharing a group.
           $doomed = @()
-          foreach ($group in $managed | Group-Object { ($_.key -split '-')[0..4] -join '-' }) {
+          foreach ($group in $managed | Group-Object { $fields = $_.key -split '-'; $fields[0..($fields.Count - 3)] -join '-' }) {
             $ordered = @($group.Group | Sort-Object { [datetime]$_.last_accessed_at } -Descending)
             Write-Output "$($group.Name): $($ordered.Count) generation(s), keeping $([Math]::Min($keep, $ordered.Count))."
             if ($ordered.Count -gt $keep) {

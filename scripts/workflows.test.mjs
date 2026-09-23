@@ -2,7 +2,7 @@
 // YAML parser, so under `node --test` it skips. Each test pins a choice the workflows make on
 // purpose; change the test in the same commit when a choice changes deliberately.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -30,15 +30,23 @@ function firstBuild(job) {
 // cannot list a second image for an OS and leave some workflows on the old one.
 const pinnedImages = { ubuntu: "ubuntu-24.04", windows: "windows-2025-vs2026", macos: "macos-26" };
 
-/** The runner label of every one of the job's legs, with its matrix platform where it has a matrix. */
+// The native legs are verify.yml, which ci.yml calls once per OS with that OS's runner image.
+const verifyWorkflow = "./.github/workflows/verify.yml";
+const verifyCalls = () => Object.entries(load("ci").jobs).filter(([, job]) => job.uses === verifyWorkflow);
+const lint = () => load("verify").jobs.lint;
+const testJob = () => load("verify").jobs.test;
+
+/** The runner label of every one of the job's legs, with its platform where it has more than one. */
 function runnerLegs(job) {
+  if (job.uses === verifyWorkflow) return [{ platform: job.with.platform, label: job.with.os }];
+  if (job["runs-on"] === "${{ inputs.os }}") return verifyCalls().flatMap(([, call]) => runnerLegs(call));
   return String(job["runs-on"]).startsWith("${{")
     ? job.strategy.matrix.include.map((entry) => ({ platform: entry.platform, label: entry.os }))
     : [{ platform: "", label: job["runs-on"] }];
 }
 
 test("every job runs on its OS's pinned runner image", { skip }, () => {
-  for (const name of ["ci", "bundle", "release", "cache-prune"]) {
+  for (const name of ["ci", "verify", "bundle", "release", "cache-prune"]) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
       for (const { label } of runnerLegs(job)) {
         const os = String(label).split("-")[0];
@@ -63,32 +71,36 @@ test("release builds each platform on the image of the Bundle cache it restores"
   assert.deepEqual(legs(release), legs(bundle));
 });
 
-test("ci, bundle and release share one env block, which rust-cache hashes into its key", { skip }, () => {
-  const env = load("ci").env;
+// A caller's env block never reaches a called workflow, so CI's cargo settings live in verify.yml.
+test("verify, bundle and release share one env block, which rust-cache hashes into its key", { skip }, () => {
+  const env = load("verify").env;
+  assert.deepEqual(env, { CARGO_INCREMENTAL: 0, CARGO_PROFILE_DEV_DEBUG: 0, CARGO_TERM_COLOR: "always" });
   assert.deepEqual(load("bundle").env, env);
   assert.deepEqual(load("release").env, env);
+  assert.equal(load("ci").env, undefined, "ci.yml's env would not reach the verify jobs");
 });
 
-test("rustfmt fails a verify leg before the cache restore and the slower setup", { skip }, () => {
-  const verify = load("ci").jobs.verify;
-  const format = step(verify, "Check Rust formatting");
-  assert.equal(format.index, step(verify, "Drop unpinned toolchains").index + 1);
-  assert.ok(format.index < step(verify, "Cache Rust dependencies").index);
+test("rustfmt fails the lint job before the cache restore and the slower setup", { skip }, () => {
+  const format = step(lint(), "Check Rust formatting");
+  assert.equal(format.index, step(lint(), "Drop unpinned toolchains").index + 1);
+  assert.ok(format.index < step(lint(), "Cache Rust dependencies").index);
 });
 
 test("macOS jobs resolve Swift packages before the build script needs them", { skip }, () => {
-  for (const job of [load("ci").jobs.verify, load("bundle").jobs.bundle, load("release").jobs.build]) {
+  for (const job of [lint(), testJob(), load("bundle").jobs.bundle, load("release").jobs.build]) {
     const resolve = step(job, "Resolve Swift package dependencies");
     assert.equal(resolve.if, "runner.os == 'macOS'");
     assert.equal(resolve.run.trim(), "./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling");
     assert.ok(resolve.index < firstBuild(job), "resolution must come before the first build");
   }
-  const tests = load("ci").jobs.verify.steps.map((candidate) => candidate.run?.trim());
-  assert.ok(tests.includes("./scripts/resolve-swift-packages.test.ps1"), "the verify legs run the resolver's tests");
+  const tests = lint().steps.map((candidate) => candidate.run?.trim());
+  assert.ok(tests.includes("./scripts/resolve-swift-packages.test.ps1"), "the lint jobs run the resolver's tests");
 });
 
 test("only pull request runs cancel an in-progress run", { skip }, () => {
   assert.equal(load("ci").concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
+  // A called workflow's concurrency group matching its caller's cancels the caller.
+  assert.equal(load("verify").concurrency, undefined, "verify.yml runs under ci.yml's group");
   for (const name of ["bundle", "release", "cache-prune"]) {
     assert.equal(load(name).concurrency["cancel-in-progress"], false, `${name}.yml has no pull request run to cancel`);
   }
@@ -102,7 +114,7 @@ test("a failing frontend check does not hide the result of the next one", { skip
 });
 
 test("a hung test run or release upload ends at its step, not the job timeout", { skip }, () => {
-  assert.equal(step(load("ci").jobs.verify, "Test Rust")["timeout-minutes"], 15);
+  assert.equal(step(testJob(), "Test Rust")["timeout-minutes"], 15);
   const upload = step(load("release").jobs["publish-draft"], "Upload and reconcile draft assets");
   assert.ok(upload["timeout-minutes"] <= 10);
   assert.match(upload.run, /WaitForExit\(\d+\)/, "each upload attempt waits a bounded time");
@@ -112,7 +124,7 @@ test("a hung test run or release upload ends at its step, not the job timeout", 
 // own build (actions/runner-images, Configure-WindowsDefender.ps1). An exclusion step here only
 // costs its 5 s of cmdlet start-up on every Windows job.
 test("no workflow spends a step on Defender exclusions the runner image already has", { skip }, () => {
-  for (const name of ["ci", "bundle", "release"]) {
+  for (const name of ["ci", "verify", "bundle", "release"]) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
       for (const candidate of job.steps ?? []) {
         assert.doesNotMatch(candidate.run ?? "", /MpPreference/, `${name}.yml ${id}: ${candidate.name}`);
@@ -122,14 +134,17 @@ test("no workflow spends a step on Defender exclusions the runner image already 
 });
 
 // The macOS jobs cache the Swift packages' .build directories: SwiftPM's resolved checkout and the
-// SDK modules and objects a cold build spends most of a minute on. All three restore through one
-// local action, so the toolchain step and the key exist once.
+// SDK modules and objects a cold build spends most of a minute on. All of them restore through one
+// local action, so the toolchain step and the key exist once. One job per key family saves: the
+// lint job, whose native checks build a superset of what the test job's build script does, and
+// Bundle, whose entry Release restores.
 const swiftCacheAction = "./.github/actions/restore-swift-build";
 const loadAction = (path) => globalThis.Bun.YAML.parse(readFileSync(join(directory, "..", "..", path, "action.yml"), "utf8"));
 const swiftJobs = () => [
-  { name: "ci", job: load("ci").jobs.verify, configuration: "debug" },
-  { name: "bundle", job: load("bundle").jobs.bundle, configuration: "release" },
-  { name: "release", job: load("release").jobs.build, configuration: "release" },
+  { name: "verify lint", job: lint(), configuration: "debug", saves: true },
+  { name: "verify test", job: testJob(), configuration: "debug", saves: false },
+  { name: "bundle", job: load("bundle").jobs.bundle, configuration: "release", saves: true },
+  { name: "release", job: load("release").jobs.build, configuration: "release", saves: false },
 ];
 const swiftBuildDirectories = ["src-tauri/macos/SideNotch/.build", "src-tauri/macos/BrowserBilling/.build"];
 const lines = (text) => String(text).trim().split("\n").map((line) => line.trim());
@@ -176,7 +191,7 @@ test("the Swift cache action keys on the toolchain and the inputs SwiftPM tracks
   const buildScript = readFileSync(join(directory, "..", "..", "src-tauri", "native_build.rs"), "utf8");
   const removal = buildScript.indexOf("fs::remove_file(&legacy);");
   assert.ok(removal !== -1 && removal < buildScript.indexOf('.args(["swift", "build", "--package-path"])'), "the helper is removed before the Swift build");
-  assert.match(step(load("ci").jobs.verify, "Check native notch models and lifecycle").run, /bun scripts\/check-native-notch\.mjs src-tauri\/target\/debug\/on-n-off-notch/);
+  assert.match(step(lint(), "Check native notch models and lifecycle").run, /bun scripts\/check-native-notch\.mjs src-tauri\/target\/debug\/on-n-off-notch/);
   // A source change restores the previous generation and rebuilds only what changed.
   assert.ok(key.endsWith("}}"));
   assert.equal(restore.with["restore-keys"].trim(), key.slice(0, key.lastIndexOf("${{")));
@@ -188,14 +203,49 @@ test("the Swift cache action keys on the toolchain and the inputs SwiftPM tracks
   assert.equal(action.outputs["cache-primary-key"].value, "${{ steps.restore.outputs.cache-primary-key }}");
 });
 
-// cache-prune groups keys by their first five fields and keeps the newest generations of each.
-test("a Swift cache key groups on five fields in cache-prune, ahead of two generation hashes", { skip }, () => {
-  const fields = keyFields(step(loadAction(swiftCacheAction).runs, "Restore the packages' build directories").with.key);
-  // v0-swiftpm-<configuration>-<os>-<arch>, then <toolchain>-<package inputs>.
-  assert.deepEqual(fields, ["v0", "swiftpm", "EXPR", "EXPR", "EXPR", "EXPR", "EXPR"]);
+// cache-prune groups keys on every field before their two trailing generation hashes and keeps the
+// newest generations of each group.
+const pruneGroup = (key) => key.split("-").slice(0, -2).join("-");
+
+test("cache-prune groups a key on the fields before its two generation hashes", { skip }, () => {
   const prune = step(load("cache-prune").jobs.prune, "Delete superseded cache generations");
   for (const family of ["v0-rust-*", "v0-swiftpm-*"]) assert.ok(prune.run.includes(`'${family}'`), family);
-  assert.match(prune.run, /\(\$_\.key -split '-'\)\[0\.\.4\]/);
+  assert.match(prune.run, /Group-Object \{ \$fields = \$_\.key -split '-'; \$fields\[0\.\.\(\$fields\.Count - 3\)\] -join '-' \}/);
+  // v0-swiftpm-<configuration>-<os>-<arch>, then <toolchain>-<package inputs>.
+  const fields = keyFields(step(loadAction(swiftCacheAction).runs, "Restore the packages' build directories").with.key);
+  assert.deepEqual(fields, ["v0", "swiftpm", "EXPR", "EXPR", "EXPR", "EXPR", "EXPR"]);
+});
+
+// Each job caches exactly what it builds under a key of its own: clippy's metadata and the debug
+// application in the lint job, the test profile's dependencies in the test job. A shared key would
+// make the two jobs overwrite each other's entry with half of what the other one needs. Release's
+// build job restores Bundle's key on purpose and never saves it.
+test("every CI and Bundle job that saves the Rust cache has a key of its own, saved only from main", { skip }, () => {
+  const cache = (job) => step(job, "Cache Rust dependencies").with;
+  assert.equal(cache(lint())["shared-key"], "verify-lint-${{ inputs.platform }}");
+  assert.equal(cache(testJob())["shared-key"], "verify-test-${{ inputs.platform }}");
+  for (const job of [lint(), testJob()]) {
+    assert.equal(cache(job)["save-if"], "${{ github.ref == 'refs/heads/main' }}");
+    assert.equal(cache(job).workspaces, "src-tauri");
+  }
+  // Bundle saves on every run, and runs only for pushes to main.
+  assert.deepEqual(load("bundle").on, { push: { branches: ["main"] } });
+  assert.equal(cache(load("release").jobs.build)["save-if"], false);
+  // rust-cache's key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>. Expand every
+  // shared key for every leg that uses it and check that no two jobs land in one prune group.
+  const rustOs = { windows: "Windows_NT-x64", macos: "Darwin-arm64" };
+  const groups = new Map();
+  const add = (sharedKey, platform, owner) => {
+    const key = `v0-rust-${sharedKey.replace(/\$\{\{ (inputs|matrix)\.platform \}\}/, platform)}-${rustOs[platform]}-15b2903b-f310a12c`;
+    const group = pruneGroup(key);
+    assert.ok(!groups.has(group), `${owner} and ${groups.get(group)} share the prune group ${group}`);
+    groups.set(group, owner);
+  };
+  for (const [, call] of verifyCalls()) {
+    for (const [id, job] of Object.entries(load("verify").jobs)) add(cache(job)["shared-key"], call.with.platform, `verify ${id} ${call.with.platform}`);
+  }
+  for (const { platform } of runnerLegs(load("bundle").jobs.bundle)) add(cache(load("bundle").jobs.bundle)["shared-key"], platform, `bundle ${platform}`);
+  assert.equal(groups.size, 6);
 });
 
 test("release restores the Swift build cache that Bundle saves", { skip }, () => {
@@ -204,8 +254,8 @@ test("release restores the Swift build cache that Bundle saves", { skip }, () =>
   assert.deepEqual(restore("release", "build").with, restore("bundle", "bundle").with);
 });
 
-test("only pushes to main save the Swift build cache, and a release never does", { skip }, () => {
-  for (const { name, job } of swiftJobs().filter(({ name }) => name !== "release")) {
+test("only pushes to main save the Swift build cache, one job per key family", { skip }, () => {
+  for (const { name, job } of swiftJobs().filter(({ saves }) => saves)) {
     const restore = step(job, "Restore Swift build cache");
     const save = step(job, "Save Swift build cache");
     assert.match(save.uses, /^actions\/cache\/save@[0-9a-f]{40}$/, name);
@@ -216,7 +266,8 @@ test("only pushes to main save the Swift build cache, and a release never does",
     assert.equal(save.index, job.steps.length - 1, `${name}: saved after every step that builds Swift`);
   }
   // The action only restores; a plain actions/cache would save in its post step.
-  for (const candidate of [...load("release").jobs.build.steps, ...loadAction(swiftCacheAction).runs.steps]) {
+  const restoreOnly = swiftJobs().filter(({ saves }) => !saves).flatMap(({ job }) => job.steps);
+  for (const candidate of [...restoreOnly, ...loadAction(swiftCacheAction).runs.steps]) {
     assert.doesNotMatch(candidate.uses ?? "", /^actions\/cache(\/save)?@/, candidate.name);
   }
 });
@@ -224,7 +275,7 @@ test("only pushes to main save the Swift build cache, and a release never does",
 // bun hardlinks from its cache into node_modules, and a hardlink cannot cross from C: to the D:
 // workspace, so with the default cache it copied every package: 16-20 s against 7 s.
 test("every Windows job that installs bun packages keeps bun's install cache on the workspace drive", { skip }, () => {
-  for (const [name, job] of [["ci", load("ci").jobs.verify], ["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
+  for (const [name, job] of [["verify lint", lint()], ["verify test", testJob()], ["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
     const cache = step(job, "Keep the bun cache on the workspace drive");
     assert.equal(cache.if, "runner.os == 'Windows'", name);
     assert.match(cache.run, /BUN_INSTALL_CACHE_DIR=\$\(Join-Path \$env:RUNNER_TEMP /, name);
@@ -232,7 +283,7 @@ test("every Windows job that installs bun packages keeps bun's install cache on 
     assert.ok(cache.index < step(job, "Install frontend dependencies").index, name);
   }
   // And no Windows job added later installs without it.
-  for (const name of ["ci", "bundle", "release"]) {
+  for (const name of ["ci", "verify", "bundle", "release"]) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
       const onWindows = runnerLegs(job).some(({ label }) => String(label).startsWith("windows"));
       if (!onWindows || !(job.steps ?? []).some((candidate) => /bun install/.test(candidate.run ?? ""))) continue;
@@ -242,11 +293,14 @@ test("every Windows job that installs bun packages keeps bun's install cache on 
 });
 
 // rust-cache deletes the registry sources it restored, so the first cargo command re-extracts them.
-// The Windows leg does that in the background, after the restore it extracts from and behind the
-// frontend steps, and waits for it before the first build so its output and any hang stay in their
-// own step. A failed fetch is a warning: clippy fetches what it needs itself and fails on its own.
-test("the Windows verify leg unpacks Rust dependencies in the background before the first build", { skip }, () => {
-  const verify = load("ci").jobs.verify;
+// Both Windows jobs do that in the background, after the restore they extract from and behind the
+// frontend steps, and wait for it before the first build so its output and any hang stay in their
+// own step. A failed fetch is a warning: cargo fetches what it needs itself and fails on its own.
+test("the Windows verify jobs unpack Rust dependencies in the background before the first build", { skip }, () => {
+  for (const verify of [lint(), testJob()]) backgroundFetch(verify);
+});
+
+function backgroundFetch(verify) {
   const start = step(verify, "Start fetching Rust dependencies");
   const finish = step(verify, "Finish fetching Rust dependencies");
   for (const candidate of [start, finish]) assert.equal(candidate.if, "runner.os == 'Windows'", candidate.name);
@@ -264,4 +318,141 @@ test("the Windows verify leg unpacks Rust dependencies in the background before 
     assert.match(candidate.run, /StartTime\.Ticks/, `${candidate.name}: a reused process id is never waited on or ended`);
   }
   assert.match(finish.run, /exit 0\s*$/, "a failed fetch never fails the job");
+}
+
+// The ruleset requires check runs named exactly frontend, verify-windows and verify-macos. Each OS's
+// lint and test jobs run in verify.yml, called once per OS, and a small job per OS answers for them
+// under the required name.
+const requiredChecks = ["frontend", "verify-windows", "verify-macos"];
+const aggregators = { "verify-windows": "windows", "verify-macos": "macos" };
+
+test("both OSes run the lint and the test job, neither of which can be skipped", { skip }, () => {
+  const calls = Object.fromEntries(verifyCalls().map(([id, call]) => [id, call]));
+  assert.deepEqual(Object.keys(calls).sort(), ["macos", "windows"]);
+  for (const [id, call] of Object.entries(calls)) {
+    assert.deepEqual(call.with, { platform: id, os: pinnedImages[id] }, id);
+    assert.equal(call.if, undefined, `${id}: the call always runs`);
+  }
+  const jobs = load("verify").jobs;
+  assert.deepEqual(Object.keys(jobs).sort(), ["lint", "test"]);
+  for (const [id, job] of Object.entries(jobs)) {
+    assert.equal(job["runs-on"], "${{ inputs.os }}", id);
+    // A called workflow whose job was skipped still reports success to its caller.
+    assert.equal(job.if, undefined, `${id} has no condition that could skip it`);
+  }
+  const runs = (job) => job.steps.map((candidate) => candidate.run ?? "").join("\n");
+  assert.match(runs(lint()), /cargo fmt /);
+  assert.match(runs(lint()), /cargo clippy /);
+  assert.match(runs(lint()), /tauri build --debug --no-bundle/);
+  assert.match(runs(lint()), /check-native-notch\.mjs/);
+  assert.match(runs(testJob()), /cargo test /);
+  assert.doesNotMatch(runs(testJob()), /cargo (fmt|clippy)|tauri build|\.test\.ps1/);
+  for (const job of [lint(), testJob()]) assert.equal(job["timeout-minutes"], 45);
+});
+
+// The test job's setup is the lint job's steps by YAML alias, so a pinned action, a toolchain input
+// or the prune that rust-cache's key depends on cannot drift between the two. Only its rust-cache
+// key and the test itself are its own.
+test("the test job's setup is the lint job's, step for step and in the same order", { skip }, () => {
+  const own = ["Cache Rust dependencies", "Test Rust"];
+  assert.deepEqual(testJob().steps.map((candidate) => candidate.name), [
+    "Check out repository",
+    "Keep the bun cache on the workspace drive",
+    "Set up Bun",
+    "Read pinned Rust toolchain",
+    "Set up Rust",
+    "Drop unpinned toolchains",
+    "Restore Swift build cache",
+    "Resolve Swift package dependencies",
+    "Cache Rust dependencies",
+    "Start fetching Rust dependencies",
+    "Install frontend dependencies",
+    "Build frontend",
+    "Finish fetching Rust dependencies",
+    "Test Rust",
+  ]);
+  let previous = -1;
+  for (const candidate of testJob().steps.filter(({ name }) => !own.includes(name))) {
+    const { index, ...shared } = step(lint(), candidate.name);
+    assert.deepEqual(candidate, shared, candidate.name);
+    assert.ok(index > previous, `${candidate.name} runs in the lint job's order`);
+    previous = index;
+  }
+  // The rust-cache step differs from the lint job's in its key alone.
+  const cache = (job) => {
+    const { index: _, ...rest } = step(job, "Cache Rust dependencies");
+    return { ...rest, with: { ...rest.with, "shared-key": "the job's own" } };
+  };
+  assert.deepEqual(cache(testJob()), cache(lint()));
+});
+
+test("the lint jobs run every PowerShell script test, and the test jobs none", { skip }, () => {
+  const scripts = readdirSync(join(directory, "..", "..", "scripts")).filter((file) => file.endsWith(".test.ps1")).sort();
+  assert.ok(scripts.length >= 6, scripts.join(", "));
+  const runsIn = (job) => job.steps.flatMap((candidate) => candidate.run?.match(/scripts\/[\w-]+\.test\.ps1/g) ?? []).map((path) => path.slice("scripts/".length));
+  assert.deepEqual(runsIn(lint()).sort(), scripts);
+  assert.deepEqual(runsIn(testJob()), []);
+  // Before the first cargo command, while the Windows fetch is still unpacking in the background.
+  for (const script of scripts) {
+    const index = lint().steps.findIndex((candidate) => candidate.run?.includes(`scripts/${script}`));
+    assert.ok(index > step(lint(), "Install frontend dependencies").index && index < firstBuild(lint()), script);
+  }
+});
+
+test("only the per-OS aggregators and frontend carry a required check's name", { skip }, () => {
+  const ci = load("ci").jobs;
+  const names = Object.values(ci).map((job) => job.name);
+  for (const required of requiredChecks) assert.equal(names.filter((name) => name === required).length, 1, required);
+  // A called workflow's check runs are named `<caller name> / <job name>`.
+  const calledRuns = verifyCalls().flatMap(([, call]) => Object.values(load("verify").jobs).map((job) => `${call.name} / ${job.name}`));
+  assert.deepEqual(calledRuns.sort(), ["macos / lint", "macos / test", "windows / lint", "windows / test"]);
+  for (const name of calledRuns) assert.ok(!requiredChecks.includes(name), name);
+  assert.equal(ci.frontend.name, "frontend");
+});
+
+test("each required verify check needs only its own OS and fails unless every needed job succeeded", { skip }, () => {
+  const ci = load("ci").jobs;
+  for (const [name, call] of Object.entries(aggregators)) {
+    const job = ci[name];
+    assert.equal(job.name, name);
+    assert.deepEqual([job.needs].flat(), [call], `${name} needs only the ${call} jobs`);
+    assert.equal(job.if, "always()", `${name} runs, and so reports, even when a needed job failed or was cancelled`);
+    assert.equal(job["runs-on"], pinnedImages.ubuntu);
+    assert.equal(job.steps.length, 1);
+    const [check] = job.steps;
+    assert.equal(check.env.NEEDS, "${{ toJSON(needs) }}");
+    assert.equal(check.shell, "bash", "pwsh's first start on a fresh ubuntu runner took 4-16 s");
+    assert.match(check.run, /all\(\.\[\]; \.result == "success"\)/, "anything but exactly success fails");
+    assert.match(check.run, /exit 1/);
+  }
+  assert.deepEqual(ci["verify-macos"].steps, ci["verify-windows"].steps);
+});
+
+// GitHub runs a bash step as `bash --noprofile --norc -eo pipefail {0}`.
+const bash = globalThis.Bun?.which?.("bash");
+const jq = globalThis.Bun?.which?.("jq");
+test("the aggregator step fails for every result but success, and when it needs nothing", { skip: skip || (bash && jq ? false : "needs bash and jq") }, async () => {
+  const script = load("ci").jobs["verify-windows"].steps[0].run;
+  const outcome = async (needs) => {
+    const child = globalThis.Bun.spawn([bash, "--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
+      env: { ...process.env, NEEDS: JSON.stringify(needs) },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    return { code, stdout, output: `${JSON.stringify(needs)}\n${stdout}${stderr}` };
+  };
+  const one = (result) => ({ windows: { result, outputs: {} } });
+  const passing = [one("success"), { lint: { result: "success" }, test: { result: "success" } }];
+  const failing = [
+    ...["failure", "cancelled", "skipped", "Success", ""].map(one),
+    { windows: { outputs: {} } },
+    { lint: { result: "success" }, test: { result: "skipped" } },
+    {},
+  ];
+  const results = await Promise.all([...passing, ...failing].map(outcome));
+  for (const { code, output } of results.slice(0, passing.length)) assert.equal(code, 0, output);
+  for (const { code, output } of results.slice(passing.length)) assert.notEqual(code, 0, output);
+  // A failed job is named in an annotation.
+  assert.match(results[passing.length].stdout, /^::error title=windows::windows finished as "failure", not "success"\.$/m);
 });

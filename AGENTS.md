@@ -53,6 +53,8 @@ of the file — start there, not here.
   the Actions cache treats unchanged sources as unchanged.
 - `restore-swift-build/` — the one action every macOS job restores its Swift build cache through;
   see [`OS.md`](OS.md).
+- `verify.yml` — the native CI legs. `ci.yml` calls it once per OS, and its lint and test jobs run
+  in parallel behind the required `verify-windows` and `verify-macos` checks; see [`OS.md`](OS.md).
 - `workflows.test.mjs` — pins the choices the workflows make on purpose, such as runner images.
 - `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
 - `verify-release.mjs` — checks a drafted release's assets, checksums, updater signatures, feed
@@ -78,8 +80,8 @@ shared key.
 
 `.github/workflows/cache-prune.yml` keeps the Actions cache under GitHub's 10 GB per-repository
 cap by deleting superseded rust-cache and Swift build cache generations. Each Rust generation
-costs roughly 1.9 GB across the four shared keys, and eviction at the cap silently turns warm
-jobs cold.
+costs roughly 2.7 GB across the six shared keys (CI's lint and test jobs per OS, and Bundle's per
+OS), and eviction at the cap silently turns warm jobs cold.
 
 ## Judging visuals
 
