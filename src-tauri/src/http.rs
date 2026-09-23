@@ -220,6 +220,14 @@ fn accept_within(listener: &std::net::TcpListener, deadline: Duration) -> std::n
     }
 }
 
+/// The next connection to `listener`, or a panic once `ACCEPT_DEADLINE` passes without one. Every
+/// loopback test server accepts through this, including a test's own listener, so none of them
+/// can wait forever on a request that never comes.
+#[cfg(test)]
+pub(crate) fn accept_in_time(listener: &std::net::TcpListener) -> std::net::TcpStream {
+    accept_within(listener, ACCEPT_DEADLINE)
+}
+
 /// One-shot HTTP server on a loopback port; returns the URL and the captured request head.
 /// Shared by the http and pipeline tests so no test ever touches the network.
 #[cfg(test)]
@@ -293,7 +301,7 @@ fn serve<T: Send + 'static>(
     let handle = std::thread::spawn(move || {
         let mut captured = Vec::new();
         for (status_line, extra_headers, body) in responses {
-            let mut stream = accept_within(&listener, ACCEPT_DEADLINE);
+            let mut stream = accept_in_time(&listener);
             let mut request = Vec::new();
             let mut buf = [0u8; 1024];
             let head_end = loop {
