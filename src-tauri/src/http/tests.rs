@@ -86,6 +86,33 @@ fn a_refused_connection_is_a_network_error() {
     ));
 }
 
+/// A refused URL has to stay refused while other tests open servers, and has to fail at once on
+/// every OS. A port given back by a dropped listener is neither: the OS may hand it to the next
+/// test's server, and Windows retries a connect it answers with a reset for about 2 s.
+#[test]
+fn a_refused_url_fails_at_once_and_no_server_can_take_it() {
+    let url = refused_url();
+    let address = url
+        .strip_prefix("http://")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap();
+    let squatter = std::net::TcpListener::bind(address).unwrap();
+    assert_ne!(
+        squatter.local_addr().unwrap().to_string(),
+        address,
+        "a server can listen on the refused address"
+    );
+
+    let started = std::time::Instant::now();
+    let result = get_json(&url, &[]);
+    assert!(matches!(result, Err(HttpError::Network(_))), "{result:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "refused after {:?}",
+        started.elapsed()
+    );
+}
+
 #[test]
 fn post_json_sends_a_bearer_json_body_and_parses_the_reply() {
     let (url, request) = serve_once_capturing("200 OK", &[], r#"{"data":{"ok":true}}"#);
