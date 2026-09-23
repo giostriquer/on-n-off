@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { formatTokens, formatUsd, makeWindow } from "./usageFormat";
 import { foldModelsByDay, foldUsage, isUnpriced, PROVIDERS, providerLabel, usagePricingNote } from "./usageMerge";
 import { buildChartSeries, toChartRows } from "./usageChart";
@@ -271,5 +271,24 @@ describe("usageFormat", () => {
     expect(w.sinceDay).toBe("2020-01-01");
     expect(w.untilDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(w.resolution).toBe("day");
+  });
+
+  it("makeWindow counts calendar days in the viewer's zone, not UTC", () => {
+    // Test workers run in UTC (vitest.config.ts), so put the viewer in Tokyo, where 15:00Z is
+    // already the next day.
+    const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
+    const zone = vi
+      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockImplementation(function (this: Intl.DateTimeFormat) {
+        return { ...resolvedOptions.call(this), timeZone: "Asia/Tokyo" };
+      });
+    try {
+      const w = makeWindow(30, new Date("2026-08-15T15:00:00.000Z"));
+      expect(w.timeZone).toBe("Asia/Tokyo");
+      expect(w.untilDay).toBe("2026-08-16");
+      expect(w.sinceDay).toBe("2026-07-18");
+    } finally {
+      zone.mockRestore();
+    }
   });
 });

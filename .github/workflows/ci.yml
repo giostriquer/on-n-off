@@ -57,8 +57,13 @@ jobs:
 
       # The three checks are independent: once dependencies are installed, each one reports even
       # when an earlier one failed, so a single push shows every failure.
+      # The tests run east of UTC on purpose. vitest.config.ts pins every worker to UTC, and fixtures
+      # such as 15:00Z fall on the next day in Tokyo, so losing the pin fails here and not only on a
+      # developer's machine east of UTC. See ui/src/test-environment.test.ts.
       - name: Test frontend
         run: bun run test
+        env:
+          TZ: Asia/Tokyo
 
       - name: Type-check frontend
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
