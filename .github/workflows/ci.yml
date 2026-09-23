@@ -162,7 +162,7 @@ jobs:
           $clock = [Diagnostics.Stopwatch]::StartNew()
           $code = 'none'
           try {
-            ping -n 600 127.0.0.1 > $null
+            ping -n 60 127.0.0.1 > $null
             cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target host-tuple *> (Join-Path $Directory 'output.log')
             $code = $LASTEXITCODE ?? 'none'
           } finally {
@@ -214,7 +214,7 @@ jobs:
           $process = Get-Process -Id $processId -ErrorAction SilentlyContinue |
             Where-Object { try { $_.StartTime.Ticks -eq $started } catch { $false } }
           $clock = [Diagnostics.Stopwatch]::StartNew()
-          if ($process -and -not $process.WaitForExit(30000)) { taskkill /T /F /PID $processId }
+          if ($process -and -not $process.WaitForExit(600000)) { taskkill /T /F /PID $processId }
           Get-Content -LiteralPath (Join-Path $fetch 'output.log') -ErrorAction SilentlyContinue
           $code, $seconds = (Test-Path -LiteralPath $result) ? ((Get-Content -LiteralPath $result) -split ' ') : @('none', '?')
           "Waited $([math]::Round($clock.Elapsed.TotalSeconds, 1)) s for cargo fetch, which ran for $seconds s."
