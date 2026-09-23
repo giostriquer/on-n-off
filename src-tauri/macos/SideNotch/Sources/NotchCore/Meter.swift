@@ -72,6 +72,3 @@ public func meterInk(_ quota: Quota?, base: Ink, at now: Date) -> Ink {
 public func meterInk(_ quota: Quota?, provider: ProviderId, at now: Date) -> Ink {
   meterInk(quota, base: providerInk(provider), at: now)
 }
-
-// EXPERIMENT (reverted before merge): a source change for the Swift cache to fall back on.
-public let cachePrefixRestoreProbe = "PREFIX-RESTORE-PROBE-7"
