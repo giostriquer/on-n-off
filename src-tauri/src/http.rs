@@ -352,10 +352,10 @@ pub(crate) fn head_header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
 /// A loopback URL no server can answer: any request to it fails with a connection error, at once.
 ///
 /// It names port 0, which no listener can hold. The client's own network stack rejects a connect
-/// to it before sending anything: `EADDRNOTAVAIL` on macOS, `WSAEADDRNOTAVAIL` on Windows. The
-/// old choice, a port freed by dropping a listener, was slower and racy. Windows answers a
-/// connect to a closed loopback port by retrying for about 2 s before it reports the refusal, and
-/// the freed port is one the OS may hand to another test's server in the meantime.
+/// to it before sending anything: `EADDRNOTAVAIL` on macOS, `WSAEADDRNOTAVAIL` on Windows. A
+/// port freed by dropping a listener would not do: Windows retries a connect to a closed loopback
+/// port for about 2 s before it reports the refusal, and the OS may hand the port to another
+/// test's server in the meantime.
 #[cfg(test)]
 pub(crate) fn refused_url() -> String {
     "http://127.0.0.1:0/usage".to_string()
