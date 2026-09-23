@@ -24,6 +24,18 @@ pub fn build() {
     } else {
         "debug"
     };
+    let legacy = package.join(format!(
+        ".build/{arch}-apple-macosx/{configuration}/on-n-off-notch"
+    ));
+    // Package.swift links Info.plist into the helper with a `-sectcreate` flag, and SwiftPM's
+    // native build system does not track a file that only a flag names. After a change to
+    // Info.plist alone it calls the helper up to date and keeps the old plist inside the Mach-O,
+    // while the bundle below gets the new Contents/Info.plist. CI restores `.build` from a cache,
+    // so every release's version bump would hit that. Removing the helper makes the build link
+    // it again, which takes about half a second. Swift Build, the default from Swift 6.4, tracks
+    // the file and puts the helper elsewhere. If an older toolchain left one at this path,
+    // removing it also means `helper_binary`'s fallback can only find a helper this build linked.
+    let _ = fs::remove_file(&legacy);
     let output = Command::new("/usr/bin/xcrun")
         .args(["swift", "build", "--package-path"])
         .arg(&package)
@@ -45,7 +57,7 @@ pub fn build() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let binary = helper_binary(&package, arch, configuration);
+    let binary = helper_binary(&package, arch, configuration, legacy);
     let binaries = root.join("binaries");
     fs::create_dir_all(&binaries).expect("create native binaries directory");
     let helper = binaries.join("on-n-off-notch.app");
@@ -88,13 +100,10 @@ pub fn build() {
 /// fallback in case a toolchain declines the query, and a failure names both so the next person
 /// does not have to guess which layout they are on.
 ///
-/// The fallback warns rather than staying quiet: the Swift build immediately above has just
-/// succeeded, so a binary only reachable at the old path is as likely to be a stale leftover as
-/// the thing that was built, and silently bundling last week's helper is the worse failure.
-fn helper_binary(package: &Path, arch: &str, configuration: &str) -> PathBuf {
-    let legacy = package.join(format!(
-        ".build/{arch}-apple-macosx/{configuration}/on-n-off-notch"
-    ));
+/// The fallback still warns: a toolchain that declines the query is one this script was not
+/// written against. `build` removes the helper at the old path before building, so whatever the
+/// fallback finds there was linked by this build, not left behind by an earlier one.
+fn helper_binary(package: &Path, arch: &str, configuration: &str, legacy: PathBuf) -> PathBuf {
     let reported = Command::new("/usr/bin/xcrun")
         .args(["swift", "build", "--package-path"])
         .arg(package)

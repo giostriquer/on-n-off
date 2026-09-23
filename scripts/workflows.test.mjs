@@ -121,15 +121,124 @@ test("no workflow spends a step on Defender exclusions the runner image already 
   }
 });
 
+// The macOS jobs cache the Swift packages' .build directories: SwiftPM's resolved checkout and the
+// SDK modules and objects a cold build spends most of a minute on. All three restore through one
+// local action, so the toolchain step and the key exist once.
+const swiftCacheAction = "./.github/actions/restore-swift-build";
+const loadAction = (path) => globalThis.Bun.YAML.parse(readFileSync(join(directory, "..", "..", path, "action.yml"), "utf8"));
+const swiftJobs = () => [
+  { name: "ci", job: load("ci").jobs.verify, configuration: "debug" },
+  { name: "bundle", job: load("bundle").jobs.bundle, configuration: "release" },
+  { name: "release", job: load("release").jobs.build, configuration: "release" },
+];
+const swiftBuildDirectories = ["src-tauri/macos/SideNotch/.build", "src-tauri/macos/BrowserBilling/.build"];
+const lines = (text) => String(text).trim().split("\n").map((line) => line.trim());
+/** The key's dash-separated fields, with each `${{ }}` expression standing in as one field. */
+const keyFields = (key) => key.replace(/\$\{\{.*?\}\}/g, "EXPR").split("-");
+
+test("macOS jobs restore the Swift build cache through one action, before resolving and building", { skip }, () => {
+  for (const { name, job, configuration } of swiftJobs()) {
+    const restore = step(job, "Restore Swift build cache");
+    assert.equal(restore.if, "runner.os == 'macOS'", name);
+    assert.equal(restore.uses, swiftCacheAction, name);
+    assert.deepEqual(restore.with, { configuration }, name);
+    assert.ok(restore.index > step(job, "Set up Bun").index, `${name}: the action stamps sources with bun`);
+    assert.ok(restore.index < step(job, "Resolve Swift package dependencies").index, `${name}: the resolver finds the restored checkout`);
+    assert.ok(restore.index < firstBuild(job), `${name}: restored and stamped before the build script's first swift build`);
+  }
+});
+
+test("the Swift cache action keys on the toolchain and the inputs SwiftPM tracks, then stamps sources", { skip }, () => {
+  const action = loadAction(swiftCacheAction);
+  assert.equal(action.runs.using, "composite");
+  const toolchain = step(action.runs, "Identify the Swift toolchain");
+  const restore = step(action.runs, "Restore the packages' build directories");
+  const stamp = step(action.runs, "Stamp Swift sources with their content");
+  // The selected Xcode fixes both the compiler and the SDK, and its version file is read without
+  // starting Swift, which took a step of its own 6 s on a fresh runner.
+  assert.match(toolchain.run, /xcode-select --print-path/);
+  assert.match(toolchain.run, /version\.plist/);
+  assert.doesNotMatch(toolchain.run, /xcrun/, "no Swift start-up just to name the toolchain");
+  // One key field per configuration, which cache-prune's grouping relies on.
+  assert.match(toolchain.run, /-cnotin 'debug', 'release'/);
+  assert.match(restore.uses, /^actions\/cache\/restore@[0-9a-f]{40}$/, "pinned by commit");
+  assert.deepEqual(lines(restore.with.path), swiftBuildDirectories);
+  const key = restore.with.key;
+  assert.ok(key.startsWith("v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-"), key);
+  for (const input of ["Package.swift", "Package.resolved", "Sources/**", "Tests/**"]) {
+    assert.ok(key.includes(`'src-tauri/macos/*/${input}'`), `the key hashes ${input}`);
+  }
+  // Info.plist reaches the notch helper only through a linker flag SwiftPM does not track, so
+  // native_build.rs relinks the helper on every build rather than trusting a restored one, and a
+  // release's version bump keeps the key Bundle saved before it. The CI leg's native checks fail a
+  // helper that embeds another Info.plist than the one beside it.
+  assert.doesNotMatch(key, /Info\.plist/);
+  const buildScript = readFileSync(join(directory, "..", "..", "src-tauri", "native_build.rs"), "utf8");
+  const removal = buildScript.indexOf("fs::remove_file(&legacy);");
+  assert.ok(removal !== -1 && removal < buildScript.indexOf('.args(["swift", "build", "--package-path"])'), "the helper is removed before the Swift build");
+  assert.match(step(load("ci").jobs.verify, "Check native notch models and lifecycle").run, /bun scripts\/check-native-notch\.mjs src-tauri\/target\/debug\/on-n-off-notch/);
+  // A source change restores the previous generation and rebuilds only what changed.
+  assert.ok(key.endsWith("}}"));
+  assert.equal(restore.with["restore-keys"].trim(), key.slice(0, key.lastIndexOf("${{")));
+  assert.ok(toolchain.index < restore.index);
+  assert.ok(restore.index < stamp.index);
+  assert.equal(stamp.run.trim(), "bun scripts/stamp-source-times.mjs src-tauri/macos");
+  for (const candidate of action.runs.steps.filter((candidate) => candidate.run)) assert.equal(candidate.shell, "pwsh", candidate.name);
+  assert.equal(action.outputs["cache-hit"].value, "${{ steps.restore.outputs.cache-hit }}");
+  assert.equal(action.outputs["cache-primary-key"].value, "${{ steps.restore.outputs.cache-primary-key }}");
+});
+
+// cache-prune groups keys by their first five fields and keeps the newest generations of each.
+test("a Swift cache key groups on five fields in cache-prune, ahead of two generation hashes", { skip }, () => {
+  const fields = keyFields(step(loadAction(swiftCacheAction).runs, "Restore the packages' build directories").with.key);
+  // v0-swiftpm-<configuration>-<os>-<arch>, then <toolchain>-<package inputs>.
+  assert.deepEqual(fields, ["v0", "swiftpm", "EXPR", "EXPR", "EXPR", "EXPR", "EXPR"]);
+  const prune = step(load("cache-prune").jobs.prune, "Delete superseded cache generations");
+  for (const family of ["v0-rust-*", "v0-swiftpm-*"]) assert.ok(prune.run.includes(`'${family}'`), family);
+  assert.match(prune.run, /\(\$_\.key -split '-'\)\[0\.\.4\]/);
+});
+
+test("release restores the Swift build cache that Bundle saves", { skip }, () => {
+  const restore = (workflow, job) => step(load(workflow).jobs[job], "Restore Swift build cache");
+  assert.equal(restore("release", "build").uses, restore("bundle", "bundle").uses);
+  assert.deepEqual(restore("release", "build").with, restore("bundle", "bundle").with);
+});
+
+test("only pushes to main save the Swift build cache, and a release never does", { skip }, () => {
+  for (const { name, job } of swiftJobs().filter(({ name }) => name !== "release")) {
+    const restore = step(job, "Restore Swift build cache");
+    const save = step(job, "Save Swift build cache");
+    assert.match(save.uses, /^actions\/cache\/save@[0-9a-f]{40}$/, name);
+    assert.equal(save.if, "runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'", name);
+    assert.equal(restore.id, "swift-cache", name);
+    assert.equal(save.with.key, "${{ steps.swift-cache.outputs.cache-primary-key }}", name);
+    assert.deepEqual(lines(save.with.path), swiftBuildDirectories, name);
+    assert.equal(save.index, job.steps.length - 1, `${name}: saved after every step that builds Swift`);
+  }
+  // The action only restores; a plain actions/cache would save in its post step.
+  for (const candidate of [...load("release").jobs.build.steps, ...loadAction(swiftCacheAction).runs.steps]) {
+    assert.doesNotMatch(candidate.uses ?? "", /^actions\/cache(\/save)?@/, candidate.name);
+  }
+});
+
 // bun hardlinks from its cache into node_modules, and a hardlink cannot cross from C: to the D:
 // workspace, so with the default cache it copied every package: 16-20 s against 7 s.
-test("the Windows verify leg keeps bun's install cache on the workspace drive", { skip }, () => {
-  const verify = load("ci").jobs.verify;
-  const cache = step(verify, "Keep the bun cache on the workspace drive");
-  assert.equal(cache.if, "runner.os == 'Windows'");
-  assert.match(cache.run, /BUN_INSTALL_CACHE_DIR=\$\(Join-Path \$env:RUNNER_TEMP /);
-  assert.match(cache.run, />> \$env:GITHUB_ENV/);
-  assert.ok(cache.index < step(verify, "Install frontend dependencies").index);
+test("every Windows job that installs bun packages keeps bun's install cache on the workspace drive", { skip }, () => {
+  for (const [name, job] of [["ci", load("ci").jobs.verify], ["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
+    const cache = step(job, "Keep the bun cache on the workspace drive");
+    assert.equal(cache.if, "runner.os == 'Windows'", name);
+    assert.match(cache.run, /BUN_INSTALL_CACHE_DIR=\$\(Join-Path \$env:RUNNER_TEMP /, name);
+    assert.match(cache.run, />> \$env:GITHUB_ENV/, name);
+    assert.ok(cache.index < step(job, "Install frontend dependencies").index, name);
+  }
+  // And no Windows job added later installs without it.
+  for (const name of ["ci", "bundle", "release"]) {
+    for (const [id, job] of Object.entries(load(name).jobs)) {
+      const onWindows = runnerLegs(job).some(({ label }) => String(label).startsWith("windows"));
+      if (!onWindows || !(job.steps ?? []).some((candidate) => /bun install/.test(candidate.run ?? ""))) continue;
+      assert.ok(job.steps.some((candidate) => candidate.name === "Keep the bun cache on the workspace drive"), `${name}.yml ${id}`);
+    }
+  }
 });
 
 // rust-cache deletes the registry sources it restored, so the first cargo command re-extracts them.

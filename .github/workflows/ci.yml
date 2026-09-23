@@ -127,8 +127,22 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+      # The build scripts build two Swift packages, whose .build directories are cached. The action
+      # says what it restores, what the key holds, and why it stamps the sources (with bun, so after
+      # Set up Bun). As with rust-cache, only main saves, as the job's last step. Bundle and Release
+      # build the release configuration and keep a `release` key family of their own; cache-prune.yml
+      # prunes both.
+      - name: Restore Swift build cache
+        id: swift-cache
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/restore-swift-build
+        with:
+          configuration: debug
+
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
-      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
+      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached. With the cache
+      # restored, it fetches nothing; its 10-20 s is SwiftPM's first start on the runner (launching
+      # the tools and compiling manifests), which the cache does not hold.
       - name: Resolve Swift package dependencies
         if: runner.os == 'macOS'
         run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
@@ -246,3 +260,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Browser billing checks failed." }
           bun scripts/check-billing-resources.mjs
           if ($LASTEXITCODE -ne 0) { throw "Billing resource signing checks failed." }
+
+      # Last, so the entry holds what the native checks built as well. A job that failed saves
+      # nothing, and an exact hit has nothing new to save.
+      - name: Save Swift build cache
+        if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            src-tauri/macos/SideNotch/.build
+            src-tauri/macos/BrowserBilling/.build
+          key: ${{ steps.swift-cache.outputs.cache-primary-key }}

@@ -4,10 +4,12 @@ name: Prune caches
 # entries once that is reached. Each Rust key generation costs roughly 1.9 GB across the four
 # shared keys, so a few compiler rolls or lockfile changes are enough to start evicting caches
 # that jobs are still restoring from. On 2026-08-20 the store sat at 9.85 GB across 20 entries.
+# The macOS jobs' Swift build caches (v0-swiftpm-*, one debug and one release family) add a
+# generation whenever the Swift toolchain or a Swift package input changes.
 #
 # This keeps the newest generations per shared key and deletes the rest. Two are kept, not one:
-# rust-cache falls back to a restore key that drops the lockfile component, so the previous
-# generation still does useful work after a dependency change.
+# both caches fall back to a restore key that drops the last component (the lockfile, or the
+# Swift package inputs), so the previous generation still does useful work after a change.
 
 on:
   schedule:
@@ -42,7 +44,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Delete superseded Rust cache generations
+      - name: Delete superseded cache generations
         env:
           GH_TOKEN: ${{ github.token }}
           KEEP: ${{ inputs.keep || '2' }}
@@ -75,16 +77,20 @@ jobs:
           $totalBytes = ($caches | Measure-Object -Property size_in_bytes -Sum).Sum
           Write-Output ("Store holds {0} entries, {1:N2} GB." -f $caches.Count, ($totalBytes / 1GB))
 
-          # Only rust-cache entries are managed here. Anything else in the store (setup-bun's own
-          # cache, for one) is small and owned by another action, so leave it alone.
-          $managed = @($caches | Where-Object { $_.key -like 'v0-rust-*' })
+          # Only the rust-cache and Swift build cache entries are managed here. Anything else in the
+          # store (setup-bun's own cache, for one) is small and owned by another action, so leave it
+          # alone.
+          $managed = @($caches | Where-Object { $_.key -like 'v0-rust-*' -or $_.key -like 'v0-swiftpm-*' })
           if ($managed.Count -eq 0) {
-            Write-Output "No rust-cache entries found; nothing to prune."
+            Write-Output "No rust-cache or Swift build cache entries found; nothing to prune."
             exit 0
           }
 
-          # A key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>. Everything up to
-          # the arch identifies the job; the two trailing hashes are the generation.
+          # A key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>, where the shared
+          # key is itself two fields (verify-macos), or v0-swiftpm-<configuration>-<os>-<arch>-
+          # <toolchain>-<package inputs>. The first five fields name the group: they end at the OS
+          # for a Rust key, whose arch follows and never varies within a job, and at the arch for a
+          # Swift key. The two trailing hashes are the generation.
           $doomed = @()
           foreach ($group in $managed | Group-Object { ($_.key -split '-')[0..4] -join '-' }) {
             $ordered = @($group.Group | Sort-Object { [datetime]$_.last_accessed_at } -Descending)

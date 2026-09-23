@@ -108,6 +108,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # bun hardlinks packages from its install cache into node_modules, which only works on one
+      # drive; see ci.yml. RUNNER_TEMP is on the workspace drive.
+      - name: Keep the bun cache on the workspace drive
+        if: runner.os == 'Windows'
+        run: |
+          "BUN_INSTALL_CACHE_DIR=$(Join-Path $env:RUNNER_TEMP 'bun-install-cache')" >> $env:GITHUB_ENV
+
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
@@ -128,6 +135,17 @@ jobs:
       # rust-toolchain.toml.
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
+
+      # Restores the Swift build cache that the Bundle workflow saves on main (see ci.yml and
+      # bundle.yml); like the Rust cache below, this job never saves one. The key moves only with
+      # the Swift package inputs, which a version bump leaves alone, so a release whose commits
+      # changed none restores an exact hit from an earlier Bundle run instead of waiting for the one
+      # running beside it.
+      - name: Restore Swift build cache
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/restore-swift-build
+        with:
+          configuration: release
 
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
       # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
