@@ -280,13 +280,13 @@ jobs:
           }
 
       - name: Lint Rust
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+        run: cargo clippy -vv --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
       # This step takes one to two minutes warm and a few more cold. A test blocked on a request
       # that never comes should fail here, not at the job's 45-minute limit.
       - name: Test Rust
         timeout-minutes: 15
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+        run: cargo test -vv --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 
       - name: Build Windows application
         if: runner.os == 'Windows'
