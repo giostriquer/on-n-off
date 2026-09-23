@@ -108,6 +108,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # bun hardlinks packages from its install cache into node_modules, which only works on one
+      # drive; see ci.yml. RUNNER_TEMP is on the workspace drive.
+      - name: Keep the bun cache on the workspace drive
+        if: runner.os == 'Windows'
+        run: |
+          "BUN_INSTALL_CACHE_DIR=$(Join-Path $env:RUNNER_TEMP 'bun-install-cache')" >> $env:GITHUB_ENV
+
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
@@ -128,6 +135,39 @@ jobs:
       # rust-toolchain.toml.
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
+
+      # Restores the Swift build cache that the Bundle workflow saves on main (see ci.yml and
+      # bundle.yml); like the Rust cache below, this job never saves one. The key moves only with
+      # the Swift inputs, so a release whose commits changed none restores an exact hit from an
+      # earlier Bundle run instead of waiting for the one running beside it.
+      - name: Identify the Swift toolchain
+        id: swift
+        if: runner.os == 'macOS'
+        run: |
+          $swift = xcrun swift --version 2>&1 | ForEach-Object { "$_" }
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the Swift version: $swift" }
+          $sdk = xcrun --show-sdk-build-version
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the SDK build version." }
+          $identity = @($swift) + "SDK build $sdk"
+          $identity
+          $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity -join "`n"))
+          "toolchain=$([Convert]::ToHexString($digest).Substring(0, 16).ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Restore Swift build cache
+        id: swift-cache
+        if: runner.os == 'macOS'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            src-tauri/macos/SideNotch/.build
+            src-tauri/macos/BrowserBilling/.build
+          key: v0-swiftpm-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-${{ hashFiles('src-tauri/macos/*/Package.swift', 'src-tauri/macos/*/Package.resolved', 'src-tauri/macos/*/Info.plist', 'src-tauri/macos/*/Sources/**', 'src-tauri/macos/*/Tests/**') }}
+          restore-keys: v0-swiftpm-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-
+
+      # See ci.yml: a restored build otherwise recompiles on-n-off's own Swift modules.
+      - name: Stamp Swift sources with their content
+        if: runner.os == 'macOS'
+        run: bun scripts/stamp-source-times.mjs src-tauri/macos
 
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
       # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.

@@ -121,15 +121,95 @@ test("no workflow spends a step on Defender exclusions the runner image already 
   }
 });
 
+// The macOS jobs cache the Swift packages' .build directories: SwiftPM's resolved checkout and the
+// SDK modules and objects a cold build spends most of a minute on.
+const swiftJobs = () => [
+  { name: "ci", job: load("ci").jobs.verify, configuration: "debug" },
+  { name: "bundle", job: load("bundle").jobs.bundle, configuration: "release" },
+  { name: "release", job: load("release").jobs.build, configuration: "release" },
+];
+const swiftBuildDirectories = ["src-tauri/macos/SideNotch/.build", "src-tauri/macos/BrowserBilling/.build"];
+const lines = (text) => String(text).trim().split("\n").map((line) => line.trim());
+/** The key's dash-separated fields, with each `${{ }}` expression standing in as one field. */
+const keyFields = (key) => key.replace(/\$\{\{.*?\}\}/g, "EXPR").split("-");
+
+test("macOS jobs restore the Swift build cache before resolving, and stamp sources before building", { skip }, () => {
+  for (const { name, job, configuration } of swiftJobs()) {
+    const toolchain = step(job, "Identify the Swift toolchain");
+    const restore = step(job, "Restore Swift build cache");
+    const stamp = step(job, "Stamp Swift sources with their content");
+    for (const candidate of [toolchain, restore, stamp]) assert.equal(candidate.if, "runner.os == 'macOS'", `${name}: ${candidate.name}`);
+    assert.match(restore.uses, /^actions\/cache\/restore@[0-9a-f]{40}$/, `${name}: pinned by commit`);
+    assert.deepEqual(lines(restore.with.path), swiftBuildDirectories, name);
+    // The toolchain and every input the build scripts and native checks read.
+    const key = restore.with.key;
+    assert.ok(key.startsWith(`v0-swiftpm-${configuration}-\${{ runner.os }}-\${{ runner.arch }}-\${{ steps.swift.outputs.toolchain }}-`), `${name}: ${key}`);
+    for (const input of ["Package.swift", "Package.resolved", "Info.plist", "Sources/**", "Tests/**"]) {
+      assert.ok(key.includes(`'src-tauri/macos/*/${input}'`), `${name}: the key hashes ${input}`);
+    }
+    // A source change restores the previous generation and rebuilds only what changed.
+    assert.ok(key.endsWith("}}"), name);
+    assert.equal(restore.with["restore-keys"].trim(), key.slice(0, key.lastIndexOf("${{")), name);
+    assert.ok(toolchain.index < restore.index, name);
+    assert.ok(restore.index < step(job, "Resolve Swift package dependencies").index, `${name}: the resolver finds the restored checkout`);
+    assert.ok(stamp.index > restore.index, name);
+    assert.ok(stamp.index < firstBuild(job), `${name}: stamped before the build script's first swift build`);
+    assert.equal(stamp.run.trim(), "bun scripts/stamp-source-times.mjs src-tauri/macos");
+    assert.ok(stamp.index > step(job, "Set up Bun").index, name);
+  }
+});
+
+// cache-prune groups keys by their first five fields and keeps the newest generations of each.
+test("a Swift cache key is five identifying fields and two generation hashes, like rust-cache's", { skip }, () => {
+  for (const { name, job, configuration } of swiftJobs()) {
+    const fields = keyFields(step(job, "Restore Swift build cache").with.key);
+    assert.deepEqual(fields.slice(0, 5), ["v0", "swiftpm", configuration, "EXPR", "EXPR"], name);
+    assert.equal(fields.length, 7, name);
+  }
+  const prune = step(load("cache-prune").jobs.prune, "Delete superseded cache generations");
+  for (const family of ["v0-rust-*", "v0-swiftpm-*"]) assert.ok(prune.run.includes(`'${family}'`), family);
+  assert.match(prune.run, /\(\$_\.key -split '-'\)\[0\.\.4\]/);
+});
+
+test("release restores the Swift build cache that Bundle saves", { skip }, () => {
+  const restore = (workflow, job) => step(load(workflow).jobs[job], "Restore Swift build cache").with;
+  assert.deepEqual(restore("release", "build"), restore("bundle", "bundle"));
+});
+
+test("only pushes to main save the Swift build cache, and a release never does", { skip }, () => {
+  for (const { name, job } of swiftJobs().filter(({ name }) => name !== "release")) {
+    const restore = step(job, "Restore Swift build cache");
+    const save = step(job, "Save Swift build cache");
+    assert.match(save.uses, /^actions\/cache\/save@[0-9a-f]{40}$/, name);
+    assert.equal(save.if, "runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'", name);
+    assert.equal(restore.id, "swift-cache", name);
+    assert.equal(save.with.key, "${{ steps.swift-cache.outputs.cache-primary-key }}", name);
+    assert.deepEqual(lines(save.with.path), swiftBuildDirectories, name);
+    assert.equal(save.index, job.steps.length - 1, `${name}: saved after every step that builds Swift`);
+  }
+  for (const candidate of load("release").jobs.build.steps) {
+    assert.doesNotMatch(candidate.uses ?? "", /^actions\/cache(\/save)?@/, `release: ${candidate.name}`);
+  }
+});
+
 // bun hardlinks from its cache into node_modules, and a hardlink cannot cross from C: to the D:
 // workspace, so with the default cache it copied every package: 16-20 s against 7 s.
-test("the Windows verify leg keeps bun's install cache on the workspace drive", { skip }, () => {
-  const verify = load("ci").jobs.verify;
-  const cache = step(verify, "Keep the bun cache on the workspace drive");
-  assert.equal(cache.if, "runner.os == 'Windows'");
-  assert.match(cache.run, /BUN_INSTALL_CACHE_DIR=\$\(Join-Path \$env:RUNNER_TEMP /);
-  assert.match(cache.run, />> \$env:GITHUB_ENV/);
-  assert.ok(cache.index < step(verify, "Install frontend dependencies").index);
+test("every Windows job that installs bun packages keeps bun's install cache on the workspace drive", { skip }, () => {
+  for (const [name, job] of [["ci", load("ci").jobs.verify], ["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
+    const cache = step(job, "Keep the bun cache on the workspace drive");
+    assert.equal(cache.if, "runner.os == 'Windows'", name);
+    assert.match(cache.run, /BUN_INSTALL_CACHE_DIR=\$\(Join-Path \$env:RUNNER_TEMP /, name);
+    assert.match(cache.run, />> \$env:GITHUB_ENV/, name);
+    assert.ok(cache.index < step(job, "Install frontend dependencies").index, name);
+  }
+  // And no Windows job added later installs without it.
+  for (const name of ["ci", "bundle", "release"]) {
+    for (const [id, job] of Object.entries(load(name).jobs)) {
+      const onWindows = runnerLegs(job).some(({ label }) => String(label).startsWith("windows"));
+      if (!onWindows || !(job.steps ?? []).some((candidate) => /bun install/.test(candidate.run ?? ""))) continue;
+      assert.ok(job.steps.some((candidate) => candidate.name === "Keep the bun cache on the workspace drive"), `${name}.yml ${id}`);
+    }
+  }
 });
 
 // rust-cache deletes the registry sources it restored, so the first cargo command re-extracts them.

@@ -73,8 +73,9 @@ toolchain. Bump the pin on its own pull request; the run after a bump pays one c
 shared key.
 
 `.github/workflows/cache-prune.yml` keeps the Actions cache under GitHub's 10 GB per-repository
-cap by deleting superseded rust-cache generations. Each generation costs roughly 1.9 GB across the
-four shared keys, and eviction at the cap silently turns warm jobs cold.
+cap by deleting superseded rust-cache and Swift build cache generations. Each Rust generation
+costs roughly 1.9 GB across the four shared keys, and eviction at the cap silently turns warm
+jobs cold.
 
 ## Judging visuals
 

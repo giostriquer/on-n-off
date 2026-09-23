@@ -127,8 +127,47 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+      # The build scripts build two Swift packages, and a cold build spent most of a minute on SDK
+      # modules and SweetCookieKit before it reached on-n-off's own Swift code. Their .build
+      # directories are cached, keyed on the toolchain and every package input. A source change
+      # restores the previous generation and rebuilds only what changed. As with rust-cache, only
+      # main saves (the job's last step). Bundle and Release build the release configuration, so
+      # they keep a `release` key family of their own; cache-prune.yml prunes both.
+      - name: Identify the Swift toolchain
+        id: swift
+        if: runner.os == 'macOS'
+        run: |
+          $swift = xcrun swift --version 2>&1 | ForEach-Object { "$_" }
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the Swift version: $swift" }
+          $sdk = xcrun --show-sdk-build-version
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the SDK build version." }
+          $identity = @($swift) + "SDK build $sdk"
+          $identity
+          $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity -join "`n"))
+          "toolchain=$([Convert]::ToHexString($digest).Substring(0, 16).ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Restore Swift build cache
+        id: swift-cache
+        if: runner.os == 'macOS'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            src-tauri/macos/SideNotch/.build
+            src-tauri/macos/BrowserBilling/.build
+          key: v0-swiftpm-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-${{ hashFiles('src-tauri/macos/*/Package.swift', 'src-tauri/macos/*/Package.resolved', 'src-tauri/macos/*/Info.plist', 'src-tauri/macos/*/Sources/**', 'src-tauri/macos/*/Tests/**') }}
+          restore-keys: v0-swiftpm-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-
+
+      # SwiftPM recompiles a source whose modification time differs from the one it recorded, and a
+      # checkout dates every file at checkout time, so a restored build recompiled on-n-off's own
+      # Swift modules on every run. The script's header says why a time taken from the content is
+      # sound.
+      - name: Stamp Swift sources with their content
+        if: runner.os == 'macOS'
+        run: bun scripts/stamp-source-times.mjs src-tauri/macos
+
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
-      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
+      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached. With the cache
+      # restored, it only confirms the checkout it finds.
       - name: Resolve Swift package dependencies
         if: runner.os == 'macOS'
         run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
@@ -246,3 +285,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Browser billing checks failed." }
           bun scripts/check-billing-resources.mjs
           if ($LASTEXITCODE -ne 0) { throw "Billing resource signing checks failed." }
+
+      # Last, so the entry holds what the native checks built as well. A job that failed saves
+      # nothing, and an exact hit has nothing new to save.
+      - name: Save Swift build cache
+        if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            src-tauri/macos/SideNotch/.build
+            src-tauri/macos/BrowserBilling/.build
+          key: ${{ steps.swift-cache.outputs.cache-primary-key }}
