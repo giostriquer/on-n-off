@@ -85,13 +85,14 @@ jobs:
         id: swift
         if: runner.os == 'macOS'
         run: |
-          $swift = xcrun swift --version 2>&1 | ForEach-Object { "$_" }
-          if ($LASTEXITCODE -ne 0) { throw "Could not read the Swift version: $swift" }
-          $sdk = xcrun --show-sdk-build-version
-          if ($LASTEXITCODE -ne 0) { throw "Could not read the SDK build version." }
-          $identity = @($swift) + "SDK build $sdk"
-          $identity
-          $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity -join "`n"))
+          $developer = xcode-select --print-path
+          if ($LASTEXITCODE -ne 0) { throw "No Xcode is selected." }
+          $version = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $developer) 'version.plist')
+          if ($version -notmatch '<key>ProductBuildVersion</key>\s*<string>([^<]+)</string>') {
+            throw "The selected Xcode at $developer has no build version."
+          }
+          "Xcode build $($Matches[1]) at $developer"
+          $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("$developer`n$version"))
           "toolchain=$([Convert]::ToHexString($digest).Substring(0, 16).ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
       - name: Restore Swift build cache

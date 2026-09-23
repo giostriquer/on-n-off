@@ -139,6 +139,11 @@ test("macOS jobs restore the Swift build cache before resolving, and stamp sourc
     const restore = step(job, "Restore Swift build cache");
     const stamp = step(job, "Stamp Swift sources with their content");
     for (const candidate of [toolchain, restore, stamp]) assert.equal(candidate.if, "runner.os == 'macOS'", `${name}: ${candidate.name}`);
+    // The selected Xcode fixes both the compiler and the SDK. Its version file costs nothing to
+    // read, where the first `xcrun swift --version` on a fresh runner took 6 s.
+    assert.match(toolchain.run, /xcode-select --print-path/, name);
+    assert.match(toolchain.run, /version\.plist/, name);
+    assert.doesNotMatch(toolchain.run, /xcrun/, `${name}: no Swift start-up just to name the toolchain`);
     assert.match(restore.uses, /^actions\/cache\/restore@[0-9a-f]{40}$/, `${name}: pinned by commit`);
     assert.deepEqual(lines(restore.with.path), swiftBuildDirectories, name);
     // The toolchain and every input the build scripts and native checks read.
