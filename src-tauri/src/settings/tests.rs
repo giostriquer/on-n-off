@@ -183,7 +183,7 @@ fn loading_settings_drops_malformed_github_scopes_and_normalises_the_rest() {
 
 #[test]
 fn saving_settings_refuses_a_malformed_github_scope_and_names_it() {
-    let err = save_settings(AppSettings {
+    let err = validated_settings(AppSettings {
         github_scopes: vec!["org:acme".into(), "org: broken".into()],
         ..AppSettings::default()
     })
@@ -217,7 +217,7 @@ fn missing_cursor_cli_hint_explains_the_agent_name_clash() {
 
 #[test]
 fn refuses_hiding_every_provider() {
-    let err = save_settings(AppSettings {
+    let err = validated_settings(AppSettings {
         hidden_agents: vec![
             AgentId::Claude,
             AgentId::Codex,
@@ -228,6 +228,43 @@ fn refuses_hiding_every_provider() {
     })
     .unwrap_err();
     assert!(err.message.contains("at least one provider"));
+}
+
+/// What a save writes, in a disposable home: the validated document, which loads back as saved.
+#[test]
+fn a_saved_document_is_the_validated_one_and_loads_back_unchanged() {
+    let home = crate::paths::scratch_dir("settings-save");
+    let settings = validated_settings(AppSettings {
+        hidden_agents: vec![AgentId::Cursor, AgentId::Claude, AgentId::Cursor],
+        binary_paths: HashMap::from([
+            (AgentId::Codex, "  ".to_string()),
+            (AgentId::Claude, "/opt/acme/bin/claude".to_string()),
+        ]),
+        github_scopes: vec![
+            "acme/webapp".into(),
+            "org:acme".into(),
+            "repo:acme/webapp".into(),
+        ],
+        limits_poll_minutes: 7,
+        ..AppSettings::default()
+    })
+    .unwrap();
+    assert_eq!(
+        settings.hidden_agents,
+        vec![AgentId::Claude, AgentId::Cursor]
+    );
+    assert_eq!(
+        settings.binary_paths,
+        HashMap::from([(AgentId::Claude, "/opt/acme/bin/claude".to_string())])
+    );
+    assert_eq!(settings.github_scopes, vec!["repo:acme/webapp", "org:acme"]);
+    assert_eq!(settings.limits_poll_minutes, 5);
+
+    let path = crate::paths::settings_path_for(&home);
+    write_settings(&path, &settings).unwrap();
+    let saved = fs::read_to_string(&path).unwrap();
+    assert_eq!(parse_settings(Some(&saved)), settings);
+    let _ = fs::remove_dir_all(home);
 }
 
 #[test]

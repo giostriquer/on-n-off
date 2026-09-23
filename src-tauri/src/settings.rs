@@ -105,7 +105,15 @@ pub fn load_settings() -> AppSettings {
     parse_settings(json.as_deref())
 }
 
-pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterError> {
+pub fn save_settings(settings: AppSettings) -> Result<AppSettings, AdapterError> {
+    let settings = validated_settings(settings)?;
+    write_settings(&paths::settings_path()?, &settings)?;
+    Ok(settings)
+}
+
+/// What `save_settings` would write, or why it refuses. It touches no file, so a test of a
+/// refusal cannot reach a real settings document even while the refusal it checks is broken.
+fn validated_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterError> {
     if let Some(bad) = settings
         .github_scopes
         .iter()
@@ -132,11 +140,13 @@ pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterEr
             "Keep at least one provider visible in the agent tabs.",
         ));
     }
-    let path = paths::settings_path()?;
-    let body = serde_json::to_string_pretty(&settings)
-        .map_err(|error| AdapterError::message(error.to_string()))?;
-    write_settings_document(&path, &body)?;
     Ok(settings)
+}
+
+fn write_settings(path: &Path, settings: &AppSettings) -> Result<(), AdapterError> {
+    let body = serde_json::to_string_pretty(settings)
+        .map_err(|error| AdapterError::message(error.to_string()))?;
+    write_settings_document(path, &body)
 }
 
 fn write_settings_document(path: &Path, body: &str) -> Result<(), AdapterError> {
