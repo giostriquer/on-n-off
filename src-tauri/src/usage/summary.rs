@@ -214,15 +214,6 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
     read_summary_from(input, user_home)
 }
 
-/// [`read_summary`] under `home` rather than the process's home. Tests read through this instead
-/// of setting `ON_N_OFF_HOME`: the variable is process-wide, so every other test running at the
-/// time would follow it into a scratch home, and whatever first caches a path derived from it
-/// (the CLI search path) keeps that scratch home for the rest of the run.
-#[cfg(test)]
-fn read_summary_in(home: &Path, input: UsageSummaryInput) -> Result<UsageSummaryDto, AdapterError> {
-    read_summary_from(input, || Ok(home.to_path_buf()))
-}
-
 /// The home is resolved only once the input has passed validation, as `read_summary` always has.
 fn read_summary_from(
     input: UsageSummaryInput,

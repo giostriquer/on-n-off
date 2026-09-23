@@ -243,6 +243,19 @@ fn fresh_fetch_writes_disk() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// A test that panics while it holds the rates-state lock fails alone: the tests after it — pricing
+/// and usage summary tests alike — still get the lock, rather than each failing with a
+/// `PoisonError`.
+#[test]
+fn a_test_that_panics_holding_the_rates_state_fails_alone() {
+    let failing = std::thread::spawn(|| {
+        let _serial = lock_rates_state();
+        panic!("deliberate: a test failing while it holds the rates state");
+    });
+    assert!(failing.join().is_err());
+    drop(lock_rates_state());
+}
+
 #[test]
 fn an_unknown_model_keeps_asking_for_an_early_refresh_until_a_fetch_succeeds() {
     let _serial = lock_rates_state();

@@ -6,53 +6,18 @@ use crate::usage::pricing;
 use crate::usage::scan_cache::{reset_scan_cache_decode_count, scan_cache_decode_count};
 use crate::usage::source_index::{reset_transcript_parse_count, transcript_parse_count};
 
-/// A summary read prices records and loads the rate table, so it changes the pricing module's
-/// process-wide state. A summary test must therefore wait while a pricing test holds that state.
-#[test]
-fn a_summary_test_waits_while_a_pricing_test_holds_the_rates_state() {
-    let pricing_test = pricing::lock_rates_state();
-    let (started, summary_started) = std::sync::mpsc::channel();
-    let summary_test = std::thread::spawn(move || {
-        let _serial = serial();
-        started.send(()).unwrap();
-    });
-    assert!(
-        summary_started
-            .recv_timeout(std::time::Duration::from_millis(100))
-            .is_err(),
-        "a summary test started while a pricing test held the rates state"
-    );
-    drop(pricing_test);
-    summary_started.recv().unwrap();
-    summary_test.join().unwrap();
-}
-
-/// A summary test that panics while holding the lock fails alone: the tests after it still get
-/// the lock, rather than each failing with a `PoisonError`.
-#[test]
-fn a_summary_test_that_panics_holding_the_lock_fails_alone() {
-    let failing = std::thread::spawn(|| {
-        let _serial = serial();
-        panic!("deliberate: a summary test failing while it holds the lock");
-    });
-    assert!(failing.join().is_err());
-    drop(serial());
-}
-
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_appended() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-append");
     write_claude_transcript(&home);
 
-    let initial =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert!(!initial.cache_hit);
     assert_eq!(initial.buckets[0].totals.output_tokens, 20);
 
     append_claude_record(&home, "msg_2", 25);
-    let refreshed =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let refreshed = read_offline(&home, august_input(false));
     assert!(!refreshed.cache_hit);
     assert_eq!(output_tokens(&refreshed), 45);
 
@@ -61,16 +26,14 @@ fn cached_summary_is_invalidated_when_transcript_is_appended() {
 
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_created() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-create");
     std::fs::create_dir_all(home.join(".claude").join("projects")).unwrap();
-    let initial =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert!(initial.buckets.is_empty());
 
     write_single_claude_record(&home, "created.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let refreshed =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let refreshed = read_offline(&home, august_input(false));
     assert!(!refreshed.cache_hit);
     assert_eq!(output_tokens(&refreshed), 20);
 
@@ -79,19 +42,17 @@ fn cached_summary_is_invalidated_when_transcript_is_created() {
 
 #[test]
 fn cached_summary_is_invalidated_by_same_size_rewrite() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-rewrite");
     let path = write_single_claude_record(&home, "rewrite.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let initial =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert_eq!(output_tokens(&initial), 20);
     let original_size = std::fs::metadata(&path).unwrap().len();
 
     std::thread::sleep(std::time::Duration::from_millis(20));
     write_single_claude_record(&home, "rewrite.jsonl", "2026-08-07T04:05:13.944Z", 25);
     assert_eq!(std::fs::metadata(path).unwrap().len(), original_size);
-    let refreshed =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let refreshed = read_offline(&home, august_input(false));
     assert!(!refreshed.cache_hit);
     assert_eq!(output_tokens(&refreshed), 25);
 
@@ -100,16 +61,14 @@ fn cached_summary_is_invalidated_by_same_size_rewrite() {
 
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_deleted() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-delete");
     let path = write_single_claude_record(&home, "delete.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let initial =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert_eq!(output_tokens(&initial), 20);
 
     std::fs::remove_file(path).unwrap();
-    let refreshed =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let refreshed = read_offline(&home, august_input(false));
     assert!(!refreshed.cache_hit);
     assert!(refreshed.buckets.is_empty());
 
@@ -118,13 +77,13 @@ fn cached_summary_is_invalidated_when_transcript_is_deleted() {
 
 #[test]
 fn cached_summary_survives_disjoint_window_change() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-disjoint");
     write_single_claude_record(&home, "july.jsonl", "2026-07-07T04:05:13.944Z", 10);
     let august_path =
         write_single_claude_record(&home, "august.jsonl", "2026-08-07T04:05:13.944Z", 20);
     let july_input = || day_input("2026-07-01", "2026-07-31", false);
-    let initial = pricing::with_test_fetch(None, || read_summary_in(&home, july_input())).unwrap();
+    let initial = read_offline(&home, july_input());
     assert_eq!(output_tokens(&initial), 10);
 
     std::thread::sleep(std::time::Duration::from_millis(20));
@@ -145,8 +104,7 @@ fn cached_summary_survives_disjoint_window_change() {
     august.push('\n');
     std::fs::write(august_path, august).unwrap();
 
-    let unchanged =
-        pricing::with_test_fetch(None, || read_summary_in(&home, july_input())).unwrap();
+    let unchanged = read_offline(&home, july_input());
     assert!(unchanged.cache_hit);
     assert_eq!(output_tokens(&unchanged), 10);
 
@@ -155,15 +113,14 @@ fn cached_summary_survives_disjoint_window_change() {
 
 #[test]
 fn corrupt_summary_cache_is_rebuilt() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-corrupt");
     write_claude_transcript(&home);
-    pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    read_offline(&home, august_input(false));
     let summary_path = summary_cache_path_for(&home);
     std::fs::write(&summary_path, "{partial").unwrap();
 
-    let rebuilt =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let rebuilt = read_offline(&home, august_input(false));
     assert!(!rebuilt.cache_hit);
     assert_eq!(output_tokens(&rebuilt), 20);
     assert!(serde_json::from_str::<serde_json::Value>(
@@ -176,7 +133,7 @@ fn corrupt_summary_cache_is_rebuilt() {
 
 #[test]
 fn incompatible_and_partial_cache_documents_rebuild_together() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-cache-migration");
     write_claude_transcript(&home);
     let cache_root = home.join(".on-n-off");
@@ -197,8 +154,7 @@ fn incompatible_and_partial_cache_documents_rebuild_together() {
     )
     .unwrap();
 
-    let migrated =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let migrated = read_offline(&home, august_input(false));
     assert!(!migrated.cache_hit);
     assert_eq!(output_tokens(&migrated), 20);
     for (cache_name, expected_version) in [
@@ -231,8 +187,7 @@ fn incompatible_and_partial_cache_documents_rebuild_together() {
     ] {
         std::fs::write(cache_root.join(cache_name), "{partial").unwrap();
     }
-    let rebuilt =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let rebuilt = read_offline(&home, august_input(false));
     assert!(!rebuilt.cache_hit);
     assert_eq!(output_tokens(&rebuilt), 20);
 
@@ -241,7 +196,7 @@ fn incompatible_and_partial_cache_documents_rebuild_together() {
 
 #[test]
 fn older_generation_cannot_overwrite_newer_summary() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-concurrent");
     write_claude_transcript(&home);
 
@@ -259,15 +214,13 @@ fn older_generation_cannot_overwrite_newer_summary() {
 
     reached.wait();
     append_claude_record(&home, "msg_2", 25);
-    let newer =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let newer = read_offline(&home, august_input(false));
     assert_eq!(output_tokens(&newer), 45);
     resume.wait();
 
     let older = older.join().unwrap();
     assert_eq!(output_tokens(&older), 20);
-    let final_hit =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let final_hit = read_offline(&home, august_input(false));
     assert!(final_hit.cache_hit);
     assert_eq!(output_tokens(&final_hit), 45);
     for cache_name in [
@@ -284,13 +237,12 @@ fn older_generation_cannot_overwrite_newer_summary() {
 
 #[test]
 fn cache_write_failures_do_not_fail_correct_summary() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-write-failure");
     write_claude_transcript(&home);
     std::fs::write(home.join(".on-n-off"), "blocks cache directory").unwrap();
 
-    let summary =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
     assert!(!summary.cache_hit);
     assert_eq!(output_tokens(&summary), 20);
 
@@ -301,7 +253,7 @@ fn cache_write_failures_do_not_fail_correct_summary() {
 /// its mtime; the usage it recorded is still usage, and still Codex's one source.
 #[test]
 fn archived_codex_sessions_still_count() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-archived-codex");
     let codex = home.join(".codex");
     write_codex_rollout(
@@ -317,8 +269,7 @@ fn archived_codex_sessions_still_count() {
         30,
     );
 
-    let summary =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
 
     let codex_output: u64 = summary
         .buckets
@@ -341,7 +292,7 @@ fn archived_codex_sessions_still_count() {
 
 #[test]
 fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-archived-only");
     write_codex_rollout(
         &home.join(".codex").join("archived_sessions"),
@@ -350,8 +301,7 @@ fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
         30,
     );
 
-    let summary =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
 
     let codex = summary
         .sources
@@ -368,7 +318,7 @@ fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
 /// rollout under both Codex roots; it is still one rollout.
 #[test]
 fn a_codex_rollout_listed_under_both_roots_counts_once() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-archived-twice");
     let codex = home.join(".codex");
     for dir in [
@@ -378,8 +328,7 @@ fn a_codex_rollout_listed_under_both_roots_counts_once() {
         write_codex_rollout(&dir, "rollout-moved.jsonl", "session-moved", 20);
     }
 
-    let summary =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
 
     assert_eq!(output_tokens(&summary), 20);
     let codex_source = summary
@@ -395,7 +344,7 @@ fn a_codex_rollout_listed_under_both_roots_counts_once() {
 /// holds the partial first line inside the window and the original the billed line after it.
 #[test]
 fn a_message_counted_outside_the_window_adds_no_session() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-session-follows-copy");
     let usage = |output: u64| {
         serde_json::json!({
@@ -426,8 +375,7 @@ fn a_message_counted_outside_the_window_adds_no_session() {
         )],
     );
 
-    let summary =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
 
     assert!(summary.buckets.is_empty(), "{:?}", summary.buckets);
     let claude = summary
@@ -443,7 +391,7 @@ fn a_message_counted_outside_the_window_adds_no_session() {
 /// one-hour rate both times.
 #[test]
 fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-one-hour-writes");
     write_claude_lines(
         &home,
@@ -492,23 +440,9 @@ fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
 
 #[test]
 fn missing_dirs_report_missing_sources() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-missing");
-    let summary = pricing::with_test_fetch(None, || {
-        read_summary_in(
-            &home,
-            UsageSummaryInput {
-                since_day: "2026-08-01".into(),
-                until_day: "2026-08-31".into(),
-                time_zone: "UTC".into(),
-                resolution: Some("day".into()),
-                since_time: None,
-                until_time: None,
-                force: false,
-            },
-        )
-    })
-    .unwrap();
+    let summary = read_offline(&home, august_input(false));
     assert_eq!(summary.sources.len(), 2);
     assert!(summary
         .sources
@@ -521,11 +455,10 @@ fn missing_dirs_report_missing_sources() {
 
 #[test]
 fn cached_missing_source_tracks_empty_root_creation_and_removal() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-root-presence");
 
-    let missing =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let missing = read_offline(&home, august_input(false));
     assert_eq!(
         missing
             .sources
@@ -535,13 +468,11 @@ fn cached_missing_source_tracks_empty_root_creation_and_removal() {
             .status,
         UsageSourceStatus::Missing
     );
-    let cached_missing =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let cached_missing = read_offline(&home, august_input(false));
     assert!(cached_missing.cache_hit);
 
     std::fs::create_dir_all(home.join(".claude").join("projects")).unwrap();
-    let present =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let present = read_offline(&home, august_input(false));
     assert!(!present.cache_hit);
     assert_eq!(
         present
@@ -554,8 +485,7 @@ fn cached_missing_source_tracks_empty_root_creation_and_removal() {
     );
 
     std::fs::remove_dir_all(home.join(".claude")).unwrap();
-    let missing_again =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let missing_again = read_offline(&home, august_input(false));
     assert!(!missing_again.cache_hit);
     assert_eq!(
         missing_again
@@ -572,19 +502,17 @@ fn cached_missing_source_tracks_empty_root_creation_and_removal() {
 
 #[test]
 fn retained_history_repeated_full_time_reparses_zero_unchanged_files() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-repeat");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
-    let initial =
-        pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
+    let initial = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&initial), 30);
     reset_transcript_parse_count();
 
-    let repeated =
-        pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
+    let repeated = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&repeated), 30);
     assert_eq!(transcript_parse_count(), 0);
 
@@ -593,14 +521,13 @@ fn retained_history_repeated_full_time_reparses_zero_unchanged_files() {
 
 #[test]
 fn retained_history_unchanged_summary_hit_decodes_zero_scan_cache_records() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-fast-hit");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
-    let initial =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert!(!initial.cache_hit);
     assert_eq!(
         claude_scanned_files(&initial),
@@ -609,8 +536,7 @@ fn retained_history_unchanged_summary_hit_decodes_zero_scan_cache_records() {
     );
     reset_scan_cache_decode_count();
 
-    let cached =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
+    let cached = read_offline(&home, august_input(false));
     assert!(cached.cache_hit);
     assert_eq!(scan_cache_decode_count(), 0);
 
@@ -619,15 +545,14 @@ fn retained_history_unchanged_summary_hit_decodes_zero_scan_cache_records() {
 
 #[test]
 fn retained_history_recent_window_keeps_old_live_cached_records() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-recent");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
-    pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
-    let recent =
-        pricing::with_test_fetch(None, || read_summary_in(&home, august_input(true))).unwrap();
+    read_offline(&home, full_time_input(true));
+    let recent = read_offline(&home, august_input(true));
     assert_eq!(output_tokens(&recent), 20);
     assert_eq!(
         claude_scanned_files(&recent),
@@ -638,8 +563,7 @@ fn retained_history_recent_window_keeps_old_live_cached_records() {
     assert!(cache.contains_key(&normalize_path(&old_path)));
     reset_transcript_parse_count();
 
-    let full_time =
-        pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
+    let full_time = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&full_time), 30);
     assert_eq!(claude_scanned_files(&full_time), 2);
     assert_eq!(transcript_parse_count(), 0);
@@ -649,15 +573,15 @@ fn retained_history_recent_window_keeps_old_live_cached_records() {
 
 #[test]
 fn retained_history_deleted_historical_file_is_pruned() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-delete");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
-    pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
+    read_offline(&home, full_time_input(true));
     std::fs::remove_file(&old_path).unwrap();
-    pricing::with_test_fetch(None, || read_summary_in(&home, august_input(true))).unwrap();
+    read_offline(&home, august_input(true));
     let cache = load_scan_cache(&scan_cache_path_for(&home));
     assert!(!cache.contains_key(&normalize_path(&old_path)));
 
@@ -666,14 +590,13 @@ fn retained_history_deleted_historical_file_is_pruned() {
 
 #[test]
 fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-equality");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
-    let warm =
-        pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
+    let warm = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&warm), 30);
     assert_eq!(record_count(&warm), 2);
     let warm_cache = load_scan_cache(&scan_cache_path_for(&home));
@@ -686,8 +609,7 @@ fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
         let _ = std::fs::remove_file(home.join(".on-n-off").join(cache_name));
     }
 
-    let from_scratch =
-        pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
+    let from_scratch = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&from_scratch), 30);
     assert_eq!(record_count(&from_scratch), 2);
     assert_eq!(from_scratch.buckets, warm.buckets);
@@ -697,7 +619,7 @@ fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
 
 #[test]
 fn scans_claude_fixture_and_dedupes() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-scan");
     write_claude_transcript(&home);
     let rates_doc = serde_json::json!({
@@ -709,18 +631,7 @@ fn scans_claude_fixture_and_dedupes() {
         }
     });
     let summary = pricing::with_test_fetch(Some(rates_doc), || {
-        read_summary_in(
-            &home,
-            UsageSummaryInput {
-                since_day: "2026-08-01".into(),
-                until_day: "2026-08-31".into(),
-                time_zone: "UTC".into(),
-                resolution: Some("day".into()),
-                since_time: None,
-                until_time: None,
-                force: false,
-            },
-        )
+        read_summary_in(&home, august_input(false))
     })
     .unwrap();
     let claude = summary
@@ -739,21 +650,7 @@ fn scans_claude_fixture_and_dedupes() {
     assert_eq!(summary.pricing.status, UsagePricingStatus::Fresh);
     assert!(summary.pricing.known_models >= 1);
 
-    let again = pricing::with_test_fetch(None, || {
-        read_summary_in(
-            &home,
-            UsageSummaryInput {
-                since_day: "2026-08-01".into(),
-                until_day: "2026-08-31".into(),
-                time_zone: "UTC".into(),
-                resolution: Some("day".into()),
-                since_time: None,
-                until_time: None,
-                force: true,
-            },
-        )
-    })
-    .unwrap();
+    let again = read_offline(&home, august_input(true));
     assert_eq!(again.buckets[0].totals.output_tokens, 20);
     assert_eq!(again.pricing.status, UsagePricingStatus::Cached);
     assert!(!again.cache_hit);
@@ -762,21 +659,7 @@ fn scans_claude_fixture_and_dedupes() {
         .join("usage-scan-cache.json")
         .is_file());
 
-    let cached = pricing::with_test_fetch(None, || {
-        read_summary_in(
-            &home,
-            UsageSummaryInput {
-                since_day: "2026-08-01".into(),
-                until_day: "2026-08-31".into(),
-                time_zone: "UTC".into(),
-                resolution: Some("day".into()),
-                since_time: None,
-                until_time: None,
-                force: false,
-            },
-        )
-    })
-    .unwrap();
+    let cached = read_offline(&home, august_input(false));
     assert!(cached.cache_hit);
     assert_eq!(cached.scan_duration_ms, 0);
     assert_eq!(cached.buckets[0].totals.output_tokens, 20);
@@ -786,24 +669,10 @@ fn scans_claude_fixture_and_dedupes() {
 
 #[test]
 fn tokens_still_returned_when_rates_unavailable() {
-    let _serial = serial();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-unpriced");
     write_claude_transcript(&home);
-    let summary = pricing::with_test_fetch(None, || {
-        read_summary_in(
-            &home,
-            UsageSummaryInput {
-                since_day: "2026-08-01".into(),
-                until_day: "2026-08-31".into(),
-                time_zone: "UTC".into(),
-                resolution: Some("day".into()),
-                since_time: None,
-                until_time: None,
-                force: false,
-            },
-        )
-    })
-    .unwrap();
+    let summary = read_offline(&home, august_input(false));
     assert_eq!(summary.pricing.status, UsagePricingStatus::Unavailable);
     assert_eq!(summary.buckets[0].cost_source, UsageCostSource::Unpriced);
     assert_eq!(summary.buckets[0].totals.output_tokens, 20);

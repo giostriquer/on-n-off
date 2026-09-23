@@ -1,15 +1,26 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::MutexGuard;
 use std::time::{Duration, SystemTime};
 
 use super::*;
 use crate::usage::pricing;
 
-/// What every summary test takes first: the pricing module's rates-state lock, because a summary
-/// read changes that module's process-wide state (see `pricing::lock_rates_state`).
-pub(super) fn serial() -> MutexGuard<'static, ()> {
-    pricing::lock_rates_state()
+/// A summary read under `home` rather than the process's home. Tests read through this instead
+/// of setting `ON_N_OFF_HOME`: the variable is process-wide, so every other test running at the
+/// time would follow it into a scratch home, and whatever first caches a path derived from it
+/// (the CLI search path) keeps that scratch home for the rest of the run. A summary read also
+/// changes the pricing module's process-wide state, so every test that reads one holds
+/// `pricing::lock_rates_state` first.
+pub(super) fn read_summary_in(
+    home: &Path,
+    input: UsageSummaryInput,
+) -> Result<UsageSummaryDto, AdapterError> {
+    read_summary_from(input, || Ok(home.to_path_buf()))
+}
+
+/// [`read_summary_in`] with the rate table's fetch failing, as it does offline.
+pub(super) fn read_offline(home: &Path, input: UsageSummaryInput) -> UsageSummaryDto {
+    pricing::with_test_fetch(None, || read_summary_in(home, input)).unwrap()
 }
 
 pub(super) fn write_claude_transcript(home: &Path) {
