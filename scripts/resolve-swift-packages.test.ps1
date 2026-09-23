@@ -7,6 +7,12 @@ $ErrorActionPreference = "Stop"
 # Every case runs the resolver in a disposable package directory against a stub that stands in for
 # `xcrun` and fails a set number of times, with no delay between attempts. Nothing here touches
 # SwiftPM, the network or the repository's own packages, so it runs on both legs.
+#
+# The resolver runs the way an Actions `pwsh` step runs it: called after
+# `$ErrorActionPreference = 'stop'`, and the step exits with the last native exit code. `xcrun` is
+# a native program, and PowerShell treats a failing native command differently from a failing
+# script, so the stub is reached through a native launcher: a batch file on Windows, a shell script
+# elsewhere.
 $scriptUnderTest = Join-Path $PSScriptRoot "resolve-swift-packages.ps1"
 $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("on-n-off-swift-resolve-test-" + [guid]::NewGuid().ToString("N"))
 $powershell = (Get-Process -Id $PID).Path
@@ -27,14 +33,45 @@ if ($call -le @FAILURES@) {
 exit 0
 '@
 
+function ConvertTo-Quoted {
+    param([string] $Value)
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function New-NativeResolver {
+    param([string] $Directory, [string] $Stub)
+
+    if ($IsWindows) {
+        $launcher = Join-Path $Directory "xcrun.cmd"
+        Set-Content -LiteralPath $launcher -Value @(
+            "@`"$powershell`" -NoProfile -ExecutionPolicy Bypass -File `"$Stub`" %*",
+            "@exit /b %ERRORLEVEL%"
+        )
+    } else {
+        $launcher = Join-Path $Directory "xcrun"
+        Set-Content -LiteralPath $launcher -Value @(
+            "#!/bin/sh",
+            "exec '$($powershell.Replace("'", "'\''"))' -NoProfile -File '$($Stub.Replace("'", "'\''"))' `"`$@`""
+        )
+        [System.IO.File]::SetUnixFileMode($launcher, [System.IO.UnixFileMode] "UserRead, UserWrite, UserExecute")
+    }
+    return $launcher
+}
+
 function Invoke-Resolve {
-    param([string] $Name, [int] $Failures, [switch] $NoManifest)
+    param(
+        [string] $Name,
+        [int] $Failures,
+        [switch] $NoManifest,
+        # A caller that turns failing native commands into errors, which Stop then makes terminating.
+        [switch] $NativeErrorsTerminate
+    )
 
     $case = Join-Path $fixtureRoot $Name
     $package = Join-Path $case "package"
     $build = Join-Path $package ".build"
     $log = Join-Path $case "calls.log"
-    $stub = Join-Path $case "xcrun.ps1"
+    $stub = Join-Path $case "xcrun-stub.ps1"
 
     # What an earlier resolution left in .build: a first attempt that succeeds must keep it.
     New-Item -ItemType Directory -Path $build -Force | Out-Null
@@ -43,16 +80,21 @@ function Invoke-Resolve {
         Set-Content -LiteralPath (Join-Path $package "Package.swift") -Value "// swift-tools-version: 6.2"
     }
     Set-Content -LiteralPath $stub -Value $stubTemplate.Replace("@LOG@", $log.Replace("'", "''")).Replace("@FAILURES@", "$Failures")
+    $resolver = New-NativeResolver -Directory $case -Stub $stub
+
+    $step = @(
+        "`$ErrorActionPreference = 'stop'"
+        if ($NativeErrorsTerminate) { "`$PSNativeCommandUseErrorActionPreference = `$true" }
+        "& $(ConvertTo-Quoted $scriptUnderTest) -PackagePath $(ConvertTo-Quoted $package) -Resolver $(ConvertTo-Quoted $resolver) -RetryDelaySeconds 0"
+        "if (Test-Path -LiteralPath variable:\LASTEXITCODE) { exit `$LASTEXITCODE }"
+    ) -join "`n"
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $powershell
     foreach ($argument in @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
-        "-File", $scriptUnderTest,
-        "-PackagePath", $package,
-        "-Resolver", $stub,
-        "-RetryDelaySeconds", "0"
+        "-Command", $step
     )) {
         $startInfo.ArgumentList.Add($argument)
     }
@@ -110,6 +152,13 @@ try {
     }
     if ($second.Output -notmatch 'attempt 1 of 3') {
         $failures += "A retry should say which attempt failed. Output: $($second.Output)"
+    }
+
+    # A step, or a future pwsh default, that makes a failing native command terminate under Stop
+    # must not turn the first failed attempt into the step's failure: the retries are the point.
+    $strict = Invoke-Resolve -Name "strict" -Failures 1 -NativeErrorsTerminate
+    if ($strict.ExitCode -ne 0 -or $strict.Calls.Count -ne 2) {
+        $failures += "A caller that makes native failures terminate should still get a retry, got exit $($strict.ExitCode) after $($strict.Calls.Count) calls. Output: $($strict.Output)"
     }
 
     $third = Invoke-Resolve -Name "third" -Failures 2

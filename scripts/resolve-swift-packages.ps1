@@ -13,6 +13,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+# The loop reads $LASTEXITCODE itself, so a failing attempt must never throw, whatever the caller
+# sets: a throw would skip the retries this script exists for.
+$PSNativeCommandUseErrorActionPreference = $false
 
 # The macOS jobs of ci.yml, bundle.yml and release.yml run this before their first cargo step.
 #
