@@ -6,7 +6,7 @@ description: >-
 
 # The Rust build script builds two Swift packages (native_build.rs, native_billing_build.rs), and
 # a cold build spent most of a minute on SDK modules and SweetCookieKit before it reached
-# on-n-off's own Swift code. verify.yml, bundle.yml and release.yml all restore through this action, so
+# on-n-off's own Swift code. ci.yml, bundle.yml and release.yml all restore through this action, so
 # Release's key is Bundle's by construction. cache-prune.yml prunes the key families.
 
 inputs:

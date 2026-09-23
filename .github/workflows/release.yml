@@ -16,7 +16,7 @@ defaults:
   run:
     shell: pwsh
 
-# Keep this block identical to verify.yml and bundle.yml: rust-cache hashes CARGO*/RUST* variables into
+# Keep this block identical to ci.yml and bundle.yml: rust-cache hashes CARGO*/RUST* variables into
 # its key, and the build job below restores the cache that the Bundle workflow saves on main.
 env:
   CARGO_INCREMENTAL: 0
@@ -25,7 +25,7 @@ env:
 
 jobs:
   # Cheap gate on the tag itself. The tagged commit must already be on main, and every commit on
-  # main has been through the CI workflow's verify jobs, so this job does not repeat that work.
+  # main has been through the CI workflow's verify matrix, so this job does not repeat that work.
   #
   # Runner labels are pinned and bumped together; see ci.yml.
   validate:
@@ -109,7 +109,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # bun hardlinks packages from its install cache into node_modules, which only works on one
-      # drive; see verify.yml. RUNNER_TEMP is on the workspace drive.
+      # drive; see ci.yml. RUNNER_TEMP is on the workspace drive.
       - name: Keep the bun cache on the workspace drive
         if: runner.os == 'Windows'
         run: |
@@ -136,7 +136,7 @@ jobs:
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
 
-      # Restores the Swift build cache that the Bundle workflow saves on main (see verify.yml and
+      # Restores the Swift build cache that the Bundle workflow saves on main (see ci.yml and
       # bundle.yml); like the Rust cache below, this job never saves one. The key moves only with
       # the Swift package inputs, which a version bump leaves alone, so a release whose commits
       # changed none restores an exact hit from an earlier Bundle run instead of waiting for the one

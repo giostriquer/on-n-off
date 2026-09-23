@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 # sets: a throw would skip the retries this script exists for.
 $PSNativeCommandUseErrorActionPreference = $false
 
-# The macOS jobs of verify.yml, bundle.yml and release.yml run this before their first cargo step.
+# The macOS jobs of ci.yml, bundle.yml and release.yml run this before their first cargo step.
 #
 # The browser billing helper's one remote dependency, SweetCookieKit, is otherwise cloned from
 # inside a cargo build script, where a transient SwiftPM failure fails the whole build: a Bundle

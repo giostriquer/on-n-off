@@ -17,7 +17,7 @@ defaults:
   run:
     shell: pwsh
 
-# Keep this block identical to verify.yml and release.yml: rust-cache hashes CARGO*/RUST* variables into
+# Keep this block identical to ci.yml and release.yml: rust-cache hashes CARGO*/RUST* variables into
 # its key, and the release workflow's build job restores the cache the bundle job saves.
 env:
   CARGO_INCREMENTAL: 0
@@ -49,7 +49,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # bun hardlinks packages from its install cache into node_modules, which only works on one
-      # drive; see verify.yml. RUNNER_TEMP is on the workspace drive.
+      # drive; see ci.yml. RUNNER_TEMP is on the workspace drive.
       - name: Keep the bun cache on the workspace drive
         if: runner.os == 'Windows'
         run: |
@@ -78,7 +78,7 @@ jobs:
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
 
-      # The Swift packages' .build directories, cached as in verify.yml, but for the release
+      # The Swift packages' .build directories, cached as in ci.yml, but for the release
       # configuration that `tauri build` asks for. The release workflow's build job restores this
       # entry; this job saves it (the job's last step).
       - name: Restore Swift build cache
@@ -128,7 +128,7 @@ jobs:
           INSTALLER_KIND: ${{ matrix.installer }}
         run: ./scripts/build-bundle.ps1 -InstallerKind $env:INSTALLER_KIND -ReleaseVersion $env:RELEASE_VERSION
 
-      # This workflow only runs on main; the ref check keeps the rule the same as verify.yml's.
+      # This workflow only runs on main; the ref check keeps the rule the same as ci.yml's.
       - name: Save Swift build cache
         if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
