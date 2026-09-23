@@ -357,6 +357,23 @@ fn a_finished_operation_frees_the_vault_lease_while_a_spawned_child_still_shares
 }
 
 #[test]
+fn a_lease_timeout_override_lasts_only_as_long_as_its_guard() {
+    use std::time::Duration;
+    assert_eq!(lease_timeout(), Duration::from_secs(10));
+    {
+        let _short = override_lease_timeout(Duration::from_millis(50));
+        assert_eq!(lease_timeout(), Duration::from_millis(50));
+        let busy = std::thread::spawn(lease_timeout).join().unwrap();
+        assert_eq!(
+            busy,
+            Duration::from_secs(10),
+            "other threads keep the production wait"
+        );
+    }
+    assert_eq!(lease_timeout(), Duration::from_secs(10));
+}
+
+#[test]
 fn capturing_a_native_login_revokes_private_renewal_ownership() {
     let mut db = Database::default();
     let id = db.save(identity("a"), login("old"), None).unwrap();

@@ -191,6 +191,38 @@ impl Database {
     }
 }
 
+/// How long an account operation waits for another one to finish before reporting it running.
+const LEASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[cfg(not(test))]
+fn lease_timeout() -> std::time::Duration {
+    LEASE_TIMEOUT
+}
+#[cfg(test)]
+thread_local! {
+    static LEASE_TIMEOUT_OVERRIDE: std::cell::Cell<Option<std::time::Duration>> =
+        const { std::cell::Cell::new(None) };
+}
+#[cfg(test)]
+fn lease_timeout() -> std::time::Duration {
+    LEASE_TIMEOUT_OVERRIDE.get().unwrap_or(LEASE_TIMEOUT)
+}
+/// Shortens `Store::lease`'s wait on the current thread until the guard drops, so a test of a
+/// busy vault does not sit out the production timeout.
+#[cfg(test)]
+#[must_use]
+pub(crate) struct LeaseTimeoutOverride(Option<std::time::Duration>);
+#[cfg(test)]
+pub(crate) fn override_lease_timeout(timeout: std::time::Duration) -> LeaseTimeoutOverride {
+    LeaseTimeoutOverride(LEASE_TIMEOUT_OVERRIDE.replace(Some(timeout)))
+}
+#[cfg(test)]
+impl Drop for LeaseTimeoutOverride {
+    fn drop(&mut self) {
+        LEASE_TIMEOUT_OVERRIDE.set(self.0);
+    }
+}
+
 pub struct Store {
     pub root: std::path::PathBuf,
     pub(super) key: [u8; 32],
@@ -198,7 +230,7 @@ pub struct Store {
 }
 impl Store {
     pub fn lease(home: &std::path::Path) -> Result<(std::path::PathBuf, FileLease), String> {
-        Self::lease_with_timeout(home, std::time::Duration::from_secs(10))
+        Self::lease_with_timeout(home, lease_timeout())
     }
     fn lease_with_timeout(
         home: &std::path::Path,

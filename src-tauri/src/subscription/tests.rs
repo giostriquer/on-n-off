@@ -200,6 +200,8 @@ fn a_busy_saved_account_vault_is_retryable_not_an_absent_identity() {
     crate::accounts::vault::tests::unlock_fixture(&home);
     let lease = std::fs::File::create(root.join("operation.lock")).unwrap();
     lease.try_lock().unwrap();
+    // Both reads wait out the vault lease; production's ten seconds would add twenty to the suite.
+    let _short = crate::accounts::override_lease_timeout(std::time::Duration::from_millis(100));
     assert!(browser::read_metadata(home.path(), "profile:inactive", now()).is_err());
     let error = validate_account(home.path(), "profile:inactive").unwrap_err();
     assert!(
