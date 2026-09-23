@@ -187,25 +187,26 @@ fn save_under(home: &Path, settings: AppSettings) -> Result<AppSettings, Adapter
     save_settings_to(settings, || Ok(crate::paths::settings_path_for(home)))
 }
 
+/// Why `settings` is refused. The document it would be saved to panics when resolved: a save is
+/// validated before its path is, so these tests reach no settings document at all — least of all
+/// the real one, which a broken refusal would otherwise overwrite — and a refusal names the bad
+/// value even when no home can be resolved.
+fn refused_save(settings: AppSettings) -> AdapterError {
+    save_settings_to(settings, || {
+        panic!("a refused save must not resolve a settings path")
+    })
+    .unwrap_err()
+}
+
 #[test]
 fn saving_settings_refuses_a_malformed_github_scope_and_names_it() {
-    let home = crate::paths::scratch_dir("settings-refuse-scope");
-    let err = save_under(
-        &home,
-        AppSettings {
-            github_scopes: vec!["org:acme".into(), "org: broken".into()],
-            ..AppSettings::default()
-        },
-    )
-    .unwrap_err();
+    let err = refused_save(AppSettings {
+        github_scopes: vec!["org:acme".into(), "org: broken".into()],
+        ..AppSettings::default()
+    });
 
     assert!(err.message.contains("org: broken"), "{}", err.message);
     assert!(err.message.contains("org:NAME"), "{}", err.message);
-    assert!(
-        !crate::paths::settings_path_for(&home).exists(),
-        "a refused save wrote the settings document"
-    );
-    let _ = fs::remove_dir_all(home);
 }
 
 #[test]
@@ -232,26 +233,20 @@ fn missing_cursor_cli_hint_explains_the_agent_name_clash() {
 
 #[test]
 fn refuses_hiding_every_provider() {
-    let home = crate::paths::scratch_dir("settings-refuse-hidden");
-    let err = save_under(
-        &home,
-        AppSettings {
-            hidden_agents: vec![
-                AgentId::Claude,
-                AgentId::Codex,
-                AgentId::Antigravity,
-                AgentId::Cursor,
-            ],
-            ..AppSettings::default()
-        },
-    )
-    .unwrap_err();
-    assert!(err.message.contains("at least one provider"));
+    let err = refused_save(AppSettings {
+        hidden_agents: vec![
+            AgentId::Claude,
+            AgentId::Codex,
+            AgentId::Antigravity,
+            AgentId::Cursor,
+        ],
+        ..AppSettings::default()
+    });
     assert!(
-        !crate::paths::settings_path_for(&home).exists(),
-        "a refused save wrote the settings document"
+        err.message.contains("at least one provider"),
+        "{}",
+        err.message
     );
-    let _ = fs::remove_dir_all(home);
 }
 
 /// What a save writes, in a disposable home: the validated document, which loads back as saved.
