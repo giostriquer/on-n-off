@@ -386,33 +386,38 @@ test("each required verify check needs only its own OS and fails unless every ne
     assert.equal(job.steps.length, 1);
     const [check] = job.steps;
     assert.equal(check.env.NEEDS, "${{ toJSON(needs) }}");
-    assert.match(check.run, /-cne 'success'/, "anything but exactly success fails");
+    assert.equal(check.shell, "bash", "pwsh's first start on a fresh ubuntu runner took 4-16 s");
+    assert.match(check.run, /all\(\.\[\]; \.result == "success"\)/, "anything but exactly success fails");
     assert.match(check.run, /exit 1/);
   }
   assert.deepEqual(ci["verify-macos"].steps, ci["verify-windows"].steps);
 });
 
-const pwsh = globalThis.Bun?.which?.("pwsh");
-// Every case starts its own pwsh, which takes most of a second on the runner, so they run at once.
-test("the aggregator step fails for every result but success, and when it needs nothing", { skip: skip || (pwsh ? false : "needs pwsh"), timeout: 60_000 }, async () => {
+// GitHub runs a bash step as `bash --noprofile --norc -eo pipefail {0}`.
+const bash = globalThis.Bun?.which?.("bash");
+const jq = globalThis.Bun?.which?.("jq");
+test("the aggregator step fails for every result but success, and when it needs nothing", { skip: skip || (bash && jq ? false : "needs bash and jq") }, async () => {
   const script = load("ci").jobs["verify-windows"].steps[0].run;
   const outcome = async (needs) => {
-    const child = globalThis.Bun.spawn([pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    const child = globalThis.Bun.spawn([bash, "--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
       env: { ...process.env, NEEDS: JSON.stringify(needs) },
       stdout: "pipe",
       stderr: "pipe",
     });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-    return { needs, code, output: `${JSON.stringify(needs)}\n${stdout}${stderr}` };
+    return { code, stdout, output: `${JSON.stringify(needs)}\n${stdout}${stderr}` };
   };
   const one = (result) => ({ windows: { result, outputs: {} } });
   const passing = [one("success"), { lint: { result: "success" }, test: { result: "success" } }];
   const failing = [
     ...["failure", "cancelled", "skipped", "Success", ""].map(one),
+    { windows: { outputs: {} } },
     { lint: { result: "success" }, test: { result: "skipped" } },
     {},
   ];
   const results = await Promise.all([...passing, ...failing].map(outcome));
   for (const { code, output } of results.slice(0, passing.length)) assert.equal(code, 0, output);
   for (const { code, output } of results.slice(passing.length)) assert.notEqual(code, 0, output);
+  // A failed job is named in an annotation.
+  assert.match(results[passing.length].stdout, /^::error title=windows::windows finished as "failure", not "success"\.$/m);
 });

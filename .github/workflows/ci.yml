@@ -93,17 +93,20 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      # bash and jq, not the workflow's pwsh: pwsh's first start on a fresh ubuntu runner took 4-16 s,
+      # and this step is the last one of every run.
       - &require-success
         name: Require every needed job to succeed
+        shell: bash
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
-          $needs = $env:NEEDS | ConvertFrom-Json -AsHashtable
-          if ($needs.Count -eq 0) { throw "This job needs no jobs, so it would pass without checking anything." }
-          $failed = @($needs.Keys | Where-Object { $needs[$_].result -cne 'success' })
-          foreach ($name in $needs.Keys) { "${name}: $($needs[$name].result)" }
-          foreach ($name in $failed) { "::error title=${name}::${name} finished as '$($needs[$name].result)', not 'success'." }
-          if ($failed.Count -gt 0) { exit 1 }
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          jq -r 'to_entries[] | select(.value.result != "success") | "::error title=\(.key)::\(.key) finished as \(.value.result | tojson), not \"success\"."' <<< "$NEEDS"
+          if ! jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null; then
+            echo "::error::Not every needed job succeeded, or this job needs none."
+            exit 1
+          fi
 
   verify-macos:
     name: verify-macos
