@@ -18,7 +18,7 @@ function Cards() {
     <AccountCardActions accountId={profile.observationId!} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>} />
   </section>)}</>;
 }
-function setup(preferences = false, onCommit?: () => void) {
+function setup({ preferences = false, onCommit }: { preferences?: boolean; onCommit?: () => void } = {}) {
   vi.mocked(api.readAccountPreferences).mockResolvedValue(false);
   vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: false, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], nativeAccount: null, recoveryRequired: false, notice: null });
   vi.mocked(api.accountAction).mockResolvedValue();
@@ -62,7 +62,7 @@ it("moves focus to Cancel in the same commit that shows the running-clients conf
   // A Profiler reports a commit after the layout effects beneath it and before any passive one, so
   // this sees the first frame the confirmation paints in, however late passive effects happen to run.
   const name = "Confirm switching while Codex is running"; let focusedOnShow: Element | null | undefined;
-  setup(false, () => { if (focusedOnShow === undefined && document.querySelector(`[role="group"][aria-label="${name}"]`)) focusedOnShow = document.activeElement; });
+  setup({ onCommit: () => { if (focusedOnShow === undefined && document.querySelector(`[role="group"][aria-label="${name}"]`)) focusedOnShow = document.activeElement; } });
   vi.mocked(api.readAccountActivationBlockers).mockResolvedValue(["ChatGPT"]);
   const card = await screen.findByRole("region", { name: "person@example.com" });
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
@@ -114,7 +114,7 @@ it("keeps email as the account name and allows a free-text category to be edited
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "category", "profile-a", ""));
 });
 it("requires opt-in in Settings before automatically saving accounts", async () => {
-  setup(true); const checkbox = await screen.findByRole("checkbox", { name: "Automatically save accounts I sign in to" });
+  setup({ preferences: true }); const checkbox = await screen.findByRole("checkbox", { name: "Automatically save accounts I sign in to" });
   await waitFor(() => expect(checkbox).toBeEnabled()); expect(checkbox).not.toBeChecked();
   expect(api.accountAction).not.toHaveBeenCalled(); fireEvent.click(checkbox);
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remember"));
