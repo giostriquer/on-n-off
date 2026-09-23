@@ -108,8 +108,11 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   `cache-prune.yml` prunes both families. SwiftPM rebuilds a source whose modification time
   differs from the one it recorded, and a checkout dates every file at checkout time, so
   `scripts/stamp-source-times.mjs` first dates each tracked file under `src-tauri/macos` from its
-  content: an unchanged file matches the cache and a changed one does not. SwiftPM's own
-  `~/Library/Caches/org.swift.swiftpm` stays uncached (see `scripts/resolve-swift-packages.ps1`).
+  content: an unchanged file matches the cache and a changed one does not. A restored cache took
+  the macOS `Lint Rust` step from about 70 s to about 40 s. What it cannot remove is SwiftPM's
+  first start on a fresh runner, 10-20 s of launching the tools and compiling manifests, paid by
+  whichever Swift command runs first. SwiftPM's own `~/Library/Caches/org.swift.swiftpm` stays
+  uncached (see `scripts/resolve-swift-packages.ps1`).
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
   to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one image per OS that

@@ -133,8 +133,8 @@ jobs:
       # restores the previous generation and rebuilds only what changed. As with rust-cache, only
       # main saves (the job's last step). Bundle and Release build the release configuration, so
       # they keep a `release` key family of their own; cache-prune.yml prunes both. The toolchain
-      # is the selected Xcode, which fixes both the compiler and the SDK. Its version file costs
-      # nothing to read, where the first `xcrun swift --version` on a fresh runner took 6 s.
+      # is the selected Xcode, which fixes both the compiler and the SDK, read from its version
+      # file: asking `xcrun swift --version` took a step of its own 6 s on a fresh runner.
       - name: Identify the Swift toolchain
         id: swift
         if: runner.os == 'macOS'
@@ -170,7 +170,8 @@ jobs:
 
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
       # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached. With the cache
-      # restored, it only confirms the checkout it finds.
+      # restored, it fetches nothing; its 10-20 s is SwiftPM's first start on the runner (launching
+      # the tools and compiling manifests), which the cache does not hold.
       - name: Resolve Swift package dependencies
         if: runner.os == 'macOS'
         run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling

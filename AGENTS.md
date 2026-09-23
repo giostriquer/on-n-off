@@ -49,6 +49,8 @@ of the file — start there, not here.
 - `read-rust-toolchain.ps1`, `prune-rust-toolchains.ps1` — see "Toolchain pinning" below.
 - `resolve-swift-packages.ps1` — resolves a Swift package's remote dependencies, with retries,
   before a macOS job's first cargo step.
+- `stamp-source-times.mjs` — dates tracked files by their content, so a Swift build restored from
+  the Actions cache treats unchanged sources as unchanged.
 - `workflows.test.mjs` — pins the choices the workflows make on purpose, such as runner images.
 - `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
 - `verify-release.mjs` — checks a drafted release's assets, checksums, updater signatures, feed
