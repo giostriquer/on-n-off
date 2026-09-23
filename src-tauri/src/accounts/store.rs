@@ -194,32 +194,39 @@ impl Database {
 /// How long an account operation waits for another one to finish before reporting it running.
 const LEASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-#[cfg(not(test))]
 fn lease_timeout() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(timeout) = lease_timeout_override::current() {
+        return timeout;
+    }
     LEASE_TIMEOUT
 }
-#[cfg(test)]
-thread_local! {
-    static LEASE_TIMEOUT_OVERRIDE: std::cell::Cell<Option<std::time::Duration>> =
-        const { std::cell::Cell::new(None) };
-}
-#[cfg(test)]
-fn lease_timeout() -> std::time::Duration {
-    LEASE_TIMEOUT_OVERRIDE.get().unwrap_or(LEASE_TIMEOUT)
-}
+
 /// Shortens `Store::lease`'s wait on the current thread until the guard drops, so a test of a
 /// busy vault does not sit out the production timeout.
 #[cfg(test)]
-#[must_use]
-pub(crate) struct LeaseTimeoutOverride(Option<std::time::Duration>);
-#[cfg(test)]
-pub(crate) fn override_lease_timeout(timeout: std::time::Duration) -> LeaseTimeoutOverride {
-    LeaseTimeoutOverride(LEASE_TIMEOUT_OVERRIDE.replace(Some(timeout)))
-}
-#[cfg(test)]
-impl Drop for LeaseTimeoutOverride {
-    fn drop(&mut self) {
-        LEASE_TIMEOUT_OVERRIDE.set(self.0);
+pub(crate) mod lease_timeout_override {
+    use std::{cell::Cell, time::Duration};
+
+    thread_local! {
+        static OVERRIDE: Cell<Option<Duration>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn current() -> Option<Duration> {
+        OVERRIDE.get()
+    }
+
+    #[must_use]
+    pub(crate) struct Guard(Option<Duration>);
+
+    pub(crate) fn set(timeout: Duration) -> Guard {
+        Guard(OVERRIDE.replace(Some(timeout)))
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            OVERRIDE.set(self.0);
+        }
     }
 }
 

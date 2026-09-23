@@ -361,7 +361,7 @@ fn a_lease_timeout_override_lasts_only_as_long_as_its_guard() {
     use std::time::Duration;
     assert_eq!(lease_timeout(), Duration::from_secs(10));
     {
-        let _short = override_lease_timeout(Duration::from_millis(50));
+        let _short = lease_timeout_override::set(Duration::from_millis(50));
         assert_eq!(lease_timeout(), Duration::from_millis(50));
         let busy = std::thread::spawn(lease_timeout).join().unwrap();
         assert_eq!(
@@ -371,6 +371,24 @@ fn a_lease_timeout_override_lasts_only_as_long_as_its_guard() {
         );
     }
     assert_eq!(lease_timeout(), Duration::from_secs(10));
+}
+
+#[test]
+fn a_busy_vault_lease_gives_up_after_the_overridden_wait() {
+    use std::time::{Duration, Instant};
+    let home = tempfile::tempdir().unwrap();
+    let (_, holder) = Store::lease(home.path()).unwrap();
+    let _short = lease_timeout_override::set(Duration::from_millis(20));
+    let started = Instant::now();
+    assert_eq!(
+        Store::lease(home.path()).unwrap_err(),
+        "Another account operation is running. Retry when it finishes."
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "Store::lease must wait the overridden timeout, not the production one"
+    );
+    drop(holder);
 }
 
 #[test]
