@@ -5,7 +5,7 @@ impl AgentCli {
 }
 
 use super::*;
-use crate::cli_stub::CliStub;
+use crate::cli_stub::{CliStub, ANSWER_DEADLINE};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -53,11 +53,12 @@ fn timeout_kills_the_process() {
 
 #[test]
 fn drains_chatty_stdout_and_stderr_while_the_process_runs() {
+    // The deadline only turns a pipe deadlock into a failure instead of a hang.
     let out = CliStub::new("chatty")
         .chatty(5000)
         .stdout("complete")
         .cli(&stub_dir())
-        .with_timeout(Duration::from_secs(5))
+        .with_timeout(ANSWER_DEADLINE)
         .run(&[])
         .expect("chatty child must not block on full output pipes");
     assert!(out.contains("complete"));
@@ -95,7 +96,7 @@ fn children_get_the_cli_search_path() {
         );
     }
     // The well-known tier (not just the process PATH) must reach the child. Compared by
-    // suffix because other tests re-point ON_N_OFF_HOME while this process runs.
+    // suffix because the home they sit under may be a disposable ON_N_OFF_HOME.
     assert!(
         search_path
             .iter()

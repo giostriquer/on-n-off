@@ -324,6 +324,18 @@ thread_local! {
     static TEST_FETCH: std::cell::RefCell<Option<Option<Value>>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Held by every test that reads or changes this module's process-wide state: the early-refresh
+/// flag and the parsed-table memo. A usage summary read changes both — it prices records and loads
+/// the table — so the summary tests hold it too; a lock of their own would let a summary test
+/// flip the flag or overwrite the memo in the middle of a pricing test's assertion. A panicking
+/// holder leaves it usable: one failing test must not fail every later one with a `PoisonError`.
+#[cfg(test)]
+pub(crate) fn lock_rates_state() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[cfg(test)]
 pub fn with_test_fetch<R>(response: Option<Value>, f: impl FnOnce() -> R) -> R {
     TEST_FETCH.with(|cell| {

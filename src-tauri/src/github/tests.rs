@@ -281,8 +281,10 @@ fn force_skips_the_memory_but_not_the_token_memo() {
 #[test]
 fn a_missing_gh_shows_the_snapshot_as_stale() {
     let harness = Harness::new("gh-read-missing", &["org:acme"], 60);
+    // The stub first, so its start is not counted against the server's wait for a request.
+    let gh = gh(&harness.home.join("cli"), "gho_t");
     let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
-    let first = harness.read(&gh(&harness.home.join("cli"), "gho_t"), &url, NOW, false);
+    let first = harness.read(&gh, &url, NOW, false);
     server.join().unwrap();
 
     let later = Harness {

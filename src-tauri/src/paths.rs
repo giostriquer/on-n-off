@@ -13,12 +13,20 @@ pub fn user_home() -> Result<PathBuf, AdapterError> {
         .map_err(|_| AdapterError::message("home directory not found"))
 }
 
+pub fn claude_root_for(home: &std::path::Path) -> PathBuf {
+    home.join(".claude")
+}
+
 pub fn claude_root() -> Result<PathBuf, AdapterError> {
-    Ok(user_home()?.join(".claude"))
+    Ok(claude_root_for(&user_home()?))
+}
+
+pub fn codex_root_for(home: &std::path::Path) -> PathBuf {
+    home.join(".codex")
 }
 
 pub fn codex_root() -> Result<PathBuf, AdapterError> {
-    Ok(user_home()?.join(".codex"))
+    Ok(codex_root_for(&user_home()?))
 }
 
 pub fn agents_skills_root() -> Result<PathBuf, AdapterError> {

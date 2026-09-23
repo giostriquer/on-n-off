@@ -14,7 +14,7 @@ use crate::dto::{
     AdapterError, AgentId, UsageBucketDto, UsageCostSource, UsagePricingDto, UsageSourceDto,
     UsageSourceStatus, UsageSummaryDto, UsageSummaryInput, UsageTokenTotalsDto,
 };
-use crate::paths::{claude_root, codex_root, user_home};
+use crate::paths::{claude_root_for, codex_root_for, user_home};
 
 use super::aggregate::{
     AggregateOptions as AggOpts, CostSource, Resolution as AggResolution, UsageAggregator,
@@ -77,8 +77,8 @@ fn pause_before_publish_if_requested() {
 #[cfg(not(test))]
 fn pause_before_publish_if_requested() {}
 
-fn scan_cache_path() -> Result<PathBuf, AdapterError> {
-    Ok(user_home()?.join(".on-n-off").join("usage-scan-cache.json"))
+fn scan_cache_path_for(home: &Path) -> PathBuf {
+    home.join(".on-n-off").join("usage-scan-cache.json")
 }
 
 fn load_scan_cache(path: &Path) -> ScanCache {
@@ -98,27 +98,26 @@ fn persist_scan_cache(path: &Path, cache: &ScanCache) {
     }
 }
 
-fn resolve_claude_transcript_dir() -> Result<PathBuf, AdapterError> {
-    let root = claude_root()?;
-    let nested = root.join("projects");
+fn resolve_claude_transcript_dir(home: &Path) -> PathBuf {
+    let nested = claude_root_for(home).join("projects");
     if nested.is_dir() {
-        return Ok(nested);
+        return nested;
     }
-    let flat = user_home()?.join("projects");
+    let flat = home.join("projects");
     if flat.is_dir() {
-        return Ok(flat);
+        return flat;
     }
-    Ok(nested)
+    nested
 }
 
-fn resolve_codex_transcript_dir() -> Result<PathBuf, AdapterError> {
-    Ok(codex_root()?.join("sessions"))
+fn resolve_codex_transcript_dir(home: &Path) -> PathBuf {
+    codex_root_for(home).join("sessions")
 }
 
 /// Where Codex moves a session's rollout when the session is archived, mtime intact. The usage it
 /// recorded is still Codex usage, reported under the same source as `sessions/`.
-fn resolve_codex_archive_dir() -> Result<PathBuf, AdapterError> {
-    Ok(codex_root()?.join("archived_sessions"))
+fn resolve_codex_archive_dir(home: &Path) -> PathBuf {
+    codex_root_for(home).join("archived_sessions")
 }
 
 fn parse_iso_ms(value: &str) -> Option<i64> {
@@ -212,6 +211,14 @@ fn missing_source(provider: Provider, dir: &Path) -> UsageSourceDto {
 
 /// Scan local transcripts and return aggregated usage (priced when rates exist).
 pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, AdapterError> {
+    read_summary_from(input, user_home)
+}
+
+/// The home is resolved only once the input has passed validation, as `read_summary` always has.
+fn read_summary_from(
+    input: UsageSummaryInput,
+    home: impl FnOnce() -> Result<PathBuf, AdapterError>,
+) -> Result<UsageSummaryDto, AdapterError> {
     if input.since_day > input.until_day {
         return Err(AdapterError::message(format!(
             "sinceDay '{}' is after untilDay '{}'",
@@ -256,8 +263,8 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
 
     let started = Instant::now();
     let started_ms = now_ms();
-    let home = user_home()?;
-    let cache_path = scan_cache_path()?;
+    let home = home()?;
+    let cache_path = scan_cache_path_for(&home);
     let summary_path = summary_cache_path_for(&home);
     let source_index_path = source_index_path_for(&home);
     // Rates first: the table's age is part of the summary key, so a re-fetched table (a model
@@ -266,13 +273,13 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
     let rates = ensure_rates(&home, started_ms, input.force);
     let key = summary_key(&input, rates.fetched_at_ms);
     // One source per provider, shown under its first root; a source may scan several roots.
-    let claude_dir = resolve_claude_transcript_dir()?;
-    let codex_dir = resolve_codex_transcript_dir()?;
+    let claude_dir = resolve_claude_transcript_dir(&home);
+    let codex_dir = resolve_codex_transcript_dir(&home);
     let source_roots = [
         (Provider::Claude, vec![claude_dir]),
         (
             Provider::Codex,
-            vec![codex_dir, resolve_codex_archive_dir()?],
+            vec![codex_dir, resolve_codex_archive_dir(&home)],
         ),
     ]
     .map(|(provider, paths)| {
