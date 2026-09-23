@@ -207,8 +207,7 @@ fn older_generation_cannot_overwrite_newer_summary() {
     let older_home = home.clone();
     let older = std::thread::spawn(move || {
         with_before_publish_pause(old_reached, old_resume, || {
-            pricing::with_test_fetch(None, || read_summary_in(&older_home, august_input(true)))
-                .unwrap()
+            read_offline(&older_home, august_input(true))
         })
     });
 
