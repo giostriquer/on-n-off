@@ -5,13 +5,39 @@
 //! program the OS can spawn: a `.cmd` batch file on Windows and an executable `sh`
 //! script elsewhere. Callers describe the behavior once and this module writes the
 //! platform-appropriate launcher.
+//!
+//! Launchers are shared by content. Endpoint security on a developer Mac can hold a newly written
+//! script for seconds the first time it runs, and it pays that once per file, not per path: a
+//! hard link to a file that has already run starts at once. A test that gives its stub a few
+//! seconds to answer fails on that first start alone. So each distinct launcher body is written
+//! once, under the temp dir and named by a hash of its content, run there once with
+//! [`WARM_UP_VAR`] set (every body exits straight away on it), and then hard-linked into the
+//! directory the test asked for. The first start is paid while the test is still setting up, and
+//! because the shared files outlive the run, later runs skip it.
+//!
+//! A link keeps everything else as it was. `$0` and `%~dp0` still name the test's own directory,
+//! so argument logs and copies stay private to it. On Unix the shared file is read-only, so no
+//! test can change another test's stub by writing through its link. Where no link can be made,
+//! the launcher is a private copy, as before.
 
+use std::collections::BTreeMap;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use crate::cli::AgentCli;
 
 const CHATTY_PAYLOAD: &str = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+/// Set only for the one run that warms a shared launcher, which makes the launcher exit at once.
+const WARM_UP_VAR: &str = "ON_N_OFF_STUB_WARMUP";
+
+/// A test's own launcher: it stays writable, as a written file always was.
+const PRIVATE_MODE: u32 = 0o755;
+/// A launcher every test with the same body links to.
+const SHARED_MODE: u32 = 0o555;
 
 #[derive(Debug, Default)]
 pub struct CliStub {
@@ -83,11 +109,15 @@ impl CliStub {
     pub fn write(&self, dir: &Path) -> PathBuf {
         fs::create_dir_all(dir).unwrap();
         let path = dir.join(launcher_file_name(&self.name));
-        if cfg!(windows) {
-            fs::write(&path, self.batch_body()).unwrap();
-        } else {
-            fs::write(&path, self.sh_body()).unwrap();
-            mark_executable(&path);
+        let body = self.body();
+        // An earlier stub of this name may be a link to a shared launcher: replace the link rather
+        // than write through it.
+        let _ = fs::remove_file(&path);
+        let linked =
+            shared_launcher(&body).is_some_and(|shared| fs::hard_link(shared, &path).is_ok());
+        if !linked {
+            fs::write(&path, &body).unwrap();
+            mark_executable(&path, PRIVATE_MODE).unwrap();
         }
         path
     }
@@ -97,8 +127,19 @@ impl CliStub {
         AgentCli::new(self.write(dir).to_string_lossy().as_ref())
     }
 
+    fn body(&self) -> String {
+        if cfg!(windows) {
+            self.batch_body()
+        } else {
+            self.sh_body()
+        }
+    }
+
     fn batch_body(&self) -> String {
-        let mut lines = vec!["@echo off".to_string()];
+        let mut lines = vec![
+            "@echo off".to_string(),
+            format!("if defined {WARM_UP_VAR} exit /b 0"),
+        ];
         if let Some((from, to)) = &self.copy {
             lines.push(format!(
                 "copy /Y \"%~dp0{}\" \"%~dp0{}\" >nul",
@@ -138,6 +179,7 @@ impl CliStub {
     fn sh_body(&self) -> String {
         let mut lines = vec![
             "#!/bin/sh".to_string(),
+            format!("if [ -n \"${WARM_UP_VAR}\" ]; then exit 0; fi"),
             "here=\"$(cd \"$(dirname \"$0\")\" && pwd)\"".to_string(),
         ];
         if let Some((from, to)) = &self.copy {
@@ -170,6 +212,79 @@ impl CliStub {
     }
 }
 
+/// The shared, already-started launcher holding `body`, or `None` when it cannot be shared.
+///
+/// Each body is published and warmed once per process; a thread that wants a launcher another
+/// thread is still warming waits for it rather than starting it cold.
+fn shared_launcher(body: &str) -> Option<PathBuf> {
+    static READY: Mutex<BTreeMap<PathBuf, Arc<OnceLock<bool>>>> = Mutex::new(BTreeMap::new());
+    let path = shared_launcher_path(body);
+    let ready = Arc::clone(
+        READY
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(path.clone())
+            .or_default(),
+    );
+    ready
+        .get_or_init(|| publish(&path, body).is_ok() && warm_up(&path))
+        .then_some(path)
+}
+
+fn shared_launcher_path(body: &str) -> PathBuf {
+    let os = std::env::consts::OS;
+    let key = crate::sha::sha256_hex(format!("{os}\n{body}").as_bytes());
+    std::env::temp_dir()
+        .join("on-n-off-cli-stubs")
+        .join(launcher_file_name(&key[..32]))
+}
+
+/// Makes `path` hold exactly `body` without ever showing a partly written file: the launcher is
+/// staged under a name of this process's own and linked into place, so a test run in another
+/// worktree either finds the whole file or publishes an identical one. A file already there is
+/// used only if it holds this very body.
+fn publish(path: &Path, body: &str) -> io::Result<()> {
+    if !path.exists() {
+        let dir = path
+            .parent()
+            .expect("a shared launcher lives in a directory");
+        fs::create_dir_all(dir)?;
+        let staging = dir.join(format!(
+            "{}.{}.staging",
+            path.file_name().unwrap_or_default().to_string_lossy(),
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&staging);
+        let staged = fs::write(&staging, body)
+            .and_then(|()| mark_executable(&staging, SHARED_MODE))
+            .and_then(|()| fs::hard_link(&staging, path));
+        let _ = fs::remove_file(&staging);
+        match staged {
+            Ok(()) => {}
+            // Another test run published it first.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    if fs::read(path)? == body.as_bytes() {
+        Ok(())
+    } else {
+        Err(io::Error::other("another file holds this launcher's name"))
+    }
+}
+
+/// Starts the launcher once, doing nothing, so whatever a first start costs is paid here and not
+/// inside the test that runs it next.
+fn warm_up(path: &Path) -> bool {
+    Command::new(path)
+        .env(WARM_UP_VAR, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 fn launcher_file_name(name: &str) -> String {
     if cfg!(windows) {
         format!("{name}.cmd")
@@ -183,12 +298,15 @@ fn windows_relative(path: &str) -> String {
 }
 
 #[cfg(unix)]
-fn mark_executable(path: &Path) {
+fn mark_executable(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(path, perms).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
 #[cfg(not(unix))]
-fn mark_executable(_path: &Path) {}
+fn mark_executable(_path: &Path, _mode: u32) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;
