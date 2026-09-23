@@ -2,12 +2,22 @@
 // No provider reads or live settings writes.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 
 const executable = resolve(process.argv[2] ?? 'src-tauri/target/debug/on-n-off-notch');
+
+// Package.swift links Info.plist into the helper's __TEXT,__info_plist section, through a linker
+// flag that SwiftPM does not track as an input. A helper that embeds another Info.plist was linked
+// from older inputs than the ones beside it, which is what a restored Swift build cache gives when
+// nothing forces the link (see native_build.rs).
+const infoPlist = resolve('src-tauri/macos/SideNotch/Info.plist');
+const embedded = spawnSync('/usr/bin/segedit', [executable, '-extract', '__TEXT', '__info_plist', '/dev/stdout'], { maxBuffer: 1 << 20 });
+assert.equal(embedded.status, 0, `segedit could not read the helper's embedded Info.plist: ${embedded.stderr}`);
+assert.ok(embedded.stdout.equals(readFileSync(infoPlist)), `${executable} embeds another Info.plist than ${infoPlist}: the helper was not relinked`);
+console.log('PASS helper embeds the current Info.plist');
 const settings = { enabled: false, displayId: null, edge: 'right', size: 'standard', show: 'always', providers: ['claude', 'codex', 'antigravity', 'cursor'], pullRequests: { enabled: true, lists: ['mine'] } };
 const snapshot = { version: 2, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
 async function check(name, input, expectedAck, args = []) {
