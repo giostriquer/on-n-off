@@ -615,3 +615,56 @@ fn a_remembered_banked_reset_count_past_its_soonest_expiry_loads_as_unknown() {
     assert!(find("lapsed-count-only").is_none());
     assert_eq!(loaded.len(), 3);
 }
+
+/// A saved account whose only observation was a count that has since lapsed stops replacing the
+/// history it superseded, since it no longer holds an observation. Forgetting it still takes that
+/// history with it, as it did while the count stood.
+#[test]
+fn forgetting_an_account_whose_count_lapsed_still_removes_the_history_it_replaced() {
+    let home = scratch_dir("limits-snap-lapsed-forget");
+    let store = SnapshotStore::for_home(&home);
+    store
+        .save(&snapshot(
+            AgentId::Codex,
+            "team",
+            "a@x",
+            "2026-08-17T10:00:00.000Z",
+        ))
+        .unwrap();
+    let mut scoped = snapshot(
+        AgentId::Codex,
+        "profile:abc",
+        "a@x",
+        "2026-08-17T11:00:00.000Z",
+    );
+    scoped.account.as_mut().unwrap().legacy_id = Some("team".to_string());
+    scoped.windows.clear();
+    scoped.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: Some("2020-01-01T00:00:00+00:00".to_string()),
+    });
+    store.save(&scoped).unwrap();
+    let ids = |store: &SnapshotStore| {
+        store
+            .load(AgentId::Codex)
+            .into_iter()
+            .map(|dto| dto.account.unwrap().id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&store), ["team"]);
+
+    store.forget(AgentId::Codex, "profile:abc").unwrap();
+    assert!(ids(&store).is_empty());
+}
+
+#[test]
+fn a_count_lapses_at_its_expiry_itself() {
+    let expires_at = "2026-09-22T12:00:00+00:00";
+    let resets = crate::dto::LimitsResetCreditsDto {
+        available_count: 2,
+        next_expires_at: Some(expires_at.to_string()),
+    };
+    let at = parse_observed_at(expires_at).unwrap();
+    assert!(lapsed(&resets, at));
+    assert!(!lapsed(&resets, at - chrono::Duration::seconds(1)));
+}

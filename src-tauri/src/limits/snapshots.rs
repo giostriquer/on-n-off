@@ -102,10 +102,19 @@ impl SnapshotStore {
     /// Every remembered snapshot for `provider`, newest first. Unreadable files are skipped rather
     /// than failing the whole read. Files from obsolete snapshot schemas are ignored.
     pub fn load(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
-        without_superseded(self.load_all(provider))
+        // A banked-reset count past its expiry can leave a snapshot with nothing observed, which is
+        // never saved, and which then no longer replaces the history it superseded.
+        without_superseded(
+            self.stored(provider)
+                .into_iter()
+                .filter(ProviderLimitsDto::has_observations)
+                .collect(),
+        )
     }
 
-    fn load_all(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
+    /// Every readable snapshot for `provider`, newest first, whatever it still observes. Forget
+    /// works from this list, so an account whose count lapsed still takes the history it replaced.
+    fn stored(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
         let now = Utc::now();
         let prefix = format!("{}-", provider.key());
         let Ok(entries) = fs::read_dir(&self.dir) else {
@@ -124,8 +133,7 @@ impl SnapshotStore {
                 let stored = decode(&raw)?;
                 Some((stored.latest_observed_at(), stored.into_dto(now)))
             })
-            // A banked-reset count past its expiry can leave nothing observed, which is never saved.
-            .filter(|(_, dto)| dto.provider == provider && dto.has_observations())
+            .filter(|(_, dto)| dto.provider == provider)
             .collect();
         snapshots.sort_by_key(|(observed_at, _)| Reverse(*observed_at));
         snapshots.into_iter().map(|(_, dto)| dto).collect()
@@ -171,7 +179,7 @@ impl SnapshotStore {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let all = self.load_all(provider);
+        let all = self.stored(provider);
         if let Some(target) = all
             .iter()
             .find(|dto| dto.account.as_ref().is_some_and(|a| a.id == account_id))

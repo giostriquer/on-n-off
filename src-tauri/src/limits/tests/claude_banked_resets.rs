@@ -131,32 +131,41 @@ fn a_login_the_plain_read_also_rejects_is_still_reported_as_one() {
     assert_eq!(dto.status, LimitsStatus::Unauthenticated);
 }
 
-#[test]
-fn a_read_that_cannot_tell_keeps_the_remembered_count_and_an_answer_of_none_replaces_it() {
-    let rig = Rig::new("limits-claude-saved-resets-memory");
+fn signed_in_rig(name: &str) -> Rig {
+    let rig = Rig::new(name);
     write(&rig.home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
     write(
         &rig.home,
         ".claude.json",
         &claude_account_file("uuid-1", "me@example.com"),
     );
-    let read = |usage: &str| {
-        let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
-        let (usage_url, usage_request) = serve_once("200 OK", usage);
-        let dtos = rig.read(AgentId::Claude, false, &profile_url, &usage_url);
-        profile_request.join().unwrap();
-        usage_request.join().unwrap();
-        let card = dtos.into_iter().find(|dto| dto.current_account).unwrap();
-        let stored = SnapshotStore::for_home(&rig.home)
-            .load(AgentId::Claude)
-            .into_iter()
-            .find(|dto| dto.account == card.account)
-            .unwrap();
-        (
-            card.reset_credits.map(|resets| resets.available_count),
-            stored.reset_credits.map(|resets| resets.available_count),
-        )
-    };
+    rig
+}
+
+/// One live read answering `usage`: the reset count on the signed-in card, and the one the next
+/// read will load from its snapshot.
+fn read_counts(rig: &Rig, usage: &str) -> (Option<u32>, Option<u32>) {
+    let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
+    let (usage_url, usage_request) = serve_once("200 OK", usage);
+    let dtos = rig.read(AgentId::Claude, false, &profile_url, &usage_url);
+    profile_request.join().unwrap();
+    usage_request.join().unwrap();
+    let card = dtos.into_iter().find(|dto| dto.current_account).unwrap();
+    let stored = SnapshotStore::for_home(&rig.home)
+        .load(AgentId::Claude)
+        .into_iter()
+        .find(|dto| dto.account == card.account)
+        .unwrap();
+    (
+        card.reset_credits.map(|resets| resets.available_count),
+        stored.reset_credits.map(|resets| resets.available_count),
+    )
+}
+
+#[test]
+fn a_read_that_cannot_tell_keeps_the_remembered_count_and_an_answer_of_none_replaces_it() {
+    let rig = signed_in_rig("limits-claude-saved-resets-memory");
+    let read = |usage: &str| read_counts(&rig, usage);
 
     assert_eq!(read(&one_saved_reset()), (Some(1), Some(1)));
     assert_eq!(
@@ -176,4 +185,26 @@ fn a_read_that_cannot_tell_keeps_the_remembered_count_and_an_answer_of_none_repl
         (Some(0), Some(0)),
         "an answer of none is an answer"
     );
+}
+
+/// The reported case: a remembered count whose soonest expiry has passed, followed by reads that
+/// cannot tell the count, which is every read Anthropic answers with `surface`.
+#[test]
+fn a_remembered_count_past_its_expiry_is_not_kept_by_a_read_that_cannot_tell() {
+    let rig = signed_in_rig("limits-claude-saved-resets-lapsed");
+    assert_eq!(read_counts(&rig, &one_saved_reset()), (Some(1), Some(1)));
+    for entry in std::fs::read_dir(rig.home.join(".on-n-off/limits")).unwrap() {
+        let path = entry.unwrap().path();
+        let mut stored: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        if let Some(resets) = stored.get_mut("resetCredits") {
+            resets["nextExpiresAt"] = "2020-01-01T00:00:00+00:00".into();
+            std::fs::write(&path, stored.to_string()).unwrap();
+        }
+    }
+
+    let surface =
+        usage_with_saved_resets(r#"{"eligible":false,"ineligible_reason":"surface","grants":[]}"#);
+    assert_eq!(read_counts(&rig, &surface), (None, None));
+    assert_eq!(read_counts(&rig, &surface), (None, None));
 }

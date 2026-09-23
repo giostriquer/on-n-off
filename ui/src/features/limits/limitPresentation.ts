@@ -112,14 +112,15 @@ export function usableAgainAt(entry: ProviderLimits, now: number): number {
  */
 export function unexpiredBankedResets(resetCredits: LimitsResetCredits | null | undefined, now: number): LimitsResetCredits | null {
   if (!resetCredits || resetCredits.availableCount <= 0) return null;
-  const expiresAt = parseInstant(resetCredits.nextExpiresAt);
-  return expiresAt !== null && expiresAt <= now ? null : resetCredits;
+  return hasElapsed(resetCredits.nextExpiresAt, now) ? null : resetCredits;
 }
 
 /**
  * Whether a read observed anything about the account: quota windows, a credit balance or banked
  * resets. `windows` lets a surface count only the windows it shows. The backend's
- * `ProviderLimitsDto::has_observations` is the same rule.
+ * `ProviderLimitsDto::has_observations` is the same rule. A count that lapses while its card is on
+ * screen still counts here until the next read, at most one poll later, drops it: only a card with
+ * nothing else observed notices, and `unexpiredBankedResets` already keeps the count off it.
  */
 export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = entry.windows): boolean {
   // Every current Codex read reports a reset count, usually 0; only a positive count was observed.
