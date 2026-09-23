@@ -224,42 +224,9 @@ pub(crate) fn serve_once(
     status_line: &str,
     body: &str,
 ) -> (String, std::thread::JoinHandle<String>) {
-    serve_once_within(status_line, body, ACCEPT_DEADLINE)
-}
-
-/// `serve_once` with its accept deadline stated, so a test can watch it give up quickly.
-#[cfg(test)]
-fn serve_once_within(
-    status_line: &str,
-    body: &str,
-    deadline: Duration,
-) -> (String, std::thread::JoinHandle<String>) {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}/usage", listener.local_addr().unwrap());
-    let body = body.to_string();
-    let status_line = status_line.to_string();
-    let handle = std::thread::spawn(move || {
-        let mut stream = accept_within(&listener, deadline);
-        let mut request = Vec::new();
-        let mut buf = [0u8; 1024];
-        loop {
-            let n = stream.read(&mut buf).unwrap();
-            request.extend_from_slice(&buf[..n]);
-            if n == 0 || request.windows(4).any(|w| w == b"\r\n\r\n") {
-                break;
-            }
-        }
-        let response = format!(
-            "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        stream.write_all(response.as_bytes()).unwrap();
-        String::from_utf8_lossy(&request).to_string()
-    });
-    (url, handle)
+    serve("/usage", &[(status_line, &[], body)], |mut requests| {
+        requests.remove(0).head
+    })
 }
 
 /// What `serve_once_capturing` saw: the request head (request line + headers) and the body.
@@ -269,18 +236,18 @@ pub(crate) struct CapturedRequest {
     pub(crate) body: String,
 }
 
-/// Like `serve_once`, but honours `Content-Length` so a POST body is captured in full, and lets
-/// the test add response headers (rate-limit headers, for instance).
+/// Like `serve_once`, but hands back the request body too, and lets the test add response
+/// headers (rate-limit headers, for instance).
 #[cfg(test)]
 pub(crate) fn serve_once_capturing(
     status_line: &str,
     response_headers: &[&str],
     body: &str,
 ) -> (String, std::thread::JoinHandle<CapturedRequest>) {
-    let (url, handle) = serve_sequence(&[(status_line, response_headers, body)]);
-    (
-        url,
-        std::thread::spawn(move || handle.join().unwrap().remove(0)),
+    serve(
+        "/graphql",
+        &[(status_line, response_headers, body)],
+        |mut requests| requests.remove(0),
     )
 }
 
@@ -290,11 +257,23 @@ pub(crate) fn serve_once_capturing(
 pub(crate) fn serve_sequence(
     responses: &[(&str, &[&str], &str)],
 ) -> (String, std::thread::JoinHandle<Vec<CapturedRequest>>) {
+    serve("/graphql", responses, |requests| requests)
+}
+
+/// The one loopback server behind the fixtures above: it answers one connection per entry at
+/// `path`, in order, reads each request's head and its `Content-Length` body, and hands what it
+/// captured to `finish`, which shapes what the thread returns.
+#[cfg(test)]
+fn serve<T: Send + 'static>(
+    path: &str,
+    responses: &[(&str, &[&str], &str)],
+    finish: fn(Vec<CapturedRequest>) -> T,
+) -> (String, std::thread::JoinHandle<T>) {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}/graphql", listener.local_addr().unwrap());
+    let url = format!("http://{}{path}", listener.local_addr().unwrap());
     let responses: Vec<(String, String, String)> = responses
         .iter()
         .map(|(status_line, headers, body)| {
@@ -352,7 +331,7 @@ pub(crate) fn serve_sequence(
             );
             stream.write_all(response.as_bytes()).unwrap();
         }
-        captured
+        finish(captured)
     });
     (url, handle)
 }
