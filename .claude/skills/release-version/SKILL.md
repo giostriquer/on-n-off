@@ -54,8 +54,7 @@ Two checks:
 Commit as `release: bump on-n-off to vX.Y.Z` with explicit pathspecs. Title the PR
 `release: on-n-off vX.Y.Z with <what ships>`, and add one Summary bullet listing the bumped files.
 
-Every head CI sees gets a full run of about four and a half minutes, so the bump rides the PR's last
-push instead of following it:
+Every head CI sees gets a full run, so the bump rides the PR's last push instead of following it:
 
 - When the release is known to follow the PR (the user asked for one, or this skill runs before the
   PR's review is done), commit the bump locally as soon as the version is decided. Push it together

@@ -38,6 +38,7 @@ jobs:
   #
   # Runner labels are pinned to exact images, like the compiler in rust-toolchain.toml, and bumped
   # deliberately on their own pull request: a `-latest` label moves to a new OS on GitHub's schedule.
+  # scripts/workflows.test.mjs holds the one list every workflow uses, so a bump changes them all.
   frontend:
     name: frontend
     runs-on: ubuntu-24.04
@@ -62,7 +63,7 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun run check
 
-      - name: Test release verifier
+      - name: Test release scripts and workflow contracts
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
@@ -124,33 +125,11 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
-      # The browser billing helper's one remote dependency, SweetCookieKit, is otherwise cloned from
-      # inside a cargo build script, where a transient SwiftPM failure fails the whole build (a Bundle
-      # run on 2026-09-22 lost SwiftPM's shared repository cache mid-fetch). Resolving here, with
-      # retries, leaves the checkout in the package's .build, so the build script never fetches. A
-      # retry starts from an empty .build and bypasses that shared cache. SideNotch has no remote
-      # dependencies. Never cache ~/Library/Caches/org.swift.swiftpm: it could preserve exactly the
-      # state that failed. bundle.yml and release.yml carry the same step.
+      # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
+      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
       - name: Resolve Swift package dependencies
         if: runner.os == 'macOS'
-        run: |
-          $package = 'src-tauri/macos/BrowserBilling'
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            if ($attempt -eq 1) {
-              xcrun swift package resolve --package-path $package
-            } else {
-              Remove-Item -LiteralPath (Join-Path $package '.build') -Recurse -Force -ErrorAction Ignore
-              xcrun swift package resolve --package-path $package --disable-dependency-cache
-            }
-            if ($LASTEXITCODE -eq 0) {
-              exit 0
-            }
-            if ($attempt -lt 3) {
-              Write-Warning "Swift package resolution failed (attempt $attempt of 3); retrying in $(15 * $attempt) s."
-              Start-Sleep -Seconds (15 * $attempt)
-            }
-          }
-          throw "Could not resolve the Swift packages in $package after 3 attempts."
+        run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
 
       # Only pushes to main write the cache so pull requests cannot evict it; every ref can
       # restore the cache that main saved. `cache-on-failure` is deliberately off: the store is
@@ -180,6 +159,9 @@ jobs:
 
       - name: Test Rust toolchain pruner
         run: ./scripts/prune-rust-toolchains.test.ps1
+
+      - name: Test Swift package resolver
+        run: ./scripts/resolve-swift-packages.test.ps1
 
       - name: Build frontend
         run: bun run build

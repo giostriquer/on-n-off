@@ -25,14 +25,19 @@ function firstBuild(job) {
   return index;
 }
 
-test("every job runs on a pinned runner image", { skip }, () => {
+// The one list of runner images, bumped deliberately like rust-toolchain.toml. A bump changes this
+// list and every workflow in the same pull request: release's build job restores the cache that
+// Bundle saves, and rust-cache's key does not include the image, so those two must never differ.
+const pinnedImages = ["ubuntu-24.04", "windows-2025-vs2026", "macos-26"];
+
+test("every job runs on one of the pinned runner images", { skip }, () => {
   for (const name of ["ci", "bundle", "release", "cache-prune"]) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
       const labels = String(job["runs-on"]).startsWith("${{")
         ? job.strategy.matrix.include.map((entry) => entry.os)
         : [job["runs-on"]];
       for (const label of labels) {
-        assert.doesNotMatch(label, /-latest\b/, `${name}.yml ${id} runs on a moving label`);
+        assert.ok(pinnedImages.includes(label), `${name}.yml ${id} runs on ${label}, not a pinned image`);
       }
     }
   }
@@ -51,29 +56,27 @@ test("rustfmt fails a verify leg before the cache restore and the slower setup",
   assert.ok(format.index < step(verify, "Cache Rust dependencies").index);
 });
 
-test("macOS jobs resolve Swift packages, with retries, before the build script needs them", { skip }, () => {
-  const jobs = [load("ci").jobs.verify, load("bundle").jobs.bundle, load("release").jobs.build];
-  const scripts = jobs.map((job) => {
+test("macOS jobs resolve Swift packages before the build script needs them", { skip }, () => {
+  for (const job of [load("ci").jobs.verify, load("bundle").jobs.bundle, load("release").jobs.build]) {
     const resolve = step(job, "Resolve Swift package dependencies");
     assert.equal(resolve.if, "runner.os == 'macOS'");
+    assert.equal(resolve.run.trim(), "./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling");
     assert.ok(resolve.index < firstBuild(job), "resolution must come before the first build");
-    return resolve.run;
-  });
-  assert.match(scripts[0], /\$package = 'src-tauri\/macos\/BrowserBilling'/);
-  assert.match(scripts[0], /swift package resolve --package-path \$package/);
-  assert.match(scripts[0], /\$attempt -le 3/);
-  assert.deepEqual(scripts, [scripts[0], scripts[0], scripts[0]], "keep the three copies identical");
+  }
+  const tests = load("ci").jobs.verify.steps.map((candidate) => candidate.run?.trim());
+  assert.ok(tests.includes("./scripts/resolve-swift-packages.test.ps1"), "the verify legs run the resolver's tests");
 });
 
 test("only pull request runs cancel an in-progress run", { skip }, () => {
-  for (const name of ["ci", "bundle"]) {
-    assert.equal(load(name).concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
+  assert.equal(load("ci").concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
+  for (const name of ["bundle", "release", "cache-prune"]) {
+    assert.equal(load(name).concurrency["cancel-in-progress"], false, `${name}.yml has no pull request run to cancel`);
   }
 });
 
 test("a failing frontend check does not hide the result of the next one", { skip }, () => {
   const frontend = load("ci").jobs.frontend;
-  for (const name of ["Type-check frontend", "Test release verifier"]) {
+  for (const name of ["Type-check frontend", "Test release scripts and workflow contracts"]) {
     assert.match(String(step(frontend, name).if), /!cancelled\(\)/, name);
   }
 });
