@@ -12,6 +12,80 @@ fn discard_shared(stub: &CliStub) {
     let _ = fs::remove_file(shared_launcher_path(&stub.body()));
 }
 
+/// A hand-written launcher that notes, in a `warmed` file beside itself, a run with the warm-up
+/// flag set, and then exits with `exit`.
+fn warm_up_probe(dir: &Path, exit: i32) -> PathBuf {
+    let path = dir.join(launcher_file_name("probe"));
+    let body = if cfg!(windows) {
+        format!("@echo off\r\nif defined {WARM_UP_VAR} echo warmed>\"%~dp0warmed\"\r\nexit /b {exit}\r\n")
+    } else {
+        format!("#!/bin/sh\nif [ -n \"${WARM_UP_VAR}\" ]; then printf warmed > \"$(dirname \"$0\")/warmed\"; fi\nexit {exit}\n")
+    };
+    fs::write(&path, body).unwrap();
+    mark_executable(&path, PRIVATE_MODE).unwrap();
+    path
+}
+
+#[test]
+fn warm_up_starts_the_launcher_with_the_warm_up_flag_set() {
+    let dir = scratch_dir("cli-stub-warm");
+    let warmed = warm_up(&warm_up_probe(&dir, 0));
+    assert_eq!(
+        fs::read_to_string(dir.join("warmed"))
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("warmed"),
+        "the warm-up must start the launcher, with the flag set"
+    );
+    assert!(warmed, "a launcher that exits 0 is warmed");
+}
+
+#[test]
+fn warm_up_fails_for_a_launcher_that_fails() {
+    let dir = scratch_dir("cli-stub-warm-fail");
+    assert!(!warm_up(&warm_up_probe(&dir, 3)));
+}
+
+#[cfg(unix)]
+#[test]
+fn repeated_stubs_link_to_one_shared_launcher() {
+    use std::os::unix::fs::MetadataExt;
+    let (a, b) = (
+        scratch_dir("cli-stub-share-a"),
+        scratch_dir("cli-stub-share-b"),
+    );
+    let stub = CliStub::new("shared").stdout(&fresh_token(&a));
+    let first = fs::metadata(stub.write(&a)).unwrap();
+    let second = fs::metadata(stub.write(&b)).unwrap();
+    let shared = fs::metadata(shared_launcher_path(&stub.body()));
+    discard_shared(&stub);
+    let shared = shared.expect("the first stub publishes the shared launcher");
+    assert_eq!(
+        (first.dev(), first.ino()),
+        (shared.dev(), shared.ino()),
+        "a stub must be the shared launcher, the file its warm-up already ran"
+    );
+    assert_eq!(
+        (first.dev(), first.ino()),
+        (second.dev(), second.ino()),
+        "a second stub with the same body must be the same file"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_shared_launcher_cannot_be_rewritten_through_a_test_directory() {
+    let dir = scratch_dir("cli-stub-sealed");
+    let stub = CliStub::new("sealed").stdout(&fresh_token(&dir));
+    let written = fs::write(stub.write(&dir), "#!/bin/sh\nexit 9\n");
+    discard_shared(&stub);
+    assert!(
+        matches!(&written, Err(error) if error.kind() == io::ErrorKind::PermissionDenied),
+        "writing through one test's link would change every other test's stub: {written:?}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_stub_that_cannot_replace_the_old_one_never_writes_through_its_link() {
@@ -44,38 +118,19 @@ fn a_stub_that_cannot_replace_the_old_one_never_writes_through_its_link() {
     );
 }
 
-#[cfg(unix)]
-#[test]
-fn repeated_stubs_share_the_launcher_file_the_first_one_warmed() {
-    use std::os::unix::fs::MetadataExt;
-    let stub = CliStub::new("shared").stdout("same-body");
-    let first = fs::metadata(stub.write(&scratch_dir("cli-stub-share-a"))).unwrap();
-    let second = fs::metadata(stub.write(&scratch_dir("cli-stub-share-b"))).unwrap();
-    assert_eq!(
-        (first.dev(), first.ino()),
-        (second.dev(), second.ino()),
-        "a second stub with the same body must be the file the first one already ran"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn a_shared_launcher_cannot_be_rewritten_through_a_test_directory() {
-    let path = CliStub::new("sealed").write(&scratch_dir("cli-stub-sealed"));
-    let error = fs::write(&path, "#!/bin/sh\nexit 9\n").unwrap_err();
-    assert_eq!(
-        error.kind(),
-        std::io::ErrorKind::PermissionDenied,
-        "writing through one test's link would change every other test's stub"
-    );
-}
-
 #[test]
 fn each_launcher_keeps_its_state_in_its_own_directory() {
-    let stub = CliStub::new("logger").log_args("args.txt", false);
     let (first, second) = (scratch_dir("cli-stub-own-a"), scratch_dir("cli-stub-own-b"));
-    stub.cli(&first).run(&["first"]).unwrap();
-    stub.cli(&second).run(&["second"]).unwrap();
+    let stub = CliStub::new("logger")
+        .log_args("args.txt", false)
+        .stdout(&fresh_token(&first));
+    let runs = (
+        stub.cli(&first).run(&["first"]),
+        stub.cli(&second).run(&["second"]),
+    );
+    discard_shared(&stub);
+    runs.0.unwrap();
+    runs.1.unwrap();
     assert_eq!(
         fs::read_to_string(first.join("args.txt")).unwrap().trim(),
         "first"
@@ -89,46 +144,71 @@ fn each_launcher_keeps_its_state_in_its_own_directory() {
 #[test]
 fn writing_a_stub_does_not_run_it() {
     let dir = scratch_dir("cli-stub-inert");
+    let token = fresh_token(&dir);
+    let (copied, logged) = (format!("{token}.copied"), format!("{token}.args"));
     fs::write(dir.join("source"), "fixture").unwrap();
-    CliStub::new("inert")
-        .copy("source", "copied")
-        .log_args("args.txt", false)
-        .write(&dir);
-    assert!(!dir.join("copied").exists());
-    assert!(!dir.join("args.txt").exists());
+    let stub = CliStub::new("inert")
+        .copy("source", &copied)
+        .log_args(&logged, false);
+    stub.write(&dir);
+    // The warm-up runs the shared file, so a body that ignored the flag would act beside it.
+    let shared_dir = shared_launcher_path(&stub.body())
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let acted: Vec<PathBuf> = [&dir, &shared_dir]
+        .into_iter()
+        .flat_map(|place| [place.join(&copied), place.join(&logged)])
+        .filter(|trace| trace.exists())
+        .collect();
+    discard_shared(&stub);
+    let _ = fs::remove_file(shared_dir.join(&logged));
+    assert!(acted.is_empty(), "the stub ran and left {acted:?}");
+}
+
+#[test]
+fn a_stub_that_fails_when_run_still_warms_up() {
+    let token = fresh_token(&scratch_dir("cli-stub-failing"));
+    // Run for real, this body fails; its warm-up run must exit before the body and succeed.
+    let stub = CliStub::new("failing").stdout(&token).exit(3);
+    let shared = shared_launcher(&stub.body());
+    discard_shared(&stub);
+    assert!(
+        shared.is_some(),
+        "a stub that fails when run must still be shareable"
+    );
 }
 
 #[test]
 fn stubs_with_different_bodies_stay_apart() {
     let dir = scratch_dir("cli-stub-apart");
-    let alpha = CliStub::new("alpha").stdout("alpha-out").cli(&dir);
-    let beta = CliStub::new("beta").stdout("beta-out").cli(&dir);
-    assert_eq!(alpha.run(&[]).unwrap().trim(), "alpha-out");
-    assert_eq!(beta.run(&[]).unwrap().trim(), "beta-out");
+    let token = fresh_token(&dir);
+    let alpha = CliStub::new("alpha").stdout(&format!("{token}-alpha"));
+    let beta = CliStub::new("beta").stdout(&format!("{token}-beta"));
+    let outputs = (alpha.cli(&dir).run(&[]), beta.cli(&dir).run(&[]));
+    discard_shared(&alpha);
+    discard_shared(&beta);
+    assert_eq!(outputs.0.unwrap().trim(), format!("{token}-alpha"));
+    assert_eq!(outputs.1.unwrap().trim(), format!("{token}-beta"));
 }
 
 #[test]
 fn a_stub_written_twice_under_one_name_runs_the_second_body() {
     let dir = scratch_dir("cli-stub-rewrite");
-    CliStub::new("tool").stdout("before").write(&dir);
-    let cli = CliStub::new("tool").stdout("after").cli(&dir);
-    assert_eq!(cli.run(&[]).unwrap().trim(), "after");
-}
-
-#[test]
-fn a_launcher_is_warmed_by_a_run_that_skips_its_behaviour() {
-    // Run for real, this body logs its argv and fails; its warm-up run must do neither.
-    let stub = CliStub::new("failing").log_args("args.txt", false).exit(3);
-    assert!(
-        shared_launcher(&stub.body()).is_some(),
-        "the warm-up run must exit before the body and succeed"
-    );
+    let token = fresh_token(&dir);
+    let before = CliStub::new("tool").stdout(&format!("{token}-before"));
+    let after = CliStub::new("tool").stdout(&format!("{token}-after"));
+    before.write(&dir);
+    let out = after.cli(&dir).run(&[]);
+    discard_shared(&before);
+    discard_shared(&after);
+    assert_eq!(out.unwrap().trim(), format!("{token}-after"));
 }
 
 #[test]
 fn a_foreign_file_under_a_launchers_name_is_never_run() {
     let dir = scratch_dir("cli-stub-foreign");
-    let token = dir.file_name().unwrap().to_string_lossy().into_owned();
+    let token = fresh_token(&dir);
     let stub = CliStub::new("foreign").stdout(&token);
     let shared = shared_launcher_path(&stub.body());
     fs::create_dir_all(shared.parent().unwrap()).unwrap();
