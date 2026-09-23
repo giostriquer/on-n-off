@@ -218,8 +218,9 @@ test("cache-prune groups a key on the fields before its two generation hashes", 
 
 // Each job caches exactly what it builds under a key of its own: clippy's metadata and the debug
 // application in the lint job, the test profile's dependencies in the test job. A shared key would
-// make the two jobs overwrite each other's entry with half of what the other one needs.
-test("every job that restores the Rust cache has a key of its own, saved only from main", { skip }, () => {
+// make the two jobs overwrite each other's entry with half of what the other one needs. Release's
+// build job restores Bundle's key on purpose and never saves it.
+test("every CI and Bundle job that saves the Rust cache has a key of its own, saved only from main", { skip }, () => {
   const cache = (job) => step(job, "Cache Rust dependencies").with;
   assert.equal(cache(lint())["shared-key"], "verify-lint-${{ inputs.platform }}");
   assert.equal(cache(testJob())["shared-key"], "verify-test-${{ inputs.platform }}");
@@ -227,6 +228,9 @@ test("every job that restores the Rust cache has a key of its own, saved only fr
     assert.equal(cache(job)["save-if"], "${{ github.ref == 'refs/heads/main' }}");
     assert.equal(cache(job).workspaces, "src-tauri");
   }
+  // Bundle saves on every run, and runs only for pushes to main.
+  assert.deepEqual(load("bundle").on, { push: { branches: ["main"] } });
+  assert.equal(cache(load("release").jobs.build)["save-if"], false);
   // rust-cache's key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>. Expand every
   // shared key for every leg that uses it and check that no two jobs land in one prune group.
   const rustOs = { windows: "Windows_NT-x64", macos: "Darwin-arm64" };

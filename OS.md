@@ -113,7 +113,9 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   fails unless every needed result is exactly `success`. They use bash and jq, because pwsh's first
   start on a fresh ubuntu runner took 4-16 s at the end of every run. Measured in the same hour, a
   warm run went from 222 s to 184 s (medians), for about 11 minutes of job time instead of about 7
-  and two macOS jobs at once instead of one.
+  and two macOS jobs at once instead of one. GitHub's free plan runs at most 5 macOS jobs at once
+  for the whole account, so three pull request runs at once, or two beside a main push (its CI run
+  and Bundle's dmg job hold 3), leave a macOS job queued, and the queue eats into that gain.
 - On macOS the Rust build script builds the two Swift helpers (`native_build.rs`,
   `native_billing_build.rs`), and building them cold, SDK modules and SweetCookieKit included, was
   most of the macOS `Lint Rust` step. The macOS jobs cache both packages' `.build` directories

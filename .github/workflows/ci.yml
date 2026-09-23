@@ -67,7 +67,7 @@ jobs:
 
   # The native legs, one call of verify.yml per OS: a lint job and a test job each, in parallel.
   # Their check runs are `windows / lint`, `windows / test` and so on; no job here or in verify.yml
-  # is named like a required check except the two below.
+  # is named like a required check apart from frontend and the two below.
   windows:
     name: windows
     uses: ./.github/workflows/verify.yml

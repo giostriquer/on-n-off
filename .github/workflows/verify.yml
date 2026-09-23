@@ -2,9 +2,9 @@ name: Verify
 
 # The native half of CI. ci.yml calls this workflow once per OS, so both legs run every job here;
 # a step that only one OS needs says so with `runner.os`. The lint and test jobs start together and
-# each compiles the crate its own way, which takes the longer of the two off the leg's critical path
-# instead of their sum. Their check runs are named `<os> / lint` and `<os> / test`; the required
-# checks are ci.yml's verify-windows and verify-macos, which pass only when both jobs did.
+# each compiles the crate its own way, so a leg takes as long as the slower of the two, not their
+# sum. Their check runs are named `<os> / lint` and `<os> / test`; the required checks are ci.yml's
+# verify-windows and verify-macos, which pass only when both jobs did.
 #
 # Each job keeps a rust-cache key of its own, verify-lint-<platform> and verify-test-<platform>, so
 # each caches exactly the target contents it builds: clippy's metadata and the debug application in
@@ -155,8 +155,10 @@ jobs:
         run: bun install --frozen-lockfile
 
       # Every scripts/*.test.ps1, here and not in the test job: nothing needs them to run before
-      # cargo, and on both OSes they cost 16-20 s that the test job's compile would otherwise wait
-      # behind. check-release-version.ps1 reads `cargo metadata`, which needs the pinned toolchain.
+      # cargo, and they cost about 30 s on Windows and 20 s on macOS that the test job's compile
+      # would otherwise wait behind. They make Windows lint the slower Windows job, but in the test
+      # job they would add their 20 s to macOS test, which finishes last about as often.
+      # check-release-version.ps1 reads `cargo metadata`, which needs the pinned toolchain.
       - name: Test release version contract
         run: ./scripts/check-release-version.test.ps1
 
