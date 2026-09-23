@@ -134,7 +134,7 @@ jobs:
       # prunes both.
       - name: Restore Swift build cache
         id: swift-cache
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && false
         uses: ./.github/actions/restore-swift-build
         with:
           configuration: debug
