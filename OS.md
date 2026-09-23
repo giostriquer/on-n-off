@@ -111,9 +111,9 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   named `verify-windows` and `verify-macos`, so those are small ubuntu jobs. Each needs only its
   own OS's call, runs with `if: always()` (a skipped required check would count as passing), and
   fails unless every needed result is exactly `success`. They use bash and jq, because pwsh's first
-  start on a fresh ubuntu runner took 4-16 s at the end of every run. A warm run went from about
-  220 s to about 180 s, for about 10 minutes of job time instead of 7.5 and two macOS jobs per
-  run instead of one.
+  start on a fresh ubuntu runner took 4-16 s at the end of every run. Measured in the same hour, a
+  warm run went from 222 s to 184 s (medians), for about 11 minutes of job time instead of about 7
+  and two macOS jobs at once instead of one.
 - On macOS the Rust build script builds the two Swift helpers (`native_build.rs`,
   `native_billing_build.rs`), and building them cold, SDK modules and SweetCookieKit included, was
   most of the macOS `Lint Rust` step. The macOS jobs cache both packages' `.build` directories
