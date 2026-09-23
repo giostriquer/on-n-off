@@ -147,11 +147,11 @@ jobs:
       # rust-cache deletes the registry sources it restored before it saves, so the first cargo
       # command of every run unpacks them again: about 350 crates, and 17 s on Windows before
       # clippy compiled anything. This unpacks them in the background, behind the frontend steps
-      # below. Cargo's package-cache lock makes clippy wait if it is still running, and clippy
-      # unpacks whatever it left undone, so a failure here costs time and never a verdict.
-      # "Finish fetching Rust dependencies" waits for it and prints its output.
-      # `--target host-tuple` keeps the fetch to the host's dependencies, the set clippy compiles;
-      # without it, cargo fetch unpacks every platform's.
+      # below. "Finish fetching Rust dependencies" waits for it, or ends it after 10 minutes, and
+      # prints its output before clippy starts; cargo's package-cache lock is only a fallback.
+      # Clippy unpacks whatever the fetch left undone, so a failure here costs time and never a
+      # verdict. `--target host-tuple` keeps the fetch to the host's dependencies, the set clippy
+      # compiles; without it, cargo fetch unpacks every platform's.
       - name: Start fetching Rust dependencies
         if: runner.os == 'Windows'
         run: |
@@ -199,9 +199,10 @@ jobs:
       - name: Build frontend
         run: bun run build
 
-      # Waits for the background fetch so its output lands here, not after the job, and so a hung
-      # fetch cannot hold cargo's lock through clippy. Its outcome is a warning, never a failure:
-      # clippy fetches anything still missing itself and fails on anything real.
+      # Waits for the background fetch so its output lands here, not after the job, and so clippy
+      # never starts beside it. A fetch still running after 10 minutes is ended so it cannot hold
+      # cargo's lock through clippy. Its outcome is a warning, never a failure: clippy fetches
+      # anything still missing itself and fails on anything real.
       - name: Finish fetching Rust dependencies
         if: runner.os == 'Windows'
         run: |
