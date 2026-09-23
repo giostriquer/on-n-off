@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- probe: an Info.plist-only change on a restored build, to be reverted -->
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>app.on-n-off.notch</string>
   <key>CFBundleName</key><string>on-n-off Side notch</string>
