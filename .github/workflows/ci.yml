@@ -38,7 +38,8 @@ jobs:
   #
   # Runner labels are pinned to exact images, like the compiler in rust-toolchain.toml, and bumped
   # deliberately on their own pull request: a `-latest` label moves to a new OS on GitHub's schedule.
-  # scripts/workflows.test.mjs holds the one list every workflow uses, so a bump changes them all.
+  # scripts/workflows.test.mjs holds the one image per OS that every workflow uses, so a bump changes
+  # them all.
   frontend:
     name: frontend
     runs-on: ubuntu-24.04

@@ -98,8 +98,8 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   `tauri-build` needs `ui/dist` before the Rust steps.
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
-  to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one list of images every
-  workflow must use, so a bump changes the list and every workflow together.
+  to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one image per OS that
+  every workflow must use, so a bump replaces it and changes every workflow together.
 - In this repo's shell tooling, prefer `Join-Path`, `$env:VAR`, `-LiteralPath`; in bash use forward
   slashes and `cygpath -w` when handing paths to Windows programs.
 

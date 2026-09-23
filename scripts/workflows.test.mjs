@@ -25,22 +25,40 @@ function firstBuild(job) {
   return index;
 }
 
-// The one list of runner images, bumped deliberately like rust-toolchain.toml. A bump changes this
-// list and every workflow in the same pull request: release's build job restores the cache that
-// Bundle saves, and rust-cache's key does not include the image, so those two must never differ.
-const pinnedImages = ["ubuntu-24.04", "windows-2025-vs2026", "macos-26"];
+// The one runner image per OS, bumped deliberately like rust-toolchain.toml. A bump replaces an
+// entry here and changes every workflow in the same pull request. Keyed by OS so that a staged bump
+// cannot list a second image for an OS and leave some workflows on the old one.
+const pinnedImages = { ubuntu: "ubuntu-24.04", windows: "windows-2025-vs2026", macos: "macos-26" };
 
-test("every job runs on one of the pinned runner images", { skip }, () => {
+/** The runner label of each of the job's legs, keyed by matrix platform where it has a matrix. */
+function runnerImages(job) {
+  return String(job["runs-on"]).startsWith("${{")
+    ? Object.fromEntries(job.strategy.matrix.include.map((entry) => [entry.platform, entry.os]))
+    : { "": job["runs-on"] };
+}
+
+test("every job runs on its OS's pinned runner image", { skip }, () => {
   for (const name of ["ci", "bundle", "release", "cache-prune"]) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
-      const labels = String(job["runs-on"]).startsWith("${{")
-        ? job.strategy.matrix.include.map((entry) => entry.os)
-        : [job["runs-on"]];
-      for (const label of labels) {
-        assert.ok(pinnedImages.includes(label), `${name}.yml ${id} runs on ${label}, not a pinned image`);
+      for (const label of Object.values(runnerImages(job))) {
+        const os = String(label).split("-")[0];
+        assert.ok(Object.hasOwn(pinnedImages, os), `${name}.yml ${id} runs on ${label}, an OS with no pinned image`);
+        assert.equal(label, pinnedImages[os], `${name}.yml ${id} runs on ${label}, not the pinned ${os} image`);
       }
     }
   }
+});
+
+// rust-cache's key does not include the runner image, so a cache saved on one image restores on
+// another. Release's build job restores the cache that Bundle saves, so the two must build each
+// platform on the same image, or a release would reuse a target directory built with another
+// image's SDK and linker.
+test("release builds each platform on the image of the Bundle cache it restores", { skip }, () => {
+  const bundle = load("bundle").jobs.bundle;
+  const release = load("release").jobs.build;
+  const sharedKey = (job) => step(job, "Cache Rust dependencies").with["shared-key"];
+  assert.equal(sharedKey(release), sharedKey(bundle));
+  assert.deepEqual(runnerImages(release), runnerImages(bundle));
 });
 
 test("ci, bundle and release share one env block, which rust-cache hashes into its key", { skip }, () => {
