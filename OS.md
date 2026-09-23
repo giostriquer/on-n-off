@@ -106,7 +106,8 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   checks, which run the notch helper that clippy's build script stages. `test` runs `cargo test`.
   They start together, so a leg takes the longer of the two instead of their sum. Both compile the
   crate, so each installs bun packages, builds `ui/dist`, and on macOS restores the Swift build
-  cache, which only `lint` saves. Each has a rust-cache key of its own (`verify-lint-<platform>`,
+  cache, which only `lint` saves; `test` takes each of those setup steps from `lint` by YAML alias,
+  so the two cannot drift. Each has a rust-cache key of its own (`verify-lint-<platform>`,
   `verify-test-<platform>`), so neither overwrites what the other built. The ruleset requires checks
   named `verify-windows` and `verify-macos`, so those are small ubuntu jobs. Each needs only its
   own OS's call, runs with `if: always()` (a skipped required check would count as passing), and

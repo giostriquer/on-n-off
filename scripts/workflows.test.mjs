@@ -298,10 +298,6 @@ test("every Windows job that installs bun packages keeps bun's install cache on 
 // own step. A failed fetch is a warning: cargo fetches what it needs itself and fails on its own.
 test("the Windows verify jobs unpack Rust dependencies in the background before the first build", { skip }, () => {
   for (const verify of [lint(), testJob()]) backgroundFetch(verify);
-  const run = (job, name) => step(job, name).run;
-  for (const name of ["Start fetching Rust dependencies", "Finish fetching Rust dependencies"]) {
-    assert.equal(run(testJob(), name), run(lint(), name), `${name} is one script in both jobs`);
-  }
 });
 
 function backgroundFetch(verify) {
@@ -352,6 +348,42 @@ test("both OSes run the lint and the test job, neither of which can be skipped",
   assert.match(runs(testJob()), /cargo test /);
   assert.doesNotMatch(runs(testJob()), /cargo (fmt|clippy)|tauri build|\.test\.ps1/);
   for (const job of [lint(), testJob()]) assert.equal(job["timeout-minutes"], 45);
+});
+
+// The test job's setup is the lint job's steps by YAML alias, so a pinned action, a toolchain input
+// or the prune that rust-cache's key depends on cannot drift between the two. Only its rust-cache
+// key and the test itself are its own.
+test("the test job's setup is the lint job's, step for step and in the same order", { skip }, () => {
+  const own = ["Cache Rust dependencies", "Test Rust"];
+  assert.deepEqual(testJob().steps.map((candidate) => candidate.name), [
+    "Check out repository",
+    "Keep the bun cache on the workspace drive",
+    "Set up Bun",
+    "Read pinned Rust toolchain",
+    "Set up Rust",
+    "Drop unpinned toolchains",
+    "Restore Swift build cache",
+    "Resolve Swift package dependencies",
+    "Cache Rust dependencies",
+    "Start fetching Rust dependencies",
+    "Install frontend dependencies",
+    "Build frontend",
+    "Finish fetching Rust dependencies",
+    "Test Rust",
+  ]);
+  let previous = -1;
+  for (const candidate of testJob().steps.filter(({ name }) => !own.includes(name))) {
+    const { index, ...shared } = step(lint(), candidate.name);
+    assert.deepEqual(candidate, shared, candidate.name);
+    assert.ok(index > previous, `${candidate.name} runs in the lint job's order`);
+    previous = index;
+  }
+  // The rust-cache step differs from the lint job's in its key alone.
+  const cache = (job) => {
+    const { index: _, ...rest } = step(job, "Cache Rust dependencies");
+    return { ...rest, with: { ...rest.with, "shared-key": "the job's own" } };
+  };
+  assert.deepEqual(cache(testJob()), cache(lint()));
 });
 
 test("the lint jobs run every PowerShell script test, and the test jobs none", { skip }, () => {
