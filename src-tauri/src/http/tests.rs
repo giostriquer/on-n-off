@@ -78,6 +78,32 @@ fn a_one_shot_server_nobody_calls_gives_up_at_its_deadline() {
     );
 }
 
+/// The server polls for its connection without blocking, and on macOS and Windows the socket it
+/// accepts starts out non-blocking too. A client that has connected but not yet written must
+/// still be read, not fail the server with `WouldBlock`: the code under test is often slower than
+/// the accept poll, above all on a loaded CI runner.
+#[test]
+fn a_one_shot_server_reads_a_request_that_arrives_after_it_accepts() {
+    use std::io::{Read, Write};
+
+    let (url, server) = serve_once("200 OK", "{}");
+    let address = url
+        .strip_prefix("http://")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap();
+    let mut client = std::net::TcpStream::connect(address).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    client
+        .write_all(b"GET /usage HTTP/1.1\r\nHost: x\r\n\r\n")
+        .unwrap();
+    let mut reply = String::new();
+    client.read_to_string(&mut reply).unwrap();
+
+    assert!(reply.starts_with("HTTP/1.1 200 OK"), "{reply}");
+    let head = server.join().expect("the server read the late request");
+    assert!(head.starts_with("GET /usage "), "{head}");
+}
+
 #[test]
 fn a_refused_connection_is_a_network_error() {
     assert!(matches!(
