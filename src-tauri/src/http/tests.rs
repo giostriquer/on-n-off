@@ -148,9 +148,14 @@ fn a_refused_url_fails_at_once_and_no_server_can_take_it() {
 /// such an environment without touching the process-wide variables other tests read.
 #[test]
 fn test_requests_ignore_a_proxy_the_environment_names() {
-    let proxied =
-        ureq::Agent::config_builder().proxy(Some(ureq::Proxy::new("http://127.0.0.1:9").unwrap()));
-    assert!(agent_config(proxied).proxy().is_none());
+    let proxied = || {
+        ureq::Agent::config_builder().proxy(Some(ureq::Proxy::new("http://127.0.0.1:9").unwrap()))
+    };
+    assert!(agent_config(proxied(), false).proxy().is_none());
+    assert!(
+        agent_config(proxied(), true).proxy().is_some(),
+        "the app keeps the proxy its environment names"
+    );
 }
 
 #[test]
