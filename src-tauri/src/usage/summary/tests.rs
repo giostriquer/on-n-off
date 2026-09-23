@@ -810,19 +810,57 @@ fn tokens_still_returned_when_rates_unavailable() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// Why `input` is refused. The home it would read panics when resolved: an invalid window must be
+/// refused before any home is, so these tests reach no home at all — least of all the real one,
+/// which a broken refusal would otherwise scan, price over the network and cache into.
+fn refused_before_any_home(input: UsageSummaryInput) -> AdapterError {
+    read_summary_from(input, || {
+        panic!("an invalid window must be refused before a home is resolved")
+    })
+    .unwrap_err()
+}
+
 #[test]
 fn invalid_window_errors() {
-    let err = read_summary(UsageSummaryInput {
-        since_day: "2026-08-10".into(),
-        until_day: "2026-08-01".into(),
-        time_zone: "UTC".into(),
-        resolution: None,
-        since_time: None,
-        until_time: None,
-        force: false,
-    })
-    .unwrap_err();
-    assert!(err.message.contains("after untilDay"));
+    let err = refused_before_any_home(day_input("2026-08-10", "2026-08-01", false));
+    assert!(err.message.contains("after untilDay"), "{}", err.message);
+}
+
+#[test]
+fn hourly_windows_need_exact_bounds_at_most_a_day_apart() {
+    let hourly = |since: &str, until: &str| UsageSummaryInput {
+        resolution: Some("hour".into()),
+        since_time: (!since.is_empty()).then(|| since.into()),
+        until_time: (!until.is_empty()).then(|| until.into()),
+        ..day_input("2026-08-07", "2026-08-08", false)
+    };
+    let refusals = [
+        ("", "2026-08-07T01:00:00Z", "valid sinceTime and untilTime"),
+        ("2026-08-07T00:00:00Z", "", "valid sinceTime and untilTime"),
+        (
+            "seven",
+            "2026-08-07T01:00:00Z",
+            "valid sinceTime and untilTime",
+        ),
+        (
+            "2026-08-07T01:00:00Z",
+            "2026-08-07T01:00:00Z",
+            "at most 24 hours",
+        ),
+        (
+            "2026-08-07T00:00:00Z",
+            "2026-08-08T00:00:01Z",
+            "at most 24 hours",
+        ),
+    ];
+    for (since, until, reason) in refusals {
+        let err = refused_before_any_home(hourly(since, until));
+        assert!(
+            err.message.contains(reason),
+            "{since}..{until}: {}",
+            err.message
+        );
+    }
 }
 
 /// Claim-check harness: time real-home common windows and reusable Full time.
