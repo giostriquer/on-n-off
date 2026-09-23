@@ -277,6 +277,14 @@ jobs:
         if: runner.os == 'Windows'
         run: bun run tauri build --debug --no-bundle
 
+      # EXPERIMENT (reverted before merge): the helper the build script staged must hold this
+      # commit's source change, which the restored cache predates.
+      - name: Check the staged helper is fresh (experiment)
+        if: runner.os == 'macOS'
+        run: |
+          grep -a -c -F PREFIX-RESTORE-PROBE-7 src-tauri/target/debug/on-n-off-notch
+          if ($LASTEXITCODE -ne 0) { throw "STALE: the staged notch helper lacks this commit's change." }
+
       - name: Check native notch models and lifecycle
         if: runner.os == 'macOS'
         run: |
