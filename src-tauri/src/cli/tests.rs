@@ -53,11 +53,13 @@ fn timeout_kills_the_process() {
 
 #[test]
 fn drains_chatty_stdout_and_stderr_while_the_process_runs() {
+    // The deadline only turns a pipe deadlock into a failure instead of a hang. It is not a
+    // bound on how fast the child starts, which on a loaded machine can take seconds.
     let out = CliStub::new("chatty")
         .chatty(5000)
         .stdout("complete")
         .cli(&stub_dir())
-        .with_timeout(Duration::from_secs(5))
+        .with_timeout(Duration::from_secs(30))
         .run(&[])
         .expect("chatty child must not block on full output pipes");
     assert!(out.contains("complete"));

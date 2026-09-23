@@ -2,6 +2,11 @@ use super::*;
 use serde_json::json;
 use std::collections::VecDeque;
 
+/// For process tests about what the child's answer means. They wait generously, because how
+/// fast a launcher starts on a loaded machine is not what they check;
+/// `process_transport_times_out_and_stops_the_child` is the one about giving up in time.
+const ANSWER_DEADLINE: Duration = Duration::from_secs(60);
+
 fn typed<T: DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).unwrap()
 }
@@ -257,8 +262,7 @@ fn process_transport_rejects_an_oversized_stdout_line() {
         .stdout(&output)
         .cli(&root);
     let mut command = cli.command();
-    let mut transport =
-        ProcessTransport::spawn_command(&mut command, Duration::from_secs(10), 64).unwrap();
+    let mut transport = ProcessTransport::spawn_command(&mut command, ANSWER_DEADLINE, 64).unwrap();
 
     let error = transport.receive().unwrap_err().message;
     transport.finish();
@@ -275,7 +279,7 @@ fn process_transport_does_not_surface_stderr_content() {
         .cli(&root);
     let mut command = cli.command();
     let mut transport =
-        ProcessTransport::spawn_command(&mut command, Duration::from_secs(10), 1024).unwrap();
+        ProcessTransport::spawn_command(&mut command, ANSWER_DEADLINE, 1024).unwrap();
 
     let error = transport.receive().unwrap_err().message;
     transport.finish();
@@ -290,7 +294,7 @@ fn early_nonzero_exit_explains_that_the_cli_may_need_an_update() {
     let cli = crate::cli_stub::CliStub::new("codex").exit(2).cli(&root);
     let mut command = cli.command();
     let mut transport =
-        ProcessTransport::spawn_command(&mut command, Duration::from_secs(10), 1024).unwrap();
+        ProcessTransport::spawn_command(&mut command, ANSWER_DEADLINE, 1024).unwrap();
 
     let error = query_app_server(&root, false, &mut transport).unwrap_err();
     let status = transport.finish();

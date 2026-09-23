@@ -6,6 +6,11 @@ use std::cell::Cell;
 use std::fs;
 use std::time::{Duration, Instant};
 
+/// For tests about what gh's answer means. They wait generously, because how fast a launcher
+/// starts on a loaded machine is not what they check; `a_hung_gh_is_killed_at_the_deadline`
+/// is the one about giving up in time.
+const ANSWER_DEADLINE: Duration = Duration::from_secs(60);
+
 #[test]
 fn a_logged_in_gh_hands_over_its_trimmed_token() {
     let dir = scratch_dir("gh-token-ok");
@@ -13,7 +18,7 @@ fn a_logged_in_gh_hands_over_its_trimmed_token() {
         .log_args("args.txt", false)
         .stdout("gho_abc123")
         .cli(&dir);
-    let token = read_token_with(&cli, TOKEN_DEADLINE).unwrap();
+    let token = read_token_with(&cli, ANSWER_DEADLINE).unwrap();
     assert_eq!(token.as_str(), "gho_abc123");
     let args = fs::read_to_string(dir.join("args.txt")).unwrap();
     assert!(args.contains("auth token"), "{args}");
@@ -27,7 +32,7 @@ fn a_signed_out_gh_is_not_logged_in_and_its_stderr_stays_private() {
         .stderr("no oauth token found for github.com: secret-path")
         .exit(1)
         .cli(&dir);
-    let error = read_token_with(&cli, TOKEN_DEADLINE).unwrap_err();
+    let error = read_token_with(&cli, ANSWER_DEADLINE).unwrap_err();
     assert_eq!(error, TokenError::NotLoggedIn);
     assert!(!format!("{error:?}").contains("secret-path"));
 }
@@ -37,12 +42,12 @@ fn an_empty_or_multi_word_answer_is_not_a_token() {
     let dir = scratch_dir("gh-token-empty");
     let cli = CliStub::new("gh").stdout("").cli(&dir);
     assert_eq!(
-        read_token_with(&cli, TOKEN_DEADLINE).unwrap_err(),
+        read_token_with(&cli, ANSWER_DEADLINE).unwrap_err(),
         TokenError::NotLoggedIn
     );
     let cli = CliStub::new("gh").stdout("not a token").cli(&dir.join("b"));
     assert_eq!(
-        read_token_with(&cli, TOKEN_DEADLINE).unwrap_err(),
+        read_token_with(&cli, ANSWER_DEADLINE).unwrap_err(),
         TokenError::NotLoggedIn
     );
 }
@@ -52,7 +57,7 @@ fn a_missing_gh_is_reported_as_missing() {
     let dir = scratch_dir("gh-token-missing");
     let cli = AgentCli::new(dir.join("gh").to_string_lossy().as_ref());
     assert_eq!(
-        read_token_with(&cli, TOKEN_DEADLINE).unwrap_err(),
+        read_token_with(&cli, ANSWER_DEADLINE).unwrap_err(),
         TokenError::GhMissing
     );
 }

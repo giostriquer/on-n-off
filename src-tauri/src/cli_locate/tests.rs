@@ -308,8 +308,10 @@ fn probes_the_login_shell_for_path_and_gives_up_on_hangs() {
         "fakeshell",
         "#!/bin/sh\nPATH=/fake/node/bin:/usr/bin\nexport PATH\neval \"$4\"\n",
     );
+    // Generous: a freshly written script can take seconds to start on a loaded machine, and
+    // only the hung shell below is about giving up in time.
     assert_eq!(
-        probe_login_shell_path(&shell, Duration::from_secs(5)),
+        probe_login_shell_path(&shell, Duration::from_secs(60)),
         Some(vec![
             PathBuf::from("/fake/node/bin"),
             PathBuf::from("/usr/bin")
