@@ -50,15 +50,29 @@ impl std::fmt::Display for HttpError {
 type Reply = ureq::http::Response<ureq::Body>;
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(TIMEOUT))
-            .user_agent(concat!("on-n-off/", env!("CARGO_PKG_VERSION")))
-            // A non-success status stays a response instead of becoming an error: the rate-limit
-            // headers this module reads live on the 403 and 429 replies themselves.
-            .http_status_as_error(false)
-            .build(),
-    )
+    // Tests only ever talk to loopback servers, and `ureq` has no loopback exception: a
+    // developer's `HTTP(S)_PROXY` or `ALL_PROXY` would send those requests to the proxy.
+    // The app itself keeps honouring the environment's proxy.
+    ureq::Agent::new_with_config(agent_config(ureq::Agent::config_builder(), !cfg!(test)))
+}
+
+/// The settings every request shares, laid over `builder`, which already carries whatever proxy
+/// the environment names; `honour_env_proxy` false drops it.
+fn agent_config(
+    builder: ureq::config::ConfigBuilder<ureq::typestate::AgentScope>,
+    honour_env_proxy: bool,
+) -> ureq::config::Config {
+    let builder = builder
+        .timeout_global(Some(TIMEOUT))
+        .user_agent(concat!("on-n-off/", env!("CARGO_PKG_VERSION")))
+        // A non-success status stays a response instead of becoming an error: the rate-limit
+        // headers this module reads live on the 403 and 429 replies themselves.
+        .http_status_as_error(false);
+    if honour_env_proxy {
+        builder.build()
+    } else {
+        builder.proxy(None).build()
+    }
 }
 
 fn parse_body(mut response: Reply) -> Result<Value, HttpError> {
@@ -176,6 +190,44 @@ fn rate_limit_reset(response: &Reply) -> Option<RateLimitReset> {
     )
 }
 
+/// How long a loopback test server waits for the code under test to connect. A test whose code
+/// never makes its request must fail with a message, not leave `join()` waiting until CI's job
+/// timeout.
+#[cfg(test)]
+const ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
+
+/// The next connection to `listener`, or a panic once `deadline` passes without one.
+#[cfg(test)]
+fn accept_within(listener: &std::net::TcpListener, deadline: Duration) -> std::net::TcpStream {
+    listener.set_nonblocking(true).unwrap();
+    let started = std::time::Instant::now();
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // macOS and Windows hand an accepted socket its listener's non-blocking mode.
+                stream.set_nonblocking(false).unwrap();
+                return stream;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    started.elapsed() < deadline,
+                    "no request reached the loopback server within {deadline:?}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("loopback accept failed: {error}"),
+        }
+    }
+}
+
+/// The next connection to `listener`, or a panic once `ACCEPT_DEADLINE` passes without one. Every
+/// loopback test server accepts through this, including a test's own listener, so none of them
+/// can wait forever on a request that never comes.
+#[cfg(test)]
+pub(crate) fn accept_in_time(listener: &std::net::TcpListener) -> std::net::TcpStream {
+    accept_within(listener, ACCEPT_DEADLINE)
+}
+
 /// One-shot HTTP server on a loopback port; returns the URL and the captured request head.
 /// Shared by the http and pipeline tests so no test ever touches the network.
 #[cfg(test)]
@@ -183,32 +235,9 @@ pub(crate) fn serve_once(
     status_line: &str,
     body: &str,
 ) -> (String, std::thread::JoinHandle<String>) {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}/usage", listener.local_addr().unwrap());
-    let body = body.to_string();
-    let status_line = status_line.to_string();
-    let handle = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = Vec::new();
-        let mut buf = [0u8; 1024];
-        loop {
-            let n = stream.read(&mut buf).unwrap();
-            request.extend_from_slice(&buf[..n]);
-            if n == 0 || request.windows(4).any(|w| w == b"\r\n\r\n") {
-                break;
-            }
-        }
-        let response = format!(
-            "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        stream.write_all(response.as_bytes()).unwrap();
-        String::from_utf8_lossy(&request).to_string()
-    });
-    (url, handle)
+    serve("/usage", &[(status_line, &[], body)], |mut requests| {
+        requests.remove(0).head
+    })
 }
 
 /// What `serve_once_capturing` saw: the request head (request line + headers) and the body.
@@ -218,18 +247,18 @@ pub(crate) struct CapturedRequest {
     pub(crate) body: String,
 }
 
-/// Like `serve_once`, but honours `Content-Length` so a POST body is captured in full, and lets
-/// the test add response headers (rate-limit headers, for instance).
+/// Like `serve_once`, but hands back the request body too, and lets the test add response
+/// headers (rate-limit headers, for instance).
 #[cfg(test)]
 pub(crate) fn serve_once_capturing(
     status_line: &str,
     response_headers: &[&str],
     body: &str,
 ) -> (String, std::thread::JoinHandle<CapturedRequest>) {
-    let (url, handle) = serve_sequence(&[(status_line, response_headers, body)]);
-    (
-        url,
-        std::thread::spawn(move || handle.join().unwrap().remove(0)),
+    serve(
+        "/graphql",
+        &[(status_line, response_headers, body)],
+        |mut requests| requests.remove(0),
     )
 }
 
@@ -239,11 +268,23 @@ pub(crate) fn serve_once_capturing(
 pub(crate) fn serve_sequence(
     responses: &[(&str, &[&str], &str)],
 ) -> (String, std::thread::JoinHandle<Vec<CapturedRequest>>) {
+    serve("/graphql", responses, |requests| requests)
+}
+
+/// The one loopback server behind the fixtures above: it answers one connection per entry at
+/// `path`, in order, reads each request's head and its `Content-Length` body, and hands what it
+/// captured to `finish`, which shapes what the thread returns.
+#[cfg(test)]
+fn serve<T: Send + 'static>(
+    path: &str,
+    responses: &[(&str, &[&str], &str)],
+    finish: fn(Vec<CapturedRequest>) -> T,
+) -> (String, std::thread::JoinHandle<T>) {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}/graphql", listener.local_addr().unwrap());
+    let url = format!("http://{}{path}", listener.local_addr().unwrap());
     let responses: Vec<(String, String, String)> = responses
         .iter()
         .map(|(status_line, headers, body)| {
@@ -257,26 +298,10 @@ pub(crate) fn serve_sequence(
             )
         })
         .collect();
-    listener.set_nonblocking(true).unwrap();
     let handle = std::thread::spawn(move || {
         let mut captured = Vec::new();
         for (status_line, extra_headers, body) in responses {
-            // A test whose code under test never connects must fail, not hang the whole run.
-            let started = std::time::Instant::now();
-            let (mut stream, _) = loop {
-                match listener.accept() {
-                    Ok(accepted) => break accepted,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(
-                            started.elapsed() < Duration::from_secs(10),
-                            "no request reached the loopback server within 10 s"
-                        );
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    Err(error) => panic!("loopback accept failed: {error}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
+            let mut stream = accept_in_time(&listener);
             let mut request = Vec::new();
             let mut buf = [0u8; 1024];
             let head_end = loop {
@@ -317,7 +342,7 @@ pub(crate) fn serve_sequence(
             );
             stream.write_all(response.as_bytes()).unwrap();
         }
-        captured
+        finish(captured)
     });
     (url, handle)
 }
@@ -335,13 +360,16 @@ pub(crate) fn head_header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
-/// A loopback URL nothing listens on: any request to it fails with a connection error.
+/// A loopback URL no server can answer: any request to it fails with a connection error, at once.
+///
+/// It names port 0, which no listener can hold. The client's own network stack rejects a connect
+/// to it before sending anything: `EADDRNOTAVAIL` on macOS, `WSAEADDRNOTAVAIL` on Windows. A
+/// port freed by dropping a listener would not do: Windows retries a connect to a closed loopback
+/// port for about 2 s before it reports the refusal, and the OS may hand the port to another
+/// test's server in the meantime.
 #[cfg(test)]
 pub(crate) fn refused_url() -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}/usage", listener.local_addr().unwrap());
-    drop(listener);
-    url
+    "http://127.0.0.1:0/usage".to_string()
 }
 
 #[cfg(test)]

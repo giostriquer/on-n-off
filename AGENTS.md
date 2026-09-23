@@ -128,6 +128,8 @@ user data.
   terminal's `PATH`.
 - Child processes: `process.rs`. Drain stdout and stderr concurrently from the start, or a full
   pipe deadlocks.
+- File locks: `FileLease` (`file_lease.rs`). It unlocks when dropped; closing a locked `File`
+  leaves the lock with any child another thread spawned until that child execs.
 - Fake CLIs in tests: `cli_stub.rs`.
 - A read shared by more than one surface: `read_revision.rs`. Announce a replacement, never a
   read, and answer an announcement unforced — either one broken makes it a loop

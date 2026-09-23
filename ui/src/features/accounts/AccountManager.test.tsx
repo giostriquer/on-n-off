@@ -1,5 +1,6 @@
 import { act, render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Profiler } from "react";
 import { afterEach, it, expect, vi } from "vitest";
 import * as api from "$lib/api";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
@@ -17,14 +18,15 @@ function Cards() {
     <AccountCardActions accountId={profile.observationId!} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>} />
   </section>)}</>;
 }
-function setup(preferences = false) {
+function setup({ preferences = false, onCommit }: { preferences?: boolean; onCommit?: () => void } = {}) {
   vi.mocked(api.readAccountPreferences).mockResolvedValue(false);
   vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: false, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], nativeAccount: null, recoveryRequired: false, notice: null });
   vi.mocked(api.accountAction).mockResolvedValue();
   vi.mocked(api.readAccountActivationBlockers).mockResolvedValue([]);
   vi.mocked(api.readCodexSubscription).mockResolvedValue({ metadata: null, connected: false, unavailable: false, browserSupported: true, canConnect: true });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}>{preferences ? <AccountPreferences /> : <AccountControllers><AccountManager provider="codex"><Cards /></AccountManager></AccountControllers>}</QueryClientProvider>);
+  const tree = <QueryClientProvider client={client}>{preferences ? <AccountPreferences /> : <AccountControllers><AccountManager provider="codex"><Cards /></AccountManager></AccountControllers>}</QueryClientProvider>;
+  render(onCommit ? <Profiler id="accounts" onRender={onCommit}>{tree}</Profiler> : tree);
   return client;
 }
 it("reads accounts without changing login and switches only from the selected card", async () => {
@@ -55,6 +57,17 @@ it("asks before switching beside running clients and switches only on confirmati
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "useAlongsideClients", "profile-a", undefined));
   expect(vi.mocked(api.accountAction).mock.calls.map(call => call[1])).toEqual(["useAlongsideClients"]);
   await waitFor(() => expect(within(card).queryByRole("group", { name })).toBeNull());
+});
+it("moves focus to Cancel in the same commit that shows the running-clients confirmation", async () => {
+  // A Profiler reports a commit after the layout effects beneath it and before any passive one, so
+  // this sees the first frame the confirmation paints in, however late passive effects happen to run.
+  const name = "Confirm switching while Codex is running"; let focusedOnShow: Element | null | undefined;
+  setup({ onCommit: () => { if (focusedOnShow === undefined && document.querySelector(`[role="group"][aria-label="${name}"]`)) focusedOnShow = document.activeElement; } });
+  vi.mocked(api.readAccountActivationBlockers).mockResolvedValue(["ChatGPT"]);
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
+  const confirm = await within(card).findByRole("group", { name });
+  expect(focusedOnShow).toBe(within(confirm).getByRole("button", { name: "Cancel" }));
 });
 it("switches normally when running clients cannot be checked, and waits for the check", async () => {
   setup(); let answer!: (running: string[]) => void;
@@ -101,7 +114,7 @@ it("keeps email as the account name and allows a free-text category to be edited
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "category", "profile-a", ""));
 });
 it("requires opt-in in Settings before automatically saving accounts", async () => {
-  setup(true); const checkbox = await screen.findByRole("checkbox", { name: "Automatically save accounts I sign in to" });
+  setup({ preferences: true }); const checkbox = await screen.findByRole("checkbox", { name: "Automatically save accounts I sign in to" });
   await waitFor(() => expect(checkbox).toBeEnabled()); expect(checkbox).not.toBeChecked();
   expect(api.accountAction).not.toHaveBeenCalled(); fireEvent.click(checkbox);
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remember"));

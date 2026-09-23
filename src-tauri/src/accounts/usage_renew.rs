@@ -7,7 +7,7 @@ use super::{
     store::{Login, Profile, Store},
     vault,
 };
-use crate::dto::AgentId;
+use crate::{dto::AgentId, file_lease::FileLease};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -24,6 +24,19 @@ fn matches(profile: &Profile, expected: &Profile) -> bool {
         && profile.usage_renewal_owned
         && profile.login.as_ref().map(Login::fingerprint)
             == expected.login.as_ref().map(Login::fingerprint)
+}
+
+/// Serializes grants for one profile across threads and app instances, without waiting.
+fn acquire_renewal_lease(root: &Path, id: &str) -> Result<FileLease, String> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(root.join(format!("{id}.lock")))
+        .map_err(|_| "Cannot coordinate account renewal.")?;
+    FileLease::acquire(file, std::fs::File::try_lock)
+        .map_err(|_| "Another account renewal is running.".into())
 }
 
 pub(super) fn renew_owned(
@@ -47,16 +60,7 @@ pub(super) fn renew_owned(
     let root = home.join(".on-n-off/accounts/usage-renewals");
     std::fs::create_dir_all(&root).map_err(|_| "Cannot prepare protected renewal storage.")?;
     let id = crate::sha::sha256_hex(profile.id.as_bytes());
-    let lease = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(root.join(format!("{id}.lock")))
-        .map_err(|_| "Cannot coordinate account renewal.")?;
-    lease
-        .try_lock()
-        .map_err(|_| "Another account renewal is running.")?;
+    let _lease = acquire_renewal_lease(&root, &id)?;
     let path = root.join(format!("{id}.enc"));
     let key = store.key;
     drop(store); // Vault publication lock never spans a provider request.

@@ -74,16 +74,58 @@ fn interrupted_renewal_never_redeems_the_same_generation_again() {
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
     let calls = Cell::new(0);
-    for _ in 0..2 {
-        assert!(
-            renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|_| {
-                calls.set(calls.get() + 1);
-                Err("connection lost".into())
-            })
-            .is_err()
-        );
-    }
+    let renew = || {
+        renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|_| {
+            calls.set(calls.get() + 1);
+            Err("connection lost".into())
+        })
+        .err()
+    };
+    assert_eq!(renew().as_deref(), Some("connection lost"));
+    // The journal refuses the retry, not a lease the first attempt left behind.
+    assert_eq!(
+        renew().as_deref(),
+        Some("A prior renewal did not finish. Sign in again to refresh this account.")
+    );
     assert_eq!(calls.get(), 1);
+}
+#[test]
+fn a_second_renewal_is_refused_while_a_grant_is_in_flight() {
+    let home = tempfile::tempdir().unwrap();
+    let profile = setup(home.path(), true);
+    let nested = std::cell::RefCell::new(None);
+    let login = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
+        *nested.borrow_mut() =
+            renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|_| {
+                panic!("a second grant must not start while the first is in flight")
+            })
+            .err();
+        Ok(rotated(login))
+    })
+    .unwrap();
+    assert_eq!(
+        nested.into_inner().as_deref(),
+        Some("Another account renewal is running.")
+    );
+    assert_eq!(login.auth["claudeAiOauth"]["refreshToken"], "new-refresh");
+}
+#[cfg(unix)]
+#[test]
+fn a_finished_renewal_frees_its_lease_while_a_spawned_child_still_shares_it() {
+    // A child that another thread spawns during the grant inherits the lease's descriptor and
+    // keeps it until it execs; the next renewal must not see the lease as still running.
+    let root = tempfile::tempdir().unwrap();
+    let lease = acquire_renewal_lease(root.path(), "profile").unwrap();
+    let inherited = lease.duplicate().unwrap();
+    assert_eq!(
+        acquire_renewal_lease(root.path(), "profile")
+            .err()
+            .as_deref(),
+        Some("Another account renewal is running.")
+    );
+    drop(lease);
+    assert!(acquire_renewal_lease(root.path(), "profile").is_ok());
+    drop(inherited);
 }
 #[test]
 fn removing_profile_during_renewal_does_not_resurrect_it() {

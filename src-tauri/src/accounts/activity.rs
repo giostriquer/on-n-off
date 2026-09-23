@@ -1,7 +1,7 @@
 //! Excludes native account mutation from in-process provider reads without holding a mutex
 //! across network I/O. Shared/exclusive file leases also exclude other app processes; the
 //! separate vault lease serializes protected database publication.
-use crate::dto::AgentId;
+use crate::{dto::AgentId, file_lease::FileLease};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
@@ -15,7 +15,7 @@ fn index(provider: AgentId) -> Option<usize> {
         _ => None,
     }
 }
-pub struct Read(Option<usize>, Option<std::fs::File>);
+pub struct Read(Option<usize>, Option<FileLease>);
 pub fn read(provider: AgentId) -> Option<Read> {
     let i = index(provider);
     let mut counts = ACTIVITY
@@ -43,7 +43,7 @@ impl Drop for Read {
         }
     }
 }
-pub struct Change(usize, Option<std::fs::File>);
+pub struct Change(usize, Option<FileLease>);
 pub fn change(provider: AgentId) -> Result<Change, String> {
     let i = index(provider).ok_or("Account activation is unsupported.")?;
     let counts = ACTIVITY
@@ -64,11 +64,7 @@ impl Drop for Change {
 }
 
 /// Separate from the protected vault lease: ordinary reads must not unlock the vault.
-fn lease(
-    home: &std::path::Path,
-    provider: usize,
-    exclusive: bool,
-) -> Result<std::fs::File, String> {
+fn lease(home: &std::path::Path, provider: usize, exclusive: bool) -> Result<FileLease, String> {
     let root = home.join(".on-n-off/accounts");
     std::fs::create_dir_all(&root).map_err(|_| "Cannot coordinate native account access.")?;
     let file = std::fs::OpenOptions::new()
@@ -78,21 +74,22 @@ fn lease(
         .write(true)
         .open(root.join(format!("activity-{provider}.lock")))
         .map_err(|_| "Cannot coordinate native account access.")?;
-    let result = if exclusive {
-        file.try_lock()
-    } else {
-        file.try_lock_shared()
-    };
-    result.map_err(|_| {
-        "Another app instance is reading or changing this account. Retry when it finishes."
-    })?;
-    Ok(file)
+    FileLease::acquire(file, |file| {
+        if exclusive {
+            file.try_lock()
+        } else {
+            file.try_lock_shared()
+        }
+    })
+    .map_err(|_| {
+        "Another app instance is reading or changing this account. Retry when it finishes.".into()
+    })
 }
 #[cfg(test)]
 mod tests;
 
 #[cfg(not(test))]
-fn runtime_lease(provider: usize, exclusive: bool) -> Result<Option<std::fs::File>, String> {
+fn runtime_lease(provider: usize, exclusive: bool) -> Result<Option<FileLease>, String> {
     lease(
         &crate::paths::user_home().map_err(|_| "Cannot resolve account home.")?,
         provider,
@@ -101,6 +98,6 @@ fn runtime_lease(provider: usize, exclusive: bool) -> Result<Option<std::fs::Fil
     .map(Some)
 }
 #[cfg(test)]
-fn runtime_lease(_: usize, _: bool) -> Result<Option<std::fs::File>, String> {
+fn runtime_lease(_: usize, _: bool) -> Result<Option<FileLease>, String> {
     Ok(None)
 }
