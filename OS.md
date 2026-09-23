@@ -112,9 +112,10 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   changed one does not. `SideNotch/Info.plist` is not in the key. It reaches the helper only
   through a `-sectcreate` linker flag, which the runner's native SwiftPM build does not track, so
   a restored helper would keep the old plist; `native_build.rs` removes the helper before every
-  build to force the link (about 0.5 s), and `check-native-notch.mjs` fails a helper that embeds
-  another Info.plist. A restored cache took the macOS `Lint Rust` step from about 75 s to about
-  40 s. What it cannot remove is SwiftPM's first start on a fresh runner, 10-20 s of launching the
+  build to force the link (about 1 s on the runner), and `check-native-notch.mjs` fails a helper
+  that embeds another Info.plist. A restored cache takes about 30 s of Swift work out of the macOS
+  `Lint Rust` step, which ran at about 75 s cold and 40-50 s restored, depending on the runner. What
+  it cannot remove is SwiftPM's first start on a fresh runner, 10-20 s of launching the
   tools and compiling manifests, paid by whichever Swift command runs first. SwiftPM's own
   `~/Library/Caches/org.swift.swiftpm` stays uncached (see `scripts/resolve-swift-packages.ps1`).
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
