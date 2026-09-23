@@ -161,9 +161,9 @@ jobs:
           restore-keys: v0-swiftpm-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-
 
       # SwiftPM recompiles a source whose modification time differs from the one it recorded, and a
-      # checkout dates every file at checkout time, so a restored build recompiled on-n-off's own
-      # Swift modules on every run. The script's header says why a time taken from the content is
-      # sound.
+      # checkout dates every file at checkout time, so a restored build would recompile on-n-off's
+      # own Swift modules on every run. The script's header says why a time taken from the content
+      # is sound.
       - name: Stamp Swift sources with their content
         if: runner.os == 'macOS'
         run: bun scripts/stamp-source-times.mjs src-tauri/macos

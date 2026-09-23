@@ -5,11 +5,11 @@
 // The macOS jobs restore the Swift packages' .build directories from the Actions cache. SwiftPM
 // decides what to recompile by comparing each source's modification time with the one it recorded,
 // and a fresh checkout writes every file at the time of the checkout, so without this every run
-// recompiled the packages' own modules against a cache that already held them. Stamping first, in
-// the run that saves the cache and in every run that restores it, makes an unchanged file look
-// unchanged, and a changed file gets another time, which is all the comparison needs. The time
-// comes from the file on disk, not from git history, so it is the same in a shallow checkout and
-// in a pull request's merge commit.
+// would recompile the packages' own modules against a cache that already held them. Stamping
+// first, in the run that saves the cache and in every run that restores it, makes an unchanged
+// file look unchanged, and a changed file gets another time, which is all the comparison needs.
+// The time comes from the file on disk, not from git history, so it is the same in a shallow
+// checkout and in a pull request's merge commit.
 //
 // Two contents share a time with odds of 1 in 2^28, and SwiftPM also compares sizes. Only the
 // modification time changes; the content is never touched.
