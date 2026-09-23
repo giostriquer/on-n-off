@@ -118,7 +118,8 @@ jobs:
         with:
           workspaces: src-tauri
           shared-key: verify-lint-${{ inputs.platform }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # EXPERIMENT, to be reverted: this pull request saves its caches so its re-runs are warm.
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
 
       # rust-cache deletes the registry sources it restored before it saves, so the first cargo
       # command of every run unpacks them again: about 350 crates, and 17 s on Windows before
@@ -282,7 +283,8 @@ jobs:
         with:
           workspaces: src-tauri
           shared-key: verify-test-${{ inputs.platform }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # EXPERIMENT, to be reverted: this pull request saves its caches so its re-runs are warm.
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
 
       # The lint job's background fetch, behind this job's frontend steps.
       - name: Start fetching Rust dependencies
