@@ -283,4 +283,8 @@ jobs:
       # that never comes should fail here, not at the job's 45-minute limit.
       - name: Test Rust
         timeout-minutes: 15
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Experiment, to be reverted: fail windows / test on purpose, to watch verify-windows fail.
+          if ($IsWindows) { throw 'windows / test fails on purpose (experiment, to be reverted).' }
