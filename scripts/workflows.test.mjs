@@ -224,8 +224,7 @@ test("every job that restores the Rust cache has a key of its own, saved only fr
   assert.equal(cache(lint())["shared-key"], "verify-lint-${{ inputs.platform }}");
   assert.equal(cache(testJob())["shared-key"], "verify-test-${{ inputs.platform }}");
   for (const job of [lint(), testJob()]) {
-    // EXPERIMENT, to be reverted with the save-if change.
-    assert.equal(cache(job)["save-if"], "${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}");
+    assert.equal(cache(job)["save-if"], "${{ github.ref == 'refs/heads/main' }}");
     assert.equal(cache(job).workspaces, "src-tauri");
   }
   // rust-cache's key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>. Expand every
