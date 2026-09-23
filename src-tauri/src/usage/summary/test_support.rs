@@ -1,13 +1,15 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::MutexGuard;
 use std::time::{Duration, SystemTime};
 
 use super::*;
+use crate::usage::pricing;
 
-pub(super) fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+/// What every summary test takes first: the pricing module's rates-state lock, because a summary
+/// read changes that module's process-wide state (see `pricing::lock_rates_state`).
+pub(super) fn serial() -> MutexGuard<'static, ()> {
+    pricing::lock_rates_state()
 }
 
 pub(super) fn write_claude_transcript(home: &Path) {

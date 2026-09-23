@@ -6,9 +6,42 @@ use crate::usage::pricing;
 use crate::usage::scan_cache::{reset_scan_cache_decode_count, scan_cache_decode_count};
 use crate::usage::source_index::{reset_transcript_parse_count, transcript_parse_count};
 
+/// A summary read prices records and loads the rate table, so it changes the pricing module's
+/// process-wide state. A summary test must therefore wait while a pricing test holds that state.
+#[test]
+fn a_summary_test_waits_while_a_pricing_test_holds_the_rates_state() {
+    let pricing_test = pricing::lock_rates_state();
+    let (started, summary_started) = std::sync::mpsc::channel();
+    let summary_test = std::thread::spawn(move || {
+        let _serial = serial();
+        started.send(()).unwrap();
+    });
+    assert!(
+        summary_started
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "a summary test started while a pricing test held the rates state"
+    );
+    drop(pricing_test);
+    summary_started.recv().unwrap();
+    summary_test.join().unwrap();
+}
+
+/// A summary test that panics while holding the lock fails alone: the tests after it still get
+/// the lock, rather than each failing with a `PoisonError`.
+#[test]
+fn a_summary_test_that_panics_holding_the_lock_fails_alone() {
+    let failing = std::thread::spawn(|| {
+        let _serial = serial();
+        panic!("deliberate: a summary test failing while it holds the lock");
+    });
+    assert!(failing.join().is_err());
+    drop(serial());
+}
+
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_appended() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-append");
     write_claude_transcript(&home);
     std::env::set_var("ON_N_OFF_HOME", &home);
@@ -28,7 +61,7 @@ fn cached_summary_is_invalidated_when_transcript_is_appended() {
 
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_created() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-create");
     std::fs::create_dir_all(home.join(".claude").join("projects")).unwrap();
     std::env::set_var("ON_N_OFF_HOME", &home);
@@ -46,7 +79,7 @@ fn cached_summary_is_invalidated_when_transcript_is_created() {
 
 #[test]
 fn cached_summary_is_invalidated_by_same_size_rewrite() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-rewrite");
     let path = write_single_claude_record(&home, "rewrite.jsonl", "2026-08-07T04:05:13.944Z", 20);
     std::env::set_var("ON_N_OFF_HOME", &home);
@@ -67,7 +100,7 @@ fn cached_summary_is_invalidated_by_same_size_rewrite() {
 
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_deleted() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-delete");
     let path = write_single_claude_record(&home, "delete.jsonl", "2026-08-07T04:05:13.944Z", 20);
     std::env::set_var("ON_N_OFF_HOME", &home);
@@ -85,7 +118,7 @@ fn cached_summary_is_invalidated_when_transcript_is_deleted() {
 
 #[test]
 fn cached_summary_survives_disjoint_window_change() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-disjoint");
     write_single_claude_record(&home, "july.jsonl", "2026-07-07T04:05:13.944Z", 10);
     let august_path =
@@ -123,7 +156,7 @@ fn cached_summary_survives_disjoint_window_change() {
 
 #[test]
 fn corrupt_summary_cache_is_rebuilt() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-corrupt");
     write_claude_transcript(&home);
     std::env::set_var("ON_N_OFF_HOME", &home);
@@ -145,7 +178,7 @@ fn corrupt_summary_cache_is_rebuilt() {
 
 #[test]
 fn incompatible_and_partial_cache_documents_rebuild_together() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-cache-migration");
     write_claude_transcript(&home);
     let cache_root = home.join(".on-n-off");
@@ -210,7 +243,7 @@ fn incompatible_and_partial_cache_documents_rebuild_together() {
 
 #[test]
 fn older_generation_cannot_overwrite_newer_summary() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-concurrent");
     write_claude_transcript(&home);
     std::env::set_var("ON_N_OFF_HOME", &home);
@@ -251,7 +284,7 @@ fn older_generation_cannot_overwrite_newer_summary() {
 
 #[test]
 fn cache_write_failures_do_not_fail_correct_summary() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-summary-write-failure");
     write_claude_transcript(&home);
     std::fs::write(home.join(".on-n-off"), "blocks cache directory").unwrap();
@@ -269,7 +302,7 @@ fn cache_write_failures_do_not_fail_correct_summary() {
 /// its mtime; the usage it recorded is still usage, and still Codex's one source.
 #[test]
 fn archived_codex_sessions_still_count() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-archived-codex");
     let codex = home.join(".codex");
     write_codex_rollout(
@@ -310,7 +343,7 @@ fn archived_codex_sessions_still_count() {
 
 #[test]
 fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-archived-only");
     write_codex_rollout(
         &home.join(".codex").join("archived_sessions"),
@@ -338,7 +371,7 @@ fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
 /// rollout under both Codex roots; it is still one rollout.
 #[test]
 fn a_codex_rollout_listed_under_both_roots_counts_once() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-archived-twice");
     let codex = home.join(".codex");
     for dir in [
@@ -366,7 +399,7 @@ fn a_codex_rollout_listed_under_both_roots_counts_once() {
 /// holds the partial first line inside the window and the original the billed line after it.
 #[test]
 fn a_message_counted_outside_the_window_adds_no_session() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-session-follows-copy");
     let usage = |output: u64| {
         serde_json::json!({
@@ -415,7 +448,7 @@ fn a_message_counted_outside_the_window_adds_no_session() {
 /// one-hour rate both times.
 #[test]
 fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-one-hour-writes");
     write_claude_lines(
         &home,
@@ -465,7 +498,7 @@ fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
 
 #[test]
 fn missing_dirs_report_missing_sources() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-missing");
     std::env::set_var("ON_N_OFF_HOME", &home);
     let summary = pricing::with_test_fetch(None, || {
@@ -493,7 +526,7 @@ fn missing_dirs_report_missing_sources() {
 
 #[test]
 fn cached_missing_source_tracks_empty_root_creation_and_removal() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-root-presence");
     std::env::set_var("ON_N_OFF_HOME", &home);
 
@@ -544,7 +577,7 @@ fn cached_missing_source_tracks_empty_root_creation_and_removal() {
 
 #[test]
 fn retained_history_repeated_full_time_reparses_zero_unchanged_files() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-retained-history-repeat");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path, 180);
@@ -565,7 +598,7 @@ fn retained_history_repeated_full_time_reparses_zero_unchanged_files() {
 
 #[test]
 fn retained_history_unchanged_summary_hit_decodes_zero_scan_cache_records() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-retained-history-fast-hit");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path, 180);
@@ -586,7 +619,7 @@ fn retained_history_unchanged_summary_hit_decodes_zero_scan_cache_records() {
 
 #[test]
 fn retained_history_recent_window_keeps_old_live_cached_records() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-retained-history-recent");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path, 180);
@@ -610,7 +643,7 @@ fn retained_history_recent_window_keeps_old_live_cached_records() {
 
 #[test]
 fn retained_history_deleted_historical_file_is_pruned() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-retained-history-delete");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path, 180);
@@ -629,7 +662,7 @@ fn retained_history_deleted_historical_file_is_pruned() {
 
 #[test]
 fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-retained-history-equality");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
     age_file(&old_path, 180);
@@ -661,7 +694,7 @@ fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
 
 #[test]
 fn scans_claude_fixture_and_dedupes() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-scan");
     write_claude_transcript(&home);
     std::env::set_var("ON_N_OFF_HOME", &home);
@@ -743,7 +776,7 @@ fn scans_claude_fixture_and_dedupes() {
 
 #[test]
 fn tokens_still_returned_when_rates_unavailable() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = serial();
     let home = scratch_dir("usage-unpriced");
     write_claude_transcript(&home);
     std::env::set_var("ON_N_OFF_HOME", &home);
