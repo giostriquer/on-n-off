@@ -102,17 +102,21 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   `ui/dist` before the Rust steps.
 - On macOS the Rust build script builds the two Swift helpers (`native_build.rs`,
   `native_billing_build.rs`), and building them cold, SDK modules and SweetCookieKit included, was
-  most of the macOS `Lint Rust` step. The macOS jobs cache both packages' `.build` directories,
-  keyed on the Swift toolchain and every package input: `v0-swiftpm-debug-*` for CI, and
-  `v0-swiftpm-release-*`, which Bundle saves and Release restores. Only main saves, and
-  `cache-prune.yml` prunes both families. SwiftPM rebuilds a source whose modification time
-  differs from the one it recorded, and a checkout dates every file at checkout time, so
-  `scripts/stamp-source-times.mjs` first dates each tracked file under `src-tauri/macos` from its
-  content: an unchanged file matches the cache and a changed one does not. A restored cache took
-  the macOS `Lint Rust` step from about 70 s to about 40 s. What it cannot remove is SwiftPM's
-  first start on a fresh runner, 10-20 s of launching the tools and compiling manifests, paid by
-  whichever Swift command runs first. SwiftPM's own `~/Library/Caches/org.swift.swiftpm` stays
-  uncached (see `scripts/resolve-swift-packages.ps1`).
+  most of the macOS `Lint Rust` step. The macOS jobs cache both packages' `.build` directories
+  through one local action, `.github/actions/restore-swift-build`, keyed on the Swift toolchain and
+  the package inputs SwiftPM tracks: `v0-swiftpm-debug-*` for CI, and `v0-swiftpm-release-*`, which
+  Bundle saves and Release restores. Only main saves, and `cache-prune.yml` prunes both families.
+  SwiftPM rebuilds a source whose modification time differs from the one it recorded, and a
+  checkout dates every file at checkout time, so `scripts/stamp-source-times.mjs` first dates each
+  tracked file under `src-tauri/macos` from its content: an unchanged file matches the cache and a
+  changed one does not. `SideNotch/Info.plist` is not in the key. It reaches the helper only
+  through a `-sectcreate` linker flag, which the runner's native SwiftPM build does not track, so
+  a restored helper would keep the old plist; `native_build.rs` removes the helper before every
+  build to force the link (about 0.5 s), and `check-native-notch.mjs` fails a helper that embeds
+  another Info.plist. A restored cache took the macOS `Lint Rust` step from about 75 s to about
+  40 s. What it cannot remove is SwiftPM's first start on a fresh runner, 10-20 s of launching the
+  tools and compiling manifests, paid by whichever Swift command runs first. SwiftPM's own
+  `~/Library/Caches/org.swift.swiftpm` stays uncached (see `scripts/resolve-swift-packages.ps1`).
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
   to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one image per OS that
