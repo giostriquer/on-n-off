@@ -1,0 +1,69 @@
+name: Restore Swift build cache
+description: >-
+  Restores the macOS Swift packages' .build directories from the Actions cache, then dates the
+  tracked Swift sources by their content. The calling job saves the cache itself, with this
+  action's outputs, because a composite action cannot run a step after the job's build.
+
+# The Rust build script builds two Swift packages (native_build.rs, native_billing_build.rs), and
+# a cold build spent most of a minute on SDK modules and SweetCookieKit before it reached
+# on-n-off's own Swift code. ci.yml, bundle.yml and release.yml all restore through this action, so
+# Release's key is Bundle's by construction. cache-prune.yml prunes the key families.
+
+inputs:
+  configuration:
+    description: The Swift configuration that the job's cargo profile builds, debug or release.
+    required: true
+
+outputs:
+  cache-hit:
+    description: Whether the exact key was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+  cache-primary-key:
+    description: The exact key, for the job's save step.
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+
+runs:
+  using: composite
+  steps:
+    # The toolchain is the selected Xcode, which fixes both the compiler and the SDK. It is read
+    # from Xcode's version file because asking `xcrun swift --version` took a step of its own 6 s
+    # on a fresh runner. The developer directory is hashed with it: the build directories hold
+    # absolute toolchain and SDK paths.
+    - name: Identify the Swift toolchain
+      id: toolchain
+      shell: pwsh
+      env:
+        CONFIGURATION: ${{ inputs.configuration }}
+      run: |
+        if ($env:CONFIGURATION -cnotin 'debug', 'release') {
+          throw "configuration must be debug or release, not '$env:CONFIGURATION'."
+        }
+        $developer = xcode-select --print-path
+        if ($LASTEXITCODE -ne 0) { throw "No Xcode is selected." }
+        $version = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $developer) 'version.plist')
+        if ($version -notmatch '<key>ProductBuildVersion</key>\s*<string>([^<]+)</string>') {
+          throw "The selected Xcode at $developer has no build version."
+        }
+        "Xcode build $($Matches[1]) at $developer"
+        $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("$developer`n$version"))
+        "toolchain=$([Convert]::ToHexString($digest).Substring(0, 16).ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+    # The key is the toolchain and every package input. The restore key drops the inputs, so after
+    # a source change the previous generation is restored and only what changed is rebuilt.
+    - name: Restore the packages' build directories
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          src-tauri/macos/SideNotch/.build
+          src-tauri/macos/BrowserBilling/.build
+        key: v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-${{ hashFiles('src-tauri/macos/*/Package.swift', 'src-tauri/macos/*/Package.resolved', 'src-tauri/macos/*/Info.plist', 'src-tauri/macos/*/Sources/**', 'src-tauri/macos/*/Tests/**') }}
+        restore-keys: v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-
+
+    # SwiftPM recompiles a source whose modification time differs from the one it recorded, and a
+    # checkout dates every file at checkout time, so a restored build would recompile on-n-off's
+    # own Swift modules on every run. The script's header says why a time taken from the content
+    # is sound.
+    - name: Stamp Swift sources with their content
+      shell: pwsh
+      run: bun scripts/stamp-source-times.mjs src-tauri/macos

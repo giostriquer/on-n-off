@@ -127,46 +127,17 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
-      # The build scripts build two Swift packages, and a cold build spent most of a minute on SDK
-      # modules and SweetCookieKit before it reached on-n-off's own Swift code. Their .build
-      # directories are cached, keyed on the toolchain and every package input. A source change
-      # restores the previous generation and rebuilds only what changed. As with rust-cache, only
-      # main saves (the job's last step). Bundle and Release build the release configuration, so
-      # they keep a `release` key family of their own; cache-prune.yml prunes both. The toolchain
-      # is the selected Xcode, which fixes both the compiler and the SDK, read from its version
-      # file: asking `xcrun swift --version` took a step of its own 6 s on a fresh runner.
-      - name: Identify the Swift toolchain
-        id: swift
-        if: runner.os == 'macOS'
-        run: |
-          $developer = xcode-select --print-path
-          if ($LASTEXITCODE -ne 0) { throw "No Xcode is selected." }
-          $version = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $developer) 'version.plist')
-          if ($version -notmatch '<key>ProductBuildVersion</key>\s*<string>([^<]+)</string>') {
-            throw "The selected Xcode at $developer has no build version."
-          }
-          "Xcode build $($Matches[1]) at $developer"
-          $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("$developer`n$version"))
-          "toolchain=$([Convert]::ToHexString($digest).Substring(0, 16).ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-
+      # The build scripts build two Swift packages, whose .build directories are cached. The action
+      # says what it restores, what the key holds, and why it stamps the sources (with bun, so after
+      # Set up Bun). As with rust-cache, only main saves, as the job's last step. Bundle and Release
+      # build the release configuration and keep a `release` key family of their own; cache-prune.yml
+      # prunes both.
       - name: Restore Swift build cache
         id: swift-cache
         if: runner.os == 'macOS'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: ./.github/actions/restore-swift-build
         with:
-          path: |
-            src-tauri/macos/SideNotch/.build
-            src-tauri/macos/BrowserBilling/.build
-          key: v0-swiftpm-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-${{ hashFiles('src-tauri/macos/*/Package.swift', 'src-tauri/macos/*/Package.resolved', 'src-tauri/macos/*/Info.plist', 'src-tauri/macos/*/Sources/**', 'src-tauri/macos/*/Tests/**') }}
-          restore-keys: v0-swiftpm-debug-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-
-
-      # SwiftPM recompiles a source whose modification time differs from the one it recorded, and a
-      # checkout dates every file at checkout time, so a restored build would recompile on-n-off's
-      # own Swift modules on every run. The script's header says why a time taken from the content
-      # is sound.
-      - name: Stamp Swift sources with their content
-        if: runner.os == 'macOS'
-        run: bun scripts/stamp-source-times.mjs src-tauri/macos
+          configuration: debug
 
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
       # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached. With the cache

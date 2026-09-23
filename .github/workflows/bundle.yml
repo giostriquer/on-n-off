@@ -81,35 +81,12 @@ jobs:
       # The Swift packages' .build directories, cached as in ci.yml, but for the release
       # configuration that `tauri build` asks for. The release workflow's build job restores this
       # entry; this job saves it (the job's last step).
-      - name: Identify the Swift toolchain
-        id: swift
-        if: runner.os == 'macOS'
-        run: |
-          $developer = xcode-select --print-path
-          if ($LASTEXITCODE -ne 0) { throw "No Xcode is selected." }
-          $version = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $developer) 'version.plist')
-          if ($version -notmatch '<key>ProductBuildVersion</key>\s*<string>([^<]+)</string>') {
-            throw "The selected Xcode at $developer has no build version."
-          }
-          "Xcode build $($Matches[1]) at $developer"
-          $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("$developer`n$version"))
-          "toolchain=$([Convert]::ToHexString($digest).Substring(0, 16).ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-
       - name: Restore Swift build cache
         id: swift-cache
         if: runner.os == 'macOS'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: ./.github/actions/restore-swift-build
         with:
-          path: |
-            src-tauri/macos/SideNotch/.build
-            src-tauri/macos/BrowserBilling/.build
-          key: v0-swiftpm-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-${{ hashFiles('src-tauri/macos/*/Package.swift', 'src-tauri/macos/*/Package.resolved', 'src-tauri/macos/*/Info.plist', 'src-tauri/macos/*/Sources/**', 'src-tauri/macos/*/Tests/**') }}
-          restore-keys: v0-swiftpm-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.toolchain }}-
-
-      # See ci.yml: a restored build otherwise recompiles on-n-off's own Swift modules.
-      - name: Stamp Swift sources with their content
-        if: runner.os == 'macOS'
-        run: bun scripts/stamp-source-times.mjs src-tauri/macos
+          configuration: release
 
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
       # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.

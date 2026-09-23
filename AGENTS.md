@@ -43,7 +43,7 @@ of the file — start there, not here.
 - `macos/SideNotch/` — the bundled SwiftUI notch helper, built by `native_build.rs` on macOS only.
 - `side_notch/win_*.rs` — the Windows notch, which has no helper and paints its own window.
 
-**Build and CI** — `scripts/`, `.github/workflows/`.
+**Build and CI** — `scripts/`, `.github/workflows/`, `.github/actions/`.
 
 - `build-bundle.ps1` — builds, validates and stages one installer format (`nsis`, `dmg`).
 - `read-rust-toolchain.ps1`, `prune-rust-toolchains.ps1` — see "Toolchain pinning" below.
@@ -51,6 +51,8 @@ of the file — start there, not here.
   before a macOS job's first cargo step.
 - `stamp-source-times.mjs` — dates tracked files by their content, so a Swift build restored from
   the Actions cache treats unchanged sources as unchanged.
+- `restore-swift-build/` — the one action every macOS job restores its Swift build cache through;
+  see [`OS.md`](OS.md).
 - `workflows.test.mjs` — pins the choices the workflows make on purpose, such as runner images.
 - `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
 - `verify-release.mjs` — checks a drafted release's assets, checksums, updater signatures, feed
