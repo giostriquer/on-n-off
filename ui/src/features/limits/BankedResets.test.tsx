@@ -65,11 +65,19 @@ describe("BankedResetsRow", () => {
     expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
   });
 
-  it("drops the note when the expiry is unknown or already past", () => {
-    for (const nextExpiresAt of [null, "2026-08-17T19:00:00Z"]) {
-      const { unmount } = render(<BankedResetsRow resetCredits={{ availableCount: 1, nextExpiresAt }} now={NOW} />);
-      expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
-      expect(screen.queryByText(/expires/)).toBeNull();
+  it("drops the note when the expiry is unknown", () => {
+    render(<BankedResetsRow resetCredits={{ availableCount: 1, nextExpiresAt: null }} now={NOW} />);
+
+    expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
+    expect(screen.queryByText(/expires/)).toBeNull();
+  });
+
+  it("leaves the card once the soonest reset has expired, since what is left is no longer known", () => {
+    for (const nextExpiresAt of ["2026-08-17T19:00:00Z", "2026-08-17T20:00:00Z"]) {
+      const { container, unmount } = render(
+        <BankedResetsRow resetCredits={{ availableCount: 2, nextExpiresAt }} hint="/limit-reset in Claude Code" now={NOW} />,
+      );
+      expect(container.innerHTML).toBe("");
       unmount();
     }
   });
@@ -97,6 +105,12 @@ describe("BankedResetsRow", () => {
 });
 
 describe("UseBankedReset", () => {
+  it("is not offered once the banked reset has expired", () => {
+    const { container } = render(button({ entry: codex({ resetCredits: { availableCount: 1, nextExpiresAt: "2026-08-17T19:59:00Z" } }) }));
+
+    expect(container.innerHTML).toBe("");
+  });
+
   it("is offered only on the live, signed-in account card that has a reset banked", () => {
     for (const props of [
       { entry: codex(), current: false },

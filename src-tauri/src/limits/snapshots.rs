@@ -99,13 +99,25 @@ impl SnapshotStore {
         }
     }
 
-    /// Every remembered snapshot for `provider`, newest first. Unreadable files are skipped rather
-    /// than failing the whole read. Files from obsolete snapshot schemas are ignored.
+    /// The remembered snapshots the cards show for `provider`, newest first: `stored` less
+    /// any left with nothing observed once a lapsed banked-reset count is dropped (as `save` would
+    /// refuse to write it, and which so no longer hides the legacy history it superseded), less the
+    /// legacy history a remaining scoped observation supersedes.
     pub fn load(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
-        without_superseded(self.load_all(provider))
+        without_superseded(
+            self.stored(provider)
+                .into_iter()
+                .filter(ProviderLimitsDto::has_observations)
+                .collect(),
+        )
     }
 
-    fn load_all(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
+    /// Every readable snapshot for `provider`, newest first, whatever it still observes. Unreadable
+    /// files are skipped rather than failing the whole read, and files from obsolete snapshot
+    /// schemas are ignored. Forget works from this list, so an account whose count lapsed still
+    /// takes the history it replaced.
+    fn stored(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
+        let now = Utc::now();
         let prefix = format!("{}-", provider.key());
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return Vec::new();
@@ -121,7 +133,7 @@ impl SnapshotStore {
                 let path = entry.path();
                 let raw = fs::read_to_string(&path).ok()?;
                 let stored = decode(&raw)?;
-                Some((stored.latest_observed_at(), stored.into_dto()))
+                Some((stored.latest_observed_at(), stored.into_dto(now)))
             })
             .filter(|(_, dto)| dto.provider == provider)
             .collect();
@@ -169,7 +181,7 @@ impl SnapshotStore {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let all = self.load_all(provider);
+        let all = self.stored(provider);
         if let Some(target) = all
             .iter()
             .find(|dto| dto.account.as_ref().is_some_and(|a| a.id == account_id))
@@ -215,7 +227,7 @@ impl StoredSnapshot {
             .or_else(|| latest_window_observed_at(&self.windows))
     }
 
-    fn into_dto(self) -> ProviderLimitsDto {
+    fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
         ProviderLimitsDto {
             provider: self.provider,
             status: LimitsStatus::Ok,
@@ -225,11 +237,22 @@ impl StoredSnapshot {
             plan: self.plan,
             windows: self.windows,
             credits: self.credits,
-            reset_credits: self.reset_credits,
+            reset_credits: self.reset_credits.filter(|resets| !lapsed(resets, now)),
             // A live offer belongs to the read that saw it and is never remembered.
             reset_offer: None,
         }
     }
+}
+
+/// Whether a remembered banked-reset count has reached its soonest known expiry. By then at least
+/// one reset has lapsed and what is left is not known, so the count is unknown until a read answers
+/// again. The UI applies the same rule to a card already on screen (`unexpiredBankedResets`).
+fn lapsed(resets: &LimitsResetCreditsDto, now: DateTime<Utc>) -> bool {
+    resets
+        .next_expires_at
+        .as_deref()
+        .and_then(parse_observed_at)
+        .is_some_and(|expires_at| expires_at <= now)
 }
 
 /// Figures with no observation time of their own, which a successful read dates when it stores them.

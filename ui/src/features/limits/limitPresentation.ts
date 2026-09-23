@@ -7,7 +7,7 @@ import {
   parseInstant,
   usageTextColor,
 } from "$lib/limitsFormat";
-import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitWindow, LimitsResetCredits, ProviderLimits } from "$lib/limitsTypes";
 import { formatAgo } from "$lib/timeFormat";
 
 export type LimitWindowPresentation = {
@@ -105,9 +105,22 @@ export function usableAgainAt(entry: ProviderLimits, now: number): number {
 }
 
 /**
+ * The banked resets a card can still show: a positive count whose soonest known expiry is ahead of
+ * `now`. Once that expiry passes, at least one reset has lapsed and what is left is not known, so the
+ * count stays off the card until a read answers again. The backend drops such a count from
+ * remembered snapshots by the same rule.
+ */
+export function unexpiredBankedResets(resetCredits: LimitsResetCredits | null | undefined, now: number): LimitsResetCredits | null {
+  if (!resetCredits || resetCredits.availableCount <= 0) return null;
+  return hasElapsed(resetCredits.nextExpiresAt, now) ? null : resetCredits;
+}
+
+/**
  * Whether a read observed anything about the account: quota windows, a credit balance or banked
  * resets. `windows` lets a surface count only the windows it shows. The backend's
- * `ProviderLimitsDto::has_observations` is the same rule.
+ * `ProviderLimitsDto::has_observations` is the same rule. A count that lapses while its card is on
+ * screen still counts here until the next read, at most one poll later, drops it: only a card with
+ * nothing else observed notices, and `unexpiredBankedResets` already keeps the count off it.
  */
 export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = entry.windows): boolean {
   // Every current Codex read reports a reset count, usually 0; only a positive count was observed.
