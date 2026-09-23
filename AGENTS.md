@@ -47,6 +47,9 @@ of the file — start there, not here.
 
 - `build-bundle.ps1` — builds, validates and stages one installer format (`nsis`, `dmg`).
 - `read-rust-toolchain.ps1`, `prune-rust-toolchains.ps1` — see "Toolchain pinning" below.
+- `resolve-swift-packages.ps1` — resolves a Swift package's remote dependencies, with retries,
+  before a macOS job's first cargo step.
+- `workflows.test.mjs` — pins the choices the workflows make on purpose, such as runner images.
 - `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
 - `verify-release.mjs` — checks a drafted release's assets, checksums, updater signatures, feed
   and attestations against the previous release before it is published. Its pure checks live in
@@ -186,7 +189,7 @@ Run from the repository root, in PowerShell on Windows or bash/zsh on macOS.
 bun install
 bun run test
 bun run check
-bun test scripts/                          # release verifier
+bun test scripts/                          # release verifier, workflow contracts
 bun run build
 bun run tauri dev
 
@@ -213,6 +216,7 @@ PowerShell 7 on either platform; if `pwsh` is not installed locally, rely on CI:
 ./scripts/new-update-feed.test.ps1
 ./scripts/read-rust-toolchain.test.ps1
 ./scripts/prune-rust-toolchains.test.ps1
+./scripts/resolve-swift-packages.test.ps1
 ```
 
 ## Parallel worktree sessions

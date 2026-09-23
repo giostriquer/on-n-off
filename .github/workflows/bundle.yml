@@ -8,9 +8,10 @@ on:
 permissions:
   contents: read
 
+# Never cancel a running bundle: each merge keeps its installer smoke and the cache it saves.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -27,6 +28,8 @@ jobs:
   # Installer smoke for main. It runs alongside the CI workflow rather than after it: tauri build
   # already compiles the app, so a broken build fails here on its own, and the release workflow
   # restores the release-profile cache this job saves.
+  #
+  # Runner labels are pinned and bumped together; see ci.yml.
   bundle:
     name: bundle-${{ matrix.installer }}
     runs-on: ${{ matrix.os }}
@@ -37,10 +40,10 @@ jobs:
         include:
           - installer: nsis
             platform: windows
-            os: windows-latest
+            os: windows-2025-vs2026
           - installer: dmg
             platform: macos
-            os: macos-latest
+            os: macos-26
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,6 +81,12 @@ jobs:
       # rust-toolchain.toml.
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
+
+      # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
+      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
+      - name: Resolve Swift package dependencies
+        if: runner.os == 'macOS'
+        run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
 
       # Shared with the release workflow's build job (same key, same release profile).
       # `cache-on-failure` is deliberately off: the store is capped at 10 GB for the whole
