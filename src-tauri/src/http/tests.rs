@@ -50,12 +50,112 @@ fn a_non_json_body_is_a_parse_error() {
     request.join().unwrap();
 }
 
+/// A regression that stops the request from being made has to fail its test with a message, not
+/// leave `request.join()` waiting until CI's job timeout. Every loopback server here accepts
+/// through `accept_within`; the deadline is shortened so the test stays quick, where the servers
+/// wait `ACCEPT_DEADLINE`.
+#[test]
+fn a_loopback_server_nobody_calls_gives_up_at_its_deadline() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let server = std::thread::spawn(move || {
+        accept_within(&listener, Duration::from_millis(50));
+    });
+    let started = std::time::Instant::now();
+    while !server.is_finished() {
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the server is still waiting for a request long after its deadline"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let panic = server
+        .join()
+        .expect_err("a server nobody called has no connection to hand over");
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(
+        message.contains("no request reached the loopback server"),
+        "{message}"
+    );
+}
+
+/// The server polls for its connection without blocking, and on macOS and Windows the socket it
+/// accepts starts out non-blocking too. A client that has connected but not yet written must
+/// still be read, not fail the server with `WouldBlock`: the code under test is often slower than
+/// the accept poll, above all on a loaded CI runner.
+#[test]
+fn a_one_shot_server_reads_a_request_that_arrives_after_it_accepts() {
+    use std::io::{Read, Write};
+
+    let (url, server) = serve_once("200 OK", "{}");
+    let address = url
+        .strip_prefix("http://")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap();
+    let mut client = std::net::TcpStream::connect(address).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    client
+        .write_all(b"GET /usage HTTP/1.1\r\nHost: x\r\n\r\n")
+        .unwrap();
+    let mut reply = String::new();
+    client.read_to_string(&mut reply).unwrap();
+
+    assert!(reply.starts_with("HTTP/1.1 200 OK"), "{reply}");
+    let head = server.join().expect("the server read the late request");
+    assert!(head.starts_with("GET /usage "), "{head}");
+}
+
 #[test]
 fn a_refused_connection_is_a_network_error() {
     assert!(matches!(
         get_json(&refused_url(), &[]),
         Err(HttpError::Network(_))
     ));
+}
+
+/// A refused URL has to stay refused while other tests open servers, and has to fail at once on
+/// every OS. A port given back by a dropped listener is neither: the OS may hand it to the next
+/// test's server, and Windows retries a connect it answers with a reset for about 2 s.
+#[test]
+fn a_refused_url_fails_at_once_and_no_server_can_take_it() {
+    let url = refused_url();
+    let address = url
+        .strip_prefix("http://")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap();
+    let squatter = std::net::TcpListener::bind(address).unwrap();
+    assert_ne!(
+        squatter.local_addr().unwrap().to_string(),
+        address,
+        "a server can listen on the refused address"
+    );
+
+    let started = std::time::Instant::now();
+    let result = get_json(&url, &[]);
+    assert!(matches!(result, Err(HttpError::Network(_))), "{result:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "refused after {:?}",
+        started.elapsed()
+    );
+}
+
+/// `ureq` reads `HTTP(S)_PROXY` and `ALL_PROXY` when the builder is made, and would send every
+/// loopback test server's request to that proxy. A builder given a proxy outright stands in for
+/// such an environment without touching the process-wide variables other tests read.
+#[test]
+fn test_requests_ignore_a_proxy_the_environment_names() {
+    let proxied = || {
+        ureq::Agent::config_builder().proxy(Some(ureq::Proxy::new("http://127.0.0.1:9").unwrap()))
+    };
+    assert!(agent_config(proxied(), false).proxy().is_none());
+    assert!(
+        agent_config(proxied(), true).proxy().is_some(),
+        "the app keeps the proxy its environment names"
+    );
 }
 
 #[test]
