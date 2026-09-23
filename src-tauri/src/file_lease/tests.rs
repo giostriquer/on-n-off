@@ -1,5 +1,5 @@
-//! Unix only: a duplicate descriptor shares the lock only where locks belong to the open file
-//! description, and Windows opens handles that a child cannot inherit.
+//! The duplicate-descriptor tests are Unix only: a duplicate shares the lock only where locks
+//! belong to the open file description, and Windows opens handles that a child cannot inherit.
 use super::FileLease;
 use std::{fs::File, path::Path};
 
@@ -13,6 +13,7 @@ fn open(dir: &Path) -> File {
         .unwrap()
 }
 
+#[cfg(unix)]
 #[test]
 fn a_dropped_lease_is_free_while_a_duplicate_descriptor_survives() {
     let dir = tempfile::tempdir().unwrap();
@@ -30,6 +31,7 @@ fn a_dropped_lease_is_free_while_a_duplicate_descriptor_survives() {
     drop(inherited);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_shared_lease_is_released_the_same_way() {
     let dir = tempfile::tempdir().unwrap();

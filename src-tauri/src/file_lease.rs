@@ -35,5 +35,5 @@ impl Drop for FileLease {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests;
