@@ -50,6 +50,34 @@ fn a_non_json_body_is_a_parse_error() {
     request.join().unwrap();
 }
 
+/// A regression that stops the request from being made has to fail its test with a message, not
+/// leave `request.join()` waiting until CI's job timeout. The deadline is shortened here so the
+/// test stays quick; `serve_once` waits `ACCEPT_DEADLINE`.
+#[test]
+fn a_one_shot_server_nobody_calls_gives_up_at_its_deadline() {
+    let (_url, server) = serve_once_within("200 OK", "{}", Duration::from_millis(50));
+    let started = std::time::Instant::now();
+    while !server.is_finished() {
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the server is still waiting for a request long after its deadline"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let panic = server
+        .join()
+        .expect_err("a server nobody called has no request to report");
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(
+        message.contains("no request reached the loopback server"),
+        "{message}"
+    );
+}
+
 #[test]
 fn a_refused_connection_is_a_network_error() {
     assert!(matches!(

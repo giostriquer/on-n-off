@@ -176,12 +176,52 @@ fn rate_limit_reset(response: &Reply) -> Option<RateLimitReset> {
     )
 }
 
+/// How long a loopback test server waits for the code under test to connect. A test whose code
+/// never makes its request must fail with a message, not leave `join()` waiting until CI's job
+/// timeout.
+#[cfg(test)]
+const ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
+
+/// The next connection to `listener`, or a panic once `deadline` passes without one.
+#[cfg(test)]
+fn accept_within(listener: &std::net::TcpListener, deadline: Duration) -> std::net::TcpStream {
+    listener.set_nonblocking(true).unwrap();
+    let started = std::time::Instant::now();
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // macOS and Windows hand an accepted socket its listener's non-blocking mode.
+                stream.set_nonblocking(false).unwrap();
+                return stream;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    started.elapsed() < deadline,
+                    "no request reached the loopback server within {deadline:?}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("loopback accept failed: {error}"),
+        }
+    }
+}
+
 /// One-shot HTTP server on a loopback port; returns the URL and the captured request head.
 /// Shared by the http and pipeline tests so no test ever touches the network.
 #[cfg(test)]
 pub(crate) fn serve_once(
     status_line: &str,
     body: &str,
+) -> (String, std::thread::JoinHandle<String>) {
+    serve_once_within(status_line, body, ACCEPT_DEADLINE)
+}
+
+/// `serve_once` with its accept deadline stated, so a test can watch it give up quickly.
+#[cfg(test)]
+fn serve_once_within(
+    status_line: &str,
+    body: &str,
+    deadline: Duration,
 ) -> (String, std::thread::JoinHandle<String>) {
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -191,7 +231,7 @@ pub(crate) fn serve_once(
     let body = body.to_string();
     let status_line = status_line.to_string();
     let handle = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept_within(&listener, deadline);
         let mut request = Vec::new();
         let mut buf = [0u8; 1024];
         loop {
@@ -257,26 +297,10 @@ pub(crate) fn serve_sequence(
             )
         })
         .collect();
-    listener.set_nonblocking(true).unwrap();
     let handle = std::thread::spawn(move || {
         let mut captured = Vec::new();
         for (status_line, extra_headers, body) in responses {
-            // A test whose code under test never connects must fail, not hang the whole run.
-            let started = std::time::Instant::now();
-            let (mut stream, _) = loop {
-                match listener.accept() {
-                    Ok(accepted) => break accepted,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(
-                            started.elapsed() < Duration::from_secs(10),
-                            "no request reached the loopback server within 10 s"
-                        );
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    Err(error) => panic!("loopback accept failed: {error}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
+            let mut stream = accept_within(&listener, ACCEPT_DEADLINE);
             let mut request = Vec::new();
             let mut buf = [0u8; 1024];
             let head_end = loop {
