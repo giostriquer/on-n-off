@@ -5,7 +5,7 @@ impl AgentCli {
 }
 
 use super::*;
-use crate::cli_stub::CliStub;
+use crate::cli_stub::{CliStub, ANSWER_DEADLINE};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -53,13 +53,12 @@ fn timeout_kills_the_process() {
 
 #[test]
 fn drains_chatty_stdout_and_stderr_while_the_process_runs() {
-    // The deadline only turns a pipe deadlock into a failure instead of a hang. It is not a
-    // bound on how fast the child starts, which on a loaded machine can take seconds.
+    // The deadline only turns a pipe deadlock into a failure instead of a hang.
     let out = CliStub::new("chatty")
         .chatty(5000)
         .stdout("complete")
         .cli(&stub_dir())
-        .with_timeout(Duration::from_secs(30))
+        .with_timeout(ANSWER_DEADLINE)
         .run(&[])
         .expect("chatty child must not block on full output pipes");
     assert!(out.contains("complete"));

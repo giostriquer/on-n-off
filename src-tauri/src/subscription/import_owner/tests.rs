@@ -18,13 +18,12 @@ fn shutdown_reaps_import_before_removing_its_snapshot() {
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         worker_owner.run(command, scratch)
     });
-    // How soon the helper starts is not what this test is about, and on a loaded machine a
-    // launcher can take seconds to start. Wait for the snapshot itself, and stop early only if
-    // the helper has already gone; the cap only keeps a regression from hanging the run.
+    // How soon the helper starts is not what this test is about. Wait for the snapshot itself,
+    // and stop early only if the helper has already gone.
     let waiting = std::time::Instant::now();
     while !path.join("snapshot").exists() && !worker.is_finished() {
         assert!(
-            waiting.elapsed() < Duration::from_secs(60),
+            waiting.elapsed() < crate::cli_stub::ANSWER_DEADLINE,
             "the import helper never copied its snapshot"
         );
         std::thread::sleep(Duration::from_millis(10));

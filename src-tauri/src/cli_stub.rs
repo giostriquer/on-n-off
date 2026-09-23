@@ -27,8 +27,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::Duration;
 
 use crate::cli::AgentCli;
+
+/// How long a test waits for a stub, or for a script it has just written, to answer.
+///
+/// Generous on purpose. A first start can take seconds on a loaded machine (see above), and how
+/// fast a launcher starts is never what such a test checks. A test about giving up in time keeps
+/// its own short deadline and bounds how long giving up took.
+pub const ANSWER_DEADLINE: Duration = Duration::from_secs(60);
 
 const CHATTY_PAYLOAD: &str = "abcdefghijklmnopqrstuvwxyz0123456789";
 

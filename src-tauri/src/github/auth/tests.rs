@@ -1,15 +1,10 @@
 use super::*;
 use crate::cli::AgentCli;
-use crate::cli_stub::CliStub;
+use crate::cli_stub::{CliStub, ANSWER_DEADLINE};
 use crate::paths::scratch_dir;
 use std::cell::Cell;
 use std::fs;
 use std::time::{Duration, Instant};
-
-/// For tests about what gh's answer means. They wait generously, because how fast a launcher
-/// starts on a loaded machine is not what they check; `a_hung_gh_is_killed_at_the_deadline`
-/// is the one about giving up in time.
-const ANSWER_DEADLINE: Duration = Duration::from_secs(60);
 
 #[test]
 fn a_logged_in_gh_hands_over_its_trimmed_token() {

@@ -1,11 +1,7 @@
 use super::*;
+use crate::cli_stub::ANSWER_DEADLINE;
 use serde_json::json;
 use std::collections::VecDeque;
-
-/// For process tests about what the child's answer means. They wait generously, because how
-/// fast a launcher starts on a loaded machine is not what they check;
-/// `process_transport_times_out_and_stops_the_child` is the one about giving up in time.
-const ANSWER_DEADLINE: Duration = Duration::from_secs(60);
 
 fn typed<T: DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).unwrap()
