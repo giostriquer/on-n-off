@@ -106,14 +106,16 @@ pub fn load_settings() -> AppSettings {
 }
 
 pub fn save_settings(settings: AppSettings) -> Result<AppSettings, AdapterError> {
-    let settings = validated_settings(settings)?;
-    write_settings(&paths::settings_path()?, &settings)?;
-    Ok(settings)
+    save_settings_to(settings, paths::settings_path)
 }
 
-/// What `save_settings` would write, or why it refuses. It touches no file, so a test of a
-/// refusal cannot reach a real settings document even while the refusal it checks is broken.
-fn validated_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterError> {
+/// [`save_settings`] into the document `path` names. It validates before it resolves the path or
+/// writes anything, so a refused save touches no file; tests save through this into a disposable
+/// home, never the real settings document, even while the refusal they check is broken.
+fn save_settings_to(
+    mut settings: AppSettings,
+    path: impl FnOnce() -> Result<PathBuf, AdapterError>,
+) -> Result<AppSettings, AdapterError> {
     if let Some(bad) = settings
         .github_scopes
         .iter()
@@ -140,13 +142,11 @@ fn validated_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterE
             "Keep at least one provider visible in the agent tabs.",
         ));
     }
-    Ok(settings)
-}
-
-fn write_settings(path: &Path, settings: &AppSettings) -> Result<(), AdapterError> {
-    let body = serde_json::to_string_pretty(settings)
+    let path = path()?;
+    let body = serde_json::to_string_pretty(&settings)
         .map_err(|error| AdapterError::message(error.to_string()))?;
-    write_settings_document(path, &body)
+    write_settings_document(&path, &body)?;
+    Ok(settings)
 }
 
 fn write_settings_document(path: &Path, body: &str) -> Result<(), AdapterError> {

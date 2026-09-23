@@ -181,16 +181,31 @@ fn loading_settings_drops_malformed_github_scopes_and_normalises_the_rest() {
     );
 }
 
+/// Saves into `home`, never the real settings document: a test whose save is wrongly accepted
+/// then writes into a disposable home, not over the developer's settings.
+fn save_under(home: &Path, settings: AppSettings) -> Result<AppSettings, AdapterError> {
+    save_settings_to(settings, || Ok(crate::paths::settings_path_for(home)))
+}
+
 #[test]
 fn saving_settings_refuses_a_malformed_github_scope_and_names_it() {
-    let err = validated_settings(AppSettings {
-        github_scopes: vec!["org:acme".into(), "org: broken".into()],
-        ..AppSettings::default()
-    })
+    let home = crate::paths::scratch_dir("settings-refuse-scope");
+    let err = save_under(
+        &home,
+        AppSettings {
+            github_scopes: vec!["org:acme".into(), "org: broken".into()],
+            ..AppSettings::default()
+        },
+    )
     .unwrap_err();
 
     assert!(err.message.contains("org: broken"), "{}", err.message);
     assert!(err.message.contains("org:NAME"), "{}", err.message);
+    assert!(
+        !crate::paths::settings_path_for(&home).exists(),
+        "a refused save wrote the settings document"
+    );
+    let _ = fs::remove_dir_all(home);
 }
 
 #[test]
@@ -217,37 +232,49 @@ fn missing_cursor_cli_hint_explains_the_agent_name_clash() {
 
 #[test]
 fn refuses_hiding_every_provider() {
-    let err = validated_settings(AppSettings {
-        hidden_agents: vec![
-            AgentId::Claude,
-            AgentId::Codex,
-            AgentId::Antigravity,
-            AgentId::Cursor,
-        ],
-        ..AppSettings::default()
-    })
+    let home = crate::paths::scratch_dir("settings-refuse-hidden");
+    let err = save_under(
+        &home,
+        AppSettings {
+            hidden_agents: vec![
+                AgentId::Claude,
+                AgentId::Codex,
+                AgentId::Antigravity,
+                AgentId::Cursor,
+            ],
+            ..AppSettings::default()
+        },
+    )
     .unwrap_err();
     assert!(err.message.contains("at least one provider"));
+    assert!(
+        !crate::paths::settings_path_for(&home).exists(),
+        "a refused save wrote the settings document"
+    );
+    let _ = fs::remove_dir_all(home);
 }
 
 /// What a save writes, in a disposable home: the validated document, which loads back as saved.
 #[test]
 fn a_saved_document_is_the_validated_one_and_loads_back_unchanged() {
     let home = crate::paths::scratch_dir("settings-save");
-    let settings = validated_settings(AppSettings {
-        hidden_agents: vec![AgentId::Cursor, AgentId::Claude, AgentId::Cursor],
-        binary_paths: HashMap::from([
-            (AgentId::Codex, "  ".to_string()),
-            (AgentId::Claude, "/opt/acme/bin/claude".to_string()),
-        ]),
-        github_scopes: vec![
-            "acme/webapp".into(),
-            "org:acme".into(),
-            "repo:acme/webapp".into(),
-        ],
-        limits_poll_minutes: 7,
-        ..AppSettings::default()
-    })
+    let settings = save_under(
+        &home,
+        AppSettings {
+            hidden_agents: vec![AgentId::Cursor, AgentId::Claude, AgentId::Cursor],
+            binary_paths: HashMap::from([
+                (AgentId::Codex, "  ".to_string()),
+                (AgentId::Claude, "/opt/acme/bin/claude".to_string()),
+            ]),
+            github_scopes: vec![
+                "acme/webapp".into(),
+                "org:acme".into(),
+                "repo:acme/webapp".into(),
+            ],
+            limits_poll_minutes: 7,
+            ..AppSettings::default()
+        },
+    )
     .unwrap();
     assert_eq!(
         settings.hidden_agents,
@@ -260,9 +287,7 @@ fn a_saved_document_is_the_validated_one_and_loads_back_unchanged() {
     assert_eq!(settings.github_scopes, vec!["repo:acme/webapp", "org:acme"]);
     assert_eq!(settings.limits_poll_minutes, 5);
 
-    let path = crate::paths::settings_path_for(&home);
-    write_settings(&path, &settings).unwrap();
-    let saved = fs::read_to_string(&path).unwrap();
+    let saved = fs::read_to_string(crate::paths::settings_path_for(&home)).unwrap();
     assert_eq!(parse_settings(Some(&saved)), settings);
     let _ = fs::remove_dir_all(home);
 }
