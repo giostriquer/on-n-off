@@ -138,8 +138,9 @@ jobs:
 
       # Restores the Swift build cache that the Bundle workflow saves on main (see ci.yml and
       # bundle.yml); like the Rust cache below, this job never saves one. The key moves only with
-      # the Swift inputs, so a release whose commits changed none restores an exact hit from an
-      # earlier Bundle run instead of waiting for the one running beside it.
+      # the Swift package inputs, which a version bump leaves alone, so a release whose commits
+      # changed none restores an exact hit from an earlier Bundle run instead of waiting for the one
+      # running beside it.
       - name: Restore Swift build cache
         if: runner.os == 'macOS'
         uses: ./.github/actions/restore-swift-build

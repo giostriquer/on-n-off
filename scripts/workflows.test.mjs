@@ -148,7 +148,7 @@ test("macOS jobs restore the Swift build cache through one action, before resolv
   }
 });
 
-test("the Swift cache action keys on the toolchain and every package input, then stamps sources", { skip }, () => {
+test("the Swift cache action keys on the toolchain and the inputs SwiftPM tracks, then stamps sources", { skip }, () => {
   const action = loadAction(swiftCacheAction);
   assert.equal(action.runs.using, "composite");
   const toolchain = step(action.runs, "Identify the Swift toolchain");
@@ -165,9 +165,18 @@ test("the Swift cache action keys on the toolchain and every package input, then
   assert.deepEqual(lines(restore.with.path), swiftBuildDirectories);
   const key = restore.with.key;
   assert.ok(key.startsWith("v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-"), key);
-  for (const input of ["Package.swift", "Package.resolved", "Info.plist", "Sources/**", "Tests/**"]) {
+  for (const input of ["Package.swift", "Package.resolved", "Sources/**", "Tests/**"]) {
     assert.ok(key.includes(`'src-tauri/macos/*/${input}'`), `the key hashes ${input}`);
   }
+  // Info.plist reaches the notch helper only through a linker flag SwiftPM does not track, so
+  // native_build.rs relinks the helper on every build rather than trusting a restored one, and a
+  // release's version bump keeps the key Bundle saved before it. The CI leg's native checks fail a
+  // helper that embeds another Info.plist than the one beside it.
+  assert.doesNotMatch(key, /Info\.plist/);
+  const buildScript = readFileSync(join(directory, "..", "..", "src-tauri", "native_build.rs"), "utf8");
+  const removal = buildScript.indexOf("fs::remove_file(&legacy);");
+  assert.ok(removal !== -1 && removal < buildScript.indexOf('.args(["swift", "build", "--package-path"])'), "the helper is removed before the Swift build");
+  assert.match(step(load("ci").jobs.verify, "Check native notch models and lifecycle").run, /bun scripts\/check-native-notch\.mjs src-tauri\/target\/debug\/on-n-off-notch/);
   // A source change restores the previous generation and rebuilds only what changed.
   assert.ok(key.endsWith("}}"));
   assert.equal(restore.with["restore-keys"].trim(), key.slice(0, key.lastIndexOf("${{")));

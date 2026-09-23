@@ -48,8 +48,11 @@ runs:
         $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("$developer`n$version"))
         "toolchain=$([Convert]::ToHexString($digest).Substring(0, 16).ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
-    # The key is the toolchain and every package input. The restore key drops the inputs, so after
-    # a source change the previous generation is restored and only what changed is rebuilt.
+    # The key is the toolchain and the package inputs SwiftPM tracks. The restore key drops the
+    # inputs, so after a source change the previous generation is restored and only what changed
+    # is rebuilt. Info.plist is left out: it reaches the notch helper only through a linker flag
+    # SwiftPM does not track, so native_build.rs relinks the helper on every build instead, and a
+    # release's version bump keeps the key that Bundle saved for the commit before it.
     - name: Restore the packages' build directories
       id: restore
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -57,7 +60,7 @@ runs:
         path: |
           src-tauri/macos/SideNotch/.build
           src-tauri/macos/BrowserBilling/.build
-        key: v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-${{ hashFiles('src-tauri/macos/*/Package.swift', 'src-tauri/macos/*/Package.resolved', 'src-tauri/macos/*/Info.plist', 'src-tauri/macos/*/Sources/**', 'src-tauri/macos/*/Tests/**') }}
+        key: v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-${{ hashFiles('src-tauri/macos/*/Package.swift', 'src-tauri/macos/*/Package.resolved', 'src-tauri/macos/*/Sources/**', 'src-tauri/macos/*/Tests/**') }}
         restore-keys: v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-
 
     # SwiftPM recompiles a source whose modification time differs from the one it recorded, and a
