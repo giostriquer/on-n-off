@@ -105,7 +105,17 @@ pub fn load_settings() -> AppSettings {
     parse_settings(json.as_deref())
 }
 
-pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterError> {
+pub fn save_settings(settings: AppSettings) -> Result<AppSettings, AdapterError> {
+    save_settings_to(settings, paths::settings_path)
+}
+
+/// [`save_settings`] into the document `path` names. It validates before it resolves the path or
+/// writes anything, so a refused save touches no file; tests save through this into a disposable
+/// home, never the real settings document, even while the refusal they check is broken.
+fn save_settings_to(
+    mut settings: AppSettings,
+    path: impl FnOnce() -> Result<PathBuf, AdapterError>,
+) -> Result<AppSettings, AdapterError> {
     if let Some(bad) = settings
         .github_scopes
         .iter()
@@ -132,7 +142,7 @@ pub fn save_settings(mut settings: AppSettings) -> Result<AppSettings, AdapterEr
             "Keep at least one provider visible in the agent tabs.",
         ));
     }
-    let path = paths::settings_path()?;
+    let path = path()?;
     let body = serde_json::to_string_pretty(&settings)
         .map_err(|error| AdapterError::message(error.to_string()))?;
     write_settings_document(&path, &body)?;

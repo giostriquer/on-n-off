@@ -235,3 +235,86 @@ fn rehearse_the_keyring_target_through_security() {
     );
     drop(entry);
 }
+
+/// An environment holding exactly `vars`, for `resolve_from`.
+fn environment<'a>(
+    vars: &'a [(&'a str, PathBuf)],
+) -> impl Fn(&str) -> Option<std::ffi::OsString> + 'a {
+    move |name| {
+        vars.iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.clone().into_os_string())
+    }
+}
+
+/// Whatever the developer running the suite has exported, a store resolved in a test lives in
+/// the test's own home and never chooses the login Keychain: `resolve` reads the test
+/// environment, not `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or whatever a sibling test did to
+/// `ON_N_OFF_HOME`.
+#[test]
+fn a_test_resolves_native_stores_inside_its_own_home_whatever_the_machine_exports() {
+    let root = tempfile::tempdir().unwrap();
+    for (provider, folder) in [(AgentId::Claude, ".claude"), (AgentId::Codex, ".codex")] {
+        let store = NativeStore::resolve(provider, root.path()).unwrap();
+        assert_eq!(store.config_home, root.path().join(folder), "{provider:?}");
+        assert!(!store.custom, "{provider:?}");
+        assert!(
+            !store.use_keychain,
+            "{provider:?} would reach the login Keychain"
+        );
+    }
+}
+
+#[test]
+fn outside_a_disposable_home_the_provider_override_and_the_keychain_apply() {
+    let root = tempfile::tempdir().unwrap();
+    let claude_home = root.path().join("elsewhere").join("claude");
+    let env = [("CLAUDE_CONFIG_DIR", claude_home.clone())];
+    let store =
+        NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
+    assert_eq!(store.config_home, claude_home);
+    assert_eq!(store.config_file, claude_home.join(".claude.json"));
+    assert!(store.custom);
+    assert!(store.use_keychain);
+
+    let codex_home = root.path().join("elsewhere").join("codex");
+    let env = [("CODEX_HOME", codex_home.clone())];
+    let store = NativeStore::resolve_from(AgentId::Codex, root.path(), &environment(&env)).unwrap();
+    assert_eq!(store.config_home, codex_home);
+    assert_eq!(store.config_file, codex_home.join("config.toml"));
+    assert!(store.custom);
+    assert!(store.use_keychain);
+
+    let store = NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&[])).unwrap();
+    assert_eq!(store.config_home, root.path().join(".claude"));
+    assert_eq!(store.config_file, root.path().join(".claude.json"));
+    assert!(!store.custom);
+    assert!(store.use_keychain);
+}
+
+#[test]
+fn a_disposable_home_ignores_provider_overrides_and_the_keychain() {
+    let root = tempfile::tempdir().unwrap();
+    let elsewhere = root.path().join("elsewhere");
+    let env = [
+        ("ON_N_OFF_HOME", root.path().to_path_buf()),
+        ("CLAUDE_CONFIG_DIR", elsewhere.clone()),
+        ("CODEX_HOME", elsewhere),
+    ];
+    for (provider, folder) in [(AgentId::Claude, ".claude"), (AgentId::Codex, ".codex")] {
+        let store = NativeStore::resolve_from(provider, root.path(), &environment(&env)).unwrap();
+        assert_eq!(store.config_home, root.path().join(folder), "{provider:?}");
+        assert!(!store.custom, "{provider:?}");
+        assert!(!store.use_keychain, "{provider:?}");
+    }
+}
+
+#[test]
+fn a_relative_provider_override_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let env = [("CODEX_HOME", Path::new("relative").join("codex"))];
+    assert_eq!(
+        NativeStore::resolve_from(AgentId::Codex, root.path(), &environment(&env)).err(),
+        Some("The provider home must be an absolute path.".to_string())
+    );
+}

@@ -8,91 +8,82 @@ use crate::usage::source_index::{reset_transcript_parse_count, transcript_parse_
 
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_appended() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-append");
     write_claude_transcript(&home);
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let initial = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert!(!initial.cache_hit);
     assert_eq!(initial.buckets[0].totals.output_tokens, 20);
 
     append_claude_record(&home, "msg_2", 25);
-    let refreshed = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let refreshed = read_offline(&home, august_input(false));
     assert!(!refreshed.cache_hit);
     assert_eq!(output_tokens(&refreshed), 45);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_created() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-create");
     std::fs::create_dir_all(home.join(".claude").join("projects")).unwrap();
-    std::env::set_var("ON_N_OFF_HOME", &home);
-    let initial = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert!(initial.buckets.is_empty());
 
     write_single_claude_record(&home, "created.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let refreshed = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let refreshed = read_offline(&home, august_input(false));
     assert!(!refreshed.cache_hit);
     assert_eq!(output_tokens(&refreshed), 20);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn cached_summary_is_invalidated_by_same_size_rewrite() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-rewrite");
     let path = write_single_claude_record(&home, "rewrite.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    std::env::set_var("ON_N_OFF_HOME", &home);
-    let initial = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert_eq!(output_tokens(&initial), 20);
     let original_size = std::fs::metadata(&path).unwrap().len();
 
     std::thread::sleep(std::time::Duration::from_millis(20));
     write_single_claude_record(&home, "rewrite.jsonl", "2026-08-07T04:05:13.944Z", 25);
     assert_eq!(std::fs::metadata(path).unwrap().len(), original_size);
-    let refreshed = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let refreshed = read_offline(&home, august_input(false));
     assert!(!refreshed.cache_hit);
     assert_eq!(output_tokens(&refreshed), 25);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_deleted() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-delete");
     let path = write_single_claude_record(&home, "delete.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    std::env::set_var("ON_N_OFF_HOME", &home);
-    let initial = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert_eq!(output_tokens(&initial), 20);
 
     std::fs::remove_file(path).unwrap();
-    let refreshed = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let refreshed = read_offline(&home, august_input(false));
     assert!(!refreshed.cache_hit);
     assert!(refreshed.buckets.is_empty());
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn cached_summary_survives_disjoint_window_change() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-disjoint");
     write_single_claude_record(&home, "july.jsonl", "2026-07-07T04:05:13.944Z", 10);
     let august_path =
         write_single_claude_record(&home, "august.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    std::env::set_var("ON_N_OFF_HOME", &home);
     let july_input = || day_input("2026-07-01", "2026-07-31", false);
-    let initial = pricing::with_test_fetch(None, || read_summary(july_input())).unwrap();
+    let initial = read_offline(&home, july_input());
     assert_eq!(output_tokens(&initial), 10);
 
     std::thread::sleep(std::time::Duration::from_millis(20));
@@ -113,25 +104,23 @@ fn cached_summary_survives_disjoint_window_change() {
     august.push('\n');
     std::fs::write(august_path, august).unwrap();
 
-    let unchanged = pricing::with_test_fetch(None, || read_summary(july_input())).unwrap();
+    let unchanged = read_offline(&home, july_input());
     assert!(unchanged.cache_hit);
     assert_eq!(output_tokens(&unchanged), 10);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn corrupt_summary_cache_is_rebuilt() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-corrupt");
     write_claude_transcript(&home);
-    std::env::set_var("ON_N_OFF_HOME", &home);
-    pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    read_offline(&home, august_input(false));
     let summary_path = summary_cache_path_for(&home);
     std::fs::write(&summary_path, "{partial").unwrap();
 
-    let rebuilt = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let rebuilt = read_offline(&home, august_input(false));
     assert!(!rebuilt.cache_hit);
     assert_eq!(output_tokens(&rebuilt), 20);
     assert!(serde_json::from_str::<serde_json::Value>(
@@ -139,13 +128,12 @@ fn corrupt_summary_cache_is_rebuilt() {
     )
     .is_ok());
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn incompatible_and_partial_cache_documents_rebuild_together() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-cache-migration");
     write_claude_transcript(&home);
     let cache_root = home.join(".on-n-off");
@@ -165,9 +153,8 @@ fn incompatible_and_partial_cache_documents_rebuild_together() {
         r#"{"version":1,"entries":[]}"#,
     )
     .unwrap();
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let migrated = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let migrated = read_offline(&home, august_input(false));
     assert!(!migrated.cache_hit);
     assert_eq!(output_tokens(&migrated), 20);
     for (cache_name, expected_version) in [
@@ -200,40 +187,39 @@ fn incompatible_and_partial_cache_documents_rebuild_together() {
     ] {
         std::fs::write(cache_root.join(cache_name), "{partial").unwrap();
     }
-    let rebuilt = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let rebuilt = read_offline(&home, august_input(false));
     assert!(!rebuilt.cache_hit);
     assert_eq!(output_tokens(&rebuilt), 20);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn older_generation_cannot_overwrite_newer_summary() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-concurrent");
     write_claude_transcript(&home);
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
     let reached = Arc::new(std::sync::Barrier::new(2));
     let resume = Arc::new(std::sync::Barrier::new(2));
     let old_reached = Arc::clone(&reached);
     let old_resume = Arc::clone(&resume);
+    let older_home = home.clone();
     let older = std::thread::spawn(move || {
         with_before_publish_pause(old_reached, old_resume, || {
-            pricing::with_test_fetch(None, || read_summary(august_input(true))).unwrap()
+            read_offline(&older_home, august_input(true))
         })
     });
 
     reached.wait();
     append_claude_record(&home, "msg_2", 25);
-    let newer = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let newer = read_offline(&home, august_input(false));
     assert_eq!(output_tokens(&newer), 45);
     resume.wait();
 
     let older = older.join().unwrap();
     assert_eq!(output_tokens(&older), 20);
-    let final_hit = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let final_hit = read_offline(&home, august_input(false));
     assert!(final_hit.cache_hit);
     assert_eq!(output_tokens(&final_hit), 45);
     for cache_name in [
@@ -245,23 +231,20 @@ fn older_generation_cannot_overwrite_newer_summary() {
         assert!(serde_json::from_str::<serde_json::Value>(&raw).is_ok());
     }
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn cache_write_failures_do_not_fail_correct_summary() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-summary-write-failure");
     write_claude_transcript(&home);
     std::fs::write(home.join(".on-n-off"), "blocks cache directory").unwrap();
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
     assert!(!summary.cache_hit);
     assert_eq!(output_tokens(&summary), 20);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
@@ -269,7 +252,7 @@ fn cache_write_failures_do_not_fail_correct_summary() {
 /// its mtime; the usage it recorded is still usage, and still Codex's one source.
 #[test]
 fn archived_codex_sessions_still_count() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-archived-codex");
     let codex = home.join(".codex");
     write_codex_rollout(
@@ -284,9 +267,8 @@ fn archived_codex_sessions_still_count() {
         "session-archived",
         30,
     );
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
 
     let codex_output: u64 = summary
         .buckets
@@ -304,13 +286,12 @@ fn archived_codex_sessions_still_count() {
     assert_eq!(sources[0].status, UsageSourceStatus::Ok);
     assert_eq!(sources[0].scanned_files, 2);
     assert_eq!(sources[0].distinct_sessions, 2);
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-archived-only");
     write_codex_rollout(
         &home.join(".codex").join("archived_sessions"),
@@ -318,9 +299,8 @@ fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
         "session-archived",
         30,
     );
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
 
     let codex = summary
         .sources
@@ -330,7 +310,6 @@ fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
     assert_eq!(codex.status, UsageSourceStatus::Ok);
     assert_eq!(codex.scanned_files, 1);
     assert_eq!(output_tokens(&summary), 30);
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -338,7 +317,7 @@ fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
 /// rollout under both Codex roots; it is still one rollout.
 #[test]
 fn a_codex_rollout_listed_under_both_roots_counts_once() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-archived-twice");
     let codex = home.join(".codex");
     for dir in [
@@ -347,9 +326,8 @@ fn a_codex_rollout_listed_under_both_roots_counts_once() {
     ] {
         write_codex_rollout(&dir, "rollout-moved.jsonl", "session-moved", 20);
     }
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
 
     assert_eq!(output_tokens(&summary), 20);
     let codex_source = summary
@@ -358,7 +336,6 @@ fn a_codex_rollout_listed_under_both_roots_counts_once() {
         .find(|source| source.provider == AgentId::Codex)
         .unwrap();
     assert_eq!(codex_source.distinct_sessions, 1);
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -366,7 +343,7 @@ fn a_codex_rollout_listed_under_both_roots_counts_once() {
 /// holds the partial first line inside the window and the original the billed line after it.
 #[test]
 fn a_message_counted_outside_the_window_adds_no_session() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-session-follows-copy");
     let usage = |output: u64| {
         serde_json::json!({
@@ -396,9 +373,8 @@ fn a_message_counted_outside_the_window_adds_no_session() {
             usage(50),
         )],
     );
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let summary = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let summary = read_offline(&home, august_input(false));
 
     assert!(summary.buckets.is_empty(), "{:?}", summary.buckets);
     let claude = summary
@@ -407,7 +383,6 @@ fn a_message_counted_outside_the_window_adds_no_session() {
         .find(|source| source.provider == AgentId::Claude)
         .unwrap();
     assert_eq!(claude.distinct_sessions, 0);
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -415,7 +390,7 @@ fn a_message_counted_outside_the_window_adds_no_session() {
 /// one-hour rate both times.
 #[test]
 fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-one-hour-writes");
     write_claude_lines(
         &home,
@@ -436,7 +411,6 @@ fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
             }),
         )],
     );
-    std::env::set_var("ON_N_OFF_HOME", &home);
     let rates = serde_json::json!({
         "claude-fable-5": {
             "input_cost_per_token": 1e-5,
@@ -449,9 +423,10 @@ fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
     let expected = 600.0 * 1.25e-5 + 400.0 * 2e-5 + 10.0 * 5e-5;
 
     for force in [false, true] {
-        let summary =
-            pricing::with_test_fetch(Some(rates.clone()), || read_summary(august_input(force)))
-                .unwrap();
+        let summary = pricing::with_test_fetch(Some(rates.clone()), || {
+            read_summary_in(&home, august_input(force))
+        })
+        .unwrap();
         assert_eq!(summary.buckets.len(), 1);
         assert!(
             (summary.buckets[0].cost_usd - expected).abs() < 1e-12,
@@ -459,27 +434,14 @@ fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
             summary.buckets[0].cost_usd
         );
     }
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn missing_dirs_report_missing_sources() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-missing");
-    std::env::set_var("ON_N_OFF_HOME", &home);
-    let summary = pricing::with_test_fetch(None, || {
-        read_summary(UsageSummaryInput {
-            since_day: "2026-08-01".into(),
-            until_day: "2026-08-31".into(),
-            time_zone: "UTC".into(),
-            resolution: Some("day".into()),
-            since_time: None,
-            until_time: None,
-            force: false,
-        })
-    })
-    .unwrap();
+    let summary = read_offline(&home, august_input(false));
     assert_eq!(summary.sources.len(), 2);
     assert!(summary
         .sources
@@ -487,17 +449,15 @@ fn missing_dirs_report_missing_sources() {
         .all(|s| s.status == UsageSourceStatus::Missing));
     assert!(summary.buckets.is_empty());
     assert_eq!(summary.pricing.status, UsagePricingStatus::Unavailable);
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn cached_missing_source_tracks_empty_root_creation_and_removal() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-root-presence");
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let missing = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let missing = read_offline(&home, august_input(false));
     assert_eq!(
         missing
             .sources
@@ -507,12 +467,11 @@ fn cached_missing_source_tracks_empty_root_creation_and_removal() {
             .status,
         UsageSourceStatus::Missing
     );
-    let cached_missing =
-        pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let cached_missing = read_offline(&home, august_input(false));
     assert!(cached_missing.cache_hit);
 
     std::fs::create_dir_all(home.join(".claude").join("projects")).unwrap();
-    let present = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let present = read_offline(&home, august_input(false));
     assert!(!present.cache_hit);
     assert_eq!(
         present
@@ -525,8 +484,7 @@ fn cached_missing_source_tracks_empty_root_creation_and_removal() {
     );
 
     std::fs::remove_dir_all(home.join(".claude")).unwrap();
-    let missing_again =
-        pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let missing_again = read_offline(&home, august_input(false));
     assert!(!missing_again.cache_hit);
     assert_eq!(
         missing_again
@@ -538,108 +496,109 @@ fn cached_missing_source_tracks_empty_root_creation_and_removal() {
         UsageSourceStatus::Missing
     );
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn retained_history_repeated_full_time_reparses_zero_unchanged_files() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-repeat");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let initial = pricing::with_test_fetch(None, || read_summary(full_time_input(true))).unwrap();
+    let initial = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&initial), 30);
     reset_transcript_parse_count();
 
-    let repeated = pricing::with_test_fetch(None, || read_summary(full_time_input(true))).unwrap();
+    let repeated = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&repeated), 30);
     assert_eq!(transcript_parse_count(), 0);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn retained_history_unchanged_summary_hit_decodes_zero_scan_cache_records() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-fast-hit");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let initial = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let initial = read_offline(&home, august_input(false));
     assert!(!initial.cache_hit);
+    assert_eq!(
+        claude_scanned_files(&initial),
+        1,
+        "the aged file is outside August"
+    );
     reset_scan_cache_decode_count();
 
-    let cached = pricing::with_test_fetch(None, || read_summary(august_input(false))).unwrap();
+    let cached = read_offline(&home, august_input(false));
     assert!(cached.cache_hit);
     assert_eq!(scan_cache_decode_count(), 0);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn retained_history_recent_window_keeps_old_live_cached_records() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-recent");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    pricing::with_test_fetch(None, || read_summary(full_time_input(true))).unwrap();
-    let recent = pricing::with_test_fetch(None, || read_summary(august_input(true))).unwrap();
+    read_offline(&home, full_time_input(true));
+    let recent = read_offline(&home, august_input(true));
     assert_eq!(output_tokens(&recent), 20);
-    let cache = load_scan_cache(&scan_cache_path().unwrap());
+    assert_eq!(
+        claude_scanned_files(&recent),
+        1,
+        "the aged file is outside August"
+    );
+    let cache = load_scan_cache(&scan_cache_path_for(&home));
     assert!(cache.contains_key(&normalize_path(&old_path)));
     reset_transcript_parse_count();
 
-    let full_time = pricing::with_test_fetch(None, || read_summary(full_time_input(true))).unwrap();
+    let full_time = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&full_time), 30);
+    assert_eq!(claude_scanned_files(&full_time), 2);
     assert_eq!(transcript_parse_count(), 0);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn retained_history_deleted_historical_file_is_pruned() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-delete");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    pricing::with_test_fetch(None, || read_summary(full_time_input(true))).unwrap();
+    read_offline(&home, full_time_input(true));
     std::fs::remove_file(&old_path).unwrap();
-    pricing::with_test_fetch(None, || read_summary(august_input(true))).unwrap();
-    let cache = load_scan_cache(&scan_cache_path().unwrap());
+    read_offline(&home, august_input(true));
+    let cache = load_scan_cache(&scan_cache_path_for(&home));
     assert!(!cache.contains_key(&normalize_path(&old_path)));
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-retained-history-equality");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    std::env::set_var("ON_N_OFF_HOME", &home);
 
-    let warm = pricing::with_test_fetch(None, || read_summary(full_time_input(true))).unwrap();
+    let warm = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&warm), 30);
     assert_eq!(record_count(&warm), 2);
-    let warm_cache = load_scan_cache(&scan_cache_path().unwrap());
+    let warm_cache = load_scan_cache(&scan_cache_path_for(&home));
     assert!(warm_cache.contains_key(&normalize_path(&old_path)));
     for cache_name in [
         "usage-source-index.json",
@@ -649,22 +608,19 @@ fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
         let _ = std::fs::remove_file(home.join(".on-n-off").join(cache_name));
     }
 
-    let from_scratch =
-        pricing::with_test_fetch(None, || read_summary(full_time_input(true))).unwrap();
+    let from_scratch = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&from_scratch), 30);
     assert_eq!(record_count(&from_scratch), 2);
     assert_eq!(from_scratch.buckets, warm.buckets);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn scans_claude_fixture_and_dedupes() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-scan");
     write_claude_transcript(&home);
-    std::env::set_var("ON_N_OFF_HOME", &home);
     let rates_doc = serde_json::json!({
         "claude-fable-5": {
             "input_cost_per_token": 1e-5,
@@ -674,15 +630,7 @@ fn scans_claude_fixture_and_dedupes() {
         }
     });
     let summary = pricing::with_test_fetch(Some(rates_doc), || {
-        read_summary(UsageSummaryInput {
-            since_day: "2026-08-01".into(),
-            until_day: "2026-08-31".into(),
-            time_zone: "UTC".into(),
-            resolution: Some("day".into()),
-            since_time: None,
-            until_time: None,
-            force: false,
-        })
+        read_summary_in(&home, august_input(false))
     })
     .unwrap();
     let claude = summary
@@ -701,18 +649,7 @@ fn scans_claude_fixture_and_dedupes() {
     assert_eq!(summary.pricing.status, UsagePricingStatus::Fresh);
     assert!(summary.pricing.known_models >= 1);
 
-    let again = pricing::with_test_fetch(None, || {
-        read_summary(UsageSummaryInput {
-            since_day: "2026-08-01".into(),
-            until_day: "2026-08-31".into(),
-            time_zone: "UTC".into(),
-            resolution: Some("day".into()),
-            since_time: None,
-            until_time: None,
-            force: true,
-        })
-    })
-    .unwrap();
+    let again = read_offline(&home, august_input(true));
     assert_eq!(again.buckets[0].totals.output_tokens, 20);
     assert_eq!(again.pricing.status, UsagePricingStatus::Cached);
     assert!(!again.cache_hit);
@@ -721,64 +658,94 @@ fn scans_claude_fixture_and_dedupes() {
         .join("usage-scan-cache.json")
         .is_file());
 
-    let cached = pricing::with_test_fetch(None, || {
-        read_summary(UsageSummaryInput {
-            since_day: "2026-08-01".into(),
-            until_day: "2026-08-31".into(),
-            time_zone: "UTC".into(),
-            resolution: Some("day".into()),
-            since_time: None,
-            until_time: None,
-            force: false,
-        })
-    })
-    .unwrap();
+    let cached = read_offline(&home, august_input(false));
     assert!(cached.cache_hit);
     assert_eq!(cached.scan_duration_ms, 0);
     assert_eq!(cached.buckets[0].totals.output_tokens, 20);
 
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn tokens_still_returned_when_rates_unavailable() {
-    let _guard = env_lock().lock().unwrap();
+    let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-unpriced");
     write_claude_transcript(&home);
-    std::env::set_var("ON_N_OFF_HOME", &home);
-    let summary = pricing::with_test_fetch(None, || {
-        read_summary(UsageSummaryInput {
-            since_day: "2026-08-01".into(),
-            until_day: "2026-08-31".into(),
-            time_zone: "UTC".into(),
-            resolution: Some("day".into()),
-            since_time: None,
-            until_time: None,
-            force: false,
-        })
-    })
-    .unwrap();
+    let summary = read_offline(&home, august_input(false));
     assert_eq!(summary.pricing.status, UsagePricingStatus::Unavailable);
     assert_eq!(summary.buckets[0].cost_source, UsageCostSource::Unpriced);
     assert_eq!(summary.buckets[0].totals.output_tokens, 20);
-    std::env::remove_var("ON_N_OFF_HOME");
     let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Why `input` is refused. The home it would read panics when resolved: an invalid window must be
+/// refused before any home is, so these tests reach no home at all — least of all the real one,
+/// which a broken refusal would otherwise scan, price over the network and cache into.
+fn refused_before_any_home(input: UsageSummaryInput) -> AdapterError {
+    read_summary_from(input, || {
+        panic!("an invalid window must be refused before a home is resolved")
+    })
+    .unwrap_err()
 }
 
 #[test]
 fn invalid_window_errors() {
-    let err = read_summary(UsageSummaryInput {
-        since_day: "2026-08-10".into(),
-        until_day: "2026-08-01".into(),
-        time_zone: "UTC".into(),
-        resolution: None,
-        since_time: None,
-        until_time: None,
-        force: false,
-    })
-    .unwrap_err();
-    assert!(err.message.contains("after untilDay"));
+    let err = refused_before_any_home(day_input("2026-08-10", "2026-08-01", false));
+    assert!(err.message.contains("after untilDay"), "{}", err.message);
+}
+
+#[test]
+fn hourly_windows_need_exact_bounds_at_most_a_day_apart() {
+    let refusals = [
+        ("", "2026-08-07T01:00:00Z", "valid sinceTime and untilTime"),
+        ("2026-08-07T00:00:00Z", "", "valid sinceTime and untilTime"),
+        (
+            "seven",
+            "2026-08-07T01:00:00Z",
+            "valid sinceTime and untilTime",
+        ),
+        (
+            "2026-08-07T01:00:00Z",
+            "2026-08-07T01:00:00Z",
+            "at most 24 hours",
+        ),
+        (
+            "2026-08-07T00:00:00Z",
+            "2026-08-08T00:00:01Z",
+            "at most 24 hours",
+        ),
+    ];
+    for (since, until, reason) in refusals {
+        let err = refused_before_any_home(hourly_input(since, until));
+        assert!(
+            err.message.contains(reason),
+            "{since}..{until}: {}",
+            err.message
+        );
+    }
+}
+
+/// The bound is inclusive: exactly 24 hours is the only hourly window the Usage screen sends
+/// (`ui/src/lib/usageFormat.ts`), so refusing it would blank that view.
+#[test]
+fn an_hourly_window_of_exactly_a_day_is_read_into_hour_buckets() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-hourly-day");
+    write_claude_transcript(&home);
+
+    let summary = read_offline(
+        &home,
+        hourly_input("2026-08-07T00:00:00Z", "2026-08-08T00:00:00Z"),
+    );
+    assert_eq!(output_tokens(&summary), 20);
+    let hours: Vec<_> = summary
+        .buckets
+        .iter()
+        .map(|bucket| bucket.hour_start.as_deref())
+        .collect();
+    assert_eq!(hours, [Some("2026-08-07T04:00:00.000Z")]);
+
+    let _ = std::fs::remove_dir_all(home);
 }
 
 /// Claim-check harness: time real-home common windows and reusable Full time.

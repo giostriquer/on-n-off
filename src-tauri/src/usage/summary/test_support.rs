@@ -1,13 +1,26 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use super::*;
+use crate::usage::pricing;
 
-pub(super) fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+/// A summary read under `home` rather than the process's home. Tests read through this instead
+/// of setting `ON_N_OFF_HOME`: the variable is process-wide, so every other test running at the
+/// time would follow it into a scratch home, and whatever first caches a path derived from it
+/// (the CLI search path) keeps that scratch home for the rest of the run. A summary read also
+/// changes the pricing module's process-wide state, so every test that reads one holds
+/// `pricing::lock_rates_state` first.
+pub(super) fn read_summary_in(
+    home: &Path,
+    input: UsageSummaryInput,
+) -> Result<UsageSummaryDto, AdapterError> {
+    read_summary_from(input, || Ok(home.to_path_buf()))
+}
+
+/// [`read_summary_in`] with the rate table's fetch failing, as it does offline.
+pub(super) fn read_offline(home: &Path, input: UsageSummaryInput) -> UsageSummaryDto {
+    pricing::with_test_fetch(None, || read_summary_in(home, input)).unwrap()
 }
 
 pub(super) fn write_claude_transcript(home: &Path) {
@@ -57,8 +70,11 @@ pub(super) fn append_claude_record(home: &Path, message_id: &str, output_tokens:
     writeln!(file, "{line}").unwrap();
 }
 
+/// The first day `august_input` reads.
+const AUGUST_OPENS: &str = "2026-08-01";
+
 pub(super) fn august_input(force: bool) -> UsageSummaryInput {
-    day_input("2026-08-01", "2026-08-31", force)
+    day_input(AUGUST_OPENS, "2026-08-31", force)
 }
 
 pub(super) fn day_input(since_day: &str, until_day: &str, force: bool) -> UsageSummaryInput {
@@ -70,6 +86,16 @@ pub(super) fn day_input(since_day: &str, until_day: &str, force: bool) -> UsageS
         since_time: None,
         until_time: None,
         force,
+    }
+}
+
+/// An hourly read of `since..until` on 2026-08-07; an empty bound is left out.
+pub(super) fn hourly_input(since: &str, until: &str) -> UsageSummaryInput {
+    UsageSummaryInput {
+        resolution: Some("hour".into()),
+        since_time: (!since.is_empty()).then(|| since.into()),
+        until_time: (!until.is_empty()).then(|| until.into()),
+        ..day_input("2026-08-07", "2026-08-08", false)
     }
 }
 
@@ -104,11 +130,14 @@ pub(super) fn write_single_claude_record(
     path
 }
 
-pub(super) fn age_file(path: &Path, days: u64) {
+/// Backdates `path` to 180 days before `august_input`'s window opens: outside that window and its
+/// mtime slack, inside `full_time_input`'s. A fixed instant, because the tests' windows are fixed:
+/// "now minus 180 days" enters August's window on runs after 2027-01-26, and the tests using it
+/// would go on passing without a file that window skips.
+pub(super) fn age_file(path: &Path) {
+    let opens = DateTime::parse_from_rfc3339(&format!("{AUGUST_OPENS}T00:00:00Z")).unwrap();
+    let modified = SystemTime::from(opens) - Duration::from_secs(180 * 24 * 60 * 60);
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
-    let modified = SystemTime::now()
-        .checked_sub(Duration::from_secs(days * 24 * 60 * 60))
-        .unwrap();
     file.set_times(std::fs::FileTimes::new().set_modified(modified))
         .unwrap();
 }
@@ -183,4 +212,14 @@ pub(super) fn write_claude_lines(home: &Path, name: &str, lines: &[String]) {
     let dir = home.join(".claude").join("projects").join("proj");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(name), lines.join("\n") + "\n").unwrap();
+}
+
+/// How many Claude transcripts a read scanned. A file counts only when its mtime puts it inside
+/// the window read, so an aged file is missing from a read of August.
+pub(super) fn claude_scanned_files(summary: &UsageSummaryDto) -> u64 {
+    summary
+        .sources
+        .iter()
+        .find(|source| source.provider == AgentId::Claude)
+        .map_or(0, |source| source.scanned_files)
 }
