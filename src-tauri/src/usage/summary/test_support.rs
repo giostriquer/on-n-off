@@ -59,8 +59,11 @@ pub(super) fn append_claude_record(home: &Path, message_id: &str, output_tokens:
     writeln!(file, "{line}").unwrap();
 }
 
+/// The first day `august_input` reads.
+const AUGUST_OPENS: &str = "2026-08-01";
+
 pub(super) fn august_input(force: bool) -> UsageSummaryInput {
-    day_input("2026-08-01", "2026-08-31", force)
+    day_input(AUGUST_OPENS, "2026-08-31", force)
 }
 
 pub(super) fn day_input(since_day: &str, until_day: &str, force: bool) -> UsageSummaryInput {
@@ -106,11 +109,14 @@ pub(super) fn write_single_claude_record(
     path
 }
 
-pub(super) fn age_file(path: &Path, days: u64) {
+/// Backdates `path` to 180 days before `august_input`'s window opens: outside that window and its
+/// mtime slack, inside `full_time_input`'s. A fixed instant, because the tests' windows are fixed:
+/// "now minus 180 days" enters August's window on runs after 2027-01-26, and the tests using it
+/// would go on passing without a file that window skips.
+pub(super) fn age_file(path: &Path) {
+    let opens = DateTime::parse_from_rfc3339(&format!("{AUGUST_OPENS}T00:00:00Z")).unwrap();
+    let modified = SystemTime::from(opens) - Duration::from_secs(180 * 24 * 60 * 60);
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
-    let modified = SystemTime::now()
-        .checked_sub(Duration::from_secs(days * 24 * 60 * 60))
-        .unwrap();
     file.set_times(std::fs::FileTimes::new().set_modified(modified))
         .unwrap();
 }
@@ -185,4 +191,14 @@ pub(super) fn write_claude_lines(home: &Path, name: &str, lines: &[String]) {
     let dir = home.join(".claude").join("projects").join("proj");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(name), lines.join("\n") + "\n").unwrap();
+}
+
+/// How many Claude transcripts a read scanned. A file counts only when its mtime puts it inside
+/// the window read, so an aged file is missing from a read of August.
+pub(super) fn claude_scanned_files(summary: &UsageSummaryDto) -> u64 {
+    summary
+        .sources
+        .iter()
+        .find(|source| source.provider == AgentId::Claude)
+        .map_or(0, |source| source.scanned_files)
 }

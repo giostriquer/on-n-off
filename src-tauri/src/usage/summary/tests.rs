@@ -575,7 +575,7 @@ fn retained_history_repeated_full_time_reparses_zero_unchanged_files() {
     let _serial = serial();
     let home = scratch_dir("usage-retained-history-repeat");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
     let initial =
@@ -596,12 +596,17 @@ fn retained_history_unchanged_summary_hit_decodes_zero_scan_cache_records() {
     let _serial = serial();
     let home = scratch_dir("usage-retained-history-fast-hit");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
     let initial =
         pricing::with_test_fetch(None, || read_summary_in(&home, august_input(false))).unwrap();
     assert!(!initial.cache_hit);
+    assert_eq!(
+        claude_scanned_files(&initial),
+        1,
+        "the aged file is outside August"
+    );
     reset_scan_cache_decode_count();
 
     let cached =
@@ -617,13 +622,18 @@ fn retained_history_recent_window_keeps_old_live_cached_records() {
     let _serial = serial();
     let home = scratch_dir("usage-retained-history-recent");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
     pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
     let recent =
         pricing::with_test_fetch(None, || read_summary_in(&home, august_input(true))).unwrap();
     assert_eq!(output_tokens(&recent), 20);
+    assert_eq!(
+        claude_scanned_files(&recent),
+        1,
+        "the aged file is outside August"
+    );
     let cache = load_scan_cache(&scan_cache_path_for(&home));
     assert!(cache.contains_key(&normalize_path(&old_path)));
     reset_transcript_parse_count();
@@ -631,6 +641,7 @@ fn retained_history_recent_window_keeps_old_live_cached_records() {
     let full_time =
         pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
     assert_eq!(output_tokens(&full_time), 30);
+    assert_eq!(claude_scanned_files(&full_time), 2);
     assert_eq!(transcript_parse_count(), 0);
 
     let _ = std::fs::remove_dir_all(home);
@@ -641,7 +652,7 @@ fn retained_history_deleted_historical_file_is_pruned() {
     let _serial = serial();
     let home = scratch_dir("usage-retained-history-delete");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
     pricing::with_test_fetch(None, || read_summary_in(&home, full_time_input(true))).unwrap();
@@ -658,7 +669,7 @@ fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
     let _serial = serial();
     let home = scratch_dir("usage-retained-history-equality");
     let old_path = write_single_claude_record(&home, "old.jsonl", "2025-01-07T04:05:13.944Z", 10);
-    age_file(&old_path, 180);
+    age_file(&old_path);
     write_single_claude_record(&home, "recent.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
     let warm =
