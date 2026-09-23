@@ -46,8 +46,13 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      # East of UTC on purpose. vitest.config.ts pins every worker to UTC, and fixtures such as
+      # 15:00Z fall on the next day in Tokyo, so losing the pin fails here and not only on a
+      # developer's machine east of UTC. See ui/src/test-environment.test.ts.
       - name: Test frontend
         run: bun run test
+        env:
+          TZ: Asia/Tokyo
 
       - name: Type-check frontend
         run: bun run check
