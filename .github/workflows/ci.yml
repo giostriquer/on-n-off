@@ -162,7 +162,6 @@ jobs:
           $clock = [Diagnostics.Stopwatch]::StartNew()
           $code = 'none'
           try {
-            ping -n 60 127.0.0.1 > $null
             cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target host-tuple *> (Join-Path $Directory 'output.log')
             $code = $LASTEXITCODE ?? 'none'
           } finally {
@@ -221,7 +220,6 @@ jobs:
           if ($code -ne '0') {
             "::warning title=Background cargo fetch::cargo fetch did not succeed (exit code: $code); clippy fetches what it needs itself."
           }
-          "EXP matched=$([bool]$process) started=$started alive=$([bool](Get-Process -Id $processId -ErrorAction SilentlyContinue)) ping=$(@(Get-Process ping -ErrorAction SilentlyContinue).Count)"
           exit 0
 
       - name: Lint Rust
