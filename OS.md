@@ -89,13 +89,16 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
 ## PowerShell vs bash in this repo
 
 - CI and `scripts/*.ps1` run under PowerShell 7 on both runners; scripts must stay path-neutral.
-- CI Rust steps cost far more on the Windows runner than on macOS (4 cores against Apple Silicon,
-  plus Defender scanning every object file cargo writes). The Windows jobs exclude the workspace,
-  `~/.cargo`, and `~/.rustup` from Defender with `Add-MpPreference`; the step is `continue-on-error`
-  because it is a speed measure, not a correctness one, and it is runner-only — never run it on a
-  development machine. Platform-neutral frontend checks (`bun run test`, `bun run check`) run once
-  on `ubuntu-24.04` instead of on both native legs; `bun run build` stays native because
-  `tauri-build` needs `ui/dist` before the Rust steps.
+- CI Rust steps cost far more on the Windows runner than on macOS (4 cores against Apple Silicon).
+  Defender is not the reason (checked 2026-09): the runner image turns off real-time protection
+  and excludes `C:\` and `D:\` itself, so the workflows add no exclusions of their own. The
+  workspace is on `D:` and every home directory on `C:`, and a hardlink cannot cross drives, so
+  `ci.yml` points `BUN_INSTALL_CACHE_DIR` at `RUNNER_TEMP` and bun links instead of copying.
+  Unpacking the cargo registry sources, which rust-cache makes every run redo, is also slow there
+  (about 17 s), so `ci.yml` does it in the background while the frontend steps run.
+  Platform-neutral frontend checks (`bun run test`, `bun run check`) run once on `ubuntu-24.04`
+  instead of on both native legs; `bun run build` stays native because `tauri-build` needs
+  `ui/dist` before the Rust steps.
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
   to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one image per OS that

@@ -107,3 +107,52 @@ test("a hung test run or release upload ends at its step, not the job timeout", 
   assert.ok(upload["timeout-minutes"] <= 10);
   assert.match(upload.run, /WaitForExit\(\d+\)/, "each upload attempt waits a bounded time");
 });
+
+// The Windows runner image turns off Defender's real-time protection and excludes C:\ and D:\ in its
+// own build (actions/runner-images, Configure-WindowsDefender.ps1). An exclusion step here only
+// costs its 5 s of cmdlet start-up on every Windows job.
+test("no workflow spends a step on Defender exclusions the runner image already has", { skip }, () => {
+  for (const name of ["ci", "bundle", "release"]) {
+    for (const [id, job] of Object.entries(load(name).jobs)) {
+      for (const candidate of job.steps ?? []) {
+        assert.doesNotMatch(candidate.run ?? "", /MpPreference/, `${name}.yml ${id}: ${candidate.name}`);
+      }
+    }
+  }
+});
+
+// bun hardlinks from its cache into node_modules, and a hardlink cannot cross from C: to the D:
+// workspace, so with the default cache it copied every package: 16-20 s against 7 s.
+test("the Windows verify leg keeps bun's install cache on the workspace drive", { skip }, () => {
+  const verify = load("ci").jobs.verify;
+  const cache = step(verify, "Keep the bun cache on the workspace drive");
+  assert.equal(cache.if, "runner.os == 'Windows'");
+  assert.match(cache.run, /BUN_INSTALL_CACHE_DIR=\$\(Join-Path \$env:RUNNER_TEMP /);
+  assert.match(cache.run, />> \$env:GITHUB_ENV/);
+  assert.ok(cache.index < step(verify, "Install frontend dependencies").index);
+});
+
+// rust-cache deletes the registry sources it restored, so the first cargo command re-extracts them.
+// The Windows leg does that in the background, after the restore it extracts from and behind the
+// frontend steps, and waits for it before the first build so its output and any hang stay in their
+// own step. A failed fetch is a warning: clippy fetches what it needs itself and fails on its own.
+test("the Windows verify leg unpacks Rust dependencies in the background before the first build", { skip }, () => {
+  const verify = load("ci").jobs.verify;
+  const start = step(verify, "Start fetching Rust dependencies");
+  const finish = step(verify, "Finish fetching Rust dependencies");
+  for (const candidate of [start, finish]) assert.equal(candidate.if, "runner.os == 'Windows'", candidate.name);
+  assert.match(start.run, /Start-Process pwsh/);
+  // host-tuple limits the fetch to the host's dependencies, the set clippy compiles.
+  assert.match(start.run, /cargo fetch --manifest-path src-tauri\/Cargo\.toml --locked --target host-tuple /);
+  assert.doesNotMatch(start.run, /rustc -vV/, "cargo resolves the host itself");
+  assert.ok(start.index > step(verify, "Cache Rust dependencies").index, "the fetch needs the restored registry");
+  assert.ok(start.index < step(verify, "Install frontend dependencies").index, "the fetch overlaps the frontend steps");
+  assert.ok(finish.index > step(verify, "Build frontend").index, "nothing is left to overlap after the frontend build");
+  assert.ok(finish.index < firstBuild(verify), "the fetch finishes before the first build");
+  assert.match(start.run, /finally \{/, "the fetch reports its result however its script ends");
+  assert.match(finish.run, /WaitForExit\(\d+\)/, "the wait is bounded");
+  for (const candidate of [start, finish]) {
+    assert.match(candidate.run, /StartTime\.Ticks/, `${candidate.name}: a reused process id is never waited on or ended`);
+  }
+  assert.match(finish.run, /exit 0\s*$/, "a failed fetch never fails the job");
+});
