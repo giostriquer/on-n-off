@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli_stub::ANSWER_DEADLINE;
 use serde_json::json;
 use std::collections::VecDeque;
 
@@ -257,8 +258,7 @@ fn process_transport_rejects_an_oversized_stdout_line() {
         .stdout(&output)
         .cli(&root);
     let mut command = cli.command();
-    let mut transport =
-        ProcessTransport::spawn_command(&mut command, Duration::from_secs(10), 64).unwrap();
+    let mut transport = ProcessTransport::spawn_command(&mut command, ANSWER_DEADLINE, 64).unwrap();
 
     let error = transport.receive().unwrap_err().message;
     transport.finish();
@@ -275,7 +275,7 @@ fn process_transport_does_not_surface_stderr_content() {
         .cli(&root);
     let mut command = cli.command();
     let mut transport =
-        ProcessTransport::spawn_command(&mut command, Duration::from_secs(10), 1024).unwrap();
+        ProcessTransport::spawn_command(&mut command, ANSWER_DEADLINE, 1024).unwrap();
 
     let error = transport.receive().unwrap_err().message;
     transport.finish();
@@ -290,7 +290,7 @@ fn early_nonzero_exit_explains_that_the_cli_may_need_an_update() {
     let cli = crate::cli_stub::CliStub::new("codex").exit(2).cli(&root);
     let mut command = cli.command();
     let mut transport =
-        ProcessTransport::spawn_command(&mut command, Duration::from_secs(10), 1024).unwrap();
+        ProcessTransport::spawn_command(&mut command, ANSWER_DEADLINE, 1024).unwrap();
 
     let error = query_app_server(&root, false, &mut transport).unwrap_err();
     let status = transport.finish();
