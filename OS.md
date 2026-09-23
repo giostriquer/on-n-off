@@ -94,8 +94,11 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   `~/.cargo`, and `~/.rustup` from Defender with `Add-MpPreference`; the step is `continue-on-error`
   because it is a speed measure, not a correctness one, and it is runner-only — never run it on a
   development machine. Platform-neutral frontend checks (`bun run test`, `bun run check`) run once
-  on `ubuntu-latest` instead of on both native legs; `bun run build` stays native because
+  on `ubuntu-24.04` instead of on both native legs; `bun run build` stays native because
   `tauri-build` needs `ui/dist` before the Rust steps.
+- Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
+  bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
+  to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` rejects one.
 - In this repo's shell tooling, prefer `Join-Path`, `$env:VAR`, `-LiteralPath`; in bash use forward
   slashes and `cygpath -w` when handing paths to Windows programs.
 

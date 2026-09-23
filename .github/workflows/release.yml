@@ -26,9 +26,12 @@ env:
 jobs:
   # Cheap gate on the tag itself. The tagged commit must already be on main, and every commit on
   # main has been through the CI workflow's verify matrix, so this job does not repeat that work.
+  #
+  # Runner labels are pinned to exact images and bumped deliberately, like rust-toolchain.toml; keep
+  # them equal to ci.yml's and bundle.yml's, since the build job restores the cache Bundle saves.
   validate:
     name: validate
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -98,10 +101,10 @@ jobs:
         include:
           - installer: nsis
             platform: windows
-            os: windows-latest
+            os: windows-2025-vs2026
           - installer: dmg
             platform: macos
-            os: macos-latest
+            os: macos-26
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,6 +139,29 @@ jobs:
       # rust-toolchain.toml.
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
+
+      # Pre-resolves SwiftPM with retries so the build script never fetches; see the same step in
+      # ci.yml for why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
+      - name: Resolve Swift package dependencies
+        if: runner.os == 'macOS'
+        run: |
+          $package = 'src-tauri/macos/BrowserBilling'
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if ($attempt -eq 1) {
+              xcrun swift package resolve --package-path $package
+            } else {
+              Remove-Item -LiteralPath (Join-Path $package '.build') -Recurse -Force -ErrorAction Ignore
+              xcrun swift package resolve --package-path $package --disable-dependency-cache
+            }
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -lt 3) {
+              Write-Warning "Swift package resolution failed (attempt $attempt of 3); retrying in $(15 * $attempt) s."
+              Start-Sleep -Seconds (15 * $attempt)
+            }
+          }
+          throw "Could not resolve the Swift packages in $package after 3 attempts."
 
       # Restores the release-profile cache that the Bundle workflow saves on main. A tag ref
       # cannot share a cache it writes with anything else, so this job never saves one.
@@ -221,7 +247,7 @@ jobs:
   publish-draft:
     name: publish-draft
     needs: build
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     timeout-minutes: 20
     permissions:
       contents: write
@@ -362,7 +388,11 @@ jobs:
             ${{ runner.temp }}/release-assets/*.dmg
             ${{ runner.temp }}/release-assets/*.app.tar.gz
 
+      # One upload stalled this step for 417 s where 3-5 s is normal. Each attempt gets two minutes
+      # and is killed past that. A retry is safe: --clobber replaces whatever an earlier attempt
+      # left, and the reconcile below checks the final asset set either way.
       - name: Upload and reconcile draft assets
+        timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -390,9 +420,33 @@ jobs:
             }
           }
 
-          gh release upload $tag $assets --repo $repository --clobber
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not upload assets to draft release '$tag'."
+          # A .NET process rather than a bare `gh` call, so the wait can be bounded and the upload
+          # stopped. ArgumentList quotes each argument; the exit code is read from the process
+          # because $LASTEXITCODE is only set by commands PowerShell runs itself.
+          $gh = (Get-Command gh -CommandType Application | Select-Object -First 1).Source
+          $uploaded = $false
+          for ($attempt = 1; $attempt -le 3 -and -not $uploaded; $attempt++) {
+            $upload = [System.Diagnostics.ProcessStartInfo]::new($gh)
+            foreach ($argument in @('release', 'upload', $tag) + $assets + @('--repo', $repository, '--clobber')) {
+              $upload.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::Start($upload)
+            if ($process.WaitForExit(120000)) {
+              $uploaded = $process.ExitCode -eq 0
+              if (-not $uploaded) {
+                Write-Warning "Upload attempt $attempt of 3 exited with code $($process.ExitCode)."
+              }
+            } else {
+              $process.Kill($true)
+              $process.WaitForExit()
+              Write-Warning "Upload attempt $attempt of 3 did not finish within 120 s; stopped it."
+            }
+            if (-not $uploaded -and $attempt -lt 3) {
+              Start-Sleep -Seconds (10 * $attempt)
+            }
+          }
+          if (-not $uploaded) {
+            throw "Could not upload assets to draft release '$tag' after 3 attempts."
           }
 
           $publishedRelease = gh release view $tag --repo $repository --json isDraft,assets | ConvertFrom-Json

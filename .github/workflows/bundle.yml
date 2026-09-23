@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# Never cancel a running bundle for main: each merge keeps its installer smoke and the cache it
+# saves. The pull request condition only matters if this workflow ever runs on pull requests.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -27,6 +29,9 @@ jobs:
   # Installer smoke for main. It runs alongside the CI workflow rather than after it: tauri build
   # already compiles the app, so a broken build fails here on its own, and the release workflow
   # restores the release-profile cache this job saves.
+  #
+  # Runner labels are pinned to exact images and bumped deliberately, like rust-toolchain.toml; keep
+  # them equal to ci.yml's and release.yml's.
   bundle:
     name: bundle-${{ matrix.installer }}
     runs-on: ${{ matrix.os }}
@@ -37,10 +42,10 @@ jobs:
         include:
           - installer: nsis
             platform: windows
-            os: windows-latest
+            os: windows-2025-vs2026
           - installer: dmg
             platform: macos
-            os: macos-latest
+            os: macos-26
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,6 +83,29 @@ jobs:
       # rust-toolchain.toml.
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
+
+      # Pre-resolves SwiftPM with retries so the build script never fetches; see the same step in
+      # ci.yml for why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
+      - name: Resolve Swift package dependencies
+        if: runner.os == 'macOS'
+        run: |
+          $package = 'src-tauri/macos/BrowserBilling'
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if ($attempt -eq 1) {
+              xcrun swift package resolve --package-path $package
+            } else {
+              Remove-Item -LiteralPath (Join-Path $package '.build') -Recurse -Force -ErrorAction Ignore
+              xcrun swift package resolve --package-path $package --disable-dependency-cache
+            }
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -lt 3) {
+              Write-Warning "Swift package resolution failed (attempt $attempt of 3); retrying in $(15 * $attempt) s."
+              Start-Sleep -Seconds (15 * $attempt)
+            }
+          }
+          throw "Could not resolve the Swift packages in $package after 3 attempts."
 
       # Shared with the release workflow's build job (same key, same release profile).
       # `cache-on-failure` is deliberately off: the store is capped at 10 GB for the whole

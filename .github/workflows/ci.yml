@@ -11,9 +11,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its running check. A push to main queues behind the
+# running main run instead of cancelling it, so a merge keeps its verdict and its chance to save the
+# cache (GitHub still drops a run that is only queued when a newer one queues behind it).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -32,9 +35,12 @@ jobs:
   # another, so running them once on Linux keeps roughly 40s off both native legs and off the
   # Windows and macOS runner queues. `bun run build` stays on the native legs: tauri-build needs
   # ui/dist to exist before the Rust steps run.
+  #
+  # Runner labels are pinned to exact images, like the compiler in rust-toolchain.toml, and bumped
+  # deliberately on their own pull request: a `-latest` label moves to a new OS on GitHub's schedule.
   frontend:
     name: frontend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -44,15 +50,20 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install frontend dependencies
+        id: install
         run: bun install --frozen-lockfile
 
+      # The three checks are independent: once dependencies are installed, each one reports even
+      # when an earlier one failed, so a single push shows every failure.
       - name: Test frontend
         run: bun run test
 
       - name: Type-check frontend
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun run check
 
       - name: Test release verifier
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
   verify:
@@ -64,9 +75,9 @@ jobs:
       matrix:
         include:
           - platform: windows
-            os: windows-latest
+            os: windows-2025-vs2026
           - platform: macos
-            os: macos-latest
+            os: macos-26
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -108,6 +119,39 @@ jobs:
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
 
+      # rustfmt needs neither the cache nor the registry, and it is the most common reason this job
+      # fails, so it runs before everything slow and reports in well under a minute.
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      # The browser billing helper's one remote dependency, SweetCookieKit, is otherwise cloned from
+      # inside a cargo build script, where a transient SwiftPM failure fails the whole build (a Bundle
+      # run on 2026-09-22 lost SwiftPM's shared repository cache mid-fetch). Resolving here, with
+      # retries, leaves the checkout in the package's .build, so the build script never fetches. A
+      # retry starts from an empty .build and bypasses that shared cache. SideNotch has no remote
+      # dependencies. Never cache ~/Library/Caches/org.swift.swiftpm: it could preserve exactly the
+      # state that failed. bundle.yml and release.yml carry the same step.
+      - name: Resolve Swift package dependencies
+        if: runner.os == 'macOS'
+        run: |
+          $package = 'src-tauri/macos/BrowserBilling'
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if ($attempt -eq 1) {
+              xcrun swift package resolve --package-path $package
+            } else {
+              Remove-Item -LiteralPath (Join-Path $package '.build') -Recurse -Force -ErrorAction Ignore
+              xcrun swift package resolve --package-path $package --disable-dependency-cache
+            }
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -lt 3) {
+              Write-Warning "Swift package resolution failed (attempt $attempt of 3); retrying in $(15 * $attempt) s."
+              Start-Sleep -Seconds (15 * $attempt)
+            }
+          }
+          throw "Could not resolve the Swift packages in $package after 3 attempts."
+
       # Only pushes to main write the cache so pull requests cannot evict it; every ref can
       # restore the cache that main saved. `cache-on-failure` is deliberately off: the store is
       # capped at 10 GB for the whole repository and a failed run's half-built target directory
@@ -140,13 +184,13 @@ jobs:
       - name: Build frontend
         run: bun run build
 
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-
       - name: Lint Rust
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
+      # This step takes one to two minutes warm and a few more cold. A test blocked on a request
+      # that never comes should fail here, not at the job's 45-minute limit.
       - name: Test Rust
+        timeout-minutes: 15
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 
       - name: Build Windows application
