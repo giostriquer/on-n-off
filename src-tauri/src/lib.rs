@@ -14,6 +14,7 @@ mod cursor;
 mod dto;
 #[cfg(test)]
 mod fake;
+mod file_lease;
 mod flags;
 mod github;
 mod github_monitor;

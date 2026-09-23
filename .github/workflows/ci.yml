@@ -11,9 +11,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its running check. A push to main queues behind the
+# running main run instead of cancelling it, so a merge keeps its verdict and its chance to save the
+# cache (GitHub still drops a run that is only queued when a newer one queues behind it).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -32,9 +35,14 @@ jobs:
   # another, so running them once on Linux keeps roughly 40s off both native legs and off the
   # Windows and macOS runner queues. `bun run build` stays on the native legs: tauri-build needs
   # ui/dist to exist before the Rust steps run.
+  #
+  # Runner labels are pinned to exact images, like the compiler in rust-toolchain.toml, and bumped
+  # deliberately on their own pull request: a `-latest` label moves to a new OS on GitHub's schedule.
+  # scripts/workflows.test.mjs holds the one image per OS that every workflow uses, so a bump changes
+  # them all.
   frontend:
     name: frontend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -44,10 +52,13 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install frontend dependencies
+        id: install
         run: bun install --frozen-lockfile
 
-      # East of UTC on purpose. vitest.config.ts pins every worker to UTC, and fixtures such as
-      # 15:00Z fall on the next day in Tokyo, so losing the pin fails here and not only on a
+      # The three checks are independent: once dependencies are installed, each one reports even
+      # when an earlier one failed, so a single push shows every failure.
+      # The tests run east of UTC on purpose. vitest.config.ts pins every worker to UTC, and fixtures
+      # such as 15:00Z fall on the next day in Tokyo, so losing the pin fails here and not only on a
       # developer's machine east of UTC. See ui/src/test-environment.test.ts.
       - name: Test frontend
         run: bun run test
@@ -55,9 +66,11 @@ jobs:
           TZ: Asia/Tokyo
 
       - name: Type-check frontend
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun run check
 
-      - name: Test release verifier
+      - name: Test release scripts and workflow contracts
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
   verify:
@@ -69,9 +82,9 @@ jobs:
       matrix:
         include:
           - platform: windows
-            os: windows-latest
+            os: windows-2025-vs2026
           - platform: macos
-            os: macos-latest
+            os: macos-26
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,6 +126,17 @@ jobs:
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
 
+      # rustfmt needs neither the cache nor the registry, and it is the most common reason this job
+      # fails, so it runs before everything slow and reports in well under a minute.
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
+      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
+      - name: Resolve Swift package dependencies
+        if: runner.os == 'macOS'
+        run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
+
       # Only pushes to main write the cache so pull requests cannot evict it; every ref can
       # restore the cache that main saved. `cache-on-failure` is deliberately off: the store is
       # capped at 10 GB for the whole repository and a failed run's half-built target directory
@@ -142,16 +166,19 @@ jobs:
       - name: Test Rust toolchain pruner
         run: ./scripts/prune-rust-toolchains.test.ps1
 
+      - name: Test Swift package resolver
+        run: ./scripts/resolve-swift-packages.test.ps1
+
       - name: Build frontend
         run: bun run build
-
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
       - name: Lint Rust
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
+      # This step takes one to two minutes warm and a few more cold. A test blocked on a request
+      # that never comes should fail here, not at the job's 45-minute limit.
       - name: Test Rust
+        timeout-minutes: 15
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 
       - name: Build Windows application

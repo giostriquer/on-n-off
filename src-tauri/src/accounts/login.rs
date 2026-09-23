@@ -2,7 +2,7 @@
 use super::model::Identity;
 use super::transaction::Native;
 use super::{home, native, store};
-use crate::dto::AgentId;
+use crate::{dto::AgentId, file_lease::FileLease};
 use std::{
     collections::VecDeque,
     process::Stdio,
@@ -177,8 +177,7 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         .write(true)
         .open(scratch.path().join("lease"))
         .map_err(|_| "Cannot own isolated sign-in storage.")?;
-    lease_file
-        .try_lock()
+    let lease = FileLease::acquire(lease_file, std::fs::File::try_lock)
         .map_err(|_| "Cannot own isolated sign-in storage.")?;
     super::vault::atomic_write(
         &scratch.path().join("provider.json"),
@@ -247,7 +246,7 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         Ok(())
     })();
     let cleanup = isolated.clean_isolated();
-    drop(lease_file);
+    drop(lease);
     if cleanup.is_err() {
         let _retained = scratch.keep();
         return Err("The isolated login could not be cleaned from protected storage. Its private recovery directory was retained.".into());
@@ -279,9 +278,9 @@ pub(super) fn recover_abandoned(home: &std::path::Path) {
         else {
             continue;
         };
-        if file.try_lock().is_err() {
+        let Ok(lease) = FileLease::acquire(file, std::fs::File::try_lock) else {
             continue;
-        }
+        };
         let Some(provider) = std::fs::read(path.join("provider.json"))
             .ok()
             .filter(|v| v.len() < 100)
@@ -298,7 +297,7 @@ pub(super) fn recover_abandoned(home: &std::path::Path) {
             continue;
         };
         if native.clean_isolated().is_ok() {
-            drop(file);
+            drop(lease);
             let _ = std::fs::remove_dir_all(path);
         }
     }

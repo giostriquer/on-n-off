@@ -4,6 +4,8 @@ pub(crate) mod model;
 pub(crate) mod vault;
 
 mod store;
+#[cfg(test)]
+pub(crate) use store::lease_timeout_override::set as override_lease_timeout;
 pub(crate) mod usage;
 mod usage_renew;
 

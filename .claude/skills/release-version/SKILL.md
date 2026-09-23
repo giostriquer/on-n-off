@@ -54,9 +54,20 @@ Two checks:
 Commit as `release: bump on-n-off to vX.Y.Z` with explicit pathspecs. Title the PR
 `release: on-n-off vX.Y.Z with <what ships>`, and add one Summary bullet listing the bumped files.
 
+Every head CI sees gets a full run, so the bump rides the PR's last push instead of following it:
+
+- When the release is known to follow the PR (the user asked for one, or this skill runs before the
+  PR's review is done), commit the bump locally as soon as the version is decided. Push it together
+  with the last review fix, and with `main` merged in if it moved, so CI runs once, on the head that
+  merges.
+- Push the bump on its own only when the release was decided after CI passed on the final head. That
+  costs one extra run on a version-only commit, and it is the only case that should.
+- Push once. Two pushes in quick succession start two runs, and the first is cancelled part-way.
+
 **Done:**
 
-- The bump commit is pushed.
+- The bump commit is pushed, in the same push as the PR's final changes whenever the release was
+  known in time.
 - CI's three required checks (`frontend`, `verify-windows`, `verify-macos`) are green at the PR's
   head. Dispatch a `workbench:ci-watcher` pinned to that SHA; on red, use `fix-ci`.
 - The branch is current with `main` (the ruleset is strict). Merge `main` in, never rebase, and let
