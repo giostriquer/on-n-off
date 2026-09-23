@@ -30,17 +30,17 @@ function firstBuild(job) {
 // cannot list a second image for an OS and leave some workflows on the old one.
 const pinnedImages = { ubuntu: "ubuntu-24.04", windows: "windows-2025-vs2026", macos: "macos-26" };
 
-/** The runner label of each of the job's legs, keyed by matrix platform where it has a matrix. */
-function runnerImages(job) {
+/** The runner label of every one of the job's legs, with its matrix platform where it has a matrix. */
+function runnerLegs(job) {
   return String(job["runs-on"]).startsWith("${{")
-    ? Object.fromEntries(job.strategy.matrix.include.map((entry) => [entry.platform, entry.os]))
-    : { "": job["runs-on"] };
+    ? job.strategy.matrix.include.map((entry) => ({ platform: entry.platform, label: entry.os }))
+    : [{ platform: "", label: job["runs-on"] }];
 }
 
 test("every job runs on its OS's pinned runner image", { skip }, () => {
   for (const name of ["ci", "bundle", "release", "cache-prune"]) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
-      for (const label of Object.values(runnerImages(job))) {
+      for (const { label } of runnerLegs(job)) {
         const os = String(label).split("-")[0];
         assert.ok(Object.hasOwn(pinnedImages, os), `${name}.yml ${id} runs on ${label}, an OS with no pinned image`);
         assert.equal(label, pinnedImages[os], `${name}.yml ${id} runs on ${label}, not the pinned ${os} image`);
@@ -58,7 +58,9 @@ test("release builds each platform on the image of the Bundle cache it restores"
   const release = load("release").jobs.build;
   const sharedKey = (job) => step(job, "Cache Rust dependencies").with["shared-key"];
   assert.equal(sharedKey(release), sharedKey(bundle));
-  assert.deepEqual(runnerImages(release), runnerImages(bundle));
+  // Every leg, not one per platform: two legs can share a platform, and so a cache.
+  const legs = (job) => runnerLegs(job).map(({ platform, label }) => `${platform}:${label}`).sort();
+  assert.deepEqual(legs(release), legs(bundle));
 });
 
 test("ci, bundle and release share one env block, which rust-cache hashes into its key", { skip }, () => {
