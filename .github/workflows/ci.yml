@@ -147,23 +147,6 @@ jobs:
         if: runner.os == 'macOS'
         run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
 
-      - name: Time the notch relink (experiment, to be reverted)
-        if: runner.os == 'macOS'
-        run: |
-          $package = 'src-tauri/macos/SideNotch'
-          $product = "$package/.build/arm64-apple-macosx/debug/on-n-off-notch"
-          function Build([string] $label) {
-            $clock = [Diagnostics.Stopwatch]::StartNew()
-            $out = xcrun swift build --package-path $package --configuration debug --arch arm64 --product on-n-off-notch -Xswiftc -warnings-as-errors 2>&1
-            if ($LASTEXITCODE -ne 0) { $out; throw "The notch build failed." }
-            "TIMING {0,-20} {1,6:N2} s  {2}" -f $label, $clock.Elapsed.TotalSeconds, (($out | Select-String 'Compiling|Linking|complete') -join ' | ')
-          }
-          Build 'first start'
-          Build 'no-op'
-          Build 'no-op'
-          foreach ($i in 1..3) { Remove-Item -LiteralPath $product; Build 'relink' }
-          Build 'no-op'
-
       # Only pushes to main write the cache so pull requests cannot evict it; every ref can
       # restore the cache that main saved. `cache-on-failure` is deliberately off: the store is
       # capped at 10 GB for the whole repository and a failed run's half-built target directory
