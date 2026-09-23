@@ -168,6 +168,26 @@ jobs:
         if: runner.os == 'macOS'
         run: bun scripts/stamp-source-times.mjs src-tauri/macos
 
+      # EXPERIMENT (reverted before merge): splits SwiftPM's start-up on a fresh runner into
+      # launching the tools and compiling a manifest.
+      - name: Time SwiftPM start-up (experiment)
+        if: runner.os == 'macOS'
+        run: |
+          $probes = @(
+            @('swift', '--version'),
+            @('swift', 'package', '--version'),
+            @('swift', 'package', '--package-path', 'src-tauri/macos/BrowserBilling', '--manifest-cache', 'none', 'dump-package'),
+            @('swift', 'package', '--package-path', 'src-tauri/macos/BrowserBilling', '--manifest-cache', 'none', 'dump-package'),
+            @('swift', 'package', '--package-path', 'src-tauri/macos/SideNotch', '--manifest-cache', 'none', 'dump-package'),
+            @('swift', 'package', '--package-path', 'src-tauri/macos/SideNotch', '--manifest-cache', 'local', 'dump-package'),
+            @('swift', 'package', '--package-path', 'src-tauri/macos/SideNotch', '--manifest-cache', 'local', 'dump-package'))
+          foreach ($probe in $probes) {
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            xcrun @probe > $null
+            "EXPERIMENT xcrun $($probe -join ' '): exit $LASTEXITCODE, $([math]::Round($clock.Elapsed.TotalSeconds, 1)) s"
+          }
+          exit 0
+
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
       # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached. With the cache
       # restored, it only confirms the checkout it finds.
