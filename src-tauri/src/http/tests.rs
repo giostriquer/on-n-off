@@ -113,6 +113,16 @@ fn a_refused_url_fails_at_once_and_no_server_can_take_it() {
     );
 }
 
+/// `ureq` reads `HTTP(S)_PROXY` and `ALL_PROXY` when the builder is made, and would send every
+/// loopback test server's request to that proxy. A builder given a proxy outright stands in for
+/// such an environment without touching the process-wide variables other tests read.
+#[test]
+fn test_requests_ignore_a_proxy_the_environment_names() {
+    let proxied =
+        ureq::Agent::config_builder().proxy(Some(ureq::Proxy::new("http://127.0.0.1:9").unwrap()));
+    assert!(agent_config(proxied).proxy().is_none());
+}
+
 #[test]
 fn post_json_sends_a_bearer_json_body_and_parses_the_reply() {
     let (url, request) = serve_once_capturing("200 OK", &[], r#"{"data":{"ok":true}}"#);

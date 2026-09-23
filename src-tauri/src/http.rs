@@ -50,15 +50,26 @@ impl std::fmt::Display for HttpError {
 type Reply = ureq::http::Response<ureq::Body>;
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(TIMEOUT))
-            .user_agent(concat!("on-n-off/", env!("CARGO_PKG_VERSION")))
-            // A non-success status stays a response instead of becoming an error: the rate-limit
-            // headers this module reads live on the 403 and 429 replies themselves.
-            .http_status_as_error(false)
-            .build(),
-    )
+    ureq::Agent::new_with_config(agent_config(ureq::Agent::config_builder()))
+}
+
+/// The settings every request shares, laid over `builder`, which already carries whatever proxy
+/// the environment names.
+fn agent_config(
+    builder: ureq::config::ConfigBuilder<ureq::typestate::AgentScope>,
+) -> ureq::config::Config {
+    let builder = builder
+        .timeout_global(Some(TIMEOUT))
+        .user_agent(concat!("on-n-off/", env!("CARGO_PKG_VERSION")))
+        // A non-success status stays a response instead of becoming an error: the rate-limit
+        // headers this module reads live on the 403 and 429 replies themselves.
+        .http_status_as_error(false);
+    // Tests only ever talk to loopback servers, and `ureq` has no loopback exception: a
+    // developer's `HTTP(S)_PROXY` or `ALL_PROXY` would send those requests to the proxy.
+    // The app itself keeps honouring the environment's proxy.
+    #[cfg(test)]
+    let builder = builder.proxy(None);
+    builder.build()
 }
 
 fn parse_body(mut response: Reply) -> Result<Value, HttpError> {
