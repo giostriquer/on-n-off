@@ -36,9 +36,10 @@ defaults:
     shell: pwsh
 
 jobs:
+  # Pinned like every other workflow's runner, and bumped deliberately (see ci.yml).
   prune:
     name: prune
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Delete superseded Rust cache generations

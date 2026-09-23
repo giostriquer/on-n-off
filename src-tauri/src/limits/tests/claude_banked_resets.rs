@@ -98,7 +98,7 @@ fn a_network_failure_on_the_reset_query_is_not_retried() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/usage", listener.local_addr().unwrap());
     let hang_up = std::thread::spawn(move || {
-        drop(listener.accept().unwrap());
+        drop(crate::http::accept_in_time(&listener));
         listener
     });
 

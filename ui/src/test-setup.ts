@@ -1,5 +1,5 @@
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterAll, afterEach, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import "./tokens.css";
 
@@ -39,3 +39,10 @@ for (const name of ["localStorage", "sessionStorage"] as const) {
 }
 
 afterEach(cleanup);
+
+// Test files that share a vmForks worker share its `process`, so an env stub left by a file's last
+// test would reach the next file in that worker; `unstubEnvs` cannot stop that, because it restores
+// only before the next test of the same file. Undo them when each file ends.
+afterAll(() => {
+  vi.unstubAllEnvs();
+});

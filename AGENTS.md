@@ -47,6 +47,9 @@ of the file — start there, not here.
 
 - `build-bundle.ps1` — builds, validates and stages one installer format (`nsis`, `dmg`).
 - `read-rust-toolchain.ps1`, `prune-rust-toolchains.ps1` — see "Toolchain pinning" below.
+- `resolve-swift-packages.ps1` — resolves a Swift package's remote dependencies, with retries,
+  before a macOS job's first cargo step.
+- `workflows.test.mjs` — pins the choices the workflows make on purpose, such as runner images.
 - `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
 - `verify-release.mjs` — checks a drafted release's assets, checksums, updater signatures, feed
   and attestations against the previous release before it is published. Its pure checks live in
@@ -125,6 +128,8 @@ user data.
   terminal's `PATH`.
 - Child processes: `process.rs`. Drain stdout and stderr concurrently from the start, or a full
   pipe deadlocks.
+- File locks: `FileLease` (`file_lease.rs`). It unlocks when dropped; closing a locked `File`
+  leaves the lock with any child another thread spawned until that child execs.
 - Fake CLIs in tests: `cli_stub.rs`.
 - A read shared by more than one surface: `read_revision.rs`. Announce a replacement, never a
   read, and answer an announcement unforced — either one broken makes it a loop
@@ -170,7 +175,7 @@ user data.
   `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
   `http::{serve_once, serve_once_capturing, refused_url, head_header}`, `plugin_meta::with_fetch_text`,
-  `usage::pricing::with_test_fetch`, `usage::scan_cache` counters, `github/fixtures.rs`,
+  `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::scan_cache` counters, `github/fixtures.rs`,
   `limits/claude_desktop::history_path_for_home`. Single-consumer helpers stay in that module's
   own tests file; adapter test constructors stay in the adapter files, because `item_install`
   tests use them across domains.
@@ -184,7 +189,7 @@ Run from the repository root, in PowerShell on Windows or bash/zsh on macOS.
 bun install
 bun run test
 bun run check
-bun test scripts/                          # release verifier
+bun test scripts/                          # release verifier, workflow contracts
 bun run build
 bun run tauri dev
 
@@ -211,6 +216,7 @@ PowerShell 7 on either platform; if `pwsh` is not installed locally, rely on CI:
 ./scripts/new-update-feed.test.ps1
 ./scripts/read-rust-toolchain.test.ps1
 ./scripts/prune-rust-toolchains.test.ps1
+./scripts/resolve-swift-packages.test.ps1
 ```
 
 ## Parallel worktree sessions

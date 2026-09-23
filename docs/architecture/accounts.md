@@ -86,7 +86,7 @@ without starting a CLI or writing auth.json.
 An in-process reservation and a cross-process shared/exclusive activity lease exclude provider
 reads from account activation. A separate lease serializes vault access. Existing vault keys are unlocked before acquiring the shared storage lease, so an OS prompt does
 not block another provider's file transaction. Initial key/vault creation remains serialized.
-Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Completed saves release their leases before announcing account changes. Native Claude locks cover
+Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Completed saves release their leases before announcing account changes. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks cover
 the outgoing reread, durable journal and publication. They are released for verification/renewal,
 while the exclusive activity lease remains held through completion or recovery. The native locks
 have a heartbeat while Keychain access is pending. Claude verification compares the authenticated

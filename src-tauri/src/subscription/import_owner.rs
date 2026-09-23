@@ -1,5 +1,6 @@
 //! Owns native imports until reaped and cleaned. Shared leases protect crash recovery
 //! while either the app or its helper still uses a private snapshot directory.
+use crate::file_lease::FileLease;
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -91,7 +92,7 @@ pub(super) fn root() -> std::io::Result<PathBuf> {
 }
 pub(super) struct Scratch {
     directory: tempfile::TempDir,
-    _lease: File,
+    _lease: FileLease,
 }
 impl Scratch {
     pub(super) fn path(&self) -> &Path {
@@ -101,15 +102,14 @@ impl Scratch {
         self.directory.close()
     }
 }
-fn root_lock(root: &Path) -> std::io::Result<File> {
+fn root_lock(root: &Path) -> std::io::Result<FileLease> {
     let file = File::options()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .open(root.join("recovery.lock"))?;
-    file.lock()?;
-    Ok(file)
+    FileLease::acquire(file, File::lock)
 }
 pub(super) fn private_scratch(root: &Path) -> std::io::Result<Scratch> {
     // Serialize creation with recovery until the new directory holds its lease.
@@ -117,8 +117,10 @@ pub(super) fn private_scratch(root: &Path) -> std::io::Result<Scratch> {
     let directory = tempfile::Builder::new()
         .prefix("import-")
         .tempdir_in(root)?;
-    let lease = File::create(directory.path().join("lease"))?;
-    lease.lock_shared()?;
+    let lease = FileLease::acquire(
+        File::create(directory.path().join("lease"))?,
+        File::lock_shared,
+    )?;
     Ok(Scratch {
         directory,
         _lease: lease,
@@ -142,7 +144,7 @@ pub(super) fn recover(root: &Path) {
         };
         // Both parent and helper hold a shared lease. Never remove a live import,
         // including one from another app instance or a helper whose parent crashed.
-        if file.try_lock().is_ok() {
+        if let Ok(_lease) = FileLease::acquire(file, File::try_lock) {
             let _ = std::fs::remove_dir_all(entry.path());
         }
     }

@@ -207,7 +207,7 @@ fn model_priced_matches_hand_calc() {
 
 #[test]
 fn unavailable_when_no_cache_and_fetch_fails() {
-    let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = lock_rates_state();
     let home = scratch_dir("usage-rates-miss");
     let snap = with_test_fetch(None, || ensure_rates(&home, 1_000_000, false));
     assert_eq!(snap.status, PricingStatus::Unavailable);
@@ -217,7 +217,7 @@ fn unavailable_when_no_cache_and_fetch_fails() {
 
 #[test]
 fn uses_disk_cache_within_ttl() {
-    let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = lock_rates_state();
     let home = scratch_dir("usage-rates-cache");
     let path = rates_cache_path(&home);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -235,7 +235,7 @@ fn uses_disk_cache_within_ttl() {
 
 #[test]
 fn fresh_fetch_writes_disk() {
-    let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = lock_rates_state();
     let home = scratch_dir("usage-rates-fresh");
     let snap = with_test_fetch(Some(sample_doc()), || ensure_rates(&home, 5_000_000, false));
     assert_eq!(snap.status, PricingStatus::Fresh);
@@ -243,18 +243,22 @@ fn fresh_fetch_writes_disk() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Every test that drives `ensure_rates` shares two pieces of process-wide state: the
-/// early-refresh flag a successful fetch clears, and the single-slot parsed-table memo, which the
-/// next test's scratch home overwrites. Serialise them, or the memo test reads another test's
-/// slot and sees a re-parse.
-fn flag_lock() -> &'static Mutex<()> {
-    static LOCK: Mutex<()> = Mutex::new(());
-    &LOCK
+/// A test that panics while it holds the rates-state lock fails alone: the tests after it — pricing
+/// and usage summary tests alike — still get the lock, rather than each failing with a
+/// `PoisonError`.
+#[test]
+fn a_test_that_panics_holding_the_rates_state_fails_alone() {
+    let failing = std::thread::spawn(|| {
+        let _serial = lock_rates_state();
+        panic!("deliberate: a test failing while it holds the rates state");
+    });
+    assert!(failing.join().is_err());
+    drop(lock_rates_state());
 }
 
 #[test]
 fn an_unknown_model_keeps_asking_for_an_early_refresh_until_a_fetch_succeeds() {
-    let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = lock_rates_state();
     let home = crate::paths::scratch_dir("rates-refresh");
     let fetched_at = 1_000_000;
     let stale = serde_json::json!({ "fetchedAtMs": fetched_at, "document": sample_doc() });
@@ -321,7 +325,7 @@ fn an_unknown_model_keeps_asking_for_an_early_refresh_until_a_fetch_succeeds() {
 
 #[test]
 fn the_disk_table_is_parsed_once_per_file_version() {
-    let _serial = flag_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = lock_rates_state();
     let home = crate::paths::scratch_dir("rates-memo");
     std::fs::create_dir_all(home.join(".on-n-off")).unwrap();
     let path = rates_cache_path(&home);

@@ -96,7 +96,7 @@ fn children_get_the_cli_search_path() {
         );
     }
     // The well-known tier (not just the process PATH) must reach the child. Compared by
-    // suffix because other tests re-point ON_N_OFF_HOME while this process runs.
+    // suffix because the home they sit under may be a disposable ON_N_OFF_HOME.
     assert!(
         search_path
             .iter()

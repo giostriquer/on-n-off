@@ -11,6 +11,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::{
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -112,19 +113,36 @@ impl Target {
         }
     }
 }
+/// The environment [`NativeStore::resolve`] reads: the process's own. A test binary sees only a
+/// disposable `ON_N_OFF_HOME` instead, so no test can follow a developer's `CLAUDE_CONFIG_DIR` or
+/// `CODEX_HOME` to a real home, or choose the login Keychain; a test that needs another
+/// environment hands it to `resolve_from`.
+#[cfg(not(test))]
+fn process_env(name: &str) -> Option<OsString> {
+    std::env::var_os(name)
+}
+#[cfg(test)]
+fn process_env(name: &str) -> Option<OsString> {
+    (name == "ON_N_OFF_HOME").then(|| OsString::from("disposable"))
+}
+
 impl NativeStore {
     pub fn resolve(provider: AgentId, home: &Path) -> Result<Self, String> {
-        let (env, folder) = match provider {
+        Self::resolve_from(provider, home, &process_env)
+    }
+    fn resolve_from(
+        provider: AgentId,
+        home: &Path,
+        lookup: &dyn Fn(&str) -> Option<OsString>,
+    ) -> Result<Self, String> {
+        let (variable, folder) = match provider {
             AgentId::Codex => ("CODEX_HOME", ".codex"),
             AgentId::Claude => ("CLAUDE_CONFIG_DIR", ".claude"),
             _ => return Err("Profiles are unsupported for this provider.".into()),
         };
         // ON_N_OFF_HOME always isolates tests and development from real native homes.
-        let override_home = if std::env::var_os("ON_N_OFF_HOME").is_none() {
-            std::env::var_os(env)
-        } else {
-            None
-        };
+        let disposable = lookup("ON_N_OFF_HOME").is_some();
+        let override_home = if disposable { None } else { lookup(variable) };
         let custom = override_home.is_some();
         let config_home = override_home
             .map(PathBuf::from)
@@ -149,7 +167,7 @@ impl NativeStore {
             config_home,
             config_file,
             custom,
-            use_keychain: std::env::var_os("ON_N_OFF_HOME").is_none(),
+            use_keychain: !disposable,
         })
     }
     pub fn isolated(provider: AgentId, home: &Path) -> Result<Self, String> {
