@@ -89,28 +89,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # EXPERIMENT W4: bun's cache on the workspace drive, so it can hardlink into node_modules.
+      # bun hardlinks packages from its install cache into node_modules, which only works on one
+      # drive. Its default cache is on C: and the workspace on D:, so it copied every file instead:
+      # 16-20 s here against 2-3 s on macOS. RUNNER_TEMP is on the workspace drive.
       - name: Keep the bun cache on the workspace drive
         if: runner.os == 'Windows'
         run: |
           "BUN_INSTALL_CACHE_DIR=$(Join-Path $env:RUNNER_TEMP 'bun-install-cache')" >> $env:GITHUB_ENV
-
-      # Defender scans every object file cargo writes. Excluding the build directories is worth
-      # measurable minutes on the Rust steps and costs nothing when it fails, so it never gates
-      # the job. Runner-only: never run this on a development machine.
-      - name: Exclude build directories from Defender scanning
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: |
-          # EXPERIMENT W4 diagnostics
-          Get-MpComputerStatus | Format-List AMRunningMode, AntivirusEnabled, RealTimeProtectionEnabled, OnAccessProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled
-          Add-MpPreference -ExclusionPath `
-            $env:GITHUB_WORKSPACE, `
-            $env:RUNNER_TEMP, `
-            (Join-Path $env:USERPROFILE '.bun'), `
-            (Join-Path $env:USERPROFILE '.cargo'), `
-            (Join-Path $env:USERPROFILE '.rustup')
-          (Get-MpPreference).ExclusionPath
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -159,42 +144,33 @@ jobs:
           shared-key: verify-${{ matrix.platform }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # EXPERIMENT W5 step 1: does unpacking the registry sources account for clippy's slow start?
-      - name: Fetch Rust dependencies
+      # rust-cache deletes the registry sources it restored before it saves, so the first cargo
+      # command of every run unpacks them again: about 350 crates, and 17 s on Windows before
+      # clippy compiled anything. This unpacks them in the background, behind the frontend steps
+      # below. Cargo's package-cache lock makes clippy wait if it is still running, and clippy
+      # unpacks whatever it left undone, so a failure here costs time and never a verdict.
+      # "Finish fetching Rust dependencies" waits for it and prints its output.
+      - name: Start fetching Rust dependencies
         if: runner.os == 'Windows'
         run: |
-          $src = Join-Path $env:CARGO_HOME 'registry/src'
-          function Measure-Src {
-            if (-not (Test-Path -LiteralPath $src)) { return '0 0' }
-            $crates = (Get-ChildItem -LiteralPath $src -Directory | ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Directory }).Count
-            $files = (Get-ChildItem -LiteralPath $src -Recurse -File -Force).Count
-            "$crates $files"
-          }
-          $before = (Measure-Src) -split ' '
-          "W45 src_crates_before=$($before[0])"
-          "W45 src_files_before=$($before[1])"
-          "W45 bun_cache=$(bun pm cache)"
+          $fetch = Join-Path $env:RUNNER_TEMP 'cargo-fetch'
+          New-Item -ItemType Directory -Force -Path $fetch | Out-Null
           $hostTriple = (rustc -vV | Select-String '^host: (.+)$').Matches[0].Groups[1].Value
-          "host $hostTriple"
+          Set-Content -LiteralPath (Join-Path $fetch 'fetch.ps1') -Value @'
+          param([string] $Target, [string] $Directory)
           $clock = [Diagnostics.Stopwatch]::StartNew()
-          cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target $hostTriple
-          if ($LASTEXITCODE -ne 0) { throw "cargo fetch failed with exit code $LASTEXITCODE." }
-          "W45 fetch_s=$($clock.Elapsed.TotalSeconds)"
-          $after = (Measure-Src) -split ' '
-          "W45 src_crates_after=$($after[0])"
-          "W45 src_files_after=$($after[1])"
+          cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target $Target *> (Join-Path $Directory 'output.log')
+          $code = $LASTEXITCODE ?? 'none'
+          Set-Content -LiteralPath (Join-Path $Directory 'result.tmp') -Value "$code $([math]::Round($clock.Elapsed.TotalSeconds, 1))"
+          Move-Item -LiteralPath (Join-Path $Directory 'result.tmp') -Destination (Join-Path $Directory 'result')
+          '@
+          $process = Start-Process pwsh -PassThru -WindowStyle Hidden -WorkingDirectory $env:GITHUB_WORKSPACE `
+            -ArgumentList '-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $fetch 'fetch.ps1'), $hostTriple, $fetch
+          Set-Content -LiteralPath (Join-Path $fetch 'pid') -Value $process.Id
+          "Started cargo fetch for $hostTriple in the background (process $($process.Id))."
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
-
-      # EXPERIMENT W4 diagnostics: did bun hardlink from its cache?
-      - name: Diagnose bun install
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: |
-          fsutil hardlink list node_modules/react/package.json
-          "W45 bun_cache_files=$((Get-ChildItem -LiteralPath $env:BUN_INSTALL_CACHE_DIR -Recurse -File -Force).Count)"
-          "W45 node_modules_files=$((Get-ChildItem -LiteralPath node_modules -Recurse -File -Force).Count)"
 
       - name: Test release version contract
         run: ./scripts/check-release-version.test.ps1
@@ -216,6 +192,29 @@ jobs:
 
       - name: Build frontend
         run: bun run build
+
+      # Waits for the background fetch so its output lands here, not after the job, and so a hung
+      # fetch cannot hold cargo's lock through clippy. Its outcome is a warning, never a failure:
+      # clippy fetches anything still missing itself and fails on anything real.
+      - name: Finish fetching Rust dependencies
+        if: runner.os == 'Windows'
+        run: |
+          $fetch = Join-Path $env:RUNNER_TEMP 'cargo-fetch'
+          $result = Join-Path $fetch 'result'
+          $processId = Get-Content -LiteralPath (Join-Path $fetch 'pid')
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          while (-not (Test-Path -LiteralPath $result)) {
+            if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) { break }
+            if ($clock.Elapsed.TotalMinutes -ge 10) { taskkill /T /F /PID $processId; break }
+            Start-Sleep -Milliseconds 200
+          }
+          Get-Content -LiteralPath (Join-Path $fetch 'output.log') -ErrorAction SilentlyContinue
+          $code, $seconds = (Test-Path -LiteralPath $result) ? ((Get-Content -LiteralPath $result) -split ' ') : @('none', '?')
+          "Waited $([math]::Round($clock.Elapsed.TotalSeconds, 1)) s for cargo fetch, which ran for $seconds s."
+          if ($code -ne '0') {
+            "::warning title=Background cargo fetch::cargo fetch did not succeed (exit code: $code); clippy fetches what it needs itself."
+          }
+          exit 0
 
       - name: Lint Rust
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
