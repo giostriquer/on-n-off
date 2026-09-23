@@ -149,5 +149,10 @@ test("the Windows verify leg unpacks Rust dependencies in the background before 
   assert.ok(start.index < step(verify, "Install frontend dependencies").index, "the fetch overlaps the frontend steps");
   assert.ok(finish.index > step(verify, "Build frontend").index, "nothing is left to overlap after the frontend build");
   assert.ok(finish.index < firstBuild(verify), "the fetch finishes before the first build");
+  assert.match(start.run, /finally \{/, "the fetch reports its result however its script ends");
+  assert.match(finish.run, /WaitForExit\(\d+\)/, "the wait is bounded");
+  for (const candidate of [start, finish]) {
+    assert.match(candidate.run, /StartTime\.Ticks/, `${candidate.name}: a reused process id is never waited on or ended`);
+  }
   assert.match(finish.run, /exit 0\s*$/, "a failed fetch never fails the job");
 });

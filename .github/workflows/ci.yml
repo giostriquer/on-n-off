@@ -160,14 +160,19 @@ jobs:
           Set-Content -LiteralPath (Join-Path $fetch 'fetch.ps1') -Value @'
           param([string] $Directory)
           $clock = [Diagnostics.Stopwatch]::StartNew()
-          cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target host-tuple *> (Join-Path $Directory 'output.log')
-          $code = $LASTEXITCODE ?? 'none'
-          Set-Content -LiteralPath (Join-Path $Directory 'result.tmp') -Value "$code $([math]::Round($clock.Elapsed.TotalSeconds, 1))"
-          Move-Item -LiteralPath (Join-Path $Directory 'result.tmp') -Destination (Join-Path $Directory 'result')
+          $code = 'none'
+          try {
+            cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target host-tuple *> (Join-Path $Directory 'output.log')
+            $code = $LASTEXITCODE ?? 'none'
+          } finally {
+            Set-Content -LiteralPath (Join-Path $Directory 'result.tmp') -Value "$code $([math]::Round($clock.Elapsed.TotalSeconds, 1))"
+            Move-Item -LiteralPath (Join-Path $Directory 'result.tmp') -Destination (Join-Path $Directory 'result')
+          }
           '@
           $process = Start-Process pwsh -PassThru -WindowStyle Hidden -WorkingDirectory $env:GITHUB_WORKSPACE `
             -ArgumentList '-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $fetch 'fetch.ps1'), $fetch
-          Set-Content -LiteralPath (Join-Path $fetch 'pid') -Value $process.Id
+          # The start time tells this process apart from a later one that is given the same id.
+          Set-Content -LiteralPath (Join-Path $fetch 'pid') -Value "$($process.Id) $($process.StartTime.Ticks)"
           "Started cargo fetch in the background (process $($process.Id))."
 
       - name: Install frontend dependencies
@@ -202,13 +207,12 @@ jobs:
         run: |
           $fetch = Join-Path $env:RUNNER_TEMP 'cargo-fetch'
           $result = Join-Path $fetch 'result'
-          $processId = Get-Content -LiteralPath (Join-Path $fetch 'pid')
+          $processId, $started = (Get-Content -LiteralPath (Join-Path $fetch 'pid')) -split ' '
+          # A process with this id but another start time is not the fetch, which has ended.
+          $process = Get-Process -Id $processId -ErrorAction SilentlyContinue |
+            Where-Object { try { $_.StartTime.Ticks -eq $started } catch { $false } }
           $clock = [Diagnostics.Stopwatch]::StartNew()
-          while (-not (Test-Path -LiteralPath $result)) {
-            if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) { break }
-            if ($clock.Elapsed.TotalMinutes -ge 10) { taskkill /T /F /PID $processId; break }
-            Start-Sleep -Milliseconds 200
-          }
+          if ($process -and -not $process.WaitForExit(600000)) { taskkill /T /F /PID $processId }
           Get-Content -LiteralPath (Join-Path $fetch 'output.log') -ErrorAction SilentlyContinue
           $code, $seconds = (Test-Path -LiteralPath $result) ? ((Get-Content -LiteralPath $result) -split ' ') : @('none', '?')
           "Waited $([math]::Round($clock.Elapsed.TotalSeconds, 1)) s for cargo fetch, which ran for $seconds s."
