@@ -697,12 +697,6 @@ fn invalid_window_errors() {
 
 #[test]
 fn hourly_windows_need_exact_bounds_at_most_a_day_apart() {
-    let hourly = |since: &str, until: &str| UsageSummaryInput {
-        resolution: Some("hour".into()),
-        since_time: (!since.is_empty()).then(|| since.into()),
-        until_time: (!until.is_empty()).then(|| until.into()),
-        ..day_input("2026-08-07", "2026-08-08", false)
-    };
     let refusals = [
         ("", "2026-08-07T01:00:00Z", "valid sinceTime and untilTime"),
         ("2026-08-07T00:00:00Z", "", "valid sinceTime and untilTime"),
@@ -723,13 +717,36 @@ fn hourly_windows_need_exact_bounds_at_most_a_day_apart() {
         ),
     ];
     for (since, until, reason) in refusals {
-        let err = refused_before_any_home(hourly(since, until));
+        let err = refused_before_any_home(hourly_input(since, until));
         assert!(
             err.message.contains(reason),
             "{since}..{until}: {}",
             err.message
         );
     }
+}
+
+/// The bound is inclusive: exactly 24 hours is the only hourly window the Usage screen sends
+/// (`ui/src/lib/usageFormat.ts`), so refusing it would blank that view.
+#[test]
+fn an_hourly_window_of_exactly_a_day_is_read_into_hour_buckets() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-hourly-day");
+    write_claude_transcript(&home);
+
+    let summary = read_offline(
+        &home,
+        hourly_input("2026-08-07T00:00:00Z", "2026-08-08T00:00:00Z"),
+    );
+    assert_eq!(output_tokens(&summary), 20);
+    let hours: Vec<_> = summary
+        .buckets
+        .iter()
+        .map(|bucket| bucket.hour_start.as_deref())
+        .collect();
+    assert_eq!(hours, [Some("2026-08-07T04:00:00.000Z")]);
+
+    let _ = std::fs::remove_dir_all(home);
 }
 
 /// Claim-check harness: time real-home common windows and reusable Full time.

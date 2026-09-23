@@ -89,6 +89,16 @@ pub(super) fn day_input(since_day: &str, until_day: &str, force: bool) -> UsageS
     }
 }
 
+/// An hourly read of `since..until` on 2026-08-07; an empty bound is left out.
+pub(super) fn hourly_input(since: &str, until: &str) -> UsageSummaryInput {
+    UsageSummaryInput {
+        resolution: Some("hour".into()),
+        since_time: (!since.is_empty()).then(|| since.into()),
+        until_time: (!until.is_empty()).then(|| until.into()),
+        ..day_input("2026-08-07", "2026-08-08", false)
+    }
+}
+
 pub(super) fn write_single_claude_record(
     home: &Path,
     name: &str,
