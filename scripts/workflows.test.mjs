@@ -186,12 +186,11 @@ test("only pushes to main save the Swift build cache, and a release never does",
     const restore = step(job, "Restore Swift build cache");
     const save = step(job, "Save Swift build cache");
     assert.match(save.uses, /^actions\/cache\/save@[0-9a-f]{40}$/, name);
-    // EXPERIMENT (reverted before merge): this pull request's CI also saves, and a probe follows the save.
-    assert.match(save.if, /^runner\.os == 'macOS' && \(?github\.ref == 'refs\/heads\/main'( \|\| github\.head_ref == 'perf\/macos-swift-cache'\))? && steps\.swift-cache\.outputs\.cache-hit != 'true'$/, name);
+    assert.equal(save.if, "runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'", name);
     assert.equal(restore.id, "swift-cache", name);
     assert.equal(save.with.key, "${{ steps.swift-cache.outputs.cache-primary-key }}", name);
     assert.deepEqual(lines(save.with.path), swiftBuildDirectories, name);
-    assert.ok(save.index >= job.steps.length - 2, `${name}: saved after every step that builds Swift`);
+    assert.equal(save.index, job.steps.length - 1, `${name}: saved after every step that builds Swift`);
   }
   for (const candidate of load("release").jobs.build.steps) {
     assert.doesNotMatch(candidate.uses ?? "", /^actions\/cache(\/save)?@/, `release: ${candidate.name}`);

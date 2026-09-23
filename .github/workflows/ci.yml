@@ -168,26 +168,6 @@ jobs:
         if: runner.os == 'macOS'
         run: bun scripts/stamp-source-times.mjs src-tauri/macos
 
-      # EXPERIMENT (reverted before merge): splits SwiftPM's start-up on a fresh runner into
-      # launching the tools and compiling a manifest.
-      - name: Time SwiftPM start-up (experiment)
-        if: runner.os == 'macOS'
-        run: |
-          $probes = @(
-            @('swift', '--version'),
-            @('swift', 'package', '--version'),
-            @('swift', 'package', '--package-path', 'src-tauri/macos/BrowserBilling', '--manifest-cache', 'none', 'dump-package'),
-            @('swift', 'package', '--package-path', 'src-tauri/macos/BrowserBilling', '--manifest-cache', 'none', 'dump-package'),
-            @('swift', 'package', '--package-path', 'src-tauri/macos/SideNotch', '--manifest-cache', 'none', 'dump-package'),
-            @('swift', 'package', '--package-path', 'src-tauri/macos/SideNotch', '--manifest-cache', 'local', 'dump-package'),
-            @('swift', 'package', '--package-path', 'src-tauri/macos/SideNotch', '--manifest-cache', 'local', 'dump-package'))
-          foreach ($probe in $probes) {
-            $clock = [Diagnostics.Stopwatch]::StartNew()
-            xcrun @probe > $null
-            "EXPERIMENT xcrun $($probe -join ' '): exit $LASTEXITCODE, $([math]::Round($clock.Elapsed.TotalSeconds, 1)) s"
-          }
-          exit 0
-
       # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
       # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached. With the cache
       # restored, it only confirms the checkout it finds.
@@ -284,29 +264,14 @@ jobs:
           }
           exit 0
 
-      # EXPERIMENT (reverted before merge): runs the build scripts' two swift builds on their own,
-      # with their output, so the Swift share of Lint Rust and what a restored cache rebuilds show.
-      - name: Time Swift helper builds (experiment)
-        if: runner.os == 'macOS'
-        run: |
-          $builds = @(
-            @('--package-path', 'src-tauri/macos/SideNotch', '--configuration', 'debug', '--arch', 'arm64', '--product', 'on-n-off-notch', '-Xswiftc', '-warnings-as-errors'),
-            @('--configuration', 'debug', '--arch', 'arm64', '--package-path', 'src-tauri/macos/BrowserBilling', '--product', 'on-n-off-billing'))
-          foreach ($build in $builds) {
-            $clock = [Diagnostics.Stopwatch]::StartNew()
-            xcrun swift build @build
-            if ($LASTEXITCODE -ne 0) { throw "swift build failed" }
-            "EXPERIMENT swift build $($build -join ' '): $([math]::Round($clock.Elapsed.TotalSeconds, 1)) s"
-          }
-
       - name: Lint Rust
-        run: cargo clippy -vv --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
       # This step takes one to two minutes warm and a few more cold. A test blocked on a request
       # that never comes should fail here, not at the job's 45-minute limit.
       - name: Test Rust
         timeout-minutes: 15
-        run: cargo test -vv --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 
       - name: Build Windows application
         if: runner.os == 'Windows'
@@ -327,40 +292,10 @@ jobs:
       # Last, so the entry holds what the native checks built as well. A job that failed saves
       # nothing, and an exact hit has nothing new to save.
       - name: Save Swift build cache
-        if: runner.os == 'macOS' && (github.ref == 'refs/heads/main' || github.head_ref == 'perf/macos-swift-cache') && steps.swift-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             src-tauri/macos/SideNotch/.build
             src-tauri/macos/BrowserBilling/.build
           key: ${{ steps.swift-cache.outputs.cache-primary-key }}
-
-      # EXPERIMENT (reverted before merge): after the save, changes a source, adds one, stamps them
-      # and rebuilds on the state this run restored, then fails if a product lacks either marker.
-      - name: Probe a source change on the restored build (experiment)
-        if: runner.os == 'macOS'
-        run: |
-          $marker = "CACHE-PROBE-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          Add-Content -LiteralPath src-tauri/macos/SideNotch/Sources/NotchCore/Meter.swift -Value "`npublic let cacheProbeChanged = `"$marker-changed`""
-          Set-Content -LiteralPath src-tauri/macos/SideNotch/Sources/NotchCore/CacheProbe.swift -Value "public let cacheProbeAdded = `"$marker-added`""
-          Add-Content -LiteralPath src-tauri/macos/BrowserBilling/Sources/BillingCore/BillingResources.swift -Value "`npublic let cacheProbeChanged = `"$marker-billing`""
-          git add src-tauri/macos/SideNotch/Sources/NotchCore/CacheProbe.swift
-          bun scripts/stamp-source-times.mjs src-tauri/macos
-          $notch = @('--package-path', 'src-tauri/macos/SideNotch', '--configuration', 'debug', '--arch', 'arm64')
-          $billing = @('--package-path', 'src-tauri/macos/BrowserBilling', '--configuration', 'debug', '--arch', 'arm64')
-          $notchBin = (xcrun swift build @notch --show-bin-path | Select-Object -Last 1).Trim()
-          $billingBin = (xcrun swift build @billing --show-bin-path | Select-Object -Last 1).Trim()
-          Get-Item src-tauri/macos/SideNotch/Sources/NotchCore/Meter.swift, src-tauri/macos/BrowserBilling/Sources/BillingCore/BillingResources.swift, (Join-Path $notchBin 'on-n-off-notch'), (Join-Path $billingBin 'on-n-off-billing') |
-            ForEach-Object { "$($_.LastWriteTimeUtc.ToString('u'))  $($_.FullName)" }
-          xcrun swift build @notch --product on-n-off-notch -Xswiftc -warnings-as-errors
-          if ($LASTEXITCODE -ne 0) { throw "notch build failed" }
-          xcrun swift build @billing --product on-n-off-billing
-          if ($LASTEXITCODE -ne 0) { throw "billing build failed" }
-          foreach ($check in @(
-              @((Join-Path $notchBin 'on-n-off-notch'), "$marker-changed"),
-              @((Join-Path $notchBin 'on-n-off-notch'), "$marker-added"),
-              @((Join-Path $billingBin 'on-n-off-billing'), "$marker-billing"))) {
-            grep -a -q -F $check[1] $check[0]
-            if ($LASTEXITCODE -ne 0) { throw "STALE: $($check[0]) lacks $($check[1])" }
-            "EXPERIMENT fresh: $($check[0]) holds $($check[1])"
-          }
