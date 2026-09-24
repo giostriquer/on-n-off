@@ -600,3 +600,26 @@ fn a_summary_counted_without_the_history_is_not_stored() {
     assert_eq!(output_tokens(&with), 320);
     let _ = std::fs::remove_dir_all(&home);
 }
+
+/// Something at the history's path that does not read as a file (here a directory, which fails
+/// to read on every platform, as a file another process holds does on Windows) is unreadable:
+/// never folded over or written, and reads count the transcripts around it.
+#[test]
+fn a_history_path_that_cannot_be_read_is_left_alone_on_every_platform() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-not-a-file");
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "b.jsonl", "2026-08-16T04:05:13.944Z", 300);
+    let history = history_path_for(&home);
+    std::fs::create_dir_all(&history).unwrap();
+
+    fold(&home);
+    let status = history_status_in(&home);
+    let summary = read_offline(&home, august_input(false));
+
+    assert_eq!(status.state, UsageHistoryState::Unreadable);
+    assert!(history.is_dir());
+    assert!(!home.join(".on-n-off/usage-history.json.bak").exists());
+    assert_eq!(output_tokens(&summary), 320);
+    let _ = std::fs::remove_dir_all(&home);
+}
