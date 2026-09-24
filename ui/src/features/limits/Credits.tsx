@@ -1,12 +1,8 @@
-import { formatShortDate, formatUsedPercent, hasElapsed, usageTextColor } from "$lib/limitsFormat";
 import type { LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
-import { formatAgo } from "$lib/timeFormat";
-import { workspaceSharePercent } from "./limitPresentation";
+import { presentWorkspaceShare } from "./limitPresentation";
 import { MeterRow } from "./Meter";
 import { SummaryRow } from "./SummaryRow";
-
-const AMOUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
 /**
  * The account's credits as rows under the windows, so they never crowd the header's identity: the
@@ -26,29 +22,8 @@ export function CreditsRows({ entry, now }: { entry: Pick<ProviderLimits, "provi
   );
 }
 
-/**
- * The share as a meter row, like a window's: the bar and figure say how much of it is used, the note
- * what is left and when it resets. A share whose reset has passed has renewed, and reads as a window
- * whose reset has passed does: nothing used, and when it reset.
- */
+/** The share as a meter row, like a window's (`presentWorkspaceShare`). */
 function WorkspaceShareRow({ share, provider, now }: { share: LimitsWorkspaceCredits; provider: AgentId; now: number }) {
-  const renewed = hasElapsed(share.resetsAt, now);
-  const percent = workspaceSharePercent(share, now);
-  const limit = Number(share.limit);
-  const left = renewed ? limit : Math.max(limit - Number(share.used), 0);
-  const amounts = !renewed && share.reached
-    ? `all ${AMOUNT.format(limit)} used`
-    : `${AMOUNT.format(left)} of ${AMOUNT.format(limit)} left`;
-  const resetDate = formatShortDate(share.resetsAt);
-  const reset = renewed ? `reset ${formatAgo(share.resetsAt, now)} · ${resetDate}` : resetDate ? `resets ${resetDate}` : undefined;
-  return (
-    <MeterRow
-      label="Workspace credits"
-      note={[amounts, reset].filter(Boolean).join(" · ")}
-      percent={percent}
-      text={formatUsedPercent(percent)}
-      color={usageTextColor(percent)}
-      provider={provider}
-    />
-  );
+  const { percent, text, color, note } = presentWorkspaceShare(share, now);
+  return <MeterRow label="Workspace credits" note={note} percent={percent} text={text} color={color} provider={provider} />;
 }

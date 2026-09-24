@@ -233,6 +233,7 @@ fn a_paused_refresh_keeps_the_remembered_workspace_credit_share() {
         Some(crate::dto::LimitsWorkspaceCreditsDto {
             limit: "25000".to_string(),
             used: used.to_string(),
+            used_percent: 32.0,
             resets_at: None,
             reached: false,
         })

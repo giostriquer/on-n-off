@@ -266,11 +266,13 @@ fn meter_ramp_only_ever_moves_toward_the_trip_red() {
             + square(color[2], TRIP_RED[2]))
         .sqrt()
     }
-    // Claude, Fable, Codex, Cursor and Antigravity: every accent the meter can be handed.
-    let accents: [Color; 5] = [
+    // Claude, Fable, Codex, Codex's workspace credits, Cursor and Antigravity: every accent the
+    // meter can be handed, the same list `Meter.swift`'s check walks.
+    let accents: [Color; 6] = [
         [217, 119, 87, 255],
         [204, 98, 64, 255],
         [238, 240, 242, 255],
+        [168, 176, 186, 255],
         [122, 162, 255, 255],
         [140, 147, 157, 255],
     ];
@@ -317,16 +319,12 @@ fn meter_ramp_only_ever_moves_toward_the_trip_red() {
     assert_eq!(meter_color(None, accents[0]), UNREADABLE_INK);
 }
 
-fn share(
-    limit: &str,
-    used: &str,
-    reached: bool,
-    resets_at: Option<&str>,
-) -> LimitsWorkspaceCreditsDto {
+fn share(limit: &str, used: &str, used_percent: f64, reached: bool) -> LimitsWorkspaceCreditsDto {
     LimitsWorkspaceCreditsDto {
         limit: limit.into(),
         used: used.into(),
-        resets_at: resets_at.map(str::to_owned),
+        used_percent,
+        resets_at: Some("2026-10-01T12:00:00Z".into()),
         reached,
     }
 }
@@ -335,85 +333,97 @@ fn at(instant: &str) -> chrono::DateTime<chrono::Utc> {
     instant.parse().unwrap()
 }
 
-#[test]
-fn a_workspace_share_is_as_used_as_its_amounts_say() {
-    assert_eq!(
-        workspace_share_percent(&share("25000", "8000", false, None)),
-        32.0
-    );
-    assert_eq!(
-        workspace_share_percent(&share("25000", "0", false, None)),
-        0.0
-    );
-}
-
-#[test]
-fn a_reached_or_empty_share_is_all_used_and_never_more() {
-    assert_eq!(
-        workspace_share_percent(&share("25000", "9000", true, None)),
-        100.0
-    );
-    assert_eq!(
-        workspace_share_percent(&share("0", "0", false, None)),
-        100.0
-    );
-    assert_eq!(
-        workspace_share_percent(&share("100", "120", false, None)),
-        100.0
-    );
-}
-
 /// The Windows painter draws the share with the window machinery, so a share past its reset reads
-/// as renewed there exactly as a window does.
+/// as renewed there exactly as a window does. The meter is the reader's figure, never recomputed.
 #[test]
-fn a_workspace_share_draws_as_a_window_that_keeps_its_reset() {
-    let window = workspace_share_window(&share(
-        "25000",
-        "8000",
-        false,
-        Some("2026-10-01T12:00:00+00:00"),
-    ));
+fn a_workspace_share_draws_as_a_window_with_the_readers_figure() {
+    let window = workspace_share_window(&share("25000", "8000", 40.0, false));
 
     assert_eq!(window.label, "Workspace credits");
-    assert_eq!(window.used_percent, 32.0);
+    assert_eq!(window.used_percent, 40.0);
+    assert_eq!(window.resets_at.as_deref(), Some("2026-10-01T12:00:00Z"));
+}
+
+/// One wording for both notches, the Limits screen's: what is left while the share is current,
+/// all of it again once it has renewed.
+#[test]
+fn a_share_is_worded_once_for_both_notches() {
+    let worded = |limit, used, reached| workspace_share_wording(&share(limit, used, 0.0, reached));
+
     assert_eq!(
-        window.resets_at.as_deref(),
-        Some("2026-10-01T12:00:00+00:00")
+        worded("25000", "8000", false),
+        ShareWording {
+            left: "17,000 of 25,000 left".into(),
+            renewed: "25,000 of 25,000 left".into(),
+        }
     );
+    assert_eq!(worded("100", "120", false).left, "0 of 100 left");
+    assert_eq!(
+        worded("25000.5", "8000.25", false).left,
+        "17,000.25 of 25,000.5 left"
+    );
+    assert_eq!(worded("10.125", "0", false).left, "10.13 of 10.13 left");
+}
+
+/// A share the backend calls reached says so: all of it used when the amounts agree, only that
+/// the limit is reached when they show some left.
+#[test]
+fn a_reached_share_says_all_used_only_when_its_amounts_agree() {
+    let left = |limit, used| workspace_share_wording(&share(limit, used, 100.0, true)).left;
+
+    assert_eq!(left("10000", "10000"), "all 10,000 used");
+    assert_eq!(left("100", "120"), "all 100 used");
+    assert_eq!(left("25000", "24000"), "limit reached");
 }
 
 #[test]
-fn says_what_is_left_of_a_share_in_grouped_amounts() {
-    let now = at("2026-09-24T12:00:00Z");
-    let pending = Some("2026-10-01T12:00:00Z");
-    let left = |limit, used, reached, resets_at| {
-        workspace_share_left(&share(limit, used, reached, resets_at), now)
+fn a_share_renews_at_its_reset() {
+    let pending = share("25000", "8000", 32.0, false);
+    let unknown = LimitsWorkspaceCreditsDto {
+        resets_at: None,
+        ..pending.clone()
+    };
+
+    assert!(!workspace_share_renewed(
+        &pending,
+        at("2026-10-01T11:59:59Z")
+    ));
+    assert!(workspace_share_renewed(
+        &pending,
+        at("2026-10-01T12:00:00Z")
+    ));
+    assert!(!workspace_share_renewed(
+        &unknown,
+        at("2099-01-01T00:00:00Z")
+    ));
+}
+
+/// The date is the viewer's, so the expectation is built from the same instant in local time.
+#[test]
+fn the_share_note_gives_the_reset_date_rather_than_a_weekday() {
+    let note = |resets_at: Option<&str>| {
+        workspace_share_note(
+            &LimitsWorkspaceCreditsDto {
+                resets_at: resets_at.map(str::to_owned),
+                ..share("25000", "8000", 32.0, false)
+            },
+            at("2026-09-24T12:00:00Z"),
+        )
+    };
+    let local = |instant: &str| {
+        at(instant)
+            .with_timezone(&chrono::Local)
+            .format("%b %-d")
+            .to_string()
     };
 
     assert_eq!(
-        left("25000", "8000", false, pending),
-        "17,000 of 25,000 left"
+        note(Some("2026-10-01T12:00:00Z")),
+        format!("Resets {}", local("2026-10-01T12:00:00Z"))
     );
-    assert_eq!(left("10000", "10000", true, pending), "0 of 10,000 left");
-    assert_eq!(left("100", "120", false, pending), "0 of 100 left");
     assert_eq!(
-        left("25000.5", "8000.25", false, None),
-        "17,000.25 of 25,000.5 left"
+        note(Some("2026-09-23T12:00:00Z")),
+        format!("Reset {}", local("2026-09-23T12:00:00Z"))
     );
-    assert_eq!(left("10.125", "0", false, None), "10.13 of 10.13 left");
-    // Past its reset the share has renewed: all of it is left again.
-    assert_eq!(
-        left("25000", "25000", true, Some("2026-09-23T12:00:00Z")),
-        "25,000 of 25,000 left"
-    );
-}
-
-#[test]
-fn the_share_note_gives_the_reset_date_rather_than_a_weekday() {
-    let now = at("2026-09-24T12:00:00Z");
-    let note = |resets_at| workspace_share_note(&share("25000", "8000", false, resets_at), now);
-
-    assert_eq!(note(Some("2026-10-01T12:00:00Z")), "Resets Oct 1");
-    assert_eq!(note(Some("2026-09-23T12:00:00Z")), "Reset Sep 23");
     assert_eq!(note(None), "");
 }

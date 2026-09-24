@@ -122,6 +122,7 @@ fn visual_dump() {
         workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
             limit: "25000".into(),
             used: "8000".into(),
+            used_percent: 32.0,
             resets_at: Some("2026-10-01T12:00:00Z".into()),
             reached: false,
         }),

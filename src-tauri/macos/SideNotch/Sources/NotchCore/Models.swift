@@ -61,22 +61,22 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
   }
 }
 
-/// A business workspace member's share of the pooled credits (Codex's spend control): the amounts as
-/// the provider writes them, and how much of the share is used, which the host works out
-/// (`workspace_share_percent` in `side_notch/model.rs`).
+/// A business workspace member's share of the pooled credits (Codex's spend control), as the host
+/// sends it: the reader's meter, the reset, and the amounts already worded
+/// (`workspace_share_wording` in `side_notch/model.rs`) — what is left while the share is current,
+/// and all of it once its reset has passed. The helper picks one by the clock and formats nothing but
+/// the reset's date.
 public struct WorkspaceCredits: Codable, Equatable, Sendable {
-  public let limit: String
-  public let used: String
   public let usedPercent: Double
   public let resetsAt: String?
-  public let reached: Bool
+  public let left: String
+  public let renewed: String
 
-  public init(limit: String, used: String, usedPercent: Double, resetsAt: String?, reached: Bool) {
-    self.limit = limit
-    self.used = used
+  public init(usedPercent: Double, resetsAt: String?, left: String, renewed: String) {
     self.usedPercent = usedPercent
     self.resetsAt = resetsAt
-    self.reached = reached
+    self.left = left
+    self.renewed = renewed
   }
 
   /// The share as a quota, so the ring, the meter ramp and renewal treat it as they treat a window:
@@ -87,13 +87,10 @@ public struct WorkspaceCredits: Codable, Equatable, Sendable {
       usedPercent: usedPercent, resetsAt: resetsAt, observedAt: "")
   }
 
-  /// "17,000 of 25,000 left", the Limits screen's wording; the whole limit again once the share has
-  /// renewed.
-  public func left(at now: Date) -> String {
-    let limit = amount(self.limit)
-    let renewed = parseInstant(resetsAt).map { $0 <= now } ?? false
-    let left = renewed ? limit : max(limit - amount(used), 0)
-    return "\(formatAmount(left)) of \(formatAmount(limit)) left"
+  /// "17,000 of 25,000 left", "limit reached" or "all 10,000 used" while the share is current; all of
+  /// it again once it has renewed.
+  public func amounts(at now: Date) -> String {
+    (parseInstant(resetsAt).map { $0 <= now } ?? false) ? renewed : left
   }
 
   /// "Resets Oct 1" while pending, "Reset Sep 23" once renewed, empty with no reset. A date rather
@@ -107,22 +104,6 @@ public struct WorkspaceCredits: Codable, Equatable, Sendable {
     let date = formatter.string(from: reset)
     return reset <= now ? "Reset \(date)" : "Resets \(date)"
   }
-}
-
-/// An amount as the provider writes it; the host only sends finite amounts of at least zero.
-private func amount(_ text: String) -> Double {
-  Double(text.trimmingCharacters(in: .whitespaces)) ?? 0
-}
-
-/// An amount in en-US digits with at most two decimals, rounding half away from zero like the app's
-/// `Intl.NumberFormat`: 25000.5 → "25,000.5".
-private func formatAmount(_ value: Double) -> String {
-  let formatter = NumberFormatter()
-  formatter.locale = Locale(identifier: "en_US")
-  formatter.numberStyle = .decimal
-  formatter.maximumFractionDigits = 2
-  formatter.roundingMode = .halfUp
-  return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
 }
 
 public struct Session: Codable, Equatable, Identifiable, Sendable {
@@ -225,6 +206,10 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     guard currentAccount, status == "ok" else { return nil }
     return workspaceCredits?.quota
   }
+
+  /// Whether the popover shows any remembered value: windows or a credit share. A paused account that
+  /// has some says they are the last observed.
+  public var hasObservedValues: Bool { !orderedWindows.isEmpty || workspaceCredits != nil }
 }
 
 public enum Edge: String, Codable, Sendable {

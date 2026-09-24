@@ -39,13 +39,13 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
     assert!(current_provider(Vec::new()).is_none());
 }
 
-/// The helper draws the share on the Codex cell's inner ring, so it gets the used percent with the
-/// amounts it shows beside it.
+/// The helper draws the share on the Codex cell's inner ring with the reader's meter, and shows the
+/// amounts already worded: it picks the renewed wording by the clock and formats nothing but dates.
 #[test]
-fn a_business_members_credit_share_travels_with_how_much_of_it_is_used() {
+fn a_business_members_credit_share_travels_worded_with_the_readers_meter() {
     let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
         {"provider":"codex","status":"ok","currentAccount":true,"windows":[],
-         "workspaceCredits":{"limit":"25000","used":"8000","resetsAt":"2026-10-01T12:00:00+00:00","reached":false}}
+         "workspaceCredits":{"limit":"25000","used":"8000","usedPercent":40.0,"resetsAt":"2026-10-01T12:00:00+00:00","reached":false}}
     ]))
     .unwrap();
     let entry = current_provider(entries).unwrap();
@@ -57,7 +57,8 @@ fn a_business_members_credit_share_travels_with_how_much_of_it_is_used() {
 
     assert_eq!(
         payload["workspaceCredits"],
-        serde_json::json!({"limit":"25000","used":"8000","usedPercent":32.0,"resetsAt":"2026-10-01T12:00:00+00:00","reached":false})
+        serde_json::json!({"usedPercent":40.0,"resetsAt":"2026-10-01T12:00:00+00:00",
+            "left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"})
     );
 }
 

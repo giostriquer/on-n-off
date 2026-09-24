@@ -165,7 +165,7 @@ private struct ProviderSection: View {
     if let entry = entry, !readable {
       Text(entry.message ?? "Usage unavailable.").font(metrics.font(11))
         .foregroundColor(mutedInk).fixedSize(horizontal: false, vertical: true)
-      if !windows.isEmpty {
+      if entry.hasObservedValues {
         Text("Refresh paused. Last observed values below.").font(metrics.font(10))
           .foregroundColor(warnAmber)
       }
@@ -178,7 +178,7 @@ private struct ProviderSection: View {
     if let credits = entry?.workspaceCredits {
       QuotaBlock(
         quota: credits.quota, provider: id, now: now, metrics: metrics,
-        note: credits.note(at: now), detail: credits.left(at: now))
+        note: credits.note(at: now), detail: credits.amounts(at: now))
     }
     if let sessions = entry?.sessions, !sessions.isEmpty {
       Divider().background(Color.white.opacity(0.1))

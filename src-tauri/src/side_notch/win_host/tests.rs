@@ -92,7 +92,7 @@ fn current_provider_drops_everything_but_the_signed_in_account() {
 fn a_business_members_credit_share_reaches_the_codex_cell() {
     let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
         {"provider":"codex","status":"ok","currentAccount":true,"windows":[],
-         "workspaceCredits":{"limit":"25000","used":"8000","reached":false}}
+         "workspaceCredits":{"limit":"25000","used":"8000","usedPercent":32.0,"reached":false}}
     ]))
     .unwrap();
     let mut providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] =

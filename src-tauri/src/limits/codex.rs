@@ -213,9 +213,9 @@ fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
 }
 
 /// The member's share of a business workspace's credits: the amount they may use, what they have
-/// used and when it resets. The amounts are kept as the provider writes them, but only when they
-/// read as finite numbers of at least zero, as Codex's own status line requires; otherwise there is
-/// no share to show. `spendControlReached` without a share says a limit was reached without saying
+/// used, how much of it that is, and when it resets. The amounts are kept as the provider writes
+/// them, but only when they read as finite numbers of at least zero, as Codex's own status line
+/// requires; otherwise there is no share to show. `spendControlReached` without a share says a limit was reached without saying
 /// which or how much, and is not shown.
 fn workspace_credits(
     individual_limit: Option<&serde_json::Value>,
@@ -229,16 +229,32 @@ fn workspace_credits(
             _ => return None,
         };
         let value: f64 = text.parse().ok()?;
-        (value.is_finite() && value >= 0.0).then_some(text)
+        (value.is_finite() && value >= 0.0).then_some((text, value))
+    };
+    let (limit, limit_value) = amount("limit")?;
+    let (used, used_value) = amount("used")?;
+    let reached = reached == Some(true);
+    let remaining = share
+        .get("remainingPercent")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|percent| (0.0..=100.0).contains(percent));
+    // Codex's own meter: full once reached, else 100 less what remains (the TUI's status line), else
+    // the amounts' ratio, with a share of nothing full.
+    let used_percent = match remaining {
+        _ if reached => 100.0,
+        Some(remaining) => 100.0 - remaining,
+        None if limit_value <= 0.0 => 100.0,
+        None => (used_value / limit_value * 100.0).clamp(0.0, 100.0),
     };
     Some(LimitsWorkspaceCreditsDto {
-        limit: amount("limit")?,
-        used: amount("used")?,
+        limit,
+        used,
+        used_percent,
         resets_at: share
             .get("resetsAt")
             .and_then(serde_json::Value::as_i64)
             .and_then(rfc3339_from_epoch),
-        reached: reached == Some(true),
+        reached,
     })
 }
 

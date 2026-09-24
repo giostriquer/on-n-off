@@ -11,8 +11,8 @@ mod marks;
 mod text;
 
 use super::model::{
-    layout, workspace_share_left, workspace_share_note, workspace_share_window, Edge, GithubList,
-    NotchSettings, NotchSize, ShowMode,
+    layout, workspace_share_note, workspace_share_renewed, workspace_share_window,
+    workspace_share_wording, Edge, GithubList, NotchSettings, NotchSize, ShowMode,
 };
 use crate::dto::{
     AgentId, CiState, GithubStatus, LimitWindowDto, LimitWindowKind, LimitsStatus,
@@ -305,8 +305,7 @@ pub enum CellContent {
     Provider {
         provider: AgentId,
         primary: Option<QuotaView>,
-        fable: Option<QuotaView>,
-        credits: Option<QuotaView>,
+        inner: Option<InnerRing>,
         label: String,
     },
     PullRequests {
@@ -321,6 +320,16 @@ pub enum CellContent {
 pub struct PrRingSegment {
     ci: CiState,
     passing_with_conflicts: bool,
+}
+
+/// A cell's second figure, inside its headline ring: Claude's Fable window or a Codex workspace
+/// member's credit share, each in a deeper shade of its provider's accent on its own dark track.
+/// Chosen once when the cell is planned, so drawing never asks which one it has.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InnerRing {
+    pub quota: QuotaView,
+    pub ink: Color,
+    pub track: Color,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -585,8 +594,19 @@ fn cell_content(data: &CellData) -> CellContent {
         CellData::Provider(provider) => CellContent::Provider {
             provider: provider.provider,
             primary: primary_quota(provider),
-            fable: fable_quota(provider),
-            credits: credits_quota(provider),
+            inner: fable_quota(provider)
+                .map(|quota| InnerRing {
+                    quota,
+                    ink: FABLE_ORANGE,
+                    track: FABLE_TRACK,
+                })
+                .or_else(|| {
+                    credits_quota(provider).map(|quota| InnerRing {
+                        quota,
+                        ink: CREDITS_INK,
+                        track: CREDITS_TRACK,
+                    })
+                }),
             label: primary_quota(provider)
                 .and_then(|quota| quota.percent)
                 .map(format_percent)
@@ -881,7 +901,8 @@ fn popover_entries(
                     );
                     y += line_h(11.0, TextWeight::Regular);
                 }
-                if !provider.windows.is_empty() {
+                // Remembered windows or a remembered share: either is a value shown below.
+                if !provider.windows.is_empty() || provider.workspace_credits.is_some() {
                     text_entry(
                         &mut entries,
                         x,
@@ -932,11 +953,16 @@ fn popover_entries(
                 .collect();
             if let Some(share) = &provider.workspace_credits {
                 let window = workspace_share_window(share);
+                let wording = workspace_share_wording(share);
                 blocks.push(Block {
                     label: window.label.clone(),
                     note: workspace_share_note(share, now),
                     percent: quota_percent(&window),
-                    detail: Some(workspace_share_left(share, now)),
+                    detail: Some(if workspace_share_renewed(share, now) {
+                        wording.renewed
+                    } else {
+                        wording.left
+                    }),
                 });
             }
             for block in blocks {
@@ -1902,8 +1928,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
         CellContent::Provider {
             provider,
             primary,
-            fable,
-            credits,
+            inner,
             label,
         } => {
             if let Some(primary) = primary {
@@ -1921,13 +1946,8 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     false,
                 );
             }
-            // The inner ring: Claude's Fable window, or a Codex workspace member's credit share,
-            // each in a deeper shade of its provider's accent on its own dark track.
-            let inner = fable
-                .map(|quota| (quota, FABLE_ORANGE, FABLE_TRACK))
-                .or_else(|| credits.map(|quota| (quota, CREDITS_INK, CREDITS_TRACK)));
-            if let Some((inner, ink, track)) = inner {
-                let inner_percent = inner.percent.unwrap_or(0.0);
+            if let Some(inner) = inner {
+                let inner_percent = inner.quota.percent.unwrap_or(0.0);
                 let inner_radius = radius - metrics.inner_ring_inset as f32 * scale;
                 stroke_ring(
                     pixmap,
@@ -1937,7 +1957,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     metrics.inner_ring_stroke as f32 * scale,
                     0.0,
                     360.0,
-                    track,
+                    inner.track,
                     false,
                     false,
                 );
@@ -1949,7 +1969,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     metrics.inner_ring_stroke as f32 * scale,
                     -90.0,
                     -90.0 + inner_percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(inner.percent, ink),
+                    meter_color(inner.quota.percent, inner.ink),
                     true,
                     false,
                 );

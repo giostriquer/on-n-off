@@ -136,7 +136,7 @@ fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<P
             .filter(|v| v.is_object())
         {
             main["individualLimit"] = json!({"limit": share["limit"], "used": share["used"],
-                "resetsAt": share["reset_at"]});
+                "remainingPercent": share["remaining_percent"], "resetsAt": share["reset_at"]});
         }
     }
     let mut buckets = serde_json::Map::new();

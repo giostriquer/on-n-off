@@ -360,6 +360,7 @@ fn maps_a_business_members_share_of_the_workspace_credits() {
         Some(LimitsWorkspaceCreditsDto {
             limit: "25000".to_string(),
             used: "8000".to_string(),
+            used_percent: 32.0,
             resets_at: Some("2026-09-21T14:13:20+00:00".to_string()),
             reached: false,
         })
@@ -375,6 +376,75 @@ fn a_share_used_up_is_marked_reached() {
 
     let share = parse_codex(&payload).workspace_credits.unwrap();
     assert!(share.reached);
+}
+
+/// The meter is Codex's own: what its status line shows as used is 100 less what the backend says
+/// remains, which can differ from the amounts' ratio by the backend's rounding.
+#[test]
+fn a_shares_meter_is_what_codex_says_remains() {
+    let payload = business_payload(
+        json!({"limit": "25000", "used": "8123", "remainingPercent": 68}),
+        json!(false),
+    );
+
+    assert_eq!(
+        parse_codex(&payload)
+            .workspace_credits
+            .unwrap()
+            .used_percent,
+        32.0
+    );
+}
+
+/// A share the backend says is used up is full, whatever it says remains.
+#[test]
+fn a_reached_share_is_all_used() {
+    let payload = business_payload(
+        json!({"limit": "25000", "used": "9000", "remainingPercent": 64}),
+        json!(true),
+    );
+
+    assert_eq!(
+        parse_codex(&payload)
+            .workspace_credits
+            .unwrap()
+            .used_percent,
+        100.0
+    );
+}
+
+/// Without a usable remaining percent, the meter is the amounts' ratio: all of a share of
+/// nothing, and never more than all of it.
+#[test]
+fn without_what_remains_the_meter_is_what_is_used_of_the_limit() {
+    for (share, expected) in [
+        (json!({"limit": "25000", "used": "8000"}), 32.0),
+        (
+            json!({"limit": "25000", "used": "8000", "remainingPercent": 150}),
+            32.0,
+        ),
+        (
+            json!({"limit": "25000", "used": "8000", "remainingPercent": -5}),
+            32.0,
+        ),
+        (
+            json!({"limit": "25000", "used": "8000", "remainingPercent": "68"}),
+            32.0,
+        ),
+        (json!({"limit": "0", "used": "0"}), 100.0),
+        (json!({"limit": "100", "used": "120"}), 100.0),
+        (json!({"limit": "25000", "used": "0"}), 0.0),
+    ] {
+        let payload = business_payload(share.clone(), json!(false));
+        assert_eq!(
+            parse_codex(&payload)
+                .workspace_credits
+                .unwrap()
+                .used_percent,
+            expected,
+            "{share}"
+        );
+    }
 }
 
 /// Right after a reset a member has used nothing, which is still a share to show.

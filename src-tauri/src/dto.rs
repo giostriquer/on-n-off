@@ -658,7 +658,7 @@ pub struct LimitsCreditsDto {
 /// which caps how many of the workspace's credits this member may use until it resets. A member's
 /// own credit balance (`LimitsCreditsDto`) is usually 0 in a workspace, because the credits are
 /// the workspace's.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsWorkspaceCreditsDto {
     /// Credits this member may use, as the provider states the amount: a finite number of at least
@@ -666,6 +666,9 @@ pub struct LimitsWorkspaceCreditsDto {
     pub limit: String,
     /// Credits this member has used of it.
     pub used: String,
+    /// How much of the share is used, 0–100, worked out once by the reader (`limits/codex.rs`).
+    /// Required: no released version stored a share without it.
+    pub used_percent: f64,
     /// RFC 3339 instant the share resets, when the provider says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<String>,

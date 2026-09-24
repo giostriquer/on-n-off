@@ -831,6 +831,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
         workspace_credits: Some(LimitsWorkspaceCreditsDto {
             limit: "25000".to_string(),
             used: "8000".to_string(),
+            used_percent: 32.0,
             resets_at: Some("2026-10-01T12:00:00+00:00".to_string()),
             reached: true,
         }),
@@ -855,7 +856,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             "plan": "pro",
             "windows": [{"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5, "observedAt": "2026-08-17T20:00:00.000Z"}],
             "credits": {"balance": "3", "unlimited": false},
-            "workspaceCredits": {"limit": "25000", "used": "8000", "resetsAt": "2026-10-01T12:00:00+00:00", "reached": true},
+            "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0, "resetsAt": "2026-10-01T12:00:00+00:00", "reached": true},
             "resetCredits": {"availableCount": 1, "nextExpiresAt": "2026-09-01T12:00:00+00:00"},
             "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
         })

@@ -7,7 +7,7 @@ const NOW = Date.parse("2026-09-24T12:00:00Z");
 const ZERO: LimitsCredits = { balance: "0", unlimited: false };
 
 function share(overrides: Partial<LimitsWorkspaceCredits> = {}): LimitsWorkspaceCredits {
-  return { limit: "25000", used: "8000", resetsAt: "2026-10-01T12:00:00Z", reached: false, ...overrides };
+  return { limit: "25000", used: "8000", usedPercent: 32, resetsAt: "2026-10-01T12:00:00Z", reached: false, ...overrides };
 }
 
 function rows(credits: LimitsCredits | null, workspaceCredits: LimitsWorkspaceCredits | null) {
@@ -27,20 +27,27 @@ function rows(credits: LimitsCredits | null, workspaceCredits: LimitsWorkspaceCr
 }
 
 describe("CreditsRows", () => {
-  it("fills a bar with what the member has used and says what is left and when it resets", () => {
-    const shown = rows(ZERO, share());
+  it("fills a bar with the reader's figure and says what is left and when it resets", () => {
+    const shown = rows(ZERO, share({ usedPercent: 40 }));
 
-    expect(shown.filled).toBe("32");
-    expect(shown.figure?.textContent).toBe("32%");
+    expect(shown.filled).toBe("40");
+    expect(shown.figure?.textContent).toBe("40%");
     expect(shown.note).toBe("17,000 of 25,000 left · resets Oct 1");
   });
 
   it("fills the bar and turns the figure red when the share is used up", () => {
-    const shown = rows(ZERO, share({ used: "25000", reached: true }));
+    const shown = rows(ZERO, share({ used: "25000", usedPercent: 100, reached: true }));
 
     expect(shown.filled).toBe("100");
     expect(shown.figure).toHaveStyle({ color: "var(--trip)" });
     expect(shown.note).toBe("all 25,000 used · resets Oct 1");
+  });
+
+  it("says only that the limit is reached when a reached share's amounts show some left", () => {
+    const shown = rows(ZERO, share({ used: "24000", usedPercent: 100, reached: true }));
+
+    expect(shown.filled).toBe("100");
+    expect(shown.note).toBe("limit reached · resets Oct 1");
   });
 
   it("fills the bar in Codex's accent while there is room", () => {
@@ -63,7 +70,7 @@ describe("CreditsRows", () => {
   });
 
   it("shows nothing left rather than a negative amount when more than the share is used", () => {
-    const shown = rows(null, share({ limit: "100", used: "120" }));
+    const shown = rows(null, share({ limit: "100", used: "120", usedPercent: 100 }));
 
     expect(shown.note).toBe("0 of 100 left · resets Oct 1");
     expect(shown.filled).toBe("100");
@@ -89,7 +96,7 @@ describe("CreditsRows", () => {
   });
 
   it("shows a share whose reset has passed as renewed, as a window is, and still leaves out the own 0", () => {
-    const shown = rows(ZERO, share({ used: "25000", reached: true, resetsAt: "2026-09-23T10:00:00Z" }));
+    const shown = rows(ZERO, share({ used: "25000", usedPercent: 100, reached: true, resetsAt: "2026-09-23T10:00:00Z" }));
 
     expect(shown.filled).toBe("0");
     expect(shown.figure?.textContent).toBe("0%");

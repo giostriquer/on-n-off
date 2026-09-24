@@ -87,12 +87,19 @@ final class NotchTests {
     expectNil(provider(windows: []).primary)
   }
 
+  /// The share as the host sends it: the reader's meter and the amounts already worded.
   func credits(
-    _ percent: Double, limit: String = "25000", used: String = "8000", reached: Bool = false,
-    reset: String? = "2027-02-01T12:00:00Z"
+    _ percent: Double, reset: String? = "2027-02-01T12:00:00Z",
+    left: String = "17,000 of 25,000 left", renewed: String = "25,000 of 25,000 left"
   ) -> WorkspaceCredits {
-    WorkspaceCredits(
-      limit: limit, used: used, usedPercent: percent, resetsAt: reset, reached: reached)
+    WorkspaceCredits(usedPercent: percent, resetsAt: reset, left: left, renewed: renewed)
+  }
+  /// A reset's date as the viewer reads it, built from the same instant in local time.
+  func localDate(_ instant: String) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US")
+    formatter.dateFormat = "MMM d"
+    return formatter.string(from: parseInstant(instant)!)
   }
 
   func testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside() {
@@ -118,21 +125,33 @@ final class NotchTests {
     expectNil(provider(.codex, windows: [quota("weekly", 31)]).credits)
   }
 
-  func testACreditShareSaysWhatIsLeftAndRenewsAtItsReset() {
-    expectEqual(credits(32).left(at: now), "17,000 of 25,000 left")
-    expectEqual(credits(100, limit: "10000", used: "10000", reached: true).left(at: now), "0 of 10,000 left")
-    expectEqual(credits(100, limit: "100", used: "120").left(at: now), "0 of 100 left")
-    expectEqual(
-      credits(32, limit: "25000.5", used: "8000.25").left(at: now), "17,000.25 of 25,000.5 left")
-    expectEqual(credits(0, limit: "10.125", used: "0").left(at: now), "10.13 of 10.13 left")
-    expectEqual(credits(32).note(at: now), "Resets Feb 1")
+  /// The host words the amounts; the helper only picks the renewed wording once the reset has
+  /// passed, and formats the reset's date in local time.
+  func testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset() {
+    let pending = credits(32)
+    expectEqual(pending.amounts(at: now), "17,000 of 25,000 left")
+    expectEqual(pending.quota.percent(at: now), 32)
+    expectEqual(pending.note(at: now), "Resets \(localDate("2027-02-01T12:00:00Z"))")
+    expectEqual(credits(100, left: "limit reached").amounts(at: now), "limit reached")
     expectEqual(credits(32, reset: nil).note(at: now), "")
+    expectEqual(credits(32, reset: nil).amounts(at: now), "17,000 of 25,000 left")
     // Past its reset the share has renewed: nothing used, all of it left, and when it reset.
-    let renewed = credits(100, used: "25000", reached: true, reset: "2026-06-15T12:00:00Z")
+    let renewed = credits(100, reset: "2026-06-15T12:00:00Z", left: "limit reached")
     expectEqual(renewed.quota.percent(at: now), 0)
     expectEqual(renewed.quota.isReached(at: now), false)
-    expectEqual(renewed.left(at: now), "25,000 of 25,000 left")
-    expectEqual(renewed.note(at: now), "Reset Jun 15")
+    expectEqual(renewed.amounts(at: now), "25,000 of 25,000 left")
+    expectEqual(renewed.note(at: now), "Reset \(localDate("2026-06-15T12:00:00Z"))")
+  }
+
+  /// A paused account's popover says its values are last observed whenever it shows any: remembered
+  /// windows or a remembered share.
+  func testAPausedAccountWithOnlyAShareStillHasObservedValues() {
+    let share = Provider(
+      provider: .codex, status: "failed", currentAccount: true, plan: nil, message: "Paused",
+      windows: [], workspaceCredits: credits(32))
+    expectEqual(share.hasObservedValues, true)
+    expectEqual(provider(.codex, windows: [quota("weekly", 31)], status: "failed").hasObservedValues, true)
+    expectEqual(provider(.codex, windows: [], status: "failed").hasObservedValues, false)
   }
 
   func testUnavailableAndRememberedAccountsNeverPopulateRings() {
@@ -372,7 +391,7 @@ final class NotchTests {
     let withCredits = valid.replacingOccurrences(
       of: "\"providers\":[]",
       with:
-        #""providers":[{"provider":"codex","status":"ok","currentAccount":true,"windows":[],"sessions":[],"workspaceCredits":{"limit":"25000","used":"8000","usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","reached":false}}]"#
+        #""providers":[{"provider":"codex","status":"ok","currentAccount":true,"windows":[],"sessions":[],"workspaceCredits":{"usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"}}]"#
     )
     expectEqual(try HostMessage.decode(Data(withCredits.utf8)).providers[0].credits?.percent(at: now), 32)
     expectThrows(
@@ -486,7 +505,8 @@ let checks = NotchTests()
 checks.testTheMeterRampOnlyEverMovesTowardTheTripRed()
 checks.testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst()
 checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
-checks.testACreditShareSaysWhatIsLeftAndRenewsAtItsReset()
+checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
+checks.testAPausedAccountWithOnlyAShareStillHasObservedValues()
 checks.testUnavailableAndRememberedAccountsNeverPopulateRings()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testCodexPrefersSessionAndHidesInternalBuckets()
@@ -503,5 +523,5 @@ try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("20 native check groups; \(failures) failures")
+print("21 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

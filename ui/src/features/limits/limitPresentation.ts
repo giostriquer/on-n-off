@@ -2,6 +2,7 @@ import {
   formatObservedAt,
   formatResetAt,
   formatResetIn,
+  formatShortDate,
   formatUsedPercent,
   hasElapsed,
   parseInstant,
@@ -115,17 +116,36 @@ export function unexpiredBankedResets(resetCredits: LimitsResetCredits | null | 
   return hasElapsed(resetCredits.nextExpiresAt, now) ? null : resetCredits;
 }
 
+const AMOUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+
 /**
- * How much of a workspace-credit share the member has used, 0–100: all of it once the share is
- * reached, or when it is a share of nothing; otherwise what is used of the limit. A share whose reset
- * has passed has renewed, so it reads as nothing used, as a window past its reset does. The side
- * notch computes the same figure in `side_notch/model.rs`.
+ * Present a business workspace member's credit share as a window is presented: the reader's meter
+ * (`usedPercent`, Codex's own figure), and a note saying what is left and when the share resets. Its
+ * reset is checked once: past it the share has renewed, so nothing is used and all of it is left
+ * again. The amounts are worded as the side notch words them (`workspace_share_wording` in
+ * `side_notch/model.rs`): a reached share says "all 10,000 used" when its amounts agree and "limit
+ * reached" when they show some left.
  */
-export function workspaceSharePercent(share: LimitsWorkspaceCredits, now: number): number {
-  if (hasElapsed(share.resetsAt, now)) return 0;
+export function presentWorkspaceShare(share: LimitsWorkspaceCredits, now: number): LimitWindowPresentation {
+  const renewed = hasElapsed(share.resetsAt, now);
+  const percent = renewed ? 0 : share.usedPercent;
   const limit = Number(share.limit);
-  if (share.reached || !(limit > 0)) return 100;
-  return Math.min(Math.max((Number(share.used) / limit) * 100, 0), 100);
+  const used = Number(share.used);
+  const amounts = renewed
+    ? `${AMOUNT.format(limit)} of ${AMOUNT.format(limit)} left`
+    : !share.reached
+      ? `${AMOUNT.format(Math.max(limit - used, 0))} of ${AMOUNT.format(limit)} left`
+      : used >= limit
+        ? `all ${AMOUNT.format(limit)} used`
+        : "limit reached";
+  const resetDate = formatShortDate(share.resetsAt);
+  const reset = renewed ? `reset ${formatAgo(share.resetsAt, now)} · ${resetDate}` : resetDate ? `resets ${resetDate}` : undefined;
+  return {
+    percent,
+    text: formatUsedPercent(percent),
+    color: usageTextColor(percent),
+    note: [amounts, reset].filter(Boolean).join(" · "),
+  };
 }
 
 /**

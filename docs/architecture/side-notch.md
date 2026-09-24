@@ -36,8 +36,10 @@ flowchart LR
 ```
 
 A provider cell's outer ring and figure are its headline window. An inner ring carries a second
-figure: Claude's Fable weekly window, or a Codex business member's workspace-credit share
-(`workspace_share_percent` in `model.rs`, drawn as a window so it renews at its reset).
+figure: Claude's Fable weekly window, or a Codex business member's workspace-credit share. The
+share's meter is the limits reader's `used_percent`; its amounts are worded once in `model.rs`
+(`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
+reset.
 
 Things that are easy to get wrong:
 

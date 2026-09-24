@@ -30,6 +30,8 @@ export type LimitsWorkspaceCredits = {
   /** Amounts as the provider states them: finite numbers of at least zero, which may carry decimals. */
   limit: string;
   used: string;
+  /** How much of the share is used, 0–100: Codex's own meter, worked out once by the reader. */
+  usedPercent: number;
   resetsAt?: string | null;
   reached: boolean;
 };

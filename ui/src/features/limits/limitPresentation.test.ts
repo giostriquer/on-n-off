@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows, workspaceSharePercent } from "./limitPresentation";
+import { hasObservations, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows, presentWorkspaceShare } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -130,29 +130,42 @@ describe("usableAgainAt", () => {
   });
 });
 
-const SHARE = { limit: "25000", used: "8000", resetsAt: null, reached: false };
+const SHARE = { limit: "25000", used: "8000", usedPercent: 32, resetsAt: null, reached: false };
 
-describe("workspaceSharePercent", () => {
+describe("presentWorkspaceShare", () => {
   const pending = "2026-09-01T00:00:00Z";
 
-  it("is what the member has used of the share", () => {
-    expect(workspaceSharePercent({ ...SHARE, resetsAt: pending }, NOW)).toBe(32);
+  it("meters the share with the reader's figure and says what is left and when it resets", () => {
+    expect(presentWorkspaceShare({ ...SHARE, usedPercent: 40, resetsAt: pending }, NOW)).toEqual({
+      percent: 40,
+      text: "40%",
+      color: undefined,
+      note: "17,000 of 25,000 left · resets Sep 1",
+    });
   });
 
-  it("is all of it once the share is reached, whatever the amounts say", () => {
-    expect(workspaceSharePercent({ ...SHARE, used: "9000", reached: true }, NOW)).toBe(100);
+  it("says all of a reached share is used when its amounts agree", () => {
+    const presented = presentWorkspaceShare({ ...SHARE, used: "25000", usedPercent: 100, reached: true, resetsAt: pending }, NOW);
+    expect(presented.note).toBe("all 25,000 used · resets Sep 1");
+    expect(presented.color).toBe("var(--trip)");
   });
 
-  it("is all of a share of nothing", () => {
-    expect(workspaceSharePercent({ ...SHARE, limit: "0", used: "0" }, NOW)).toBe(100);
+  it("says only that the limit is reached when a reached share's amounts show some left", () => {
+    expect(presentWorkspaceShare({ ...SHARE, used: "24000", usedPercent: 100, reached: true, resetsAt: pending }, NOW).note)
+      .toBe("limit reached · resets Sep 1");
   });
 
-  it("never runs past the whole share", () => {
-    expect(workspaceSharePercent({ ...SHARE, limit: "100", used: "120" }, NOW)).toBe(100);
+  it("never says less than nothing is left", () => {
+    expect(presentWorkspaceShare({ ...SHARE, limit: "100", used: "120", usedPercent: 100 }, NOW).note).toBe("0 of 100 left");
   });
 
-  it("is nothing used once the share has reset, as a window past its reset is", () => {
-    expect(workspaceSharePercent({ ...SHARE, used: "25000", reached: true, resetsAt: "2026-08-17T19:00:00Z" }, NOW)).toBe(0);
+  it("reads a share past its reset as renewed, as a window past its reset is", () => {
+    expect(presentWorkspaceShare({ ...SHARE, used: "25000", usedPercent: 100, reached: true, resetsAt: "2026-08-17T19:00:00Z" }, NOW)).toEqual({
+      percent: 0,
+      text: "0%",
+      color: undefined,
+      note: "25,000 of 25,000 left · reset 1h ago · Aug 17",
+    });
   });
 });
 
