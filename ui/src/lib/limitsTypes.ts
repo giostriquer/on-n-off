@@ -36,6 +36,17 @@ export type LimitsWorkspaceCredits = {
   reached: boolean;
 };
 
+/**
+ * What a business workspace member spent lately, counted the way the Codex app's "Credit usage
+ * history" counts it: the last 7 and 30 UTC days of per-model credits. There is no limit beside it.
+ */
+export type LimitsCreditsSpent = {
+  last7Days: number;
+  last30Days: number;
+  /** When the provider's usage data runs up to; it can trail the read by hours. */
+  updatedAt?: string | null;
+};
+
 /** Codex banked rate-limit resets: one-time resets saved to the account until used or expired. */
 export type LimitsResetCredits = {
   availableCount: number;
@@ -80,6 +91,7 @@ export type ProviderLimits = {
   windows: LimitWindow[];
   credits?: LimitsCredits | null;
   workspaceCredits?: LimitsWorkspaceCredits | null;
+  creditsSpent?: LimitsCreditsSpent | null;
   resetCredits?: LimitsResetCredits | null;
   /** A paid reset offered right now. Absent whenever the account is not at its limit. */
   resetOffer?: LimitsResetOffer | null;

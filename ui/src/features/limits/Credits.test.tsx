@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { LimitsCredits, LimitsWorkspaceCredits } from "$lib/limitsTypes";
+import type { LimitsCredits, LimitsCreditsSpent, LimitsWorkspaceCredits } from "$lib/limitsTypes";
 import { CreditsRows } from "./Credits";
 
 const NOW = Date.parse("2026-09-24T12:00:00Z");
@@ -108,5 +108,26 @@ describe("CreditsRows", () => {
     const { container } = render(<CreditsRows entry={{ provider: "codex", credits: null, workspaceCredits: null }} now={NOW} />);
 
     expect(container.textContent).toBe("");
+  });
+
+  it("shows what a business member spent, and leaves out the own 0 beside it", () => {
+    const spent: LimitsCreditsSpent = { last7Days: 18303.4, last30Days: 20299.7, updatedAt: null };
+    render(<CreditsRows entry={{ provider: "codex", credits: ZERO, workspaceCredits: null, creditsSpent: spent }} now={NOW} />);
+
+    const value = screen.getByRole("definition", { name: "Credits spent" });
+    expect(value.textContent).toBe("18,303.4");
+    expect(value.closest("dl")?.textContent).toContain("last 7 days · 20,299.7 in 30 days");
+    expect(screen.queryByRole("definition", { name: "Credits" })).toBeNull();
+  });
+
+  it("keeps an own balance that says something beside what was spent", () => {
+    render(
+      <CreditsRows
+        entry={{ provider: "codex", credits: { balance: "3", unlimited: false }, workspaceCredits: null, creditsSpent: { last7Days: 1, last30Days: 1 } }}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByRole("definition", { name: "Credits" }).textContent).toBe("3");
   });
 });

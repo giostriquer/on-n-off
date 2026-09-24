@@ -168,6 +168,21 @@ export function workspaceCreditsCodex(): ProviderLimits[] {
   }));
 }
 
+/**
+ * `?mock=creditsSpent` on Codex: two business workspace members without a per-member cap, so Codex
+ * reports no share, only what each spent. Their own balances read 0, which the card leaves out.
+ */
+export function creditsSpentCodex(): ProviderLimits[] {
+  return CODEX.map((entry) => ({
+    ...entry,
+    plan: "self_serve_business_prolite",
+    credits: { balance: "0", unlimited: false },
+    creditsSpent: entry.currentAccount
+      ? { last7Days: 18303.4, last30Days: 20299.7, updatedAt: at(-3 * 60) }
+      : { last7Days: 0, last30Days: 412.5, updatedAt: at(-26 * 60) },
+  }));
+}
+
 /** `?mock=bankedResets` on Claude: one saved reset, reported with where Claude Code spends it. */
 export function bankedResetsClaude(): ProviderLimits[] {
   return CLAUDE.map((entry) => ({ ...entry, resetCredits: { availableCount: 1, nextExpiresAt: at(13 * 24 * 60 + 4 * 60) } }));

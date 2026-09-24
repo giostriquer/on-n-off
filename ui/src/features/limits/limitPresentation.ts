@@ -1,4 +1,5 @@
 import {
+  formatClock,
   formatObservedAt,
   formatResetAt,
   formatResetIn,
@@ -8,7 +9,7 @@ import {
   parseInstant,
   usageTextColor,
 } from "$lib/limitsFormat";
-import type { LimitWindow, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitWindow, LimitsCreditsSpent, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
 import { formatAgo } from "$lib/timeFormat";
 
 export type LimitWindowPresentation = {
@@ -148,9 +149,29 @@ export function presentWorkspaceShare(share: LimitsWorkspaceCredits, now: number
   };
 }
 
+const SPENT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
+/**
+ * What a business member spent lately, as a summary row: the last 7 days, the Codex app's default
+ * view, with the last 30 days and how fresh the provider's data is in the note. That data trails the
+ * read by hours, so an update time from an earlier day carries its date. `timeZone` is for tests; the
+ * card uses the viewer's.
+ */
+export function presentCreditsSpent(spent: LimitsCreditsSpent, now: number, timeZone?: string): { value: string; note: string } {
+  const day = (iso: string | null | undefined) => formatShortDate(iso, { timeZone });
+  const clock = formatClock(spent.updatedAt, timeZone);
+  const updated = clock
+    ? `updated ${day(spent.updatedAt) === day(new Date(now).toISOString()) ? clock : `${day(spent.updatedAt)} ${clock}`}`
+    : undefined;
+  return {
+    value: SPENT.format(spent.last7Days),
+    note: ["last 7 days", `${SPENT.format(spent.last30Days)} in 30 days`, updated].filter(Boolean).join(" · "),
+  };
+}
+
 /**
  * Whether a read observed anything about the account: quota windows, a credit balance, a
- * workspace-credit share or banked resets. `windows` lets a surface count only the windows it
+ * workspace-credit share, the credits spent lately or banked resets. `windows` lets a surface count only the windows it
  * shows. The backend's `ProviderLimitsDto::has_observations` is the same rule. A count that lapses while its card is on
  * screen still counts here until the next read, at most one poll later, drops it: only a card with
  * nothing else observed notices, and `unexpiredBankedResets` already keeps the count off it.
@@ -161,6 +182,7 @@ export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = 
     windows.length > 0 ||
     entry.credits != null ||
     entry.workspaceCredits != null ||
+    entry.creditsSpent != null ||
     (entry.resetCredits?.availableCount ?? 0) > 0
   );
 }
