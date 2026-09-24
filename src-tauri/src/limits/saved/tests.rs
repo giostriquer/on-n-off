@@ -226,6 +226,30 @@ fn saved_codex_reads_the_members_share_of_the_workspace_credits() {
     );
 }
 
+/// A saved member at their cap reads as used up, which only `spend_control.reached` says.
+#[test]
+fn saved_codex_marks_a_members_used_up_share_reached() {
+    let (url, request) = serve_once_capturing(
+        "200 OK",
+        &[],
+        r#"{"plan_type":"self_serve_business_prolite","rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":18000}},"spend_control":{"reached":true,"individual_limit":{"source":"workspace","limit":"25000","used":"25000","remaining":"0","used_percent":100,"remaining_percent":0,"reset_after_seconds":3600,"reset_at":1790000000}}}"#,
+    );
+    let dto = read_at(
+        &identity(AgentId::Codex),
+        &json!({"tokens":{"access_token":"fixture-access"}}),
+        "unused",
+        "unused",
+        &url,
+        "unused",
+    )
+    .unwrap();
+    request.join().unwrap();
+
+    let share = dto.workspace_credits.expect("a share");
+    assert_eq!(share.used, "25000");
+    assert!(share.reached);
+}
+
 const CODEX_USAGE_WITH_RESETS: &str = r#"{"rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":18000}},"rate_limit_reset_credits":{"available_count":2}}"#;
 
 /// Two endpoints on one loopback server, which answers in request order whatever the path.

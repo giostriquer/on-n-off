@@ -329,23 +329,23 @@ fn a_banner_shaped_unlike_the_one_this_app_knows_offers_nothing() {
 
 /// A business workspace pools its credits; each member's share of them is Codex's spend control,
 /// which app-server reports on the main bucket as `individualLimit` and `spendControlReached`.
+/// App-server's answer for a business member, shaped like `APP_SERVER_CAPTURE`: the main bucket both
+/// on its own and under its id, which is the copy `parse_codex` reads.
 fn business_payload(
     individual_limit: serde_json::Value,
     reached: serde_json::Value,
 ) -> RateLimitsResponse {
-    serde_json::from_value(json!({
-        "rateLimits": {
-            "limitId": "codex",
-            "primary": {"usedPercent": 12, "windowDurationMins": 300},
-            "secondary": null,
-            "credits": {"hasCredits": true, "unlimited": false, "balance": "0"},
-            "individualLimit": individual_limit,
-            "spendControlReached": reached,
-            "planType": "self_serve_business_prolite"
-        },
-        "rateLimitsByLimitId": null
-    }))
-    .unwrap()
+    let main = json!({
+        "limitId": "codex",
+        "primary": {"usedPercent": 12, "windowDurationMins": 300},
+        "secondary": null,
+        "credits": {"hasCredits": true, "unlimited": false, "balance": "0"},
+        "individualLimit": individual_limit,
+        "spendControlReached": reached,
+        "planType": "self_serve_business_prolite"
+    });
+    serde_json::from_value(json!({"rateLimits": main, "rateLimitsByLimitId": {"codex": main}}))
+        .unwrap()
 }
 
 #[test]
@@ -375,6 +375,15 @@ fn a_share_used_up_is_marked_reached() {
 
     let share = parse_codex(&payload).workspace_credits.unwrap();
     assert!(share.reached);
+}
+
+/// Right after a reset a member has used nothing, which is still a share to show.
+#[test]
+fn a_share_with_nothing_used_yet_reads() {
+    let payload = business_payload(json!({"limit": "25000", "used": "0"}), json!(false));
+
+    let share = parse_codex(&payload).workspace_credits.unwrap();
+    assert_eq!((share.limit.as_str(), share.used.as_str()), ("25000", "0"));
 }
 
 /// Amounts arrive as strings; a number is read the same way.

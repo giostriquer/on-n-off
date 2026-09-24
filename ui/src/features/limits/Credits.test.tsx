@@ -13,7 +13,10 @@ function share(overrides: Partial<LimitsWorkspaceCredits> = {}): LimitsWorkspace
 function rows(credits: LimitsCredits | null, workspaceCredits: LimitsWorkspaceCredits | null) {
   render(<CreditsRows entry={{ credits, workspaceCredits }} now={NOW} />);
   const value = (name: string) => screen.queryByRole("definition", { name })?.textContent ?? null;
-  return { share: value("Workspace credits"), own: value("Credits"), text: document.body.textContent ?? "" };
+  // The note is the row's second definition, the one that is not its named value.
+  const shareRow = screen.queryByRole("definition", { name: "Workspace credits" })?.closest("dl");
+  const note = shareRow ? (shareRow.querySelectorAll("dd")[1]?.textContent ?? null) : null;
+  return { share: value("Workspace credits"), note, own: value("Credits") };
 }
 
 describe("CreditsRows", () => {
@@ -21,18 +24,29 @@ describe("CreditsRows", () => {
     const shown = rows(ZERO, share());
 
     expect(shown.share).toBe("17,000 of 25,000 left");
-    expect(shown.text).toContain("resets Oct 1");
+    expect(shown.note).toBe("resets Oct 1");
   });
 
   it("says a share that is used up is used up", () => {
     const shown = rows(ZERO, share({ used: "25000", reached: true }));
 
     expect(shown.share).toBe("Used up");
-    expect(shown.text).toContain("all 25,000 used · resets Oct 1");
+    expect(shown.note).toBe("all 25,000 used · resets Oct 1");
   });
 
-  it("keeps the decimals an amount carries and never shows less than nothing left", () => {
+  it("gives no note for a share with no reset date that is not used up", () => {
+    const shown = rows(null, share({ resetsAt: null }));
+
+    expect(shown.share).toBe("17,000 of 25,000 left");
+    expect(shown.note).toBeNull();
+  });
+
+  it("keeps the decimals an amount carries", () => {
     expect(rows(null, share({ limit: "25000.5", used: "8000.25" })).share).toBe("17,000.25 of 25,000.5 left");
+  });
+
+  it("rounds an amount to two decimals", () => {
+    expect(rows(null, share({ limit: "10.125", used: "0" })).share).toBe("10.13 of 10.13 left");
   });
 
   it("shows nothing left rather than a negative amount when more than the share is used", () => {
@@ -55,7 +69,7 @@ describe("CreditsRows", () => {
     expect(rows(ZERO, null).own).toBe("0");
   });
 
-  it("shows neither a share nor the own 0 once the share has reset, since what is used is no longer known", () => {
+  it("drops a share once it has reset, since what is used is no longer known, and shows the own 0 again", () => {
     const shown = rows(ZERO, share({ resetsAt: "2026-09-24T11:59:59Z" }));
 
     expect(shown.share).toBeNull();

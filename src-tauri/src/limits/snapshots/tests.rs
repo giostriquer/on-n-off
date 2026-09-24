@@ -724,3 +724,27 @@ fn a_workspace_credit_share_alone_counts_as_an_observation() {
 
     assert!(dto.has_observations());
 }
+
+/// A failed read that carries only a remembered share observed nothing: dating it now would make an
+/// old share look fresh and replace the snapshot it came from.
+#[test]
+fn a_failed_read_carrying_only_a_remembered_share_is_not_saved() {
+    let home = scratch_dir("limits-snap-failed-share");
+    let store = SnapshotStore::for_home(&home);
+    let mut remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    remembered.workspace_credits = Some(crate::dto::LimitsWorkspaceCreditsDto {
+        limit: "25000".to_string(),
+        used: "8000".to_string(),
+        resets_at: Some("2100-10-01T00:00:00+00:00".to_string()),
+        reached: false,
+    });
+    store.save(&remembered).unwrap();
+    let mut failed = remembered.clone();
+    failed.status = LimitsStatus::Failed;
+    failed.windows.clear();
+
+    assert!(store.save(&failed).is_err());
+
+    assert_eq!(store.load(AgentId::Codex)[0].windows, remembered.windows);
+    let _ = std::fs::remove_dir_all(&home);
+}
