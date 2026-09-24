@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows, presentWorkspaceShare } from "./limitPresentation";
+import { hasObservations, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows, presentWorkspaceShare } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -169,11 +169,40 @@ describe("presentWorkspaceShare", () => {
   });
 });
 
+const SPENT = { last7Days: 18303.44, last30Days: 20299.7, updatedAt: "2026-08-17T19:00:00Z" };
+
+describe("presentCreditsSpent", () => {
+  it("leads with the last 7 days, the app's default view, and notes the 30 days and how fresh the data is", () => {
+    expect(presentCreditsSpent(SPENT, NOW, "UTC")).toEqual({
+      value: "18,303.4",
+      note: "last 7 days · 20,299.7 in 30 days · updated 19:00",
+    });
+  });
+
+  it("dates data that runs up to an earlier day, since it can trail the read by hours", () => {
+    expect(presentCreditsSpent({ ...SPENT, updatedAt: "2026-08-16T22:00:00Z" }, NOW, "UTC").note).toBe(
+      "last 7 days · 20,299.7 in 30 days · updated Aug 16 22:00",
+    );
+  });
+
+  it("says nothing about freshness it was not told", () => {
+    expect(presentCreditsSpent({ ...SPENT, updatedAt: null }, NOW, "UTC").note).toBe("last 7 days · 20,299.7 in 30 days");
+  });
+
+  it("shows nothing spent as 0", () => {
+    expect(presentCreditsSpent({ last7Days: 0, last30Days: 0 }, NOW, "UTC")).toEqual({
+      value: "0",
+      note: "last 7 days · 0 in 30 days",
+    });
+  });
+});
+
 describe("hasObservations", () => {
   const bare: ProviderLimits = { provider: "codex", status: "ok", currentAccount: true, windows: [] };
 
-  it("counts quota windows, a credit balance, a workspace-credit share and banked resets alike", () => {
+  it("counts quota windows, a credit balance, a workspace-credit share, credits spent and banked resets alike", () => {
     expect(hasObservations({ ...bare, workspaceCredits: SHARE })).toBe(true);
+    expect(hasObservations({ ...bare, creditsSpent: SPENT })).toBe(true);
     expect(hasObservations(bare)).toBe(false);
     expect(hasObservations({ ...bare, windows: [window] })).toBe(true);
     expect(hasObservations({ ...bare, credits: { balance: "0", unlimited: false } })).toBe(true);

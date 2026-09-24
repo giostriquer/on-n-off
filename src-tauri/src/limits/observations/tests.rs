@@ -32,6 +32,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -62,6 +63,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         ],
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     });
@@ -133,6 +135,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -157,6 +160,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         )],
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: reset_credits.clone(),
         // A remembered account can carry no offer, and merging must not invent one either.
         reset_offer: Some(crate::dto::LimitsResetOfferDto {
@@ -190,6 +194,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -207,6 +212,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: reset_credits.clone(),
         reset_offer: None,
     });
@@ -248,6 +254,7 @@ fn a_paused_refresh_keeps_the_remembered_workspace_credit_share() {
         windows: Vec::new(),
         credits: None,
         workspace_credits,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -265,4 +272,48 @@ fn a_paused_refresh_keeps_the_remembered_workspace_credit_share() {
 
     assert_eq!(paused.workspace_credits, share("8000"));
     assert_eq!(answered.workspace_credits, share("9000"));
+}
+
+/// Spending is kept through a paused refresh like the other figures, and a read that answered wins.
+#[test]
+fn a_paused_refresh_keeps_the_remembered_credits_spent() {
+    let spent = |last_7_days: f64| {
+        Some(crate::dto::LimitsCreditsSpentDto {
+            last_7_days,
+            last_30_days: last_7_days,
+            updated_at: None,
+        })
+    };
+    let read = |credits_spent| ProviderLimitsDto {
+        provider: AgentId::Codex,
+        status: LimitsStatus::Failed,
+        message: Some("Refresh paused".to_string()),
+        account: Some(LimitsAccountDto {
+            id: "acct-1".to_string(),
+            legacy_id: None,
+            label: None,
+        }),
+        current_account: true,
+        plan: None,
+        windows: Vec::new(),
+        credits: None,
+        workspace_credits: None,
+        credits_spent,
+        reset_credits: None,
+        reset_offer: None,
+    };
+    let remembered = || {
+        ObservedWindowSet::from_account(ProviderLimitsDto {
+            status: LimitsStatus::Ok,
+            message: None,
+            current_account: false,
+            ..read(spent(100.0))
+        })
+    };
+
+    let paused = merge_windows(read(None), None, remembered());
+    let answered = merge_windows(read(spent(250.0)), None, remembered());
+
+    assert_eq!(paused.credits_spent, spent(100.0));
+    assert_eq!(answered.credits_spent, spent(250.0));
 }

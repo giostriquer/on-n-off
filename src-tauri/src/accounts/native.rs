@@ -672,18 +672,29 @@ impl Drop for NativeLocks {
     }
 }
 
-/// Metadata projection from the backend selected by native Codex config. No credential leaves accounts.
+/// Metadata projection from the backend selected by native Codex config. No credential leaves
+/// accounts here; `codex_metadata_and_access` is the one projection that carries the access token.
 pub(crate) fn codex_metadata(config_home: &Path) -> Result<Option<(String, Value)>, String> {
-    let native = NativeStore {
+    match codex_login(config_home)? {
+        Some(login) => codex_identity(&login),
+        None => Ok(None),
+    }
+}
+
+/// The native Codex login from the backend its config selects.
+fn codex_login(config_home: &Path) -> Result<Option<Login>, String> {
+    NativeStore {
         provider: AgentId::Codex,
         config_home: config_home.into(),
         config_file: config_home.join("config.toml"),
         custom: true,
         use_keychain: true,
-    };
-    let Some(login) = native.read()? else {
-        return Ok(None);
-    };
+    }
+    .read()
+}
+
+/// A Codex login's observation key and workspace claims, refusing claims for another workspace.
+fn codex_identity(login: &Login) -> Result<Option<(String, Value)>, String> {
     let Some(workspace) = login
         .auth
         .pointer("/tokens/account_id")
@@ -709,6 +720,48 @@ pub(crate) fn codex_metadata(config_home: &Path) -> Result<Option<(String, Value
         model::codex_observation_key(workspace, &claims),
         claims,
     )))
+}
+
+/// The signed-in Codex login's access token, beside the identity it belongs to, for the one request
+/// on-n-off makes with that login itself: a workspace member's spending (`limits/credits_spent.rs`),
+/// a read-only GET the user chose to allow on 2026-09-24. Only the access token leaves accounts.
+pub(crate) struct CodexAccess {
+    /// The same key `codex_metadata` gives, so the caller can match the token to a card.
+    pub observation_key: String,
+    /// The `ChatGPT-Account-Id` the request is made for.
+    pub workspace_id: String,
+    pub token: model::AccessToken,
+}
+
+/// A metadata projection: the observation key and the workspace claims (`codex_metadata`).
+pub(crate) type CodexMetadata = (String, Value);
+
+/// `codex_metadata`, and the login's access projection when it holds an access token, from one
+/// read of the native store: the signed-in read's identity check after the app-server handshake
+/// takes it for a workspace plan, so the spending read costs no read of its own. `None` for no
+/// login; the access is `None` for a login without an access token.
+pub(crate) fn codex_metadata_and_access(
+    config_home: &Path,
+) -> Result<Option<(CodexMetadata, Option<CodexAccess>)>, String> {
+    let Some(login) = codex_login(config_home)? else {
+        return Ok(None);
+    };
+    let Some((observation_key, claims)) = codex_identity(&login)? else {
+        return Ok(None);
+    };
+    let access = match model::string(&login.auth, "/tokens/access_token") {
+        Ok(token) => Some(CodexAccess {
+            observation_key: observation_key.clone(),
+            workspace_id: claims
+                .get("chatgpt_account_id")
+                .and_then(Value::as_str)
+                .ok_or("Missing native account claims.")?
+                .to_string(),
+            token: model::AccessToken::new(token),
+        }),
+        Err(_) => None,
+    };
+    Ok(Some(((observation_key, claims), access)))
 }
 
 #[cfg(test)]

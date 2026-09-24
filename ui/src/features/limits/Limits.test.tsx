@@ -528,6 +528,16 @@ describe("Limits", () => {
     expect(within(codex).queryByRole("definition", { name: "Credits" })).toBeNull();
   });
 
+  it("shows what a business member spent in place of an own balance of 0 when Codex reports no share", async () => {
+    const creditsSpent = { last7Days: 18303.4, last30Days: 20299.7, updatedAt: null };
+    answer([okClaude()], [okCodex({ plan: "self_serve_business_prolite", credits: { balance: "0", unlimited: false }, creditsSpent })]);
+    renderLimits();
+
+    const codex = await waitFor(() => card("Codex limits · work@codex.example"));
+    expect(within(codex).getByRole("definition", { name: "Credits spent" })).toHaveTextContent("18,303.4");
+    expect(within(codex).queryByRole("definition", { name: "Credits" })).toBeNull();
+  });
+
   it("offers a banked reset beside the current Codex account's actions and lists every provider's count as a row", async () => {
     const remembered = { ...staleCodex(), resetCredits: { availableCount: 1, nextExpiresAt: null } };
     const banked = { availableCount: 2, nextExpiresAt: null };

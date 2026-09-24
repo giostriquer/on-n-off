@@ -3,8 +3,8 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::dto::{
-    LimitWindowDto, LimitsCreditsDto, LimitsResetCreditsDto, LimitsWorkspaceCreditsDto,
-    ProviderLimitsDto,
+    LimitWindowDto, LimitsCreditsDto, LimitsCreditsSpentDto, LimitsResetCreditsDto,
+    LimitsWorkspaceCreditsDto, ProviderLimitsDto,
 };
 
 pub(super) struct ObservedWindowSet {
@@ -14,6 +14,7 @@ pub(super) struct ObservedWindowSet {
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
     workspace_credits: Option<LimitsWorkspaceCreditsDto>,
+    credits_spent: Option<LimitsCreditsSpentDto>,
     reset_credits: Option<LimitsResetCreditsDto>,
 }
 
@@ -25,6 +26,7 @@ impl ObservedWindowSet {
             windows,
             credits: None,
             workspace_credits: None,
+            credits_spent: None,
             reset_credits: None,
         }
     }
@@ -47,6 +49,7 @@ impl ObservedWindowSet {
             windows: dto.windows,
             credits: dto.credits,
             workspace_credits: dto.workspace_credits,
+            credits_spent: dto.credits_spent,
             reset_credits: dto.reset_credits,
         })
     }
@@ -69,6 +72,10 @@ pub(super) fn merge_windows(
             .workspace_credits
             .take()
             .or_else(|| remembered.workspace_credits.clone());
+        current.credits_spent = current
+            .credits_spent
+            .take()
+            .or_else(|| remembered.credits_spent.clone());
         current.reset_credits = current
             .reset_credits
             .take()

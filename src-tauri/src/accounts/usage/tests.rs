@@ -523,3 +523,58 @@ fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_
         assert_eq!(entries[0].reset_credits, banked, "refresh {refresh}");
     }
 }
+
+/// A saved read whose spending read failed or was backing off keeps the figure the card had.
+#[test]
+fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_cards_figure() {
+    let profile = profile();
+    let spent = Some(crate::dto::LimitsCreditsSpentDto {
+        last_7_days: 18303.4,
+        last_30_days: 20299.7,
+        updated_at: None,
+    });
+    let mut entries = vec![];
+    let mut first = codex_reading(&profile, "business");
+    first.credits_spent.clone_from(&spent);
+    merge(&mut entries, &profile, Some(Ok(first)));
+
+    merge(
+        &mut entries,
+        &profile,
+        Some(Ok(codex_reading(&profile, "business"))),
+    );
+
+    assert_eq!(entries[0].credits_spent, spent);
+}
+
+/// A saved Codex read on `plan`.
+fn codex_reading(profile: &Profile, plan: &str) -> ProviderLimitsDto {
+    ProviderLimitsDto {
+        provider: AgentId::Codex,
+        plan: Some(plan.to_string()),
+        ..reading(profile)
+    }
+}
+
+/// An account now on a personal plan pools nothing and is never asked what it spent: the figure it
+/// had on a workspace plan goes, rather than staying on its card for good.
+#[test]
+fn a_saved_personal_plan_read_drops_the_cards_figure() {
+    let profile = profile();
+    let mut entries = vec![];
+    let mut first = codex_reading(&profile, "business");
+    first.credits_spent = Some(crate::dto::LimitsCreditsSpentDto {
+        last_7_days: 18303.4,
+        last_30_days: 20299.7,
+        updated_at: None,
+    });
+    merge(&mut entries, &profile, Some(Ok(first)));
+
+    merge(
+        &mut entries,
+        &profile,
+        Some(Ok(codex_reading(&profile, "pro"))),
+    );
+
+    assert_eq!(entries[0].credits_spent, None);
+}

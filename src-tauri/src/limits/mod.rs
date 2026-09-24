@@ -15,6 +15,7 @@ mod codex;
 mod codex_app_server;
 mod codex_sessions;
 pub(crate) mod credentials;
+pub(crate) mod credits_spent;
 pub(crate) mod json;
 pub(crate) mod login;
 mod observations;
@@ -63,6 +64,7 @@ struct Parsed {
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
     workspace_credits: Option<LimitsWorkspaceCreditsDto>,
+    credits_spent: Option<crate::dto::LimitsCreditsSpentDto>,
     reset_credits: Option<LimitsResetCreditsDto>,
     reset_offer: Option<crate::dto::LimitsResetOfferDto>,
 }
@@ -232,6 +234,7 @@ fn aggregate_accounts(
         let mut current = current;
         if let Some(prior) = &prior {
             current.keep_reset_credits_from(prior);
+            credits_spent::keep_credits_spent_from(&mut current, prior);
         }
         current
     } else {

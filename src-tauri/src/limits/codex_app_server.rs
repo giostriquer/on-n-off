@@ -11,9 +11,10 @@ use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 
 use super::Parsed;
+use crate::accounts::native::CodexAccess;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
-use crate::dto::{AgentId, ResetCreditOutcome};
+use crate::dto::{AgentId, LimitsCreditsSpentDto, ResetCreditOutcome};
 
 const APP_SERVER_TIMEOUT: Duration = Duration::from_secs(30);
 const STDOUT_LINE_LIMIT: usize = 1024 * 1024;
@@ -203,16 +204,38 @@ fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> R
 }
 
 pub(super) fn read(home: &Path, force: bool) -> Result<Parsed, AppServerFailure> {
+    read_with(
+        home,
+        force,
+        ProcessTransport::spawn,
+        super::credits_spent::signed_in,
+    )
+}
+
+/// `read`, with the app-server process and the spending read (`credits_spent::signed_in`, given the
+/// login's access projection, the card's account and its plan) replaceable for tests.
+fn read_with<T: JsonLineTransport>(
+    home: &Path,
+    force: bool,
+    spawn: impl FnOnce(&Path) -> Result<T, String>,
+    spent: impl FnOnce(Option<CodexAccess>, Option<&str>, Option<&str>) -> Option<LimitsCreditsSpentDto>,
+) -> Result<Parsed, AppServerFailure> {
     let expected_codex_home = home.join(".codex");
     let before = crate::accounts::native::codex_metadata(&expected_codex_home)
         .map_err(AppServerFailure::Failed)?;
-    let mut transport =
-        ProcessTransport::spawn(&expected_codex_home).map_err(AppServerFailure::Failed)?;
+    let mut transport = spawn(&expected_codex_home).map_err(AppServerFailure::Failed)?;
     let session = query_app_server(&expected_codex_home, force, &mut transport);
     let exit_status = transport.finish();
     let session = session
         .map_err(|error| AppServerFailure::Failed(classify_query_failure(error, exit_status)))?;
-    normalize_app_server(session, before)
+    let (mut parsed, access) = normalize_app_server(session, before)?;
+    // Only now is the card's account confirmed, and `access` was taken by that check.
+    parsed.credits_spent = spent(
+        access,
+        parsed.account.as_ref().map(|account| account.id.as_str()),
+        parsed.plan.as_deref(),
+    );
+    Ok(parsed)
 }
 
 struct ProcessTransport {
@@ -577,10 +600,13 @@ fn response_result<T: DeserializeOwned>(message: &Value, method: &str) -> Result
     ))
 }
 
+/// The card for the account app-server read, once the native login is confirmed to be the account
+/// captured before it started; for a workspace plan, with that login's access projection for the
+/// spending read, taken in the same read of the native store as the check.
 fn normalize_app_server(
     session: AppServerResult,
     before: Option<(String, Value)>,
-) -> Result<Parsed, AppServerFailure> {
+) -> Result<(Parsed, Option<CodexAccess>), AppServerFailure> {
     let account = require_chatgpt(&session.account)?;
     let email = account
         .email
@@ -588,8 +614,31 @@ fn normalize_app_server(
         .map(str::trim)
         .filter(|email| !email.is_empty())
         .map(str::to_string);
-    let after = crate::accounts::native::codex_metadata(&session.codex_home)
-        .map_err(AppServerFailure::Failed)?;
+    let mut parsed = super::codex::parse_codex(&session.rate_limits);
+    parsed.plan = account
+        .plan_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|plan| !plan.is_empty())
+        .map(str::to_string)
+        .or(parsed.plan);
+    // One read of the native store confirms the account; for a workspace plan the same read also
+    // takes the access projection the spending read needs (`credits_spent::signed_in`).
+    let (after, access) = if parsed
+        .plan
+        .as_deref()
+        .is_some_and(super::credits_spent::is_codex_workspace_plan)
+    {
+        crate::accounts::native::codex_metadata_and_access(&session.codex_home)
+            .map_err(AppServerFailure::Failed)?
+            .map_or((None, None), |(metadata, access)| (Some(metadata), access))
+    } else {
+        (
+            crate::accounts::native::codex_metadata(&session.codex_home)
+                .map_err(AppServerFailure::Failed)?,
+            None,
+        )
+    };
     if before.as_ref().map(|(id, _)| id) != after.as_ref().map(|(id, _)| id) {
         return Err(AppServerFailure::Failed(
             "The signed-in account changed while reading usage. Retry after sign-in finishes."
@@ -611,20 +660,12 @@ fn normalize_app_server(
                 .map(|email| format!("email:{}", email.to_lowercase()))
         })
         .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string());
-    let mut parsed = super::codex::parse_codex(&session.rate_limits);
     parsed.account = Some(crate::dto::LimitsAccountDto {
         legacy_id,
         id: account_id,
         label: email,
     });
-    parsed.plan = account
-        .plan_type
-        .as_deref()
-        .map(str::trim)
-        .filter(|plan| !plan.is_empty())
-        .map(str::to_string)
-        .or(parsed.plan);
-    Ok(parsed)
+    Ok((parsed, access))
 }
 
 /// Subscription limits and banked resets exist only for a ChatGPT login.

@@ -8,15 +8,24 @@ const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_RESET_CREDITS_URL: &str =
     "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 
+/// The services one saved Codex read talks to, together as `ClaudeEndpoints` keeps Claude's, so a
+/// fourth costs one field and not an edit at every call site.
+#[derive(Debug, Clone, Copy)]
+struct CodexEndpoints<'a> {
+    usage: &'a str,
+    reset_credits: &'a str,
+    /// What a workspace member spent (`credits_spent.rs`); asked only for a workspace plan.
+    credit_usage: &'a str,
+}
+
+const CODEX: CodexEndpoints<'static> = CodexEndpoints {
+    usage: CODEX_USAGE_URL,
+    reset_credits: CODEX_RESET_CREDITS_URL,
+    credit_usage: credits_spent::CODEX_CREDIT_USAGE_URL,
+};
+
 pub(crate) fn read(identity: &Identity, auth: &Value) -> Result<ProviderLimitsDto, HttpError> {
-    read_at(
-        identity,
-        auth,
-        CLAUDE_PROFILE_URL,
-        CLAUDE_USAGE_URL,
-        CODEX_USAGE_URL,
-        CODEX_RESET_CREDITS_URL,
-    )
+    read_at(identity, auth, CLAUDE_PROFILE_URL, CLAUDE_USAGE_URL, CODEX)
 }
 
 fn read_at(
@@ -24,8 +33,7 @@ fn read_at(
     auth: &Value,
     profile: &str,
     claude_url: &str,
-    codex_url: &str,
-    codex_reset_credits_url: &str,
+    codex: CodexEndpoints<'_>,
 ) -> Result<ProviderLimitsDto, HttpError> {
     let mut parsed = match identity.provider {
         AgentId::Claude => {
@@ -66,7 +74,7 @@ fn read_at(
                 ("Authorization", bearer.as_str()),
                 ("ChatGPT-Account-Id", identity.workspace_id.as_str()),
             ];
-            let payload = get_json(codex_url, &headers)?;
+            let payload = get_json(codex.usage, &headers)?;
             if payload
                 .get("account_id")
                 .or_else(|| payload.get("accountId"))
@@ -79,9 +87,25 @@ fn read_at(
             // count still stands, only without an expiry.
             let details = (banked_reset_count(&payload["rate_limit_reset_credits"])
                 .is_some_and(|count| count > 0))
-            .then(|| get_json(codex_reset_credits_url, &headers).ok())
+            .then(|| get_json(codex.reset_credits, &headers).ok())
             .flatten();
-            parse_codex_usage(&payload, details.as_ref())?
+            let mut parsed = parse_codex_usage(&payload, details.as_ref())?;
+            // Only a workspace pools credits, and like the detail read, spending never decides
+            // the read: a member the endpoint refuses just has no figure.
+            if parsed
+                .plan
+                .as_deref()
+                .is_some_and(credits_spent::is_codex_workspace_plan)
+            {
+                parsed.credits_spent = credits_spent::read_backed_off(
+                    &identity.observation_key(),
+                    &crate::accounts::model::AccessToken::new(token),
+                    &identity.workspace_id,
+                    codex.credit_usage,
+                    Utc::now(),
+                );
+            }
+            parsed
         }
         _ => return Err(HttpError::Unauthorized),
     };
