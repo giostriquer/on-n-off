@@ -178,7 +178,7 @@ The selected account uses the existing green status dot beside the main usage-wi
 
 A Claude card also shows the subscription status the profile read already returns,
 `organization.subscription_status`, beside the plan whenever it is not `active`: `past_due` and
-`unpaid` read **Payment due**, `canceled`/`cancelled` **Canceled** and `expired` **Expired** (all red),
+`unpaid` read **Payment due**, `canceled`/`cancelled` **Canceled** and `expired` **Expired** (all outlined in red, like the header's other tags),
 `trialing` **Trial**, and any other value is humanized; the tooltip shows the raw value. It never
 decides a read and is remembered with the account like the plan. The tooltip says when the card was
 checked, and adds "last known" only when the card's read did not answer, which is when the status
