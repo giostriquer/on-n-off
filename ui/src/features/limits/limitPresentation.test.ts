@@ -200,7 +200,7 @@ describe("presentCreditsSpent", () => {
 describe("hasObservations", () => {
   const bare: ProviderLimits = { provider: "codex", status: "ok", currentAccount: true, windows: [] };
 
-  it("counts quota windows, a credit balance, a workspace-credit share and banked resets alike", () => {
+  it("counts quota windows, a credit balance, a workspace-credit share, credits spent and banked resets alike", () => {
     expect(hasObservations({ ...bare, workspaceCredits: SHARE })).toBe(true);
     expect(hasObservations({ ...bare, creditsSpent: SPENT })).toBe(true);
     expect(hasObservations(bare)).toBe(false);
