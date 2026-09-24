@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
+import { formatObservedAt } from "$lib/limitsFormat";
 import { refreshLimits } from "./useLimitsProviders";
 import { Limits } from "./Limits";
 
@@ -530,14 +531,25 @@ describe("Limits", () => {
     expect(within(active).queryByRole("button", { name: /Subscription status/ })).toBeNull();
   });
 
-  it("says a remembered Claude card's subscription status is only the last one known", async () => {
-    answer([okClaude({ currentAccount: false, subscriptionStatus: "canceled" })], []);
+  const EARLIER = "2026-08-10T09:30:00Z";
+  it.each([
+    ["a live signed-in card", {}, NOW, false],
+    ["a signed-in card whose refresh failed, showing the remembered status", { status: "unauthenticated", message: "Sign in again." }, NOW, true],
+    ["a saved card read just now", { currentAccount: false }, NOW, false],
+    // A card only remembered from a snapshot answers "ok" like a saved read: its Checked time says how old it is.
+    ["a card remembered from a snapshot", { currentAccount: false }, EARLIER, false],
+  ] as const)("says a subscription status is only the last one known when the read failed: %s", async (_case, overrides, observedAt, lastKnown) => {
+    const entry = okClaude({ subscriptionStatus: "past_due", ...overrides });
+    entry.windows = entry.windows.map((window) => ({ ...window, observedAt }));
+    answer([entry], []);
     renderLimits();
 
     const claude = await waitFor(() => card("Claude limits · me@claude.example"));
-    const badge = within(claude).getByRole("button", { name: "Subscription status: Canceled" });
-    fireEvent.focus(badge);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Last known subscription status.");
+    fireEvent.focus(within(claude).getByRole("button", { name: "Subscription status: Payment due" }));
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent(`Checked ${formatObservedAt(observedAt)}`);
+    if (lastKnown) expect(tooltip).toHaveTextContent("Last known subscription status.");
+    else expect(tooltip).not.toHaveTextContent("Last known");
   });
 
   it("shows a business member's workspace credits in place of an own balance of 0", async () => {

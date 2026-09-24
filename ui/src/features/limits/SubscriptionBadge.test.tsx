@@ -55,26 +55,29 @@ it.each([null, "invalid"])("omits a badge when its date is %s", date => {
   expect(container).toBeEmptyDOMElement();
 });
 describe("ClaudeSubscriptionStatusBadge", () => {
-  it("names what Claude reports, in the red tone when the subscription is in trouble", () => {
-    render(<ClaudeSubscriptionStatusBadge status="past_due" lastKnown={false} />);
+  it("names what Claude reports, in the alert tone when the subscription is in trouble, and when it was checked", () => {
+    render(<ClaudeSubscriptionStatusBadge status="past_due" lastKnown={false} checkedAt="Aug 17, 2026, 20:00" />);
     const badge = screen.getByRole("button", { name: "Subscription status: Payment due" });
-    expect(badge).toHaveClass("subscription-badge--expired");
+    expect(badge).toHaveClass("subscription-badge--alert");
+    expect(badge).not.toHaveClass("subscription-badge--expired");
     expect(badge).toHaveTextContent("Payment due");
     fireEvent.focus(badge);
     expect(screen.getByRole("tooltip")).toHaveTextContent("Claude reports this subscription as past_due");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Checked Aug 17, 2026, 20:00");
     expect(screen.getByRole("tooltip")).not.toHaveTextContent("Last known");
   });
   it("keeps a trial neutral and says when the status is only the last one known", () => {
-    render(<ClaudeSubscriptionStatusBadge status="trialing" lastKnown />);
+    render(<ClaudeSubscriptionStatusBadge status="trialing" lastKnown checkedAt={null} />);
     const badge = screen.getByRole("button", { name: "Subscription status: Trial" });
     expect(badge).toHaveClass("subscription-badge--neutral");
     fireEvent.focus(badge);
     expect(screen.getByRole("tooltip")).toHaveTextContent("Last known subscription status.");
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("Checked");
   });
   it("shows nothing for an active or unknown subscription", () => {
-    const { container, rerender } = render(<ClaudeSubscriptionStatusBadge status="active" lastKnown={false} />);
+    const { container, rerender } = render(<ClaudeSubscriptionStatusBadge status="active" lastKnown={false} checkedAt={null} />);
     expect(container).toBeEmptyDOMElement();
-    rerender(<ClaudeSubscriptionStatusBadge status={null} lastKnown={false} />);
+    rerender(<ClaudeSubscriptionStatusBadge status={null} lastKnown={false} checkedAt={null} />);
     expect(container).toBeEmptyDOMElement();
   });
 });

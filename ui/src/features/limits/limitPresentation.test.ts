@@ -247,3 +247,17 @@ describe.each(["failed", "unauthenticated"] as const)("saved %s usage status", s
     expect(presented.savedRefreshDetail).toBeNull();
   });
 });
+
+describe("presentLimitAccount freshness", () => {
+  const claude = (overrides: Partial<ProviderLimits>): ProviderLimits => ({
+    provider: "claude", status: "ok", currentAccount: true, windows: [], ...overrides,
+  });
+  it.each([
+    ["a live signed-in read", {}, false],
+    ["a saved read that answered", { currentAccount: false }, false],
+    ["a signed-in read that failed", { status: "failed" }, true],
+    ["a saved read that was refused", { currentAccount: false, status: "unauthenticated" }, true],
+  ] as const)("calls what a card shows last known only when its read did not answer: %s", (_case, overrides, lastKnown) => {
+    expect(presentLimitAccount(claude(overrides), "unavailable").lastKnown).toBe(lastKnown);
+  });
+});

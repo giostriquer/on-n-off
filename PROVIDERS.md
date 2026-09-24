@@ -173,19 +173,21 @@ Claude Max plan labels use the existing login metadata: `subscriptionType=max` w
 `rateLimitTier=default_claude_max_5x` displays **Max ×5**, and
 `default_claude_max_20x` displays **Max ×20**. Missing or unknown tiers keep **Max**;
 other subscription types keep their own label. This requires no additional request.
+The selected account uses the existing green status dot beside the main usage-window label
+(or in the card header when usage is unavailable).
 
 A Claude card also shows the subscription status the profile read already returns,
 `organization.subscription_status`, beside the plan whenever it is not `active`: `past_due` and
 `unpaid` read **Payment due**, `canceled`/`cancelled` **Canceled** and `expired` **Expired** (all red),
-`trialing` **Trial**, and any other value is shown as written. It never decides a read, is remembered
-with the account like the plan, and says "last known" on a card that is not the current read. No
-renewal or expiry date is available to the Claude Code OAuth token: the profile carries only
-`subscription_status` and `subscription_created_at`, and the billing page's own
+`trialing` **Trial**, and any other value is humanized; the tooltip shows the raw value. It never
+decides a read and is remembered with the account like the plan. The tooltip says when the card was
+checked, and adds "last known" only when the card's read did not answer, which is when the status
+shown is the remembered one; a card only remembered from a snapshot reads as current, with its older
+check time. No renewal or expiry date is available to the Claude Code OAuth token: the profile
+carries only `subscription_status` and `subscription_created_at`, and the billing page's own
 `subscription_details` read answers that token with 404 on `/api/oauth/organizations/{org}/…` and 403
 on `/api/organizations/{org}/…`. **verified** (2026-09-24, one Max account, read-only probe); **code**
 (Claude Code 2.1.282's profile mapper reads no renewal, expiry or cancellation field).
-The selected account uses the existing green status dot beside the main usage-window label
-(or in the card header when usage is unavailable).
 
 The Codex plan badge follows CodexBar's plan-code mapping: `pro` displays **Pro ×20**,
 and `prolite` (including separator variants) displays **Pro ×5**. Other providers keep their

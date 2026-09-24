@@ -4,9 +4,10 @@
  * the subscription are red; a trial is neutral. A state this list does not know is shown as written,
  * humanized, so a new one surfaces rather than disappearing. Nothing when the status is unknown.
  */
-export type ClaudeSubscriptionStatusBadge = { label: string; tone: "alert" | "neutral" };
+/** A status's wording and the `subscription-badge--<tone>` modifier it is drawn with. */
+export type ClaudeStatusLabel = { label: string; tone: "alert" | "neutral" };
 
-const KNOWN: Record<string, ClaudeSubscriptionStatusBadge | null> = {
+const KNOWN: Record<string, ClaudeStatusLabel | null> = {
   active: null,
   past_due: { label: "Payment due", tone: "alert" },
   unpaid: { label: "Payment due", tone: "alert" },
@@ -16,7 +17,7 @@ const KNOWN: Record<string, ClaudeSubscriptionStatusBadge | null> = {
   trialing: { label: "Trial", tone: "neutral" },
 };
 
-export function claudeSubscriptionStatus(status: string | null | undefined): ClaudeSubscriptionStatusBadge | null {
+export function claudeSubscriptionStatus(status: string | null | undefined): ClaudeStatusLabel | null {
   const key = status?.trim().toLowerCase() ?? "";
   if (!key) return null;
   if (Object.hasOwn(KNOWN, key)) return KNOWN[key];

@@ -26,6 +26,13 @@ export type LimitAccountPresentation = {
   refreshPaused: boolean;
   savedRefreshDetail: string | null;
   remembered: boolean;
+  /**
+   * The card's read did not answer, so the account metadata it shows (a subscription status, a plan)
+   * is what an earlier read left: the backend fills it from memory exactly then. A saved account read
+   * this poll, and a card only remembered from a snapshot, both answer; `updatedAt` says how old
+   * either one is.
+   */
+  lastKnown: boolean;
   updatedAt: string | null;
 };
 
@@ -202,6 +209,7 @@ export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: stri
     savedRefreshDetail: savedRefreshPaused ? detail : null,
     refreshPaused: entry.currentAccount && entry.status !== "ok" && observed,
     remembered: !entry.currentAccount && observed,
+    lastKnown: entry.status !== "ok",
     updatedAt: latestObservedAt === null ? null : formatObservedAt(new Date(latestObservedAt).toISOString()),
   };
 }
