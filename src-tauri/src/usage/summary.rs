@@ -387,8 +387,10 @@ fn read_summary_from(
 
     {
         let _files = lock_usage_files();
+        // A summary counted around a history that did not read would undercount once it reads.
         if source_snapshot.is_complete()
             && prepared_sources.complete
+            && history.history().is_some()
             && source_snapshot.persisted_generation_is_current(&paths.source_index)
             && source_snapshot.inventory_is_current(&roots)
         {

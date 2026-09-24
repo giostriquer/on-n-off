@@ -251,10 +251,12 @@ gone nothing can rebuild it.
   the history. A fold needs every root walked and every transcript that may hold a record in range
   read, now or from its cached parse; a transcript still being written counts what it holds,
   since its records old enough to fold were written days ago. Otherwise it waits for the next
-  check. A transcript that cannot be read holds it back only until it is a week past the cutoff
-  unread: by then it never will read, and waiting longer would let the provider delete the rest.
+  check. A transcript that cannot be read holds it back until it is a week past the cutoff and has
+  failed on two checks in a row: by then it never will read, and waiting longer would let the
+  provider delete the rest.
 - **Summaries.** The summary cache key carries the history file's size and mtime, so a fold or a
-  clear never serves a summary counted with the history before it.
+  clear never serves a summary counted with the history before it, and a summary counted while
+  the file did not read is not stored.
 - **When the file does not read.** It is never written over: the previous good file is kept as
   `.bak` and read in its place, and the unreadable one is copied aside under a new name before
   the new file replaces it. A file a newer on-n-off wrote, or one with no readable backup, is left
@@ -264,7 +266,9 @@ gone nothing can rebuild it.
 - **Limits.** A parser fix reaches only records newer than the watermark. A transcript that shows
   up later holding records older than it (copied from another machine, restored from a backup)
   is not counted. A wall clock far ahead at a fold sets the watermark ahead with it, hiding usage
-  recorded after the clock is corrected until real time passes it; Clear recovers. Settings shows
+  recorded after the clock is corrected until real time passes it; Clear recovers. A provider set
+  to delete transcripts sooner than about nine days (Claude Code's `cleanupPeriodDays` under 9)
+  deletes them before they are old enough to fold. Settings shows
   how far back the history reaches and can clear it; clearing forgets what only the history held
   and counts what the transcripts still hold again.
 

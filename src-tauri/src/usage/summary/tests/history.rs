@@ -5,7 +5,7 @@ use super::super::test_support::*;
 use super::super::*;
 use crate::dto::UsageHistoryState;
 use crate::paths::scratch_dir;
-use crate::usage::folding::{clear_history_in, fold_history_in, history_status_in};
+use crate::usage::folding::{clear_history_in, fold_history_in, history_status_in, FoldChecks};
 use crate::usage::history::{history_path_for, FoldedRow, HistoryStore, Watermark};
 use crate::usage::pricing;
 use crate::usage::source_index::normalize_path;
@@ -26,8 +26,14 @@ fn at(iso: &str) -> i64 {
         .timestamp_millis()
 }
 
+/// One background check, as the first after launch: no memory of earlier checks.
 fn fold(home: &Path) {
-    fold_history_in(home, at(AFTER_AUGUST_FIRST_WEEK)).unwrap();
+    fold_with(home, &mut FoldChecks::default());
+}
+
+/// One background check that remembers the checks before it.
+fn fold_with(home: &Path, checks: &mut FoldChecks) {
+    fold_history_in(home, at(AFTER_AUGUST_FIRST_WEEK), checks).unwrap();
 }
 
 fn folded_outputs(home: &Path) -> Vec<u64> {
@@ -233,7 +239,7 @@ fn folding_waits_until_every_directory_can_be_walked() {
 }
 
 /// A transcript that cannot be read may just be mid-write: while it was written recently, the
-/// fold waits for it.
+/// fold waits for it, however many checks it fails.
 #[cfg(unix)]
 #[test]
 fn folding_waits_for_a_recent_transcript_that_cannot_be_read() {
@@ -244,16 +250,18 @@ fn folding_waits_for_a_recent_transcript_that_cannot_be_read() {
     let locked = write_record(&home, "b.jsonl", "2026-08-08T04:05:13.944Z", 300);
     set_mtime(&locked, "2026-08-08T04:05:14Z");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let mut checks = FoldChecks::default();
 
-    fold(&home);
+    fold_with(&home, &mut checks);
+    fold_with(&home, &mut checks);
 
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
     assert_eq!(watermark(&home), Watermark::NONE);
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// One that still does not read a week past the cutoff never will; waiting on it would let the
-/// provider delete every other transcript before it is kept.
+/// One a week past the cutoff that failed on the previous check too never will read; waiting on
+/// it would let the provider delete every other transcript before it is kept.
 #[cfg(unix)]
 #[test]
 fn a_transcript_unreadable_for_a_week_past_the_cutoff_stops_holding_the_fold_back() {
@@ -264,12 +272,41 @@ fn a_transcript_unreadable_for_a_week_past_the_cutoff_stops_holding_the_fold_bac
     let locked = write_record(&home, "b.jsonl", "2026-08-06T04:05:13.944Z", 300);
     set_mtime(&locked, "2026-08-06T23:59:59Z");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let mut checks = FoldChecks::default();
 
-    fold(&home);
+    fold_with(&home, &mut checks);
+    let after_one_check = watermark(&home);
+    fold_with(&home, &mut checks);
 
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(after_one_check, Watermark::NONE);
     assert_eq!(watermark(&home).ms(), Some(at("2026-08-14T00:00:00Z")));
     assert_eq!(folded_outputs(&home), [20]);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// An old transcript that fails to read once (another process held it for a moment) is waited
+/// for, and its usage is kept once it reads.
+#[cfg(unix)]
+#[test]
+fn an_old_transcript_that_fails_to_read_once_is_waited_for() {
+    use std::os::unix::fs::PermissionsExt;
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-transient-unreadable");
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    let locked = write_record(&home, "b.jsonl", "2026-08-06T04:05:13.944Z", 300);
+    set_mtime(&locked, "2026-08-06T23:59:59Z");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let mut checks = FoldChecks::default();
+
+    fold_with(&home, &mut checks);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+    fold_with(&home, &mut checks);
+
+    assert_eq!(watermark(&home).ms(), Some(at("2026-08-14T00:00:00Z")));
+    let mut outputs = folded_outputs(&home);
+    outputs.sort_unstable();
+    assert_eq!(outputs, [20, 300]);
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -520,7 +557,12 @@ fn a_history_file_that_cannot_be_opened_is_left_alone() {
     let before = std::fs::read_to_string(&history).unwrap();
     std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-    fold_history_in(&home, at("2026-08-30T12:00:00Z")).unwrap();
+    fold_history_in(
+        &home,
+        at("2026-08-30T12:00:00Z"),
+        &mut FoldChecks::default(),
+    )
+    .unwrap();
     let status = history_status_in(&home);
     let summary = read_offline(&home, august_input(false));
 
@@ -531,5 +573,30 @@ fn a_history_file_that_cannot_be_opened_is_left_alone() {
     assert_eq!(std::fs::read_to_string(&history).unwrap(), before);
     assert!(!home.join(".on-n-off/usage-history.json.bak").exists());
     assert_eq!(output_tokens(&summary), 320);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A read made while the history file cannot be opened counts transcripts alone. Its summary is
+/// not stored, so the file reading again brings its usage back rather than a stale undercount.
+#[cfg(unix)]
+#[test]
+fn a_summary_counted_without_the_history_is_not_stored() {
+    use std::os::unix::fs::PermissionsExt;
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-summary-while-locked");
+    let gone = write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "b.jsonl", "2026-08-16T04:05:13.944Z", 300);
+    fold(&home);
+    std::fs::remove_file(&gone).unwrap();
+    let history = history_path_for(&home);
+    std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let without = read_offline(&home, august_input(false));
+    std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let with = read_offline(&home, august_input(false));
+
+    assert_eq!(output_tokens(&without), 300);
+    assert!(!with.cache_hit);
+    assert_eq!(output_tokens(&with), 320);
     let _ = std::fs::remove_dir_all(&home);
 }

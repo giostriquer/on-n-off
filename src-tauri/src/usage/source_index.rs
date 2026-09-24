@@ -87,9 +87,9 @@ pub struct PreparedSources {
     pub files: Vec<PreparedSourceFile>,
     pub complete: bool,
     pub scan_cache_dirty: bool,
-    /// The mtimes of files no parse succeeded on and no cached parse stands in for: their records
-    /// are unknown.
-    pub unread_file_mtimes: Vec<i64>,
+    /// The paths and mtimes of files no parse succeeded on and no cached parse stands in for:
+    /// their records are unknown.
+    pub unread_files: Vec<(String, i64)>,
 }
 
 pub fn source_index_path_for(home: &Path) -> PathBuf {
@@ -431,7 +431,7 @@ pub fn prepare_sources(
     let mut files = Vec::new();
     let mut complete = snapshot.is_complete();
     let mut scan_cache_dirty = false;
-    let mut unread_file_mtimes = Vec::new();
+    let mut unread_files = Vec::new();
 
     for entry in snapshot.entries.values().filter(|entry| {
         entry.mtime_ms >= window_start_ms
@@ -482,7 +482,7 @@ pub fn prepare_sources(
 
         let Some(records) = records else {
             complete = false;
-            unread_file_mtimes.push(entry.mtime_ms);
+            unread_files.push((entry.path.clone(), entry.mtime_ms));
             continue;
         };
         files.push(PreparedSourceFile {
@@ -495,7 +495,7 @@ pub fn prepare_sources(
         files,
         complete,
         scan_cache_dirty,
-        unread_file_mtimes,
+        unread_files,
     }
 }
 

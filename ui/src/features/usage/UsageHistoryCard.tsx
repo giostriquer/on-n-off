@@ -39,9 +39,9 @@ export function UsageHistoryCard() {
       <div className="px-3.5 py-3">
         <h3 className="m-0 text-[13px] font-semibold">Usage history</h3>
         <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
-          Claude Code deletes transcripts after 30 days unless told otherwise. on-n-off keeps the
-          numbers of usage older than a week, never the conversations, so Usage still counts it once
-          the transcript is gone.
+          Claude Code deletes transcripts after 30 days unless told otherwise. Once usage is a week
+          old, on-n-off keeps its numbers, never the conversations, so Usage still counts it after
+          the transcript is gone. A transcript deleted sooner than that is not kept.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">

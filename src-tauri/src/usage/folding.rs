@@ -3,6 +3,7 @@
 //! when the screen is never opened. Settings reads how far back the history reaches and can
 //! clear it.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -29,10 +30,18 @@ const FIRST_FOLD_DELAY: Duration = Duration::from_secs(90);
 /// A fold is due once a day at most; a check that finds none reads only the history file.
 const FOLD_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
-/// A transcript that cannot be read holds a fold back only while it may still be written to.
-/// One last written this long before the cutoff that still does not read never will, and
-/// waiting on it would let the provider delete every other transcript before it is kept.
+/// A transcript that cannot be read holds a fold back while it may still be written to, or while
+/// its failure may be passing (another process holding it). One last written this long before the
+/// cutoff that failed on the previous check too never will read, and waiting on it would let the
+/// provider delete every other transcript before it is kept.
 const UNREADABLE_GRACE_MS: i64 = FOLD_AFTER_DAYS * DAY_MS;
+
+/// What the background checks remember between runs: the transcripts the last one that got as far
+/// as reading them could not read.
+#[derive(Debug, Default)]
+pub(crate) struct FoldChecks {
+    unread_last_time: HashSet<String>,
+}
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -45,8 +54,11 @@ pub fn spawn_history_folding() {
         .name("usage-history".into())
         .spawn(|| {
             std::thread::sleep(FIRST_FOLD_DELAY);
+            let mut checks = FoldChecks::default();
             loop {
-                if let Err(error) = user_home().and_then(|home| fold_history_in(&home, now_ms())) {
+                let checked =
+                    user_home().and_then(|home| fold_history_in(&home, now_ms(), &mut checks));
+                if let Err(error) = checked {
                     eprintln!("usage history: {}", error.message);
                 }
                 std::thread::sleep(FOLD_CHECK_INTERVAL);
@@ -72,7 +84,11 @@ pub fn clear_usage_history() -> Result<UsageHistoryStatusDto, AdapterError> {
 /// every root walked, and every transcript that may hold one read now or from its cached parse.
 /// A transcript still being written counts what it holds, since its records old enough to fold
 /// were written days ago. Reads only the history file unless a fold is due.
-pub(crate) fn fold_history_in(home: &Path, now_ms: i64) -> Result<(), AdapterError> {
+pub(crate) fn fold_history_in(
+    home: &Path,
+    now_ms: i64,
+    checks: &mut FoldChecks,
+) -> Result<(), AdapterError> {
     let paths = UsagePaths::for_home(home);
     let roots = all_roots(&source_roots_for(home));
     let _files = lock_usage_files();
@@ -100,10 +116,14 @@ pub(crate) fn fold_history_in(home: &Path, now_ms: i64) -> Result<(), AdapterErr
         let cutoff_ms = fold_cutoff_ms(now_ms);
         let prepared = prepare_sources(&snapshot, &mut file_cache, i64::MIN, store.watermark());
         dirty |= prepared.scan_cache_dirty;
-        let waiting = prepared
-            .unread_file_mtimes
+        let waiting = prepared.unread_files.iter().any(|(path, mtime_ms)| {
+            *mtime_ms >= cutoff_ms - UNREADABLE_GRACE_MS || !checks.unread_last_time.contains(path)
+        });
+        checks.unread_last_time = prepared
+            .unread_files
             .iter()
-            .any(|&mtime_ms| mtime_ms >= cutoff_ms - UNREADABLE_GRACE_MS);
+            .map(|(path, _)| path.clone())
+            .collect();
         if !waiting {
             let records = richest_copies(prepared.files.iter().map(|file| file.records.as_slice()));
             saved = store.fold(records, cutoff_ms, now_ms);
