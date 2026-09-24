@@ -21,6 +21,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
         }),
         current_account: true,
         plan: Some("pro".to_string()),
+        subscription_status: None,
         windows: vec![super::super::json::window(
             "primary",
             "Weekly · all models",
@@ -190,6 +191,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
         }),
         current_account: true,
         plan: Some("pro".to_string()),
+        subscription_status: None,
         windows: Vec::new(),
         credits: Some(LimitsCreditsDto {
             balance: "3".to_string(),
@@ -788,4 +790,51 @@ fn credits_spent_alone_counts_as_an_observation() {
     dto.credits_spent = credits_spent(0.0);
 
     assert!(dto.has_observations());
+}
+
+/// The subscription status is remembered with the account, and a snapshot written before it existed
+/// still loads, without one.
+#[test]
+fn a_remembered_snapshot_keeps_the_subscription_status() {
+    let home = scratch_dir("limits-snap-subscription-status");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Claude, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.subscription_status = Some("past_due".to_string());
+    store.save(&dto).unwrap();
+
+    assert_eq!(
+        store.load(AgentId::Claude)[0]
+            .subscription_status
+            .as_deref(),
+        Some("past_due")
+    );
+
+    let old = serde_json::json!({
+        "schemaVersion": 2, "provider": "claude",
+        "account": {"id": "acct-2", "label": "b@x"},
+        "windows": [{"id": "seven_day", "label": "Weekly", "kind": "weekly", "usedPercent": 10.0,
+                     "observedAt": "2026-08-17T10:00:00.000Z"}]
+    });
+    std::fs::write(
+        home.join(".on-n-off/limits/claude-acct_2-00000000.json"),
+        old.to_string(),
+    )
+    .unwrap();
+    let loaded = store.load(AgentId::Claude);
+    let older = loaded
+        .iter()
+        .find(|dto| dto.account.as_ref().unwrap().id == "acct-2")
+        .expect("a snapshot written before the field loads");
+    assert_eq!(older.subscription_status, None);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A subscription status is metadata, like the plan: on its own it is not an observation worth a card.
+#[test]
+fn a_subscription_status_alone_is_not_an_observation() {
+    let mut dto = snapshot(AgentId::Claude, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.windows.clear();
+    dto.subscription_status = Some("past_due".to_string());
+
+    assert!(!dto.has_observations());
 }

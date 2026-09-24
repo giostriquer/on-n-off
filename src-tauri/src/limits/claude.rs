@@ -34,6 +34,11 @@ pub(super) fn parse_profile(payload: &Value) -> Result<ClaudeIdentity, String> {
     })
 }
 
+/// The profile's `organization.subscription_status`, as Anthropic writes it; unknown when absent.
+pub(super) fn subscription_status(payload: &Value) -> Option<String> {
+    optional_string(payload.pointer("/organization/subscription_status"))
+}
+
 /// Everything one usage payload says about the account: its windows and its saved resets.
 pub(super) fn parse_usage(payload: &Value, now: DateTime<Utc>) -> Parsed {
     Parsed {

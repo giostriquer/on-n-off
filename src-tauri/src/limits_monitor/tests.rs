@@ -23,6 +23,7 @@ fn snapshot(
         }),
         current_account: true,
         plan: Some("pro".into()),
+        subscription_status: None,
         windows: vec![LimitWindowDto {
             id: "weekly".into(),
             label: "Weekly · all models".into(),

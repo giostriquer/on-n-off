@@ -34,14 +34,15 @@ fn read_at(
             let credential =
                 credentials::parse_claude_credential(auth).ok_or(HttpError::Unauthorized)?;
             let bearer = format!("Bearer {}", credential.token);
-            let profile = claude::parse_profile(&get_json(
+            let profile_payload = get_json(
                 profile,
                 &[
                     ("Authorization", &bearer),
                     ("anthropic-beta", "oauth-2025-04-20"),
                 ],
-            )?)
-            .map_err(HttpError::Parse)?;
+            )?;
+            let subscription_status = claude::subscription_status(&profile_payload);
+            let profile = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
             if profile.account.id != identity.user_id
                 || profile.organization_id.as_deref() != Some(&identity.workspace_id)
             {
@@ -57,6 +58,7 @@ fn read_at(
             Parsed {
                 account: Some(profile.account),
                 plan: credential.plan(),
+                subscription_status,
                 ..usage
             }
         }

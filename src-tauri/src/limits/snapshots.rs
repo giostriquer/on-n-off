@@ -31,6 +31,8 @@ struct StoredSnapshot {
     account: LimitsAccountDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subscription_status: Option<String>,
     windows: Vec<LimitWindowDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     credits: Option<LimitsCreditsDto>,
@@ -218,6 +220,7 @@ impl StoredSnapshot {
             provider: dto.provider,
             account: dto.account.clone().expect("caller checked account"),
             plan: dto.plan.clone(),
+            subscription_status: dto.subscription_status.clone(),
             windows: dto.windows.clone(),
             credits: dto.credits.clone(),
             workspace_credits: dto.workspace_credits.clone(),
@@ -242,6 +245,7 @@ impl StoredSnapshot {
             account: Some(self.account),
             current_account: false,
             plan: self.plan,
+            subscription_status: self.subscription_status,
             windows: self.windows,
             credits: self.credits,
             // A share past its reset has renewed, which the card shows as it shows a window's

@@ -29,6 +29,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         }),
         current_account: true,
         plan: None,
+        subscription_status: None,
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
@@ -43,6 +44,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         account: current.account.clone(),
         current_account: false,
         plan: Some("max".to_string()),
+        subscription_status: None,
         windows: vec![
             observed(
                 "weekly_all",
@@ -132,6 +134,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         account: account.clone(),
         current_account: true,
         plan: None,
+        subscription_status: None,
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
@@ -150,6 +153,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         account,
         current_account: false,
         plan: Some("pro".to_string()),
+        subscription_status: None,
         windows: vec![observed(
             "primary",
             "Weekly · all models",
@@ -191,6 +195,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         account: account.clone(),
         current_account: true,
         plan: None,
+        subscription_status: None,
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
@@ -209,6 +214,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         account,
         current_account: false,
         plan: Some("pro".to_string()),
+        subscription_status: None,
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
@@ -251,6 +257,7 @@ fn a_paused_refresh_keeps_the_remembered_workspace_credit_share() {
         account: account.clone(),
         current_account: true,
         plan: None,
+        subscription_status: None,
         windows: Vec::new(),
         credits: None,
         workspace_credits,
@@ -295,6 +302,7 @@ fn a_paused_refresh_keeps_the_remembered_credits_spent() {
         }),
         current_account: true,
         plan: None,
+        subscription_status: None,
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,
@@ -316,4 +324,51 @@ fn a_paused_refresh_keeps_the_remembered_credits_spent() {
 
     assert_eq!(paused.credits_spent, spent(100.0));
     assert_eq!(answered.credits_spent, spent(250.0));
+}
+
+/// The subscription status is account metadata, like the plan: a read that could not say keeps the
+/// remembered one, and a read that did say wins.
+#[test]
+fn a_paused_refresh_keeps_the_remembered_subscription_status() {
+    let read = |subscription_status: Option<&str>| ProviderLimitsDto {
+        provider: AgentId::Claude,
+        status: LimitsStatus::Failed,
+        message: Some("Refresh paused".to_string()),
+        account: Some(LimitsAccountDto {
+            legacy_id: None,
+            id: "acct-1".to_string(),
+            label: Some("me@example.com".to_string()),
+        }),
+        current_account: true,
+        plan: None,
+        subscription_status: subscription_status.map(str::to_string),
+        windows: Vec::new(),
+        credits: None,
+        workspace_credits: None,
+        credits_spent: None,
+        reset_credits: None,
+        reset_offer: None,
+    };
+    let remembered = || {
+        ObservedWindowSet::from_account(ProviderLimitsDto {
+            status: LimitsStatus::Ok,
+            message: None,
+            current_account: false,
+            windows: vec![observed(
+                "seven_day",
+                "Weekly · all models",
+                LimitWindowKind::Weekly,
+                40.0,
+                None,
+                "2026-08-17T10:00:00.000Z",
+            )],
+            ..read(Some("past_due"))
+        })
+    };
+
+    let paused = merge_windows(read(None), None, remembered());
+    let answered = merge_windows(read(Some("active")), None, remembered());
+
+    assert_eq!(paused.subscription_status.as_deref(), Some("past_due"));
+    assert_eq!(answered.subscription_status.as_deref(), Some("active"));
 }

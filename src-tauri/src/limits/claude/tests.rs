@@ -318,3 +318,26 @@ fn a_count_too_large_for_the_card_saturates_instead_of_wrapping_or_dropping_a_gr
     // leaves 0; only a clamp and a saturating sum reach u32::MAX.
     assert_eq!(parse_reset_credits(&payload, now()), resets(u32::MAX, None));
 }
+
+/// The profile's `organization.subscription_status` is kept as Anthropic writes it; a missing,
+/// empty or non-text value is simply unknown.
+#[test]
+fn reads_the_subscription_status_the_profile_reports() {
+    let profile = |status: serde_json::Value| json!({"account":{"uuid":"u"},"organization":{"uuid":"o","subscription_status":status}});
+
+    assert_eq!(
+        subscription_status(&profile(json!("past_due"))).as_deref(),
+        Some("past_due")
+    );
+    assert_eq!(
+        subscription_status(&profile(json!(" active "))).as_deref(),
+        Some("active")
+    );
+    assert_eq!(subscription_status(&profile(json!(""))), None);
+    assert_eq!(subscription_status(&profile(json!(null))), None);
+    assert_eq!(subscription_status(&profile(json!(3))), None);
+    assert_eq!(
+        subscription_status(&json!({"account":{"uuid":"u"},"organization":{"uuid":"o"}})),
+        None
+    );
+}

@@ -113,6 +113,7 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
         message: None,
         current_account: false,
         plan: Some("pro".into()),
+        subscription_status: None,
         credits: None,
         workspace_credits: None,
         credits_spent: None,

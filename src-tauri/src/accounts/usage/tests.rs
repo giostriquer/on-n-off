@@ -557,6 +557,7 @@ fn signed_in_card(key: &str, plan: &str) -> ProviderLimitsDto {
         }),
         current_account: true,
         plan: Some(plan.to_string()),
+        subscription_status: None,
         windows: vec![],
         credits: Some(crate::dto::LimitsCreditsDto {
             balance: "0".to_string(),

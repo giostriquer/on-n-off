@@ -19,6 +19,7 @@ fn ok_snapshot(provider: AgentId, id: &str, label: &str, used: f64) -> ProviderL
         Parsed {
             account: Some(account(id, label)),
             plan: Some("pro".to_string()),
+            subscription_status: None,
             windows: vec![window(
                 "primary",
                 "Weekly · all models",

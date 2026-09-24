@@ -19,6 +19,7 @@ fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> Pr
         }),
         current_account,
         plan: None,
+        subscription_status: None,
         windows: Vec::new(),
         credits: None,
         workspace_credits: None,

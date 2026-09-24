@@ -127,6 +127,7 @@ pub(super) fn finish(
         account: parsed.account,
         current_account: true,
         plan: parsed.plan,
+        subscription_status: parsed.subscription_status,
         windows: parsed.windows,
         credits: parsed.credits,
         workspace_credits: parsed.workspace_credits,

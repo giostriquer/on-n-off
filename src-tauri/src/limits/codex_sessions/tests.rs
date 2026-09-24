@@ -20,6 +20,7 @@ fn remembered(id: &str, reset_at: &str) -> ProviderLimitsDto {
         }),
         current_account: false,
         plan: Some("pro".to_string()),
+        subscription_status: None,
         windows: vec![LimitWindowDto {
             id: "primary".to_string(),
             label: "Weekly · all models".to_string(),
