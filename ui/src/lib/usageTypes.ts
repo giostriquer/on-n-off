@@ -67,3 +67,15 @@ export type UsageSummaryInput = {
   untilTime?: string;
   force?: boolean;
 };
+
+/** What the usage kept after transcripts are deleted holds (`usage/history.rs`). */
+export type UsageHistoryState = "empty" | "kept" | "unreadable";
+
+export type UsageHistoryStatus = {
+  state: UsageHistoryState;
+  /** Start of the oldest usage kept (RFC 3339). */
+  keptSince?: string | null;
+  /** The history counts usage before this instant; transcripts count from it on. */
+  foldedThrough?: string | null;
+  bytes: number;
+};

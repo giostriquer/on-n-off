@@ -5,14 +5,15 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, TimeZone, Utc};
 use chrono_tz::Tz;
 
 use crate::dto::{
-    AdapterError, AgentId, UsageBucketDto, UsageCostSource, UsagePricingDto, UsageSourceDto,
-    UsageSourceStatus, UsageSummaryDto, UsageSummaryInput, UsageTokenTotalsDto,
+    AdapterError, AgentId, UsageBucketDto, UsageCostSource, UsageHistoryState,
+    UsageHistoryStatusDto, UsagePricingDto, UsageSourceDto, UsageSourceStatus, UsageSummaryDto,
+    UsageSummaryInput, UsageTokenTotalsDto,
 };
 use crate::paths::{claude_root_for, codex_root_for, user_home};
 
@@ -37,6 +38,10 @@ use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_f
 use super::transcripts::{richest_copies, UsageProvider as Provider};
 
 const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
+/// Out of the way of startup's own reads.
+const FIRST_FOLD_DELAY: Duration = Duration::from_secs(90);
+/// A fold is due once a day at most; a check that finds none reads only the history file.
+const FOLD_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 
 fn now_ms() -> i64 {
@@ -360,6 +365,36 @@ pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, Adapter
     read_summary_from(input, user_home, now_ms())
 }
 
+/// Folds usage in the background, so it is kept even when the Usage screen is never opened: a
+/// little after launch, then every hour.
+pub fn spawn_history_folding() {
+    let spawned = std::thread::Builder::new()
+        .name("usage-history".into())
+        .spawn(|| {
+            std::thread::sleep(FIRST_FOLD_DELAY);
+            loop {
+                if let Err(error) = user_home().and_then(|home| fold_history_in(&home, now_ms())) {
+                    eprintln!("usage history: {}", error.message);
+                }
+                std::thread::sleep(FOLD_CHECK_INTERVAL);
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("usage history: could not start folding: {error}");
+    }
+}
+
+pub fn usage_history_status() -> Result<UsageHistoryStatusDto, AdapterError> {
+    Ok(history_status_in(&user_home()?))
+}
+
+/// Clears the history and says what it holds now.
+pub fn clear_usage_history() -> Result<UsageHistoryStatusDto, AdapterError> {
+    let home = user_home()?;
+    clear_history_in(&home)?;
+    Ok(history_status_in(&home))
+}
+
 /// Folds what has aged past the cutoff without reading a summary, so usage is kept even when the
 /// Usage screen is never opened. Reads only the history file unless a fold is due.
 pub(crate) fn fold_history_in(home: &Path, now_ms: i64) -> Result<(), AdapterError> {
@@ -400,6 +435,40 @@ pub(crate) fn fold_history_in(home: &Path, now_ms: i64) -> Result<(), AdapterErr
         dirty,
     );
     Ok(())
+}
+
+/// How far back the usage history reaches and how much room it takes.
+pub(crate) fn history_status_in(home: &Path) -> UsageHistoryStatusDto {
+    let path = history_path_for(home);
+    let bytes = std::fs::metadata(&path).map_or(0, |metadata| metadata.len());
+    let iso = |ms: i64| {
+        Utc.timestamp_millis_opt(ms)
+            .single()
+            .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true))
+    };
+    let (state, kept_since, folded_through) = match load_history(&path) {
+        LoadedHistory::Missing => (UsageHistoryState::Empty, None, None),
+        LoadedHistory::Unreadable => (UsageHistoryState::Unreadable, None, None),
+        LoadedHistory::Ready { history, .. } => {
+            let kept_since = history.kept_since_ms();
+            let state = if kept_since.is_some() {
+                UsageHistoryState::Kept
+            } else {
+                UsageHistoryState::Empty
+            };
+            (
+                state,
+                kept_since.and_then(iso),
+                history.folded_through_ms().and_then(iso),
+            )
+        }
+    };
+    UsageHistoryStatusDto {
+        state,
+        kept_since,
+        folded_through,
+        bytes,
+    }
 }
 
 /// Forgets every folded row. Usage whose transcript is still on disk is counted from it again and

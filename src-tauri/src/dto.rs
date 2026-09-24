@@ -373,6 +373,31 @@ pub struct UsageSummaryDto {
     pub cache_hit: bool,
 }
 
+/// What the usage history holds (`usage/history.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UsageHistoryState {
+    /// No usage is old enough to have been kept yet.
+    Empty,
+    Kept,
+    /// The file does not read: usage is counted from the transcripts alone and the file is left
+    /// as it is.
+    Unreadable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageHistoryStatusDto {
+    pub state: UsageHistoryState,
+    /// RFC 3339 start of the oldest usage kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_since: Option<String>,
+    /// RFC 3339 instant the history covers up to; transcripts count from here on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folded_through: Option<String>,
+    pub bytes: u64,
+}
+
 /// Why the GitHub screen has no fresh data. Every value except `Ok` comes with a `hint` telling
 /// the user what to do; `stale` says whether the last snapshot is being shown meanwhile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

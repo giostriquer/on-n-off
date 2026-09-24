@@ -88,6 +88,7 @@ pub fn run() {
             limits_monitor::setup(_app);
             accounts::discovery::setup(_app);
             github_monitor::setup(_app);
+            usage::spawn_history_folding();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -116,6 +117,8 @@ pub fn run() {
             commands::open_url,
             commands::refresh,
             commands::usage_summary,
+            commands::usage_history_status,
+            commands::clear_usage_history,
             commands::read_limits,
             commands::read_accounts,
             commands::read_account_preferences,

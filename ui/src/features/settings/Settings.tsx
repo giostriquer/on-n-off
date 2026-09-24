@@ -7,6 +7,7 @@ import { Rocker } from "@/features/agents/Rocker";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
 import { NotchSettingsCard } from "@/features/notch/NotchSettingsCard";
 import { TraySettingsCard } from "./TraySettingsCard";
+import { UsageHistoryCard } from "@/features/usage/UsageHistoryCard";
 import { FOCUS_RING } from "$lib/a11y";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { visibleAgentIds } from "$lib/appSettings";
@@ -107,6 +108,8 @@ export function Settings({
         pollSeconds={settings.githubPollSeconds}
         onChange={onSettingsChange}
       />
+
+      <UsageHistoryCard />
 
       <section aria-label="Providers">
         <div className="flex flex-col gap-3">

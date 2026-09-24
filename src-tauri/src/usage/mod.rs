@@ -11,4 +11,4 @@ mod summary;
 mod summary_cache;
 mod transcripts;
 
-pub use summary::read_summary;
+pub use summary::{clear_usage_history, read_summary, spawn_history_folding, usage_history_status};

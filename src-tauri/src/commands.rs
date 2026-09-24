@@ -4,7 +4,7 @@ use crate::adapter::AgentAdapter;
 use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, GithubPrsDto, InstallItemsRequest,
     InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto, ProjectDto, ProviderLimitsDto,
-    ResetCreditOutcome, UpdateItemMode, UsageSummaryDto, UsageSummaryInput,
+    ResetCreditOutcome, UpdateItemMode, UsageHistoryStatusDto, UsageSummaryDto, UsageSummaryInput,
 };
 use crate::flags::FeatureFlags;
 use crate::item_install::ItemService;
@@ -352,6 +352,18 @@ pub async fn refresh(
 #[tauri::command]
 pub async fn usage_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, AdapterError> {
     blocking("usage scan", move || crate::usage::read_summary(input)).await
+}
+
+/// How far back the usage kept after transcripts are deleted reaches.
+#[tauri::command]
+pub async fn usage_history_status() -> Result<UsageHistoryStatusDto, AdapterError> {
+    blocking("usage history status", crate::usage::usage_history_status).await
+}
+
+/// Forgets the usage kept after transcripts are deleted; transcripts still on disk count again.
+#[tauri::command]
+pub async fn clear_usage_history() -> Result<UsageHistoryStatusDto, AdapterError> {
+    blocking("usage history clear", crate::usage::clear_usage_history).await
 }
 
 /// Live subscription rate limits for one provider (Claude Keychain + HTTPS, or Codex app-server)

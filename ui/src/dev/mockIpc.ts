@@ -13,7 +13,7 @@ import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
 import { bankedResetsClaude, bankedResetsCodex, claudeWithoutReset, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
-import type { UsageBucket, UsageSummary } from "$lib/usageTypes";
+import type { UsageBucket, UsageHistoryStatus, UsageSummary } from "$lib/usageTypes";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -134,6 +134,13 @@ const fullTab = (): AgentTabDto => ({
 const catalogTab = (args: Record<string, unknown> = {}): AgentTabDto => {
   const tab = scenario === "catalog" ? fullTab() : emptyTab();
   return scenario === "hooks" ? { ...tab, hooks: hooksFor(args.agentId as AgentId) } : tab;
+};
+
+let usageHistory: UsageHistoryStatus = {
+  state: "kept",
+  keptSince: new Date(Date.now() - 90 * 86_400_000).toISOString(),
+  foldedThrough: new Date(Date.now() - 7 * 86_400_000).toISOString(),
+  bytes: 1_363_148,
 };
 
 let notch: NotchSnapshot = {
@@ -284,6 +291,11 @@ const handlers: Record<string, Handler> = {
   connect_codex_billing: () => { if (scenario === "billingFailure") throw billingFailure; },
   disconnect_codex_billing: () => undefined,
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),
+  usage_history_status: () => usageHistory,
+  clear_usage_history: () => {
+    usageHistory = { state: "empty", bytes: 0 };
+    return usageHistory;
+  },
   read_notch_state: () => notch,
   save_notch_settings: (args) => { notch = { ...notch, settings: args.settings as NotchSettings }; return notch; },
   hide_limits_popover: () => undefined,

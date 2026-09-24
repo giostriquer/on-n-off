@@ -3,6 +3,7 @@
 
 use super::super::test_support::*;
 use super::super::*;
+use crate::dto::UsageHistoryState;
 use crate::paths::scratch_dir;
 use crate::usage::history::{history_path_for, load_history, FoldedRow, LoadedHistory};
 use crate::usage::pricing;
@@ -327,5 +328,39 @@ fn a_superseded_transcript_keeps_the_turns_its_rewrite_dropped() {
 
     assert_eq!(output_tokens(&summary), 320);
     assert_eq!(record_count(&summary), 2);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn history_status_says_how_far_back_usage_is_kept() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-status");
+    let empty = history_status_in(&home);
+    assert_eq!(empty.state, UsageHistoryState::Empty);
+    assert_eq!(
+        (empty.kept_since, empty.folded_through, empty.bytes),
+        (None, None, 0)
+    );
+
+    write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    read_at(&home, august_input(false), AFTER_AUGUST_FIRST_WEEK);
+    let kept = history_status_in(&home);
+
+    assert_eq!(kept.state, UsageHistoryState::Kept);
+    assert_eq!(kept.kept_since.as_deref(), Some("2026-08-07T04:00:00.000Z"));
+    assert_eq!(
+        kept.folded_through.as_deref(),
+        Some("2026-08-14T00:00:00.000Z")
+    );
+    assert_eq!(
+        kept.bytes,
+        std::fs::metadata(history_path_for(&home)).unwrap().len()
+    );
+
+    std::fs::write(history_path_for(&home), "{ torn").unwrap();
+    assert_eq!(
+        history_status_in(&home).state,
+        UsageHistoryState::Unreadable
+    );
     let _ = std::fs::remove_dir_all(&home);
 }

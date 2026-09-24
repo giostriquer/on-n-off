@@ -108,7 +108,7 @@ the real explanation. What follows is only enough to know which one you want.
 | --- | --- | --- |
 | `{claude,codex,antigravity,cursor}.rs` | Provider adapters behind `AgentAdapter` | Every provider difference belongs here. Layout per provider is in `PROVIDERS.md`. |
 | `scanner.rs`, `plugin_meta.rs`, `mcp.rs` | Plugins, skills and MCP servers for a provider | Feeds Overview, Plugins, Skills, MCP. |
-| `usage/` | Token and cost aggregation from transcripts | Read-only. See below. |
+| `usage/` | Token and cost aggregation from transcripts, and the usage kept after they are deleted | Read-only on agent homes. See below. |
 | `limits/` + `limits_refresh.rs` | Live subscription rate limits | Provider problems come back as a `status` on the DTO, never an `Err`. See below. |
 | `github/` + `github_monitor.rs` | The Pull requests screen and its CI notifications | Not a provider, not behind `AgentAdapter`. See below. |
 | `item_install/` | Installing skills/subagents from a GitHub marketplace | The only substantial writer. Atomic placement plus a provenance registry at `~/.on-n-off/installed-items.json`, so upstream changes stay visible after the user edits their copy. |
@@ -220,7 +220,45 @@ the file again.
 A model the table has no price for is shown as **unpriced**, never as `$0.00`: its tokens count
 and its cost is left out of the total, which says how many models it leaves out. Any change to
 what a transcript parses to bumps `USAGE_TRANSCRIPT_PARSER_VERSION`, which invalidates every
-cache, so history is re-read from the transcripts; nothing in an agent home is ever written.
+cache, so what the transcripts still hold is re-read from them; nothing in an agent home is ever
+written.
+
+Claude Code sets a replaced transcript aside as `<session>.jsonl.superseded-<ms>` rather than
+overwriting it. Those are read too, so a turn a rewrite dropped still counts; the turns both copies
+hold collapse to one.
+
+#### Usage history
+
+Claude Code deletes transcripts after `cleanupPeriodDays` (30 by default), so a count read only
+from transcripts shrinks as they go. `usage/history.rs` keeps what they held in
+`~/.on-n-off/usage-history.json`. That file is user data, not a cache: once the transcripts are
+gone nothing can rebuild it.
+
+- **What is kept.** Records older than a week are folded into rows keyed by 15-minute UTC slot,
+  provider, model, whether the provider reported the cost, and whether the request's input passed
+  200k tokens. A row holds token totals, record count, summed reported cost and the session ids of
+  its slot: numbers, model names and session ids, never conversation content. Every UTC offset in
+  use is a multiple of 15 minutes, so a slot never straddles a local midnight or hour, and prices
+  are linear per model, so a row reads exactly like its records in any time zone and with any
+  newer price table. The 200k flag keeps a later long-context price possible for folded usage.
+- **The watermark.** Rows cover every record before `foldedThroughMs`; a read counts a
+  transcript's records only from it on, so the copies a resumed session makes of folded messages
+  are not counted twice. It moves forward only, to the UTC midnight a week before now, so a fold
+  runs at most once a day. A transcript whose records all sit below it (or that was last written
+  36 hours before it) leaves the scan cache and is never parsed again, even after an index rebuild.
+- **When it folds.** At a Usage read that finds a fold due, and from a background thread 90
+  seconds after launch and hourly after that, so usage is kept even if the screen is never opened.
+  A fold needs every root walked and every transcript that may hold a record in range read, now or
+  from its cached parse; a transcript still being written counts what it holds, since its records
+  old enough to fold were written days ago. Otherwise it waits for the next attempt.
+- **When the file does not read.** It is never written over: the previous good file is kept as
+  `.bak` and read in its place, and the unreadable one is set aside under a new name. A file a
+  newer on-n-off wrote, or one with no readable backup, is left alone; Usage counts transcripts
+  alone until the user clears it.
+- **Limits.** A parser fix reaches only records newer than the watermark. A transcript that shows
+  up later holding records older than it (copied from another machine, restored from a backup)
+  is not counted. Settings shows how far back the history reaches and can clear it; clearing
+  forgets what only the history held and counts what the transcripts still hold again.
 
 ## Cross-cutting plumbing
 
@@ -248,7 +286,7 @@ flowchart LR
         s1["settings.json"]
         s2["side-notch.json"]
         s3["limits/ · github/ snapshots"]
-        s4["usage caches"]
+        s4["usage caches<br/>usage-history.json (not a cache)"]
         s5["installed-items.json"]
     end
 ```
