@@ -5,6 +5,19 @@ function matches(query: string, ...parts: string[]): boolean {
   return parts.join(" ").toLowerCase().includes(query);
 }
 
+/** A server by its name, id, transport, source, the plugin that brings it, or a project keeping it. */
+function matchesMcp(query: string, server: McpServerDto): boolean {
+  return matches(
+    query,
+    server.name,
+    server.id,
+    server.system,
+    server.source,
+    server.pluginId ?? "",
+    ...(server.projects ?? []),
+  );
+}
+
 export type FilteredTab = {
   plugins: PluginDto[];
   skills: SkillDto[];
@@ -43,7 +56,7 @@ export function filterTab(tab: AgentTabDto, query: string): FilteredTab {
   );
 
   const filteredMcps = sortMcps(
-    mcpServers.filter((server) => matches(q, server.name, server.id, server.system, server.source)),
+    mcpServers.filter((server) => matchesMcp(q, server)),
   );
 
   return {
@@ -97,5 +110,5 @@ export function filterMcpList(tab: AgentTabDto, query: string): McpServerDto[] {
   if (!q) {
     return servers;
   }
-  return servers.filter((server) => matches(q, server.name, server.id, server.system, server.source));
+  return servers.filter((server) => matchesMcp(q, server));
 }

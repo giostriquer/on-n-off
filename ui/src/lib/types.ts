@@ -46,6 +46,12 @@ export type PluginDto = {
   skills: SkillDto[];
 };
 
+/**
+ * Where a server is configured: "" the user's own list, "project" the selected project,
+ * "plugin" an enabled plugin, "local" Claude's list for particular projects (all-projects view).
+ */
+export type McpOrigin = "" | "project" | "plugin" | "local";
+
 export type McpServerDto = {
   id: string;
   name: string;
@@ -53,7 +59,11 @@ export type McpServerDto = {
   source: string;
   enabled: boolean;
   togglable: boolean;
-  origin?: string;
+  origin?: McpOrigin;
+  /** The plugin (`name@marketplace`) that brings a "plugin" server. */
+  pluginId?: string | null;
+  /** The projects, as the provider keys them, that keep a "local" server. */
+  projects?: string[];
 };
 
 /**

@@ -4,6 +4,11 @@ use serde::Deserialize;
 
 use crate::dto::McpServerDto;
 
+/// A server an enabled plugin brings (`claude_mcp.rs`).
+pub const ORIGIN_PLUGIN: &str = "plugin";
+/// A server Claude keeps for particular projects, listed outside them (`claude_mcp.rs`).
+pub const ORIGIN_LOCAL: &str = "local";
+
 #[derive(Debug, Deserialize, Default)]
 pub struct CodexMcpEntry {
     pub command: Option<String>,
@@ -32,7 +37,7 @@ struct ClaudeMcpEntry {
     disabled: bool,
 }
 
-fn claude_disabled_list(value: &serde_json::Value) -> Vec<String> {
+pub fn claude_disabled_list(value: &serde_json::Value) -> Vec<String> {
     value
         .get("disabledMcpServers")
         .and_then(|value| value.as_array())
@@ -46,13 +51,25 @@ fn claude_disabled_list(value: &serde_json::Value) -> Vec<String> {
 }
 
 pub fn parse_claude_json(text: &str) -> Vec<McpServerDto> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
-        return Vec::new();
-    };
+    serde_json::from_str::<serde_json::Value>(text)
+        .map(|value| claude_json_servers(&value))
+        .unwrap_or_default()
+}
+
+/// The user's own servers in an already-parsed `~/.claude.json` (or a project's `.mcp.json`).
+pub fn claude_json_servers(value: &serde_json::Value) -> Vec<McpServerDto> {
     let Some(servers) = value.get("mcpServers").and_then(|value| value.as_object()) else {
         return Vec::new();
     };
-    let disabled_list = claude_disabled_list(&value);
+    claude_servers(servers, &claude_disabled_list(value))
+}
+
+/// Claude servers from a map of name to entry, off when the entry says `disabled` or its name is
+/// in `disabled_list`.
+pub fn claude_servers(
+    servers: &serde_json::Map<String, serde_json::Value>,
+    disabled_list: &[String],
+) -> Vec<McpServerDto> {
     let mut out = Vec::new();
     for (id, raw) in servers {
         let Ok(entry) = serde_json::from_value::<ClaudeMcpEntry>(raw.clone()) else {
@@ -107,6 +124,8 @@ fn mcp_dto(
         enabled,
         togglable: true,
         origin: String::new(),
+        plugin_id: None,
+        projects: Vec::new(),
     })
 }
 

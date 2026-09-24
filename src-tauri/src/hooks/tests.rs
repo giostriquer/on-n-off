@@ -172,8 +172,8 @@ fn claude_plugin_manifest_names_several_hook_files() {
         r#"{ "hooks": { "SessionEnd": [{ "hooks": [{ "type": "command", "command": "acme second" }] }] } }"#,
     );
     // A real file one level above the plugin, which is what `../escape.json` would reach if `..`
-    // were followed. It is dropped instead, so the manifest resolves to `escape.json` *inside*
-    // the plugin, where nothing is written, and the file above contributes nothing.
+    // were followed. The path is refused (`plugin_files::plugin_file`), so the file above
+    // contributes nothing.
     fs::write(
         root.parent().unwrap().join("escape.json"),
         r#"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "acme escaped" }] }] } }"#,
@@ -190,6 +190,33 @@ fn claude_plugin_manifest_names_several_hook_files() {
         ]
     );
     assert_eq!(commands(&hooks), ["acme first", "acme second"]);
+}
+
+/// On Windows a `C:` segment would take the path out of the plugin to a drive; the manifest
+/// path is refused by its text on every platform. A file of that very name is written inside the
+/// plugin here, where only Unix allows one, so reading it would show.
+#[cfg(unix)]
+#[test]
+fn a_hook_file_named_with_a_drive_is_refused() {
+    let root = plugin_dir(
+        "on-n-off-hooks-claude-drive",
+        ".claude-plugin",
+        r#"{ "name": "acme", "hooks": ["C:escape.json", "hooks/kept.json"] }"#,
+    );
+    write_hook_file(
+        &root,
+        "C:escape.json",
+        r#"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "acme escaped" }] }] } }"#,
+    );
+    write_hook_file(
+        &root,
+        "hooks/kept.json",
+        r#"{ "hooks": { "SessionEnd": [{ "hooks": [{ "type": "command", "command": "acme kept" }] }] } }"#,
+    );
+
+    let hooks = claude_plugin_hooks("acme@webapp", "acme", &root);
+
+    assert_eq!(commands(&hooks), ["acme kept"]);
 }
 
 #[test]

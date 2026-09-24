@@ -4,6 +4,19 @@ export function isProjectOrigin(origin?: string): boolean {
   return origin?.toLowerCase() === "project";
 }
 
+/** A server an enabled plugin brings: live wherever the plugin is. */
+export function isPluginOrigin(origin?: string): boolean {
+  return origin?.toLowerCase() === "plugin";
+}
+
+/**
+ * A server Claude keeps for particular projects, listed in the all-projects view: it runs only
+ * inside those projects, so it is not live here.
+ */
+export function isLocalOrigin(origin?: string): boolean {
+  return origin?.toLowerCase() === "local";
+}
+
 export function normalizeProjectKey(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }

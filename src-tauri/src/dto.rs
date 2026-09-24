@@ -149,8 +149,17 @@ pub struct McpServerDto {
     pub source: String,
     pub enabled: bool,
     pub togglable: bool,
+    /// `""` for a server the user configured, `"project"` for one a project folder carries,
+    /// `"plugin"` for one an enabled plugin brings, `"local"` for one Claude keeps for particular
+    /// projects (its local scope) when listed outside them.
     #[serde(default)]
     pub origin: String,
+    /// The plugin (`name@marketplace`) that brings a `"plugin"` server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+    /// The projects, as `~/.claude.json` keys them, that keep a `"local"` server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<String>,
 }
 
 /// One hook handler a provider would run: one row on the Hooks screen, which is read-only —

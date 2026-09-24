@@ -36,6 +36,8 @@ fn mcp(name: &str, system: &str) -> McpServerDto {
         enabled: true,
         togglable: true,
         origin: String::new(),
+        plugin_id: None,
+        projects: Vec::new(),
     }
 }
 

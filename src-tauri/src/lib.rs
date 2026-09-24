@@ -3,6 +3,7 @@ mod adapter;
 mod antigravity;
 mod backup;
 mod claude;
+mod claude_mcp;
 mod cli;
 mod cli_locate;
 #[cfg(test)]
@@ -29,6 +30,7 @@ mod mcp;
 mod monitor;
 mod notifications;
 mod paths;
+mod plugin_files;
 mod plugin_meta;
 mod process;
 mod project;

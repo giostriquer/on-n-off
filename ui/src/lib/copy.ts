@@ -5,6 +5,9 @@ export const copy = {
   emptyPlugins: "No plugins on this circuit.",
   emptyUserSkills: "No user skills.",
   emptyMcps: "No MCP servers on this circuit.",
+  mcpFromPlugin: (plugin: string) => `from ${plugin}`,
+  mcpInProjects: (projects: string[]) =>
+    projects.length === 1 ? `in ${projects[0]}` : `in ${projects.length} projects`,
   emptyHooks: "No hooks on this circuit.",
   hooksScope: "user settings + plugins · listed, never run",
   hooksUnread: (agent: string) =>

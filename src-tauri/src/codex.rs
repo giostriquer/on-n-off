@@ -202,7 +202,7 @@ impl CodexAdapter {
             // A disabled plugin's hooks do not run, so they are not rows.
             if entry.enabled {
                 if let Some(dir) = cache.as_deref() {
-                    hook_plugins.push(crate::hooks::PluginSource {
+                    hook_plugins.push(crate::plugin_files::PluginSource {
                         id: id.clone(),
                         name: name.clone(),
                         root: dir.to_path_buf(),
