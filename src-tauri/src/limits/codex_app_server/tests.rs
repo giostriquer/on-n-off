@@ -487,38 +487,44 @@ fn scoped_codex_observation_carries_its_previous_workspace_key() {
     assert_eq!(account.label.as_deref(), Some("me@example.com"));
 }
 
+/// Both of the identity check's reads are held to it: a personal plan's metadata read, and a
+/// workspace plan's read that also takes the access token, which must never pass another account.
 #[test]
 fn rejects_native_identity_changes_during_an_app_server_read() {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    for (user, workspace) in [("user-2", "workspace-1"), ("user-1", "workspace-2")] {
-        let codex_home = crate::paths::scratch_dir("codex-app-server-account-race");
-        let write_identity = |user: &str, workspace: &str| {
-            let payload = json!({"https://api.openai.com/auth": {"chatgpt_user_id":user, "chatgpt_account_id":workspace}});
-            let token = format!(
-                "header.{}.signature",
-                URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
+    for plan in ["pro", "business"] {
+        for (user, workspace) in [("user-2", "workspace-1"), ("user-1", "workspace-2")] {
+            let codex_home = crate::paths::scratch_dir("codex-app-server-account-race");
+            let write_identity = |user: &str, workspace: &str| {
+                let payload = json!({"https://api.openai.com/auth": {"chatgpt_user_id":user, "chatgpt_account_id":workspace}});
+                let token = format!(
+                    "header.{}.signature",
+                    URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
+                );
+                std::fs::write(
+                    codex_home.join("auth.json"),
+                    json!({"tokens":{"account_id":workspace,"id_token":token,"access_token":"fixture-access"}})
+                        .to_string(),
+                )
+                .unwrap();
+            };
+            write_identity("user-1", "workspace-1");
+            let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+            let mut transport = FakeTransport {
+                received: VecDeque::from([
+                    json!({"id":1,"result":{"codexHome":codex_home}}),
+                    json!({"id":2,"result":{"account":{"type":"chatgpt","email":"same@example.com","planType":plan}}}),
+                    json!({"id":3,"result":{"rateLimits":{"primary":{"usedPercent":42,"windowDurationMins":10080}}}}),
+                ]),
+                sent: vec![],
+            };
+            let session = query_app_server(&codex_home, false, &mut transport).unwrap();
+            write_identity(user, workspace);
+            assert!(
+                matches!(normalize_app_server(session, before), Err(AppServerFailure::Failed(message)) if message.contains("changed")),
+                "{plan}: {user} / {workspace}"
             );
-            std::fs::write(
-                codex_home.join("auth.json"),
-                json!({"tokens":{"account_id":workspace,"id_token":token}}).to_string(),
-            )
-            .unwrap();
-        };
-        write_identity("user-1", "workspace-1");
-        let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
-        let mut transport = FakeTransport {
-            received: VecDeque::from([
-                json!({"id":1,"result":{"codexHome":codex_home}}),
-                json!({"id":2,"result":{"account":{"type":"chatgpt","email":"same@example.com","planType":"pro"}}}),
-                json!({"id":3,"result":{"rateLimits":{"primary":{"usedPercent":42,"windowDurationMins":10080}}}}),
-            ]),
-            sent: vec![],
-        };
-        let session = query_app_server(&codex_home, false, &mut transport).unwrap();
-        write_identity(user, workspace);
-        assert!(
-            matches!(normalize_app_server(session, before), Err(AppServerFailure::Failed(message)) if message.contains("changed"))
-        );
+        }
     }
 }
 
@@ -904,4 +910,28 @@ fn a_personal_plan_takes_no_access_from_the_identity_check() {
 
     assert!(access.is_none());
     assert_eq!(parsed.account.unwrap().id, "acct-1");
+}
+
+/// The account's plan outranks the rate-limit bucket's, and it is the plan that decides whether the
+/// access token is taken.
+#[test]
+fn the_accounts_plan_decides_the_card_and_whether_its_token_is_taken() {
+    let codex_home = business_home("codex-app-server-plan-precedence").join(".codex");
+    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let session = AppServerResult {
+        codex_home,
+        account: typed(json!({
+            "account": {"type": "chatgpt", "email": "you@example.com", "planType": "business"},
+            "requiresOpenaiAuth": true
+        })),
+        rate_limits: typed(json!({"rateLimits": {"planType": "pro"}})),
+    };
+
+    let (parsed, access) = normalize_app_server(session, before).unwrap();
+
+    assert_eq!(parsed.plan.as_deref(), Some("business"));
+    assert_eq!(
+        access.map(|access| access.token.authorization()),
+        Some("Bearer fixture-access".to_string())
+    );
 }
