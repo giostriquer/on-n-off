@@ -3,8 +3,10 @@
  * the profile read reports. An active subscription needs no badge; the states that stop or will stop
  * the subscription are red; a trial is neutral. A state this list does not know is shown as written,
  * humanized, so a new one surfaces rather than disappearing. Nothing when the status is unknown.
+ *
+ * `ClaudeStatusLabel` is a status's wording and the `subscription-badge--<tone>` modifier it is
+ * drawn with.
  */
-/** A status's wording and the `subscription-badge--<tone>` modifier it is drawn with. */
 export type ClaudeStatusLabel = { label: string; tone: "alert" | "neutral" };
 
 const KNOWN: Record<string, ClaudeStatusLabel | null> = {

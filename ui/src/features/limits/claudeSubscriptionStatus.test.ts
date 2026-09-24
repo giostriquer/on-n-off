@@ -28,6 +28,6 @@ describe("claudeSubscriptionStatus", () => {
 
   it("shows a state it does not know rather than hiding it", () => {
     expect(claudeSubscriptionStatus("incomplete_expired")).toEqual({ label: "Incomplete expired", tone: "neutral" });
-    expect(claudeSubscriptionStatus("payment_action_required")).toEqual({ label: "Payment action required", tone: "neutral" });
+    expect(claudeSubscriptionStatus("some_made_up_state")).toEqual({ label: "Some made up state", tone: "neutral" });
   });
 });
