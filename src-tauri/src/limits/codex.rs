@@ -8,7 +8,7 @@ use super::json::window;
 use super::Parsed;
 use crate::dto::{
     LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
-    LimitsResetOfferDto,
+    LimitsResetOfferDto, LimitsWorkspaceCreditsDto,
 };
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
@@ -41,6 +41,12 @@ struct RateLimitBucket {
     secondary: Option<RateLimitWindow>,
     #[serde(default)]
     credits: Option<RateLimitCredits>,
+    /// A business member's share of the workspace's credits (Codex's spend control). Read loosely:
+    /// the amounts are strings in Codex's protocol, and a share that does not read is not shown.
+    #[serde(default)]
+    individual_limit: Option<serde_json::Value>,
+    #[serde(default)]
+    spend_control_reached: Option<bool>,
     #[serde(default)]
     plan_type: Option<String>,
 }
@@ -112,6 +118,10 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
         plan: main.plan_type.clone(),
         windows,
         credits: credits(main.credits.as_ref()),
+        workspace_credits: workspace_credits(
+            main.individual_limit.as_ref(),
+            main.spend_control_reached,
+        ),
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
         reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
     }
@@ -161,10 +171,7 @@ fn rate_limit_window(
             .clone()
             .unwrap_or_else(|| "extra limit".to_string())
     };
-    let resets_at = entry
-        .resets_at
-        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
-        .map(|at| at.to_rfc3339());
+    let resets_at = entry.resets_at.and_then(rfc3339_from_epoch);
     let window_id = if main {
         slot.to_string()
     } else if slot == "primary" {
@@ -203,6 +210,56 @@ fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
         balance: credits.balance.clone().unwrap_or_else(|| "0".to_string()),
         unlimited: credits.unlimited,
     })
+}
+
+/// The member's share of a business workspace's credits: the amount they may use, what they have
+/// used, how much of it that is, and when it resets. The amounts are kept as the provider writes
+/// them, but only when they read as finite numbers of at least zero, as Codex's own status line
+/// requires; otherwise there is no share to show. `spendControlReached` without a share says a limit was reached without saying
+/// which or how much, and is not shown.
+fn workspace_credits(
+    individual_limit: Option<&serde_json::Value>,
+    reached: Option<bool>,
+) -> Option<LimitsWorkspaceCreditsDto> {
+    let share = individual_limit?.as_object()?;
+    let amount = |key: &str| {
+        let text = match share.get(key)? {
+            serde_json::Value::String(text) => text.trim().to_string(),
+            serde_json::Value::Number(number) => number.to_string(),
+            _ => return None,
+        };
+        let value: f64 = text.parse().ok()?;
+        (value.is_finite() && value >= 0.0).then_some((text, value))
+    };
+    let (limit, limit_value) = amount("limit")?;
+    let (used, used_value) = amount("used")?;
+    let reached = reached == Some(true);
+    let remaining = share
+        .get("remainingPercent")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|percent| (0.0..=100.0).contains(percent));
+    // Codex's own meter: full once reached, else 100 less what remains (the TUI's status line), else
+    // the amounts' ratio, with a share of nothing full.
+    let used_percent = match remaining {
+        _ if reached => 100.0,
+        Some(remaining) => 100.0 - remaining,
+        None if limit_value <= 0.0 => 100.0,
+        None => (used_value / limit_value * 100.0).clamp(0.0, 100.0),
+    };
+    Some(LimitsWorkspaceCreditsDto {
+        limit,
+        used,
+        used_percent,
+        resets_at: share
+            .get("resetsAt")
+            .and_then(serde_json::Value::as_i64)
+            .and_then(rfc3339_from_epoch),
+        reached,
+    })
+}
+
+fn rfc3339_from_epoch(epoch: i64) -> Option<String> {
+    DateTime::<Utc>::from_timestamp(epoch, 0).map(|at| at.to_rfc3339())
 }
 
 /// Codex's own name for the paid reset in a banner's calls to action. Anything else the backend

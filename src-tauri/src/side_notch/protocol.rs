@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 pub const MAX_MESSAGE: usize = 262_144;
 /// Bumped whenever the host → helper message shape changes; a stale helper must fail loudly.
-pub const PROTOCOL_VERSION: u64 = 2;
+pub const PROTOCOL_VERSION: u64 = 3;
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]

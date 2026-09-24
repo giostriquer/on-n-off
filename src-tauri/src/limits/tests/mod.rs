@@ -4,7 +4,7 @@ mod claude_renewal;
 mod memory;
 
 use super::*;
-use crate::dto::{LimitWindowKind, LimitsPriceDto, LimitsResetOfferDto};
+use crate::dto::{LimitWindowKind, LimitsPriceDto, LimitsResetOfferDto, LimitsWorkspaceCreditsDto};
 use crate::http::{head_header, refused_url, serve_once, serve_sequence, HttpError};
 use crate::paths::scratch_dir;
 use credentials::read_claude_credential;
@@ -31,6 +31,7 @@ fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
         plan: Some("max".to_string()),
         windows,
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     }
@@ -827,6 +828,13 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             balance: "3".to_string(),
             unlimited: false,
         }),
+        workspace_credits: Some(LimitsWorkspaceCreditsDto {
+            limit: "25000".to_string(),
+            used: "8000".to_string(),
+            used_percent: 32.0,
+            resets_at: Some("2026-10-01T12:00:00+00:00".to_string()),
+            reached: true,
+        }),
         reset_credits: Some(LimitsResetCreditsDto {
             available_count: 1,
             next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
@@ -848,6 +856,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             "plan": "pro",
             "windows": [{"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5, "observedAt": "2026-08-17T20:00:00.000Z"}],
             "credits": {"balance": "3", "unlimited": false},
+            "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0, "resetsAt": "2026-10-01T12:00:00+00:00", "reached": true},
             "resetCredits": {"availableCount": 1, "nextExpiresAt": "2026-09-01T12:00:00+00:00"},
             "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
         })
@@ -864,6 +873,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
     assert_eq!(value["windows"], json!([]));
     assert!(value.get("plan").is_none());
     assert!(value.get("credits").is_none());
+    assert!(value.get("workspaceCredits").is_none());
     assert!(value.get("resetCredits").is_none());
     assert!(value.get("resetOffer").is_none());
     assert!(value.get("account").is_none());

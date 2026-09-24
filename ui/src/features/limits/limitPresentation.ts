@@ -2,12 +2,13 @@ import {
   formatObservedAt,
   formatResetAt,
   formatResetIn,
+  formatShortDate,
   formatUsedPercent,
   hasElapsed,
   parseInstant,
   usageTextColor,
 } from "$lib/limitsFormat";
-import type { LimitWindow, LimitsResetCredits, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitWindow, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
 import { formatAgo } from "$lib/timeFormat";
 
 export type LimitWindowPresentation = {
@@ -115,16 +116,53 @@ export function unexpiredBankedResets(resetCredits: LimitsResetCredits | null | 
   return hasElapsed(resetCredits.nextExpiresAt, now) ? null : resetCredits;
 }
 
+const AMOUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+
 /**
- * Whether a read observed anything about the account: quota windows, a credit balance or banked
- * resets. `windows` lets a surface count only the windows it shows. The backend's
- * `ProviderLimitsDto::has_observations` is the same rule. A count that lapses while its card is on
+ * Present a business workspace member's credit share as a window is presented: the reader's meter
+ * (`usedPercent`, Codex's own figure), and a note saying what is left and when the share resets. Its
+ * reset is checked once: past it the share has renewed, so nothing is used and all of it is left
+ * again. The amounts are worded as the side notch words them (`workspace_share_wording` in
+ * `side_notch/model.rs`): a reached share says "all 10,000 used" when its amounts agree and "limit
+ * reached" when they show some left.
+ */
+export function presentWorkspaceShare(share: LimitsWorkspaceCredits, now: number): LimitWindowPresentation {
+  const renewed = hasElapsed(share.resetsAt, now);
+  const percent = renewed ? 0 : share.usedPercent;
+  const limit = Number(share.limit);
+  const used = Number(share.used);
+  const amounts = renewed
+    ? `${AMOUNT.format(limit)} of ${AMOUNT.format(limit)} left`
+    : !share.reached
+      ? `${AMOUNT.format(Math.max(limit - used, 0))} of ${AMOUNT.format(limit)} left`
+      : used >= limit
+        ? `all ${AMOUNT.format(limit)} used`
+        : "limit reached";
+  const resetDate = formatShortDate(share.resetsAt);
+  const reset = renewed ? `reset ${formatAgo(share.resetsAt, now)} · ${resetDate}` : resetDate ? `resets ${resetDate}` : undefined;
+  return {
+    percent,
+    text: formatUsedPercent(percent),
+    color: usageTextColor(percent),
+    note: [amounts, reset].filter(Boolean).join(" · "),
+  };
+}
+
+/**
+ * Whether a read observed anything about the account: quota windows, a credit balance, a
+ * workspace-credit share or banked resets. `windows` lets a surface count only the windows it
+ * shows. The backend's `ProviderLimitsDto::has_observations` is the same rule. A count that lapses while its card is on
  * screen still counts here until the next read, at most one poll later, drops it: only a card with
  * nothing else observed notices, and `unexpiredBankedResets` already keeps the count off it.
  */
 export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = entry.windows): boolean {
   // Every current Codex read reports a reset count, usually 0; only a positive count was observed.
-  return windows.length > 0 || entry.credits != null || (entry.resetCredits?.availableCount ?? 0) > 0;
+  return (
+    windows.length > 0 ||
+    entry.credits != null ||
+    entry.workspaceCredits != null ||
+    (entry.resetCredits?.availableCount ?? 0) > 0
+  );
 }
 
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {

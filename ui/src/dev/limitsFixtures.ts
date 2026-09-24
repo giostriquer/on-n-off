@@ -152,6 +152,22 @@ export function bankedResetsCodex(): ProviderLimits[] {
   }));
 }
 
+/**
+ * `?mock=workspaceCredits` on Codex: two business workspace members. The live one has used part of
+ * its share of the workspace's credits; the remembered one has used all of it. Both own balances
+ * read 0, as they do in a workspace.
+ */
+export function workspaceCreditsCodex(): ProviderLimits[] {
+  return CODEX.map((entry) => ({
+    ...entry,
+    plan: "self_serve_business_prolite",
+    credits: { balance: "0", unlimited: false },
+    workspaceCredits: entry.currentAccount
+      ? { limit: "25000", used: "8000", usedPercent: 32, resetsAt: at(6 * 24 * 60 + 11 * 60), reached: false }
+      : { limit: "10000", used: "10000", usedPercent: 100, resetsAt: at(2 * 24 * 60), reached: true },
+  }));
+}
+
 /** `?mock=bankedResets` on Claude: one saved reset, reported with where Claude Code spends it. */
 export function bankedResetsClaude(): ProviderLimits[] {
   return CLAUDE.map((entry) => ({ ...entry, resetCredits: { availableCount: 1, nextExpiresAt: at(13 * 24 * 60 + 4 * 60) } }));

@@ -35,6 +35,12 @@ flowchart LR
     model -.->|"same pure layout,<br/>checked by NotchCoreChecks"| core
 ```
 
+A provider cell's outer ring and figure are its headline window. An inner ring carries a second
+figure: Claude's Fable weekly window, or a Codex business member's workspace-credit share. The
+share's meter is the limits reader's `used_percent`; its amounts are worded once in `model.rs`
+(`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
+reset.
+
 Things that are easy to get wrong:
 
 - **Rust owns settings and data; the helper owns drawing.** The settings card stays in

@@ -10,7 +10,8 @@ use super::win_paint::{
 };
 use super::win_window::{WinAction, WindowMsg};
 use crate::dto::{
-    AgentId, GithubPrDto, GithubPrsDto, LimitWindowDto, LimitsStatus, ProviderLimitsDto,
+    AgentId, GithubPrDto, GithubPrsDto, LimitWindowDto, LimitsStatus, LimitsWorkspaceCreditsDto,
+    ProviderLimitsDto,
 };
 use crate::side_notch::sessions::{self, LiveSession};
 use serde::Serialize;
@@ -123,6 +124,8 @@ pub(crate) struct NativeProvider {
     pub status: LimitsStatus,
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
+    /// A business workspace member's credit share, which the Codex cell draws on its inner ring.
+    pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
 }
 
 fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
@@ -134,6 +137,7 @@ fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
             status: entry.status,
             message: entry.message,
             windows: entry.windows,
+            workspace_credits: entry.workspace_credits,
         })
 }
 
@@ -204,6 +208,7 @@ fn rail_cells(
                     status: entry.status,
                     message: entry.message.clone(),
                     windows: entry.windows.clone(),
+                    workspace_credits: entry.workspace_credits.clone(),
                     sessions: session_rows[index].clone(),
                 })
             })

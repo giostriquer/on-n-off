@@ -106,8 +106,8 @@ fn read_at(
 }
 
 /// The HTTP response uses seconds and snake_case; the existing app-server parser uses minutes
-/// and camelCase. Map only the documented quota buckets and the banked resets. Missing reset
-/// inventory is unknown.
+/// and camelCase. Map only the documented quota buckets, the credits, a business member's
+/// workspace-credit share and the banked resets. Missing reset inventory is unknown.
 fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Parsed, HttpError> {
     use serde_json::json;
     fn window(value: &Value) -> Value {
@@ -127,6 +127,17 @@ fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<P
         main["credits"] = json!({"hasCredits":credits["has_credits"].as_bool().unwrap_or(false),
             "unlimited":credits["unlimited"].as_bool().unwrap_or(false),
             "balance":credits.get("balance").and_then(|v| v.as_str().map(str::to_owned).or_else(|| v.as_f64().map(|n| n.to_string()))) });
+    }
+    // A business member's share of the workspace's credits, in app-server's names.
+    if let Some(spend_control) = payload.get("spend_control").filter(|v| v.is_object()) {
+        main["spendControlReached"] = json!(spend_control["reached"].as_bool());
+        if let Some(share) = spend_control
+            .get("individual_limit")
+            .filter(|v| v.is_object())
+        {
+            main["individualLimit"] = json!({"limit": share["limit"], "used": share["used"],
+                "remainingPercent": share["remaining_percent"], "resetsAt": share["reset_at"]});
+        }
     }
     let mut buckets = serde_json::Map::new();
     buckets.insert("codex".into(), main.clone());

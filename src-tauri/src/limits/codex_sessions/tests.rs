@@ -30,6 +30,7 @@ fn remembered(id: &str, reset_at: &str) -> ProviderLimitsDto {
             observed_at: "2026-08-20T02:39:06.754Z".to_string(),
         }],
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     }

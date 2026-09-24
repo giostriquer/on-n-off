@@ -67,6 +67,7 @@ fn usage(identity: &Identity) -> ProviderLimitsDto {
         current_account: false,
         plan: Some("pro".into()),
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
         windows: vec![LimitWindowDto {

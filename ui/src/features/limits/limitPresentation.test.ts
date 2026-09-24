@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows } from "./limitPresentation";
+import { hasObservations, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows, presentWorkspaceShare } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -130,10 +130,50 @@ describe("usableAgainAt", () => {
   });
 });
 
+const SHARE = { limit: "25000", used: "8000", usedPercent: 32, resetsAt: null, reached: false };
+
+describe("presentWorkspaceShare", () => {
+  const pending = "2026-09-01T00:00:00Z";
+
+  it("meters the share with the reader's figure and says what is left and when it resets", () => {
+    expect(presentWorkspaceShare({ ...SHARE, usedPercent: 40, resetsAt: pending }, NOW)).toEqual({
+      percent: 40,
+      text: "40%",
+      color: undefined,
+      note: "17,000 of 25,000 left · resets Sep 1",
+    });
+  });
+
+  it("says all of a reached share is used when its amounts agree", () => {
+    const presented = presentWorkspaceShare({ ...SHARE, used: "25000", usedPercent: 100, reached: true, resetsAt: pending }, NOW);
+    expect(presented.note).toBe("all 25,000 used · resets Sep 1");
+    expect(presented.color).toBe("var(--trip)");
+  });
+
+  it("says only that the limit is reached when a reached share's amounts show some left", () => {
+    expect(presentWorkspaceShare({ ...SHARE, used: "24000", usedPercent: 100, reached: true, resetsAt: pending }, NOW).note)
+      .toBe("limit reached · resets Sep 1");
+  });
+
+  it("never says less than nothing is left", () => {
+    expect(presentWorkspaceShare({ ...SHARE, limit: "100", used: "120", usedPercent: 100 }, NOW).note).toBe("0 of 100 left");
+  });
+
+  it("reads a share past its reset as renewed, as a window past its reset is", () => {
+    expect(presentWorkspaceShare({ ...SHARE, used: "25000", usedPercent: 100, reached: true, resetsAt: "2026-08-17T19:00:00Z" }, NOW)).toEqual({
+      percent: 0,
+      text: "0%",
+      color: undefined,
+      note: "25,000 of 25,000 left · reset 1h ago · Aug 17",
+    });
+  });
+});
+
 describe("hasObservations", () => {
   const bare: ProviderLimits = { provider: "codex", status: "ok", currentAccount: true, windows: [] };
 
-  it("counts quota windows, a credit balance and banked resets alike", () => {
+  it("counts quota windows, a credit balance, a workspace-credit share and banked resets alike", () => {
+    expect(hasObservations({ ...bare, workspaceCredits: SHARE })).toBe(true);
     expect(hasObservations(bare)).toBe(false);
     expect(hasObservations({ ...bare, windows: [window] })).toBe(true);
     expect(hasObservations({ ...bare, credits: { balance: "0", unlimited: false } })).toBe(true);
@@ -144,6 +184,12 @@ describe("hasObservations", () => {
 
   it("lets a caller count only the windows it shows", () => {
     expect(hasObservations({ ...bare, windows: [window] }, [])).toBe(false);
+  });
+
+  it("keeps a card with only a workspace-credit share as a paused refresh rather than an empty one", () => {
+    const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", workspaceCredits: SHARE };
+    expect(presentLimitAccount(failed, "unavailable").refreshPaused).toBe(true);
+    expect(presentLimitAccount({ ...failed, currentAccount: false }, "unavailable").remembered).toBe(true);
   });
 
   it("keeps a card with only banked resets as a paused refresh rather than an empty one", () => {
@@ -160,6 +206,7 @@ describe.each(["failed", "unauthenticated"] as const)("saved %s usage status", s
     {name:"windows", windows:[window]},
     {name:"credits", windows:[], credits:{balance:"0", unlimited:false}},
     {name:"banked resets", windows:[], resetCredits:{availableCount:1, nextExpiresAt:null}},
+    {name:"a workspace-credit share", windows:[], workspaceCredits:SHARE},
   ])("quietly identifies retained $name", observation => {
     const presented = presentLimitAccount({provider:"codex", currentAccount:false, status, message, ...observation}, "fallback");
     expect(presented.message).toBeNull();

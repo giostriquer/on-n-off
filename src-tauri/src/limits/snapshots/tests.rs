@@ -29,6 +29,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
             Some("2026-08-24T23:34:33+00:00".to_string()),
         )],
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -193,6 +194,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
             balance: "3".to_string(),
             unlimited: false,
         }),
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -665,6 +667,87 @@ fn a_count_lapses_at_its_expiry_itself() {
         next_expires_at: Some(expires_at.to_string()),
     };
     let at = parse_observed_at(expires_at).unwrap();
-    assert!(lapsed(&resets, at));
-    assert!(!lapsed(&resets, at - chrono::Duration::seconds(1)));
+    let expiry = resets.next_expires_at.as_deref();
+    assert!(passed(expiry, at));
+    assert!(!passed(expiry, at - chrono::Duration::seconds(1)));
+    assert!(!passed(None, at), "no known expiry never lapses");
+}
+
+/// A remembered workspace-credit share is kept whether or not its reset has passed.
+#[test]
+fn a_remembered_workspace_credit_share_outlives_its_reset() {
+    let home = scratch_dir("limits-snap-workspace-credits");
+    let store = SnapshotStore::for_home(&home);
+    let share = |resets_at: &str| {
+        Some(crate::dto::LimitsWorkspaceCreditsDto {
+            limit: "25000".to_string(),
+            used: "8000".to_string(),
+            used_percent: 32.0,
+            resets_at: Some(resets_at.to_string()),
+            reached: false,
+        })
+    };
+    let mut current = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    current.workspace_credits = share("2100-10-01T00:00:00.000Z");
+    store.save(&current).unwrap();
+    assert_eq!(
+        store.load(AgentId::Codex)[0].workspace_credits,
+        current.workspace_credits
+    );
+
+    // Past its reset the share has renewed, which the card shows as a window's passed reset is shown;
+    // dropping it would bring back the own balance of 0 the share stands in for.
+    let mut renewed = snapshot(AgentId::Codex, "acct-2", "b@x", "2026-08-17T10:00:00.000Z");
+    renewed.workspace_credits = share("2026-08-18T00:00:00.000Z");
+    store.save(&renewed).unwrap();
+    let loaded = store.load(AgentId::Codex);
+    let second = loaded
+        .iter()
+        .find(|dto| dto.account.as_ref().unwrap().id == "acct-2")
+        .unwrap();
+    assert_eq!(second.workspace_credits, renewed.workspace_credits);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A read whose only figure is a workspace-credit share is still worth remembering.
+#[test]
+fn a_workspace_credit_share_alone_counts_as_an_observation() {
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.windows.clear();
+    assert!(!dto.has_observations());
+
+    dto.workspace_credits = Some(crate::dto::LimitsWorkspaceCreditsDto {
+        limit: "25000".to_string(),
+        used: "8000".to_string(),
+        used_percent: 32.0,
+        resets_at: None,
+        reached: false,
+    });
+
+    assert!(dto.has_observations());
+}
+
+/// A failed read that carries only a remembered share observed nothing: dating it now would make an
+/// old share look fresh and replace the snapshot it came from.
+#[test]
+fn a_failed_read_carrying_only_a_remembered_share_is_not_saved() {
+    let home = scratch_dir("limits-snap-failed-share");
+    let store = SnapshotStore::for_home(&home);
+    let mut remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    remembered.workspace_credits = Some(crate::dto::LimitsWorkspaceCreditsDto {
+        limit: "25000".to_string(),
+        used: "8000".to_string(),
+        used_percent: 32.0,
+        resets_at: Some("2100-10-01T00:00:00+00:00".to_string()),
+        reached: false,
+    });
+    store.save(&remembered).unwrap();
+    let mut failed = remembered.clone();
+    failed.status = LimitsStatus::Failed;
+    failed.windows.clear();
+
+    assert!(store.save(&failed).is_err());
+
+    assert_eq!(store.load(AgentId::Codex)[0].windows, remembered.windows);
+    let _ = std::fs::remove_dir_all(&home);
 }

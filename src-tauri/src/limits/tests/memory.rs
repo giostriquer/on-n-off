@@ -27,6 +27,7 @@ fn ok_snapshot(provider: AgentId, id: &str, label: &str, used: f64) -> ProviderL
                 None,
             )],
             credits: None,
+            workspace_credits: None,
             reset_credits: None,
             reset_offer: None,
         },

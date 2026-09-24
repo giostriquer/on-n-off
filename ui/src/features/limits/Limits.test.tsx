@@ -516,6 +516,18 @@ describe("Limits", () => {
     expect(within(card("Codex limits · work@codex.example")).getByRole("definition", { name: "Credits" }).textContent).toBe("Unlimited");
   });
 
+  it("shows a business member's workspace credits in place of an own balance of 0", async () => {
+    const workspaceCredits = { limit: "25000", used: "8000", usedPercent: 32, resetsAt: "2026-10-01T12:00:00Z", reached: false };
+    answer([okClaude()], [okCodex({ plan: "self_serve_business_prolite", credits: { balance: "0", unlimited: false }, workspaceCredits })]);
+    renderLimits();
+
+    const codex = await waitFor(() => card("Codex limits · work@codex.example"));
+    const share = within(codex).getByRole("meter", { name: "Workspace credits" });
+    expect(share).toHaveAttribute("aria-valuenow", "32");
+    expect(share).toHaveAccessibleDescription("17,000 of 25,000 left · resets Oct 1");
+    expect(within(codex).queryByRole("definition", { name: "Credits" })).toBeNull();
+  });
+
   it("offers a banked reset beside the current Codex account's actions and lists every provider's count as a row", async () => {
     const remembered = { ...staleCodex(), resetCredits: { availableCount: 1, nextExpiresAt: null } };
     const banked = { availableCount: 2, nextExpiresAt: null };

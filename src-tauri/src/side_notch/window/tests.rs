@@ -33,9 +33,33 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
     .unwrap();
     assert!(payload.get("account").is_none());
     assert!(payload.get("credits").is_none());
+    assert!(payload.get("workspaceCredits").is_none());
     assert_eq!(payload["provider"], "claude");
     assert_eq!(payload["sessions"], serde_json::json!([]));
     assert!(current_provider(Vec::new()).is_none());
+}
+
+/// The helper draws the share on the Codex cell's inner ring with the reader's meter, and shows the
+/// amounts already worded: it picks the renewed wording by the clock and formats nothing but dates.
+#[test]
+fn a_business_members_credit_share_travels_worded_with_the_readers_meter() {
+    let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
+        {"provider":"codex","status":"ok","currentAccount":true,"windows":[],
+         "workspaceCredits":{"limit":"25000","used":"8000","usedPercent":40.0,"resetsAt":"2026-10-01T12:00:00+00:00","reached":false}}
+    ]))
+    .unwrap();
+    let entry = current_provider(entries).unwrap();
+    let payload = serde_json::to_value(MessageProvider {
+        entry: &entry,
+        sessions: &[],
+    })
+    .unwrap();
+
+    assert_eq!(
+        payload["workspaceCredits"],
+        serde_json::json!({"usedPercent":40.0,"resetsAt":"2026-10-01T12:00:00+00:00",
+            "left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"})
+    );
 }
 
 #[test]
@@ -47,6 +71,7 @@ fn the_message_lists_selected_providers_in_rail_order_with_their_sessions() {
         plan: None,
         message: None,
         windows: Vec::new(),
+        workspace_credits: None,
     };
     let providers = [
         Poll::new(Some(entry(AgentId::Claude))),

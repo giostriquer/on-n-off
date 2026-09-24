@@ -31,6 +31,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         plan: None,
         windows: Vec::new(),
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -60,6 +61,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
             ),
         ],
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     });
@@ -130,6 +132,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         plan: None,
         windows: Vec::new(),
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -153,6 +156,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
             "2026-08-17T15:00:00Z",
         )],
         credits: None,
+        workspace_credits: None,
         reset_credits: reset_credits.clone(),
         // A remembered account can carry no offer, and merging must not invent one either.
         reset_offer: Some(crate::dto::LimitsResetOfferDto {
@@ -185,6 +189,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         plan: None,
         windows: Vec::new(),
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -201,6 +206,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         plan: Some("pro".to_string()),
         windows: Vec::new(),
         credits: None,
+        workspace_credits: None,
         reset_credits: reset_credits.clone(),
         reset_offer: None,
     });
@@ -212,4 +218,51 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
     assert_eq!(merged.reset_offer, None);
     assert_eq!(merged.plan.as_deref(), Some("pro"));
     assert!(merged.windows.is_empty());
+}
+
+/// A read that paused keeps the workspace-credit share the account last reported, as it keeps a
+/// credit balance; a read that reports one replaces it.
+#[test]
+fn a_paused_refresh_keeps_the_remembered_workspace_credit_share() {
+    let account = Some(LimitsAccountDto {
+        legacy_id: None,
+        id: "acct-1".to_string(),
+        label: Some("me@example.com".to_string()),
+    });
+    let share = |used: &str| {
+        Some(crate::dto::LimitsWorkspaceCreditsDto {
+            limit: "25000".to_string(),
+            used: used.to_string(),
+            used_percent: 32.0,
+            resets_at: None,
+            reached: false,
+        })
+    };
+    let read = |workspace_credits| ProviderLimitsDto {
+        provider: AgentId::Codex,
+        status: LimitsStatus::Failed,
+        message: Some("Refresh paused".to_string()),
+        account: account.clone(),
+        current_account: true,
+        plan: None,
+        windows: Vec::new(),
+        credits: None,
+        workspace_credits,
+        reset_credits: None,
+        reset_offer: None,
+    };
+    let remembered = || {
+        ObservedWindowSet::from_account(ProviderLimitsDto {
+            status: LimitsStatus::Ok,
+            message: None,
+            current_account: false,
+            ..read(share("8000"))
+        })
+    };
+
+    let paused = merge_windows(read(None), None, remembered());
+    let answered = merge_windows(read(share("9000")), None, remembered());
+
+    assert_eq!(paused.workspace_credits, share("8000"));
+    assert_eq!(answered.workspace_credits, share("9000"));
 }

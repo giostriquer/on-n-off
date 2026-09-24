@@ -1,5 +1,5 @@
 use super::{
-    model::{layout, GithubList, NotchSnapshot, RAIL_ORDER},
+    model::{layout, workspace_share_wording, GithubList, NotchSnapshot, RAIL_ORDER},
     protocol::{Action, PROTOCOL_VERSION},
     sessions::{self, LiveSession},
     transport::{Connection, Lifetime},
@@ -38,6 +38,20 @@ struct NativeProvider {
     plan: Option<String>,
     message: Option<String>,
     windows: Vec<LimitWindowDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace_credits: Option<NativeWorkspaceCredits>,
+}
+/// A business workspace member's credit share, which the helper draws on the Codex cell's inner ring:
+/// the reader's meter, the reset, and the amounts already worded (`workspace_share_wording`), so the
+/// helper only picks `renewed` once `resets_at` has passed and formats nothing but the date.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeWorkspaceCredits {
+    used_percent: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resets_at: Option<String>,
+    left: String,
+    renewed: String,
 }
 fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
     entries
@@ -50,6 +64,15 @@ fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
             plan: entry.plan,
             message: entry.message,
             windows: entry.windows,
+            workspace_credits: entry.workspace_credits.map(|share| {
+                let wording = workspace_share_wording(&share);
+                NativeWorkspaceCredits {
+                    used_percent: share.used_percent,
+                    resets_at: share.resets_at,
+                    left: wording.left,
+                    renewed: wording.renewed,
+                }
+            }),
         })
 }
 /// One provider on the wire: its quota snapshot plus the live sessions read on their own cadence.

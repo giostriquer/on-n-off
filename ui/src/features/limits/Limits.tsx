@@ -6,11 +6,8 @@ import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
-import {
-  planLabel,
-  usageFillStyle,
-} from "$lib/limitsFormat";
-import type { LimitsCredits, LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import { planLabel } from "$lib/limitsFormat";
+import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
@@ -21,7 +18,8 @@ import { accountCards, orderAccountCards } from "./accountCards";
 import { BankedResetsRow, CLAUDE_RESET_HINT, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
 import { UsageStatusBadge } from "./UsageStatusBadge";
-import { SummaryRow } from "./SummaryRow";
+import { CreditsRows } from "./Credits";
+import { Meter, MeterRow } from "./Meter";
 
 export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
   return <AccountControllers><LimitsContent pollMinutes={pollMinutes} /></AccountControllers>;
@@ -227,7 +225,7 @@ function AccountCard({
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{profile ? "Usage unavailable." : `${name} reported no rate-limit windows.`}</p>
       ) : null}
 
-      {entry.credits ? <CreditsRow credits={entry.credits} /> : null}
+      <CreditsRows entry={entry} now={now} />
       <BankedResetsRow resetCredits={entry.resetCredits} hint={entry.provider === "claude" && entry.currentAccount ? CLAUDE_RESET_HINT : undefined} now={now} />
       {entry.provider === "codex" ? <ResetOfferRow offer={entry.resetOffer} /> : null}
   </>;
@@ -243,34 +241,6 @@ function AccountCard({
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
     </section>
-  );
-}
-
-function Meter({
-  window,
-  percent,
-  provider,
-  className,
-}: {
-  window: LimitWindow;
-  percent: number;
-  provider: AgentId;
-  className: string;
-}) {
-  return (
-    <div
-      className={`overflow-hidden rounded-sm bg-[var(--well)] ${className}`}
-      role="meter"
-      aria-label={window.label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(percent)}
-    >
-      <div
-        className="h-full rounded-sm transition-[width]"
-        style={{ width: `${percent}%`, ...usageFillStyle(provider, percent) }}
-      />
-    </div>
   );
 }
 
@@ -309,15 +279,12 @@ function HeroWindow({
           <span className="min-w-0 flex-1 pb-0.5 font-mono text-[12px] leading-snug text-[var(--mute)]">{note}</span>
         ) : null}
       </div>
-      <Meter window={window} percent={percent} provider={provider} className="h-1.5" />
+      <Meter label={window.label} percent={percent} provider={provider} className="h-1.5" />
     </div>
   );
 }
 
-/**
- * Remaining windows as compact rows: small-caps label with its reset note underneath (never
- * truncated), bar and percent on the right — the same idiom as the Overview's list rows.
- */
+/** Remaining windows as compact meter rows, with the reset as the note. */
 function WindowRow({
   window,
   provider,
@@ -331,28 +298,6 @@ function WindowRow({
   const awaitingFirstMessage = provider === "claude" && window.kind === "session"
     && window.usedPercent === 0 && window.resetsAt == null;
   const resetNote = note || (awaitingFirstMessage ? "Starts with your first message" : "Reset time unavailable");
-  return (
-    <div className="flex items-center gap-2.5 border-t border-[var(--hair)] px-3.5 py-2">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span
-          className="text-[10px] leading-4 font-semibold tracking-[0.03em] text-[var(--mute)] uppercase"
-        >
-          {window.label}
-        </span>
-        <span className="font-mono text-[11px] leading-snug text-[var(--mute)]">{resetNote}</span>
-      </div>
-      <Meter window={window} percent={percent} provider={provider} className="h-1 w-24 shrink-0" />
-      <span
-        className="w-11 shrink-0 text-right font-mono text-[12px]"
-        style={{ color }}
-      >
-        {text}
-      </span>
-    </div>
-  );
+  return <MeterRow label={window.label} note={resetNote} percent={percent} text={text} color={color} provider={provider} />;
 }
 
-/** The credit balance as one more row under the windows, so it never crowds the header's identity. */
-function CreditsRow({ credits }: { credits: LimitsCredits }) {
-  return <SummaryRow label="Credits" value={credits.unlimited ? "Unlimited" : credits.balance} />;
-}

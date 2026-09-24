@@ -266,11 +266,13 @@ fn meter_ramp_only_ever_moves_toward_the_trip_red() {
             + square(color[2], TRIP_RED[2]))
         .sqrt()
     }
-    // Claude, Fable, Codex, Cursor and Antigravity: every accent the meter can be handed.
-    let accents: [Color; 5] = [
+    // Claude, Fable, Codex, Codex's workspace credits, Cursor and Antigravity: every accent the
+    // meter can be handed, the same list `Meter.swift`'s check walks.
+    let accents: [Color; 6] = [
         [217, 119, 87, 255],
         [204, 98, 64, 255],
         [238, 240, 242, 255],
+        [168, 176, 186, 255],
         [122, 162, 255, 255],
         [140, 147, 157, 255],
     ];
@@ -315,4 +317,113 @@ fn meter_ramp_only_ever_moves_toward_the_trip_red() {
         );
     }
     assert_eq!(meter_color(None, accents[0]), UNREADABLE_INK);
+}
+
+fn share(limit: &str, used: &str, used_percent: f64, reached: bool) -> LimitsWorkspaceCreditsDto {
+    LimitsWorkspaceCreditsDto {
+        limit: limit.into(),
+        used: used.into(),
+        used_percent,
+        resets_at: Some("2026-10-01T12:00:00Z".into()),
+        reached,
+    }
+}
+
+fn at(instant: &str) -> chrono::DateTime<chrono::Utc> {
+    instant.parse().unwrap()
+}
+
+/// The Windows painter draws the share with the window machinery, so a share past its reset reads
+/// as renewed there exactly as a window does. The meter is the reader's figure, never recomputed.
+#[test]
+fn a_workspace_share_draws_as_a_window_with_the_readers_figure() {
+    let window = workspace_share_window(&share("25000", "8000", 40.0, false));
+
+    assert_eq!(window.label, "Workspace credits");
+    assert_eq!(window.used_percent, 40.0);
+    assert_eq!(window.resets_at.as_deref(), Some("2026-10-01T12:00:00Z"));
+}
+
+/// One wording for both notches, the Limits screen's: what is left while the share is current,
+/// all of it again once it has renewed.
+#[test]
+fn a_share_is_worded_once_for_both_notches() {
+    let worded = |limit, used, reached| workspace_share_wording(&share(limit, used, 0.0, reached));
+
+    assert_eq!(
+        worded("25000", "8000", false),
+        ShareWording {
+            left: "17,000 of 25,000 left".into(),
+            renewed: "25,000 of 25,000 left".into(),
+        }
+    );
+    assert_eq!(worded("100", "120", false).left, "0 of 100 left");
+    assert_eq!(
+        worded("25000.5", "8000.25", false).left,
+        "17,000.25 of 25,000.5 left"
+    );
+    assert_eq!(worded("10.125", "0", false).left, "10.13 of 10.13 left");
+}
+
+/// A share the backend calls reached says so: all of it used when the amounts agree, only that
+/// the limit is reached when they show some left.
+#[test]
+fn a_reached_share_says_all_used_only_when_its_amounts_agree() {
+    let left = |limit, used| workspace_share_wording(&share(limit, used, 100.0, true)).left;
+
+    assert_eq!(left("10000", "10000"), "all 10,000 used");
+    assert_eq!(left("100", "120"), "all 100 used");
+    assert_eq!(left("25000", "24000"), "limit reached");
+}
+
+#[test]
+fn a_share_renews_at_its_reset() {
+    let pending = share("25000", "8000", 32.0, false);
+    let unknown = LimitsWorkspaceCreditsDto {
+        resets_at: None,
+        ..pending.clone()
+    };
+
+    assert!(!workspace_share_renewed(
+        &pending,
+        at("2026-10-01T11:59:59Z")
+    ));
+    assert!(workspace_share_renewed(
+        &pending,
+        at("2026-10-01T12:00:00Z")
+    ));
+    assert!(!workspace_share_renewed(
+        &unknown,
+        at("2099-01-01T00:00:00Z")
+    ));
+}
+
+/// The date is the viewer's, so the expectation is built from the same instant in local time.
+#[test]
+fn the_share_note_gives_the_reset_date_rather_than_a_weekday() {
+    let note = |resets_at: Option<&str>| {
+        workspace_share_note(
+            &LimitsWorkspaceCreditsDto {
+                resets_at: resets_at.map(str::to_owned),
+                ..share("25000", "8000", 32.0, false)
+            },
+            at("2026-09-24T12:00:00Z"),
+        )
+    };
+    let local = |instant: &str| {
+        at(instant)
+            .with_timezone(&chrono::Local)
+            .format("%b %-d")
+            .to_string()
+    };
+
+    assert_eq!(
+        note(Some("2026-10-01T12:00:00Z")),
+        format!("Resets {}", local("2026-10-01T12:00:00Z"))
+    );
+    assert_eq!(
+        note(Some("2026-09-23T12:00:00Z")),
+        format!("Reset {}", local("2026-09-23T12:00:00Z"))
+    );
+    assert_eq!(note(None), "");
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::LimitsWorkspaceCreditsDto;
 use serde_json::json;
 
 /// Sanitised `account/rateLimits/read` result from Codex app-server 0.148.0.
@@ -324,4 +325,183 @@ fn a_banner_shaped_unlike_the_one_this_app_knows_offers_nothing() {
     let absent: RateLimitsResponse =
         serde_json::from_value(json!({"rateLimits": {"limitId": "codex"}})).unwrap();
     assert_eq!(parse_codex(&absent).reset_offer, None);
+}
+
+/// A business workspace pools its credits; each member's share of them is Codex's spend control,
+/// which app-server reports on the main bucket as `individualLimit` and `spendControlReached`.
+/// App-server's answer for a business member, shaped like `APP_SERVER_CAPTURE`: the main bucket both
+/// on its own and under its id, which is the copy `parse_codex` reads.
+fn business_payload(
+    individual_limit: serde_json::Value,
+    reached: serde_json::Value,
+) -> RateLimitsResponse {
+    let main = json!({
+        "limitId": "codex",
+        "primary": {"usedPercent": 12, "windowDurationMins": 300},
+        "secondary": null,
+        "credits": {"hasCredits": true, "unlimited": false, "balance": "0"},
+        "individualLimit": individual_limit,
+        "spendControlReached": reached,
+        "planType": "self_serve_business_prolite"
+    });
+    serde_json::from_value(json!({"rateLimits": main, "rateLimitsByLimitId": {"codex": main}}))
+        .unwrap()
+}
+
+#[test]
+fn maps_a_business_members_share_of_the_workspace_credits() {
+    let payload = business_payload(
+        json!({"limit": "25000", "used": "8000", "remainingPercent": 68, "resetsAt": 1790000000}),
+        json!(false),
+    );
+
+    assert_eq!(
+        parse_codex(&payload).workspace_credits,
+        Some(LimitsWorkspaceCreditsDto {
+            limit: "25000".to_string(),
+            used: "8000".to_string(),
+            used_percent: 32.0,
+            resets_at: Some("2026-09-21T14:13:20+00:00".to_string()),
+            reached: false,
+        })
+    );
+}
+
+#[test]
+fn a_share_used_up_is_marked_reached() {
+    let payload = business_payload(
+        json!({"limit": "25000", "used": "25000", "remainingPercent": 0, "resetsAt": 1790000000}),
+        json!(true),
+    );
+
+    let share = parse_codex(&payload).workspace_credits.unwrap();
+    assert!(share.reached);
+}
+
+/// The meter is Codex's own: what its status line shows as used is 100 less what the backend says
+/// remains, which can differ from the amounts' ratio by the backend's rounding.
+#[test]
+fn a_shares_meter_is_what_codex_says_remains() {
+    let payload = business_payload(
+        json!({"limit": "25000", "used": "8123", "remainingPercent": 68}),
+        json!(false),
+    );
+
+    assert_eq!(
+        parse_codex(&payload)
+            .workspace_credits
+            .unwrap()
+            .used_percent,
+        32.0
+    );
+}
+
+/// A share the backend says is used up is full, whatever it says remains.
+#[test]
+fn a_reached_share_is_all_used() {
+    let payload = business_payload(
+        json!({"limit": "25000", "used": "9000", "remainingPercent": 64}),
+        json!(true),
+    );
+
+    assert_eq!(
+        parse_codex(&payload)
+            .workspace_credits
+            .unwrap()
+            .used_percent,
+        100.0
+    );
+}
+
+/// Without a usable remaining percent, the meter is the amounts' ratio: all of a share of
+/// nothing, and never more than all of it.
+#[test]
+fn without_what_remains_the_meter_is_what_is_used_of_the_limit() {
+    for (share, expected) in [
+        (json!({"limit": "25000", "used": "8000"}), 32.0),
+        (
+            json!({"limit": "25000", "used": "8000", "remainingPercent": 150}),
+            32.0,
+        ),
+        (
+            json!({"limit": "25000", "used": "8000", "remainingPercent": -5}),
+            32.0,
+        ),
+        (
+            json!({"limit": "25000", "used": "8000", "remainingPercent": "68"}),
+            32.0,
+        ),
+        (json!({"limit": "0", "used": "0"}), 100.0),
+        (json!({"limit": "100", "used": "120"}), 100.0),
+        (json!({"limit": "25000", "used": "0"}), 0.0),
+    ] {
+        let payload = business_payload(share.clone(), json!(false));
+        assert_eq!(
+            parse_codex(&payload)
+                .workspace_credits
+                .unwrap()
+                .used_percent,
+            expected,
+            "{share}"
+        );
+    }
+}
+
+/// Right after a reset a member has used nothing, which is still a share to show.
+#[test]
+fn a_share_with_nothing_used_yet_reads() {
+    let payload = business_payload(json!({"limit": "25000", "used": "0"}), json!(false));
+
+    let share = parse_codex(&payload).workspace_credits.unwrap();
+    assert_eq!((share.limit.as_str(), share.used.as_str()), ("25000", "0"));
+}
+
+/// Amounts arrive as strings; a number is read the same way.
+#[test]
+fn a_share_given_in_numbers_still_reads() {
+    let payload = business_payload(
+        json!({"limit": 25000.5, "used": 8000, "resetsAt": null}),
+        json!(null),
+    );
+
+    let share = parse_codex(&payload).workspace_credits.unwrap();
+    assert_eq!(
+        (share.limit.as_str(), share.used.as_str()),
+        ("25000.5", "8000")
+    );
+    assert_eq!(share.resets_at, None);
+    assert!(!share.reached);
+}
+
+/// An amount that is not a finite number of at least zero leaves nothing to show, as Codex's own
+/// status line treats it.
+#[test]
+fn a_share_whose_amounts_are_not_counts_is_not_shown() {
+    for (limit, used) in [
+        (json!("n/a"), json!("8000")),
+        (json!("25000"), json!("")),
+        (json!("25000"), json!("-1")),
+        (json!("NaN"), json!("0")),
+        (json!("inf"), json!("0")),
+        (json!(true), json!("0")),
+    ] {
+        let payload = business_payload(json!({"limit": limit, "used": used}), json!(false));
+        assert_eq!(
+            parse_codex(&payload).workspace_credits,
+            None,
+            "{limit} / {used}"
+        );
+    }
+}
+
+/// Without an individual limit there is no share to show, whatever else the bucket says.
+#[test]
+fn no_share_without_an_individual_limit() {
+    let plain: RateLimitsResponse = serde_json::from_str(APP_SERVER_CAPTURE).unwrap();
+    let reached_only = business_payload(json!(null), json!(true));
+    let unreadable = business_payload(json!({"limit": "25000"}), json!(false));
+
+    assert_eq!(parse_codex(&plain).workspace_credits, None);
+    assert_eq!(parse_codex(&reached_only).workspace_credits, None);
+    assert_eq!(parse_codex(&unreadable).workspace_credits, None);
 }

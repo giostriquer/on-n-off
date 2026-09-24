@@ -26,6 +26,7 @@ fn codex_hides_internal_windows_from_both_ring_and_popover() {
                 observed_at: "2026-09-01T10:00:00Z".into(),
             },
         ],
+        workspace_credits: None,
         sessions: Vec::new(),
     };
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
@@ -416,4 +417,178 @@ fn conflict_band_only_marks_passing_prs_with_merge_conflicts() {
             );
         }
     }
+}
+
+fn share(
+    used: &str,
+    used_percent: f64,
+    reached: bool,
+    resets_at: &str,
+) -> LimitsWorkspaceCreditsDto {
+    LimitsWorkspaceCreditsDto {
+        limit: "25000".into(),
+        used: used.into(),
+        used_percent,
+        resets_at: Some(resets_at.into()),
+        reached,
+    }
+}
+
+/// Every text entry of one open provider popover, in order.
+fn popover_texts(provider: ProviderData) -> Vec<String> {
+    let (planned, _) = popover_render(provider);
+    let popover = planned.popover.expect("the popover is open");
+    popover
+        .entries
+        .into_iter()
+        .filter_map(|(item, _)| match item {
+            PopItem::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+fn inner_ring(provider: ProviderData) -> Option<InnerRing> {
+    match cell_content(&CellData::Provider(provider)) {
+        CellContent::Provider { inner, .. } => inner,
+        _ => panic!("wrong content kind"),
+    }
+}
+
+#[test]
+fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
+    let member = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
+    match cell_content(&CellData::Provider(member.clone())) {
+        CellContent::Provider { label, primary, .. } => {
+            assert_eq!(label, "31%", "the weekly stays the headline");
+            assert_eq!(primary.and_then(|quota| quota.percent), Some(31.0));
+        }
+        _ => panic!("wrong content kind"),
+    }
+    assert_eq!(
+        inner_ring(member),
+        Some(InnerRing {
+            quota: QuotaView {
+                percent: Some(32.0),
+                reached: false
+            },
+            ink: CREDITS_INK,
+            track: CREDITS_TRACK,
+        })
+    );
+    assert_eq!(
+        inner_ring(codex_member(share(
+            "25000",
+            100.0,
+            true,
+            "2020-01-01T12:00:00Z"
+        )))
+        .map(|ring| ring.quota),
+        Some(QuotaView {
+            percent: Some(0.0),
+            reached: false
+        }),
+        "a share past its reset has renewed, as a window has"
+    );
+    let mut unreadable = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
+    unreadable.status = LimitsStatus::Failed;
+    assert!(inner_ring(unreadable).is_none());
+}
+
+/// Claude's Fable window takes the same inner ring, in its own terracotta.
+#[test]
+fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
+    let claude = claude_with(vec![
+        window(
+            "weekly",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            7.0,
+        ),
+        window("fable", "Weekly · Fable", LimitWindowKind::Model, 13.0),
+    ]);
+    let ring = inner_ring(claude).expect("an inner ring");
+    assert_eq!(ring.quota.percent, Some(13.0));
+    assert_eq!((ring.ink, ring.track), (FABLE_ORANGE, FABLE_TRACK));
+}
+
+#[test]
+fn the_codex_popover_lists_the_credit_share_after_the_weekly() {
+    let texts = popover_texts(codex_member(share(
+        "8000",
+        32.0,
+        false,
+        "2099-01-01T12:00:00Z",
+    )));
+    let weekly = texts.iter().position(|text| text == "Weekly · all models");
+    let credits = texts.iter().position(|text| text == "Workspace credits");
+    assert!(weekly.is_some() && credits > weekly, "{texts:?}");
+    // The date is the viewer's, built from the same instant in local time.
+    let note = format!(
+        "Resets {}",
+        chrono::DateTime::parse_from_rfc3339("2099-01-01T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%b %-d")
+    );
+    assert_eq!(texts.get(credits.unwrap() + 1), Some(&note), "{texts:?}");
+    assert!(
+        texts.contains(&"32% Used · 17,000 of 25,000 left".to_string()),
+        "{texts:?}"
+    );
+    let (planned, _) = popover_render(codex_member(share(
+        "8000",
+        32.0,
+        false,
+        "2099-01-01T12:00:00Z",
+    )));
+    let bars = planned
+        .popover
+        .expect("the popover is open")
+        .entries
+        .iter()
+        .filter(|(item, _)| matches!(item, PopItem::Bar { .. }))
+        .count();
+    assert_eq!(bars, 2, "a bar for the weekly and one for the share");
+}
+
+/// The popover words the share as the app does: a reached share with some left says only that the
+/// limit is reached, and a renewed one says all of it is left.
+#[test]
+fn the_codex_popover_words_a_reached_and_a_renewed_share_as_the_app_does() {
+    let reached = popover_texts(codex_member(share(
+        "24000",
+        100.0,
+        true,
+        "2099-01-01T12:00:00Z",
+    )));
+    assert!(
+        reached.contains(&"100% Used · limit reached".to_string()),
+        "{reached:?}"
+    );
+    let renewed = popover_texts(codex_member(share(
+        "25000",
+        100.0,
+        true,
+        "2020-01-01T12:00:00Z",
+    )));
+    assert!(
+        renewed.contains(&"0% Used · 25,000 of 25,000 left".to_string()),
+        "{renewed:?}"
+    );
+}
+
+/// A paused account with only a remembered share still says the values below are last observed.
+#[test]
+fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
+    let mut paused = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
+    paused.status = LimitsStatus::Failed;
+    paused.message = Some("Refresh failed.".into());
+    paused.windows.clear();
+
+    let texts = popover_texts(paused);
+    assert!(
+        texts.contains(&"Refresh paused. Last observed values below.".to_string()),
+        "{texts:?}"
+    );
 }

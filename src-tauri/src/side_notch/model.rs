@@ -1,4 +1,8 @@
 use crate::dto::AgentId;
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+use crate::dto::LimitsWorkspaceCreditsDto;
+#[cfg(any(target_os = "windows", test))]
+use crate::dto::{LimitWindowDto, LimitWindowKind};
 use serde::{Deserialize, Serialize};
 
 /// A cell's width on screen (points at the standard size); a vertical rail is this thick.
@@ -327,6 +331,114 @@ fn mix(from: Color, to: Color, amount: f64) -> Color {
         channel(from[2], to[2]),
         channel(from[3], to[3]),
     ]
+}
+
+/// What the side notch says about a business workspace member's credit share, worded once for both
+/// notches as the Limits screen words it (`presentWorkspaceShare` in
+/// `ui/src/features/limits/limitPresentation.ts`): `left` while the share is current, `renewed` once
+/// its reset has passed and all of it is left again. Each notch picks one by the clock when it draws.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShareWording {
+    pub left: String,
+    pub renewed: String,
+}
+
+/// A reached share reads "all 10,000 used" when its amounts agree and "limit reached" when they show
+/// some left; otherwise it says what is left, never less than nothing.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub fn workspace_share_wording(share: &LimitsWorkspaceCreditsDto) -> ShareWording {
+    let limit = amount(&share.limit);
+    let used = amount(&share.used);
+    let left = if !share.reached {
+        format!(
+            "{} of {} left",
+            format_amount((limit - used).max(0.0)),
+            format_amount(limit)
+        )
+    } else if used >= limit {
+        format!("all {} used", format_amount(limit))
+    } else {
+        "limit reached".into()
+    };
+    ShareWording {
+        left,
+        renewed: format!("{} of {} left", format_amount(limit), format_amount(limit)),
+    }
+}
+
+/// An amount as the provider writes it; the limits reader only keeps finite amounts of at least zero.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn amount(text: &str) -> f64 {
+    text.trim().parse().unwrap_or(0.0)
+}
+
+/// An amount in en-US digits with at most two decimals, rounding half away from zero like the app's
+/// `Intl.NumberFormat`: 25000.5 → "25,000.5".
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn format_amount(value: f64) -> String {
+    let cents = (value.max(0.0) * 100.0).round() as u128;
+    let whole = (cents / 100).to_string();
+    let mut grouped = String::new();
+    for (index, digit) in whole.chars().enumerate() {
+        if index > 0 && (whole.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    match cents % 100 {
+        0 => grouped,
+        fraction if fraction.is_multiple_of(10) => format!("{grouped}.{}", fraction / 10),
+        fraction => format!("{grouped}.{fraction:02}"),
+    }
+}
+
+/// The share as a window, so the Windows painter's inner ring, meter ramp and renewal treat it the way
+/// they treat Claude's Fable window. The meter is the reader's figure.
+#[cfg(any(target_os = "windows", test))]
+pub fn workspace_share_window(share: &LimitsWorkspaceCreditsDto) -> LimitWindowDto {
+    LimitWindowDto {
+        id: "workspace-credits".into(),
+        label: "Workspace credits".into(),
+        kind: LimitWindowKind::Model,
+        used_percent: share.used_percent,
+        resets_at: share.resets_at.clone(),
+        window_seconds: None,
+        observed_at: String::new(),
+    }
+}
+
+/// Whether the share's reset has passed, so all of it is left again.
+#[cfg(any(target_os = "windows", test))]
+pub fn workspace_share_renewed(
+    share: &LimitsWorkspaceCreditsDto,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    share_reset(share).is_some_and(|reset| reset <= now)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn share_reset(share: &LimitsWorkspaceCreditsDto) -> Option<chrono::DateTime<chrono::Utc>> {
+    let reset = chrono::DateTime::parse_from_rfc3339(share.resets_at.as_deref()?).ok()?;
+    Some(reset.with_timezone(&chrono::Utc))
+}
+
+/// "Resets Oct 1" while pending, "Reset Sep 23" once renewed, empty with no reset. A date rather than
+/// the windows' weekday and clock: a share renews monthly, and a weekday would not say which week.
+#[cfg(any(target_os = "windows", test))]
+pub fn workspace_share_note(
+    share: &LimitsWorkspaceCreditsDto,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let Some(reset) = share_reset(share) else {
+        return String::new();
+    };
+    let date = reset.with_timezone(&chrono::Local).format("%b %-d");
+    if reset <= now {
+        format!("Reset {date}")
+    } else {
+        format!("Resets {date}")
+    }
 }
 
 #[cfg(test)]

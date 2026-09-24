@@ -30,6 +30,7 @@ fn provider_entry(provider: AgentId, percent: f64) -> NativeProvider {
             window_seconds: None,
             observed_at: "2026-09-01T10:00:00Z".into(),
         }],
+        workspace_credits: None,
     }
 }
 
@@ -83,6 +84,32 @@ fn current_provider_drops_everything_but_the_signed_in_account() {
     let entry = current_provider(entries).expect("the current account");
     assert_eq!(entry.status, LimitsStatus::SignedOut);
     assert!(current_provider(Vec::new()).is_none());
+}
+
+/// The painter draws a business member's credit share on the Codex cell's inner ring, so it has to
+/// arrive with the cell.
+#[test]
+fn a_business_members_credit_share_reaches_the_codex_cell() {
+    let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
+        {"provider":"codex","status":"ok","currentAccount":true,"windows":[],
+         "workspaceCredits":{"limit":"25000","used":"8000","usedPercent":32.0,"reached":false}}
+    ]))
+    .unwrap();
+    let mut providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] =
+        [(); PROVIDER_COUNT].map(|_| Poll::new(None));
+    providers[1] = Poll::new(current_provider(entries));
+    let session_rows: Vec<Vec<LiveSession>> = vec![Vec::new(); PROVIDER_COUNT];
+    let cells = rail_cells(&snapshot(), &providers, &session_rows, &Poll::new(None));
+    match cells.first() {
+        Some(CellData::Provider(provider)) => assert_eq!(
+            provider
+                .workspace_credits
+                .as_ref()
+                .map(|share| (share.limit.as_str(), share.used.as_str())),
+            Some(("25000", "8000"))
+        ),
+        _ => panic!("the Codex cell"),
+    }
 }
 
 #[test]
