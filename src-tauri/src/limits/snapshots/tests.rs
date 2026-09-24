@@ -673,10 +673,9 @@ fn a_count_lapses_at_its_expiry_itself() {
     assert!(!passed(None, at), "no known expiry never lapses");
 }
 
-/// A remembered workspace-credit share stays until it resets; after that what is used is not known
-/// until a read answers again.
+/// A remembered workspace-credit share is kept whether or not its reset has passed.
 #[test]
-fn a_remembered_workspace_credit_share_lasts_until_it_resets() {
+fn a_remembered_workspace_credit_share_outlives_its_reset() {
     let home = scratch_dir("limits-snap-workspace-credits");
     let store = SnapshotStore::for_home(&home);
     let share = |resets_at: &str| {
@@ -695,16 +694,17 @@ fn a_remembered_workspace_credit_share_lasts_until_it_resets() {
         current.workspace_credits
     );
 
-    let mut lapsed = snapshot(AgentId::Codex, "acct-2", "b@x", "2026-08-17T10:00:00.000Z");
-    lapsed.workspace_credits = share("2026-08-18T00:00:00.000Z");
-    store.save(&lapsed).unwrap();
+    // Past its reset the share has renewed, which the card shows as a window's passed reset is shown;
+    // dropping it would bring back the own balance of 0 the share stands in for.
+    let mut renewed = snapshot(AgentId::Codex, "acct-2", "b@x", "2026-08-17T10:00:00.000Z");
+    renewed.workspace_credits = share("2026-08-18T00:00:00.000Z");
+    store.save(&renewed).unwrap();
     let loaded = store.load(AgentId::Codex);
     let second = loaded
         .iter()
         .find(|dto| dto.account.as_ref().unwrap().id == "acct-2")
         .unwrap();
-    assert_eq!(second.workspace_credits, None);
-    assert_eq!(second.windows, lapsed.windows);
+    assert_eq!(second.workspace_credits, renewed.workspace_credits);
     let _ = std::fs::remove_dir_all(&home);
 }
 

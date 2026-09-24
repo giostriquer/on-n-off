@@ -241,9 +241,9 @@ impl StoredSnapshot {
             plan: self.plan,
             windows: self.windows,
             credits: self.credits,
-            workspace_credits: self
-                .workspace_credits
-                .filter(|share| !passed(share.resets_at.as_deref(), now)),
+            // A share past its reset has renewed, which the card shows as it shows a window's
+            // passed reset; it is kept, since dropping it would bring back the own balance of 0.
+            workspace_credits: self.workspace_credits,
             reset_credits: self
                 .reset_credits
                 .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),
@@ -253,11 +253,9 @@ impl StoredSnapshot {
     }
 }
 
-/// Whether a remembered figure's instant has come: a banked-reset count's soonest known expiry (by
-/// then at least one reset has lapsed and what is left is not known), or a workspace-credit share's
-/// reset (after it, what is used is not known). Either stays unknown until a read answers again.
-/// The UI applies the same rule to a card already on screen (`unexpiredBankedResets`,
-/// `currentWorkspaceShare`).
+/// Whether a remembered banked-reset count's soonest known expiry has come: by then at least one
+/// reset has lapsed and what is left is not known until a read answers again. The UI applies the same
+/// rule to a card already on screen (`unexpiredBankedResets`).
 fn passed(at: Option<&str>, now: DateTime<Utc>) -> bool {
     at.and_then(parse_observed_at).is_some_and(|at| at <= now)
 }

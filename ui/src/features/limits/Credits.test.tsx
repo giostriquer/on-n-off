@@ -69,11 +69,12 @@ describe("CreditsRows", () => {
     expect(rows(ZERO, null).own).toBe("0");
   });
 
-  it("drops a share once it has reset, since what is used is no longer known, and shows the own 0 again", () => {
-    const shown = rows(ZERO, share({ resetsAt: "2026-09-24T11:59:59Z" }));
+  it("shows a share whose reset has passed as renewed, as a window is, and still leaves out the own 0", () => {
+    const shown = rows(ZERO, share({ used: "25000", reached: true, resetsAt: "2026-09-23T10:00:00Z" }));
 
-    expect(shown.share).toBeNull();
-    expect(shown.own).toBe("0");
+    expect(shown.share).toBe("25,000 of 25,000 left");
+    expect(shown.note).toBe("reset 1d ago · Sep 23");
+    expect(shown.own).toBeNull();
   });
 
   it("shows nothing with neither a balance nor a share", () => {
