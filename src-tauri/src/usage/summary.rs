@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Arc;
-use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, TimeZone, Utc};
@@ -14,25 +13,25 @@ use crate::dto::{
     AdapterError, AgentId, UsageBucketDto, UsageCostSource, UsagePricingDto, UsageSourceDto,
     UsageSourceStatus, UsageSummaryDto, UsageSummaryInput, UsageTokenTotalsDto,
 };
-use crate::paths::{claude_root_for, codex_root_for, user_home};
+use crate::paths::user_home;
 
 use super::aggregate::{
     AggregateOptions as AggOpts, CostSource, Resolution as AggResolution, UsageAggregator,
     UsageBucket,
 };
-use super::cache_io::atomic_write;
+use super::history::{history_fingerprint, HistoryStore};
 use super::pricing::{ensure_rates, LITELLM_RATES_URL};
-use super::scan_cache::{
-    decode_scan_cache, encode_scan_cache, prune_scan_cache, PruneOptions, ScanCache,
-};
+use super::reader::MTIME_SLACK_MS;
 use super::source_index::{
-    inventory_sources, normalize_path, prepare_sources, reconcile_inventory, source_index_path_for,
-    unchanged_snapshot, SourceRoot,
+    inventory_sources, prepare_sources, reconcile_inventory, unchanged_snapshot,
 };
-use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_for, summary_key};
+use super::sources::{
+    all_roots, load_scan_cache, lock_usage_files, prune_and_persist_scan_cache, source_roots_for,
+    UsagePaths,
+};
+use super::summary_cache::{load_summary_hit, store_summary, summary_key};
 use super::transcripts::{richest_copies, UsageProvider as Provider};
 
-const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
 const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 
 fn now_ms() -> i64 {
@@ -40,11 +39,6 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-fn usage_cache_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 #[cfg(test)]
@@ -76,49 +70,6 @@ fn pause_before_publish_if_requested() {
 
 #[cfg(not(test))]
 fn pause_before_publish_if_requested() {}
-
-fn scan_cache_path_for(home: &Path) -> PathBuf {
-    home.join(".on-n-off").join("usage-scan-cache.json")
-}
-
-fn load_scan_cache(path: &Path) -> ScanCache {
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return ScanCache::new();
-    };
-    let Ok(doc) = serde_json::from_str(&raw) else {
-        return ScanCache::new();
-    };
-    decode_scan_cache(&doc)
-}
-
-fn persist_scan_cache(path: &Path, cache: &ScanCache) {
-    let doc = encode_scan_cache(cache);
-    if let Ok(raw) = serde_json::to_string(&doc) {
-        let _ = atomic_write(path, &raw);
-    }
-}
-
-fn resolve_claude_transcript_dir(home: &Path) -> PathBuf {
-    let nested = claude_root_for(home).join("projects");
-    if nested.is_dir() {
-        return nested;
-    }
-    let flat = home.join("projects");
-    if flat.is_dir() {
-        return flat;
-    }
-    nested
-}
-
-fn resolve_codex_transcript_dir(home: &Path) -> PathBuf {
-    codex_root_for(home).join("sessions")
-}
-
-/// Where Codex moves a session's rollout when the session is archived, mtime intact. The usage it
-/// recorded is still Codex usage, reported under the same source as `sessions/`.
-fn resolve_codex_archive_dir(home: &Path) -> PathBuf {
-    codex_root_for(home).join("archived_sessions")
-}
 
 fn parse_iso_ms(value: &str) -> Option<i64> {
     DateTime::parse_from_rfc3339(value)
@@ -264,35 +215,18 @@ fn read_summary_from(
     let started = Instant::now();
     let started_ms = now_ms();
     let home = home()?;
-    let cache_path = scan_cache_path_for(&home);
-    let summary_path = summary_cache_path_for(&home);
-    let source_index_path = source_index_path_for(&home);
+    let paths = UsagePaths::for_home(&home);
     // Rates first: the table's age is part of the summary key, so a re-fetched table (a model
     // released today, a price change) never serves a summary priced with the old one. The
     // parsed table is memoised on the file, so this costs one metadata read on the fast path.
     let rates = ensure_rates(&home, started_ms, input.force);
-    let key = summary_key(&input, rates.fetched_at_ms);
-    // One source per provider, shown under its first root; a source may scan several roots.
-    let claude_dir = resolve_claude_transcript_dir(&home);
-    let codex_dir = resolve_codex_transcript_dir(&home);
-    let source_roots = [
-        (Provider::Claude, vec![claude_dir]),
-        (
-            Provider::Codex,
-            vec![codex_dir, resolve_codex_archive_dir(&home)],
-        ),
-    ]
-    .map(|(provider, paths)| {
-        let roots: Vec<SourceRoot> = paths
-            .into_iter()
-            .map(|path| SourceRoot { provider, path })
-            .collect();
-        (provider, roots)
-    });
-    let roots: Vec<SourceRoot> = source_roots
-        .iter()
-        .flat_map(|(_, roots)| roots.iter().cloned())
-        .collect();
+    let key = summary_key(
+        &input,
+        rates.fetched_at_ms,
+        &history_fingerprint(&paths.history),
+    );
+    let source_roots = source_roots_for(&home);
+    let roots = all_roots(&source_roots);
     let (signature_start_ms, signature_end_ms) = source_window_bounds(&input);
     let window_start_ms = since_time_ms.unwrap_or_else(|| {
         DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", input.since_day))
@@ -300,54 +234,52 @@ fn read_summary_from(
             .unwrap_or(0)
     }) - MTIME_SLACK_MS;
 
-    let (source_snapshot, source_signature, prepared_sources) = {
-        let _cache_guard = usage_cache_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (source_snapshot, source_signature, prepared_sources, history) = {
+        let _files = lock_usage_files();
         let inventory = inventory_sources(&roots);
-        let unchanged = unchanged_snapshot(&source_index_path, &inventory);
+        let unchanged = unchanged_snapshot(&paths.source_index, &inventory);
         if let Some(snapshot) = unchanged.as_ref() {
             let signature = snapshot.signature(signature_start_ms, signature_end_ms);
             if snapshot.is_complete() && !input.force {
-                if let Some(hit) = load_summary_hit(&summary_path, &key, &signature) {
+                if let Some(hit) = load_summary_hit(&paths.summary, &key, &signature) {
                     return Ok(hit);
                 }
             }
         }
 
-        let mut file_cache = load_scan_cache(&cache_path);
-        let (source_snapshot, scan_cache_dirty, summary_already_checked) = if let Some(snapshot) =
-            unchanged
-        {
-            (snapshot, false, true)
-        } else {
-            let reconciled = reconcile_inventory(&source_index_path, inventory, &mut file_cache);
-            (reconciled.snapshot, reconciled.scan_cache_dirty, false)
-        };
+        let mut file_cache = load_scan_cache(&paths.scan_cache);
+        // Read, never folded here: the background fold owns that (`folding`).
+        let history = HistoryStore::open(paths.history.clone());
+        let watermark = history.watermark();
+        let (source_snapshot, scan_cache_dirty, summary_already_checked) =
+            if let Some(snapshot) = unchanged {
+                (snapshot, false, true)
+            } else {
+                let reconciled =
+                    reconcile_inventory(&paths.source_index, inventory, &mut file_cache, watermark);
+                (reconciled.snapshot, reconciled.scan_cache_dirty, false)
+            };
         let source_signature = source_snapshot.signature(signature_start_ms, signature_end_ms);
         if !summary_already_checked && source_snapshot.is_complete() && !input.force {
-            if let Some(hit) = load_summary_hit(&summary_path, &key, &source_signature) {
+            if let Some(hit) = load_summary_hit(&paths.summary, &key, &source_signature) {
                 return Ok(hit);
             }
         }
-        let prepared_sources = prepare_sources(&source_snapshot, &mut file_cache, window_start_ms);
-        let live_paths = source_snapshot.live_paths();
-        let active_roots: Vec<String> = roots
-            .iter()
-            .map(|root| normalize_path(&root.path))
-            .collect();
-        let pruned = prune_scan_cache(
+        let prepared_sources = prepare_sources(
+            &source_snapshot,
             &mut file_cache,
-            PruneOptions {
-                live_paths: &live_paths,
-                active_roots: &active_roots,
-                walked_roots: source_snapshot.successfully_walked_root_paths(),
-            },
+            window_start_ms,
+            watermark,
         );
-        if scan_cache_dirty || prepared_sources.scan_cache_dirty || pruned > 0 {
-            persist_scan_cache(&cache_path, &file_cache);
-        }
-        (source_snapshot, source_signature, prepared_sources)
+        prune_and_persist_scan_cache(
+            &paths.scan_cache,
+            &mut file_cache,
+            &source_snapshot,
+            &roots,
+            watermark,
+            scan_cache_dirty || prepared_sources.scan_cache_dirty,
+        );
+        (source_snapshot, source_signature, prepared_sources, history)
     };
 
     let rates_arc = rates.table.clone();
@@ -372,13 +304,30 @@ fn read_summary_from(
             .iter()
             .map(|file| file.records.as_slice()),
     );
+    // Below the watermark the history is the count: a transcript's copy of a folded record, a
+    // resumed session's included, is not counted again.
+    let watermark = history.watermark();
     let mut session_ids: HashMap<Provider, HashSet<&str>> = HashMap::new();
-    for record in records {
+    for record in records
+        .into_iter()
+        .filter(|record| !watermark.is_folded(record.timestamp_ms))
+    {
         if aggregator.add(record) && !record.session_id.is_empty() {
             session_ids
                 .entry(record.provider)
                 .or_default()
                 .insert(&record.session_id);
+        }
+    }
+    let folded_rows = history.history().map_or(&[][..], |history| {
+        history.rows_between(signature_start_ms, signature_end_ms)
+    });
+    for row in folded_rows {
+        if aggregator.add_folded(row) {
+            session_ids
+                .entry(row.provider)
+                .or_default()
+                .extend(row.sessions.iter().map(String::as_str));
         }
     }
 
@@ -437,15 +386,15 @@ fn read_summary_from(
     pause_before_publish_if_requested();
 
     {
-        let _cache_guard = usage_cache_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _files = lock_usage_files();
+        // A summary counted around a history that did not read would undercount once it reads.
         if source_snapshot.is_complete()
             && prepared_sources.complete
-            && source_snapshot.persisted_generation_is_current(&source_index_path)
+            && history.history().is_some()
+            && source_snapshot.persisted_generation_is_current(&paths.source_index)
             && source_snapshot.inventory_is_current(&roots)
         {
-            store_summary(&summary_path, &key, &source_signature, &dto);
+            store_summary(&paths.summary, &key, &source_signature, &dto);
         }
     }
 

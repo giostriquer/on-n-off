@@ -8,6 +8,7 @@ use std::time::UNIX_EPOCH;
 use serde::{Deserialize, Serialize};
 
 use super::cache_io::atomic_write;
+use super::history::Watermark;
 use super::reader::{inventory_transcript_files, read_transcript_records, TranscriptFile};
 use super::scan_cache::{dedupe_within_file, CachedFile, ScanCache, USAGE_SCAN_CACHE_VERSION};
 use super::transcripts::{UsageProvider, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
@@ -18,7 +19,9 @@ pub const USAGE_SOURCE_INDEX_VERSION: u32 = 3;
 mod test_support;
 
 #[cfg(test)]
-pub(crate) use test_support::{reset_transcript_parse_count, transcript_parse_count};
+pub(crate) use test_support::{
+    reset_transcript_parse_count, transcript_parse_count, with_live_transcript,
+};
 
 #[derive(Debug, Clone)]
 pub struct SourceRoot {
@@ -84,6 +87,9 @@ pub struct PreparedSources {
     pub files: Vec<PreparedSourceFile>,
     pub complete: bool,
     pub scan_cache_dirty: bool,
+    /// The paths and mtimes of files no parse succeeded on and no cached parse stands in for:
+    /// their records are unknown.
+    pub unread_files: Vec<(String, i64)>,
 }
 
 pub fn source_index_path_for(home: &Path) -> PathBuf {
@@ -96,7 +102,7 @@ pub fn reconcile(
     roots: &[SourceRoot],
     scan_cache: &mut ScanCache,
 ) -> ReconcileOutcome {
-    reconcile_inventory(path, inventory_sources(roots), scan_cache)
+    reconcile_inventory(path, inventory_sources(roots), scan_cache, Watermark::NONE)
 }
 
 pub fn inventory_sources(roots: &[SourceRoot]) -> SourceInventory {
@@ -133,18 +139,22 @@ pub fn unchanged_snapshot(path: &Path, inventory: &SourceInventory) -> Option<So
     Some(snapshot_from_index(previous, &inventory.roots, true))
 }
 
+/// Brings the index up to date with `inventory`, parsing each new or changed transcript for its
+/// record bounds, except one that holds only records the usage history already has.
 pub fn reconcile_inventory(
     path: &Path,
     inventory: SourceInventory,
     scan_cache: &mut ScanCache,
+    watermark: Watermark,
 ) -> ReconcileOutcome {
-    reconcile_inventories(path, inventory.roots, scan_cache)
+    reconcile_inventories(path, inventory.roots, scan_cache, watermark)
 }
 
 fn reconcile_inventories(
     path: &Path,
     inventories: Vec<(SourceRoot, RootInventory)>,
     scan_cache: &mut ScanCache,
+    watermark: Watermark,
 ) -> ReconcileOutcome {
     let previous = load_index(path);
     let mut indexed_roots = BTreeMap::new();
@@ -200,6 +210,7 @@ fn reconcile_inventories(
                         root.provider,
                         scan_cache,
                         &mut scan_cache_dirty,
+                        watermark,
                     )
                 },
                 |entry| (entry, true),
@@ -393,6 +404,13 @@ impl SourceSnapshot {
             .is_some_and(|entry| entry.present)
     }
 
+    /// Every root was walked to the end this time: no transcript can be missing from the index.
+    pub fn walked_every_root(&self) -> bool {
+        self.roots
+            .values()
+            .all(|root| self.successfully_walked_roots.contains(&root.path))
+    }
+
     pub fn live_paths(&self) -> HashSet<String> {
         self.entries.keys().cloned().collect()
     }
@@ -402,20 +420,23 @@ impl SourceSnapshot {
     }
 }
 
+/// The records of every transcript written since `window_start_ms`, except those holding only
+/// records the usage history already has.
 pub fn prepare_sources(
     snapshot: &SourceSnapshot,
     scan_cache: &mut ScanCache,
     window_start_ms: i64,
+    watermark: Watermark,
 ) -> PreparedSources {
     let mut files = Vec::new();
     let mut complete = snapshot.is_complete();
     let mut scan_cache_dirty = false;
+    let mut unread_files = Vec::new();
 
-    for entry in snapshot
-        .entries
-        .values()
-        .filter(|entry| entry.mtime_ms >= window_start_ms)
-    {
+    for entry in snapshot.entries.values().filter(|entry| {
+        entry.mtime_ms >= window_start_ms
+            && !watermark.holds_only_folded(entry.mtime_ms, entry.max_record_ms)
+    }) {
         let cached = scan_cache
             .get(&entry.path)
             .filter(|cached| cached.provider == entry.provider);
@@ -461,6 +482,7 @@ pub fn prepare_sources(
 
         let Some(records) = records else {
             complete = false;
+            unread_files.push((entry.path.clone(), entry.mtime_ms));
             continue;
         };
         files.push(PreparedSourceFile {
@@ -473,6 +495,7 @@ pub fn prepare_sources(
         files,
         complete,
         scan_cache_dirty,
+        unread_files,
     }
 }
 
@@ -497,6 +520,7 @@ fn inspect_changed_file(
     provider: UsageProvider,
     scan_cache: &mut ScanCache,
     scan_cache_dirty: &mut bool,
+    watermark: Watermark,
 ) -> (SourceEntry, bool) {
     if let Some(cached) = scan_cache.get(&normalized) {
         if cached.provider == provider
@@ -517,6 +541,22 @@ fn inspect_changed_file(
                 true,
             );
         }
+    }
+
+    // Everything it holds is already folded: its bounds are never needed, so it is not read.
+    if watermark.holds_only_folded(observed.mtime_ms, None) {
+        return (
+            SourceEntry {
+                provider,
+                path: normalized,
+                size: observed.size,
+                mtime_ms: observed.mtime_ms,
+                min_record_ms: None,
+                max_record_ms: None,
+                resolved: true,
+            },
+            true,
+        );
     }
 
     let parsed =

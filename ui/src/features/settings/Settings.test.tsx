@@ -1,6 +1,6 @@
 import { defaultNotchSettings } from "$lib/notchTypes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Settings } from "./Settings";
@@ -23,6 +23,7 @@ vi.mock("$lib/api", () => ({
   readNotchState: () => Promise.resolve({ revision: 0, supported: false, settings: defaultNotchSettings(), displays: [], error: null }),
   onNotchChanged: () => Promise.resolve(() => undefined),
   saveNotchSettings: vi.fn(),
+  usageHistoryStatus: () => Promise.resolve({ state: "empty", bytes: 0 }),
   diagnoseProviders: () =>
     Promise.resolve([
       {
@@ -151,6 +152,13 @@ describe("Settings", () => {
     expect(screen.getByRole("button", { name: /Show Claude in agent tabs/i })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /Show Antigravity in agent tabs/i }));
     expect(onToggleVisible).toHaveBeenCalledWith("antigravity", true);
+  });
+
+  it("shows how far back usage is kept", async () => {
+    renderSettings();
+
+    const card = await screen.findByRole("region", { name: "Usage history" });
+    await waitFor(() => expect(card).toHaveTextContent("Nothing kept yet"));
   });
 
   it("uses Cursor's `agent` command as the binary placeholder", () => {

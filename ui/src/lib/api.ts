@@ -19,7 +19,7 @@ import type {
 import type { GithubPrs } from "./githubTypes";
 import type { ProviderLimits, ResetCreditOutcome } from "./limitsTypes";
 import type { NotchChanged, NotchSettings, NotchSnapshot } from "./notchTypes";
-import type { UsageSummary, UsageSummaryInput } from "./usageTypes";
+import type { UsageHistoryStatus, UsageSummary, UsageSummaryInput } from "./usageTypes";
 
 export function listAgents(): Promise<AgentInfo[]> {
   return invoke("list_agents");
@@ -124,6 +124,15 @@ export function refresh(agentId: AgentId, projectPath?: string | null): Promise<
 
 export function usageSummary(input: UsageSummaryInput): Promise<UsageSummary> {
   return invoke("usage_summary", { input });
+}
+
+export function usageHistoryStatus(): Promise<UsageHistoryStatus> {
+  return invoke("usage_history_status");
+}
+
+/** Forgets the usage kept after transcripts were deleted; transcripts still on disk count again. */
+export function clearUsageHistory(): Promise<UsageHistoryStatus> {
+  return invoke("clear_usage_history");
 }
 
 /** Live limits for the signed-in account first, then remembered snapshots of other accounts. */
