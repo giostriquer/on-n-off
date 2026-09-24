@@ -390,7 +390,8 @@ fn normalizes_the_chatgpt_account_and_rate_limits_without_reading_a_token() {
         },
         before,
     )
-    .unwrap();
+    .unwrap()
+    .0;
 
     assert_eq!(
         parsed.account,
@@ -424,7 +425,8 @@ fn falls_back_to_a_normalized_email_identity_when_codex_has_no_account_id() {
         },
         before,
     )
-    .unwrap();
+    .unwrap()
+    .0;
 
     assert_eq!(
         parsed.account,
@@ -449,7 +451,8 @@ fn api_key_accounts_are_explicitly_unsupported() {
         },
         None,
     )
-    .unwrap_err();
+    .err()
+    .unwrap();
 
     assert!(matches!(
         error,
@@ -476,7 +479,8 @@ fn scoped_codex_observation_carries_its_previous_workspace_key() {
         codex_home,
         account: typed(json!({"account":{"type":"chatgpt", "email":"me@example.com", "planType":"pro"}, "requiresOpenaiAuth":true})),
         rate_limits: typed(json!({"rateLimits":{"planType":"pro"}})),
-    }, before).unwrap();
+    }, before).unwrap()
+    .0;
     let account = parsed.account.unwrap();
     assert!(account.id.starts_with("profile:"));
     assert_eq!(account.legacy_id.as_deref(), Some("workspace-1"));
@@ -745,6 +749,7 @@ fn the_card_account_id_from_a_read_is_the_id_a_spend_accepts() {
         before,
     )
     .unwrap()
+    .0
     .account
     .unwrap()
     .id;
@@ -788,7 +793,7 @@ fn business_home(name: &str) -> PathBuf {
     std::fs::create_dir_all(home.join(".codex")).unwrap();
     std::fs::write(
         home.join(".codex/auth.json"),
-        r#"{"tokens":{"account_id":"acct-1"}}"#,
+        r#"{"tokens":{"account_id":"acct-1","access_token":"fixture-access"}}"#,
     )
     .unwrap();
     home
@@ -811,9 +816,9 @@ fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() 
         &home,
         false,
         |_| Ok(business_session(&codex_home, "chatgpt")),
-        |at: &Path, account: Option<&str>, plan: Option<&str>| {
+        |access: Option<CodexAccess>, account: Option<&str>, plan: Option<&str>| {
             asked.borrow_mut().push((
-                at.to_path_buf(),
+                access.map(|access| (access.observation_key, access.token.authorization())),
                 account.map(str::to_string),
                 plan.map(str::to_string),
             ));
@@ -826,7 +831,7 @@ fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() 
     assert_eq!(
         asked.into_inner(),
         vec![(
-            codex_home,
+            Some(("acct-1".to_string(), "Bearer fixture-access".to_string())),
             Some("acct-1".to_string()),
             Some("self_serve_business_prolite".to_string())
         )]
@@ -843,15 +848,60 @@ fn a_failed_signed_in_read_never_asks_what_it_spent() {
         &home,
         false,
         |_| Ok(business_session(&codex_home, "apiKey")),
-        |_: &Path, _: Option<&str>, _: Option<&str>| panic!("asked what an API key spent"),
+        |_: Option<CodexAccess>, _: Option<&str>, _: Option<&str>| {
+            panic!("asked what an API key spent")
+        },
     );
     let no_process = read_with(
         &home,
         false,
         |_| Err::<FakeTransport, _>("codex is not installed".to_string()),
-        |_: &Path, _: Option<&str>, _: Option<&str>| panic!("asked without a read"),
+        |_: Option<CodexAccess>, _: Option<&str>, _: Option<&str>| panic!("asked without a read"),
     );
 
     assert!(matches!(not_chatgpt, Err(AppServerFailure::Unsupported(_))));
     assert!(matches!(no_process, Err(AppServerFailure::Failed(_))));
+}
+
+/// A session for `plan` whose native login holds an access token.
+fn signed_in_on(plan: &str, name: &str) -> (AppServerResult, Option<(String, Value)>) {
+    let codex_home = business_home(name).join(".codex");
+    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let session = AppServerResult {
+        codex_home,
+        account: typed(json!({
+            "account": {"type": "chatgpt", "email": "you@example.com", "planType": plan},
+            "requiresOpenaiAuth": true
+        })),
+        rate_limits: typed(json!({"rateLimits": {"planType": plan}})),
+    };
+    (session, before)
+}
+
+/// The identity check after the handshake reads the native store once, and for a workspace plan
+/// that one read also yields the login's access projection, so spending costs no read of its own.
+#[test]
+fn a_workspace_plan_takes_its_access_from_the_identity_check() {
+    let (session, before) = signed_in_on("business", "codex-app-server-access");
+
+    let (parsed, access) = normalize_app_server(session, before).unwrap();
+
+    let access = access.unwrap();
+    assert_eq!(
+        Some(access.observation_key.as_str()),
+        parsed.account.as_ref().map(|a| a.id.as_str())
+    );
+    assert_eq!(access.workspace_id, "acct-1");
+    assert_eq!(access.token.authorization(), "Bearer fixture-access");
+}
+
+/// A personal plan is never asked what it spent, so its identity check leaves the token alone.
+#[test]
+fn a_personal_plan_takes_no_access_from_the_identity_check() {
+    let (session, before) = signed_in_on("pro", "codex-app-server-no-access");
+
+    let (parsed, access) = normalize_app_server(session, before).unwrap();
+
+    assert!(access.is_none());
+    assert_eq!(parsed.account.unwrap().id, "acct-1");
 }
