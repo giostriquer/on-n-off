@@ -7,7 +7,7 @@ use super::{
     transaction::Native,
 };
 use crate::{
-    dto::{AgentId, LimitsCreditsSpentDto, LimitsStatus, ProviderLimitsDto},
+    dto::{AgentId, LimitsStatus, ProviderLimitsDto},
     http::{HttpError, RateLimitReset},
 };
 use std::{
@@ -32,19 +32,6 @@ struct FetchResult {
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
 
-/// What a login has spent lately (`limits::saved::codex_credits_spent`), injectable for tests.
-type SpentReader<'a> =
-    dyn Fn(&model::Identity, &serde_json::Value) -> Option<LimitsCreditsSpentDto> + 'a;
-
-/// How `refresh_with` reads, so tests can stand in for the vault, the saved polls and the
-/// signed-in login's spending without touching the network.
-#[derive(Clone, Copy)]
-struct Readers<'a> {
-    open: &'a (dyn Fn() -> Result<Store, String> + Sync),
-    fetch: &'a (dyn Fn(&Profile) -> FetchResult + Sync),
-    spent: &'a SpentReader<'a>,
-}
-
 /// Caller holds the provider activity read lease and shares the Limits cache with all surfaces.
 /// At most two saved-account requests per provider run at once; no state mutex spans a network call.
 pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<ProviderLimitsDto>) {
@@ -60,18 +47,9 @@ pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<Provider
     }
     let open = || Store::open_read(&home);
     let native = NativeStore::resolve(provider, &home).and_then(|n| n.read());
-    refresh_with(
-        &home,
-        provider,
-        force,
-        entries,
-        native,
-        &Readers {
-            open: &open,
-            fetch: &|profile| fetch_profile(&home, profile, &open),
-            spent: &crate::limits::saved::codex_credits_spent,
-        },
-    );
+    refresh_with(&home, provider, force, entries, native, &open, &|profile| {
+        fetch_profile(&home, profile, &open)
+    });
 }
 
 fn refresh_with(
@@ -80,9 +58,9 @@ fn refresh_with(
     force: bool,
     entries: &mut Vec<ProviderLimitsDto>,
     native: Result<Option<Login>, String>,
-    readers: &Readers<'_>,
+    open: &(dyn Fn() -> Result<Store, String> + Sync),
+    fetch: &(dyn Fn(&Profile) -> FetchResult + Sync),
 ) {
-    let Readers { open, fetch, spent } = *readers;
     let native = native.and_then(|login| match login {
         Some(login)
             if provider == AgentId::Codex
@@ -94,8 +72,7 @@ fn refresh_with(
         {
             Ok(None)
         }
-        Some(login) => model::identity(provider, &login.auth, &login.account)
-            .map(|identity| Some((identity, login))),
+        Some(login) => model::identity(provider, &login.auth, &login.account).map(Some),
         None => Ok(None),
     });
     let Ok(native) = native else {
@@ -107,10 +84,6 @@ fn refresh_with(
     if db.recovery.is_some() {
         return;
     }
-    if let Some((identity, login)) = &native {
-        attach_credits_spent(entries, identity, &login.auth, spent);
-    }
-    let native = native.map(|(identity, _)| identity);
     let profiles: Vec<_> = db
         .profiles
         .into_iter()
@@ -138,34 +111,6 @@ fn refresh_with(
         for (profile, result) in batch.iter().zip(results) {
             merge(entries, profile, result);
         }
-    }
-}
-
-/// app-server reads the signed-in card without a token, and the saved shadow of the same login is
-/// never polled, so a workspace card is asked what it spent with the native login itself: access
-/// only, like every saved read. The card is the one keyed by that login's identity.
-fn attach_credits_spent(
-    entries: &mut [ProviderLimitsDto],
-    identity: &model::Identity,
-    auth: &serde_json::Value,
-    spent: &SpentReader<'_>,
-) {
-    if identity.provider != AgentId::Codex {
-        return;
-    }
-    let key = identity.observation_key();
-    let Some(card) = entries
-        .iter_mut()
-        .find(|e| e.current_account && e.account.as_ref().is_some_and(|a| a.id == key))
-    else {
-        return;
-    };
-    if card
-        .plan
-        .as_deref()
-        .is_some_and(crate::limits::credits_spent::is_workspace_plan)
-    {
-        card.credits_spent = spent(identity, auth);
     }
 }
 
@@ -383,6 +328,7 @@ fn merge(
         Ok(mut dto) => {
             if let Some(i) = existing {
                 dto.keep_reset_credits_from(&entries[i]);
+                dto.keep_credits_spent_from(&entries[i]);
             }
             dto
         }

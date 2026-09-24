@@ -207,4 +207,12 @@ impl ProviderLimitsDto {
             self.reset_credits.clone_from(&previous.reset_credits);
         }
     }
+
+    /// A successful read whose spending read failed or was backing off could not tell what was
+    /// spent, and keeps the figure `previous` knew; one that answered replaces it.
+    pub fn keep_credits_spent_from(&mut self, previous: &Self) {
+        if self.credits_spent.is_none() {
+            self.credits_spent.clone_from(&previous.credits_spent);
+        }
+    }
 }

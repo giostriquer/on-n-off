@@ -48,7 +48,14 @@ backup store for tokens.
 `accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
 existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
 store under its locks. The same grant/parser implementation also serves private vault renewal
-under the saved-account journal. Limits consumes access-only projections. Native Codex delegates
+under the saved-account journal. Limits consumes access-only projections. The one projection that carries
+a credential is `native::codex_access`: the signed-in Codex login's access token alone (never its
+refresh or id token, never the login JSON), wrapped in `model::AccessToken`, which has no `Debug`,
+`Clone` or serialization and reads back only as an `Authorization` header value. Its one caller is
+`limits/credits_spent.rs`, which sends it in a single read-only GET to
+`/backend-api/wham/usage/daily-workspace-user-token-usage-breakdown`, only for a workspace plan and
+only after the app-server read has confirmed the account. That exception to "Codex alone makes
+requests for the signed-in account" is the user's decision (2026-09-24). Native Codex delegates
 renewal to its official app-server; private saved Codex credentials use the JSON refresh grant
 without starting a CLI or writing auth.json.
 

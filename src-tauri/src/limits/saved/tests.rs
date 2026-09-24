@@ -24,9 +24,11 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
         &auth,
         &profile,
         &usage,
-        "unused",
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: "unused",
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     )
     .unwrap();
     p.join().unwrap();
@@ -58,9 +60,11 @@ fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
         &auth,
         &profile,
         &usage,
-        "unused",
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: "unused",
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     )
     .unwrap();
     p.join().unwrap();
@@ -94,9 +98,11 @@ fn saved_claude_falls_back_to_the_plain_read_when_the_reset_query_is_refused() {
         &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
         &profile,
         &usage,
-        "unused",
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: "unused",
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     )
     .unwrap();
     p.join().unwrap();
@@ -139,9 +145,11 @@ fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
                 &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
                 &profile,
                 &usage,
-                "unused",
-                "unused",
-                "unused",
+                CodexEndpoints {
+                    usage: "unused",
+                    reset_credits: "unused",
+                    credit_usage: "unused",
+                },
             )
             .unwrap();
             p.join().unwrap();
@@ -172,9 +180,11 @@ fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
         &json!({"tokens":{"access_token":"fixture-access"}}),
         "unused",
         "unused",
-        &url,
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: &url,
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     )
     .unwrap();
     let request = request.join().unwrap();
@@ -214,9 +224,11 @@ fn saved_codex_reads_the_members_share_of_the_workspace_credits() {
         &json!({"tokens":{"access_token":"fixture-access"}}),
         "unused",
         "unused",
-        &url,
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: &url,
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     )
     .unwrap();
     request.join().unwrap();
@@ -246,9 +258,11 @@ fn saved_codex_takes_the_shares_meter_from_what_codex_says_remains() {
         &json!({"tokens":{"access_token":"fixture-access"}}),
         "unused",
         "unused",
-        &url,
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: &url,
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     )
     .unwrap();
     request.join().unwrap();
@@ -269,9 +283,11 @@ fn saved_codex_marks_a_members_used_up_share_reached() {
         &json!({"tokens":{"access_token":"fixture-access"}}),
         "unused",
         "unused",
-        &url,
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: &url,
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     )
     .unwrap();
     request.join().unwrap();
@@ -306,9 +322,11 @@ fn read_codex(usage: &str, resets: &str) -> Result<ProviderLimitsDto, HttpError>
         &json!({"tokens":{"access_token":"fixture-access"}}),
         "unused",
         "unused",
-        usage,
-        resets,
-        "unused",
+        CodexEndpoints {
+            usage,
+            reset_credits: resets,
+            credit_usage: "unused",
+        },
     )
 }
 
@@ -444,9 +462,11 @@ fn wrong_claude_identity_stops_before_usage() {
         &json!({"claudeAiOauth":{"accessToken":"fixture"}}),
         &profile,
         &crate::http::refused_url(),
-        "unused",
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: "unused",
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     );
     p.join().unwrap();
     assert!(matches!(result, Err(HttpError::Unauthorized)));
@@ -463,9 +483,11 @@ fn matching_claude_user_in_another_workspace_is_rejected_before_usage() {
         &json!({"claudeAiOauth":{"accessToken":"fixture"}}),
         &url,
         &crate::http::refused_url(),
-        "unused",
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: "unused",
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     );
     request.join().unwrap();
     assert!(matches!(result, Err(HttpError::Unauthorized)));
@@ -482,9 +504,11 @@ fn codex_quota_for_another_account_is_rejected() {
         &json!({"tokens":{"access_token":"fixture"}}),
         "unused",
         "unused",
-        &url,
-        "unused",
-        "unused",
+        CodexEndpoints {
+            usage: &url,
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
     );
     request.join().unwrap();
     assert!(matches!(result, Err(HttpError::Unauthorized)));
@@ -509,15 +533,31 @@ fn spending(days: &[(u64, &[f64])]) -> String {
     .to_string()
 }
 
-fn read_codex_spending(usage: &str, spending: &str) -> Result<ProviderLimitsDto, HttpError> {
+/// A saved Codex member of workspace `team`. Each test names its own member, because a failed
+/// spending read backs off per account and must not hold another test's read back.
+fn member(user: &str) -> Identity {
+    Identity {
+        provider: AgentId::Codex,
+        user_id: format!("{user}:{:?}", std::thread::current().id()),
+        workspace_id: "team".into(),
+    }
+}
+
+fn read_codex_spending(
+    who: &Identity,
+    usage: &str,
+    spending: &str,
+) -> Result<ProviderLimitsDto, HttpError> {
     read_at(
-        &identity(AgentId::Codex),
+        who,
         &json!({"tokens":{"access_token":"fixture-access"}}),
         "unused",
         "unused",
-        usage,
-        "unused",
-        spending,
+        CodexEndpoints {
+            usage,
+            reset_credits: "unused",
+            credit_usage: spending,
+        },
     )
 }
 
@@ -531,26 +571,32 @@ fn saved_codex_reads_what_a_workspace_member_spent() {
         ("200 OK", &[], &breakdown),
     ]);
     let base = url.trim_end_matches("/graphql");
+    // The read dates its window by the clock; a run that crosses UTC midnight may see either day.
+    let before = chrono::Utc::now().date_naive();
     let dto = read_codex_spending(
+        &member("spent"),
         &format!("{base}/wham/usage"),
         &format!("{base}/wham/usage/daily-workspace-user-token-usage-breakdown"),
     )
     .unwrap();
+    let after = chrono::Utc::now().date_naive();
     let requests = requests.join().unwrap();
 
-    let today = chrono::Utc::now().date_naive();
     let asked = requests[1]
         .head
         .lines()
         .next()
         .unwrap_or_default()
         .to_string();
-    assert!(
-        asked.contains(&format!(
+    let window = |today: chrono::NaiveDate| {
+        format!(
             "/wham/usage/daily-workspace-user-token-usage-breakdown?start_date={}&end_date={}&group_by=day ",
             (today - chrono::Days::new(29)).format("%Y-%m-%d"),
             today.format("%Y-%m-%d"),
-        )),
+        )
+    };
+    assert!(
+        asked.contains(&window(before)) || asked.contains(&window(after)),
         "{asked}"
     );
     assert!(requests[1].head.contains("Bearer fixture-access"));
@@ -580,6 +626,7 @@ fn saved_codex_never_asks_a_personal_plan_what_it_spent() {
     let spending = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     spending.set_nonblocking(true).unwrap();
     let dto = read_codex_spending(
+        &member("personal"),
         &format!("{}/wham/usage", url.trim_end_matches("/graphql")),
         &format!("http://{}/breakdown", spending.local_addr().unwrap()),
     )
@@ -610,11 +657,53 @@ fn a_spending_read_that_fails_leaves_the_usage_read_standing() {
             (status, &[], body),
         ]);
         let base = url.trim_end_matches("/graphql");
-        let dto = read_codex_spending(&format!("{base}/wham/usage"), &format!("{base}/breakdown"))
-            .unwrap();
+        let dto = read_codex_spending(
+            &member(status),
+            &format!("{base}/wham/usage"),
+            &format!("{base}/breakdown"),
+        )
+        .unwrap();
         requests.join().unwrap();
 
         assert_eq!(dto.credits_spent, None, "{status}");
         assert_eq!(dto.windows[0].used_percent, 12.0, "{status}");
+    }
+}
+
+/// "team" and "enterprise" are Claude plans too. The spending read belongs to Codex's usage read, so
+/// a saved Claude account on either plan never asks the ChatGPT backend what it spent.
+#[test]
+fn a_saved_claude_team_or_enterprise_account_is_never_asked_what_it_spent() {
+    for plan in ["team", "enterprise"] {
+        let (profile, p) = serve_once(
+            "200 OK",
+            r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team"}}"#,
+        );
+        let (usage, u) = serve_once("200 OK", r#"{"seven_day":{"utilization":61}}"#);
+        let spending = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        spending.set_nonblocking(true).unwrap();
+        let credit_usage = format!("http://{}/breakdown", spending.local_addr().unwrap());
+        let dto = read_at(
+            &identity(AgentId::Claude),
+            &json!({"claudeAiOauth":{"accessToken":"fixture-access","subscriptionType":plan}}),
+            &profile,
+            &usage,
+            CodexEndpoints {
+                usage: "unused",
+                reset_credits: "unused",
+                credit_usage: &credit_usage,
+            },
+        )
+        .unwrap();
+        p.join().unwrap();
+        u.join().unwrap();
+
+        assert_eq!(dto.plan.as_deref(), Some(plan));
+        assert_eq!(
+            spending.accept().map(|_| ()).map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::WouldBlock),
+            "a Claude {plan} account asked what it spent"
+        );
+        assert_eq!(dto.credits_spent, None);
     }
 }

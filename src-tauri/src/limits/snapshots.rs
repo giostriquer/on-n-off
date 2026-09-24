@@ -86,10 +86,16 @@ impl SnapshotStore {
             return Ok(());
         }
         let mut stored = StoredSnapshot::from_dto(dto, incoming_latest);
-        // `ProviderLimitsDto::keep_reset_credits_from`, applied to what is on disk: every writer
-        // stores its own read, and one that could not tell the banked-reset count must not erase it.
-        if stored.reset_credits.is_none() {
-            stored.reset_credits = existing.and_then(|existing| existing.reset_credits);
+        // `ProviderLimitsDto::keep_reset_credits_from` and `keep_credits_spent_from`, applied to
+        // what is on disk: every writer stores its own read, and one that could not tell the
+        // banked-reset count or what was spent must not erase it.
+        if let Some(existing) = existing {
+            if stored.reset_credits.is_none() {
+                stored.reset_credits = existing.reset_credits;
+            }
+            if stored.credits_spent.is_none() {
+                stored.credits_spent = existing.credits_spent;
+            }
         }
         write_stored(&path, stored)
     }

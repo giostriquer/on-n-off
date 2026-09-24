@@ -1,8 +1,14 @@
 use super::*;
 use serde_json::json;
 
+fn now() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-09-24T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
 fn today() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 9, 24).unwrap()
+    now().date_naive()
 }
 
 /// A breakdown in the shape the endpoint answers: one row per day, with the credits each model used.
@@ -34,7 +40,7 @@ fn sums_each_days_models_over_the_last_7_and_30_days() {
     ]);
 
     assert_eq!(
-        parse(&payload, today()),
+        parse(&payload, now()),
         Some(LimitsCreditsSpentDto {
             last_7_days: 1200.5,
             last_30_days: 1376.0,
@@ -51,14 +57,14 @@ fn days_outside_the_30_day_window_are_left_out() {
         ("2026-09-25", &[999.0]),
     ]);
 
-    let spent = parse(&payload, today()).unwrap();
+    let spent = parse(&payload, now()).unwrap();
     assert_eq!((spent.last_7_days, spent.last_30_days), (0.0, 1.0));
 }
 
 /// A member who has used nothing yet has still been answered: nothing spent is a figure.
 #[test]
 fn no_rows_is_nothing_spent() {
-    let spent = parse(&breakdown(&[]), today()).unwrap();
+    let spent = parse(&breakdown(&[]), now()).unwrap();
     assert_eq!((spent.last_7_days, spent.last_30_days), (0.0, 0.0));
 }
 
@@ -70,9 +76,9 @@ fn only_a_breakdown_counted_in_credits_is_read() {
     let mut unitless = breakdown(&[("2026-09-24", &[5.0])]);
     unitless.as_object_mut().unwrap().remove("units");
 
-    assert_eq!(parse(&tokens, today()), None);
-    assert_eq!(parse(&unitless, today()), None);
-    assert_eq!(parse(&json!({"units": "credits"}), today()), None);
+    assert_eq!(parse(&tokens, now()), None);
+    assert_eq!(parse(&unitless, now()), None);
+    assert_eq!(parse(&json!({"units": "credits"}), now()), None);
 }
 
 #[test]
@@ -87,19 +93,22 @@ fn an_amount_that_is_not_a_count_of_credits_adds_nothing() {
         json!({}),
     ]);
 
-    let spent = parse(&payload, today()).unwrap();
+    let spent = parse(&payload, now()).unwrap();
     assert_eq!((spent.last_7_days, spent.last_30_days), (10.0, 10.0));
 }
 
+/// Without a freshness time of its own the figure is dated when it was read, so a remembered one
+/// still says how old it is.
 #[test]
-fn a_missing_or_unreadable_freshness_is_no_update_time() {
+fn a_missing_or_unreadable_freshness_dates_the_figure_when_it_was_read() {
     let mut missing = breakdown(&[]);
     missing.as_object_mut().unwrap().remove("data_freshness_ts");
     let mut unreadable = breakdown(&[]);
     unreadable["data_freshness_ts"] = json!("yesterday");
 
-    assert_eq!(parse(&missing, today()).unwrap().updated_at, None);
-    assert_eq!(parse(&unreadable, today()).unwrap().updated_at, None);
+    let read_at = Some("2026-09-24T12:00:00Z".to_string());
+    assert_eq!(parse(&missing, now()).unwrap().updated_at, read_at);
+    assert_eq!(parse(&unreadable, now()).unwrap().updated_at, read_at);
 }
 
 /// The app asks for whole UTC days ending today: `start = today - (days - 1)`.
@@ -128,11 +137,186 @@ fn workspace_plans_are_the_ones_codex_counts_as_workspace_accounts() {
         "edu_plus",
         "edu_pro",
     ] {
-        assert!(is_workspace_plan(plan), "{plan}");
+        assert!(is_codex_workspace_plan(plan), "{plan}");
     }
     for plan in [
         "free", "go", "plus", "pro", "prolite", "guest", "", "unknown",
     ] {
-        assert!(!is_workspace_plan(plan), "{plan}");
+        assert!(!is_codex_workspace_plan(plan), "{plan}");
     }
+}
+
+/// A key no other test uses, so the backoff one test records never skips another's read.
+fn account(name: &str) -> String {
+    format!("test-account:{name}:{:?}", std::thread::current().id())
+}
+
+/// The seam both callers go through: one GET with the login's own token and workspace, for the 30
+/// UTC days up to the injected clock.
+#[test]
+fn reads_with_the_logins_token_for_its_workspace() {
+    let (url, request) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        &breakdown(&[("2026-09-24", &[7.5])]).to_string(),
+    );
+
+    let spent = read(&AccessToken::new("fixture-access"), "team", &url, now());
+    let head = request.join().unwrap().head;
+
+    assert!(
+        head.lines()
+            .next()
+            .unwrap_or_default()
+            .contains("?start_date=2026-08-26&end_date=2026-09-24&group_by=day "),
+        "{head}"
+    );
+    assert!(head.contains("Bearer fixture-access"), "{head}");
+    assert!(
+        head.to_lowercase().contains("chatgpt-account-id: team"),
+        "{head}"
+    );
+    assert_eq!(spent.map(|spent| spent.last_7_days), Some(7.5));
+}
+
+#[test]
+fn a_refused_or_failed_read_is_no_figure() {
+    let (url, request) = crate::http::serve_once("403 Forbidden", "{}");
+    assert_eq!(read(&AccessToken::new("t"), "team", &url, now()), None);
+    request.join().unwrap();
+    assert_eq!(
+        read(
+            &AccessToken::new("t"),
+            "team",
+            &crate::http::refused_url(),
+            now()
+        ),
+        None
+    );
+}
+
+/// A listener that never answers: a request would sit in its backlog, where `accept` finds it.
+fn never_asked() -> (std::net::TcpListener, String) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}/breakdown", listener.local_addr().unwrap());
+    (listener, url)
+}
+
+fn was_asked(listener: &std::net::TcpListener) -> bool {
+    listener.accept().is_ok()
+}
+
+/// A failing endpoint costs one request per backoff period, not one per refresh.
+#[test]
+fn a_failed_read_backs_off_before_the_account_is_asked_again() {
+    let key = account("backoff");
+    let token = AccessToken::new("t");
+    assert_eq!(
+        read_backed_off(&key, &token, "team", &crate::http::refused_url(), now()),
+        None
+    );
+    let (listener, url) = never_asked();
+
+    assert_eq!(read_backed_off(&key, &token, "team", &url, now()), None);
+    assert!(!was_asked(&listener), "asked again while backing off");
+
+    // Another account is not held back by this one's failure.
+    let (url, request) =
+        crate::http::serve_once("200 OK", &breakdown(&[("2026-09-24", &[1.0])]).to_string());
+    assert!(read_backed_off(&account("backoff-other"), &token, "team", &url, now()).is_some());
+    request.join().unwrap();
+}
+
+#[test]
+fn a_successful_read_does_not_hold_the_next_one_back() {
+    let key = account("success");
+    let token = AccessToken::new("t");
+    let body = breakdown(&[("2026-09-24", &[1.0])]).to_string();
+    let (url, requests) =
+        crate::http::serve_sequence(&[("200 OK", &[], &body), ("200 OK", &[], &body)]);
+
+    assert!(read_backed_off(&key, &token, "team", &url, now()).is_some());
+    assert!(read_backed_off(&key, &token, "team", &url, now()).is_some());
+    assert_eq!(requests.join().unwrap().len(), 2);
+}
+
+/// The signed-in login, as the accounts projection hands it over.
+fn access(key: &str) -> impl Fn(&Path) -> Result<Option<CodexAccess>, String> + '_ {
+    move |_| {
+        Ok(Some(CodexAccess {
+            observation_key: key.to_string(),
+            workspace_id: "team".to_string(),
+            token: AccessToken::new("native-access"),
+        }))
+    }
+}
+
+/// The signed-in card has no token of its own (app-server reads it), so its login's access token is
+/// used, for its own workspace, and the figure is that card's.
+#[test]
+fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
+    let key = account("signed-in");
+    let (url, request) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        &breakdown(&[("2026-09-24", &[18303.4])]).to_string(),
+    );
+
+    let spent = signed_in_with(
+        Path::new("/fixture/.codex"),
+        Some(&key),
+        Some("self_serve_business_prolite"),
+        &access(&key),
+        &url,
+        now(),
+    );
+    let head = request.join().unwrap().head;
+
+    assert!(head.contains("Bearer native-access"), "{head}");
+    assert!(
+        head.to_lowercase().contains("chatgpt-account-id: team"),
+        "{head}"
+    );
+    assert_eq!(spent.map(|spent| spent.last_7_days), Some(18303.4));
+}
+
+/// A personal plan pools nothing, so its token is not even read.
+#[test]
+fn a_personal_signed_in_card_never_reads_the_token() {
+    for plan in [Some("pro"), Some("plus"), None] {
+        let spent = signed_in_with(
+            Path::new("/fixture/.codex"),
+            Some("acct"),
+            plan,
+            &|_| panic!("a personal plan's token was read"),
+            "http://unused.test/",
+            now(),
+        );
+        assert_eq!(spent, None, "{plan:?}");
+    }
+}
+
+/// The login on disk may have changed since app-server read the card; another account's token is
+/// never spent on this card, and no login at all is no figure.
+#[test]
+fn a_login_that_is_no_longer_the_cards_account_is_not_asked() {
+    let (listener, url) = never_asked();
+    let other = account("other-login");
+    for access in [
+        &access(&other) as &dyn Fn(&Path) -> Result<Option<CodexAccess>, String>,
+        &|_| Ok(None),
+        &|_| Err("unreadable".to_string()),
+    ] {
+        let spent = signed_in_with(
+            Path::new("/fixture/.codex"),
+            Some("the-cards-account"),
+            Some("business"),
+            access,
+            &url,
+            now(),
+        );
+        assert_eq!(spent, None);
+    }
+    assert!(!was_asked(&listener));
 }

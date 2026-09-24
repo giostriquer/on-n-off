@@ -789,3 +789,31 @@ fn credits_spent_alone_counts_as_an_observation() {
 
     assert!(dto.has_observations());
 }
+
+/// Every writer stores its own read, so one that could not tell what was spent must not erase the
+/// figure already on disk; one that answered replaces it.
+#[test]
+fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_stored_figure() {
+    let home = scratch_dir("limits-snap-credits-spent-kept");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.credits_spent = credits_spent(18303.4);
+    store.save(&dto).unwrap();
+
+    let mut unanswered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T11:00:00.000Z");
+    unanswered.credits_spent = None;
+    store.save(&unanswered).unwrap();
+    assert_eq!(
+        store.load(AgentId::Codex)[0].credits_spent,
+        credits_spent(18303.4)
+    );
+
+    let mut answered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T12:00:00.000Z");
+    answered.credits_spent = credits_spent(5.0);
+    store.save(&answered).unwrap();
+    assert_eq!(
+        store.load(AgentId::Codex)[0].credits_spent,
+        credits_spent(5.0)
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}

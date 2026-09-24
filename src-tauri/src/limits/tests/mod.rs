@@ -1,6 +1,7 @@
 mod claude_banked_resets;
 mod claude_observation;
 mod claude_renewal;
+mod credits_spent;
 mod memory;
 
 use super::*;

@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::Parsed;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
-use crate::dto::{AgentId, ResetCreditOutcome};
+use crate::dto::{AgentId, LimitsCreditsSpentDto, ResetCreditOutcome};
 
 const APP_SERVER_TIMEOUT: Duration = Duration::from_secs(30);
 const STDOUT_LINE_LIMIT: usize = 1024 * 1024;
@@ -203,16 +203,39 @@ fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> R
 }
 
 pub(super) fn read(home: &Path, force: bool) -> Result<Parsed, AppServerFailure> {
+    read_with(
+        home,
+        force,
+        ProcessTransport::spawn,
+        super::credits_spent::signed_in,
+    )
+}
+
+/// `read`, with the app-server process and the spending read (`credits_spent::signed_in`, given the
+/// Codex home, the card's account and its plan) replaceable for tests.
+fn read_with<T: JsonLineTransport>(
+    home: &Path,
+    force: bool,
+    spawn: impl FnOnce(&Path) -> Result<T, String>,
+    spent: impl FnOnce(&Path, Option<&str>, Option<&str>) -> Option<LimitsCreditsSpentDto>,
+) -> Result<Parsed, AppServerFailure> {
     let expected_codex_home = home.join(".codex");
     let before = crate::accounts::native::codex_metadata(&expected_codex_home)
         .map_err(AppServerFailure::Failed)?;
-    let mut transport =
-        ProcessTransport::spawn(&expected_codex_home).map_err(AppServerFailure::Failed)?;
+    let mut transport = spawn(&expected_codex_home).map_err(AppServerFailure::Failed)?;
     let session = query_app_server(&expected_codex_home, force, &mut transport);
     let exit_status = transport.finish();
     let session = session
         .map_err(|error| AppServerFailure::Failed(classify_query_failure(error, exit_status)))?;
-    normalize_app_server(session, before)
+    let mut parsed = normalize_app_server(session, before)?;
+    // Only now is the card's account confirmed; the spending read then checks that the login on
+    // disk is still that account before its token is used.
+    parsed.credits_spent = spent(
+        &expected_codex_home,
+        parsed.account.as_ref().map(|account| account.id.as_str()),
+        parsed.plan.as_deref(),
+    );
+    Ok(parsed)
 }
 
 struct ProcessTransport {
