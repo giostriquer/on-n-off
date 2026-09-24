@@ -198,7 +198,7 @@ Run from the repository root, in PowerShell on Windows or bash/zsh on macOS.
 bun install
 bun run test
 bun run check
-bun test scripts/                          # release verifier, workflow contracts
+bun test scripts/                          # release verifier, workflow and IPC contracts
 bun run build
 bun run tauri dev
 

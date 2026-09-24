@@ -25,20 +25,26 @@ function registeredCommands() {
 /** Every command `api.ts` invokes, in order. */
 function invokedCommands() {
   const api = read("ui/src/lib/api.ts");
-  const calls = [...api.matchAll(/\binvoke(?:<[^>(]*>)?\(/g)].length;
-  const names = [...api.matchAll(/\binvoke(?:<[^>(]*>)?\(\s*"([^"]+)"/g)].map((match) => match[1]);
-  // A name built at run time would slip past every check below.
+  // Every call, however it is typed (`invoke(`, `invoke<Array<Dto>>(`): anything not read as a
+  // literal name below then fails, rather than slipping past every check.
+  const calls = [...api.matchAll(/\binvoke\s*[<(]/g)].length;
+  const names = [...api.matchAll(/\binvoke\s*(?:<[^(]*>)?\(\s*"([^"]+)"/g)].map((match) => match[1]);
   assert.equal(names.length, calls, "api.ts invokes a command whose name is not a string literal");
   return names;
 }
 
-/** The commands the dev mock (`?mock`) answers. */
+/** The app's commands the dev mock (`?mock`) answers. */
 function mockedCommands() {
   const mock = read("ui/src/dev/mockIpc.ts");
   const start = mock.indexOf("const handlers: Record<string, Handler> = {");
   assert.notEqual(start, -1, "mockIpc.ts has no handlers table");
-  const table = mock.slice(start, mock.indexOf("\n};\n", start));
-  return [...table.matchAll(/^ {2}(\w+):/gm)].map((match) => match[1]);
+  const end = mock.indexOf("\n};\n", start);
+  assert.notEqual(end, -1, "mockIpc.ts's handlers table has no end");
+  const keys = [...mock.slice(start, end).matchAll(/^ {2}(?:"([^"]+)"|(\w+)):/gm)].map(
+    (match) => match[1] ?? match[2],
+  );
+  // Tauri's own plugins answer `plugin:<name>|<command>`; they are not the app's to register.
+  return keys.filter((key) => !key.startsWith("plugin:"));
 }
 
 test("every command the UI invokes is registered on the Rust side", () => {
