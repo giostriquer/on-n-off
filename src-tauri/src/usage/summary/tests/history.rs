@@ -8,10 +8,12 @@ use crate::paths::scratch_dir;
 use crate::usage::folding::{clear_history_in, fold_history_in, history_status_in};
 use crate::usage::history::{history_path_for, FoldedRow, HistoryStore, Watermark};
 use crate::usage::pricing;
+use crate::usage::source_index::normalize_path;
 use crate::usage::source_index::{
     reset_transcript_parse_count, source_index_path_for, transcript_parse_count,
     with_live_transcript,
 };
+use crate::usage::sources::{load_scan_cache, scan_cache_path_for};
 use crate::usage::summary_cache::summary_cache_path_for;
 
 /// Two weeks after the fixtures' 2026-08-07: the fold cutoff is 2026-08-14, so August's first week
@@ -51,6 +53,25 @@ fn claude_line(message_id: &str, timestamp: &str, output_tokens: u64) -> String 
     )
 }
 
+/// One Claude record, its transcript last written when the record was, as an agent leaves it.
+fn write_record(home: &Path, name: &str, timestamp: &str, output_tokens: u64) -> PathBuf {
+    let path = write_single_claude_record(home, name, timestamp, output_tokens);
+    set_mtime(&path, timestamp);
+    path
+}
+
+/// A transcript of `lines`, last written at `written`.
+fn write_lines(home: &Path, name: &str, lines: &[String], written: &str) -> PathBuf {
+    write_claude_lines(home, name, lines);
+    let path = home.join(".claude/projects/proj").join(name);
+    set_mtime(&path, written);
+    path
+}
+
+fn scan_cache_holds(home: &Path, path: &Path) -> bool {
+    load_scan_cache(&scan_cache_path_for(home)).contains_key(&normalize_path(path))
+}
+
 fn set_mtime(path: &Path, iso: &str) {
     let modified = std::time::SystemTime::from(DateTime::parse_from_rfc3339(iso).unwrap());
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
@@ -62,7 +83,7 @@ fn set_mtime(path: &Path, iso: &str) {
 fn a_deleted_transcript_still_counts_once_its_usage_is_folded() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-deleted");
-    let path = write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    let path = write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
     fold(&home);
     std::fs::remove_file(&path).unwrap();
@@ -84,7 +105,7 @@ fn a_deleted_transcript_still_counts_once_its_usage_is_folded() {
 fn a_read_never_folds() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-read-only");
-    let path = write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    let path = write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
 
     read_offline(&home, august_input(false));
     std::fs::remove_file(&path).unwrap();
@@ -99,7 +120,7 @@ fn a_read_never_folds() {
 fn nothing_is_folded_before_it_is_a_week_old() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-too-recent");
-    let path = write_single_claude_record(&home, "a.jsonl", "2026-08-15T04:05:13.944Z", 20);
+    let path = write_record(&home, "a.jsonl", "2026-08-15T04:05:13.944Z", 20);
 
     fold(&home);
     std::fs::remove_file(&path).unwrap();
@@ -119,10 +140,20 @@ fn a_live_copy_of_a_folded_record_is_not_counted_twice() {
     let home = scratch_dir("usage-history-copy");
     let original = claude_line("msg_1", "2026-08-07T04:05:13.944Z", 20);
     let later = claude_line("msg_2", "2026-08-20T04:05:13.944Z", 300);
-    write_claude_lines(&home, "original.jsonl", std::slice::from_ref(&original));
+    write_lines(
+        &home,
+        "original.jsonl",
+        std::slice::from_ref(&original),
+        "2026-08-07T04:05:14Z",
+    );
     fold(&home);
 
-    write_claude_lines(&home, "resumed.jsonl", &[original, later]);
+    write_lines(
+        &home,
+        "resumed.jsonl",
+        &[original, later],
+        "2026-08-20T04:05:14Z",
+    );
     let with_both = read_offline(&home, august_input(false));
     std::fs::remove_file(home.join(".claude/projects/proj/original.jsonl")).unwrap();
     let with_copy_only = read_offline(&home, august_input(false));
@@ -139,12 +170,22 @@ fn records_after_the_watermark_are_read_from_their_transcript() {
     let home = scratch_dir("usage-history-live-side");
     let first = claude_line("msg_1", "2026-08-07T04:05:13.944Z", 20);
     let recent = claude_line("msg_2", "2026-08-18T04:05:13.944Z", 300);
-    write_claude_lines(&home, "a.jsonl", &[first.clone(), recent.clone()]);
+    write_lines(
+        &home,
+        "a.jsonl",
+        &[first.clone(), recent.clone()],
+        "2026-08-18T04:05:14Z",
+    );
     fold(&home);
     let folded = read_offline(&home, august_input(false));
 
     let appended = claude_line("msg_3", "2026-08-20T04:05:13.944Z", 4000);
-    write_claude_lines(&home, "a.jsonl", &[first, recent, appended]);
+    write_lines(
+        &home,
+        "a.jsonl",
+        &[first, recent, appended],
+        "2026-08-20T04:05:14Z",
+    );
     let grown = read_offline(&home, august_input(false));
 
     assert_eq!(output_tokens(&folded), 320);
@@ -179,7 +220,7 @@ fn folding_waits_until_every_directory_can_be_walked() {
     use std::os::unix::fs::PermissionsExt;
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-locked-dir");
-    write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     let locked = home.join(".claude/projects/locked");
     std::fs::create_dir_all(&locked).unwrap();
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
@@ -199,8 +240,8 @@ fn folding_waits_for_a_recent_transcript_that_cannot_be_read() {
     use std::os::unix::fs::PermissionsExt;
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-locked-file");
-    write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let locked = write_single_claude_record(&home, "b.jsonl", "2026-08-08T04:05:13.944Z", 300);
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    let locked = write_record(&home, "b.jsonl", "2026-08-08T04:05:13.944Z", 300);
     set_mtime(&locked, "2026-08-08T04:05:14Z");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
@@ -219,8 +260,8 @@ fn a_transcript_unreadable_for_a_week_past_the_cutoff_stops_holding_the_fold_bac
     use std::os::unix::fs::PermissionsExt;
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-long-unreadable");
-    write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let locked = write_single_claude_record(&home, "b.jsonl", "2026-08-06T04:05:13.944Z", 300);
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    let locked = write_record(&home, "b.jsonl", "2026-08-06T04:05:13.944Z", 300);
     set_mtime(&locked, "2026-08-06T23:59:59Z");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
@@ -236,7 +277,7 @@ fn a_transcript_unreadable_for_a_week_past_the_cutoff_stops_holding_the_fold_bac
 fn a_history_that_does_not_read_is_counted_around_and_never_written_over() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-torn");
-    write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     let history = history_path_for(&home);
     std::fs::create_dir_all(history.parent().unwrap()).unwrap();
     std::fs::write(&history, "{ torn").unwrap();
@@ -255,12 +296,10 @@ fn a_history_that_does_not_read_is_counted_around_and_never_written_over() {
 fn a_folded_transcript_is_never_parsed_again() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-no-reparse");
-    let path = write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    set_mtime(&path, "2026-08-07T04:05:14Z");
+    let path = write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     fold(&home);
 
-    let scan_cache = std::fs::read_to_string(home.join(".on-n-off/usage-scan-cache.json")).unwrap();
-    assert!(!scan_cache.contains("a.jsonl"), "{scan_cache}");
+    assert!(!scan_cache_holds(&home, &path));
     std::fs::remove_file(source_index_path_for(&home)).unwrap();
     reset_transcript_parse_count();
     let again = read_offline(&home, full_time_input(false));
@@ -276,8 +315,8 @@ fn a_folded_transcript_is_never_parsed_again() {
 fn clearing_the_history_recounts_what_is_still_on_disk() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-clear");
-    let gone = write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    write_single_claude_record(&home, "b.jsonl", "2026-08-08T04:05:13.944Z", 300);
+    let gone = write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "b.jsonl", "2026-08-08T04:05:13.944Z", 300);
     fold(&home);
     std::fs::remove_file(&gone).unwrap();
     let before_clear = read_offline(&home, august_input(false));
@@ -299,7 +338,7 @@ fn clearing_the_history_recounts_what_is_still_on_disk() {
 fn a_summary_stored_before_a_fold_is_not_served_after_it() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-summary-key");
-    write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     read_offline(&home, august_input(false));
     assert!(read_offline(&home, august_input(false)).cache_hit);
 
@@ -319,8 +358,18 @@ fn a_superseded_transcript_keeps_the_turns_its_rewrite_dropped() {
     let home = scratch_dir("usage-history-superseded");
     let kept = claude_line("msg_1", "2026-08-18T04:05:13.944Z", 20);
     let dropped = claude_line("msg_0", "2026-08-18T04:00:00.000Z", 300);
-    write_claude_lines(&home, "s.jsonl", std::slice::from_ref(&kept));
-    write_claude_lines(&home, "s.jsonl.superseded-1755489600000", &[dropped, kept]);
+    write_lines(
+        &home,
+        "s.jsonl",
+        std::slice::from_ref(&kept),
+        "2026-08-18T04:05:14Z",
+    );
+    write_lines(
+        &home,
+        "s.jsonl.superseded-1755489600000",
+        &[dropped, kept],
+        "2026-08-18T04:05:14Z",
+    );
 
     let summary = read_offline(&home, august_input(false));
 
@@ -340,7 +389,7 @@ fn history_status_says_how_far_back_usage_is_kept() {
         (None, None, 0)
     );
 
-    write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     fold(&home);
     let kept = history_status_in(&home);
 
@@ -360,5 +409,127 @@ fn history_status_says_how_far_back_usage_is_kept() {
         history_status_in(&home).state,
         UsageHistoryState::Unreadable
     );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A transcript whose newest record is folded leaves the scan cache even when it was written
+/// recently, so its mtime alone would keep it.
+#[test]
+fn a_transcript_whose_records_are_all_folded_leaves_the_scan_cache() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-prune-by-record");
+    let path = write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    read_offline(&home, august_input(false));
+    assert!(scan_cache_holds(&home, &path));
+
+    fold(&home);
+
+    assert!(!scan_cache_holds(&home, &path));
+    assert_eq!(output_tokens(&read_offline(&home, august_input(false))), 20);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Just after the watermark, a transcript still counts from itself: one written six hours after
+/// it, and one whose record is stamped an hour after it by a clock five hours ahead of the
+/// filesystem's. Both are inside the 36-hour allowance.
+#[test]
+fn transcripts_written_around_the_watermark_are_still_read() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-around-watermark");
+    write_record(&home, "after.jsonl", "2026-08-14T06:00:00.000Z", 20);
+    let skewed = write_single_claude_record(&home, "skewed.jsonl", "2026-08-14T01:00:00.000Z", 300);
+    set_mtime(&skewed, "2026-08-13T19:00:00Z");
+
+    fold(&home);
+    let summary = read_offline(&home, august_input(false));
+
+    assert_eq!(watermark(&home).ms(), Some(at("2026-08-14T00:00:00Z")));
+    assert!(folded_outputs(&home).is_empty());
+    assert_eq!(output_tokens(&summary), 320);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// The watermark belongs to the transcripts: a record stamped exactly at it is not folded, and
+/// is counted once, from its transcript.
+#[test]
+fn a_record_exactly_at_the_watermark_counts_once() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-at-watermark");
+    write_record(&home, "a.jsonl", "2026-08-14T00:00:00.000Z", 20);
+
+    fold(&home);
+    let summary = read_offline(&home, august_input(false));
+
+    assert!(folded_outputs(&home).is_empty());
+    assert_eq!(output_tokens(&summary), 20);
+    assert_eq!(record_count(&summary), 1);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A message's copies can sit either side of the watermark in different transcripts (a partial
+/// line in one, the finished message in a resumed session). Copies collapse to the richest before
+/// the watermark splits them, so the message counts once, whole.
+#[test]
+fn a_message_whose_copies_straddle_the_watermark_counts_its_richest_copy_once() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-straddle");
+    let partial = claude_line("msg_1", "2026-08-13T23:59:59.999Z", 1);
+    let finished = claude_line("msg_1", "2026-08-14T00:00:00.001Z", 50);
+    write_lines(&home, "first.jsonl", &[partial], "2026-08-14T00:00:00Z");
+    write_lines(&home, "resumed.jsonl", &[finished], "2026-08-14T00:00:01Z");
+
+    fold(&home);
+    let summary = read_offline(&home, august_input(false));
+
+    assert!(folded_outputs(&home).is_empty());
+    assert_eq!(output_tokens(&summary), 50);
+    assert_eq!(record_count(&summary), 1);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Until a fold is due, the background check reads the history file and nothing else.
+#[test]
+fn the_background_check_reads_nothing_else_until_a_fold_is_due() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-idle-check");
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    fold(&home);
+    std::fs::remove_file(source_index_path_for(&home)).unwrap();
+    reset_transcript_parse_count();
+
+    fold(&home);
+
+    assert!(!source_index_path_for(&home).exists());
+    assert_eq!(transcript_parse_count(), 0);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A history file that exists but cannot be opened (another process holds it, its permissions
+/// changed) is not the same as no history: it is neither folded over nor backed up, and reads
+/// count the transcripts around it.
+#[cfg(unix)]
+#[test]
+fn a_history_file_that_cannot_be_opened_is_left_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-locked-history");
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "b.jsonl", "2026-08-16T04:05:13.944Z", 300);
+    fold(&home);
+    let history = history_path_for(&home);
+    let before = std::fs::read_to_string(&history).unwrap();
+    std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    fold_history_in(&home, at("2026-08-30T12:00:00Z")).unwrap();
+    let status = history_status_in(&home);
+    let summary = read_offline(&home, august_input(false));
+
+    let mode = std::fs::metadata(&history).unwrap().permissions().mode() & 0o777;
+    std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(mode, 0o000);
+    assert_eq!(status.state, UsageHistoryState::Unreadable);
+    assert_eq!(std::fs::read_to_string(&history).unwrap(), before);
+    assert!(!home.join(".on-n-off/usage-history.json.bak").exists());
+    assert_eq!(output_tokens(&summary), 320);
     let _ = std::fs::remove_dir_all(&home);
 }

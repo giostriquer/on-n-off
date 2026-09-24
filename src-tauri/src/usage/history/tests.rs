@@ -101,26 +101,35 @@ fn fold_keeps_provider_reported_cost_apart_from_priced_usage() {
     assert_eq!(priced[0].reported_cost_usd, 0.0);
 }
 
+/// A request is long-context when its whole input (fresh, cached and cache writes) passes 200k
+/// tokens. The flag cannot be recomputed once the transcripts are gone, so which request carries
+/// it is pinned by its own output count.
 #[test]
 fn fold_marks_requests_over_two_hundred_thousand_input_tokens() {
+    let input = |uncached: u64, cached: u64, writes: u64, output: u64| {
+        move |r: &mut UsageRecord| {
+            r.totals.uncached_input_tokens = uncached;
+            r.totals.cached_input_tokens = cached;
+            r.totals.cache_creation_tokens = writes;
+            r.totals.cache_creation_1h_tokens = 0;
+            r.totals.output_tokens = output;
+        }
+    };
     let history = folded(
         &[
-            record("2026-08-07T04:01:00Z", |r| {
-                r.totals.uncached_input_tokens = 1_000;
-                r.totals.cached_input_tokens = 199_000;
-                r.totals.cache_creation_tokens = 0;
-            }),
-            record("2026-08-07T04:02:00Z", |r| {
-                r.totals.uncached_input_tokens = 1_001;
-                r.totals.cached_input_tokens = 199_000;
-                r.totals.cache_creation_tokens = 0;
-            }),
+            record("2026-08-07T04:01:00Z", input(1_000, 199_000, 0, 1)),
+            record("2026-08-07T04:02:00Z", input(1_001, 199_000, 0, 10)),
+            record("2026-08-07T04:03:00Z", input(1_000, 0, 199_001, 100)),
         ],
         "2026-09-01T00:00:00Z",
     );
 
-    let long: Vec<_> = history.rows().iter().map(|row| row.long_context).collect();
-    assert_eq!(long, [false, true]);
+    let flagged: Vec<(bool, u64)> = history
+        .rows()
+        .iter()
+        .map(|row| (row.long_context, row.totals.output_tokens))
+        .collect();
+    assert_eq!(flagged, [(false, 1), (true, 110)]);
 }
 
 #[test]
@@ -549,5 +558,139 @@ fn a_failed_write_while_recovering_keeps_the_backup_in_reach() {
 
     assert!(failed.is_err());
     assert_eq!(opened(&path), Some((good, true)));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Records exactly at the old watermark belong to this fold; records exactly at the cutoff wait
+/// for the next.
+#[test]
+fn fold_takes_from_the_watermark_up_to_but_not_including_the_cutoff() {
+    let watermark = ms("2026-08-10T00:00:00Z");
+    let cutoff = ms("2026-08-15T00:00:00Z");
+    let at = |at_ms: i64, output: u64| {
+        let mut r = record("2026-08-01T00:00:00Z", |_| {});
+        r.timestamp_ms = at_ms;
+        r.totals.output_tokens = output;
+        r
+    };
+    let records = [
+        at(watermark - 1, 1),
+        at(watermark, 10),
+        at(cutoff - 1, 100),
+        at(cutoff, 1000),
+    ];
+    let mut history = UsageHistory::default();
+    history.fold(&records, watermark, 0);
+
+    history.fold(&records, cutoff, 0);
+
+    let outputs: Vec<u64> = history
+        .rows()
+        .iter()
+        .map(|row| row.totals.output_tokens)
+        .collect();
+    assert_eq!(outputs, [1, 10, 100]);
+}
+
+/// Each malformed shape is a damaged file, not a value to normalize and write back; a damaged
+/// file falls back to its backup.
+#[test]
+fn every_malformed_row_or_version_makes_the_file_unreadable() {
+    let document: serde_json::Value = serde_json::from_str(&encode(&one_fold())).unwrap();
+    let with = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut damaged = document.clone();
+        edit(&mut damaged);
+        damaged.to_string()
+    };
+    let cases = [
+        with(&|d| d["rows"][0][3] = serde_json::json!(4)),
+        with(&|d| d["rows"][0][7] = serde_json::json!(d["rows"][0][6].as_u64().unwrap() + 1)),
+        with(&|d| d["rows"][0][12] = serde_json::json!([5])),
+        with(&|d| d["rows"][0][11] = serde_json::json!("NaN")),
+        with(&|d| d["version"] = serde_json::json!(0)),
+    ];
+    for damaged in &cases {
+        assert!(
+            matches!(decode(damaged), Err(DecodeError::Damaged)),
+            "{damaged}"
+        );
+    }
+
+    let (root, path) = history_path("usage-history-malformed");
+    save(&path, &one_fold(), false).unwrap();
+    save(&path, &one_fold(), false).unwrap();
+    for damaged in &cases {
+        std::fs::write(&path, damaged).unwrap();
+        assert_eq!(opened(&path), Some((one_fold(), true)), "{damaged}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Back-to-back folds read by the same parser are one segment; a fold after a parser change starts
+/// a new one, so the file says which parser read which stretch of history.
+#[test]
+fn folds_are_recorded_by_the_parser_that_read_them() {
+    let mut history = UsageHistory::default();
+    history.fold(
+        &[record("2026-08-07T04:01:00Z", |_| {})],
+        ms("2026-08-10T00:00:00Z"),
+        1,
+    );
+    history.fold(
+        &[record("2026-08-12T04:01:00Z", |_| {})],
+        ms("2026-08-15T00:00:00Z"),
+        2,
+    );
+    assert_eq!(
+        history.segments,
+        [FoldSegment {
+            from_ms: None,
+            to_ms: ms("2026-08-15T00:00:00Z"),
+            parser_version: USAGE_TRANSCRIPT_PARSER_VERSION,
+            folded_at_ms: 2,
+        }]
+    );
+
+    history.segments[0].parser_version = USAGE_TRANSCRIPT_PARSER_VERSION - 1;
+    history.fold(
+        &[record("2026-08-17T04:01:00Z", |_| {})],
+        ms("2026-08-20T00:00:00Z"),
+        3,
+    );
+
+    assert_eq!(history.segments.len(), 2);
+    assert_eq!(
+        history.segments[1],
+        FoldSegment {
+            from_ms: Some(ms("2026-08-15T00:00:00Z")),
+            to_ms: ms("2026-08-20T00:00:00Z"),
+            parser_version: USAGE_TRANSCRIPT_PARSER_VERSION,
+            folded_at_ms: 3,
+        }
+    );
+}
+
+/// A file that exists but cannot be read is not replaced, and not backed up as if it were empty.
+#[cfg(unix)]
+#[test]
+fn save_refuses_to_replace_a_file_it_cannot_read() {
+    use std::os::unix::fs::PermissionsExt;
+    let (root, path) = history_path("usage-history-save-locked");
+    save(&path, &one_fold(), false).unwrap();
+    let before = std::fs::read_to_string(&path).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let mut next = one_fold();
+    next.fold(
+        &[record("2026-08-12T04:01:00Z", |_| {})],
+        ms("2026-08-15T00:00:00Z"),
+        0,
+    );
+
+    let refused = save(&path, &next, false);
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(refused.is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    assert!(!backup_path(&path).exists());
     let _ = std::fs::remove_dir_all(&root);
 }

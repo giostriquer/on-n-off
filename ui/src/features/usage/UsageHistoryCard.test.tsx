@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, test, vi } from "vitest";
 import type { UsageHistoryStatus } from "$lib/usageTypes";
 import { UsageHistoryCard } from "./UsageHistoryCard";
 
@@ -69,6 +69,7 @@ it("clears only once the loss is confirmed, then shows what is left and rereads 
   const card = screen.getByRole("region", { name: "Usage history" });
   await waitFor(() => expect(card).toHaveTextContent("Nothing kept yet"));
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["usage"] });
+  expect(screen.queryByRole("group", { name: "Confirm clearing usage history" })).toBeNull();
 });
 
 it("keeps the history when the confirmation is cancelled", async () => {
@@ -110,4 +111,17 @@ it("says when what is kept cannot be read", async () => {
   const card = await screen.findByRole("region", { name: "Usage history" });
   await waitFor(() => expect(card).toHaveTextContent("Could not read the usage history: worker failed"));
   expect(screen.queryByRole("button", { name: "Clear history" })).toBeNull();
+});
+
+test.each([
+  [{ state: "kept", keptSince: "2026-08-07T12:00:00.000Z", bytes: 12 }, "Kept since Aug 7, 2026 · 12 bytes"],
+  [{ state: "kept", keptSince: "2026-08-07T12:00:00.000Z", bytes: 1024 }, "Kept since Aug 7, 2026 · 1 KB"],
+  [{ state: "kept", keptSince: "2026-08-07T12:00:00.000Z", bytes: 1_363_148 }, "Kept since Aug 7, 2026 · 1.3 MB"],
+  [{ state: "kept", bytes: 2048 }, "Kept · 2 KB"],
+] satisfies [UsageHistoryStatus, string][])("describes %o as %s", async (status, text) => {
+  calls.usageHistoryStatus.mockResolvedValue(status);
+  renderCard();
+
+  const card = await screen.findByRole("region", { name: "Usage history" });
+  await waitFor(() => expect(card).toHaveTextContent(text));
 });
