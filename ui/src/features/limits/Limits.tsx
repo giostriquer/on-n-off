@@ -12,7 +12,7 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
-import { CodexSubscriptionBadge } from "./SubscriptionBadge";
+import { ClaudeSubscriptionStatusBadge, CodexSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { accountCards, orderAccountCards } from "./accountCards";
 import { BankedResetsRow, CLAUDE_RESET_HINT, ResetOfferRow } from "./BankedResets";
@@ -192,7 +192,9 @@ function AccountCard({
 
   const subscription = entry.provider === "codex" && account
     ? <CodexSubscriptionBadge accountId={account.id} current={entry.currentAccount} now={now} />
-    : null;
+    : entry.provider === "claude"
+      ? <ClaudeSubscriptionStatusBadge status={entry.subscriptionStatus} lastKnown={!entry.currentAccount || entry.status !== "ok"} />
+      : null;
   const header = (menu: ReactNode) => <CardHeader savedRefreshDetail={savedRefreshDetail} activeWithoutUsage={active && !hero} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
   const content = <>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}

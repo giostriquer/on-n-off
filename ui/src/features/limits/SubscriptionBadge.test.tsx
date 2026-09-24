@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubscriptionReading } from "$lib/subscriptionTypes";
-import { SubscriptionBadge } from "./SubscriptionBadge";
+import { ClaudeSubscriptionStatusBadge, SubscriptionBadge } from "./SubscriptionBadge";
 vi.mock("$lib/api", () => ({}));
 afterEach(cleanup);
 const DAY = 86_400_000;
@@ -53,4 +53,28 @@ it.each([null, "invalid"])("omits a badge when its date is %s", date => {
   const value = reading(4); value.metadata!.date = date;
   const {container} = render(<SubscriptionBadge reading={value} now={NOW} />);
   expect(container).toBeEmptyDOMElement();
+});
+describe("ClaudeSubscriptionStatusBadge", () => {
+  it("names what Claude reports, in the red tone when the subscription is in trouble", () => {
+    render(<ClaudeSubscriptionStatusBadge status="past_due" lastKnown={false} />);
+    const badge = screen.getByRole("button", { name: "Subscription status: Payment due" });
+    expect(badge).toHaveClass("subscription-badge--expired");
+    expect(badge).toHaveTextContent("Payment due");
+    fireEvent.focus(badge);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Claude reports this subscription as past_due");
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("Last known");
+  });
+  it("keeps a trial neutral and says when the status is only the last one known", () => {
+    render(<ClaudeSubscriptionStatusBadge status="trialing" lastKnown />);
+    const badge = screen.getByRole("button", { name: "Subscription status: Trial" });
+    expect(badge).toHaveClass("subscription-badge--neutral");
+    fireEvent.focus(badge);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Last known subscription status.");
+  });
+  it("shows nothing for an active or unknown subscription", () => {
+    const { container, rerender } = render(<ClaudeSubscriptionStatusBadge status="active" lastKnown={false} />);
+    expect(container).toBeEmptyDOMElement();
+    rerender(<ClaudeSubscriptionStatusBadge status={null} lastKnown={false} />);
+    expect(container).toBeEmptyDOMElement();
+  });
 });

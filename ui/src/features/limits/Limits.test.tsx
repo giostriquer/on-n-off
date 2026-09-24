@@ -516,6 +516,30 @@ describe("Limits", () => {
     expect(within(card("Codex limits · work@codex.example")).getByRole("definition", { name: "Credits" }).textContent).toBe("Unlimited");
   });
 
+  it("puts the subscription status Claude reports beside the plan, and nothing when it is active", async () => {
+    answer([okClaude({ subscriptionStatus: "past_due" })], []);
+    const { unmount } = renderLimits();
+
+    const claude = await waitFor(() => card("Claude limits · me@claude.example"));
+    expect(within(claude).getByRole("button", { name: "Subscription status: Payment due" })).toBeTruthy();
+
+    unmount();
+    answer([okClaude({ subscriptionStatus: "active" })], []);
+    renderLimits();
+    const active = await waitFor(() => card("Claude limits · me@claude.example"));
+    expect(within(active).queryByRole("button", { name: /Subscription status/ })).toBeNull();
+  });
+
+  it("says a remembered Claude card's subscription status is only the last one known", async () => {
+    answer([okClaude({ currentAccount: false, subscriptionStatus: "canceled" })], []);
+    renderLimits();
+
+    const claude = await waitFor(() => card("Claude limits · me@claude.example"));
+    const badge = within(claude).getByRole("button", { name: "Subscription status: Canceled" });
+    fireEvent.focus(badge);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Last known subscription status.");
+  });
+
   it("shows a business member's workspace credits in place of an own balance of 0", async () => {
     const workspaceCredits = { limit: "25000", used: "8000", usedPercent: 32, resetsAt: "2026-10-01T12:00:00Z", reached: false };
     answer([okClaude()], [okCodex({ plan: "self_serve_business_prolite", credits: { balance: "0", unlimited: false }, workspaceCredits })]);

@@ -1,6 +1,7 @@
 import { TooltipButton } from "$lib/TooltipButton";
 import { useCodexSubscription } from "$lib/useCodexSubscription";
 import type { SubscriptionReading } from "$lib/subscriptionTypes";
+import { claudeSubscriptionStatus } from "./claudeSubscriptionStatus";
 import "./SubscriptionBadge.css";
 
 const DAY = 86_400_000;
@@ -42,4 +43,21 @@ export function SubscriptionBadge({ reading, now }: {reading: SubscriptionReadin
 export function CodexSubscriptionBadge({accountId, current, now}: {accountId: string; current: boolean; now: number}) {
   const query = useCodexSubscription(accountId, current);
   return <SubscriptionBadge reading={query.data ?? {metadata: null, connected: false, unavailable: false}} now={now} />;
+}
+
+/**
+ * Claude's own subscription status beside the plan, when it is anything but active. It carries no
+ * dates: the OAuth token on-n-off holds is not given a renewal or expiry date (see PROVIDERS.md).
+ */
+export function ClaudeSubscriptionStatusBadge({ status, lastKnown }: { status: string | null | undefined; lastKnown: boolean }) {
+  const badge = claudeSubscriptionStatus(status);
+  if (!badge) return null;
+  const tooltip = <>
+    <div>Claude reports this subscription as {status?.trim()}</div>
+    {lastKnown && <div>Last known subscription status.</div>}
+  </>;
+  return <TooltipButton label={`Subscription status: ${badge.label}`} tooltip={tooltip}
+    className={`type-badge subscription-badge subscription-badge--${badge.tone === "alert" ? "expired" : "neutral"}`}>
+    <span className="relative">{badge.label}</span>
+  </TooltipButton>;
 }
