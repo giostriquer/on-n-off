@@ -1,7 +1,6 @@
 ---
 name: release-version
-description: Cut an on-n-off release end to end — version bump, merge, tag, release approval, draft verification, publish.
-disable-model-invocation: true
+description: Use when the user explicitly asks to release, ship, cut or publish a new on-n-off version, or to finish a release already in progress. Never start a release on your own initiative.
 argument-hint: "[major | minor | patch | X.Y.Z] [PR number]"
 ---
 
