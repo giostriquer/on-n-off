@@ -397,3 +397,45 @@ fn kept_since_is_the_first_folded_slot() {
     assert_eq!(history.kept_since_ms(), Some(ms("2026-08-07T23:45:00Z")));
     assert_eq!(UsageHistory::default().kept_since_ms(), None);
 }
+
+/// Recovering from the backup must survive a write that fails: the damaged file stays where it
+/// is until the new one replaces it, so the next load falls back to the backup again rather than
+/// finding no history at all and starting over.
+#[test]
+fn a_failed_write_while_recovering_keeps_the_backup_in_reach() {
+    let (root, path) = history_path("usage-history-recover-write-fails");
+    let good = folded(
+        &[record("2026-08-07T04:01:00Z", |_| {})],
+        "2026-08-10T00:00:00Z",
+    );
+    persist_history(&path, &good, false).unwrap();
+    persist_history(&path, &good, false).unwrap();
+    std::fs::write(&path, "{ torn").unwrap();
+    let LoadedHistory::Ready {
+        history,
+        recovered: true,
+    } = load_history(&path)
+    else {
+        panic!("expected the backup");
+    };
+    let mut next = history.clone();
+    next.fold(
+        &[record("2026-08-12T04:01:00Z", |_| {})],
+        ms("2026-08-15T00:00:00Z"),
+        0,
+    );
+
+    let failed = persist_history_with(&path, &next, true, |_, _| {
+        Err(io::Error::other("disk full"))
+    });
+
+    assert!(failed.is_err());
+    match load_history(&path) {
+        LoadedHistory::Ready { history, recovered } => {
+            assert!(recovered);
+            assert_eq!(history, good);
+        }
+        other => panic!("expected the backup again, got {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -291,9 +291,19 @@ pub fn load_history(path: &Path) -> LoadedHistory {
 }
 
 /// Writes `history`, keeping the file it replaces as the backup. A `recovered` history came from
-/// the backup because the file did not read: that file is set aside under a new name first, so
-/// the backup is not replaced with it.
+/// the backup because the file did not read: that file is copied aside under a new name first,
+/// and the backup is not replaced with it.
 pub fn persist_history(path: &Path, history: &UsageHistory, recovered: bool) -> io::Result<()> {
+    persist_history_with(path, history, recovered, atomic_write)
+}
+
+/// [`persist_history`] with the write of the file itself supplied, so a test can fail it.
+fn persist_history_with(
+    path: &Path,
+    history: &UsageHistory,
+    recovered: bool,
+    write_file: impl FnOnce(&Path, &str) -> io::Result<()>,
+) -> io::Result<()> {
     if recovered {
         set_aside(path)?;
     } else {
@@ -303,7 +313,7 @@ pub fn persist_history(path: &Path, history: &UsageHistory, recovered: bool) -> 
             Err(error) => return Err(error),
         }
     }
-    atomic_write(path, &encode(history))
+    write_file(path, &encode(history))
 }
 
 fn set_aside(path: &Path) -> io::Result<()> {
@@ -318,7 +328,9 @@ fn set_aside(path: &Path) -> io::Result<()> {
         }
         attempt += 1;
     };
-    match std::fs::rename(path, target) {
+    // Copied, not moved: the file stays where it is until the new one replaces it, so a write
+    // that fails leaves it to fall back to the backup again.
+    match std::fs::copy(path, target) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
         _ => Ok(()),
     }
