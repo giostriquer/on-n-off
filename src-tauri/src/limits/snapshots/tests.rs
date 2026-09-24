@@ -30,6 +30,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
         )],
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -195,6 +196,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
             unlimited: false,
         }),
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -750,4 +752,40 @@ fn a_failed_read_carrying_only_a_remembered_share_is_not_saved() {
 
     assert_eq!(store.load(AgentId::Codex)[0].windows, remembered.windows);
     let _ = std::fs::remove_dir_all(&home);
+}
+
+fn credits_spent(last_7_days: f64) -> Option<crate::dto::LimitsCreditsSpentDto> {
+    Some(crate::dto::LimitsCreditsSpentDto {
+        last_7_days,
+        last_30_days: last_7_days + 2000.0,
+        updated_at: Some("2026-09-24T19:00:00Z".to_string()),
+    })
+}
+
+/// Spending is remembered like the other figures, so a card read later still has it.
+#[test]
+fn a_remembered_credits_spent_figure_loads_back() {
+    let home = scratch_dir("limits-snap-credits-spent");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.credits_spent = credits_spent(18303.4);
+    store.save(&dto).unwrap();
+
+    assert_eq!(
+        store.load(AgentId::Codex)[0].credits_spent,
+        dto.credits_spent
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A read whose only figure is what the member spent still observed the account.
+#[test]
+fn credits_spent_alone_counts_as_an_observation() {
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.windows.clear();
+    assert!(!dto.has_observations());
+
+    dto.credits_spent = credits_spent(0.0);
+
+    assert!(dto.has_observations());
 }

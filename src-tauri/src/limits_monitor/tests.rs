@@ -34,6 +34,7 @@ fn snapshot(
         }],
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     }

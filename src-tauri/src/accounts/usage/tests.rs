@@ -296,13 +296,16 @@ fn native_api_key_login_does_not_block_saved_subscription_polling() {
             auth: json!({"OPENAI_API_KEY":"fixture-api-key"}),
             account: json!({}),
         })),
-        &|| Ok(open(home.path())),
-        &|p| {
-            calls.fetch_add(1, Ordering::SeqCst);
-            FetchResult {
-                login: p.login.clone(),
-                result: Ok(reading(p)),
-            }
+        &Readers {
+            open: &|| Ok(open(home.path())),
+            fetch: &|p| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                FetchResult {
+                    login: p.login.clone(),
+                    result: Ok(reading(p)),
+                }
+            },
+            spent: &never_asked_what_it_spent,
         },
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -406,14 +409,17 @@ fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_result
                 force,
                 entries,
                 Ok(active.login.clone()),
-                &|| Ok(open(home.path())),
-                &|p| {
-                    assert_eq!(p.id, inactive.id);
-                    fetch_calls.fetch_add(1, Ordering::SeqCst);
-                    FetchResult {
-                        login: p.login.clone(),
-                        result: Ok(reading(p)),
-                    }
+                &Readers {
+                    open: &|| Ok(open(home.path())),
+                    fetch: &|p| {
+                        assert_eq!(p.id, inactive.id);
+                        fetch_calls.fetch_add(1, Ordering::SeqCst);
+                        FetchResult {
+                            login: p.login.clone(),
+                            result: Ok(reading(p)),
+                        }
+                    },
+                    spent: &never_asked_what_it_spent,
                 },
             );
         }))
@@ -521,5 +527,119 @@ fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_
         });
         merge(&mut entries, &p, result);
         assert_eq!(entries[0].reset_credits, banked, "refresh {refresh}");
+    }
+}
+
+fn never_asked_what_it_spent(
+    _: &model::Identity,
+    _: &serde_json::Value,
+) -> Option<crate::dto::LimitsCreditsSpentDto> {
+    panic!("only a signed-in workspace card is asked what it spent")
+}
+
+/// The signed-in Codex login, and the identity its card is keyed by.
+fn codex_native() -> (Login, model::Identity) {
+    let login = policy_profile(AgentId::Codex, false, false).login.unwrap();
+    let identity = model::identity(AgentId::Codex, &login.auth, &login.account).unwrap();
+    (login, identity)
+}
+
+/// The card app-server reads for the signed-in account: no token, so no spending of its own.
+fn signed_in_card(key: &str, plan: &str) -> ProviderLimitsDto {
+    ProviderLimitsDto {
+        provider: AgentId::Codex,
+        status: LimitsStatus::Ok,
+        message: None,
+        account: Some(crate::dto::LimitsAccountDto {
+            id: key.to_string(),
+            legacy_id: None,
+            label: None,
+        }),
+        current_account: true,
+        plan: Some(plan.to_string()),
+        windows: vec![],
+        credits: Some(crate::dto::LimitsCreditsDto {
+            balance: "0".to_string(),
+            unlimited: false,
+        }),
+        workspace_credits: None,
+        credits_spent: None,
+        reset_credits: None,
+        reset_offer: None,
+    }
+}
+
+fn spent() -> crate::dto::LimitsCreditsSpentDto {
+    crate::dto::LimitsCreditsSpentDto {
+        last_7_days: 18303.4,
+        last_30_days: 20299.7,
+        updated_at: Some("2026-09-24T19:00:00Z".to_string()),
+    }
+}
+
+/// app-server hands the signed-in card no token, and its saved shadow is never polled, so the
+/// native login itself is asked what it spent, and the figure goes on the card keyed by it.
+#[test]
+fn the_signed_in_workspace_card_gets_what_its_login_spent() {
+    let home = tempfile::tempdir().unwrap();
+    let (login, identity) = codex_native();
+    let mut entries = vec![signed_in_card(
+        &identity.observation_key(),
+        "self_serve_business_prolite",
+    )];
+    let asked = Mutex::new(Vec::new());
+    refresh_with(
+        home.path(),
+        AgentId::Codex,
+        false,
+        &mut entries,
+        Ok(Some(login.clone())),
+        &Readers {
+            open: &|| Ok(open(home.path())),
+            fetch: &|_| panic!("no saved profile to poll"),
+            spent: &|who, auth| {
+                asked.lock().unwrap().push((who.clone(), auth.clone()));
+                Some(spent())
+            },
+        },
+    );
+
+    assert_eq!(entries[0].credits_spent, Some(spent()));
+    assert_eq!(*asked.lock().unwrap(), vec![(identity, login.auth)]);
+}
+
+/// A personal plan pools nothing, a remembered card is not the signed-in one, another account's
+/// card is not this login's, and without a native login there is no token to ask with.
+#[test]
+fn only_the_signed_in_workspace_card_is_asked_what_it_spent() {
+    let (login, identity) = codex_native();
+    let key = identity.observation_key();
+    let mut remembered = signed_in_card(&key, "business");
+    remembered.current_account = false;
+    for (card, native) in [
+        (signed_in_card(&key, "pro"), Some(login.clone())),
+        (remembered, Some(login.clone())),
+        (
+            signed_in_card("profile:another-account", "business"),
+            Some(login.clone()),
+        ),
+        (signed_in_card(&key, "business"), None),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let mut entries = vec![card.clone()];
+        refresh_with(
+            home.path(),
+            AgentId::Codex,
+            false,
+            &mut entries,
+            Ok(native),
+            &Readers {
+                open: &|| Ok(open(home.path())),
+                fetch: &|_| panic!("no saved profile to poll"),
+                spent: &never_asked_what_it_spent,
+            },
+        );
+
+        assert_eq!(entries, vec![card]);
     }
 }

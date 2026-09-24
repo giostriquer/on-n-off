@@ -115,6 +115,7 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
         plan: Some("pro".into()),
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
         account: Some(LimitsAccountDto {

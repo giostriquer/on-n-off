@@ -71,6 +71,19 @@ pub struct LimitsWorkspaceCreditsDto {
     pub reached: bool,
 }
 
+/// Credits a business workspace member has spent lately, counted the way the Codex app's "Credit
+/// usage history" counts them: each UTC day's per-model credits, summed over the last 7 and the last
+/// 30 days up to today. There is no limit to measure it against; it is only reported.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsCreditsSpentDto {
+    pub last_7_days: f64,
+    pub last_30_days: f64,
+    /// RFC 3339 instant the provider's usage data runs up to; it can trail the read by hours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
 /// Banked rate-limit resets: one-time resets saved to the account until used or expired. Codex's
 /// can be spent from on-n-off; Claude's are only reported, and spent with Claude Code's `/limit-reset`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -154,6 +167,8 @@ pub struct ProviderLimitsDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credits_spent: Option<LimitsCreditsSpentDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_credits: Option<LimitsResetCreditsDto>,
     /// Never remembered: an offer withdrawn between reads must disappear with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -167,10 +182,14 @@ impl ProviderLimitsDto {
         !self.windows.is_empty() || self.has_figures()
     }
 
-    /// The figures a read reports beside its windows: a credit balance, a workspace-credit share or
-    /// banked resets. One list, so a figure added later is counted everywhere at once.
+    /// The figures a read reports beside its windows: a credit balance, a workspace-credit share,
+    /// the credits spent lately or banked resets. One list, so a figure added later is counted
+    /// everywhere at once.
     pub fn has_figures(&self) -> bool {
-        self.credits.is_some() || self.workspace_credits.is_some() || self.has_banked_resets()
+        self.credits.is_some()
+            || self.workspace_credits.is_some()
+            || self.credits_spent.is_some()
+            || self.has_banked_resets()
     }
 
     /// Every current Codex read and most Claude reads report a reset count, usually 0, so only a

@@ -32,6 +32,7 @@ fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
         windows,
         credits: None,
         workspace_credits: None,
+        credits_spent: None,
         reset_credits: None,
         reset_offer: None,
     }
@@ -835,6 +836,11 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             resets_at: Some("2026-10-01T12:00:00+00:00".to_string()),
             reached: true,
         }),
+        credits_spent: Some(crate::dto::LimitsCreditsSpentDto {
+            last_7_days: 18303.4,
+            last_30_days: 20299.7,
+            updated_at: Some("2026-09-24T19:00:00Z".to_string()),
+        }),
         reset_credits: Some(LimitsResetCreditsDto {
             available_count: 1,
             next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
@@ -857,6 +863,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             "windows": [{"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5, "observedAt": "2026-08-17T20:00:00.000Z"}],
             "credits": {"balance": "3", "unlimited": false},
             "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0, "resetsAt": "2026-10-01T12:00:00+00:00", "reached": true},
+            "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7, "updatedAt": "2026-09-24T19:00:00Z"},
             "resetCredits": {"availableCount": 1, "nextExpiresAt": "2026-09-01T12:00:00+00:00"},
             "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
         })
@@ -874,6 +881,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
     assert!(value.get("plan").is_none());
     assert!(value.get("credits").is_none());
     assert!(value.get("workspaceCredits").is_none());
+    assert!(value.get("creditsSpent").is_none());
     assert!(value.get("resetCredits").is_none());
     assert!(value.get("resetOffer").is_none());
     assert!(value.get("account").is_none());

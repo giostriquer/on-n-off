@@ -37,6 +37,8 @@ struct StoredSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    credits_spent: Option<crate::dto::LimitsCreditsSpentDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     reset_credits: Option<LimitsResetCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observed_at: Option<String>,
@@ -219,6 +221,7 @@ impl StoredSnapshot {
             windows: dto.windows.clone(),
             credits: dto.credits.clone(),
             workspace_credits: dto.workspace_credits.clone(),
+            credits_spent: dto.credits_spent.clone(),
             reset_credits: dto.reset_credits.clone(),
             observed_at: Some(observed_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
         }
@@ -244,6 +247,7 @@ impl StoredSnapshot {
             // A share past its reset has renewed, which the card shows as it shows a window's
             // passed reset; it is kept, since dropping it would bring back the own balance of 0.
             workspace_credits: self.workspace_credits,
+            credits_spent: self.credits_spent,
             reset_credits: self
                 .reset_credits
                 .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),

@@ -16,6 +16,7 @@ pub(crate) fn read(identity: &Identity, auth: &Value) -> Result<ProviderLimitsDt
         CLAUDE_USAGE_URL,
         CODEX_USAGE_URL,
         CODEX_RESET_CREDITS_URL,
+        credits_spent::CODEX_CREDIT_USAGE_URL,
     )
 }
 
@@ -26,6 +27,7 @@ fn read_at(
     claude_url: &str,
     codex_url: &str,
     codex_reset_credits_url: &str,
+    codex_credit_usage_url: &str,
 ) -> Result<ProviderLimitsDto, HttpError> {
     let mut parsed = match identity.provider {
         AgentId::Claude => {
@@ -81,7 +83,22 @@ fn read_at(
                 .is_some_and(|count| count > 0))
             .then(|| get_json(codex_reset_credits_url, &headers).ok())
             .flatten();
-            parse_codex_usage(&payload, details.as_ref())?
+            let mut parsed = parse_codex_usage(&payload, details.as_ref())?;
+            // Only a workspace pools credits, and like the detail read, spending never decides
+            // the read: a member the endpoint refuses just has no figure.
+            if parsed
+                .plan
+                .as_deref()
+                .is_some_and(credits_spent::is_workspace_plan)
+            {
+                parsed.credits_spent = codex_credits_spent_at(
+                    token,
+                    &identity.workspace_id,
+                    codex_credit_usage_url,
+                    Utc::now().date_naive(),
+                );
+            }
+            parsed
         }
         _ => return Err(HttpError::Unauthorized),
     };
@@ -195,6 +212,40 @@ fn reset_credits(summary: &Value, details: Option<&Value>) -> Option<Value> {
     });
     detailed
         .or_else(|| Some(json!({"availableCount": banked_reset_count(summary)?, "credits": null})))
+}
+
+/// What a workspace Codex login has spent lately, for the signed-in account whose card app-server
+/// reads without a token. Access-only like every read here: any failure is no figure.
+pub(crate) fn codex_credits_spent(
+    identity: &Identity,
+    auth: &Value,
+) -> Option<crate::dto::LimitsCreditsSpentDto> {
+    let token = crate::accounts::model::string(auth, "/tokens/access_token").ok()?;
+    codex_credits_spent_at(
+        token,
+        &identity.workspace_id,
+        credits_spent::CODEX_CREDIT_USAGE_URL,
+        Utc::now().date_naive(),
+    )
+}
+
+/// What a Codex login has spent lately, asked of `url` with its token and workspace.
+fn codex_credits_spent_at(
+    token: &str,
+    workspace_id: &str,
+    url: &str,
+    today: chrono::NaiveDate,
+) -> Option<crate::dto::LimitsCreditsSpentDto> {
+    let bearer = format!("Bearer {token}");
+    let payload = get_json(
+        &credits_spent::query_url(url, today),
+        &[
+            ("Authorization", bearer.as_str()),
+            ("ChatGPT-Account-Id", workspace_id),
+        ],
+    )
+    .ok()?;
+    credits_spent::parse(&payload, today)
 }
 
 #[cfg(test)]
