@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   catalogCounts,
   canUninstallPlugin,
+  configMcpCount,
   comparePluginThenName,
   driftRows,
   emptyTabDto,
@@ -9,6 +10,8 @@ import {
   globalItemCount,
   liveRows,
   masterAllOn,
+  mcpIsLive,
+  mcpSourcesLabel,
   pluginOutOfSync,
   pluginVersionNote,
   skillIsLive,
@@ -17,7 +20,7 @@ import {
   sortSkills,
   tallyLine,
 } from "./catalog";
-import type { AgentTabDto, HookDto } from "./types";
+import type { AgentTabDto, HookDto, McpServerDto } from "./types";
 
 const tab: AgentTabDto = {
   plugins: [
@@ -344,5 +347,73 @@ describe("catalog hooks", () => {
 
   it("starts an empty tab with no hooks", () => {
     expect(emptyTabDto().hooks).toEqual([]);
+  });
+});
+
+describe("catalog MCP sources", () => {
+  const own: McpServerDto = {
+    id: "github",
+    name: "github",
+    system: "stdio",
+    source: "npx github",
+    enabled: true,
+    togglable: true,
+    origin: "",
+  };
+  const plugin: McpServerDto = {
+    id: "plugin:tracker:tracker",
+    name: "tracker",
+    system: "http",
+    source: "https://tracker.example/mcp",
+    enabled: true,
+    togglable: false,
+    origin: "plugin",
+    pluginId: "tracker@acme",
+  };
+  const local: McpServerDto = {
+    id: "local:library-docs",
+    name: "library-docs",
+    system: "http",
+    source: "https://docs.example/mcp",
+    enabled: true,
+    togglable: false,
+    origin: "local",
+    projects: ["/Users/me/acme/webapp", "/Users/me/acme/api"],
+  };
+  const project: McpServerDto = { ...own, id: "project:repo-docs", name: "repo-docs", togglable: false, origin: "project" };
+
+  it("counts a plugin's server as live, and one kept for particular projects as listed but not live", () => {
+    const tab: AgentTabDto = { ...emptyTabDto(), mcpServers: [plugin, local] };
+    expect(catalogCounts(tab).mcp).toEqual({ on: 1, total: 2 });
+    expect(liveRows(tab).map((row) => row.id)).toEqual(["plugin:tracker:tracker"]);
+    expect([own, plugin, local, project, { ...own, enabled: false }].map(mcpIsLive)).toEqual([
+      true,
+      true,
+      false,
+      true,
+      false,
+    ]);
+  });
+
+  // A plugin's skills and hooks are not counted apart from the plugin; its servers are not either.
+  it("counts only the user's own servers as global items", () => {
+    expect(globalItemCount({ ...emptyTabDto(), mcpServers: [own, plugin, local, project] })).toBe(1);
+  });
+
+  it("counts only the servers read from the provider's MCP config file", () => {
+    expect(configMcpCount({ ...emptyTabDto(), mcpServers: [own, plugin, local, project] })).toBe(1);
+    expect(configMcpCount(null)).toBe(0);
+  });
+
+  it.each([
+    [[own], "user-scope config only"],
+    [[own, plugin], "user config + plugins"],
+    [[own, local], "user config + per-project"],
+    [[own, plugin, local], "user config + plugins + per-project"],
+    [[own, project], "user config + this project"],
+    [[own, plugin, project], "user config + plugins + this project"],
+    [[], "user-scope config only"],
+  ] satisfies [McpServerDto[], string][])("names the sources of %j as %s", (servers, label) => {
+    expect(mcpSourcesLabel(servers)).toBe(label);
   });
 });

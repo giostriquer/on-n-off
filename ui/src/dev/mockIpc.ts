@@ -35,7 +35,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "accountClients", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
-  "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "workspaceCredits", "hooks",
+  "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "workspaceCredits", "hooks", "mcpSources",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -129,10 +129,52 @@ const fullTab = (): AgentTabDto => ({
   })),
 });
 
+// `?mock=mcpSources`: the catalog plus the Claude servers that are not the user's own — one the
+// toolkit plugin brings and two kept for particular projects.
+const mcpSourcesTab = (): AgentTabDto => {
+  const tab = fullTab();
+  return {
+    ...tab,
+    mcpServers: [
+      ...tab.mcpServers,
+      {
+        id: "plugin:toolkit:tracker",
+        name: "tracker",
+        system: "http",
+        source: "https://tracker.example/mcp",
+        enabled: true,
+        togglable: false,
+        origin: "plugin",
+        pluginId: "toolkit@workshop",
+      },
+      {
+        id: "local:library-docs",
+        name: "library-docs",
+        system: "http",
+        source: "https://docs.example/mcp",
+        enabled: true,
+        togglable: false,
+        origin: "local",
+        projects: Array.from({ length: 18 }, (_, index) => `/Users/me/acme/app-${String(index + 1).padStart(2, "0")}`),
+      },
+      {
+        id: "local:scratchpad",
+        name: "scratchpad",
+        system: "stdio",
+        source: "node pad.js",
+        enabled: true,
+        togglable: false,
+        origin: "local",
+        projects: ["/Users/me/acme/webapp"],
+      },
+    ],
+  };
+};
+
 // `?mock=hooks`: the Hooks screen's rows, which are per provider — Antigravity and Cursor get
 // none, and say so rather than reading as unconfigured.
 const catalogTab = (args: Record<string, unknown> = {}): AgentTabDto => {
-  const tab = scenario === "catalog" ? fullTab() : emptyTab();
+  const tab = scenario === "catalog" ? fullTab() : scenario === "mcpSources" ? mcpSourcesTab() : emptyTab();
   return scenario === "hooks" ? { ...tab, hooks: hooksFor(args.agentId as AgentId) } : tab;
 };
 

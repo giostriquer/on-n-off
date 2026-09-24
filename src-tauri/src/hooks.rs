@@ -32,11 +32,12 @@
 //! wrong about one plugin is worth more than one that refuses to draw.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Map, Value};
 
 use crate::dto::HookDto;
+use crate::plugin_files::{plugin_file, read_json, PluginSource};
 
 /// The one Claude settings file in scope (see the module doc).
 const CLAUDE_SETTINGS: &str = "settings.json";
@@ -70,15 +71,6 @@ impl Origin {
             description: String::new(),
         }
     }
-}
-
-/// One enabled plugin, as the adapter that walked the provider's inventory found it: the id
-/// Codex keys its state by, the name a row shows, and the directory the manifest sits in. A
-/// disabled plugin's hooks do not run, so the adapter simply leaves it out.
-pub struct PluginSource {
-    pub id: String,
-    pub name: String,
-    pub root: PathBuf,
 }
 
 /// Every hook Claude would run from this home: the user's own `settings.json` first, then each
@@ -391,17 +383,17 @@ fn plugin_hooks(
             let mut seen = HashSet::new();
             files
                 .iter()
-                .filter_map(|rel| resolve(root, rel))
-                .filter(|(key, _)| seen.insert(key.clone()))
-                .flat_map(|(key, path)| {
-                    file_hooks(plugin_id, name, &key, &path, &plugin_description)
+                .filter_map(|rel| plugin_file(root, rel))
+                .filter(|file| seen.insert(file.key.clone()))
+                .flat_map(|file| {
+                    file_hooks(plugin_id, name, &file.key, &file.path, &plugin_description)
                 })
                 .collect()
         }
         // No `hooks` key at all: only Claude has a file it looks for anyway.
         None => default_file
-            .and_then(|rel| resolve(root, rel))
-            .map(|(key, path)| file_hooks(plugin_id, name, &key, &path, &plugin_description))
+            .and_then(|rel| plugin_file(root, rel))
+            .map(|file| file_hooks(plugin_id, name, &file.key, &file.path, &plugin_description))
             .unwrap_or_default(),
     }
 }
@@ -450,30 +442,6 @@ fn file_hooks(
         },
     };
     rows(&origin, events)
-}
-
-/// A manifest path is written the way its author reads it (`./hooks/codex.json`) and has to end
-/// up both as a path on this machine and as the `/`-joined key Codex writes into
-/// `[hooks.state]`. `..` is dropped rather than followed: a plugin's hook file lives inside the
-/// plugin, and a manifest is not a reason to read anything above it.
-fn resolve(root: &Path, rel: &str) -> Option<(String, PathBuf)> {
-    let parts: Vec<&str> = rel
-        .split(['/', '\\'])
-        .map(str::trim)
-        .filter(|part| !part.is_empty() && *part != "." && *part != "..")
-        .collect();
-    if parts.is_empty() {
-        return None;
-    }
-    let mut path = root.to_path_buf();
-    for part in &parts {
-        path.push(part);
-    }
-    Some((parts.join("/"), path))
-}
-
-fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
 #[cfg(test)]

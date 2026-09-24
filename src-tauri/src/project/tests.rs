@@ -120,21 +120,6 @@ fn overlays_project_skills_and_mcp_read_only() {
 }
 
 #[test]
-fn reads_claude_inline_project_mcp_servers() {
-    let servers = parse_claude_project_mcp(
-        r#"{
-                "mcpServers": { "github": { "command": "npx" } },
-                "projects": {
-                    "E:/dev/app": { "mcpServers": { "local-only": { "command": "node" } } }
-                }
-            }"#,
-        Path::new(r"E:\dev\app"),
-    );
-    assert_eq!(servers.len(), 1);
-    assert_eq!(servers[0].id, "local-only");
-}
-
-#[test]
 fn inspect_reads_git_branch_and_local_counts() {
     let root = crate::paths::scratch_dir("on-n-off-inspect-project");
     fs::create_dir_all(root.join(".claude").join("skills").join("local-feed")).unwrap();
@@ -225,4 +210,101 @@ fn overlay_collapses_same_name_across_skill_roots() {
     assert!(tab.user_skills[0].togglable);
     assert_eq!(tab.user_skills[1].origin, ORIGIN_PROJECT);
     assert!(!tab.user_skills[1].togglable);
+}
+
+/// Inside a Claude project, that project's `~/.claude.json` entry decides: its servers become
+/// project rows (off when its `disabledMcpServers` names them), a plugin server it switched off
+/// reads off, and the rows standing for servers kept for particular projects are not repeated.
+#[test]
+fn a_claude_project_view_follows_its_own_entry() {
+    let root = crate::paths::scratch_dir("on-n-off-project-scope-local");
+    let key = root.to_string_lossy().into_owned();
+    let config = serde_json::json!({
+        "projects": {
+            key: {
+                "mcpServers": { "scratchpad": { "command": "node", "args": ["pad.js"] } },
+                "disabledMcpServers": ["scratchpad", "plugin:kit:tracker"]
+            }
+        }
+    });
+    let row = |id: &str, origin: &str| crate::dto::McpServerDto {
+        id: id.into(),
+        name: id.rsplit(':').next().unwrap().into(),
+        system: "http".into(),
+        source: "https://docs.example/mcp".into(),
+        enabled: true,
+        togglable: origin.is_empty(),
+        origin: origin.into(),
+        plugin_id: None,
+        projects: Vec::new(),
+    };
+    let mut tab = AgentTabDto {
+        plugins: vec![],
+        user_skills: vec![],
+        mcp_servers: vec![
+            row("local:library-docs", "local"),
+            row("github", ""),
+            row("plugin:kit:tracker", "plugin"),
+        ],
+        hooks: vec![],
+    };
+
+    overlay_project_with(&mut tab, &root, AgentId::Claude, &config);
+
+    let view: Vec<_> = tab
+        .mcp_servers
+        .iter()
+        .map(|server| (server.id.as_str(), server.origin.as_str(), server.enabled))
+        .collect();
+    assert_eq!(
+        view,
+        [
+            ("github", "", true),
+            ("project:scratchpad", ORIGIN_PROJECT, false),
+            ("plugin:kit:tracker", "plugin", false),
+        ]
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+/// The project views read the home's `~/.claude.json` for Claude and for no one else: the same
+/// home, whose entry for this project keeps one server, gives Claude a project row and Codex none.
+#[test]
+fn only_a_claude_project_view_reads_the_homes_claude_json() {
+    let home = crate::paths::scratch_dir("on-n-off-project-scope-home");
+    let project = home.join("acme").join("webapp");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        home.join(".claude.json"),
+        serde_json::json!({
+            "projects": {
+                project.to_string_lossy(): {
+                    "mcpServers": { "scratchpad": { "command": "node", "args": ["pad.js"] } }
+                }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let empty = || AgentTabDto {
+        plugins: vec![],
+        user_skills: vec![],
+        mcp_servers: vec![],
+        hooks: vec![],
+    };
+
+    let mut claude = empty();
+    overlay_project_in(&mut claude, &project, AgentId::Claude, Some(&home));
+    let mut codex = empty();
+    overlay_project_in(&mut codex, &project, AgentId::Codex, Some(&home));
+
+    let claude_ids: Vec<_> = claude
+        .mcp_servers
+        .iter()
+        .map(|server| server.id.as_str())
+        .collect();
+    assert_eq!(claude_ids, ["project:scratchpad"]);
+    assert_eq!(claude.mcp_servers[0].origin, ORIGIN_PROJECT);
+    assert!(codex.mcp_servers.is_empty(), "{:?}", codex.mcp_servers);
+    let _ = fs::remove_dir_all(home);
 }

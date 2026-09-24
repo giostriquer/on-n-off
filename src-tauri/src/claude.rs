@@ -13,7 +13,6 @@ use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto,
 };
 use crate::install_source::{parse_install_source, InstallSource};
-use crate::mcp::parse_claude_json;
 use crate::paths::{claude_root, plugin_id_parts};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
@@ -173,14 +172,22 @@ impl ClaudeAdapter {
         Ok(plugins)
     }
 
-    fn mcp_servers(&self) -> Vec<crate::dto::McpServerDto> {
-        let Some(path) = self.claude_json.as_ref() else {
-            return Vec::new();
-        };
-        let Ok(text) = fs::read_to_string(path) else {
-            return Vec::new();
-        };
-        parse_claude_json(&text)
+    /// The user's own servers, then the ones enabled `plugins` bring, then the ones Claude keeps for
+    /// particular projects (`claude_mcp.rs`).
+    fn mcp_servers(
+        &self,
+        plugins: &[crate::plugin_files::PluginSource],
+    ) -> Vec<crate::dto::McpServerDto> {
+        let config: serde_json::Value = self
+            .claude_json
+            .as_ref()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let mut servers = crate::mcp::claude_json_servers(&config);
+        servers.extend(crate::claude_mcp::plugin_servers(plugins));
+        servers.extend(crate::claude_mcp::local_servers(&config));
+        servers
     }
 
     fn marketplace_roots(&self) -> HashMap<String, (PathBuf, String)> {
@@ -219,7 +226,7 @@ impl ClaudeAdapter {
             })
             .collect();
         let mut plugins = Vec::new();
-        let mut hook_plugins = Vec::new();
+        let mut enabled_plugins = Vec::new();
         for (id, install_path, inventory_version) in self.installed()? {
             let (name, source) = plugin_id_parts(&id);
             let enabled = settings
@@ -227,9 +234,9 @@ impl ClaudeAdapter {
                 .get(&id)
                 .copied()
                 .unwrap_or_else(|| plugin_default_enabled(&install_path));
-            // A disabled plugin's hooks do not run, so they are not rows.
+            // A disabled plugin's hooks and MCP servers do not run, so they are not rows.
             if enabled {
-                hook_plugins.push(crate::hooks::PluginSource {
+                enabled_plugins.push(crate::plugin_files::PluginSource {
                     id: id.clone(),
                     name: name.clone(),
                     root: install_path.clone(),
@@ -271,8 +278,8 @@ impl ClaudeAdapter {
         let mut tab = AgentTabDto {
             plugins,
             user_skills,
-            mcp_servers: self.mcp_servers(),
-            hooks: crate::hooks::claude_hooks(self.root()?, &hook_plugins),
+            mcp_servers: self.mcp_servers(&enabled_plugins),
+            hooks: crate::hooks::claude_hooks(self.root()?, &enabled_plugins),
         };
         sort_tab(&mut tab);
         Ok(tab)
