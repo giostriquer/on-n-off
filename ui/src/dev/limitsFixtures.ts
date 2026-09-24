@@ -183,6 +183,17 @@ export function creditsSpentCodex(): ProviderLimits[] {
   }));
 }
 
+/**
+ * `?mock=claudeSubscriptionStatus`: the signed-in Claude account behind on payment and a remembered
+ * one whose subscription was canceled, as the profile's `organization.subscription_status` says.
+ */
+export function claudeSubscriptionStatusClaude(): ProviderLimits[] {
+  return [
+    { ...CLAUDE[0], subscriptionStatus: "past_due" },
+    { ...CLAUDE[0], account: { id: "claude-2", label: "team@example.com" }, currentAccount: false, subscriptionStatus: "canceled" },
+  ];
+}
+
 /** `?mock=bankedResets` on Claude: one saved reset, reported with where Claude Code spends it. */
 export function bankedResetsClaude(): ProviderLimits[] {
   return CLAUDE.map((entry) => ({ ...entry, resetCredits: { availableCount: 1, nextExpiresAt: at(13 * 24 * 60 + 4 * 60) } }));

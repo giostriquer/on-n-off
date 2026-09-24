@@ -66,6 +66,7 @@ fn usage(identity: &Identity) -> ProviderLimitsDto {
         }),
         current_account: false,
         plan: Some("pro".into()),
+        subscription_status: None,
         credits: None,
         workspace_credits: None,
         credits_spent: None,

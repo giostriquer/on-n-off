@@ -43,6 +43,34 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
     );
 }
 
+/// A saved Claude account carries the subscription status its profile reports, like the native one.
+#[test]
+fn saved_claude_carries_the_subscription_status_its_profile_reports() {
+    let (profile, p) = serve_once(
+        "200 OK",
+        r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team","subscription_status":"canceled"}}"#,
+    );
+    let (usage, u) = serve_once_capturing("200 OK", &[], r#"{"seven_day":{"utilization":61}}"#);
+    let auth = json!({"claudeAiOauth":{"accessToken":"fixture-access"}});
+
+    let dto = read_at(
+        &identity(AgentId::Claude),
+        &auth,
+        &profile,
+        &usage,
+        CodexEndpoints {
+            usage: "unused",
+            reset_credits: "unused",
+            credit_usage: "unused",
+        },
+    )
+    .unwrap();
+    p.join().unwrap();
+    u.join().unwrap();
+
+    assert_eq!(dto.subscription_status.as_deref(), Some("canceled"));
+}
+
 #[test]
 fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
     let (profile, p) = serve_once(

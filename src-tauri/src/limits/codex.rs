@@ -116,6 +116,7 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
     Parsed {
         account: None,
         plan: main.plan_type.clone(),
+        subscription_status: None,
         windows,
         credits: credits(main.credits.as_ref()),
         workspace_credits: workspace_credits(

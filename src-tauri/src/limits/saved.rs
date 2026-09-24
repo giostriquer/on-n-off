@@ -40,7 +40,10 @@ fn read_at(
             let credential =
                 credentials::parse_claude_credential(auth).ok_or(HttpError::Unauthorized)?;
             let bearer = format!("Bearer {}", credential.token);
-            let profile = claude::parse_profile(&get_json(
+            let claude::ClaudeProfile {
+                identity: profile,
+                subscription_status,
+            } = claude::parse_profile(&get_json(
                 profile,
                 &[
                     ("Authorization", &bearer),
@@ -63,6 +66,7 @@ fn read_at(
             Parsed {
                 account: Some(profile.account),
                 plan: credential.plan(),
+                subscription_status,
                 ..usage
             }
         }

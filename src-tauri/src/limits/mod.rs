@@ -61,6 +61,7 @@ static CODEX_READ_LOCK: Mutex<()> = Mutex::new(());
 struct Parsed {
     account: Option<LimitsAccountDto>,
     plan: Option<String>,
+    subscription_status: Option<String>,
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
     workspace_credits: Option<LimitsWorkspaceCreditsDto>,
@@ -352,7 +353,10 @@ fn claude_limits(
                     ("Cache-Control", "no-cache"),
                 ],
             )?;
-            let profile = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
+            let claude::ClaudeProfile {
+                identity: profile,
+                subscription_status,
+            } = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
             if selected_identity.as_ref().is_some_and(|selected| {
                 selected.account.id != profile.account.id
                     || selected.organization_id != profile.organization_id
@@ -370,6 +374,7 @@ fn claude_limits(
             Ok(Parsed {
                 account: Some(profile.account),
                 plan: credential.plan(),
+                subscription_status,
                 ..usage
             })
         },

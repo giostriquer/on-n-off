@@ -347,6 +347,7 @@ fn merge(
                         }),
                         current_account: false,
                         plan: None,
+                        subscription_status: None,
                         windows: vec![],
                         credits: None,
                         workspace_credits: None,

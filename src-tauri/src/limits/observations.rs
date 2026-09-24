@@ -11,6 +11,7 @@ pub(super) struct ObservedWindowSet {
     /// When the windows were observed; `None` only for a set that carries figures and no windows.
     observed_at: Option<DateTime<Utc>>,
     plan: Option<String>,
+    subscription_status: Option<String>,
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
     workspace_credits: Option<LimitsWorkspaceCreditsDto>,
@@ -23,6 +24,7 @@ impl ObservedWindowSet {
         Self {
             observed_at: Some(observed_at),
             plan: None,
+            subscription_status: None,
             windows,
             credits: None,
             workspace_credits: None,
@@ -46,6 +48,7 @@ impl ObservedWindowSet {
         Some(Self {
             observed_at,
             plan: dto.plan,
+            subscription_status: dto.subscription_status,
             windows: dto.windows,
             credits: dto.credits,
             workspace_credits: dto.workspace_credits,
@@ -55,8 +58,8 @@ impl ObservedWindowSet {
     }
 }
 
-/// Merge every observation per quota window. Remembered plan/credit metadata remains useful when a
-/// newer local observation contains percentage windows only.
+/// Merge every observation per quota window. Remembered plan, subscription-status and credit
+/// metadata remains useful when a newer local observation contains percentage windows only.
 pub(super) fn merge_windows(
     mut current: ProviderLimitsDto,
     local: Option<ObservedWindowSet>,
@@ -64,6 +67,10 @@ pub(super) fn merge_windows(
 ) -> ProviderLimitsDto {
     if let Some(remembered) = &remembered {
         current.plan = current.plan.take().or_else(|| remembered.plan.clone());
+        current.subscription_status = current
+            .subscription_status
+            .take()
+            .or_else(|| remembered.subscription_status.clone());
         current.credits = current
             .credits
             .take()

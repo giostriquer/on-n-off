@@ -161,6 +161,10 @@ pub struct ProviderLimitsDto {
     pub current_account: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
+    /// Claude only: `organization.subscription_status` from the profile read (`active`,
+    /// `past_due`, `canceled`, …), as Anthropic writes it. Metadata like `plan`, never an observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription_status: Option<String>,
     pub windows: Vec<LimitWindowDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credits: Option<LimitsCreditsDto>,

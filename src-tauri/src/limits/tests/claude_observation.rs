@@ -55,6 +55,7 @@ impl ClaudeObservationRig {
                 }),
                 current_account: true,
                 plan: Some("pro".to_string()),
+                subscription_status: None,
                 windows: vec![LimitWindowDto {
                     observed_at: observed_at.to_string(),
                     ..window(

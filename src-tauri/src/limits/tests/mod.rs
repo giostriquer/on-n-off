@@ -1,6 +1,7 @@
 mod claude_banked_resets;
 mod claude_observation;
 mod claude_renewal;
+mod claude_subscription;
 mod credits_spent;
 mod memory;
 
@@ -30,6 +31,7 @@ fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
     Parsed {
         account: None,
         plan: Some("max".to_string()),
+        subscription_status: None,
         windows,
         credits: None,
         workspace_credits: None,
@@ -816,6 +818,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
         }),
         current_account: true,
         plan: Some("pro".to_string()),
+        subscription_status: None,
         windows: vec![LimitWindowDto {
             observed_at: "2026-08-17T20:00:00.000Z".to_string(),
             ..window(

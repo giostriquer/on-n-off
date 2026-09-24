@@ -11,7 +11,7 @@ import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeRe
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
-import { bankedResetsClaude, bankedResetsCodex, claudeWithoutReset, creditsSpentCodex, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex, workspaceCreditsCodex } from "./limitsFixtures";
+import { bankedResetsClaude, bankedResetsCodex, claudeSubscriptionStatusClaude, claudeWithoutReset, creditsSpentCodex, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex, workspaceCreditsCodex } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageHistoryStatus, UsageSummary } from "$lib/usageTypes";
 
@@ -35,7 +35,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "accountClients", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
-  "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "workspaceCredits", "creditsSpent", "hooks", "mcpSources",
+  "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "workspaceCredits", "creditsSpent", "claudeSubscriptionStatus", "hooks", "mcpSources",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -310,6 +310,7 @@ const handlers: Record<string, Handler> = {
     if (scenario === "sameEmailWorkspaces" && args.agentId === "codex") return sameEmailWorkspacesCodex();
     if (scenario === "workspaceCredits" && args.agentId === "codex") return workspaceCreditsCodex();
     if (scenario === "creditsSpent" && args.agentId === "codex") return creditsSpentCodex();
+    if (scenario === "claudeSubscriptionStatus" && args.agentId === "claude") return claudeSubscriptionStatusClaude();
     const entries = limitsFor(args.agentId);
     if (scenario !== "accountDuplicate" || args.agentId !== "codex") return entries;
     const legacy = { ...entries[1], currentAccount: false, account: {
