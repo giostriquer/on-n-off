@@ -84,8 +84,8 @@ pub(crate) fn parse(payload: &Value, now: DateTime<Utc>) -> Option<LimitsCredits
     let mut spent = LimitsCreditsSpentDto {
         last_7_days: 0.0,
         last_30_days: 0.0,
-        // Without a freshness time of its own, the figure is as fresh as this read, which a
-        // remembered figure then carries so its age still shows.
+        // Without a freshness time of its own, the figure is as fresh as this read. The card does not
+        // show it; it stays with the figure, and with a remembered one, as a record of its age.
         updated_at: Some(
             payload
                 .get("data_freshness_ts")
