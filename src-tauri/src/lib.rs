@@ -3,6 +3,7 @@ mod adapter;
 mod antigravity;
 mod backup;
 mod claude;
+mod claude_mcp;
 mod cli;
 mod cli_locate;
 #[cfg(test)]

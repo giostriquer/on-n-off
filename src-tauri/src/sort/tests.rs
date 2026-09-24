@@ -36,6 +36,7 @@ fn mcp(name: &str, system: &str) -> McpServerDto {
         enabled: true,
         togglable: true,
         origin: String::new(),
+        via: String::new(),
     }
 }
 

@@ -173,6 +173,10 @@ pub fn overlay_project(tab: &mut AgentTabDto, project: &Path, agent: AgentId) {
         }
     }
 
+    // This project's own local-scope servers come back as project rows below; the rows standing
+    // for servers kept for particular projects belong to the all-projects view.
+    tab.mcp_servers
+        .retain(|server| server.origin != crate::mcp::ORIGIN_LOCAL);
     let mut seen_mcp: std::collections::HashSet<String> = tab
         .mcp_servers
         .iter()

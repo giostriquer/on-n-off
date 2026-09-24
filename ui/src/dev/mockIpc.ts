@@ -35,7 +35,7 @@ const latency = Number(params.get("latency") ?? 80);
 const LOCAL_SCENARIOS = [
   "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
   "accountDuplicate", "accountClients", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
-  "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "hooks",
+  "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "hooks", "mcpSources",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
   console.error(
@@ -131,8 +131,50 @@ const fullTab = (): AgentTabDto => ({
 
 // `?mock=hooks`: the Hooks screen's rows, which are per provider — Antigravity and Cursor get
 // none, and say so rather than reading as unconfigured.
+// `?mock=mcpSources`: the catalog plus the Claude servers that are not the user's own — one an
+// enabled plugin brings and two kept for particular projects.
+const mcpSourcesTab = (): AgentTabDto => {
+  const tab = fullTab();
+  return {
+    ...tab,
+    mcpServers: [
+      ...tab.mcpServers,
+      {
+        id: "plugin:tracker:tracker",
+        name: "tracker",
+        system: "http",
+        source: "https://tracker.example/mcp",
+        enabled: true,
+        togglable: false,
+        origin: "plugin",
+        via: "tracker",
+      },
+      {
+        id: "local:library-docs",
+        name: "library-docs",
+        system: "http",
+        source: "https://docs.example/mcp",
+        enabled: true,
+        togglable: false,
+        origin: "local",
+        via: "18 projects",
+      },
+      {
+        id: "local:scratchpad",
+        name: "scratchpad",
+        system: "stdio",
+        source: "node pad.js",
+        enabled: true,
+        togglable: false,
+        origin: "local",
+        via: "webapp",
+      },
+    ],
+  };
+};
+
 const catalogTab = (args: Record<string, unknown> = {}): AgentTabDto => {
-  const tab = scenario === "catalog" ? fullTab() : emptyTab();
+  const tab = scenario === "catalog" ? fullTab() : scenario === "mcpSources" ? mcpSourcesTab() : emptyTab();
   return scenario === "hooks" ? { ...tab, hooks: hooksFor(args.agentId as AgentId) } : tab;
 };
 

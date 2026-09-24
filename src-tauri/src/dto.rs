@@ -149,8 +149,15 @@ pub struct McpServerDto {
     pub source: String,
     pub enabled: bool,
     pub togglable: bool,
+    /// `""` for a server the user configured, `"project"` for one a project folder carries,
+    /// `"plugin"` for one an enabled plugin brings, `"local"` for one Claude keeps for particular
+    /// projects (its local scope) when listed outside them.
     #[serde(default)]
     pub origin: String,
+    /// What a read-only row belongs to: the plugin that brings it, or the project (or how many
+    /// projects) it is configured for. Empty for the user's own servers.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub via: String,
 }
 
 /// One hook handler a provider would run: one row on the Hooks screen, which is read-only —

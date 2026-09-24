@@ -53,7 +53,10 @@ export type McpServerDto = {
   source: string;
   enabled: boolean;
   togglable: boolean;
+  /** "", "project", "plugin" (an enabled plugin brings it) or "local" (kept for particular projects). */
   origin?: string;
+  /** The plugin, or the project(s), a read-only server comes from. */
+  via?: string;
 };
 
 /**

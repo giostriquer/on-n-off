@@ -346,3 +346,33 @@ describe("catalog hooks", () => {
     expect(emptyTabDto().hooks).toEqual([]);
   });
 });
+
+describe("catalog MCP sources", () => {
+  const plugin = {
+    id: "plugin:tracker:tracker",
+    name: "tracker",
+    system: "http",
+    source: "https://tracker.example/mcp",
+    enabled: true,
+    togglable: false,
+    origin: "plugin",
+    via: "tracker",
+  };
+  const local = {
+    id: "local:library-docs",
+    name: "library-docs",
+    system: "http",
+    source: "https://docs.example/mcp",
+    enabled: true,
+    togglable: false,
+    origin: "local",
+    via: "2 projects",
+  };
+  const withSources: AgentTabDto = { ...emptyTabDto(), mcpServers: [plugin, local] };
+
+  it("counts a plugin's server as live and global, and a server kept for particular projects as neither", () => {
+    expect(catalogCounts(withSources).mcp).toEqual({ on: 1, total: 2 });
+    expect(liveRows(withSources).map((row) => row.id)).toEqual(["plugin:tracker:tracker"]);
+    expect(globalItemCount(withSources)).toBe(1);
+  });
+});

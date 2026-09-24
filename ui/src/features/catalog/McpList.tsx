@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Rocker } from "@/features/agents/Rocker";
 import { copy } from "$lib/copy";
-import { isProjectOrigin } from "$lib/project";
+import { isLocalOrigin, isPluginOrigin, isProjectOrigin } from "$lib/project";
 import type { AgentTabDto, McpServerDto } from "$lib/types";
 
 type Chip = "all" | "on" | "off";
@@ -20,15 +20,22 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
   const [chip, setChip] = useState<Chip>("all");
   const servers =
     chip === "on" ? pool.filter((server) => server.enabled) : chip === "off" ? pool.filter((server) => !server.enabled) : pool;
-  const live = tab.mcpServers.filter((server) => server.enabled).length;
+  const live = tab.mcpServers.filter((server) => server.enabled && !isLocalOrigin(server.origin)).length;
   const hasProject = tab.mcpServers.some((server) => isProjectOrigin(server.origin));
+  const hasPlugin = tab.mcpServers.some((server) => isPluginOrigin(server.origin));
+  const hasLocal = tab.mcpServers.some((server) => isLocalOrigin(server.origin));
+  const sources = hasProject
+    ? "global + this project"
+    : hasPlugin || hasLocal
+      ? ["user config", hasPlugin ? "plugins" : "", hasLocal ? "per-project" : ""].filter(Boolean).join(" + ")
+      : "user-scope config only";
 
   return (
     <div className="flex flex-col gap-3.5 px-5 pt-[18px] pb-[26px]">
       <header className="flex items-baseline gap-3">
         <h2 className="m-0 shrink-0 text-[15px] font-semibold tracking-[0.05em] uppercase whitespace-nowrap">MCP servers</h2>
         <span className="font-mono text-xs leading-snug text-[var(--mute)]">
-          {live} live · {hasProject ? "global + this project" : "user-scope config only"} · handshake not probed
+          {live} live · {sources} · handshake not probed
         </span>
         <div className="flex-1" />
         <div className="flex border border-[var(--hair)]" role="group" aria-label="Filter list">
@@ -83,12 +90,17 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
                     <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
                       {server.system.toUpperCase()}
                     </span>
-                    {isProjectOrigin(server.origin) ? (
+                    {originBadge(server.origin) ? (
                       <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
-                        PROJECT
+                        {originBadge(server.origin)}
                       </span>
                     ) : null}
                   </div>
+                  {server.via ? (
+                    <div className="mt-0.5 truncate text-[11px]/[1.4] text-[var(--mute)]" title={server.via}>
+                      {isPluginOrigin(server.origin) ? `from ${server.via}` : `in ${server.via}`}
+                    </div>
+                  ) : null}
                   <div
                     className="mt-0.5 truncate font-mono text-[11px]/[1.4] text-[var(--mute)]"
                     title={server.source}
@@ -113,4 +125,12 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
       )}
     </div>
   );
+}
+
+/** The badge for a server that is not the user's own, or null for one that is. */
+function originBadge(origin?: string): string | null {
+  if (isProjectOrigin(origin)) return "PROJECT";
+  if (isPluginOrigin(origin)) return "PLUGIN";
+  if (isLocalOrigin(origin)) return "PER-PROJECT";
+  return null;
 }

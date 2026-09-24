@@ -438,3 +438,94 @@ fn uninstall_uses_official_argv_and_backs_up() {
         .is_some());
     let _ = fs::remove_dir_all(root);
 }
+
+/// A plugin's `.mcp.json`, as its root file holds it: the bare server map, or one wrapped in
+/// `mcpServers`.
+fn write_plugin_mcp(plugin_root: &Path, body: serde_json::Value) {
+    fs::create_dir_all(plugin_root).unwrap();
+    fs::write(plugin_root.join(".mcp.json"), body.to_string()).unwrap();
+}
+
+#[test]
+fn lists_the_mcp_servers_enabled_plugins_bring_read_only() {
+    let root = fixture();
+    write_plugin_mcp(
+        &root.join("plugins/cache/workshop/workbench/1.0.0"),
+        serde_json::json!({
+            "docs-search": {
+                "command": "${CLAUDE_PLUGIN_ROOT}/bin/search",
+                "args": ["--stdio"]
+            }
+        }),
+    );
+    write_plugin_mcp(
+        &root.join("plugins/cache/opt/quiet/1.0.0"),
+        serde_json::json!({ "mcpServers": { "hidden": { "type": "http", "url": "https://quiet.example/mcp" } } }),
+    );
+
+    let tab = ClaudeAdapter::at(root.clone()).list_tab().expect("list");
+
+    let plugin_rows: Vec<_> = tab
+        .mcp_servers
+        .iter()
+        .filter(|server| server.origin == "plugin")
+        .collect();
+    assert_eq!(plugin_rows.len(), 1, "{:?}", tab.mcp_servers);
+    let row = plugin_rows[0];
+    assert_eq!(row.id, "plugin:workbench:docs-search");
+    assert_eq!(row.name, "docs-search");
+    assert_eq!(row.via, "workbench");
+    assert_eq!(row.source, "${CLAUDE_PLUGIN_ROOT}/bin/search --stdio");
+    assert!(row.enabled);
+    assert!(!row.togglable);
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Claude's local scope keeps a server for particular projects in `~/.claude.json`. Outside
+/// those projects it is one read-only row per definition, saying which projects have it.
+#[test]
+fn lists_servers_kept_for_particular_projects_once_each() {
+    let root = fixture();
+    let docs = serde_json::json!({ "type": "http", "url": "https://docs.example/mcp" });
+    fs::write(
+        root.join(".claude.json"),
+        serde_json::json!({
+            "mcpServers": {},
+            "projects": {
+                "/Users/me/acme/webapp": { "mcpServers": { "library-docs": docs } },
+                "/Users/me/acme/api": { "mcpServers": { "library-docs": docs } },
+                "/Users/me/acme/notes": {
+                    "mcpServers": { "scratchpad": { "command": "node", "args": ["pad.js"] } },
+                    "disabledMcpServers": ["scratchpad"]
+                },
+                "/Users/me/acme/empty": { "mcpServers": {} }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let tab = ClaudeAdapter::at(root.clone()).list_tab().expect("list");
+
+    let local: Vec<_> = tab
+        .mcp_servers
+        .iter()
+        .filter(|server| server.origin == "local")
+        .map(|server| {
+            (
+                server.id.as_str(),
+                server.via.as_str(),
+                server.enabled,
+                server.togglable,
+            )
+        })
+        .collect();
+    assert_eq!(
+        local,
+        [
+            ("local:library-docs", "2 projects", true, false),
+            ("local:scratchpad", "notes", false, false),
+        ]
+    );
+    let _ = fs::remove_dir_all(root);
+}

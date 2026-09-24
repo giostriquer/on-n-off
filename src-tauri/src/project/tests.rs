@@ -226,3 +226,43 @@ fn overlay_collapses_same_name_across_skill_roots() {
     assert_eq!(tab.user_skills[1].origin, ORIGIN_PROJECT);
     assert!(!tab.user_skills[1].togglable);
 }
+
+/// Inside a project, its own local-scope servers are project rows; the rows that stand for
+/// servers kept for particular projects belong to the all-projects view and are not repeated.
+#[test]
+fn a_project_scope_drops_the_all_projects_local_rows() {
+    let root = crate::paths::scratch_dir("on-n-off-project-scope-local");
+    let local = crate::dto::McpServerDto {
+        id: "local:library-docs".into(),
+        name: "library-docs".into(),
+        system: "http".into(),
+        source: "https://docs.example/mcp".into(),
+        enabled: true,
+        togglable: false,
+        origin: "local".into(),
+        via: "2 projects".into(),
+    };
+    let own = crate::dto::McpServerDto {
+        id: "github".into(),
+        origin: String::new(),
+        via: String::new(),
+        togglable: true,
+        ..local.clone()
+    };
+    let mut tab = AgentTabDto {
+        plugins: vec![],
+        user_skills: vec![],
+        mcp_servers: vec![local, own],
+        hooks: vec![],
+    };
+
+    overlay_project(&mut tab, &root, AgentId::Claude);
+
+    let ids: Vec<_> = tab
+        .mcp_servers
+        .iter()
+        .map(|server| server.id.as_str())
+        .collect();
+    assert_eq!(ids, ["github"]);
+    let _ = fs::remove_dir_all(root);
+}

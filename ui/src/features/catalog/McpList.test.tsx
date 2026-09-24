@@ -55,4 +55,42 @@ describe("McpList", () => {
     expect(screen.getByRole("note")).toHaveTextContent("Managed in Cursor.");
     expect(screen.getByRole("button", { name: /GitHub on/ })).toBeDisabled();
   });
+
+  it("labels plugin and per-project servers and counts only what is live here", () => {
+    const tracker: McpServerDto = {
+      ...server,
+      id: "plugin:kit:tracker",
+      name: "tracker",
+      togglable: false,
+      origin: "plugin",
+      via: "kit",
+    };
+    const docs: McpServerDto = {
+      ...server,
+      id: "local:library-docs",
+      name: "library-docs",
+      togglable: false,
+      origin: "local",
+      via: "2 projects",
+    };
+    const servers = [server, tracker, docs];
+    render(
+      <McpList tab={{ plugins: [], userSkills: [], mcpServers: servers }} servers={servers} onToggle={vi.fn()} />,
+    );
+
+    expect(screen.getByText("2 live · user config + plugins + per-project · handshake not probed")).toBeInTheDocument();
+    const trackerRow = screen.getByText("tracker").closest("article")!;
+    expect(trackerRow).toHaveTextContent("PLUGIN");
+    expect(trackerRow).toHaveTextContent("from kit");
+    const docsRow = screen.getByText("library-docs").closest("article")!;
+    expect(docsRow).toHaveTextContent("PER-PROJECT");
+    expect(docsRow).toHaveTextContent("in 2 projects");
+    expect(screen.getByRole("button", { name: /tracker on/ })).toBeDisabled();
+  });
+
+  it("keeps the plain header when every server is the user's own", () => {
+    render(<McpList tab={{ plugins: [], userSkills: [], mcpServers: [server] }} servers={[server]} onToggle={vi.fn()} />);
+
+    expect(screen.getByText("1 live · user-scope config only · handshake not probed")).toBeInTheDocument();
+  });
 });

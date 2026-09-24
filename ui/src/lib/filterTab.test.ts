@@ -92,6 +92,23 @@ describe("filterTab", () => {
   });
 });
 
+describe("filterMcpList", () => {
+  it("finds a server by the project it is kept for", () => {
+    const docs = {
+      id: "local:library-docs",
+      name: "library-docs",
+      system: "http",
+      source: "https://docs.example/mcp",
+      enabled: true,
+      togglable: false,
+      origin: "local",
+      via: "webapp",
+    };
+    const withLocal: AgentTabDto = { ...tab, mcpServers: [...tab.mcpServers, docs] };
+    expect(filterMcpList(withLocal, "webapp").map((server) => server.id)).toEqual(["local:library-docs"]);
+  });
+});
+
 describe("filterSkillList", () => {
   it("flattens plugin and user skills", () => {
     expect(filterSkillList(tab, "").map((skill) => skill.name)).toEqual(["statusline", "brainstorming"]);

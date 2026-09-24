@@ -323,6 +323,7 @@ fn claude_seed() -> AgentTabDto {
             enabled: true,
             togglable: true,
             origin: String::new(),
+            via: String::new(),
         }],
         hooks: vec![
             hook(

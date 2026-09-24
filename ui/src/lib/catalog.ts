@@ -1,5 +1,5 @@
 import { copy } from "./copy";
-import { isProjectOrigin } from "./project";
+import { isLocalOrigin, isProjectOrigin } from "./project";
 import type { AgentId, AgentTabDto, HookDto, McpServerDto, PluginDto, SkillDto } from "./types";
 
 export type Screen =
@@ -200,7 +200,7 @@ export function catalogCounts(tab: AgentTabDto | null): CatalogCounts {
       total: skills.length,
     },
     mcp: {
-      on: mcps.filter((server) => server.enabled).length,
+      on: mcps.filter((server) => server.enabled && !isLocalOrigin(server.origin)).length,
       total: mcps.length,
     },
     hooks: {
@@ -253,7 +253,7 @@ export function liveRows(tab: AgentTabDto): LiveRow[] {
     });
   }
   for (const server of tab.mcpServers ?? []) {
-    if (!server.enabled) {
+    if (!server.enabled || isLocalOrigin(server.origin)) {
       continue;
     }
     rows.push({
@@ -347,7 +347,7 @@ export function globalItemCount(tab: AgentTabDto | null | undefined): number {
   return (
     tab.plugins.length +
     tab.userSkills.filter((skill) => !project(skill.origin)).length +
-    (tab.mcpServers ?? []).filter((server) => !project(server.origin)).length
+    (tab.mcpServers ?? []).filter((server) => !project(server.origin) && !isLocalOrigin(server.origin)).length
   );
 }
 
