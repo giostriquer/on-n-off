@@ -316,3 +316,104 @@ fn meter_ramp_only_ever_moves_toward_the_trip_red() {
     }
     assert_eq!(meter_color(None, accents[0]), UNREADABLE_INK);
 }
+
+fn share(
+    limit: &str,
+    used: &str,
+    reached: bool,
+    resets_at: Option<&str>,
+) -> LimitsWorkspaceCreditsDto {
+    LimitsWorkspaceCreditsDto {
+        limit: limit.into(),
+        used: used.into(),
+        resets_at: resets_at.map(str::to_owned),
+        reached,
+    }
+}
+
+fn at(instant: &str) -> chrono::DateTime<chrono::Utc> {
+    instant.parse().unwrap()
+}
+
+#[test]
+fn a_workspace_share_is_as_used_as_its_amounts_say() {
+    assert_eq!(
+        workspace_share_percent(&share("25000", "8000", false, None)),
+        32.0
+    );
+    assert_eq!(
+        workspace_share_percent(&share("25000", "0", false, None)),
+        0.0
+    );
+}
+
+#[test]
+fn a_reached_or_empty_share_is_all_used_and_never_more() {
+    assert_eq!(
+        workspace_share_percent(&share("25000", "9000", true, None)),
+        100.0
+    );
+    assert_eq!(
+        workspace_share_percent(&share("0", "0", false, None)),
+        100.0
+    );
+    assert_eq!(
+        workspace_share_percent(&share("100", "120", false, None)),
+        100.0
+    );
+}
+
+/// The Windows painter draws the share with the window machinery, so a share past its reset reads
+/// as renewed there exactly as a window does.
+#[test]
+fn a_workspace_share_draws_as_a_window_that_keeps_its_reset() {
+    let window = workspace_share_window(&share(
+        "25000",
+        "8000",
+        false,
+        Some("2026-10-01T12:00:00+00:00"),
+    ));
+
+    assert_eq!(window.label, "Workspace credits");
+    assert_eq!(window.used_percent, 32.0);
+    assert_eq!(
+        window.resets_at.as_deref(),
+        Some("2026-10-01T12:00:00+00:00")
+    );
+}
+
+#[test]
+fn says_what_is_left_of_a_share_in_grouped_amounts() {
+    let now = at("2026-09-24T12:00:00Z");
+    let pending = Some("2026-10-01T12:00:00Z");
+    let left = |limit, used, reached, resets_at| {
+        workspace_share_left(&share(limit, used, reached, resets_at), now)
+    };
+
+    assert_eq!(
+        left("25000", "8000", false, pending),
+        "17,000 of 25,000 left"
+    );
+    assert_eq!(left("10000", "10000", true, pending), "0 of 10,000 left");
+    assert_eq!(left("100", "120", false, pending), "0 of 100 left");
+    assert_eq!(
+        left("25000.5", "8000.25", false, None),
+        "17,000.25 of 25,000.5 left"
+    );
+    assert_eq!(left("10.125", "0", false, None), "10.13 of 10.13 left");
+    // Past its reset the share has renewed: all of it is left again.
+    assert_eq!(
+        left("25000", "25000", true, Some("2026-09-23T12:00:00Z")),
+        "25,000 of 25,000 left"
+    );
+}
+
+#[test]
+fn the_share_note_gives_the_reset_date_rather_than_a_weekday() {
+    let now = at("2026-09-24T12:00:00Z");
+    let note = |resets_at| workspace_share_note(&share("25000", "8000", false, resets_at), now);
+
+    assert_eq!(note(Some("2026-10-01T12:00:00Z")), "Resets Oct 1");
+    assert_eq!(note(Some("2026-09-23T12:00:00Z")), "Reset Sep 23");
+    assert_eq!(note(None), "");
+}

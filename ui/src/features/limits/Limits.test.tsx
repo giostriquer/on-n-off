@@ -522,7 +522,9 @@ describe("Limits", () => {
     renderLimits();
 
     const codex = await waitFor(() => card("Codex limits · work@codex.example"));
-    expect(within(codex).getByRole("definition", { name: "Workspace credits" }).textContent).toBe("17,000 of 25,000 left");
+    const share = within(codex).getByRole("meter", { name: "Workspace credits" });
+    expect(share).toHaveAttribute("aria-valuenow", "32");
+    expect(share).toHaveAccessibleDescription("17,000 of 25,000 left · resets Oct 1");
     expect(within(codex).queryByRole("definition", { name: "Credits" })).toBeNull();
   });
 

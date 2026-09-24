@@ -26,7 +26,8 @@ public struct Ink: Equatable, Sendable {
 // that file's own literals. Claude is the brand terracotta `#d97757` on every surface.
 //
 // The inner Fable ring is a deeper shade of that same terracotta than the outer weekly ring, so the
-// two read as one family with the inner arc the firmer of the pair.
+// two read as one family with the inner arc the firmer of the pair. Codex's inner ring, a business
+// workspace member's credit share, is a deeper shade of Codex's near-white in the same way.
 //
 // The Limits screen runs this ramp too, as `usageMeterColor` in `ui/src/lib/limitsFormat.ts`, over
 // the same endpoints. Change the shape here and change it there and in `side_notch/model.rs`.
@@ -35,6 +36,7 @@ public let codexInk = Ink(r: 238, g: 240, b: 242)
 public let cursorInk = Ink(r: 122, g: 162, b: 255)
 public let antigravityInk = Ink(r: 140, g: 147, b: 157)
 public let fableInk = Ink(r: 204, g: 98, b: 64)
+public let creditsInk = Ink(r: 168, g: 176, b: 186)
 public let tripInk = Ink(r: 226, g: 89, b: 76)
 public let unreadableInk = Ink(r: 77, g: 77, b: 77)
 

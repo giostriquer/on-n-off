@@ -1,4 +1,8 @@
 use crate::dto::AgentId;
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+use crate::dto::LimitsWorkspaceCreditsDto;
+#[cfg(any(target_os = "windows", test))]
+use crate::dto::{LimitWindowDto, LimitWindowKind};
 use serde::{Deserialize, Serialize};
 
 /// A cell's width on screen (points at the standard size); a vertical rail is this thick.
@@ -327,6 +331,107 @@ fn mix(from: Color, to: Color, amount: f64) -> Color {
         channel(from[2], to[2]),
         channel(from[3], to[3]),
     ]
+}
+
+/// How much of a business workspace member's credit share is used, 0–100: all of it once reached, or
+/// when it is a share of nothing; otherwise what is used of the limit. The Limits screen's twin is
+/// `workspaceSharePercent` (`ui/src/features/limits/limitPresentation.ts`). A share past its reset
+/// has renewed; like a window, it is drawn as nothing used, which each surface decides at the moment
+/// it draws rather than here.
+///
+/// Both notch hosts use it: macOS sends the figure to its helper, Windows draws the share as a window.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub fn workspace_share_percent(share: &LimitsWorkspaceCreditsDto) -> f64 {
+    let limit = amount(&share.limit);
+    if share.reached || limit.is_nan() || limit <= 0.0 {
+        return 100.0;
+    }
+    (amount(&share.used) / limit * 100.0).clamp(0.0, 100.0)
+}
+
+/// An amount as the provider writes it; the limits reader only keeps finite amounts of at least zero.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn amount(text: &str) -> f64 {
+    text.trim().parse().unwrap_or(f64::NAN)
+}
+
+/// The share as a window, so the Windows painter's inner ring, meter ramp and renewal treat it the way
+/// they treat Claude's Fable window.
+#[cfg(any(target_os = "windows", test))]
+pub fn workspace_share_window(share: &LimitsWorkspaceCreditsDto) -> LimitWindowDto {
+    LimitWindowDto {
+        id: "workspace-credits".into(),
+        label: "Workspace credits".into(),
+        kind: LimitWindowKind::Model,
+        used_percent: workspace_share_percent(share),
+        resets_at: share.resets_at.clone(),
+        window_seconds: None,
+        observed_at: String::new(),
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn share_renewed(share: &LimitsWorkspaceCreditsDto, now: chrono::DateTime<chrono::Utc>) -> bool {
+    share_reset(share).is_some_and(|reset| reset <= now)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn share_reset(share: &LimitsWorkspaceCreditsDto) -> Option<chrono::DateTime<chrono::Utc>> {
+    let reset = chrono::DateTime::parse_from_rfc3339(share.resets_at.as_deref()?).ok()?;
+    Some(reset.with_timezone(&chrono::Utc))
+}
+
+/// "17,000 of 25,000 left", the whole limit once the share has renewed; the Limits screen's wording.
+#[cfg(any(target_os = "windows", test))]
+pub fn workspace_share_left(
+    share: &LimitsWorkspaceCreditsDto,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let limit = amount(&share.limit);
+    let left = if share_renewed(share, now) {
+        limit
+    } else {
+        (limit - amount(&share.used)).max(0.0)
+    };
+    format!("{} of {} left", format_amount(left), format_amount(limit))
+}
+
+/// "Resets Oct 1" while pending, "Reset Sep 23" once renewed, empty with no reset. A date rather than
+/// the windows' weekday and clock: a share renews monthly, and a weekday would not say which week.
+#[cfg(any(target_os = "windows", test))]
+pub fn workspace_share_note(
+    share: &LimitsWorkspaceCreditsDto,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let Some(reset) = share_reset(share) else {
+        return String::new();
+    };
+    let date = reset.with_timezone(&chrono::Local).format("%b %-d");
+    if reset <= now {
+        format!("Reset {date}")
+    } else {
+        format!("Resets {date}")
+    }
+}
+
+/// An amount in en-US digits with at most two decimals, rounding half away from zero like the app's
+/// `Intl.NumberFormat`: 25000.5 → "25,000.5".
+#[cfg(any(target_os = "windows", test))]
+fn format_amount(value: f64) -> String {
+    let cents = (value.max(0.0) * 100.0).round() as u128;
+    let whole = (cents / 100).to_string();
+    let mut grouped = String::new();
+    for (index, digit) in whole.chars().enumerate() {
+        if index > 0 && (whole.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    match cents % 100 {
+        0 => grouped,
+        fraction if fraction.is_multiple_of(10) => format!("{grouped}.{}", fraction / 10),
+        fraction => format!("{grouped}.{fraction:02}"),
+    }
 }
 
 #[cfg(test)]

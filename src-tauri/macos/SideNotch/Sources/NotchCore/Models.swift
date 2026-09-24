@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// Host ↔ helper message version. Bumped with every shape change so a stale helper fails loudly.
-public let protocolVersion = 2
+public let protocolVersion = 3
 /// Rows per provider in a message; mirrors `MAX_SESSIONS` on the host.
 public let maxSessions = 12
 
@@ -61,6 +61,70 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
   }
 }
 
+/// A business workspace member's share of the pooled credits (Codex's spend control): the amounts as
+/// the provider writes them, and how much of the share is used, which the host works out
+/// (`workspace_share_percent` in `side_notch/model.rs`).
+public struct WorkspaceCredits: Codable, Equatable, Sendable {
+  public let limit: String
+  public let used: String
+  public let usedPercent: Double
+  public let resetsAt: String?
+  public let reached: Bool
+
+  public init(limit: String, used: String, usedPercent: Double, resetsAt: String?, reached: Bool) {
+    self.limit = limit
+    self.used = used
+    self.usedPercent = usedPercent
+    self.resetsAt = resetsAt
+    self.reached = reached
+  }
+
+  /// The share as a quota, so the ring, the meter ramp and renewal treat it as they treat a window:
+  /// once its reset has passed it reads as nothing used.
+  public var quota: Quota {
+    Quota(
+      id: "workspace-credits", label: "Workspace credits", kind: "credits",
+      usedPercent: usedPercent, resetsAt: resetsAt, observedAt: "")
+  }
+
+  /// "17,000 of 25,000 left", the Limits screen's wording; the whole limit again once the share has
+  /// renewed.
+  public func left(at now: Date) -> String {
+    let limit = amount(self.limit)
+    let renewed = parseInstant(resetsAt).map { $0 <= now } ?? false
+    let left = renewed ? limit : max(limit - amount(used), 0)
+    return "\(formatAmount(left)) of \(formatAmount(limit)) left"
+  }
+
+  /// "Resets Oct 1" while pending, "Reset Sep 23" once renewed, empty with no reset. A date rather
+  /// than a window's weekday and clock: a share renews monthly, and a weekday would not say which
+  /// week.
+  public func note(at now: Date) -> String {
+    guard let reset = parseInstant(resetsAt) else { return "" }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US")
+    formatter.dateFormat = "MMM d"
+    let date = formatter.string(from: reset)
+    return reset <= now ? "Reset \(date)" : "Resets \(date)"
+  }
+}
+
+/// An amount as the provider writes it; the host only sends finite amounts of at least zero.
+private func amount(_ text: String) -> Double {
+  Double(text.trimmingCharacters(in: .whitespaces)) ?? 0
+}
+
+/// An amount in en-US digits with at most two decimals, rounding half away from zero like the app's
+/// `Intl.NumberFormat`: 25000.5 → "25,000.5".
+private func formatAmount(_ value: Double) -> String {
+  let formatter = NumberFormatter()
+  formatter.locale = Locale(identifier: "en_US")
+  formatter.numberStyle = .decimal
+  formatter.maximumFractionDigits = 2
+  formatter.roundingMode = .halfUp
+  return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+}
+
 public struct Session: Codable, Equatable, Identifiable, Sendable {
   public let id: String
   public let name: String
@@ -103,10 +167,11 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
   public let message: String?
   public let windows: [Quota]
   public let sessions: [Session]
+  public let workspaceCredits: WorkspaceCredits?
 
   public init(
     provider: ProviderId, status: String, currentAccount: Bool, plan: String?, message: String?,
-    windows: [Quota], sessions: [Session] = []
+    windows: [Quota], sessions: [Session] = [], workspaceCredits: WorkspaceCredits? = nil
   ) {
     self.provider = provider
     self.status = status
@@ -115,6 +180,7 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     self.message = message
     self.windows = windows
     self.sessions = sessions
+    self.workspaceCredits = workspaceCredits
   }
 
   public var visibleWindows: [Quota] {
@@ -151,6 +217,13 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
       $0.kind == "model"
         && $0.label.trimmingCharacters(in: .whitespaces).lowercased() == "weekly · fable"
     }
+  }
+
+  /// A business workspace member's credit share, on the inner ring as Claude's Fable window is, while
+  /// the outer ring and the label stay the weekly limit. Only for a readable current account.
+  public var credits: Quota? {
+    guard currentAccount, status == "ok" else { return nil }
+    return workspaceCredits?.quota
   }
 }
 
@@ -442,6 +515,9 @@ public struct HostMessage: Decodable, Sendable {
           && entry.windows.allSatisfy {
             (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
           }
+          && (entry.workspaceCredits.map {
+            (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
+          } ?? true)
           && entry.sessions.count <= maxSessions
           && entry.sessions.allSatisfy { !$0.id.isEmpty && !$0.name.isEmpty }
       }),

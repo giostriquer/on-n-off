@@ -1,5 +1,5 @@
 use super::{
-    model::{layout, GithubList, NotchSnapshot, RAIL_ORDER},
+    model::{layout, workspace_share_percent, GithubList, NotchSnapshot, RAIL_ORDER},
     protocol::{Action, PROTOCOL_VERSION},
     sessions::{self, LiveSession},
     transport::{Connection, Lifetime},
@@ -38,6 +38,20 @@ struct NativeProvider {
     plan: Option<String>,
     message: Option<String>,
     windows: Vec<LimitWindowDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace_credits: Option<NativeWorkspaceCredits>,
+}
+/// A business workspace member's credit share, which the helper draws on the Codex cell's inner ring.
+/// The amounts go as the provider writes them, beside the used percent `model.rs` works out from them.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeWorkspaceCredits {
+    limit: String,
+    used: String,
+    used_percent: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resets_at: Option<String>,
+    reached: bool,
 }
 fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
     entries
@@ -50,6 +64,13 @@ fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
             plan: entry.plan,
             message: entry.message,
             windows: entry.windows,
+            workspace_credits: entry.workspace_credits.map(|share| NativeWorkspaceCredits {
+                used_percent: workspace_share_percent(&share),
+                limit: share.limit,
+                used: share.used,
+                resets_at: share.resets_at,
+                reached: share.reached,
+            }),
         })
 }
 /// One provider on the wire: its quota snapshot plus the live sessions read on their own cadence.

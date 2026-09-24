@@ -7,7 +7,7 @@ import {
   parseInstant,
   usageTextColor,
 } from "$lib/limitsFormat";
-import type { LimitWindow, LimitsResetCredits, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitWindow, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
 import { formatAgo } from "$lib/timeFormat";
 
 export type LimitWindowPresentation = {
@@ -113,6 +113,19 @@ export function usableAgainAt(entry: ProviderLimits, now: number): number {
 export function unexpiredBankedResets(resetCredits: LimitsResetCredits | null | undefined, now: number): LimitsResetCredits | null {
   if (!resetCredits || resetCredits.availableCount <= 0) return null;
   return hasElapsed(resetCredits.nextExpiresAt, now) ? null : resetCredits;
+}
+
+/**
+ * How much of a workspace-credit share the member has used, 0–100: all of it once the share is
+ * reached, or when it is a share of nothing; otherwise what is used of the limit. A share whose reset
+ * has passed has renewed, so it reads as nothing used, as a window past its reset does. The side
+ * notch computes the same figure in `side_notch/model.rs`.
+ */
+export function workspaceSharePercent(share: LimitsWorkspaceCredits, now: number): number {
+  if (hasElapsed(share.resetsAt, now)) return 0;
+  const limit = Number(share.limit);
+  if (share.reached || !(limit > 0)) return 100;
+  return Math.min(Math.max((Number(share.used) / limit) * 100, 0), 100);
 }
 
 /**

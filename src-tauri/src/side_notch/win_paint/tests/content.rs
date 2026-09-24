@@ -26,6 +26,7 @@ fn codex_hides_internal_windows_from_both_ring_and_popover() {
                 observed_at: "2026-09-01T10:00:00Z".into(),
             },
         ],
+        workspace_credits: None,
         sessions: Vec::new(),
     };
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
@@ -416,4 +417,88 @@ fn conflict_band_only_marks_passing_prs_with_merge_conflicts() {
             );
         }
     }
+}
+
+fn share(used: &str, reached: bool, resets_at: &str) -> LimitsWorkspaceCreditsDto {
+    LimitsWorkspaceCreditsDto {
+        limit: "25000".into(),
+        used: used.into(),
+        resets_at: Some(resets_at.into()),
+        reached,
+    }
+}
+
+#[test]
+fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
+    let content = cell_content(&CellData::Provider(codex_member(share(
+        "8000",
+        false,
+        "2099-01-01T12:00:00Z",
+    ))));
+    match content {
+        CellContent::Provider {
+            label,
+            primary,
+            fable,
+            credits,
+            ..
+        } => {
+            assert_eq!(label, "31%", "the weekly stays the headline");
+            assert_eq!(primary.and_then(|quota| quota.percent), Some(31.0));
+            assert!(fable.is_none());
+            assert_eq!(credits.and_then(|quota| quota.percent), Some(32.0));
+        }
+        _ => panic!("wrong content kind"),
+    }
+
+    let renewed = cell_content(&CellData::Provider(codex_member(share(
+        "25000",
+        true,
+        "2020-01-01T12:00:00Z",
+    ))));
+    match renewed {
+        CellContent::Provider { credits, .. } => assert_eq!(
+            credits,
+            Some(QuotaView {
+                percent: Some(0.0),
+                reached: false
+            }),
+            "a share past its reset has renewed, as a window has"
+        ),
+        _ => panic!("wrong content kind"),
+    }
+
+    let mut unreadable = codex_member(share("8000", false, "2099-01-01T12:00:00Z"));
+    unreadable.status = LimitsStatus::Failed;
+    match cell_content(&CellData::Provider(unreadable)) {
+        CellContent::Provider { credits, .. } => assert!(credits.is_none()),
+        _ => panic!("wrong content kind"),
+    }
+}
+
+#[test]
+fn the_codex_popover_lists_the_credit_share_after_the_weekly() {
+    let (planned, _) = popover_render(codex_member(share("8000", false, "2099-01-01T12:00:00Z")));
+    let popover = planned.popover.as_ref().expect("the popover is open");
+    let texts: Vec<&str> = popover
+        .entries
+        .iter()
+        .filter_map(|(item, _)| match item {
+            PopItem::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let weekly = texts.iter().position(|text| *text == "Weekly · all models");
+    let credits = texts.iter().position(|text| *text == "Workspace credits");
+    assert!(weekly.is_some() && credits > weekly, "{texts:?}");
+    assert!(
+        texts.contains(&"32% Used · 17,000 of 25,000 left"),
+        "{texts:?}"
+    );
+    let bars = popover
+        .entries
+        .iter()
+        .filter(|(item, _)| matches!(item, PopItem::Bar { .. }))
+        .count();
+    assert_eq!(bars, 2, "a bar for the weekly and one for the share");
 }

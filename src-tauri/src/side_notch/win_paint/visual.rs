@@ -85,6 +85,7 @@ fn visual_dump() {
                 observed_at: "2026-09-03T10:00:00Z".into(),
             },
         ],
+        workspace_credits: None,
         sessions: vec![
             LiveSession {
                 id: "s1".into(),
@@ -117,6 +118,13 @@ fn visual_dump() {
             window_seconds: None,
             observed_at: "2026-09-03T10:00:00Z".into(),
         }],
+        // A business workspace member: the credit share fills the inner ring.
+        workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
+            limit: "25000".into(),
+            used: "8000".into(),
+            resets_at: Some("2026-10-01T12:00:00Z".into()),
+            reached: false,
+        }),
         sessions: Vec::new(),
     };
     let antigravity = ProviderData {
@@ -124,6 +132,7 @@ fn visual_dump() {
         status: LimitsStatus::Unsupported,
         message: Some("Antigravity has no subscription limits to show.".into()),
         windows: Vec::new(),
+        workspace_credits: None,
         sessions: Vec::new(),
     };
     let cursor = ProviderData {
@@ -131,6 +140,7 @@ fn visual_dump() {
         status: LimitsStatus::Ok,
         message: None,
         windows: Vec::new(),
+        workspace_credits: None,
         sessions: Vec::new(),
     };
     let pr_cell = PrCellData {

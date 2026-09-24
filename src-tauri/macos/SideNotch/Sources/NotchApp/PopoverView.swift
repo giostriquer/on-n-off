@@ -175,6 +175,11 @@ private struct ProviderSection: View {
     ForEach(windows) { quota in
       QuotaBlock(quota: quota, provider: id, now: now, metrics: metrics)
     }
+    if let credits = entry?.workspaceCredits {
+      QuotaBlock(
+        quota: credits.quota, provider: id, now: now, metrics: metrics,
+        note: credits.note(at: now), detail: credits.left(at: now))
+    }
     if let sessions = entry?.sessions, !sessions.isEmpty {
       Divider().background(Color.white.opacity(0.1))
       VStack(alignment: .leading, spacing: metrics.value(8)) {
@@ -186,17 +191,26 @@ private struct ProviderSection: View {
   }
 }
 
+/// One quota in the popover: label and reset note, bar, and how much is used. A workspace-credit
+/// share passes its own note (a date) and what is left, which follows the figure.
 private struct QuotaBlock: View {
   let quota: Quota
   let provider: ProviderId
   let now: Date
   let metrics: NotchMetrics
+  var note: String? = nil
+  var detail: String? = nil
+  private var figure: String {
+    guard quota.percent(at: now) != nil else { return "—" }
+    return "\(quota.text(at: now)) Used" + (detail.map { " · \($0)" } ?? "")
+  }
   var body: some View {
     VStack(alignment: .leading, spacing: metrics.value(5)) {
       HStack(alignment: .firstTextBaseline) {
         Text(quota.label).font(metrics.font(11, weight: .semibold)).lineLimit(1)
         Spacer(minLength: metrics.value(8))
-        Text(quota.note(at: now)).font(metrics.font(10)).foregroundColor(mutedInk).lineLimit(1)
+        Text(note ?? quota.note(at: now)).font(metrics.font(10)).foregroundColor(mutedInk)
+          .lineLimit(1)
       }
       GeometryReader { geometry in
         ZStack(alignment: .leading) {
@@ -211,8 +225,9 @@ private struct QuotaBlock: View {
       .accessibilityValue(
         quota.percent(at: now) == nil
           ? "Usage unavailable"
-          : "\(quota.text(at: now)) used" + (quota.isReached(at: now) ? ", limit reached" : ""))
-      Text(quota.percent(at: now) == nil ? "—" : "\(quota.text(at: now)) Used")
+          : "\(quota.text(at: now)) used" + (quota.isReached(at: now) ? ", limit reached" : "")
+            + (detail.map { ", \($0)" } ?? ""))
+      Text(figure)
         .font(metrics.font(10.5, weight: .medium).monospacedDigit())
     }
   }

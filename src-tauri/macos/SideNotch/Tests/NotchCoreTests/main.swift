@@ -44,7 +44,7 @@ final class NotchTests {
       return (dr * dr + dg * dg + db * db).squareRoot()
     }
     // Every accent the meter can be handed, so a new provider is covered the day it lands.
-    for base in railProviderOrder.map(providerInk) + [fableInk] {
+    for base in railProviderOrder.map(providerInk) + [fableInk, creditsInk] {
       var previous = Double.infinity
       for step in 0...100 {
         let ink = meterInk(quota("weekly", Double(step)), base: base, at: now)
@@ -85,6 +85,54 @@ final class NotchTests {
     expectNil(noWeekly.primary)
     expectNil(noWeekly.fable)
     expectNil(provider(windows: []).primary)
+  }
+
+  func credits(
+    _ percent: Double, limit: String = "25000", used: String = "8000", reached: Bool = false,
+    reset: String? = "2027-02-01T12:00:00Z"
+  ) -> WorkspaceCredits {
+    WorkspaceCredits(
+      limit: limit, used: used, usedPercent: percent, resetsAt: reset, reached: reached)
+  }
+
+  func testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside() {
+    let entry = Provider(
+      provider: .codex, status: "ok", currentAccount: true, plan: "business", message: nil,
+      windows: [quota("weekly", 31, label: "Weekly · all models")], workspaceCredits: credits(32))
+    expectEqual(entry.primary?.usedPercent, 31)
+    expectEqual(entry.credits?.percent(at: now), 32)
+    expectEqual(entry.credits?.label, "Workspace credits")
+    expectNil(entry.fable)
+    // The weekly stays the headline: the share never joins the windows the popover lists.
+    expectEqual(entry.orderedWindows.map(\.label), ["Weekly · all models"])
+    for unreadable in [
+      Provider(
+        provider: .codex, status: "failed", currentAccount: true, plan: nil, message: nil,
+        windows: [], workspaceCredits: credits(32)),
+      Provider(
+        provider: .codex, status: "ok", currentAccount: false, plan: nil, message: nil,
+        windows: [], workspaceCredits: credits(32)),
+    ] {
+      expectNil(unreadable.credits)
+    }
+    expectNil(provider(.codex, windows: [quota("weekly", 31)]).credits)
+  }
+
+  func testACreditShareSaysWhatIsLeftAndRenewsAtItsReset() {
+    expectEqual(credits(32).left(at: now), "17,000 of 25,000 left")
+    expectEqual(credits(100, limit: "10000", used: "10000", reached: true).left(at: now), "0 of 10,000 left")
+    expectEqual(credits(100, limit: "100", used: "120").left(at: now), "0 of 100 left")
+    expectEqual(
+      credits(32, limit: "25000.5", used: "8000.25").left(at: now), "17,000.25 of 25,000.5 left")
+    expectEqual(credits(0, limit: "10.125", used: "0").left(at: now), "10.13 of 10.13 left")
+    expectEqual(credits(32).note(at: now), "Resets Feb 1")
+    expectEqual(credits(32, reset: nil).note(at: now), "")
+    // Past its reset the share has renewed: nothing used, all of it left, and when it reset.
+    let renewed = credits(100, used: "25000", reached: true, reset: "2026-06-15T12:00:00Z")
+    expectEqual(renewed.quota.percent(at: now), 0)
+    expectEqual(renewed.quota.isReached(at: now), false)
+    expectEqual(renewed.left(at: now), "25,000 of 25,000 left")
+    expectEqual(renewed.note(at: now), "Reset Jun 15")
   }
 
   func testUnavailableAndRememberedAccountsNeverPopulateRings() {
@@ -293,11 +341,14 @@ final class NotchTests {
 
   func testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions() throws {
     let valid =
-      #"{"version":2,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
+      #"{"version":3,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
     expectEqual(try HostMessage.decode(Data(valid.utf8)).sequence, 1)
-    expectThrows(
-      try HostMessage.decode(
-        Data(valid.replacingOccurrences(of: "\"version\":2", with: "\"version\":1").utf8)))
+    // An older host's message is refused rather than drawn in part, whichever version it speaks.
+    for older in ["1", "2"] {
+      expectThrows(
+        try HostMessage.decode(
+          Data(valid.replacingOccurrences(of: "\"version\":3", with: "\"version\":\(older)").utf8)))
+    }
     expectThrows(
       try HostMessage.decode(Data((valid + String(repeating: " ", count: 262_144)).utf8)))
     let invalid = valid.replacingOccurrences(
@@ -317,6 +368,16 @@ final class NotchTests {
     )
     let decoded = try HostMessage.decode(Data(withSessions.utf8))
     expectEqual(decoded.providers[0].sessions.first?.isWorking, true)
+    expectNil(decoded.providers[0].workspaceCredits)
+    let withCredits = valid.replacingOccurrences(
+      of: "\"providers\":[]",
+      with:
+        #""providers":[{"provider":"codex","status":"ok","currentAccount":true,"windows":[],"sessions":[],"workspaceCredits":{"limit":"25000","used":"8000","usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","reached":false}}]"#
+    )
+    expectEqual(try HostMessage.decode(Data(withCredits.utf8)).providers[0].credits?.percent(at: now), 32)
+    expectThrows(
+      try HostMessage.decode(
+        Data(withCredits.replacingOccurrences(of: "\"usedPercent\":32", with: "\"usedPercent\":101").utf8)))
     let emptyName = withSessions.replacingOccurrences(of: "\"name\":\"repo-1a\"", with: "\"name\":\"\"")
     expectThrows(try HostMessage.decode(Data(emptyName.utf8)))
     let oneSession =
@@ -329,7 +390,7 @@ final class NotchTests {
 
   func testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows() throws {
     let valid =
-      #"{"version":2,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
+      #"{"version":3,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
     let pull =
       #"{"id":"node","number":42,"title":"ci: one concurrency group","url":"https://github.com/octo/tools/pull/42","repo":"octo/tools","author":"gio","isDraft":false,"reviewDecision":"APPROVED","ci":"success","mergeKind":"ready","updatedAt":"2026-09-01T10:00:00Z"}"#
     let withPulls = valid.replacingOccurrences(
@@ -381,14 +442,14 @@ final class NotchTests {
 
   func testClientActionsEncodeACompleteTypedProtocol() throws {
     let cases: [(ClientAction, [String: Any])] = [
-      (.ready, ["version": 2, "type": "ready"]),
-      (.ack(sequence: 42), ["version": 2, "type": "ack", "sequence": 42]),
-      (.screensChanged, ["version": 2, "type": "screensChanged"]),
-      (.refresh, ["version": 2, "type": "refresh"]),
-      (.openLimits, ["version": 2, "type": "openLimits"]),
-      (.openPullRequests, ["version": 2, "type": "openPullRequests"]),
-      (.setShow(.onHover), ["version": 2, "type": "setShow", "show": "onHover"]),
-      (.setShow(.always), ["version": 2, "type": "setShow", "show": "always"]),
+      (.ready, ["version": 3, "type": "ready"]),
+      (.ack(sequence: 42), ["version": 3, "type": "ack", "sequence": 42]),
+      (.screensChanged, ["version": 3, "type": "screensChanged"]),
+      (.refresh, ["version": 3, "type": "refresh"]),
+      (.openLimits, ["version": 3, "type": "openLimits"]),
+      (.openPullRequests, ["version": 3, "type": "openPullRequests"]),
+      (.setShow(.onHover), ["version": 3, "type": "setShow", "show": "onHover"]),
+      (.setShow(.always), ["version": 3, "type": "setShow", "show": "always"]),
     ]
     for (action, expected) in cases {
       let encoded = try JSONEncoder().encode(action)
@@ -424,6 +485,8 @@ func expectThrows<T>(_ value: @autoclosure () throws -> T, line: Int = #line) {
 let checks = NotchTests()
 checks.testTheMeterRampOnlyEverMovesTowardTheTripRed()
 checks.testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst()
+checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
+checks.testACreditShareSaysWhatIsLeftAndRenewsAtItsReset()
 checks.testUnavailableAndRememberedAccountsNeverPopulateRings()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testCodexPrefersSessionAndHidesInternalBuckets()
@@ -440,5 +503,5 @@ try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("18 native check groups; \(failures) failures")
+print("20 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

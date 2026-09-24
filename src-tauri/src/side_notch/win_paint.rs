@@ -10,10 +10,13 @@
 mod marks;
 mod text;
 
-use super::model::{layout, Edge, GithubList, NotchSettings, NotchSize, ShowMode};
+use super::model::{
+    layout, workspace_share_left, workspace_share_note, workspace_share_window, Edge, GithubList,
+    NotchSettings, NotchSize, ShowMode,
+};
 use crate::dto::{
-    AgentId, CiState, GithubStatus, LimitWindowDto, LimitWindowKind, LimitsStatus, MergeKind,
-    ReviewDecision,
+    AgentId, CiState, GithubStatus, LimitWindowDto, LimitWindowKind, LimitsStatus,
+    LimitsWorkspaceCreditsDto, MergeKind, ReviewDecision,
 };
 use crate::side_notch::sessions::LiveSession;
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
@@ -41,6 +44,8 @@ pub struct ProviderData {
     pub status: LimitsStatus,
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
+    /// A business workspace member's credit share, drawn on the Codex cell's inner ring.
+    pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     pub sessions: Vec<LiveSession>,
 }
 
@@ -301,6 +306,7 @@ pub enum CellContent {
         provider: AgentId,
         primary: Option<QuotaView>,
         fable: Option<QuotaView>,
+        credits: Option<QuotaView>,
         label: String,
     },
     PullRequests {
@@ -526,6 +532,18 @@ fn fable_quota(provider: &ProviderData) -> Option<QuotaView> {
         .map(quota_view)
 }
 
+/// A business workspace member's credit share, on the inner ring as Claude's Fable window is, while
+/// the outer ring and the label stay the weekly limit (the `Provider.credits` port).
+fn credits_quota(provider: &ProviderData) -> Option<QuotaView> {
+    if provider.status != LimitsStatus::Ok {
+        return None;
+    }
+    provider
+        .workspace_credits
+        .as_ref()
+        .map(|share| quota_view(&workspace_share_window(share)))
+}
+
 fn list_title(list: GithubList) -> &'static str {
     match list {
         GithubList::Mine => "Mine",
@@ -568,6 +586,7 @@ fn cell_content(data: &CellData) -> CellContent {
             provider: provider.provider,
             primary: primary_quota(provider),
             fable: fable_quota(provider),
+            credits: credits_quota(provider),
             label: primary_quota(provider)
                 .and_then(|quota| quota.percent)
                 .map(format_percent)
@@ -893,13 +912,40 @@ fn popover_entries(
                 y += line_h(11.0, TextWeight::Regular);
             }
 
-            for window in ordered_windows(provider) {
+            // Each window, then a business member's credit share, which brings its own note (a
+            // date, since it renews monthly) and what is left after the figure.
+            struct Block {
+                label: String,
+                note: String,
+                percent: Option<f64>,
+                detail: Option<String>,
+            }
+            let now = chrono::Utc::now();
+            let mut blocks: Vec<Block> = ordered_windows(provider)
+                .iter()
+                .map(|window| Block {
+                    label: window.label.clone(),
+                    note: reset_note(window),
+                    percent: quota_percent(window),
+                    detail: None,
+                })
+                .collect();
+            if let Some(share) = &provider.workspace_credits {
+                let window = workspace_share_window(share);
+                blocks.push(Block {
+                    label: window.label.clone(),
+                    note: workspace_share_note(share, now),
+                    percent: quota_percent(&window),
+                    detail: Some(workspace_share_left(share, now)),
+                });
+            }
+            for block in blocks {
                 // The note is right-aligned; the label truncates so the two never
                 // overlap (SwiftUI's Spacer + lineLimit(1) behaviour). The note yields
                 // first: it keeps at most 60 % of the row, the label the rest.
                 let note_max = inner_w * 0.6;
                 let note = ellipsize(
-                    &reset_note(&window),
+                    &block.note,
                     note_max,
                     v(10.0),
                     TextWeight::Regular,
@@ -908,7 +954,7 @@ fn popover_entries(
                 let note_w = measure_weight(&note, v(10.0), TextWeight::Regular, display_scale);
                 let label_space = (inner_w - note_w - v(8.0)).max(inner_w * 0.3);
                 let label = ellipsize(
-                    &window.label,
+                    &block.label,
                     label_space,
                     v(11.0),
                     TextWeight::Semibold,
@@ -939,24 +985,28 @@ fn popover_entries(
                     true,
                 );
                 y += line_h(11.0, TextWeight::Semibold) + v(5.0);
-                let percent = quota_percent(&window);
                 entries.push((
                     PopItem::Bar {
-                        percent,
-                        color: meter_color(percent, provider_color(provider.provider)),
+                        percent: block.percent,
+                        color: meter_color(block.percent, provider_color(provider.provider)),
                     },
                     R::new(x, y, inner_w, v(4.0)),
                 ));
                 y += v(4.0) + v(5.0);
+                let figure = match (block.percent, &block.detail) {
+                    (None, _) => "—".into(),
+                    (Some(percent), None) => format!("{} Used", format_percent(percent)),
+                    (Some(percent), Some(detail)) => {
+                        format!("{} Used · {detail}", format_percent(percent))
+                    }
+                };
                 text_entry(
                     &mut entries,
                     x,
                     y,
                     inner_w,
                     line_h(10.5, TextWeight::Medium),
-                    quota_percent(&window)
-                        .map(|percent| format!("{} Used", format_percent(percent)))
-                        .unwrap_or_else(|| "—".into()),
+                    figure,
                     v(10.5),
                     TextWeight::Medium,
                     [255, 255, 255, 255],
@@ -1442,6 +1492,9 @@ const CODEX_INK: Color = [238, 240, 242, 255];
 const CURSOR_BLUE: Color = [122, 162, 255, 255];
 const ANTIGRAVITY_MUTE: Color = [140, 147, 157, 255];
 const FABLE_TRACK: Color = [53, 42, 38, 255];
+/// Codex's inner ring, a business workspace member's credit share: `creditsInk` in `Meter.swift`.
+const CREDITS_INK: Color = [168, 176, 186, 255];
+const CREDITS_TRACK: Color = [38, 41, 45, 255];
 /// The mac `ShowToggleCap`'s hovered fill: white at 11 %.
 const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
 
@@ -1850,6 +1903,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
             provider,
             primary,
             fable,
+            credits,
             label,
         } => {
             if let Some(primary) = primary {
@@ -1867,8 +1921,13 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     false,
                 );
             }
-            if let Some(fable) = fable {
-                let fable_percent = fable.percent.unwrap_or(0.0);
+            // The inner ring: Claude's Fable window, or a Codex workspace member's credit share,
+            // each in a deeper shade of its provider's accent on its own dark track.
+            let inner = fable
+                .map(|quota| (quota, FABLE_ORANGE, FABLE_TRACK))
+                .or_else(|| credits.map(|quota| (quota, CREDITS_INK, CREDITS_TRACK)));
+            if let Some((inner, ink, track)) = inner {
+                let inner_percent = inner.percent.unwrap_or(0.0);
                 let inner_radius = radius - metrics.inner_ring_inset as f32 * scale;
                 stroke_ring(
                     pixmap,
@@ -1878,7 +1937,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     metrics.inner_ring_stroke as f32 * scale,
                     0.0,
                     360.0,
-                    FABLE_TRACK,
+                    track,
                     false,
                     false,
                 );
@@ -1889,8 +1948,8 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     inner_radius,
                     metrics.inner_ring_stroke as f32 * scale,
                     -90.0,
-                    -90.0 + fable_percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(fable.percent, FABLE_ORANGE),
+                    -90.0 + inner_percent.clamp(0.0, 100.0) as f32 * 3.6,
+                    meter_color(inner.percent, ink),
                     true,
                     false,
                 );

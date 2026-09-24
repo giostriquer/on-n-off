@@ -33,6 +33,7 @@ fn provider_data(provider: AgentId, percent: f64) -> ProviderData {
             window_seconds: None,
             observed_at: "2026-09-01T10:00:00Z".into(),
         }],
+        workspace_credits: None,
         sessions: Vec::new(),
     }
 }
@@ -68,6 +69,23 @@ fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderData {
         status: LimitsStatus::Ok,
         message: None,
         windows,
+        workspace_credits: None,
+        sessions: Vec::new(),
+    }
+}
+/// A Codex business member: the weekly window, which is all Codex reports, and a credit share.
+fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderData {
+    ProviderData {
+        provider: AgentId::Codex,
+        status: LimitsStatus::Ok,
+        message: None,
+        windows: vec![window(
+            "primary",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            31.0,
+        )],
+        workspace_credits: Some(share),
         sessions: Vec::new(),
     }
 }

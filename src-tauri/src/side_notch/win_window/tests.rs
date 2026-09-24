@@ -45,6 +45,7 @@ fn data(show: ShowMode) -> RailData {
                 window_seconds: None,
                 observed_at: "2026-09-01T10:00:00Z".into(),
             }],
+            workspace_credits: None,
             sessions: Vec::new(),
         })],
         action_error: None,

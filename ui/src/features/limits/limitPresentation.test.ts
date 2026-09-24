@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows } from "./limitPresentation";
+import { hasObservations, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows, workspaceSharePercent } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -131,6 +131,30 @@ describe("usableAgainAt", () => {
 });
 
 const SHARE = { limit: "25000", used: "8000", resetsAt: null, reached: false };
+
+describe("workspaceSharePercent", () => {
+  const pending = "2026-09-01T00:00:00Z";
+
+  it("is what the member has used of the share", () => {
+    expect(workspaceSharePercent({ ...SHARE, resetsAt: pending }, NOW)).toBe(32);
+  });
+
+  it("is all of it once the share is reached, whatever the amounts say", () => {
+    expect(workspaceSharePercent({ ...SHARE, used: "9000", reached: true }, NOW)).toBe(100);
+  });
+
+  it("is all of a share of nothing", () => {
+    expect(workspaceSharePercent({ ...SHARE, limit: "0", used: "0" }, NOW)).toBe(100);
+  });
+
+  it("never runs past the whole share", () => {
+    expect(workspaceSharePercent({ ...SHARE, limit: "100", used: "120" }, NOW)).toBe(100);
+  });
+
+  it("is nothing used once the share has reset, as a window past its reset is", () => {
+    expect(workspaceSharePercent({ ...SHARE, used: "25000", reached: true, resetsAt: "2026-08-17T19:00:00Z" }, NOW)).toBe(0);
+  });
+});
 
 describe("hasObservations", () => {
   const bare: ProviderLimits = { provider: "codex", status: "ok", currentAccount: true, windows: [] };
