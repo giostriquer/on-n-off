@@ -123,7 +123,8 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
             main.individual_limit.as_ref(),
             main.spend_control_reached,
         ),
-        // Only a saved read, which holds a token, can ask for spending (`limits/saved.rs`).
+        // Spending comes from its own endpoint, asked after this parse for a workspace plan
+        // (`limits/credits_spent.rs`): by the saved read, or after the signed-in read's identity check.
         credits_spent: None,
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
         reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),

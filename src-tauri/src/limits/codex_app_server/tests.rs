@@ -757,3 +757,101 @@ fn the_card_account_id_from_a_read_is_the_id_a_spend_accepts() {
         Ok(())
     );
 }
+
+/// An app-server session for a signed-in business member of `acct-1`, answered in order.
+fn business_session(codex_home: &Path, kind: &str) -> FakeTransport {
+    FakeTransport {
+        received: VecDeque::from([
+            json!({"id": 1, "result": {
+                "userAgent": "on_n_off/0.148.0",
+                "codexHome": codex_home.to_string_lossy(),
+                "platformFamily": "unix",
+                "platformOs": "macos"
+            }}),
+            json!({"id": 2, "result": {
+                "account": {"type": kind, "email": "you@example.com", "planType": "self_serve_business_prolite"},
+                "requiresOpenaiAuth": true
+            }}),
+            json!({"id": 3, "result": {"rateLimits": {
+                "limitId": "codex",
+                "primary": {"usedPercent": 12, "windowDurationMins": 10080},
+                "credits": {"hasCredits": true, "unlimited": false, "balance": null},
+                "planType": "self_serve_business_prolite"
+            }}}),
+        ]),
+        sent: Vec::new(),
+    }
+}
+
+fn business_home(name: &str) -> PathBuf {
+    let home = crate::paths::scratch_dir(name);
+    std::fs::create_dir_all(home.join(".codex")).unwrap();
+    std::fs::write(
+        home.join(".codex/auth.json"),
+        r#"{"tokens":{"account_id":"acct-1"}}"#,
+    )
+    .unwrap();
+    home
+}
+
+/// The spending read runs after the identity check, for the account and plan the card was read
+/// for, and its figure is on the card before the card is remembered.
+#[test]
+fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() {
+    let home = business_home("codex-app-server-spent");
+    let codex_home = home.join(".codex");
+    let spent = crate::dto::LimitsCreditsSpentDto {
+        last_7_days: 18303.4,
+        last_30_days: 20299.7,
+        updated_at: None,
+    };
+    let asked = std::cell::RefCell::new(Vec::new());
+
+    let parsed = read_with(
+        &home,
+        false,
+        |_| Ok(business_session(&codex_home, "chatgpt")),
+        |at: &Path, account: Option<&str>, plan: Option<&str>| {
+            asked.borrow_mut().push((
+                at.to_path_buf(),
+                account.map(str::to_string),
+                plan.map(str::to_string),
+            ));
+            Some(spent.clone())
+        },
+    )
+    .unwrap();
+
+    assert_eq!(parsed.credits_spent, Some(spent));
+    assert_eq!(
+        asked.into_inner(),
+        vec![(
+            codex_home,
+            Some("acct-1".to_string()),
+            Some("self_serve_business_prolite".to_string())
+        )]
+    );
+}
+
+/// A read that fails, or a login that is not a ChatGPT one, is never asked what it spent.
+#[test]
+fn a_failed_signed_in_read_never_asks_what_it_spent() {
+    let home = business_home("codex-app-server-spent-failed");
+    let codex_home = home.join(".codex");
+
+    let not_chatgpt = read_with(
+        &home,
+        false,
+        |_| Ok(business_session(&codex_home, "apiKey")),
+        |_: &Path, _: Option<&str>, _: Option<&str>| panic!("asked what an API key spent"),
+    );
+    let no_process = read_with(
+        &home,
+        false,
+        |_| Err::<FakeTransport, _>("codex is not installed".to_string()),
+        |_: &Path, _: Option<&str>, _: Option<&str>| panic!("asked without a read"),
+    );
+
+    assert!(matches!(not_chatgpt, Err(AppServerFailure::Unsupported(_))));
+    assert!(matches!(no_process, Err(AppServerFailure::Failed(_))));
+}

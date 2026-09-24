@@ -838,3 +838,58 @@ fn a_subscription_status_alone_is_not_an_observation() {
 
     assert!(!dto.has_observations());
 }
+
+/// Every writer stores its own read, so one that could not tell what was spent must not erase the
+/// figure already on disk; one that answered replaces it.
+#[test]
+fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_stored_figure() {
+    let home = scratch_dir("limits-snap-credits-spent-kept");
+    let store = SnapshotStore::for_home(&home);
+    let business = |observed_at: &str| {
+        let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", observed_at);
+        dto.plan = Some("business".to_string());
+        dto
+    };
+    let mut dto = business("2026-08-17T10:00:00.000Z");
+    dto.credits_spent = credits_spent(18303.4);
+    store.save(&dto).unwrap();
+
+    store.save(&business("2026-08-17T11:00:00.000Z")).unwrap();
+    assert_eq!(
+        store.load(AgentId::Codex)[0].credits_spent,
+        credits_spent(18303.4)
+    );
+
+    let mut answered = business("2026-08-17T12:00:00.000Z");
+    answered.credits_spent = credits_spent(5.0);
+    store.save(&answered).unwrap();
+    assert_eq!(
+        store.load(AgentId::Codex)[0].credits_spent,
+        credits_spent(5.0)
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Only a workspace pools credits: an account now on a personal plan is never asked what it spent,
+/// so the figure it had on a workspace plan is dropped from disk rather than kept stale.
+#[test]
+fn a_personal_plan_read_drops_the_stored_figure() {
+    let home = scratch_dir("limits-snap-credits-spent-personal");
+    let store = SnapshotStore::for_home(&home);
+    let mut business = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    business.plan = Some("business".to_string());
+    business.credits_spent = credits_spent(18303.4);
+    store.save(&business).unwrap();
+
+    store
+        .save(&snapshot(
+            AgentId::Codex,
+            "acct-1",
+            "a@x",
+            "2026-08-17T11:00:00.000Z",
+        ))
+        .unwrap();
+
+    assert_eq!(store.load(AgentId::Codex)[0].credits_spent, None);
+    let _ = std::fs::remove_dir_all(&home);
+}

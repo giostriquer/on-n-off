@@ -10,6 +10,23 @@ pub struct Identity {
     pub user_id: String,
     pub workspace_id: String,
 }
+/// An OAuth access token on its way into one request header, and nothing more: never a refresh or
+/// id token, never the login JSON it came from. It has no `Debug`, `Display`, `Clone` or
+/// serialization, so it cannot reach a log, a DTO or a snapshot by accident; `authorization` is
+/// the only way to read it back, already as the header value.
+pub struct AccessToken(String);
+
+impl AccessToken {
+    pub fn new(token: &str) -> Self {
+        Self(token.to_string())
+    }
+
+    /// The `Authorization` header value.
+    pub fn authorization(&self) -> String {
+        format!("Bearer {}", self.0)
+    }
+}
+
 pub fn string<'a>(value: &'a Value, pointer: &str) -> Result<&'a str, String> {
     value.pointer(pointer).and_then(Value::as_str).filter(|s| !s.trim().is_empty())
         .ok_or_else(|| "The native login is missing required identity or renewable credentials. Sign in again with the official CLI.".into())

@@ -235,6 +235,7 @@ fn aggregate_accounts(
         let mut current = current;
         if let Some(prior) = &prior {
             current.keep_reset_credits_from(prior);
+            current.keep_credits_spent_from(prior);
         }
         current
     } else {
