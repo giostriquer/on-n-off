@@ -120,21 +120,6 @@ fn overlays_project_skills_and_mcp_read_only() {
 }
 
 #[test]
-fn reads_claude_inline_project_mcp_servers() {
-    let servers = parse_claude_project_mcp(
-        r#"{
-                "mcpServers": { "github": { "command": "npx" } },
-                "projects": {
-                    "E:/dev/app": { "mcpServers": { "local-only": { "command": "node" } } }
-                }
-            }"#,
-        Path::new(r"E:\dev\app"),
-    );
-    assert_eq!(servers.len(), 1);
-    assert_eq!(servers[0].id, "local-only");
-}
-
-#[test]
 fn inspect_reads_git_branch_and_local_counts() {
     let root = crate::paths::scratch_dir("on-n-off-inspect-project");
     fs::create_dir_all(root.join(".claude").join("skills").join("local-feed")).unwrap();
@@ -227,42 +212,57 @@ fn overlay_collapses_same_name_across_skill_roots() {
     assert!(!tab.user_skills[1].togglable);
 }
 
-/// Inside a project, its own local-scope servers are project rows; the rows that stand for
-/// servers kept for particular projects belong to the all-projects view and are not repeated.
+/// Inside a Claude project, that project's `~/.claude.json` entry decides: its servers become
+/// project rows (off when its `disabledMcpServers` names them), a plugin server it switched off
+/// reads off, and the rows standing for servers kept for particular projects are not repeated.
 #[test]
-fn a_project_scope_drops_the_all_projects_local_rows() {
+fn a_claude_project_view_follows_its_own_entry() {
     let root = crate::paths::scratch_dir("on-n-off-project-scope-local");
-    let local = crate::dto::McpServerDto {
-        id: "local:library-docs".into(),
-        name: "library-docs".into(),
+    let key = root.to_string_lossy().into_owned();
+    let config = serde_json::json!({
+        "projects": {
+            key: {
+                "mcpServers": { "scratchpad": { "command": "node", "args": ["pad.js"] } },
+                "disabledMcpServers": ["scratchpad", "plugin:kit:tracker"]
+            }
+        }
+    });
+    let row = |id: &str, origin: &str| crate::dto::McpServerDto {
+        id: id.into(),
+        name: id.rsplit(':').next().unwrap().into(),
         system: "http".into(),
         source: "https://docs.example/mcp".into(),
         enabled: true,
-        togglable: false,
-        origin: "local".into(),
-        via: "2 projects".into(),
-    };
-    let own = crate::dto::McpServerDto {
-        id: "github".into(),
-        origin: String::new(),
-        via: String::new(),
-        togglable: true,
-        ..local.clone()
+        togglable: origin.is_empty(),
+        origin: origin.into(),
+        plugin_id: None,
+        projects: Vec::new(),
     };
     let mut tab = AgentTabDto {
         plugins: vec![],
         user_skills: vec![],
-        mcp_servers: vec![local, own],
+        mcp_servers: vec![
+            row("local:library-docs", "local"),
+            row("github", ""),
+            row("plugin:kit:tracker", "plugin"),
+        ],
         hooks: vec![],
     };
 
-    overlay_project(&mut tab, &root, AgentId::Claude);
+    overlay_project_with(&mut tab, &root, AgentId::Claude, &config);
 
-    let ids: Vec<_> = tab
+    let view: Vec<_> = tab
         .mcp_servers
         .iter()
-        .map(|server| server.id.as_str())
+        .map(|server| (server.id.as_str(), server.origin.as_str(), server.enabled))
         .collect();
-    assert_eq!(ids, ["github"]);
+    assert_eq!(
+        view,
+        [
+            ("github", "", true),
+            ("project:scratchpad", ORIGIN_PROJECT, false),
+            ("plugin:kit:tracker", "plugin", false),
+        ]
+    );
     let _ = fs::remove_dir_all(root);
 }

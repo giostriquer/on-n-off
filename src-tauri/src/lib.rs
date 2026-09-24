@@ -30,6 +30,7 @@ mod mcp;
 mod monitor;
 mod notifications;
 mod paths;
+mod plugin_files;
 mod plugin_meta;
 mod process;
 mod project;

@@ -131,6 +131,25 @@ pub fn inspect_projects(paths: Vec<String>, agent: AgentId) -> Vec<ProjectDto> {
 }
 
 pub fn overlay_project(tab: &mut AgentTabDto, project: &Path, agent: AgentId) {
+    let claude_json = if agent == AgentId::Claude {
+        crate::paths::user_home()
+            .ok()
+            .and_then(|home| fs::read_to_string(home.join(".claude.json")).ok())
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
+    } else {
+        serde_json::Value::Null
+    };
+    overlay_project_with(tab, project, agent, &claude_json);
+}
+
+/// [`overlay_project`] with `~/.claude.json` already read, for Claude; `Null` for the others.
+fn overlay_project_with(
+    tab: &mut AgentTabDto,
+    project: &Path,
+    agent: AgentId,
+    claude_json: &serde_json::Value,
+) {
     if agent == AgentId::Antigravity {
         overlay_antigravity_plugins(tab, project);
     }
@@ -173,16 +192,20 @@ pub fn overlay_project(tab: &mut AgentTabDto, project: &Path, agent: AgentId) {
         }
     }
 
-    // This project's own local-scope servers come back as project rows below; the rows standing
-    // for servers kept for particular projects belong to the all-projects view.
-    tab.mcp_servers
-        .retain(|server| server.origin != crate::mcp::ORIGIN_LOCAL);
+    let mut servers = project_mcp_servers(project, agent);
+    if agent == AgentId::Claude {
+        servers.extend(as_project_mcp(crate::claude_mcp::project_servers(
+            &mut tab.mcp_servers,
+            claude_json,
+            project,
+        )));
+    }
     let mut seen_mcp: std::collections::HashSet<String> = tab
         .mcp_servers
         .iter()
         .map(|server| server.id.clone())
         .collect();
-    for mut server in project_mcp_servers(project, agent) {
+    for mut server in servers {
         if !server.id.starts_with("project:") {
             server.id = format!("project:{}", server.id);
         }
@@ -247,13 +270,8 @@ fn project_mcp_servers(project: &Path, agent: AgentId) -> Vec<McpServerDto> {
         servers.extend(as_project_mcp(parse_claude_json(&text)));
     }
     match agent {
-        AgentId::Claude => {
-            if let Ok(home) = crate::paths::user_home() {
-                if let Ok(text) = fs::read_to_string(home.join(".claude.json")) {
-                    servers.extend(as_project_mcp(parse_claude_project_mcp(&text, project)));
-                }
-            }
-        }
+        // Its `~/.claude.json` entry is read with the user's view in `overlay_project_with`.
+        AgentId::Claude => {}
         AgentId::Codex => {
             let config = project.join(".codex").join("config.toml");
             if let Ok(text) = fs::read_to_string(&config) {
@@ -282,27 +300,6 @@ fn project_mcp_servers(project: &Path, agent: AgentId) -> Vec<McpServerDto> {
 struct ProjectCodexConfig {
     #[serde(default)]
     mcp_servers: HashMap<String, CodexMcpEntry>,
-}
-
-pub fn parse_claude_project_mcp(text: &str, project: &Path) -> Vec<McpServerDto> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
-        return Vec::new();
-    };
-    let Some(projects) = value.get("projects").and_then(|value| value.as_object()) else {
-        return Vec::new();
-    };
-    let key = normalize_project_key(&project.to_string_lossy());
-    let Some((_, entry)) = projects
-        .iter()
-        .find(|(path, _)| normalize_project_key(path) == key)
-    else {
-        return Vec::new();
-    };
-    let Some(servers) = entry.get("mcpServers") else {
-        return Vec::new();
-    };
-    let wrapped = serde_json::json!({ "mcpServers": servers });
-    parse_claude_json(&wrapped.to_string())
 }
 
 fn as_project_mcp(servers: Vec<McpServerDto>) -> Vec<McpServerDto> {

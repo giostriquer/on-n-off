@@ -13,7 +13,6 @@ use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto,
 };
 use crate::install_source::{parse_install_source, InstallSource};
-use crate::mcp::parse_claude_json;
 use crate::paths::{claude_root, plugin_id_parts};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
@@ -175,18 +174,18 @@ impl ClaudeAdapter {
 
     /// The user's own servers, then the ones enabled `plugins` bring, then the ones Claude keeps for
     /// particular projects (`claude_mcp.rs`).
-    fn mcp_servers(&self, plugins: &[crate::hooks::PluginSource]) -> Vec<crate::dto::McpServerDto> {
-        let text = self
+    fn mcp_servers(
+        &self,
+        plugins: &[crate::plugin_files::PluginSource],
+    ) -> Vec<crate::dto::McpServerDto> {
+        let config: serde_json::Value = self
             .claude_json
             .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
+            .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
-        let config: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-        let mut servers = parse_claude_json(&text);
-        servers.extend(crate::claude_mcp::plugin_servers(
-            plugins,
-            &crate::mcp::claude_disabled_list(&config),
-        ));
+        let mut servers = crate::mcp::claude_json_servers(&config);
+        servers.extend(crate::claude_mcp::plugin_servers(plugins));
         servers.extend(crate::claude_mcp::local_servers(&config));
         servers
     }
@@ -237,7 +236,7 @@ impl ClaudeAdapter {
                 .unwrap_or_else(|| plugin_default_enabled(&install_path));
             // A disabled plugin's hooks and MCP servers do not run, so they are not rows.
             if enabled {
-                enabled_plugins.push(crate::hooks::PluginSource {
+                enabled_plugins.push(crate::plugin_files::PluginSource {
                     id: id.clone(),
                     name: name.clone(),
                     root: install_path.clone(),

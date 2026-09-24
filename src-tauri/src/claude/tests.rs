@@ -474,7 +474,8 @@ fn lists_the_mcp_servers_enabled_plugins_bring_read_only() {
     let row = plugin_rows[0];
     assert_eq!(row.id, "plugin:workbench:docs-search");
     assert_eq!(row.name, "docs-search");
-    assert_eq!(row.via, "workbench");
+    assert_eq!(row.plugin_id.as_deref(), Some("workbench@workshop"));
+    assert!(row.projects.is_empty());
     assert_eq!(row.source, "${CLAUDE_PLUGIN_ROOT}/bin/search --stdio");
     assert!(row.enabled);
     assert!(!row.togglable);
@@ -514,7 +515,7 @@ fn lists_servers_kept_for_particular_projects_once_each() {
         .map(|server| {
             (
                 server.id.as_str(),
-                server.via.as_str(),
+                server.projects.join(" "),
                 server.enabled,
                 server.togglable,
             )
@@ -523,9 +524,77 @@ fn lists_servers_kept_for_particular_projects_once_each() {
     assert_eq!(
         local,
         [
-            ("local:library-docs", "2 projects", true, false),
-            ("local:scratchpad", "notes", false, false),
+            (
+                "local:library-docs",
+                "/Users/me/acme/api /Users/me/acme/webapp".to_string(),
+                true,
+                false
+            ),
+            (
+                "local:scratchpad",
+                "/Users/me/acme/notes".to_string(),
+                false,
+                false
+            ),
         ]
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Claude Code 2.1.281 reads `disabledMcpServers` only from a project's own entry, so a
+/// top-level list naming a plugin server switches nothing off; the plugin's switch does.
+#[test]
+fn a_top_level_disabled_list_does_not_switch_off_a_plugin_server() {
+    let root = fixture();
+    write_plugin_mcp(
+        &root.join("plugins/cache/workshop/workbench/1.0.0"),
+        serde_json::json!({ "docs-search": { "command": "search" } }),
+    );
+    fs::write(
+        root.join(".claude.json"),
+        serde_json::json!({
+            "mcpServers": {},
+            "disabledMcpServers": ["plugin:workbench:docs-search"]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let tab = ClaudeAdapter::at(root.clone()).list_tab().expect("list");
+
+    let row = tab
+        .mcp_servers
+        .iter()
+        .find(|server| server.id == "plugin:workbench:docs-search")
+        .unwrap();
+    assert!(row.enabled);
+    let _ = fs::remove_dir_all(root);
+}
+
+/// A plugin's server and a server kept for particular projects are listed, never switched: a
+/// toggle on either is refused and `~/.claude.json` is left byte for byte as it was.
+#[test]
+fn toggling_a_plugin_or_per_project_server_is_refused_without_a_write() {
+    let root = fixture();
+    write_plugin_mcp(
+        &root.join("plugins/cache/workshop/workbench/1.0.0"),
+        serde_json::json!({ "docs-search": { "command": "search" } }),
+    );
+    let config = serde_json::json!({
+        "mcpServers": {},
+        "projects": { "/Users/me/acme/webapp": { "mcpServers": { "pad": { "command": "pad" } } } }
+    })
+    .to_string();
+    fs::write(root.join(".claude.json"), &config).unwrap();
+    let adapter = ClaudeAdapter::at(root.clone());
+
+    for id in ["plugin:workbench:docs-search", "local:pad"] {
+        assert!(adapter.set_mcp_enabled(id, false).is_err(), "{id}");
+    }
+
+    assert_eq!(
+        fs::read_to_string(root.join(".claude.json")).unwrap(),
+        config
     );
     let _ = fs::remove_dir_all(root);
 }

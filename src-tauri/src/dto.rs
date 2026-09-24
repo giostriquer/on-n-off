@@ -154,10 +154,12 @@ pub struct McpServerDto {
     /// projects (its local scope) when listed outside them.
     #[serde(default)]
     pub origin: String,
-    /// What a read-only row belongs to: the plugin that brings it, or the project (or how many
-    /// projects) it is configured for. Empty for the user's own servers.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub via: String,
+    /// The plugin (`name@marketplace`) that brings a `"plugin"` server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+    /// The projects, as `~/.claude.json` keys them, that keep a `"local"` server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<String>,
 }
 
 /// One hook handler a provider would run: one row on the Hooks screen, which is read-only —

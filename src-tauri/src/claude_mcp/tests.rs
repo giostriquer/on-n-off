@@ -1,3 +1,5 @@
+use std::fs;
+
 use super::*;
 use crate::paths::scratch_dir;
 
@@ -14,8 +16,22 @@ fn write(path: &Path, body: Value) {
     fs::write(path, body.to_string()).unwrap();
 }
 
+fn manifest(root: &Path, servers: Value) {
+    write(
+        &root.join(".claude-plugin").join("plugin.json"),
+        serde_json::json!({ "name": "tools", "mcpServers": servers }),
+    );
+}
+
 fn ids(servers: &[McpServerDto]) -> Vec<&str> {
     servers.iter().map(|server| server.id.as_str()).collect()
+}
+
+fn sources(servers: &[McpServerDto]) -> Vec<(&str, &str)> {
+    servers
+        .iter()
+        .map(|server| (server.name.as_str(), server.source.as_str()))
+        .collect()
 }
 
 #[test]
@@ -32,7 +48,7 @@ fn reads_a_bare_or_wrapped_mcp_json_at_the_plugin_root() {
         serde_json::json!({ "mcpServers": { "search": { "command": "node", "args": ["s.js"] } } }),
     );
 
-    let servers = plugin_servers(&[plugin(&bare, "bare"), plugin(&wrapped, "wrapped")], &[]);
+    let servers = plugin_servers(&[plugin(&bare, "bare"), plugin(&wrapped, "wrapped")]);
 
     assert_eq!(
         ids(&servers),
@@ -40,80 +56,134 @@ fn reads_a_bare_or_wrapped_mcp_json_at_the_plugin_root() {
     );
     assert_eq!(servers[0].system, "http");
     assert_eq!(servers[1].source, "node s.js");
+    let plugin_ids: Vec<_> = servers
+        .iter()
+        .map(|server| server.plugin_id.as_deref())
+        .collect();
+    assert_eq!(plugin_ids, [Some("bare@acme"), Some("wrapped@acme")]);
+    assert!(servers.iter().all(|server| server.projects.is_empty()));
     let _ = fs::remove_dir_all(root);
 }
 
-/// The manifest's `mcpServers` may be inline, a path, or a list of either, and adds to
-/// `.mcp.json`; a name defined in both is the manifest's.
 #[test]
-fn reads_every_form_of_the_manifest_key_and_lets_it_win_a_shared_name() {
-    let root = scratch_dir("claude-mcp-plugin-manifest");
-    write(
-        &root.join(".claude-plugin").join("plugin.json"),
-        serde_json::json!({
-            "name": "tools",
-            "mcpServers": [
-                { "inline": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/inline" } },
-                "./servers/extra.json",
-                "../outside.json"
-            ]
-        }),
+fn reads_a_manifest_that_declares_one_inline_map() {
+    let root = scratch_dir("claude-mcp-manifest-inline");
+    manifest(
+        &root,
+        serde_json::json!({ "inline": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/inline" } }),
     );
+
+    let servers = plugin_servers(&[plugin(&root, "tools")]);
+
+    assert_eq!(ids(&servers), ["plugin:tools:inline"]);
+    assert_eq!(servers[0].source, "${CLAUDE_PLUGIN_ROOT}/bin/inline");
+    assert!(!servers[0].togglable);
+    assert_eq!(servers[0].origin, ORIGIN_PLUGIN);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn reads_a_manifest_that_names_one_file() {
+    let root = scratch_dir("claude-mcp-manifest-path");
+    manifest(&root, serde_json::json!("./servers/extra.json"));
     write(
         &root.join("servers").join("extra.json"),
         serde_json::json!({ "mcpServers": { "extra": { "command": "extra" } } }),
+    );
+
+    let servers = plugin_servers(&[plugin(&root, "tools")]);
+
+    assert_eq!(ids(&servers), ["plugin:tools:extra"]);
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Claude Code 2.1.281 merges a plugin's servers into one map: `.mcp.json` first, then each
+/// manifest entry in order, a later entry replacing an earlier one of the same name.
+#[test]
+fn a_later_source_replaces_a_server_of_the_same_name() {
+    let root = scratch_dir("claude-mcp-merge-order");
+    write(
+        &root.join(".mcp.json"),
+        serde_json::json!({
+            "search": { "command": "from-mcp-json" },
+            "rooted": { "command": "rooted" }
+        }),
+    );
+    write(
+        &root.join("servers").join("first.json"),
+        serde_json::json!({ "search": { "command": "from-first-file" }, "extra": { "command": "first-extra" } }),
+    );
+    manifest(
+        &root,
+        serde_json::json!([
+            "./servers/first.json",
+            { "extra": { "command": "from-inline" } },
+            "../outside.json"
+        ]),
     );
     write(
         &root.parent().unwrap().join("outside.json"),
         serde_json::json!({ "escaped": { "command": "nope" } }),
     );
-    write(
-        &root.join(".mcp.json"),
-        serde_json::json!({
-            "inline": { "command": "shadowed" },
-            "rooted": { "command": "rooted" }
-        }),
-    );
 
-    let servers = plugin_servers(&[plugin(&root, "tools")], &[]);
+    let servers = plugin_servers(&[plugin(&root, "tools")]);
 
+    let mut seen = sources(&servers);
+    seen.sort_unstable();
     assert_eq!(
-        ids(&servers),
+        seen,
         [
-            "plugin:tools:inline",
-            "plugin:tools:extra",
-            "plugin:tools:rooted"
+            ("extra", "from-inline"),
+            ("rooted", "rooted"),
+            ("search", "from-first-file"),
         ]
     );
-    assert_eq!(servers[0].source, "${CLAUDE_PLUGIN_ROOT}/bin/inline");
-    assert!(servers.iter().all(|server| !server.togglable));
-    assert!(servers.iter().all(|server| server.origin == ORIGIN_PLUGIN));
-    assert!(servers.iter().all(|server| server.via == "tools"));
     let _ = fs::remove_dir_all(root);
 }
 
+/// An MCP bundle (`.mcpb`, and the older `.dxt`) is an archive Claude Code installs; on-n-off
+/// does not open it, whatever it holds.
 #[test]
-fn a_plugin_server_the_user_disabled_by_its_scoped_name_is_off() {
-    let root = scratch_dir("claude-mcp-plugin-disabled");
+fn bundle_entries_are_skipped() {
+    let root = scratch_dir("claude-mcp-bundles");
+    manifest(
+        &root,
+        serde_json::json!(["./server.mcpb", "./legacy.DXT", "./servers/real.json"]),
+    );
+    for name in ["server.mcpb", "legacy.DXT"] {
+        write(
+            &root.join(name),
+            serde_json::json!({ "bundled": { "command": "bundled" } }),
+        );
+    }
     write(
-        &root.join(".mcp.json"),
-        serde_json::json!({
-            "tracker": { "type": "http", "url": "https://tracker.example/mcp" },
-            "search": { "command": "search", "disabled": true },
-            "notes": { "command": "notes" }
-        }),
+        &root.join("servers").join("real.json"),
+        serde_json::json!({ "real": { "command": "real" } }),
     );
 
-    let servers = plugin_servers(&[plugin(&root, "kit")], &["plugin:kit:tracker".to_string()]);
+    let servers = plugin_servers(&[plugin(&root, "tools")]);
 
-    let states: Vec<_> = servers
-        .iter()
-        .map(|server| (server.name.as_str(), server.enabled))
-        .collect();
-    assert_eq!(
-        states,
-        [("tracker", false), ("search", false), ("notes", true)]
-    );
+    assert_eq!(ids(&servers), ["plugin:tools:real"]);
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Names only collide within one plugin: two plugins that each bring a `search` are two rows.
+#[test]
+fn two_plugins_may_bring_servers_of_the_same_name() {
+    let root = scratch_dir("claude-mcp-two-plugins");
+    for name in ["alpha", "beta"] {
+        write(
+            &root.join(name).join(".mcp.json"),
+            serde_json::json!({ "search": { "command": name } }),
+        );
+    }
+
+    let servers = plugin_servers(&[
+        plugin(&root.join("alpha"), "alpha"),
+        plugin(&root.join("beta"), "beta"),
+    ]);
+
+    assert_eq!(ids(&servers), ["plugin:alpha:search", "plugin:beta:search"]);
     let _ = fs::remove_dir_all(root);
 }
 
@@ -127,13 +197,10 @@ fn a_plugin_without_servers_or_with_a_broken_file_brings_none() {
     );
     fs::write(broken.join(".mcp.json"), "{ torn").unwrap();
 
-    let servers = plugin_servers(
-        &[
-            plugin(&root.join("empty"), "empty"),
-            plugin(&broken, "broken"),
-        ],
-        &[],
-    );
+    let servers = plugin_servers(&[
+        plugin(&root.join("empty"), "empty"),
+        plugin(&broken, "broken"),
+    ]);
 
     assert!(servers.is_empty(), "{servers:?}");
     let _ = fs::remove_dir_all(root);
@@ -169,7 +236,7 @@ fn groups_local_servers_by_definition() {
             (
                 server.id.as_str(),
                 server.source.as_str(),
-                server.via.as_str(),
+                server.projects.clone(),
                 server.enabled,
             )
         })
@@ -177,18 +244,131 @@ fn groups_local_servers_by_definition() {
     assert_eq!(
         rows,
         [
-            ("local:db", "db", "tools", true),
-            ("local:db#2", "db --ro", "api", true),
-            ("local:docs", "https://docs.example/mcp", "2 projects", true),
+            (
+                "local:db",
+                "db",
+                vec!["C:\\Users\\me\\acme\\tools".to_string()],
+                true
+            ),
+            (
+                "local:db#2",
+                "db --ro",
+                vec!["/Users/me/acme/api".to_string()],
+                true
+            ),
+            (
+                "local:docs",
+                "https://docs.example/mcp",
+                vec![
+                    "/Users/me/acme/api".to_string(),
+                    "/Users/me/acme/webapp".to_string()
+                ],
+                true
+            ),
         ]
     );
-    assert!(servers
-        .iter()
-        .all(|server| !server.togglable && server.origin == ORIGIN_LOCAL));
+    assert!(servers.iter().all(|server| !server.togglable
+        && server.origin == ORIGIN_LOCAL
+        && server.plugin_id.is_none()));
+}
+
+/// Claude Code reads `disabledMcpServers` from the project's own entry (2.1.281): a server the
+/// only project keeping it switched off is off here too.
+#[test]
+fn a_local_server_its_project_disabled_is_off() {
+    let config = serde_json::json!({
+        "projects": {
+            "/Users/me/acme/webapp": {
+                "mcpServers": { "scratchpad": { "command": "node", "args": ["pad.js"] } },
+                "disabledMcpServers": ["scratchpad"]
+            }
+        }
+    });
+
+    let servers = local_servers(&config);
+
+    assert_eq!(ids(&servers), ["local:scratchpad"]);
+    assert!(!servers[0].enabled);
 }
 
 #[test]
 fn no_projects_means_no_local_servers() {
     assert!(local_servers(&serde_json::json!({ "mcpServers": {} })).is_empty());
     assert!(local_servers(&Value::Null).is_empty());
+}
+
+fn server(id: &str, origin: &str) -> McpServerDto {
+    McpServerDto {
+        id: id.to_string(),
+        name: id.rsplit(':').next().unwrap().to_string(),
+        system: "stdio".to_string(),
+        source: "run".to_string(),
+        enabled: true,
+        togglable: origin.is_empty(),
+        origin: origin.to_string(),
+        plugin_id: None,
+        projects: Vec::new(),
+    }
+}
+
+/// Inside a project, what that project's `~/.claude.json` entry says: its local servers, off when
+/// its `disabledMcpServers` names them; the plugin servers it switched off by their scoped name;
+/// and none of the rows that stand for servers kept for particular projects.
+#[test]
+fn a_project_view_applies_that_projects_own_disabled_list() {
+    let config = serde_json::json!({
+        "disabledMcpServers": ["plugin:kit:search"],
+        "projects": {
+            "E:/dev/app": {
+                "mcpServers": {
+                    "docs": { "type": "http", "url": "https://docs.example/mcp" },
+                    "db": { "command": "db" }
+                },
+                "disabledMcpServers": ["docs", "plugin:kit:tracker"]
+            },
+            "/Users/me/acme/other": {
+                "disabledMcpServers": ["db", "plugin:kit:search"]
+            }
+        }
+    });
+    let mut servers = vec![
+        server("github", ""),
+        server("plugin:kit:tracker", ORIGIN_PLUGIN),
+        server("plugin:kit:search", ORIGIN_PLUGIN),
+        server("local:docs", ORIGIN_LOCAL),
+    ];
+
+    let own = project_servers(&mut servers, &config, Path::new("E:\\dev\\app"));
+
+    let view: Vec<_> = servers
+        .iter()
+        .map(|server| (server.id.as_str(), server.enabled))
+        .collect();
+    assert_eq!(
+        view,
+        [
+            ("github", true),
+            ("plugin:kit:tracker", false),
+            ("plugin:kit:search", true),
+        ]
+    );
+    let own: Vec<_> = own
+        .iter()
+        .map(|server| (server.id.as_str(), server.enabled))
+        .collect();
+    assert_eq!(own, [("docs", false), ("db", true)]);
+}
+
+#[test]
+fn a_project_with_no_entry_keeps_every_plugin_server_on() {
+    let mut servers = vec![server("plugin:kit:tracker", ORIGIN_PLUGIN)];
+
+    let own = project_servers(
+        &mut servers,
+        &Value::Null,
+        Path::new("/Users/me/acme/webapp"),
+    );
+
+    assert!(own.is_empty());
+    assert!(servers[0].enabled);
 }
