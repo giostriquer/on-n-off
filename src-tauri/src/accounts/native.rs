@@ -673,7 +673,7 @@ impl Drop for NativeLocks {
 }
 
 /// Metadata projection from the backend selected by native Codex config. No credential leaves
-/// accounts here; `codex_access` is the one projection that carries the access token.
+/// accounts here; `codex_metadata_and_access` is the one projection that carries the access token.
 pub(crate) fn codex_metadata(config_home: &Path) -> Result<Option<(String, Value)>, String> {
     match codex_login(config_home)? {
         Some(login) => codex_identity(&login),
@@ -733,28 +733,35 @@ pub(crate) struct CodexAccess {
     pub token: model::AccessToken,
 }
 
-/// `codex_metadata` plus the login's access token, read in the same single pass over the native
-/// store. `None` for no login, or one without an access token.
-pub(crate) fn codex_access(config_home: &Path) -> Result<Option<CodexAccess>, String> {
+/// A metadata projection: the observation key and the workspace claims (`codex_metadata`).
+pub(crate) type CodexMetadata = (String, Value);
+
+/// `codex_metadata`, and the login's access projection when it holds an access token, from one
+/// read of the native store: the signed-in read's identity check after the app-server handshake
+/// takes it for a workspace plan, so the spending read costs no read of its own. `None` for no
+/// login; the access is `None` for a login without an access token.
+pub(crate) fn codex_metadata_and_access(
+    config_home: &Path,
+) -> Result<Option<(CodexMetadata, Option<CodexAccess>)>, String> {
     let Some(login) = codex_login(config_home)? else {
         return Ok(None);
     };
     let Some((observation_key, claims)) = codex_identity(&login)? else {
         return Ok(None);
     };
-    let Ok(token) = model::string(&login.auth, "/tokens/access_token") else {
-        return Ok(None);
+    let access = match model::string(&login.auth, "/tokens/access_token") {
+        Ok(token) => Some(CodexAccess {
+            observation_key: observation_key.clone(),
+            workspace_id: claims
+                .get("chatgpt_account_id")
+                .and_then(Value::as_str)
+                .ok_or("Missing native account claims.")?
+                .to_string(),
+            token: model::AccessToken::new(token),
+        }),
+        Err(_) => None,
     };
-    let workspace_id = claims
-        .get("chatgpt_account_id")
-        .and_then(Value::as_str)
-        .ok_or("Missing native account claims.")?
-        .to_string();
-    Ok(Some(CodexAccess {
-        observation_key,
-        workspace_id,
-        token: model::AccessToken::new(token),
-    }))
+    Ok(Some(((observation_key, claims), access)))
 }
 
 #[cfg(test)]

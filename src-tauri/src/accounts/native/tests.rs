@@ -341,34 +341,40 @@ fn codex_login(root: &Path, access_token: Option<&str>) {
 
 /// Only the access token leaves accounts, beside the key the card is known by and its workspace.
 #[test]
-fn codex_access_carries_only_the_access_token_with_the_cards_identity() {
+fn the_access_projection_carries_only_the_access_token_with_the_cards_identity() {
     let root = tempfile::tempdir().unwrap();
     codex_login(root.path(), Some("fixture-access"));
 
-    let access = codex_access(root.path()).unwrap().unwrap();
+    let (metadata, access) = codex_metadata_and_access(root.path()).unwrap().unwrap();
+    let access = access.unwrap();
 
     assert_eq!(
-        access.observation_key,
-        codex_metadata(root.path()).unwrap().unwrap().0
+        Some(&metadata),
+        codex_metadata(root.path()).unwrap().as_ref()
     );
+    assert_eq!(access.observation_key, metadata.0);
     assert_eq!(access.workspace_id, "team");
     assert_eq!(access.token.authorization(), "Bearer fixture-access");
 }
 
 #[test]
-fn a_codex_login_without_an_access_token_gives_no_access() {
+fn a_codex_login_without_an_access_token_gives_its_identity_and_no_access() {
     let root = tempfile::tempdir().unwrap();
     codex_login(root.path(), None);
 
-    assert!(codex_access(root.path()).unwrap().is_none());
-    assert!(codex_access(tempfile::tempdir().unwrap().path())
-        .unwrap()
-        .is_none());
+    let (metadata, access) = codex_metadata_and_access(root.path()).unwrap().unwrap();
+    assert_eq!(Some(metadata), codex_metadata(root.path()).unwrap());
+    assert!(access.is_none());
+    assert!(
+        codex_metadata_and_access(tempfile::tempdir().unwrap().path())
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// Reading the token must not loosen the identity rules `codex_metadata` enforces.
 #[test]
-fn codex_access_refuses_a_login_whose_claims_name_another_workspace() {
+fn the_access_projection_refuses_a_login_whose_claims_name_another_workspace() {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     let root = tempfile::tempdir().unwrap();
     let claims = json!({"https://api.openai.com/auth":{"chatgpt_account_id":"other","chatgpt_user_id":"user"}});
@@ -380,5 +386,5 @@ fn codex_access_refuses_a_login_whose_claims_name_another_workspace() {
     )
     .unwrap();
 
-    assert!(codex_access(root.path()).is_err());
+    assert!(codex_metadata_and_access(root.path()).is_err());
 }

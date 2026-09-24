@@ -241,15 +241,13 @@ fn a_successful_read_does_not_hold_the_next_one_back() {
     assert_eq!(requests.join().unwrap().len(), 2);
 }
 
-/// The signed-in login, as the accounts projection hands it over.
-fn access(key: &str) -> impl Fn(&Path) -> Result<Option<CodexAccess>, String> + '_ {
-    move |_| {
-        Ok(Some(CodexAccess {
-            observation_key: key.to_string(),
-            workspace_id: "team".to_string(),
-            token: AccessToken::new("native-access"),
-        }))
-    }
+/// The signed-in login's access projection, as the read's identity check hands it over.
+fn access(key: &str) -> Option<CodexAccess> {
+    Some(CodexAccess {
+        observation_key: key.to_string(),
+        workspace_id: "team".to_string(),
+        token: AccessToken::new("native-access"),
+    })
 }
 
 /// The signed-in card has no token of its own (app-server reads it), so its login's access token is
@@ -264,10 +262,9 @@ fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
     );
 
     let spent = signed_in_with(
-        Path::new("/fixture/.codex"),
+        access(&key),
         Some(&key),
         Some("self_serve_business_prolite"),
-        &access(&key),
         &url,
         now(),
     );
@@ -281,38 +278,27 @@ fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
     assert_eq!(spent.map(|spent| spent.last_7_days), Some(18303.4));
 }
 
-/// A personal plan pools nothing, so its token is not even read.
+/// A personal plan pools nothing and is never asked, whatever access it is handed.
 #[test]
-fn a_personal_signed_in_card_never_reads_the_token() {
+fn a_personal_signed_in_card_is_never_asked() {
+    let (listener, url) = never_asked();
     for plan in [Some("pro"), Some("plus"), None] {
-        let spent = signed_in_with(
-            Path::new("/fixture/.codex"),
-            Some("acct"),
-            plan,
-            &|_| panic!("a personal plan's token was read"),
-            "http://unused.test/",
-            now(),
-        );
+        let key = account("personal");
+        let spent = signed_in_with(access(&key), Some(&key), plan, &url, now());
         assert_eq!(spent, None, "{plan:?}");
     }
+    assert!(!was_asked(&listener));
 }
 
-/// The login on disk may have changed since app-server read the card; another account's token is
-/// never spent on this card, and no login at all is no figure.
+/// Another account's token is never spent on this card, and no access at all is no figure.
 #[test]
-fn a_login_that_is_no_longer_the_cards_account_is_not_asked() {
+fn access_that_is_not_the_cards_account_is_not_asked() {
     let (listener, url) = never_asked();
-    let other = account("other-login");
-    for access in [
-        &access(&other) as &dyn Fn(&Path) -> Result<Option<CodexAccess>, String>,
-        &|_| Ok(None),
-        &|_| Err("unreadable".to_string()),
-    ] {
+    for handed in [access(&account("other-login")), None] {
         let spent = signed_in_with(
-            Path::new("/fixture/.codex"),
+            handed,
             Some("the-cards-account"),
             Some("business"),
-            access,
             &url,
             now(),
         );

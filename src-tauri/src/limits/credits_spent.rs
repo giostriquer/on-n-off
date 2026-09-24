@@ -6,7 +6,6 @@
 //! figure a member can see. The workspace-wide endpoint the app's admins read answers a member 403.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -197,34 +196,27 @@ fn backoff_delay(count: u32, interval: Duration) -> Duration {
 /// card without handing one over, and the saved shadow of the signed-in login is never polled.
 /// Using the native login's access token for this one read-only GET is the user's decision
 /// (2026-09-24), an exception to Codex alone making requests for the signed-in account. It is
-/// asked only for a workspace plan, and only while the login on disk is still the card's account.
+/// asked only for a workspace plan, with the access projection the read's identity check took from
+/// the login it confirmed (`codex_app_server::normalize_app_server`), and only for that card.
 pub(super) fn signed_in(
-    codex_home: &Path,
+    access: Option<CodexAccess>,
     account_id: Option<&str>,
     plan: Option<&str>,
 ) -> Option<LimitsCreditsSpentDto> {
-    signed_in_with(
-        codex_home,
-        account_id,
-        plan,
-        &crate::accounts::native::codex_access,
-        CODEX_CREDIT_USAGE_URL,
-        Utc::now(),
-    )
+    signed_in_with(access, account_id, plan, CODEX_CREDIT_USAGE_URL, Utc::now())
 }
 
 fn signed_in_with(
-    codex_home: &Path,
+    access: Option<CodexAccess>,
     account_id: Option<&str>,
     plan: Option<&str>,
-    access: &dyn Fn(&Path) -> Result<Option<CodexAccess>, String>,
     url: &str,
     now: DateTime<Utc>,
 ) -> Option<LimitsCreditsSpentDto> {
     if !plan.is_some_and(is_codex_workspace_plan) {
         return None;
     }
-    let access = access(codex_home).ok()??;
+    let access = access?;
     if account_id != Some(access.observation_key.as_str()) {
         return None;
     }
