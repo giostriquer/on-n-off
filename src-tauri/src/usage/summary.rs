@@ -21,13 +21,17 @@ use super::aggregate::{
     UsageBucket,
 };
 use super::cache_io::atomic_write;
+use super::history::{
+    clear_history, fold_cutoff_ms, fold_due, history_path_for, load_history, persist_history,
+    FoldedRow, LoadedHistory, UsageHistory,
+};
 use super::pricing::{ensure_rates, LITELLM_RATES_URL};
 use super::scan_cache::{
     decode_scan_cache, encode_scan_cache, prune_scan_cache, PruneOptions, ScanCache,
 };
 use super::source_index::{
     inventory_sources, normalize_path, prepare_sources, reconcile_inventory, source_index_path_for,
-    unchanged_snapshot, SourceRoot,
+    unchanged_snapshot, SourceRoot, SourceSnapshot,
 };
 use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_for, summary_key};
 use super::transcripts::{richest_copies, UsageProvider as Provider};
@@ -118,6 +122,148 @@ fn resolve_codex_transcript_dir(home: &Path) -> PathBuf {
 /// recorded is still Codex usage, reported under the same source as `sessions/`.
 fn resolve_codex_archive_dir(home: &Path) -> PathBuf {
     codex_root_for(home).join("archived_sessions")
+}
+
+/// The files a usage read keeps under `~/.on-n-off/`.
+struct UsagePaths {
+    scan_cache: PathBuf,
+    summary: PathBuf,
+    source_index: PathBuf,
+    history: PathBuf,
+}
+
+impl UsagePaths {
+    fn for_home(home: &Path) -> Self {
+        Self {
+            scan_cache: scan_cache_path_for(home),
+            summary: summary_cache_path_for(home),
+            source_index: source_index_path_for(home),
+            history: history_path_for(home),
+        }
+    }
+}
+
+/// One source per provider, shown under its first root; a source may scan several roots.
+fn source_roots_for(home: &Path) -> [(Provider, Vec<SourceRoot>); 2] {
+    [
+        (Provider::Claude, vec![resolve_claude_transcript_dir(home)]),
+        (
+            Provider::Codex,
+            vec![
+                resolve_codex_transcript_dir(home),
+                resolve_codex_archive_dir(home),
+            ],
+        ),
+    ]
+    .map(|(provider, paths)| {
+        let roots: Vec<SourceRoot> = paths
+            .into_iter()
+            .map(|path| SourceRoot { provider, path })
+            .collect();
+        (provider, roots)
+    })
+}
+
+/// The usage history as a read found it (see `history`).
+enum HistoryState {
+    /// Folds may add to it; a history not written yet starts empty.
+    Writable {
+        history: UsageHistory,
+        recovered: bool,
+    },
+    /// It does not read: counted around, never folded over or written.
+    Unreadable,
+}
+
+impl HistoryState {
+    fn load(path: &Path) -> Self {
+        match load_history(path) {
+            LoadedHistory::Missing => Self::Writable {
+                history: UsageHistory::default(),
+                recovered: false,
+            },
+            LoadedHistory::Ready { history, recovered } => Self::Writable { history, recovered },
+            LoadedHistory::Unreadable => Self::Unreadable,
+        }
+    }
+
+    fn folded_through_ms(&self) -> Option<i64> {
+        match self {
+            Self::Writable { history, .. } => history.folded_through_ms(),
+            Self::Unreadable => None,
+        }
+    }
+
+    fn rows(&self) -> &[FoldedRow] {
+        match self {
+            Self::Writable { history, .. } => history.rows(),
+            Self::Unreadable => &[],
+        }
+    }
+
+    /// Folds the records that have aged past the cutoff, when a fold is due and every one of them
+    /// can be read: every root walked, and every transcript that may hold one read now or from
+    /// its cached parse. A transcript still being written counts what it holds; its records old
+    /// enough to fold were written days ago. Returns whether the scan cache gained a parse.
+    fn fold_if_due(
+        &mut self,
+        snapshot: &SourceSnapshot,
+        file_cache: &mut ScanCache,
+        path: &Path,
+        now_ms: i64,
+    ) -> bool {
+        let Self::Writable { history, recovered } = self else {
+            return false;
+        };
+        let through = history.folded_through_ms();
+        if !fold_due(through, now_ms) || !snapshot.walked_every_root() {
+            return false;
+        }
+        let prepared = prepare_sources(snapshot, file_cache, i64::MIN, through);
+        if prepared.unread_files > 0 {
+            return prepared.scan_cache_dirty;
+        }
+        let records = richest_copies(prepared.files.iter().map(|file| file.records.as_slice()));
+        let mut folded = history.clone();
+        folded.fold(records, fold_cutoff_ms(now_ms), now_ms);
+        match persist_history(path, &folded, *recovered) {
+            Ok(()) => {
+                *history = folded;
+                *recovered = false;
+            }
+            Err(error) => eprintln!("usage history: could not save a fold: {error}"),
+        }
+        prepared.scan_cache_dirty
+    }
+}
+
+/// Drops what the scan cache no longer needs (deleted, outside every root, or folded) and saves
+/// it when anything changed.
+fn prune_and_persist_scan_cache(
+    path: &Path,
+    file_cache: &mut ScanCache,
+    snapshot: &SourceSnapshot,
+    roots: &[SourceRoot],
+    folded_through_ms: Option<i64>,
+    dirty: bool,
+) {
+    let live_paths = snapshot.live_paths();
+    let active_roots: Vec<String> = roots
+        .iter()
+        .map(|root| normalize_path(&root.path))
+        .collect();
+    let pruned = prune_scan_cache(
+        file_cache,
+        PruneOptions {
+            live_paths: &live_paths,
+            active_roots: &active_roots,
+            walked_roots: snapshot.successfully_walked_root_paths(),
+            folded_through_ms,
+        },
+    );
+    if dirty || pruned > 0 {
+        persist_scan_cache(path, file_cache);
+    }
 }
 
 fn parse_iso_ms(value: &str) -> Option<i64> {
@@ -211,13 +357,74 @@ fn missing_source(provider: Provider, dir: &Path) -> UsageSourceDto {
 
 /// Scan local transcripts and return aggregated usage (priced when rates exist).
 pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, AdapterError> {
-    read_summary_from(input, user_home)
+    read_summary_from(input, user_home, now_ms())
+}
+
+/// Folds what has aged past the cutoff without reading a summary, so usage is kept even when the
+/// Usage screen is never opened. Reads only the history file unless a fold is due.
+pub(crate) fn fold_history_in(home: &Path, now_ms: i64) -> Result<(), AdapterError> {
+    let paths = UsagePaths::for_home(home);
+    let roots: Vec<SourceRoot> = source_roots_for(home)
+        .into_iter()
+        .flat_map(|(_, roots)| roots)
+        .collect();
+    let _cache_guard = usage_cache_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut history = HistoryState::load(&paths.history);
+    if matches!(history, HistoryState::Unreadable) || !fold_due(history.folded_through_ms(), now_ms)
+    {
+        return Ok(());
+    }
+    let inventory = inventory_sources(&roots);
+    let mut file_cache = load_scan_cache(&paths.scan_cache);
+    let (snapshot, mut dirty) = match unchanged_snapshot(&paths.source_index, &inventory) {
+        Some(snapshot) => (snapshot, false),
+        None => {
+            let reconciled = reconcile_inventory(
+                &paths.source_index,
+                inventory,
+                &mut file_cache,
+                history.folded_through_ms(),
+            );
+            (reconciled.snapshot, reconciled.scan_cache_dirty)
+        }
+    };
+    dirty |= history.fold_if_due(&snapshot, &mut file_cache, &paths.history, now_ms);
+    prune_and_persist_scan_cache(
+        &paths.scan_cache,
+        &mut file_cache,
+        &snapshot,
+        &roots,
+        history.folded_through_ms(),
+        dirty,
+    );
+    Ok(())
+}
+
+/// Forgets every folded row. Usage whose transcript is still on disk is counted from it again and
+/// folded again once due; usage only the history held is gone.
+pub(crate) fn clear_history_in(home: &Path) -> Result<(), AdapterError> {
+    let paths = UsagePaths::for_home(home);
+    let _cache_guard = usage_cache_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let io_error = |error: std::io::Error| {
+        AdapterError::message(format!("Could not clear the usage history: {error}"))
+    };
+    clear_history(&paths.history).map_err(io_error)?;
+    // A stored summary counted the cleared rows; the source signature alone would not notice.
+    match std::fs::remove_file(&paths.summary) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(io_error(error)),
+        _ => Ok(()),
+    }
 }
 
 /// The home is resolved only once the input has passed validation, as `read_summary` always has.
 fn read_summary_from(
     input: UsageSummaryInput,
     home: impl FnOnce() -> Result<PathBuf, AdapterError>,
+    fold_now_ms: i64,
 ) -> Result<UsageSummaryDto, AdapterError> {
     if input.since_day > input.until_day {
         return Err(AdapterError::message(format!(
@@ -264,31 +471,13 @@ fn read_summary_from(
     let started = Instant::now();
     let started_ms = now_ms();
     let home = home()?;
-    let cache_path = scan_cache_path_for(&home);
-    let summary_path = summary_cache_path_for(&home);
-    let source_index_path = source_index_path_for(&home);
+    let paths = UsagePaths::for_home(&home);
     // Rates first: the table's age is part of the summary key, so a re-fetched table (a model
     // released today, a price change) never serves a summary priced with the old one. The
     // parsed table is memoised on the file, so this costs one metadata read on the fast path.
     let rates = ensure_rates(&home, started_ms, input.force);
     let key = summary_key(&input, rates.fetched_at_ms);
-    // One source per provider, shown under its first root; a source may scan several roots.
-    let claude_dir = resolve_claude_transcript_dir(&home);
-    let codex_dir = resolve_codex_transcript_dir(&home);
-    let source_roots = [
-        (Provider::Claude, vec![claude_dir]),
-        (
-            Provider::Codex,
-            vec![codex_dir, resolve_codex_archive_dir(&home)],
-        ),
-    ]
-    .map(|(provider, paths)| {
-        let roots: Vec<SourceRoot> = paths
-            .into_iter()
-            .map(|path| SourceRoot { provider, path })
-            .collect();
-        (provider, roots)
-    });
+    let source_roots = source_roots_for(&home);
     let roots: Vec<SourceRoot> = source_roots
         .iter()
         .flat_map(|(_, roots)| roots.iter().cloned())
@@ -300,54 +489,63 @@ fn read_summary_from(
             .unwrap_or(0)
     }) - MTIME_SLACK_MS;
 
-    let (source_snapshot, source_signature, prepared_sources) = {
+    let (source_snapshot, source_signature, prepared_sources, history) = {
         let _cache_guard = usage_cache_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let inventory = inventory_sources(&roots);
-        let unchanged = unchanged_snapshot(&source_index_path, &inventory);
+        let unchanged = unchanged_snapshot(&paths.source_index, &inventory);
         if let Some(snapshot) = unchanged.as_ref() {
             let signature = snapshot.signature(signature_start_ms, signature_end_ms);
             if snapshot.is_complete() && !input.force {
-                if let Some(hit) = load_summary_hit(&summary_path, &key, &signature) {
+                if let Some(hit) = load_summary_hit(&paths.summary, &key, &signature) {
                     return Ok(hit);
                 }
             }
         }
 
-        let mut file_cache = load_scan_cache(&cache_path);
-        let (source_snapshot, scan_cache_dirty, summary_already_checked) = if let Some(snapshot) =
-            unchanged
-        {
-            (snapshot, false, true)
-        } else {
-            let reconciled = reconcile_inventory(&source_index_path, inventory, &mut file_cache);
-            (reconciled.snapshot, reconciled.scan_cache_dirty, false)
-        };
+        let mut file_cache = load_scan_cache(&paths.scan_cache);
+        let mut history = HistoryState::load(&paths.history);
+        let (source_snapshot, mut scan_cache_dirty, summary_already_checked) =
+            if let Some(snapshot) = unchanged {
+                (snapshot, false, true)
+            } else {
+                let reconciled = reconcile_inventory(
+                    &paths.source_index,
+                    inventory,
+                    &mut file_cache,
+                    history.folded_through_ms(),
+                );
+                (reconciled.snapshot, reconciled.scan_cache_dirty, false)
+            };
         let source_signature = source_snapshot.signature(signature_start_ms, signature_end_ms);
         if !summary_already_checked && source_snapshot.is_complete() && !input.force {
-            if let Some(hit) = load_summary_hit(&summary_path, &key, &source_signature) {
+            if let Some(hit) = load_summary_hit(&paths.summary, &key, &source_signature) {
                 return Ok(hit);
             }
         }
-        let prepared_sources = prepare_sources(&source_snapshot, &mut file_cache, window_start_ms);
-        let live_paths = source_snapshot.live_paths();
-        let active_roots: Vec<String> = roots
-            .iter()
-            .map(|root| normalize_path(&root.path))
-            .collect();
-        let pruned = prune_scan_cache(
+        scan_cache_dirty |= history.fold_if_due(
+            &source_snapshot,
             &mut file_cache,
-            PruneOptions {
-                live_paths: &live_paths,
-                active_roots: &active_roots,
-                walked_roots: source_snapshot.successfully_walked_root_paths(),
-            },
+            &paths.history,
+            fold_now_ms,
         );
-        if scan_cache_dirty || prepared_sources.scan_cache_dirty || pruned > 0 {
-            persist_scan_cache(&cache_path, &file_cache);
-        }
-        (source_snapshot, source_signature, prepared_sources)
+        let folded_through_ms = history.folded_through_ms();
+        let prepared_sources = prepare_sources(
+            &source_snapshot,
+            &mut file_cache,
+            window_start_ms,
+            folded_through_ms,
+        );
+        prune_and_persist_scan_cache(
+            &paths.scan_cache,
+            &mut file_cache,
+            &source_snapshot,
+            &roots,
+            folded_through_ms,
+            scan_cache_dirty || prepared_sources.scan_cache_dirty,
+        );
+        (source_snapshot, source_signature, prepared_sources, history)
     };
 
     let rates_arc = rates.table.clone();
@@ -372,13 +570,27 @@ fn read_summary_from(
             .iter()
             .map(|file| file.records.as_slice()),
     );
+    // Below the watermark the history is the count: a transcript's copy of a folded record, a
+    // resumed session's included, is not counted again.
+    let folded_through_ms = history.folded_through_ms();
     let mut session_ids: HashMap<Provider, HashSet<&str>> = HashMap::new();
-    for record in records {
+    for record in records
+        .into_iter()
+        .filter(|record| folded_through_ms.is_none_or(|through| record.timestamp_ms >= through))
+    {
         if aggregator.add(record) && !record.session_id.is_empty() {
             session_ids
                 .entry(record.provider)
                 .or_default()
                 .insert(&record.session_id);
+        }
+    }
+    for row in history.rows() {
+        if aggregator.add_folded(row) {
+            session_ids
+                .entry(row.provider)
+                .or_default()
+                .extend(row.sessions.iter().map(String::as_str));
         }
     }
 
@@ -442,10 +654,10 @@ fn read_summary_from(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if source_snapshot.is_complete()
             && prepared_sources.complete
-            && source_snapshot.persisted_generation_is_current(&source_index_path)
+            && source_snapshot.persisted_generation_is_current(&paths.source_index)
             && source_snapshot.inventory_is_current(&roots)
         {
-            store_summary(&summary_path, &key, &source_signature, &dto);
+            store_summary(&paths.summary, &key, &source_signature, &dto);
         }
     }
 

@@ -185,6 +185,7 @@ fn prune_keeps_live_history_and_incomplete_roots() {
             live_paths: &live,
             active_roots: &active_roots,
             walked_roots: &walked_roots,
+            folded_through_ms: None,
         },
     );
     assert_eq!(removed, 2);

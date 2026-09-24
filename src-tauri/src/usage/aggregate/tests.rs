@@ -1,4 +1,5 @@
 use super::*;
+use crate::usage::history::{FoldedRow, UsageHistory};
 
 fn record(overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
     let mut r = UsageRecord {
@@ -207,4 +208,158 @@ fn out_of_window_day_dropped() {
     );
     assert_eq!(result.buckets.len(), 0);
     assert_eq!(result.out_of_window, 1);
+}
+
+fn at(iso: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(iso)
+        .unwrap()
+        .timestamp_millis()
+}
+
+/// A day read of August, or an hourly read of `hours`, fed by `feed`.
+fn read_with(
+    time_zone: &str,
+    hours: Option<(i64, i64)>,
+    feed: impl FnOnce(&mut UsageAggregator),
+) -> AggregateResult {
+    let mut agg = UsageAggregator::new(AggregateOptions {
+        time_zone: time_zone.into(),
+        since_day: "2026-08-01".into(),
+        until_day: "2026-08-31".into(),
+        resolution: if hours.is_some() {
+            Resolution::Hour
+        } else {
+            Resolution::Day
+        },
+        since_time_ms: hours.map(|(since, _)| since),
+        until_time_ms: hours.map(|(_, until)| until),
+        rates: sample_rates(),
+    })
+    .unwrap();
+    feed(&mut agg);
+    agg.finish()
+}
+
+fn fold_all(records: &[UsageRecord]) -> Vec<FoldedRow> {
+    let mut history = UsageHistory::default();
+    history.fold(records, i64::MAX, 0);
+    history.rows().to_vec()
+}
+
+fn assert_same_read(from_records: &AggregateResult, from_rows: &AggregateResult) {
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0);
+    assert_eq!(from_rows.out_of_window, from_records.out_of_window);
+    assert_eq!(from_rows.buckets.len(), from_records.buckets.len());
+    for (row, record) in from_rows.buckets.iter().zip(&from_records.buckets) {
+        let key = (&row.day, &row.hour_start, row.provider, &row.model);
+        assert_eq!(
+            key,
+            (
+                &record.day,
+                &record.hour_start,
+                record.provider,
+                &record.model
+            )
+        );
+        assert_eq!(row.totals, record.totals, "{key:?}");
+        assert_eq!(row.records, record.records, "{key:?}");
+        assert_eq!(row.unpriced_records, record.unpriced_records, "{key:?}");
+        assert_eq!(row.sessions, record.sessions, "{key:?}");
+        assert_eq!(row.cost_source, record.cost_source, "{key:?}");
+        assert!(close(row.cost_usd, record.cost_usd), "{key:?}");
+        assert!(
+            close(row.cache_savings_usd, record.cache_savings_usd),
+            "{key:?}"
+        );
+    }
+}
+
+/// Records either side of Kathmandu's midnight (UTC+5:45) and St. John's (UTC-2:30 in August),
+/// a provider-reported cost, a model with no price, a second session and one before the window.
+fn history_sample() -> Vec<UsageRecord> {
+    vec![
+        record(|r| r.timestamp_ms = at("2026-08-07T18:14:59.999Z")),
+        record(|r| {
+            r.timestamp_ms = at("2026-08-07T18:15:00Z");
+            r.session_id = "session-b".into();
+        }),
+        record(|r| {
+            r.timestamp_ms = at("2026-08-07T18:16:00Z");
+            r.reported_cost_usd = Some(0.4);
+        }),
+        record(|r| {
+            r.timestamp_ms = at("2026-08-07T18:17:00Z");
+            r.model = "mystery-model".into();
+        }),
+        record(|r| {
+            r.timestamp_ms = at("2026-08-08T02:29:59Z");
+            r.provider = UsageProvider::Codex;
+            r.model = "gpt-5.6-sol".into();
+        }),
+        record(|r| r.timestamp_ms = at("2026-08-08T02:30:00Z")),
+        record(|r| r.timestamp_ms = at("2026-07-31T10:00:00Z")),
+    ]
+}
+
+#[test]
+fn folded_rows_read_like_the_records_they_hold_in_any_zone() {
+    let records = history_sample();
+    let rows = fold_all(&records);
+    for zone in [
+        "UTC",
+        "Asia/Kathmandu",
+        "America/St_Johns",
+        "America/Los_Angeles",
+    ] {
+        let from_records = read_with(zone, None, |agg| {
+            for record in &records {
+                agg.add(record);
+            }
+        });
+        let from_rows = read_with(zone, None, |agg| {
+            for row in &rows {
+                agg.add_folded(row);
+            }
+        });
+        assert!(!from_records.buckets.is_empty());
+        assert_same_read(&from_records, &from_rows);
+    }
+}
+
+#[test]
+fn folded_rows_read_like_their_records_by_the_hour() {
+    let records = history_sample();
+    let rows = fold_all(&records);
+    let hours = Some((at("2026-08-07T18:00:00Z"), at("2026-08-08T02:30:00Z")));
+    let from_records = read_with("Asia/Kathmandu", hours, |agg| {
+        for record in &records {
+            agg.add(record);
+        }
+    });
+    let from_rows = read_with("Asia/Kathmandu", hours, |agg| {
+        for row in &rows {
+            agg.add_folded(row);
+        }
+    });
+
+    assert!(from_records.buckets.len() > 1);
+    assert_same_read(&from_records, &from_rows);
+}
+
+#[test]
+fn add_folded_says_whether_the_row_was_counted() {
+    let rows = fold_all(&history_sample());
+    let inside = rows
+        .iter()
+        .find(|row| row.slot_start_ms == at("2026-08-07T18:00:00Z"))
+        .unwrap();
+    let outside = rows
+        .iter()
+        .find(|row| row.slot_start_ms == at("2026-07-31T10:00:00Z"))
+        .unwrap();
+
+    read_with("UTC", None, |agg| {
+        assert!(agg.add_folded(inside));
+        assert!(!agg.add_folded(outside));
+    });
 }

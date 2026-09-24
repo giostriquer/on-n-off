@@ -15,8 +15,13 @@ pub(super) fn read_summary_in(
     home: &Path,
     input: UsageSummaryInput,
 ) -> Result<UsageSummaryDto, AdapterError> {
-    read_summary_from(input, || Ok(home.to_path_buf()))
+    read_summary_from(input, || Ok(home.to_path_buf()), FIXTURE_NOW_MS)
 }
+
+/// The instant [`read_summary_in`] reads at: 2020-01-08, a week after `full_time_input` opens,
+/// so no fixture is old enough to fold and a read counts every record from its transcript. The
+/// history tests read at their own instants.
+pub(super) const FIXTURE_NOW_MS: i64 = 1_578_441_600_000;
 
 /// [`read_summary_in`] with the rate table's fetch failing, as it does offline.
 pub(super) fn read_offline(home: &Path, input: UsageSummaryInput) -> UsageSummaryDto {

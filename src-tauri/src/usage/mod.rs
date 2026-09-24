@@ -2,6 +2,7 @@
 
 mod aggregate;
 pub(crate) mod cache_io;
+mod history;
 mod pricing;
 mod reader;
 mod scan_cache;

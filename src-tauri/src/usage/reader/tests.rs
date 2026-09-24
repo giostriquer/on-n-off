@@ -15,6 +15,43 @@ fn list_finds_jsonl_by_mtime() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Claude Code sets a replaced transcript aside as `<session>.jsonl.superseded-<ms>` rather than
+/// overwriting it, and turns it dropped from the rewrite live only there.
+#[test]
+fn list_finds_superseded_transcripts_and_nothing_else() {
+    let root = scratch_dir("usage-list-superseded");
+    std::fs::create_dir_all(&root).unwrap();
+    let names = [
+        "session.jsonl",
+        "session.jsonl.superseded-1758000000000",
+        "session.jsonl.tmp",
+        "notes.txt",
+    ];
+    for name in names {
+        std::fs::write(root.join(name), "{}\n").unwrap();
+    }
+
+    let inventory = inventory_transcript_files(&root, 0);
+    let mut found: Vec<String> = inventory
+        .files
+        .iter()
+        .map(|file| {
+            file.path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    found.sort();
+
+    assert_eq!(
+        found,
+        ["session.jsonl", "session.jsonl.superseded-1758000000000"]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn read_claude_file() {
     let root = scratch_dir("usage-read");

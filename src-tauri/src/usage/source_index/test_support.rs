@@ -25,7 +25,7 @@ thread_local! {
 
 /// Run `f` while `path` grows by `line` after every parse of it. Growth changes the file's size,
 /// so a parse never sees it hold still, however coarse the filesystem's mtime.
-pub(super) fn with_live_transcript<R>(
+pub(crate) fn with_live_transcript<R>(
     path: &std::path::Path,
     line: &str,
     f: impl FnOnce() -> R,

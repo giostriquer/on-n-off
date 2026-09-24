@@ -279,6 +279,7 @@ fn incomplete_root_walk_retains_previous_entries_and_disables_hits() {
             },
         )],
         &mut cache,
+        None,
     );
     assert!(!failed.snapshot.is_complete());
     assert_eq!(failed.snapshot.generation(), generation);
@@ -308,6 +309,7 @@ fn unresolved_file_is_pending_and_retried_on_next_reconciliation() {
             },
         )],
         &mut cache,
+        None,
     );
     assert!(!pending.snapshot.is_complete());
     assert!(cache.is_empty());
@@ -444,9 +446,11 @@ fn a_changed_or_live_transcript_counts_what_it_holds_uncached_and_not_final() {
         let mut cache = ScanCache::new();
 
         let prepared = if live {
-            with_live_transcript(&path, &growth, || prepare_sources(&snapshot, &mut cache, 0))
+            with_live_transcript(&path, &growth, || {
+                prepare_sources(&snapshot, &mut cache, 0, None)
+            })
         } else {
-            prepare_sources(&snapshot, &mut cache, 0)
+            prepare_sources(&snapshot, &mut cache, 0, None)
         };
 
         let expected: &[u64] = if live { &[20, 30, 5] } else { &[20, 30] };
@@ -488,7 +492,7 @@ fn a_same_size_rewrite_since_the_inventory_counts_uncached_and_not_final() {
     rewrite_same_size_later(&path, &record("2026-08-07T04:05:13.944Z", "msg-1", 21));
     let mut cache = ScanCache::new();
 
-    let prepared = prepare_sources(&snapshot, &mut cache, 0);
+    let prepared = prepare_sources(&snapshot, &mut cache, 0, None);
 
     assert_eq!(output_tokens(&prepared), [21]);
     assert!(!prepared.complete);
@@ -509,7 +513,7 @@ fn an_unreadable_transcript_counts_its_last_cached_parse_and_is_not_final() {
     let snapshot = complete_snapshot(&home);
     std::fs::remove_file(&path).unwrap();
 
-    let prepared = prepare_sources(&snapshot, &mut stale, 0);
+    let prepared = prepare_sources(&snapshot, &mut stale, 0, None);
 
     assert_eq!(output_tokens(&prepared), [20]);
     assert!(!prepared.complete);
@@ -525,7 +529,7 @@ fn an_unchanged_transcript_missing_from_the_cache_is_read_cached_and_final() {
     let snapshot = complete_snapshot(&home);
     let mut cache = ScanCache::new();
 
-    let prepared = prepare_sources(&snapshot, &mut cache, 0);
+    let prepared = prepare_sources(&snapshot, &mut cache, 0, None);
 
     assert_eq!(output_tokens(&prepared), [20]);
     assert!(prepared.complete);
@@ -544,7 +548,7 @@ fn a_cached_parse_serves_only_when_both_size_and_mtime_match() {
     rewrite_same_size_later(&path, &record("2026-08-07T04:05:13.944Z", "msg-1", 21));
     let snapshot = complete_snapshot(&home);
 
-    let prepared = prepare_sources(&snapshot, &mut stale, 0);
+    let prepared = prepare_sources(&snapshot, &mut stale, 0, None);
 
     assert_eq!(output_tokens(&prepared), [21], "not the stale parse");
     assert!(prepared.complete);

@@ -53,7 +53,7 @@ fn walk(dir: &Path, since_ms: i64, found: &mut Vec<TranscriptFile>) -> bool {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !name.ends_with(".jsonl") {
+        if !is_transcript_name(name) {
             continue;
         }
         let Ok(meta) = entry.metadata() else {
@@ -75,6 +75,13 @@ fn walk(dir: &Path, since_ms: i64, found: &mut Vec<TranscriptFile>) -> bool {
         }
     }
     complete
+}
+
+/// A transcript, or one Claude Code set aside as `<session>.jsonl.superseded-<ms>` instead of
+/// overwriting it. Turns a rewrite dropped live only in the set-aside copy; the turns both hold
+/// share a message id and collapse to one (`transcripts::richest_copies`).
+fn is_transcript_name(name: &str) -> bool {
+    name.ends_with(".jsonl") || name.contains(".jsonl.superseded-")
 }
 
 /// Streams one transcript. `None` = read failure (do not cache as empty).

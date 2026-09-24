@@ -6,6 +6,7 @@ use std::sync::Arc;
 use chrono::{SecondsFormat, TimeZone, Utc};
 use chrono_tz::Tz;
 
+use super::history::FoldedRow;
 use super::pricing::{cache_savings_usd, price_usage, RateTable};
 use super::transcripts::{TokenTotals, UsageProvider, UsageRecord};
 
@@ -61,6 +62,16 @@ struct MutableBucket {
     sessions: HashSet<String>,
 }
 
+/// What one record, or one folded row of records, adds to its bucket.
+struct Usage<'a> {
+    at_ms: i64,
+    provider: UsageProvider,
+    model: &'a str,
+    totals: &'a TokenTotals,
+    records: u64,
+    reported_cost_usd: Option<f64>,
+}
+
 /// Folds records that are already de-duplicated (`transcripts::richest_copies`) into buckets.
 pub struct UsageAggregator {
     buckets: HashMap<String, MutableBucket>,
@@ -94,15 +105,15 @@ impl UsageAggregator {
         })
     }
 
-    /// The `(day, hour, provider, model)` bucket a record belongs to, or `None` outside the window.
-    fn bucket_key(&self, record: &UsageRecord) -> Option<String> {
+    /// The `(day, hour, provider, model)` bucket of usage at `at_ms`, or `None` outside the window.
+    fn bucket_key(&self, at_ms: i64, provider: UsageProvider, model: &str) -> Option<String> {
         if let Some((since, until)) = self.hourly {
-            if record.timestamp_ms < since || record.timestamp_ms >= until {
+            if at_ms < since || at_ms >= until {
                 return None;
             }
         }
 
-        let day = day_in_zone(record.timestamp_ms, self.zone);
+        let day = day_in_zone(at_ms, self.zone);
         if self.hourly.is_none()
             && (day.as_str() < self.options.since_day.as_str()
                 || day.as_str() > self.options.until_day.as_str())
@@ -111,7 +122,7 @@ impl UsageAggregator {
         }
 
         let hour_start = self.hourly.map(|(since, _)| {
-            let offset = ((record.timestamp_ms - since) / HOUR_MS) * HOUR_MS;
+            let offset = ((at_ms - since) / HOUR_MS) * HOUR_MS;
             ms_to_iso(since + offset)
         });
 
@@ -119,15 +130,51 @@ impl UsageAggregator {
             "{}\0{}\0{}\0{}",
             day,
             hour_start.as_deref().unwrap_or(""),
-            record.provider.as_str(),
-            record.model
+            provider.as_str(),
+            model
         ))
     }
 
     /// Counts one record into its bucket; `false` when it falls outside the window.
     pub fn add(&mut self, record: &UsageRecord) -> bool {
-        let Some(key) = self.bucket_key(record) else {
-            self.out_of_window += 1;
+        self.add_usage(
+            Usage {
+                at_ms: record.timestamp_ms,
+                provider: record.provider,
+                model: &record.model,
+                totals: &record.totals,
+                records: 1,
+                reported_cost_usd: record.reported_cost_usd,
+            },
+            [record.session_id.as_str()],
+        )
+    }
+
+    /// Counts a folded row as the records it holds: its slot never straddles a local midnight or
+    /// hour, and pricing is linear in tokens per model, so the bucket, the tokens and the cost
+    /// all come out as they would from the records. An hourly window that does not start on a
+    /// quarter hour counts the slot by its start.
+    pub fn add_folded(&mut self, row: &FoldedRow) -> bool {
+        self.add_usage(
+            Usage {
+                at_ms: row.slot_start_ms,
+                provider: row.provider,
+                model: &row.model,
+                totals: &row.totals,
+                records: row.records,
+                reported_cost_usd: row.reported.then_some(row.reported_cost_usd),
+            },
+            row.sessions.iter().map(String::as_str),
+        )
+    }
+
+    fn add_usage<'s>(
+        &mut self,
+        usage: Usage<'_>,
+        sessions: impl IntoIterator<Item = &'s str>,
+    ) -> bool {
+        let Some(key) = self.bucket_key(usage.at_ms, usage.provider, usage.model) else {
+            self.out_of_window += usage.records;
             return false;
         };
 
@@ -143,22 +190,24 @@ impl UsageAggregator {
 
         let priced = price_usage(
             &self.options.rates,
-            &record.model,
-            &record.totals,
-            record.reported_cost_usd,
+            usage.model,
+            usage.totals,
+            usage.reported_cost_usd,
         );
-        bucket.totals = bucket.totals.add(&record.totals);
+        bucket.totals = bucket.totals.add(usage.totals);
         bucket.cost_usd += priced.cost_usd;
         bucket.cache_savings_usd +=
-            cache_savings_usd(&self.options.rates, &record.model, &record.totals);
-        bucket.records += 1;
+            cache_savings_usd(&self.options.rates, usage.model, usage.totals);
+        bucket.records += usage.records;
         match priced.cost_source {
-            CostSource::Unpriced => bucket.unpriced_records += 1,
-            CostSource::ProviderReported => bucket.provider_reported_records += 1,
+            CostSource::Unpriced => bucket.unpriced_records += usage.records,
+            CostSource::ProviderReported => bucket.provider_reported_records += usage.records,
             CostSource::ModelPriced => {}
         }
-        if !record.session_id.is_empty() {
-            bucket.sessions.insert(record.session_id.clone());
+        for session in sessions {
+            if !session.is_empty() {
+                bucket.sessions.insert(session.to_string());
+            }
         }
         true
     }
