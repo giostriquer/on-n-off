@@ -13,30 +13,37 @@ use super::json::{humanize, optional_string, percent, window};
 use super::Parsed;
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsResetCreditsDto};
 
-pub(super) fn parse_profile(payload: &Value) -> Result<ClaudeIdentity, String> {
+/// What `GET /api/oauth/profile` says about the login: whose it is, and the subscription status
+/// Anthropic reports for its organization. The status never decides the read.
+pub(super) struct ClaudeProfile {
+    pub(super) identity: ClaudeIdentity,
+    /// `organization.subscription_status` as Anthropic writes it (`active`, `past_due`, …);
+    /// unknown when absent, empty or not text.
+    pub(super) subscription_status: Option<String>,
+}
+
+pub(super) fn parse_profile(payload: &Value) -> Result<ClaudeProfile, String> {
     let account = payload
         .get("account")
         .ok_or_else(|| "missing account".to_string())?;
     let organization = payload
         .get("organization")
         .ok_or_else(|| "missing organization".to_string())?;
-    Ok(ClaudeIdentity {
-        account: LimitsAccountDto {
-            legacy_id: None,
-            id: optional_string(account.get("uuid"))
-                .ok_or_else(|| "missing account uuid".to_string())?,
-            label: optional_string(account.get("email")),
+    Ok(ClaudeProfile {
+        identity: ClaudeIdentity {
+            account: LimitsAccountDto {
+                legacy_id: None,
+                id: optional_string(account.get("uuid"))
+                    .ok_or_else(|| "missing account uuid".to_string())?,
+                label: optional_string(account.get("email")),
+            },
+            organization_id: Some(
+                optional_string(organization.get("uuid"))
+                    .ok_or_else(|| "missing organization uuid".to_string())?,
+            ),
         },
-        organization_id: Some(
-            optional_string(organization.get("uuid"))
-                .ok_or_else(|| "missing organization uuid".to_string())?,
-        ),
+        subscription_status: optional_string(organization.get("subscription_status")),
     })
-}
-
-/// The profile's `organization.subscription_status`, as Anthropic writes it; unknown when absent.
-pub(super) fn subscription_status(payload: &Value) -> Option<String> {
-    optional_string(payload.pointer("/organization/subscription_status"))
 }
 
 /// Everything one usage payload says about the account: its windows and its saved resets.

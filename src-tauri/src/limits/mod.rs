@@ -353,8 +353,10 @@ fn claude_limits(
                     ("Cache-Control", "no-cache"),
                 ],
             )?;
-            let profile = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
-            let subscription_status = claude::subscription_status(&profile_payload);
+            let claude::ClaudeProfile {
+                identity: profile,
+                subscription_status,
+            } = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
             if selected_identity.as_ref().is_some_and(|selected| {
                 selected.account.id != profile.account.id
                     || selected.organization_id != profile.organization_id
