@@ -1,5 +1,4 @@
 import {
-  formatClock,
   formatObservedAt,
   formatResetAt,
   formatResetIn,
@@ -160,19 +159,13 @@ const SPENT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
 /**
  * What a business member spent lately, as a summary row: the last 7 days, the Codex app's default
- * view, with the last 30 days and how fresh the provider's data is in the note. That data trails the
- * read by hours, so an update time from an earlier day carries its date. `timeZone` is for tests; the
- * card uses the viewer's.
+ * view, with the last 30 days in the note. The provider's update time is left off the card, where it
+ * crowded the row.
  */
-export function presentCreditsSpent(spent: LimitsCreditsSpent, now: number, timeZone?: string): { value: string; note: string } {
-  const day = (iso: string | null | undefined) => formatShortDate(iso, { timeZone });
-  const clock = formatClock(spent.updatedAt, timeZone);
-  const updated = clock
-    ? `updated ${day(spent.updatedAt) === day(new Date(now).toISOString()) ? clock : `${day(spent.updatedAt)} ${clock}`}`
-    : undefined;
+export function presentCreditsSpent(spent: LimitsCreditsSpent): { value: string; note: string } {
   return {
     value: SPENT.format(spent.last7Days),
-    note: ["last 7 days", `${SPENT.format(spent.last30Days)} in 30 days`, updated].filter(Boolean).join(" · "),
+    note: `last 7 days · ${SPENT.format(spent.last30Days)} in 30 days`,
   };
 }
 

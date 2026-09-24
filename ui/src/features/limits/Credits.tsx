@@ -20,14 +20,14 @@ export function CreditsRows({ entry, now }: { entry: Pick<ProviderLimits, "provi
     <>
       {ownBalance ? <SummaryRow label="Credits" value={ownBalance.unlimited ? "Unlimited" : ownBalance.balance} /> : null}
       {share ? <WorkspaceShareRow share={share} provider={entry.provider} now={now} /> : null}
-      {spent ? <CreditsSpentRow spent={spent} now={now} /> : null}
+      {spent ? <CreditsSpentRow spent={spent} /> : null}
     </>
   );
 }
 
 /** What the member spent lately (`presentCreditsSpent`); spending has no limit to meter against. */
-function CreditsSpentRow({ spent, now }: { spent: LimitsCreditsSpent; now: number }) {
-  const { value, note } = presentCreditsSpent(spent, now);
+function CreditsSpentRow({ spent }: { spent: LimitsCreditsSpent }) {
+  const { value, note } = presentCreditsSpent(spent);
   return <SummaryRow label="Credits spent" value={value} note={note} />;
 }
 
