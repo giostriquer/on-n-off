@@ -209,10 +209,21 @@ impl ProviderLimitsDto {
     }
 
     /// A successful read whose spending read failed or was backing off could not tell what was
-    /// spent, and keeps the figure `previous` knew; one that answered replaces it.
+    /// spent, and keeps the figure `previous` knew; one that answered replaces it. Only a Codex
+    /// workspace plan is ever asked, so a card on any other plan keeps nothing: an account that
+    /// moved to a personal plan loses the figure it had on its next read.
     pub fn keep_credits_spent_from(&mut self, previous: &Self) {
-        if self.credits_spent.is_none() {
+        if self.credits_spent.is_none() && self.asks_what_was_spent() {
             self.credits_spent.clone_from(&previous.credits_spent);
         }
+    }
+
+    /// Whether this card's plan is one that is asked what it spent: a Codex workspace plan.
+    pub fn asks_what_was_spent(&self) -> bool {
+        self.provider == AgentId::Codex
+            && self
+                .plan
+                .as_deref()
+                .is_some_and(crate::limits::credits_spent::is_codex_workspace_plan)
     }
 }

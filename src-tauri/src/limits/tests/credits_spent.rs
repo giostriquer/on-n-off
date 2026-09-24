@@ -139,3 +139,37 @@ fn a_read_that_could_not_tell_what_was_spent_keeps_the_remembered_figure() {
     );
     assert_eq!(card(&listed, "acct-a").credits_spent, spent(5.0));
 }
+
+/// An account that moved to a personal plan pools nothing and is never asked again, so its next read
+/// drops the figure it had on a workspace plan, on the card and on disk.
+#[test]
+fn a_personal_plan_read_drops_the_remembered_figure() {
+    let home = scratch_dir("limits-spent-personal");
+    let store = SnapshotStore::for_home(&home);
+    aggregate_accounts(
+        &store,
+        business_card("acct-a", LimitsStatus::Ok, spent(18303.4)),
+        None,
+    );
+    let mut personal = business_card("acct-a", LimitsStatus::Ok, None);
+    personal.plan = Some("pro".to_string());
+
+    let listed = aggregate_accounts(&store, personal, None);
+
+    assert_eq!(card(&listed, "acct-a").credits_spent, None);
+    assert_eq!(store.load(AgentId::Codex)[0].credits_spent, None);
+}
+
+/// "team" is a Claude plan too; only a Codex workspace card is ever asked what it spent.
+#[test]
+fn only_a_codex_workspace_card_is_asked_what_it_spent() {
+    let mut card = business_card("acct-a", LimitsStatus::Ok, None);
+    assert!(card.asks_what_was_spent());
+
+    card.plan = Some("pro".to_string());
+    assert!(!card.asks_what_was_spent());
+
+    card.provider = AgentId::Claude;
+    card.plan = Some("team".to_string());
+    assert!(!card.asks_what_was_spent());
+}

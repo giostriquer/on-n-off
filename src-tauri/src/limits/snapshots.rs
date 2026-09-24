@@ -93,7 +93,7 @@ impl SnapshotStore {
             if stored.reset_credits.is_none() {
                 stored.reset_credits = existing.reset_credits;
             }
-            if stored.credits_spent.is_none() {
+            if stored.credits_spent.is_none() && dto.asks_what_was_spent() {
                 stored.credits_spent = existing.credits_spent;
             }
         }
