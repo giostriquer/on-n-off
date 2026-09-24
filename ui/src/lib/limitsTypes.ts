@@ -22,6 +22,20 @@ export type LimitsCredits = {
   unlimited: boolean;
 };
 
+/**
+ * A business workspace member's share of the workspace's pooled credits (Codex's spend control):
+ * how many of them this member may use, how many are used, and when the share resets.
+ */
+export type LimitsWorkspaceCredits = {
+  /** Amounts as the provider states them, which may carry decimals. */
+  limit: string;
+  used: string;
+  /** 0 to 100, as the provider rounds it. */
+  remainingPercent: number;
+  resetsAt?: string | null;
+  reached?: boolean;
+};
+
 /** Codex banked rate-limit resets: one-time resets saved to the account until used or expired. */
 export type LimitsResetCredits = {
   availableCount: number;
@@ -65,6 +79,7 @@ export type ProviderLimits = {
   plan?: string | null;
   windows: LimitWindow[];
   credits?: LimitsCredits | null;
+  workspaceCredits?: LimitsWorkspaceCredits | null;
   resetCredits?: LimitsResetCredits | null;
   /** A paid reset offered right now. Absent whenever the account is not at its limit. */
   resetOffer?: LimitsResetOffer | null;

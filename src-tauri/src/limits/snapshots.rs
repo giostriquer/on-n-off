@@ -35,6 +35,8 @@ struct StoredSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     credits: Option<LimitsCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    workspace_credits: Option<crate::dto::LimitsWorkspaceCreditsDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     reset_credits: Option<LimitsResetCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observed_at: Option<String>,
@@ -215,6 +217,7 @@ impl StoredSnapshot {
             plan: dto.plan.clone(),
             windows: dto.windows.clone(),
             credits: dto.credits.clone(),
+            workspace_credits: dto.workspace_credits.clone(),
             reset_credits: dto.reset_credits.clone(),
             observed_at: Some(observed_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
         }
@@ -237,6 +240,9 @@ impl StoredSnapshot {
             plan: self.plan,
             windows: self.windows,
             credits: self.credits,
+            workspace_credits: self
+                .workspace_credits
+                .filter(|share| !share_reset(share, now)),
             reset_credits: self.reset_credits.filter(|resets| !lapsed(resets, now)),
             // A live offer belongs to the read that saw it and is never remembered.
             reset_offer: None,
@@ -255,9 +261,19 @@ fn lapsed(resets: &LimitsResetCreditsDto, now: DateTime<Utc>) -> bool {
         .is_some_and(|expires_at| expires_at <= now)
 }
 
+/// Whether a remembered workspace-credit share has reached its reset. After it, what the member has
+/// used is not known until a read answers again.
+fn share_reset(share: &crate::dto::LimitsWorkspaceCreditsDto, now: DateTime<Utc>) -> bool {
+    share
+        .resets_at
+        .as_deref()
+        .and_then(parse_observed_at)
+        .is_some_and(|resets_at| resets_at <= now)
+}
+
 /// Figures with no observation time of their own, which a successful read dates when it stores them.
 fn has_undated_figures(dto: &ProviderLimitsDto) -> bool {
-    dto.credits.is_some() || dto.has_banked_resets()
+    dto.credits.is_some() || dto.workspace_credits.is_some() || dto.has_banked_resets()
 }
 
 fn decode(raw: &str) -> Option<StoredSnapshot> {

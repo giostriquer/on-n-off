@@ -31,6 +31,7 @@ fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
         plan: Some("max".to_string()),
         windows,
         credits: None,
+        workspace_credits: None,
         reset_credits: None,
         reset_offer: None,
     }
@@ -827,6 +828,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             balance: "3".to_string(),
             unlimited: false,
         }),
+        workspace_credits: None,
         reset_credits: Some(LimitsResetCreditsDto {
             available_count: 1,
             next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),

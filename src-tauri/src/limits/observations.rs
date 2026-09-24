@@ -2,7 +2,10 @@
 
 use chrono::{DateTime, SecondsFormat, Utc};
 
-use crate::dto::{LimitWindowDto, LimitsCreditsDto, LimitsResetCreditsDto, ProviderLimitsDto};
+use crate::dto::{
+    LimitWindowDto, LimitsCreditsDto, LimitsResetCreditsDto, LimitsWorkspaceCreditsDto,
+    ProviderLimitsDto,
+};
 
 pub(super) struct ObservedWindowSet {
     /// When the windows were observed; `None` only for a set that carries figures and no windows.
@@ -10,6 +13,7 @@ pub(super) struct ObservedWindowSet {
     plan: Option<String>,
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
+    workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     reset_credits: Option<LimitsResetCreditsDto>,
 }
 
@@ -20,6 +24,7 @@ impl ObservedWindowSet {
             plan: None,
             windows,
             credits: None,
+            workspace_credits: None,
             reset_credits: None,
         }
     }
@@ -41,6 +46,7 @@ impl ObservedWindowSet {
             plan: dto.plan,
             windows: dto.windows,
             credits: dto.credits,
+            workspace_credits: dto.workspace_credits,
             reset_credits: dto.reset_credits,
         })
     }
@@ -63,7 +69,11 @@ pub(super) fn merge_windows(
     let remembered_reset_credits = remembered
         .as_ref()
         .and_then(|snapshot| snapshot.reset_credits.clone());
+    let remembered_workspace_credits = remembered
+        .as_ref()
+        .and_then(|snapshot| snapshot.workspace_credits.clone());
     current.credits = current.credits.or(remembered_credits);
+    current.workspace_credits = current.workspace_credits.or(remembered_workspace_credits);
     current.reset_credits = current.reset_credits.or(remembered_reset_credits);
     for mut snapshot in [remembered, local].into_iter().flatten() {
         let observed_at = snapshot

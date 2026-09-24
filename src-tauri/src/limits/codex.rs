@@ -8,7 +8,7 @@ use super::json::window;
 use super::Parsed;
 use crate::dto::{
     LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
-    LimitsResetOfferDto,
+    LimitsResetOfferDto, LimitsWorkspaceCreditsDto,
 };
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
@@ -41,6 +41,12 @@ struct RateLimitBucket {
     secondary: Option<RateLimitWindow>,
     #[serde(default)]
     credits: Option<RateLimitCredits>,
+    /// A business member's share of the workspace's credits (Codex's spend control). Read loosely:
+    /// the amounts are strings in Codex's protocol, and a share that does not read is not shown.
+    #[serde(default)]
+    individual_limit: Option<serde_json::Value>,
+    #[serde(default)]
+    spend_control_reached: Option<bool>,
     #[serde(default)]
     plan_type: Option<String>,
 }
@@ -112,6 +118,10 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
         plan: main.plan_type.clone(),
         windows,
         credits: credits(main.credits.as_ref()),
+        workspace_credits: workspace_credits(
+            main.individual_limit.as_ref(),
+            main.spend_control_reached,
+        ),
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
         reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
     }
@@ -202,6 +212,32 @@ fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
     Some(LimitsCreditsDto {
         balance: credits.balance.clone().unwrap_or_else(|| "0".to_string()),
         unlimited: credits.unlimited,
+    })
+}
+
+/// The member's share of a business workspace's credits: an amount they may use, what they have
+/// used, the share left and when it resets. Without a limit and a used amount there is no share.
+fn workspace_credits(
+    individual_limit: Option<&serde_json::Value>,
+    reached: Option<bool>,
+) -> Option<LimitsWorkspaceCreditsDto> {
+    let share = individual_limit?.as_object()?;
+    let amount = |key: &str| match share.get(key)? {
+        serde_json::Value::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    };
+    let remaining_percent = share.get("remainingPercent")?.as_f64()?;
+    Some(LimitsWorkspaceCreditsDto {
+        limit: amount("limit")?,
+        used: amount("used")?,
+        remaining_percent: remaining_percent.clamp(0.0, 100.0).round() as u8,
+        resets_at: share
+            .get("resetsAt")
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
+            .map(|at| at.to_rfc3339()),
+        reached: reached == Some(true),
     })
 }
 

@@ -22,6 +22,7 @@ import { BankedResetsRow, CLAUDE_RESET_HINT, ResetOfferRow } from "./BankedReset
 import { CodexAccountActions } from "./CodexAccountActions";
 import { UsageStatusBadge } from "./UsageStatusBadge";
 import { SummaryRow } from "./SummaryRow";
+import { showsOwnCredits, WorkspaceCreditsRow } from "./WorkspaceCredits";
 
 export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
   return <AccountControllers><LimitsContent pollMinutes={pollMinutes} /></AccountControllers>;
@@ -227,7 +228,8 @@ function AccountCard({
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{profile ? "Usage unavailable." : `${name} reported no rate-limit windows.`}</p>
       ) : null}
 
-      {entry.credits ? <CreditsRow credits={entry.credits} /> : null}
+      {entry.credits && showsOwnCredits(entry) ? <CreditsRow credits={entry.credits} /> : null}
+      <WorkspaceCreditsRow share={entry.workspaceCredits} now={now} />
       <BankedResetsRow resetCredits={entry.resetCredits} hint={entry.provider === "claude" && entry.currentAccount ? CLAUDE_RESET_HINT : undefined} now={now} />
       {entry.provider === "codex" ? <ResetOfferRow offer={entry.resetOffer} /> : null}
   </>;

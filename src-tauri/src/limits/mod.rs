@@ -62,6 +62,7 @@ struct Parsed {
     plan: Option<String>,
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
+    workspace_credits: Option<crate::dto::LimitsWorkspaceCreditsDto>,
     reset_credits: Option<LimitsResetCreditsDto>,
     reset_offer: Option<crate::dto::LimitsResetOfferDto>,
 }

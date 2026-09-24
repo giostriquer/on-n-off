@@ -645,6 +645,27 @@ pub struct LimitsCreditsDto {
     pub unlimited: bool,
 }
 
+/// A business workspace member's share of the workspace's pooled credits: Codex's spend control,
+/// which caps how many of the workspace's credits this member may use until it resets. A member's
+/// own credit balance (`LimitsCreditsDto`) is usually 0 in a workspace, because the credits are
+/// the workspace's.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsWorkspaceCreditsDto {
+    /// Credits this member may use, as the provider states the amount.
+    pub limit: String,
+    /// Credits this member has used of it.
+    pub used: String,
+    /// What is left of the share, 0 to 100, as the provider rounds it.
+    pub remaining_percent: u8,
+    /// RFC 3339 instant the share resets, when the provider says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<String>,
+    /// The provider says this member has used the whole share.
+    #[serde(default)]
+    pub reached: bool,
+}
+
 /// Banked rate-limit resets: one-time resets saved to the account until used or expired. Codex's
 /// can be spent from on-n-off; Claude's are only reported, and spent with Claude Code's `/limit-reset`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -726,6 +747,8 @@ pub struct ProviderLimitsDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credits: Option<LimitsCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_credits: Option<LimitsResetCreditsDto>,
     /// Never remembered: an offer withdrawn between reads must disappear with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -734,9 +757,12 @@ pub struct ProviderLimitsDto {
 
 impl ProviderLimitsDto {
     /// Whether this read observed anything about the account worth keeping: quota windows, a
-    /// credit balance or banked resets. One definition for every place that decides that.
+    /// credit balance, a workspace-credit share or banked resets. One definition for every place that decides that.
     pub fn has_observations(&self) -> bool {
-        !self.windows.is_empty() || self.credits.is_some() || self.has_banked_resets()
+        !self.windows.is_empty()
+            || self.credits.is_some()
+            || self.workspace_credits.is_some()
+            || self.has_banked_resets()
     }
 
     /// Every current Codex read and most Claude reads report a reset count, usually 0, so only a

@@ -128,6 +128,17 @@ fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<P
             "unlimited":credits["unlimited"].as_bool().unwrap_or(false),
             "balance":credits.get("balance").and_then(|v| v.as_str().map(str::to_owned).or_else(|| v.as_f64().map(|n| n.to_string()))) });
     }
+    // A business member's share of the workspace's credits, in app-server's names.
+    if let Some(spend_control) = payload.get("spend_control").filter(|v| v.is_object()) {
+        main["spendControlReached"] = spend_control["reached"].clone();
+        if let Some(share) = spend_control
+            .get("individual_limit")
+            .filter(|v| v.is_object())
+        {
+            main["individualLimit"] = json!({"limit": share["limit"], "used": share["used"],
+                "remainingPercent": share["remaining_percent"], "resetsAt": share["reset_at"]});
+        }
+    }
     let mut buckets = serde_json::Map::new();
     buckets.insert("codex".into(), main.clone());
     for extra in payload

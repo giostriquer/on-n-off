@@ -129,6 +129,7 @@ pub(super) fn finish(
         plan: parsed.plan,
         windows: parsed.windows,
         credits: parsed.credits,
+        workspace_credits: parsed.workspace_credits,
         reset_credits: parsed.reset_credits,
         reset_offer: parsed.reset_offer,
     }

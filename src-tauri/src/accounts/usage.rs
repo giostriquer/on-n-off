@@ -348,6 +348,7 @@ fn merge(
                         plan: None,
                         windows: vec![],
                         credits: None,
+                        workspace_credits: None,
                         reset_credits: None,
                         reset_offer: None,
                     });
