@@ -56,6 +56,8 @@ of the file — start there, not here.
 - `verify.yml` — the native CI legs. `ci.yml` calls it once per OS, and its lint and test jobs run
   in parallel behind the required `verify-windows` and `verify-macos` checks; see [`OS.md`](OS.md).
 - `workflows.test.mjs` — pins the choices the workflows make on purpose, such as runner images.
+- `ipc-commands.test.mjs` — holds `api.ts`'s command names, `lib.rs`'s registrations and the dev
+  mock's handlers together.
 - `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
 - `verify-release.mjs` — checks a drafted release's assets, checksums, updater signatures, feed
   and attestations against the previous release before it is published. Its pure checks live in
