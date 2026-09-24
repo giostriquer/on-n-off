@@ -328,7 +328,7 @@ fn merge(
         Ok(mut dto) => {
             if let Some(i) = existing {
                 dto.keep_reset_credits_from(&entries[i]);
-                dto.keep_credits_spent_from(&entries[i]);
+                crate::limits::credits_spent::keep_credits_spent_from(&mut dto, &entries[i]);
             }
             dto
         }

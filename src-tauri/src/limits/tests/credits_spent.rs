@@ -164,12 +164,12 @@ fn a_personal_plan_read_drops_the_remembered_figure() {
 #[test]
 fn only_a_codex_workspace_card_is_asked_what_it_spent() {
     let mut card = business_card("acct-a", LimitsStatus::Ok, None);
-    assert!(card.asks_what_was_spent());
+    assert!(credits_spent::asks_what_was_spent(&card));
 
     card.plan = Some("pro".to_string());
-    assert!(!card.asks_what_was_spent());
+    assert!(!credits_spent::asks_what_was_spent(&card));
 
     card.provider = AgentId::Claude;
     card.plan = Some("team".to_string());
-    assert!(!card.asks_what_was_spent());
+    assert!(!credits_spent::asks_what_was_spent(&card));
 }
