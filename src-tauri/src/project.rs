@@ -131,10 +131,19 @@ pub fn inspect_projects(paths: Vec<String>, agent: AgentId) -> Vec<ProjectDto> {
 }
 
 pub fn overlay_project(tab: &mut AgentTabDto, project: &Path, agent: AgentId) {
+    overlay_project_in(
+        tab,
+        project,
+        agent,
+        crate::paths::user_home().ok().as_deref(),
+    );
+}
+
+/// [`overlay_project`] under `home`: Claude's view also reads `<home>/.claude.json`, where it
+/// keeps its servers for particular projects. `None` when there is no home to read.
+fn overlay_project_in(tab: &mut AgentTabDto, project: &Path, agent: AgentId, home: Option<&Path>) {
     let claude_json = if agent == AgentId::Claude {
-        crate::paths::user_home()
-            .ok()
-            .and_then(|home| fs::read_to_string(home.join(".claude.json")).ok())
+        home.and_then(|home| fs::read_to_string(home.join(".claude.json")).ok())
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default()
     } else {

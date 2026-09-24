@@ -266,3 +266,45 @@ fn a_claude_project_view_follows_its_own_entry() {
     );
     let _ = fs::remove_dir_all(root);
 }
+
+/// The project views read the home's `~/.claude.json` for Claude and for no one else: the same
+/// home, whose entry for this project keeps one server, gives Claude a project row and Codex none.
+#[test]
+fn only_a_claude_project_view_reads_the_homes_claude_json() {
+    let home = crate::paths::scratch_dir("on-n-off-project-scope-home");
+    let project = home.join("acme").join("webapp");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        home.join(".claude.json"),
+        serde_json::json!({
+            "projects": {
+                project.to_string_lossy(): {
+                    "mcpServers": { "scratchpad": { "command": "node", "args": ["pad.js"] } }
+                }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let empty = || AgentTabDto {
+        plugins: vec![],
+        user_skills: vec![],
+        mcp_servers: vec![],
+        hooks: vec![],
+    };
+
+    let mut claude = empty();
+    overlay_project_in(&mut claude, &project, AgentId::Claude, Some(&home));
+    let mut codex = empty();
+    overlay_project_in(&mut codex, &project, AgentId::Codex, Some(&home));
+
+    let claude_ids: Vec<_> = claude
+        .mcp_servers
+        .iter()
+        .map(|server| server.id.as_str())
+        .collect();
+    assert_eq!(claude_ids, ["project:scratchpad"]);
+    assert_eq!(claude.mcp_servers[0].origin, ORIGIN_PROJECT);
+    assert!(codex.mcp_servers.is_empty(), "{:?}", codex.mcp_servers);
+    let _ = fs::remove_dir_all(home);
+}

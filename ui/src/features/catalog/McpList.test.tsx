@@ -84,16 +84,28 @@ describe("McpList", () => {
       projects: ["/Users/me/acme/webapp", "/Users/me/acme/api"],
     };
     const pad: McpServerDto = { ...docs, id: "local:pad", name: "pad", projects: ["/Users/me/acme/notes"] };
-    const kit = { id: "kit@acme", name: "Kit", source: "acme", version: "", upstream: "", enabled: true, togglable: true, skills: [] };
-    const servers = [server, tracker, docs, pad];
-    render(
-      <McpList tab={{ plugins: [kit], userSkills: [], mcpServers: servers }} servers={servers} onToggle={vi.fn()} />,
-    );
+    // Its plugin is not listed (not installed from this home's inventory): the raw id stands in.
+    const orphan: McpServerDto = { ...tracker, id: "plugin:gone:orphan", name: "orphan", pluginId: "gone@acme" };
+    const plugin = (id: string, name: string) => ({
+      id,
+      name,
+      source: "acme",
+      version: "",
+      upstream: "",
+      enabled: true,
+      togglable: true,
+      skills: [],
+    });
+    // Another plugin listed first, so only a lookup by id finds Kit.
+    const plugins = [plugin("tools@acme", "Tools"), plugin("kit@acme", "Kit")];
+    const servers = [server, tracker, docs, pad, orphan];
+    render(<McpList tab={{ plugins, userSkills: [], mcpServers: servers }} servers={servers} onToggle={vi.fn()} />);
 
-    expect(screen.getByText("2 live · user config + plugins + per-project · handshake not probed")).toBeInTheDocument();
+    expect(screen.getByText("3 live · user config + plugins + per-project · handshake not probed")).toBeInTheDocument();
     const trackerRow = row("tracker");
     expect(within(trackerRow).getByText("PLUGIN")).toBeInTheDocument();
     expect(within(trackerRow).getByText("from Kit")).toBeInTheDocument();
+    expect(within(row("orphan")).getByText("from gone@acme")).toBeInTheDocument();
     expect(within(row("library-docs")).getByText("PER-PROJECT")).toBeInTheDocument();
     const projects = within(row("library-docs")).getByText("in 2 projects");
     expect(projects).toHaveAttribute("title", "/Users/me/acme/api\n/Users/me/acme/webapp");
