@@ -320,3 +320,82 @@ fn a_login_that_is_no_longer_the_cards_account_is_not_asked() {
     }
     assert!(!was_asked(&listener));
 }
+
+#[test]
+fn each_failure_in_a_row_doubles_the_wait_up_to_sixteen_intervals_and_an_hour() {
+    let minute = Duration::from_secs(60);
+    for (count, intervals) in [(1, 1), (2, 2), (3, 4), (4, 8), (5, 16), (6, 16), (40, 16)] {
+        assert_eq!(
+            backoff_delay(count, minute),
+            minute * intervals,
+            "failure {count}"
+        );
+    }
+    assert_eq!(
+        backoff_delay(1, Duration::from_secs(7200)),
+        Duration::from_secs(3600)
+    );
+    assert_eq!(
+        backoff_delay(3, Duration::from_secs(1000)),
+        Duration::from_secs(3600)
+    );
+}
+
+/// Backoff state for an account, as if its last failure's wait had already run out.
+fn failed_before(key: &str, count: u32) {
+    let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+    FAILURES
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap()
+        .insert(key.to_string(), (expired, count));
+}
+
+fn backoff_of(key: &str) -> Option<(Instant, u32)> {
+    FAILURES
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap()
+        .get(key)
+        .copied()
+}
+
+/// Another failure once the wait has run out counts toward a longer one.
+#[test]
+fn a_further_failure_waits_longer() {
+    let key = account("escalates");
+    failed_before(&key, 2);
+
+    let before = Instant::now();
+    assert_eq!(
+        read_backed_off(
+            &key,
+            &AccessToken::new("t"),
+            "team",
+            &crate::http::refused_url(),
+            now()
+        ),
+        None
+    );
+    let after = Instant::now();
+
+    let (until, count) = backoff_of(&key).unwrap();
+    let wait = backoff_delay(3, crate::limits_refresh::poll_interval());
+    assert_eq!(count, 3);
+    assert!(until >= before + wait && until <= after + wait);
+}
+
+/// A success after failures clears the account's backoff, so its next failure starts from one
+/// interval again.
+#[test]
+fn a_success_after_failures_clears_the_accounts_backoff() {
+    let key = account("recovers");
+    failed_before(&key, 3);
+    let (url, request) =
+        crate::http::serve_once("200 OK", &breakdown(&[("2026-09-24", &[1.0])]).to_string());
+
+    assert!(read_backed_off(&key, &AccessToken::new("t"), "team", &url, now()).is_some());
+    request.join().unwrap();
+
+    assert_eq!(backoff_of(&key), None);
+}

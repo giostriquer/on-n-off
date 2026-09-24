@@ -164,12 +164,18 @@ pub(crate) fn read_backed_off(
         failures.remove(account);
     } else {
         let count = previous.map_or(1, |(_, count)| count.saturating_add(1));
-        let delay = crate::limits_refresh::poll_interval()
-            .saturating_mul(1 << (count - 1).min(4))
-            .min(Duration::from_secs(3600));
+        let delay = backoff_delay(count, crate::limits_refresh::poll_interval());
         failures.insert(account.to_string(), (Instant::now() + delay, count));
     }
     spent
+}
+
+/// How long an account waits after its `count`th failure in a row: one poll interval, doubling with
+/// each further failure up to sixteen intervals, and never more than an hour.
+fn backoff_delay(count: u32, interval: Duration) -> Duration {
+    interval
+        .saturating_mul(1 << count.saturating_sub(1).min(4))
+        .min(Duration::from_secs(3600))
 }
 
 /// The signed-in Codex account's spending, asked with its own access token: app-server reads that
