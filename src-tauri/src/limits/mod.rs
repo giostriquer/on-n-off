@@ -29,7 +29,7 @@ use chrono::Utc;
 
 use crate::dto::{
     AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
-    LimitsStatus, ProviderLimitsDto, ResetCreditOutcome,
+    LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto, ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
@@ -62,7 +62,7 @@ struct Parsed {
     plan: Option<String>,
     windows: Vec<LimitWindowDto>,
     credits: Option<LimitsCreditsDto>,
-    workspace_credits: Option<crate::dto::LimitsWorkspaceCreditsDto>,
+    workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     reset_credits: Option<LimitsResetCreditsDto>,
     reset_offer: Option<crate::dto::LimitsResetOfferDto>,
 }

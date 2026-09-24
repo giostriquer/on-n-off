@@ -171,10 +171,7 @@ fn rate_limit_window(
             .clone()
             .unwrap_or_else(|| "extra limit".to_string())
     };
-    let resets_at = entry
-        .resets_at
-        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
-        .map(|at| at.to_rfc3339());
+    let resets_at = entry.resets_at.and_then(rfc3339_from_epoch);
     let window_id = if main {
         slot.to_string()
     } else if slot == "primary" {
@@ -215,30 +212,38 @@ fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
     })
 }
 
-/// The member's share of a business workspace's credits: an amount they may use, what they have
-/// used, the share left and when it resets. Without a limit and a used amount there is no share.
+/// The member's share of a business workspace's credits: the amount they may use, what they have
+/// used and when it resets. The amounts are kept as the provider writes them, but only when they
+/// read as finite numbers of at least zero, as Codex's own status line requires; otherwise there is
+/// no share to show. `spendControlReached` without a share says a limit was reached without saying
+/// which or how much, and is not shown.
 fn workspace_credits(
     individual_limit: Option<&serde_json::Value>,
     reached: Option<bool>,
 ) -> Option<LimitsWorkspaceCreditsDto> {
     let share = individual_limit?.as_object()?;
-    let amount = |key: &str| match share.get(key)? {
-        serde_json::Value::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
-        serde_json::Value::Number(number) => Some(number.to_string()),
-        _ => None,
+    let amount = |key: &str| {
+        let text = match share.get(key)? {
+            serde_json::Value::String(text) => text.trim().to_string(),
+            serde_json::Value::Number(number) => number.to_string(),
+            _ => return None,
+        };
+        let value: f64 = text.parse().ok()?;
+        (value.is_finite() && value >= 0.0).then_some(text)
     };
-    let remaining_percent = share.get("remainingPercent")?.as_f64()?;
     Some(LimitsWorkspaceCreditsDto {
         limit: amount("limit")?,
         used: amount("used")?,
-        remaining_percent: remaining_percent.clamp(0.0, 100.0).round() as u8,
         resets_at: share
             .get("resetsAt")
             .and_then(serde_json::Value::as_i64)
-            .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
-            .map(|at| at.to_rfc3339()),
+            .and_then(rfc3339_from_epoch),
         reached: reached == Some(true),
     })
+}
+
+fn rfc3339_from_epoch(epoch: i64) -> Option<String> {
+    DateTime::<Utc>::from_timestamp(epoch, 0).map(|at| at.to_rfc3339())
 }
 
 /// Codex's own name for the paid reset in a banner's calls to action. Anything else the backend

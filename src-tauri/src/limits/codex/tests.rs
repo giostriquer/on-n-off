@@ -360,7 +360,6 @@ fn maps_a_business_members_share_of_the_workspace_credits() {
         Some(LimitsWorkspaceCreditsDto {
             limit: "25000".to_string(),
             used: "8000".to_string(),
-            remaining_percent: 68,
             resets_at: Some("2026-09-21T14:13:20+00:00".to_string()),
             reached: false,
         })
@@ -376,37 +375,44 @@ fn a_share_used_up_is_marked_reached() {
 
     let share = parse_codex(&payload).workspace_credits.unwrap();
     assert!(share.reached);
-    assert_eq!(share.remaining_percent, 0);
 }
 
-/// Amounts arrive as strings; a number is read the same way, and a percentage outside 0 to 100 is
-/// held to it.
+/// Amounts arrive as strings; a number is read the same way.
 #[test]
-fn a_share_given_in_numbers_or_past_its_bounds_still_reads() {
-    let over = business_payload(
-        json!({"limit": 25000.5, "used": 8000, "remainingPercent": 140, "resetsAt": null}),
-        json!(null),
-    );
-    let under = business_payload(
-        json!({"limit": "10", "used": "12", "remainingPercent": -5, "resetsAt": 1790000000}),
+fn a_share_given_in_numbers_still_reads() {
+    let payload = business_payload(
+        json!({"limit": 25000.5, "used": 8000, "resetsAt": null}),
         json!(null),
     );
 
-    let over = parse_codex(&over).workspace_credits.unwrap();
+    let share = parse_codex(&payload).workspace_credits.unwrap();
     assert_eq!(
-        (over.limit.as_str(), over.used.as_str()),
+        (share.limit.as_str(), share.used.as_str()),
         ("25000.5", "8000")
     );
-    assert_eq!(over.remaining_percent, 100);
-    assert_eq!(over.resets_at, None);
-    assert!(!over.reached);
-    assert_eq!(
-        parse_codex(&under)
-            .workspace_credits
-            .unwrap()
-            .remaining_percent,
-        0
-    );
+    assert_eq!(share.resets_at, None);
+    assert!(!share.reached);
+}
+
+/// An amount that is not a finite number of at least zero leaves nothing to show, as Codex's own
+/// status line treats it.
+#[test]
+fn a_share_whose_amounts_are_not_counts_is_not_shown() {
+    for (limit, used) in [
+        (json!("n/a"), json!("8000")),
+        (json!("25000"), json!("")),
+        (json!("25000"), json!("-1")),
+        (json!("NaN"), json!("0")),
+        (json!("inf"), json!("0")),
+        (json!(true), json!("0")),
+    ] {
+        let payload = business_payload(json!({"limit": limit, "used": used}), json!(false));
+        assert_eq!(
+            parse_codex(&payload).workspace_credits,
+            None,
+            "{limit} / {used}"
+        );
+    }
 }
 
 /// Without an individual limit there is no share to show, whatever else the bucket says.

@@ -652,12 +652,11 @@ pub struct LimitsCreditsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsWorkspaceCreditsDto {
-    /// Credits this member may use, as the provider states the amount.
+    /// Credits this member may use, as the provider states the amount: a finite number of at least
+    /// zero, which may carry decimals.
     pub limit: String,
     /// Credits this member has used of it.
     pub used: String,
-    /// What is left of the share, 0 to 100, as the provider rounds it.
-    pub remaining_percent: u8,
     /// RFC 3339 instant the share resets, when the provider says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<String>,
@@ -756,13 +755,16 @@ pub struct ProviderLimitsDto {
 }
 
 impl ProviderLimitsDto {
-    /// Whether this read observed anything about the account worth keeping: quota windows, a
-    /// credit balance, a workspace-credit share or banked resets. One definition for every place that decides that.
+    /// Whether this read observed anything about the account worth keeping: quota windows or any
+    /// of the figures beside them. One definition for every place that decides that.
     pub fn has_observations(&self) -> bool {
-        !self.windows.is_empty()
-            || self.credits.is_some()
-            || self.workspace_credits.is_some()
-            || self.has_banked_resets()
+        !self.windows.is_empty() || self.has_figures()
+    }
+
+    /// The figures a read reports beside its windows: a credit balance, a workspace-credit share or
+    /// banked resets. One list, so a figure added later is counted everywhere at once.
+    pub fn has_figures(&self) -> bool {
+        self.credits.is_some() || self.workspace_credits.is_some() || self.has_banked_resets()
     }
 
     /// Every current Codex read and most Claude reads report a reset count, usually 0, so only a

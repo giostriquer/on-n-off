@@ -130,10 +130,13 @@ describe("usableAgainAt", () => {
   });
 });
 
+const SHARE = { limit: "25000", used: "8000", resetsAt: null, reached: false };
+
 describe("hasObservations", () => {
   const bare: ProviderLimits = { provider: "codex", status: "ok", currentAccount: true, windows: [] };
 
-  it("counts quota windows, a credit balance and banked resets alike", () => {
+  it("counts quota windows, a credit balance, a workspace-credit share and banked resets alike", () => {
+    expect(hasObservations({ ...bare, workspaceCredits: SHARE })).toBe(true);
     expect(hasObservations(bare)).toBe(false);
     expect(hasObservations({ ...bare, windows: [window] })).toBe(true);
     expect(hasObservations({ ...bare, credits: { balance: "0", unlimited: false } })).toBe(true);
@@ -144,6 +147,12 @@ describe("hasObservations", () => {
 
   it("lets a caller count only the windows it shows", () => {
     expect(hasObservations({ ...bare, windows: [window] }, [])).toBe(false);
+  });
+
+  it("keeps a card with only a workspace-credit share as a paused refresh rather than an empty one", () => {
+    const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", workspaceCredits: SHARE };
+    expect(presentLimitAccount(failed, "unavailable").refreshPaused).toBe(true);
+    expect(presentLimitAccount({ ...failed, currentAccount: false }, "unavailable").remembered).toBe(true);
   });
 
   it("keeps a card with only banked resets as a paused refresh rather than an empty one", () => {
@@ -160,6 +169,7 @@ describe.each(["failed", "unauthenticated"] as const)("saved %s usage status", s
     {name:"windows", windows:[window]},
     {name:"credits", windows:[], credits:{balance:"0", unlimited:false}},
     {name:"banked resets", windows:[], resetCredits:{availableCount:1, nextExpiresAt:null}},
+    {name:"a workspace-credit share", windows:[], workspaceCredits:SHARE},
   ])("quietly identifies retained $name", observation => {
     const presented = presentLimitAccount({provider:"codex", currentAccount:false, status, message, ...observation}, "fallback");
     expect(presented.message).toBeNull();

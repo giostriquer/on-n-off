@@ -667,8 +667,10 @@ fn a_count_lapses_at_its_expiry_itself() {
         next_expires_at: Some(expires_at.to_string()),
     };
     let at = parse_observed_at(expires_at).unwrap();
-    assert!(lapsed(&resets, at));
-    assert!(!lapsed(&resets, at - chrono::Duration::seconds(1)));
+    let expiry = resets.next_expires_at.as_deref();
+    assert!(passed(expiry, at));
+    assert!(!passed(expiry, at - chrono::Duration::seconds(1)));
+    assert!(!passed(None, at), "no known expiry never lapses");
 }
 
 /// A remembered workspace-credit share stays until it resets; after that what is used is not known
@@ -681,7 +683,6 @@ fn a_remembered_workspace_credit_share_lasts_until_it_resets() {
         Some(crate::dto::LimitsWorkspaceCreditsDto {
             limit: "25000".to_string(),
             used: "8000".to_string(),
-            remaining_percent: 68,
             resets_at: Some(resets_at.to_string()),
             reached: false,
         })
@@ -717,7 +718,6 @@ fn a_workspace_credit_share_alone_counts_as_an_observation() {
     dto.workspace_credits = Some(crate::dto::LimitsWorkspaceCreditsDto {
         limit: "25000".to_string(),
         used: "8000".to_string(),
-        remaining_percent: 68,
         resets_at: None,
         reached: false,
     });

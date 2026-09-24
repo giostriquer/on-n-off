@@ -10,7 +10,7 @@ import {
   planLabel,
   usageFillStyle,
 } from "$lib/limitsFormat";
-import type { LimitsCredits, LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
@@ -21,8 +21,7 @@ import { accountCards, orderAccountCards } from "./accountCards";
 import { BankedResetsRow, CLAUDE_RESET_HINT, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
 import { UsageStatusBadge } from "./UsageStatusBadge";
-import { SummaryRow } from "./SummaryRow";
-import { showsOwnCredits, WorkspaceCreditsRow } from "./WorkspaceCredits";
+import { CreditsRows } from "./Credits";
 
 export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
   return <AccountControllers><LimitsContent pollMinutes={pollMinutes} /></AccountControllers>;
@@ -228,8 +227,7 @@ function AccountCard({
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{profile ? "Usage unavailable." : `${name} reported no rate-limit windows.`}</p>
       ) : null}
 
-      {entry.credits && showsOwnCredits(entry) ? <CreditsRow credits={entry.credits} /> : null}
-      <WorkspaceCreditsRow share={entry.workspaceCredits} now={now} />
+      <CreditsRows entry={entry} now={now} />
       <BankedResetsRow resetCredits={entry.resetCredits} hint={entry.provider === "claude" && entry.currentAccount ? CLAUDE_RESET_HINT : undefined} now={now} />
       {entry.provider === "codex" ? <ResetOfferRow offer={entry.resetOffer} /> : null}
   </>;
@@ -354,7 +352,3 @@ function WindowRow({
   );
 }
 
-/** The credit balance as one more row under the windows, so it never crowds the header's identity. */
-function CreditsRow({ credits }: { credits: LimitsCredits }) {
-  return <SummaryRow label="Credits" value={credits.unlimited ? "Unlimited" : credits.balance} />;
-}

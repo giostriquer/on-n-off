@@ -27,13 +27,11 @@ export type LimitsCredits = {
  * how many of them this member may use, how many are used, and when the share resets.
  */
 export type LimitsWorkspaceCredits = {
-  /** Amounts as the provider states them, which may carry decimals. */
+  /** Amounts as the provider states them: finite numbers of at least zero, which may carry decimals. */
   limit: string;
   used: string;
-  /** 0 to 100, as the provider rounds it. */
-  remainingPercent: number;
   resetsAt?: string | null;
-  reached?: boolean;
+  reached: boolean;
 };
 
 /** Codex banked rate-limit resets: one-time resets saved to the account until used or expired. */

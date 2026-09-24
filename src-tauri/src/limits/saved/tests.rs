@@ -220,7 +220,6 @@ fn saved_codex_reads_the_members_share_of_the_workspace_credits() {
         Some(crate::dto::LimitsWorkspaceCreditsDto {
             limit: "25000".to_string(),
             used: "8000".to_string(),
-            remaining_percent: 68,
             resets_at: Some("2026-09-21T14:13:20+00:00".to_string()),
             reached: false,
         })

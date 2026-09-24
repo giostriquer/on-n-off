@@ -517,7 +517,7 @@ describe("Limits", () => {
   });
 
   it("shows a business member's workspace credits in place of an own balance of 0", async () => {
-    const workspaceCredits = { limit: "25000", used: "8000", remainingPercent: 68, resetsAt: "2026-10-01T12:00:00Z", reached: false };
+    const workspaceCredits = { limit: "25000", used: "8000", resetsAt: "2026-10-01T12:00:00Z", reached: false };
     answer([okClaude()], [okCodex({ plan: "self_serve_business_prolite", credits: { balance: "0", unlimited: false }, workspaceCredits })]);
     renderLimits();
 

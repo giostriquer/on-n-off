@@ -59,22 +59,21 @@ pub(super) fn merge_windows(
     local: Option<ObservedWindowSet>,
     remembered: Option<ObservedWindowSet>,
 ) -> ProviderLimitsDto {
-    let remembered_plan = remembered
-        .as_ref()
-        .and_then(|snapshot| snapshot.plan.clone());
-    let remembered_credits = remembered
-        .as_ref()
-        .and_then(|snapshot| snapshot.credits.clone());
-    current.plan = current.plan.or(remembered_plan);
-    let remembered_reset_credits = remembered
-        .as_ref()
-        .and_then(|snapshot| snapshot.reset_credits.clone());
-    let remembered_workspace_credits = remembered
-        .as_ref()
-        .and_then(|snapshot| snapshot.workspace_credits.clone());
-    current.credits = current.credits.or(remembered_credits);
-    current.workspace_credits = current.workspace_credits.or(remembered_workspace_credits);
-    current.reset_credits = current.reset_credits.or(remembered_reset_credits);
+    if let Some(remembered) = &remembered {
+        current.plan = current.plan.take().or_else(|| remembered.plan.clone());
+        current.credits = current
+            .credits
+            .take()
+            .or_else(|| remembered.credits.clone());
+        current.workspace_credits = current
+            .workspace_credits
+            .take()
+            .or_else(|| remembered.workspace_credits.clone());
+        current.reset_credits = current
+            .reset_credits
+            .take()
+            .or_else(|| remembered.reset_credits.clone());
+    }
     for mut snapshot in [remembered, local].into_iter().flatten() {
         let observed_at = snapshot
             .observed_at

@@ -163,8 +163,8 @@ export function workspaceCreditsCodex(): ProviderLimits[] {
     plan: "self_serve_business_prolite",
     credits: { balance: "0", unlimited: false },
     workspaceCredits: entry.currentAccount
-      ? { limit: "25000", used: "8000", remainingPercent: 68, resetsAt: at(6 * 24 * 60 + 11 * 60), reached: false }
-      : { limit: "10000", used: "10000", remainingPercent: 0, resetsAt: at(2 * 24 * 60), reached: true },
+      ? { limit: "25000", used: "8000", resetsAt: at(6 * 24 * 60 + 11 * 60), reached: false }
+      : { limit: "10000", used: "10000", resetsAt: at(2 * 24 * 60), reached: true },
   }));
 }
 

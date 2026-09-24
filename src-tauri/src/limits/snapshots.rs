@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dto::{
     AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
-    LimitsStatus, ProviderLimitsDto,
+    LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
 };
 use crate::usage::cache_io::atomic_write;
 
@@ -35,7 +35,7 @@ struct StoredSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     credits: Option<LimitsCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    workspace_credits: Option<crate::dto::LimitsWorkspaceCreditsDto>,
+    workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reset_credits: Option<LimitsResetCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,7 +70,8 @@ impl SnapshotStore {
         }
         let path = self.dir.join(file_name(dto.provider, &account.id));
         let incoming_latest = latest_observed_at(dto).or_else(|| {
-            (dto.status == LimitsStatus::Ok && has_undated_figures(dto)).then(Utc::now)
+            // Figures have no observation time of their own; a successful read dates them here.
+            (dto.status == LimitsStatus::Ok && dto.has_figures()).then(Utc::now)
         });
         let incoming_latest =
             incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
@@ -242,38 +243,23 @@ impl StoredSnapshot {
             credits: self.credits,
             workspace_credits: self
                 .workspace_credits
-                .filter(|share| !share_reset(share, now)),
-            reset_credits: self.reset_credits.filter(|resets| !lapsed(resets, now)),
+                .filter(|share| !passed(share.resets_at.as_deref(), now)),
+            reset_credits: self
+                .reset_credits
+                .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),
             // A live offer belongs to the read that saw it and is never remembered.
             reset_offer: None,
         }
     }
 }
 
-/// Whether a remembered banked-reset count has reached its soonest known expiry. By then at least
-/// one reset has lapsed and what is left is not known, so the count is unknown until a read answers
-/// again. The UI applies the same rule to a card already on screen (`unexpiredBankedResets`).
-fn lapsed(resets: &LimitsResetCreditsDto, now: DateTime<Utc>) -> bool {
-    resets
-        .next_expires_at
-        .as_deref()
-        .and_then(parse_observed_at)
-        .is_some_and(|expires_at| expires_at <= now)
-}
-
-/// Whether a remembered workspace-credit share has reached its reset. After it, what the member has
-/// used is not known until a read answers again.
-fn share_reset(share: &crate::dto::LimitsWorkspaceCreditsDto, now: DateTime<Utc>) -> bool {
-    share
-        .resets_at
-        .as_deref()
-        .and_then(parse_observed_at)
-        .is_some_and(|resets_at| resets_at <= now)
-}
-
-/// Figures with no observation time of their own, which a successful read dates when it stores them.
-fn has_undated_figures(dto: &ProviderLimitsDto) -> bool {
-    dto.credits.is_some() || dto.workspace_credits.is_some() || dto.has_banked_resets()
+/// Whether a remembered figure's instant has come: a banked-reset count's soonest known expiry (by
+/// then at least one reset has lapsed and what is left is not known), or a workspace-credit share's
+/// reset (after it, what is used is not known). Either stays unknown until a read answers again.
+/// The UI applies the same rule to a card already on screen (`unexpiredBankedResets`,
+/// `currentWorkspaceShare`).
+fn passed(at: Option<&str>, now: DateTime<Utc>) -> bool {
+    at.and_then(parse_observed_at).is_some_and(|at| at <= now)
 }
 
 fn decode(raw: &str) -> Option<StoredSnapshot> {

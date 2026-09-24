@@ -7,7 +7,7 @@ import {
   parseInstant,
   usageTextColor,
 } from "$lib/limitsFormat";
-import type { LimitWindow, LimitsResetCredits, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitWindow, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
 import { formatAgo } from "$lib/timeFormat";
 
 export type LimitWindowPresentation = {
@@ -116,15 +116,30 @@ export function unexpiredBankedResets(resetCredits: LimitsResetCredits | null | 
 }
 
 /**
- * Whether a read observed anything about the account: quota windows, a credit balance or banked
- * resets. `windows` lets a surface count only the windows it shows. The backend's
+ * The workspace-credit share a card can still show: one whose reset is ahead of `now`. After the
+ * reset, what is used is not known, so the share stays off the card until a read answers again. The
+ * backend drops such a share from remembered snapshots by the same rule.
+ */
+export function currentWorkspaceShare(share: LimitsWorkspaceCredits | null | undefined, now: number): LimitsWorkspaceCredits | null {
+  if (!share) return null;
+  return hasElapsed(share.resetsAt, now) ? null : share;
+}
+
+/**
+ * Whether a read observed anything about the account: quota windows, a credit balance, a
+ * workspace-credit share or banked resets. `windows` lets a surface count only the windows it shows. The backend's
  * `ProviderLimitsDto::has_observations` is the same rule. A count that lapses while its card is on
  * screen still counts here until the next read, at most one poll later, drops it: only a card with
  * nothing else observed notices, and `unexpiredBankedResets` already keeps the count off it.
  */
 export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = entry.windows): boolean {
   // Every current Codex read reports a reset count, usually 0; only a positive count was observed.
-  return windows.length > 0 || entry.credits != null || (entry.resetCredits?.availableCount ?? 0) > 0;
+  return (
+    windows.length > 0 ||
+    entry.credits != null ||
+    entry.workspaceCredits != null ||
+    (entry.resetCredits?.availableCount ?? 0) > 0
+  );
 }
 
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
