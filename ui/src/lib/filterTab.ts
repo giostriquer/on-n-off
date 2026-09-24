@@ -5,9 +5,17 @@ function matches(query: string, ...parts: string[]): boolean {
   return parts.join(" ").toLowerCase().includes(query);
 }
 
-/** A server by its name, id, transport, source, or the plugin or project it comes from. */
+/** A server by its name, id, transport, source, the plugin that brings it, or a project keeping it. */
 function matchesMcp(query: string, server: McpServerDto): boolean {
-  return matches(query, server.name, server.id, server.system, server.source, server.via ?? "");
+  return matches(
+    query,
+    server.name,
+    server.id,
+    server.system,
+    server.source,
+    server.pluginId ?? "",
+    ...(server.projects ?? []),
+  );
 }
 
 export type FilteredTab = {

@@ -90,22 +90,39 @@ describe("filterTab", () => {
     expect(filterTab(tab, "0.22.1").plugins.map((plugin) => plugin.id)).toEqual(["workbench@workshop"]);
     expect(filterTab(tab, "0.23.0").plugins.map((plugin) => plugin.id)).toEqual(["workbench@workshop"]);
   });
-});
 
-describe("filterMcpList", () => {
-  it("finds a server by the project it is kept for", () => {
-    const docs = {
-      id: "local:library-docs",
-      name: "library-docs",
-      system: "http",
-      source: "https://docs.example/mcp",
-      enabled: true,
-      togglable: false,
-      origin: "local",
-      via: "webapp",
+  it("finds a server by any project that keeps it, or by the plugin that brings it", () => {
+    const withSources: AgentTabDto = {
+      ...tab,
+      mcpServers: [
+        ...tab.mcpServers,
+        {
+          id: "local:library-docs",
+          name: "library-docs",
+          system: "http",
+          source: "https://docs.example/mcp",
+          enabled: true,
+          togglable: false,
+          origin: "local",
+          projects: ["/Users/me/acme/webapp", "/Users/me/acme/api"],
+        },
+        {
+          id: "plugin:kit:tracker",
+          name: "tracker",
+          system: "http",
+          source: "https://tracker.example/mcp",
+          enabled: true,
+          togglable: false,
+          origin: "plugin",
+          pluginId: "kit@marketplace-one",
+        },
+      ],
     };
-    const withLocal: AgentTabDto = { ...tab, mcpServers: [...tab.mcpServers, docs] };
-    expect(filterMcpList(withLocal, "webapp").map((server) => server.id)).toEqual(["local:library-docs"]);
+    const ids = (query: string) => filterTab(withSources, query).mcpServers.map((server) => server.id);
+    expect(ids("webapp")).toEqual(["local:library-docs"]);
+    expect(ids("acme/api")).toEqual(["local:library-docs"]);
+    expect(ids("marketplace-one")).toEqual(["plugin:kit:tracker"]);
+    expect(ids("no-such-project")).toEqual([]);
   });
 });
 

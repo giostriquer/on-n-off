@@ -1,5 +1,5 @@
 import { copy } from "./copy";
-import { isLocalOrigin, isProjectOrigin } from "./project";
+import { isLocalOrigin, isPluginOrigin, isProjectOrigin } from "./project";
 import type { AgentId, AgentTabDto, HookDto, McpServerDto, PluginDto, SkillDto } from "./types";
 
 export type Screen =
@@ -178,6 +178,35 @@ export function skillIsLive(skill: SkillDto, tab: AgentTabDto): boolean {
   return tab.plugins.find((plugin) => plugin.id === skill.pluginId)?.enabled ?? skill.enabled;
 }
 
+/**
+ * Whether a server runs in this view. One Claude keeps for particular projects is listed in the
+ * all-projects view but runs only inside those projects.
+ */
+export function mcpIsLive(server: McpServerDto): boolean {
+  return server.enabled && !isLocalOrigin(server.origin);
+}
+
+/** A server from the user's own list, as opposed to a project's, a plugin's or a per-project one. */
+function isOwnMcp(server: McpServerDto): boolean {
+  return !server.origin;
+}
+
+/** Where the listed servers come from, for the MCP screen's header. */
+export function mcpSourcesLabel(servers: McpServerDto[]): string {
+  const has = (test: (origin?: string) => boolean) => servers.some((server) => test(server.origin));
+  const extra = [
+    has(isPluginOrigin) ? "plugins" : "",
+    has(isLocalOrigin) ? "per-project" : "",
+    has(isProjectOrigin) ? "this project" : "",
+  ].filter(Boolean);
+  return extra.length === 0 ? "user-scope config only" : ["user config", ...extra].join(" + ");
+}
+
+/** Servers read from the provider's MCP config file itself (`mcpConfigPath`). */
+export function configMcpCount(tab: AgentTabDto | null | undefined): number {
+  return (tab?.mcpServers ?? []).filter(isOwnMcp).length;
+}
+
 export function catalogCounts(tab: AgentTabDto | null): CatalogCounts {
   if (!tab) {
     return {
@@ -200,7 +229,7 @@ export function catalogCounts(tab: AgentTabDto | null): CatalogCounts {
       total: skills.length,
     },
     mcp: {
-      on: mcps.filter((server) => server.enabled && !isLocalOrigin(server.origin)).length,
+      on: mcps.filter(mcpIsLive).length,
       total: mcps.length,
     },
     hooks: {
@@ -253,7 +282,7 @@ export function liveRows(tab: AgentTabDto): LiveRow[] {
     });
   }
   for (const server of tab.mcpServers ?? []) {
-    if (!server.enabled || isLocalOrigin(server.origin)) {
+    if (!mcpIsLive(server)) {
       continue;
     }
     rows.push({
@@ -343,11 +372,11 @@ export function globalItemCount(tab: AgentTabDto | null | undefined): number {
   if (!tab) {
     return 0;
   }
-  const project = (origin?: string) => origin?.toLowerCase() === "project";
+  // A plugin counts once: its skills, hooks and servers are not counted apart from it.
   return (
     tab.plugins.length +
-    tab.userSkills.filter((skill) => !project(skill.origin)).length +
-    (tab.mcpServers ?? []).filter((server) => !project(server.origin) && !isLocalOrigin(server.origin)).length
+    tab.userSkills.filter((skill) => !isProjectOrigin(skill.origin)).length +
+    configMcpCount(tab)
   );
 }
 

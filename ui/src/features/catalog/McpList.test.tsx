@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { McpList } from "./McpList";
 import type { McpServerDto } from "$lib/types";
@@ -24,6 +24,16 @@ const server: McpServerDto = {
   enabled: true,
   togglable: true,
 };
+
+/** The row that names `name`. */
+function row(name: string): HTMLElement {
+  return screen.getByText(name).closest("article")!;
+}
+
+/** The dot beside a row's name: lit when the server runs here. */
+function liveDot(article: HTMLElement): Element {
+  return article.querySelector("span.rounded-full")!;
+}
 
 describe("McpList", () => {
   it("uses an already-derived server list without filtering it again", () => {
@@ -56,14 +66,14 @@ describe("McpList", () => {
     expect(screen.getByRole("button", { name: /GitHub on/ })).toBeDisabled();
   });
 
-  it("labels plugin and per-project servers and counts only what is live here", () => {
+  it("labels a plugin's server with its plugin and a per-project server with its projects", () => {
     const tracker: McpServerDto = {
       ...server,
       id: "plugin:kit:tracker",
       name: "tracker",
       togglable: false,
       origin: "plugin",
-      via: "kit",
+      pluginId: "kit@acme",
     };
     const docs: McpServerDto = {
       ...server,
@@ -71,21 +81,41 @@ describe("McpList", () => {
       name: "library-docs",
       togglable: false,
       origin: "local",
-      via: "2 projects",
+      projects: ["/Users/me/acme/webapp", "/Users/me/acme/api"],
     };
-    const servers = [server, tracker, docs];
+    const pad: McpServerDto = { ...docs, id: "local:pad", name: "pad", projects: ["/Users/me/acme/notes"] };
+    const kit = { id: "kit@acme", name: "Kit", source: "acme", version: "", upstream: "", enabled: true, togglable: true, skills: [] };
+    const servers = [server, tracker, docs, pad];
     render(
-      <McpList tab={{ plugins: [], userSkills: [], mcpServers: servers }} servers={servers} onToggle={vi.fn()} />,
+      <McpList tab={{ plugins: [kit], userSkills: [], mcpServers: servers }} servers={servers} onToggle={vi.fn()} />,
     );
 
     expect(screen.getByText("2 live · user config + plugins + per-project · handshake not probed")).toBeInTheDocument();
-    const trackerRow = screen.getByText("tracker").closest("article")!;
-    expect(trackerRow).toHaveTextContent("PLUGIN");
-    expect(trackerRow).toHaveTextContent("from kit");
-    const docsRow = screen.getByText("library-docs").closest("article")!;
-    expect(docsRow).toHaveTextContent("PER-PROJECT");
-    expect(docsRow).toHaveTextContent("in 2 projects");
+    const trackerRow = row("tracker");
+    expect(within(trackerRow).getByText("PLUGIN")).toBeInTheDocument();
+    expect(within(trackerRow).getByText("from Kit")).toBeInTheDocument();
+    expect(within(row("library-docs")).getByText("PER-PROJECT")).toBeInTheDocument();
+    const projects = within(row("library-docs")).getByText("in 2 projects");
+    expect(projects).toHaveAttribute("title", "/Users/me/acme/api\n/Users/me/acme/webapp");
+    expect(within(row("pad")).getByText("in notes")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /tracker on/ })).toBeDisabled();
+    // A server kept for particular projects does not run here: listed on, but no live glow.
+    expect(liveDot(row("library-docs"))).not.toHaveClass("bg-[var(--live)]");
+    expect(liveDot(row("tracker"))).toHaveClass("bg-[var(--live)]");
+  });
+
+  it("labels the user's own server with nothing and a project's server with exactly PROJECT", () => {
+    const repo: McpServerDto = { ...server, id: "project:repo-docs", name: "repo-docs", togglable: false, origin: "project" };
+    const servers = [server, repo];
+    render(<McpList tab={{ plugins: [], userSkills: [], mcpServers: servers }} servers={servers} onToggle={vi.fn()} />);
+
+    // The name line holds the name and its badges, nothing else; the block under it is that line
+    // and the source, with no "from"/"in" line between them.
+    const nameLine = (name: string) => screen.getByText(name).parentElement!;
+    expect(nameLine("GitHub")).toHaveTextContent(/^GitHubSTDIO$/);
+    expect(nameLine("GitHub").parentElement!.children).toHaveLength(2);
+    expect(nameLine("repo-docs")).toHaveTextContent(/^repo-docsSTDIOPROJECT$/);
+    expect(nameLine("repo-docs").parentElement!.children).toHaveLength(2);
   });
 
   it("keeps the plain header when every server is the user's own", () => {

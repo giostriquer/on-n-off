@@ -129,10 +129,8 @@ const fullTab = (): AgentTabDto => ({
   })),
 });
 
-// `?mock=hooks`: the Hooks screen's rows, which are per provider — Antigravity and Cursor get
-// none, and say so rather than reading as unconfigured.
-// `?mock=mcpSources`: the catalog plus the Claude servers that are not the user's own — one an
-// enabled plugin brings and two kept for particular projects.
+// `?mock=mcpSources`: the catalog plus the Claude servers that are not the user's own — one the
+// toolkit plugin brings and two kept for particular projects.
 const mcpSourcesTab = (): AgentTabDto => {
   const tab = fullTab();
   return {
@@ -140,14 +138,14 @@ const mcpSourcesTab = (): AgentTabDto => {
     mcpServers: [
       ...tab.mcpServers,
       {
-        id: "plugin:tracker:tracker",
+        id: "plugin:toolkit:tracker",
         name: "tracker",
         system: "http",
         source: "https://tracker.example/mcp",
         enabled: true,
         togglable: false,
         origin: "plugin",
-        via: "tracker",
+        pluginId: "toolkit@workshop",
       },
       {
         id: "local:library-docs",
@@ -157,7 +155,7 @@ const mcpSourcesTab = (): AgentTabDto => {
         enabled: true,
         togglable: false,
         origin: "local",
-        via: "18 projects",
+        projects: Array.from({ length: 18 }, (_, index) => `/Users/me/acme/app-${String(index + 1).padStart(2, "0")}`),
       },
       {
         id: "local:scratchpad",
@@ -167,12 +165,14 @@ const mcpSourcesTab = (): AgentTabDto => {
         enabled: true,
         togglable: false,
         origin: "local",
-        via: "webapp",
+        projects: ["/Users/me/acme/webapp"],
       },
     ],
   };
 };
 
+// `?mock=hooks`: the Hooks screen's rows, which are per provider — Antigravity and Cursor get
+// none, and say so rather than reading as unconfigured.
 const catalogTab = (args: Record<string, unknown> = {}): AgentTabDto => {
   const tab = scenario === "catalog" ? fullTab() : scenario === "mcpSources" ? mcpSourcesTab() : emptyTab();
   return scenario === "hooks" ? { ...tab, hooks: hooksFor(args.agentId as AgentId) } : tab;

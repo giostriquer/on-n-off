@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Rocker } from "@/features/agents/Rocker";
+import { mcpIsLive, mcpSourcesLabel } from "$lib/catalog";
 import { copy } from "$lib/copy";
-import { isLocalOrigin, isPluginOrigin, isProjectOrigin } from "$lib/project";
-import type { AgentTabDto, McpServerDto } from "$lib/types";
+import { projectLabel } from "$lib/project";
+import type { AgentTabDto, McpOrigin, McpServerDto, PluginDto } from "$lib/types";
 
 type Chip = "all" | "on" | "off";
 
@@ -20,22 +21,14 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
   const [chip, setChip] = useState<Chip>("all");
   const servers =
     chip === "on" ? pool.filter((server) => server.enabled) : chip === "off" ? pool.filter((server) => !server.enabled) : pool;
-  const live = tab.mcpServers.filter((server) => server.enabled && !isLocalOrigin(server.origin)).length;
-  const hasProject = tab.mcpServers.some((server) => isProjectOrigin(server.origin));
-  const hasPlugin = tab.mcpServers.some((server) => isPluginOrigin(server.origin));
-  const hasLocal = tab.mcpServers.some((server) => isLocalOrigin(server.origin));
-  const sources = hasProject
-    ? "global + this project"
-    : hasPlugin || hasLocal
-      ? ["user config", hasPlugin ? "plugins" : "", hasLocal ? "per-project" : ""].filter(Boolean).join(" + ")
-      : "user-scope config only";
+  const live = tab.mcpServers.filter(mcpIsLive).length;
 
   return (
     <div className="flex flex-col gap-3.5 px-5 pt-[18px] pb-[26px]">
       <header className="flex items-baseline gap-3">
         <h2 className="m-0 shrink-0 text-[15px] font-semibold tracking-[0.05em] uppercase whitespace-nowrap">MCP servers</h2>
         <span className="font-mono text-xs leading-snug text-[var(--mute)]">
-          {live} live · {sources} · handshake not probed
+          {live} live · {mcpSourcesLabel(tab.mcpServers)} · handshake not probed
         </span>
         <div className="flex-1" />
         <div className="flex border border-[var(--hair)]" role="group" aria-label="Filter list">
@@ -74,63 +67,83 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
         </p>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {servers.map((server) => (
-            <article key={server.id} className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
-              <div className="flex items-start gap-3 px-3 py-[11px]">
-                <span className="min-h-6 min-w-6 shrink-0" aria-hidden="true" />
-                <span
-                  className={`mt-2 size-2 shrink-0 rounded-full ${
-                    server.enabled ? "bg-[var(--live)] shadow-[0_0_7px_var(--live)]" : "bg-[var(--mute)]"
-                  }`}
-                  aria-hidden="true"
-                />
-                <div className="w-[238px] min-w-0 shrink-0">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[13px]/[1.15] font-semibold break-words">{server.name}</span>
-                    <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
-                      {server.system.toUpperCase()}
-                    </span>
-                    {originBadge(server.origin) ? (
-                      <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
-                        {originBadge(server.origin)}
-                      </span>
-                    ) : null}
-                  </div>
-                  {server.via ? (
-                    <div className="mt-0.5 truncate text-[11px]/[1.4] text-[var(--mute)]" title={server.via}>
-                      {isPluginOrigin(server.origin) ? `from ${server.via}` : `in ${server.via}`}
-                    </div>
-                  ) : null}
-                  <div
-                    className="mt-0.5 truncate font-mono text-[11px]/[1.4] text-[var(--mute)]"
-                    title={server.source}
-                  >
-                    {server.source}
-                  </div>
-                </div>
-                <div className="mt-0.5 ml-auto shrink-0">
-                  <Rocker
-                    size="plugin"
-                    on={server.enabled}
-                    busy={busy}
-                    disabled={!server.togglable}
-                    ariaLabel={`${server.name} ${server.enabled ? "on" : "off"}`}
-                    onToggle={() => onToggle(server, !server.enabled)}
+          {servers.map((server) => {
+            const badge = ORIGIN_BADGE[server.origin ?? ""];
+            const from = fromLine(server, tab.plugins);
+            return (
+              <article key={server.id} className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
+                <div className="flex items-start gap-3 px-3 py-[11px]">
+                  <span className="min-h-6 min-w-6 shrink-0" aria-hidden="true" />
+                  <span
+                    className={`mt-2 size-2 shrink-0 rounded-full ${
+                      mcpIsLive(server) ? "bg-[var(--live)] shadow-[0_0_7px_var(--live)]" : "bg-[var(--mute)]"
+                    }`}
+                    aria-hidden="true"
                   />
+                  <div className="w-[238px] min-w-0 shrink-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[13px]/[1.15] font-semibold break-words">{server.name}</span>
+                      <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+                        {server.system.toUpperCase()}
+                      </span>
+                      {badge ? (
+                        <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
+                          {badge}
+                        </span>
+                      ) : null}
+                    </div>
+                    {from ? (
+                      <div className="mt-0.5 truncate text-[11px]/[1.4] text-[var(--mute)]" title={from.title}>
+                        {from.text}
+                      </div>
+                    ) : null}
+                    <div
+                      className="mt-0.5 truncate font-mono text-[11px]/[1.4] text-[var(--mute)]"
+                      title={server.source}
+                    >
+                      {server.source}
+                    </div>
+                  </div>
+                  <div className="mt-0.5 ml-auto shrink-0">
+                    <Rocker
+                      size="plugin"
+                      on={server.enabled}
+                      busy={busy}
+                      disabled={!server.togglable}
+                      ariaLabel={`${server.name} ${server.enabled ? "on" : "off"}`}
+                      onToggle={() => onToggle(server, !server.enabled)}
+                    />
+                  </div>
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-/** The badge for a server that is not the user's own, or null for one that is. */
-function originBadge(origin?: string): string | null {
-  if (isProjectOrigin(origin)) return "PROJECT";
-  if (isPluginOrigin(origin)) return "PLUGIN";
-  if (isLocalOrigin(origin)) return "PER-PROJECT";
-  return null;
+/** The badge for a server that is not the user's own; none for one that is. */
+const ORIGIN_BADGE: Record<McpOrigin, string | null> = {
+  "": null,
+  project: "PROJECT",
+  plugin: "PLUGIN",
+  local: "PER-PROJECT",
+};
+
+/**
+ * The line saying where a read-only server comes from: the plugin that brings it (by its name
+ * where the plugin is listed), or the projects keeping it, all named in the tooltip.
+ */
+function fromLine(server: McpServerDto, plugins: PluginDto[]): { text: string; title: string } | null {
+  if (server.pluginId) {
+    const name = plugins.find((plugin) => plugin.id === server.pluginId)?.name ?? server.pluginId;
+    return { text: copy.mcpFromPlugin(name), title: server.pluginId };
+  }
+  const projects = [...(server.projects ?? [])].sort();
+  if (projects.length === 0) {
+    return null;
+  }
+  return { text: copy.mcpInProjects(projects.map(projectLabel)), title: projects.join("\n") };
 }

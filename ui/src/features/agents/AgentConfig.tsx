@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { FolderPlus, Search } from "lucide-react";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { agentRoot, mcpConfigPath } from "$lib/catalog";
+import { agentRoot, configMcpCount, mcpConfigPath } from "$lib/catalog";
 import { sameProjectPath } from "$lib/project";
 import { tripTagClass, type TripEntry } from "$lib/tripLog";
 import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
@@ -146,7 +146,8 @@ export function AgentConfig({
   const skillCount =
     (tab?.plugins.reduce((sum, plugin) => sum + plugin.skills.length, 0) ?? 0) +
     (tab?.userSkills.length ?? 0);
-  const mcpCount = tab?.mcpServers.length ?? 0;
+  // The row names the provider's MCP config file: only the servers read from it count here.
+  const mcpCount = configMcpCount(tab);
   const installModes =
     [agent.installGit ? "git/url" : null, agent.installFolder ? "folder" : null].filter(Boolean).join(" · ") ||
     "unavailable";
