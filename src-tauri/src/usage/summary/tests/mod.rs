@@ -4,7 +4,11 @@ use crate::dto::{UsageCostSource, UsagePricingStatus, UsageSourceStatus};
 use crate::paths::scratch_dir;
 use crate::usage::pricing;
 use crate::usage::scan_cache::{reset_scan_cache_decode_count, scan_cache_decode_count};
-use crate::usage::source_index::{reset_transcript_parse_count, transcript_parse_count};
+use crate::usage::source_index::{
+    normalize_path, reset_transcript_parse_count, transcript_parse_count,
+};
+use crate::usage::sources::{load_scan_cache, scan_cache_path_for};
+use crate::usage::summary_cache::summary_cache_path_for;
 
 mod history;
 
@@ -684,11 +688,9 @@ fn tokens_still_returned_when_rates_unavailable() {
 /// refused before any home is, so these tests reach no home at all — least of all the real one,
 /// which a broken refusal would otherwise scan, price over the network and cache into.
 fn refused_before_any_home(input: UsageSummaryInput) -> AdapterError {
-    read_summary_from(
-        input,
-        || panic!("an invalid window must be refused before a home is resolved"),
-        FIXTURE_NOW_MS,
-    )
+    read_summary_from(input, || {
+        panic!("an invalid window must be refused before a home is resolved")
+    })
     .unwrap_err()
 }
 

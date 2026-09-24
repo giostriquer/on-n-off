@@ -9,15 +9,15 @@
 //! time zone come out as they would from the records themselves. Tokens are kept rather than
 //! dollars, so a new price table still prices history.
 //!
-//! The file also holds the watermark: rows cover every record before it, and a read counts a
+//! The file also holds the [`Watermark`]: rows cover every record before it, and a read counts a
 //! transcript's records only from it onward. Nothing below the watermark is ever counted twice,
 //! and a transcript entirely below it is never parsed again. The watermark only moves forward,
 //! to the UTC midnight [`FOLD_AFTER_DAYS`] before now, well inside every provider's retention.
 //!
 //! This is user data, not a cache: it cannot be rebuilt once the transcripts are gone. A file
 //! that does not read is never written over: the previous good file is kept as a backup and read
-//! in its place, and the unreadable one is set aside, never deleted. A file a newer on-n-off
-//! wrote is left alone entirely.
+//! in its place, and the unreadable one is copied aside, never deleted. A file a newer on-n-off
+//! wrote is left alone entirely, and a history is written only once it is known to read back.
 
 use std::collections::{BTreeSet, HashMap};
 use std::io;
@@ -25,9 +25,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use super::cache_io::atomic_write;
+use super::reader::MTIME_SLACK_MS;
 use super::transcripts::{
     TokenTotals, UsageProvider, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION,
 };
@@ -39,7 +39,7 @@ pub const USAGE_HISTORY_VERSION: u32 = 1;
 pub const FOLD_AFTER_DAYS: i64 = 7;
 
 const SLOT_MS: i64 = 15 * 60 * 1000;
-const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+pub const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// A request whose input (fresh, cached and cache writes) exceeds this is flagged in its row.
 /// LiteLLM lists a higher `*_above_200k_tokens` rate for some models; on-n-off does not apply it
@@ -48,6 +48,36 @@ const LONG_CONTEXT_INPUT_TOKENS: u64 = 200_000;
 
 const REPORTED_FLAG: u8 = 1;
 const LONG_CONTEXT_FLAG: u8 = 2;
+
+/// The instant before which the history holds every record and the transcripts count for
+/// nothing. [`Watermark::NONE`] until the first fold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Watermark(i64);
+
+impl Watermark {
+    pub const NONE: Self = Self(i64::MIN);
+
+    #[cfg(test)]
+    pub fn at(ms: i64) -> Self {
+        Self(ms)
+    }
+
+    pub fn ms(self) -> Option<i64> {
+        (self != Self::NONE).then_some(self.0)
+    }
+
+    /// A record from `at_ms` is in the history, not counted from its transcript.
+    pub fn is_folded(self, at_ms: i64) -> bool {
+        at_ms < self.0
+    }
+
+    /// Every record a transcript holds is in the history, so the transcript need not be read:
+    /// its newest record is, or it was last written well before the watermark.
+    pub fn holds_only_folded(self, mtime_ms: i64, newest_record_ms: Option<i64>) -> bool {
+        newest_record_ms.is_some_and(|newest| self.is_folded(newest))
+            || mtime_ms < self.0.saturating_sub(MTIME_SLACK_MS)
+    }
+}
 
 /// The records of one slot that share a provider, a model and a way of being priced.
 #[derive(Debug, Clone, PartialEq)]
@@ -76,6 +106,7 @@ pub struct FoldSegment {
     pub folded_at_ms: i64,
 }
 
+/// Rows sorted by slot, all before the watermark.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UsageHistory {
     folded_through_ms: Option<i64>,
@@ -83,39 +114,27 @@ pub struct UsageHistory {
     rows: Vec<FoldedRow>,
 }
 
-#[derive(Debug)]
-pub enum LoadedHistory {
-    /// Nothing folded yet.
-    Missing,
-    Ready {
-        history: UsageHistory,
-        /// Read from the backup because the file itself did not read; the next write sets the
-        /// file aside first.
-        recovered: bool,
-    },
-    /// Neither the file nor its backup reads, or a newer on-n-off wrote it: never fold over it
-    /// or write it.
-    Unreadable,
-}
-
-#[derive(Debug)]
-pub enum DecodeError {
-    Newer,
-    Damaged,
-}
-
 impl UsageHistory {
-    /// Rows cover every record before this instant; `None` before the first fold.
-    pub fn folded_through_ms(&self) -> Option<i64> {
-        self.folded_through_ms
+    pub fn watermark(&self) -> Watermark {
+        self.folded_through_ms.map_or(Watermark::NONE, Watermark)
     }
 
+    #[cfg(test)]
     pub fn rows(&self) -> &[FoldedRow] {
         &self.rows
     }
 
+    /// The rows whose slot starts in `[start_ms, end_ms)`.
+    pub fn rows_between(&self, start_ms: i64, end_ms: i64) -> &[FoldedRow] {
+        let first = self
+            .rows
+            .partition_point(|row| row.slot_start_ms < start_ms);
+        let end = self.rows.partition_point(|row| row.slot_start_ms < end_ms);
+        &self.rows[first..end.max(first)]
+    }
+
     pub fn kept_since_ms(&self) -> Option<i64> {
-        self.rows.iter().map(|row| row.slot_start_ms).min()
+        self.rows.first().map(|row| row.slot_start_ms)
     }
 
     /// Folds the records from the watermark up to `cutoff_ms` and moves the watermark there.
@@ -128,15 +147,15 @@ impl UsageHistory {
         cutoff_ms: i64,
         folded_at_ms: i64,
     ) {
-        let from_ms = self.folded_through_ms;
-        if from_ms.is_some_and(|through| cutoff_ms <= through) {
+        let from = self.watermark();
+        if from.ms().is_some_and(|through| cutoff_ms <= through) {
             return;
         }
 
         let mut groups: HashMap<RowKey<'a>, RowSums<'a>> = HashMap::new();
         for record in records {
             let at = record.timestamp_ms;
-            if from_ms.is_some_and(|through| at < through) || at >= cutoff_ms {
+            if from.is_folded(at) || at >= cutoff_ms {
                 continue;
             }
             let reported_cost = record.reported_cost_usd.filter(|cost| cost.is_finite());
@@ -171,8 +190,9 @@ impl UsageHistory {
             })
             .collect();
         rows.sort_by(|a, b| row_order(a).cmp(&row_order(b)));
+        // Every new slot starts at or after the old watermark, past every row already held.
         self.rows.extend(rows);
-        self.record_segment(from_ms, cutoff_ms, folded_at_ms);
+        self.record_segment(from.ms(), cutoff_ms, folded_at_ms);
         self.folded_through_ms = Some(cutoff_ms);
     }
 
@@ -231,30 +251,100 @@ pub fn fold_cutoff_ms(now_ms: i64) -> i64 {
     (now_ms - FOLD_AFTER_DAYS * DAY_MS).div_euclid(DAY_MS) * DAY_MS
 }
 
-/// A transcript last written this long before the watermark holds no record after it, even with
-/// its records stamped by a clock that disagrees with the filesystem's.
-const FOLDED_MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
-
-/// Whether every record a transcript holds is below the watermark, so the history already has
-/// them and the transcript need not be read: its newest record is, or it was last written well
-/// before.
-pub fn holds_only_folded(
-    mtime_ms: i64,
-    newest_record_ms: Option<i64>,
-    folded_through_ms: Option<i64>,
-) -> bool {
-    folded_through_ms.is_some_and(|through| {
-        newest_record_ms.is_some_and(|newest| newest < through)
-            || mtime_ms < through - FOLDED_MTIME_SLACK_MS
-    })
-}
-
-pub fn fold_due(folded_through_ms: Option<i64>, now_ms: i64) -> bool {
-    folded_through_ms.is_none_or(|through| fold_cutoff_ms(now_ms) > through)
+pub fn fold_due(watermark: Watermark, now_ms: i64) -> bool {
+    watermark
+        .ms()
+        .is_none_or(|through| fold_cutoff_ms(now_ms) > through)
 }
 
 pub fn history_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-history.json")
+}
+
+/// The history file and what it holds. A missing file is an empty history; one that does not
+/// read, with no readable backup, is held apart and never written.
+#[derive(Debug)]
+pub struct HistoryStore {
+    path: PathBuf,
+    state: StoreState,
+}
+
+#[derive(Debug)]
+enum StoreState {
+    Readable {
+        history: UsageHistory,
+        /// Read from the backup because the file itself did not read; the next save copies
+        /// that file aside first.
+        recovered: bool,
+    },
+    Unreadable,
+}
+
+impl HistoryStore {
+    pub fn open(path: PathBuf) -> Self {
+        let state = load(&path);
+        Self { path, state }
+    }
+
+    /// `None` when the file does not read.
+    pub fn history(&self) -> Option<&UsageHistory> {
+        match &self.state {
+            StoreState::Readable { history, .. } => Some(history),
+            StoreState::Unreadable => None,
+        }
+    }
+
+    /// [`Watermark::NONE`] when the file does not read: every record counts from its transcript.
+    pub fn watermark(&self) -> Watermark {
+        self.history()
+            .map_or(Watermark::NONE, UsageHistory::watermark)
+    }
+
+    /// Folds into a copy and saves it; the store holds the fold only once the file has it, so a
+    /// save that fails changes nothing. A file that does not read is never folded over.
+    pub fn fold<'a>(
+        &mut self,
+        records: impl IntoIterator<Item = &'a UsageRecord>,
+        cutoff_ms: i64,
+        folded_at_ms: i64,
+    ) -> io::Result<()> {
+        let StoreState::Readable { history, recovered } = &mut self.state else {
+            return Err(io::Error::other("the usage history does not read"));
+        };
+        let mut folded = history.clone();
+        folded.fold(records, cutoff_ms, folded_at_ms);
+        save(&self.path, &folded, *recovered)?;
+        *history = folded;
+        *recovered = false;
+        Ok(())
+    }
+}
+
+fn load(path: &Path) -> StoreState {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return StoreState::Readable {
+                history: UsageHistory::default(),
+                recovered: false,
+            }
+        }
+        Err(_) => return StoreState::Unreadable,
+    };
+    match decode(&raw) {
+        Ok(history) => StoreState::Readable {
+            history,
+            recovered: false,
+        },
+        Err(DecodeError::Newer) => StoreState::Unreadable,
+        Err(DecodeError::Damaged) => std::fs::read_to_string(backup_path(path))
+            .ok()
+            .and_then(|raw| decode(&raw).ok())
+            .map_or(StoreState::Unreadable, |history| StoreState::Readable {
+                history,
+                recovered: true,
+            }),
+    }
 }
 
 fn backup_path(path: &Path) -> PathBuf {
@@ -268,42 +358,27 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-pub fn load_history(path: &Path) -> LoadedHistory {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return LoadedHistory::Missing,
-        Err(_) => return LoadedHistory::Unreadable,
-    };
-    match decode(&raw) {
-        Ok(history) => LoadedHistory::Ready {
-            history,
-            recovered: false,
-        },
-        Err(DecodeError::Newer) => LoadedHistory::Unreadable,
-        Err(DecodeError::Damaged) => std::fs::read_to_string(backup_path(path))
-            .ok()
-            .and_then(|raw| decode(&raw).ok())
-            .map_or(LoadedHistory::Unreadable, |history| LoadedHistory::Ready {
-                history,
-                recovered: true,
-            }),
-    }
+fn save(path: &Path, history: &UsageHistory, recovered: bool) -> io::Result<()> {
+    save_with(path, history, recovered, atomic_write)
 }
 
 /// Writes `history`, keeping the file it replaces as the backup. A `recovered` history came from
 /// the backup because the file did not read: that file is copied aside under a new name first,
-/// and the backup is not replaced with it.
-pub fn persist_history(path: &Path, history: &UsageHistory, recovered: bool) -> io::Result<()> {
-    persist_history_with(path, history, recovered, atomic_write)
-}
-
-/// [`persist_history`] with the write of the file itself supplied, so a test can fail it.
-fn persist_history_with(
+/// and the backup is not replaced with it. Nothing is touched unless the encoded history reads
+/// back as itself. `write_file` writes the file itself, so a test can fail it.
+fn save_with(
     path: &Path,
     history: &UsageHistory,
     recovered: bool,
     write_file: impl FnOnce(&Path, &str) -> io::Result<()>,
 ) -> io::Result<()> {
+    let encoded = encode(history);
+    if decode(&encoded).ok().as_ref() != Some(history) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the usage history would not read back",
+        ));
+    }
     if recovered {
         set_aside(path)?;
     } else {
@@ -313,7 +388,7 @@ fn persist_history_with(
             Err(error) => return Err(error),
         }
     }
-    write_file(path, &encode(history))
+    write_file(path, &encoded)
 }
 
 fn set_aside(path: &Path) -> io::Result<()> {
@@ -336,14 +411,15 @@ fn set_aside(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Forgets every folded row: the file, its backup, and any copy set aside.
-pub fn clear_history(path: &Path) -> io::Result<()> {
+/// The history file's backup, the copies set aside and any temporary left by an interrupted
+/// write: every sibling named after it.
+fn copies_of(path: &Path) -> io::Result<Vec<PathBuf>> {
     let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let prefix = format!("{}.", name.to_string_lossy());
-    let copies = match std::fs::read_dir(dir) {
-        Ok(entries) => entries
+    match std::fs::read_dir(dir) {
+        Ok(entries) => Ok(entries
             .filter_map(Result::ok)
             .map(|entry| entry.path())
             .filter(|candidate| {
@@ -351,10 +427,27 @@ pub fn clear_history(path: &Path) -> io::Result<()> {
                     .file_name()
                     .is_some_and(|name| name.to_string_lossy().starts_with(&prefix))
             })
-            .collect(),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => return Err(error),
-    };
+            .collect()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
+}
+
+/// The room the history takes on disk: the file and every copy of it.
+pub fn history_bytes(path: &Path) -> u64 {
+    copies_of(path)
+        .unwrap_or_default()
+        .iter()
+        .map(PathBuf::as_path)
+        .chain([path])
+        .filter_map(|file| std::fs::metadata(file).ok())
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+/// Forgets every folded row: the file, its backup, and any copy set aside.
+pub fn clear_history(path: &Path) -> io::Result<()> {
+    let copies = copies_of(path)?;
     // The file goes last, so a clear cut short leaves the history readable rather than half gone.
     for target in copies.iter().map(PathBuf::as_path).chain([path]) {
         match std::fs::remove_file(target) {
@@ -363,6 +456,33 @@ pub fn clear_history(path: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Changes whenever the history file is written or removed, so a stored summary counted with
+/// one history is never served with another.
+pub fn history_fingerprint(path: &Path) -> String {
+    std::fs::metadata(path).map_or_else(
+        |_| "none".to_string(),
+        |metadata| {
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|at| at.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |elapsed| elapsed.as_nanos());
+            format!("{}:{modified}", metadata.len())
+        },
+    )
+}
+
+#[derive(Debug)]
+enum DecodeError {
+    Newer,
+    Damaged,
+}
+
+#[derive(Deserialize)]
+struct VersionOnly {
+    version: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -459,26 +579,35 @@ impl Interner {
 }
 
 /// Every row or none: a row that does not read makes the whole file unreadable, because writing
-/// the rest back would lose that row's usage for good.
+/// the rest back would lose that row's usage for good. So do rows out of slot order, or at or
+/// past the watermark, which a read would count a second time from the transcripts.
 fn decode(raw: &str) -> Result<UsageHistory, DecodeError> {
-    let document: Value = serde_json::from_str(raw).map_err(|_| DecodeError::Damaged)?;
-    let version = document
-        .get("version")
-        .and_then(Value::as_u64)
-        .ok_or(DecodeError::Damaged)?;
+    let version = serde_json::from_str::<VersionOnly>(raw)
+        .map_err(|_| DecodeError::Damaged)?
+        .version;
     if version > u64::from(USAGE_HISTORY_VERSION) {
         return Err(DecodeError::Newer);
     }
     if version != u64::from(USAGE_HISTORY_VERSION) {
         return Err(DecodeError::Damaged);
     }
-    let file: HistoryFile = serde_json::from_value(document).map_err(|_| DecodeError::Damaged)?;
+    let file: HistoryFile = serde_json::from_str(raw).map_err(|_| DecodeError::Damaged)?;
     let rows = file
         .rows
         .into_iter()
         .map(|row| decode_row(row, &file.models, &file.sessions))
         .collect::<Option<Vec<_>>>()
         .ok_or(DecodeError::Damaged)?;
+    let in_slot_order = rows
+        .windows(2)
+        .all(|pair| pair[0].slot_start_ms <= pair[1].slot_start_ms);
+    let below_watermark = rows.last().is_none_or(|last| {
+        file.folded_through_ms
+            .is_some_and(|through| last.slot_start_ms < through)
+    });
+    if !in_slot_order || !below_watermark {
+        return Err(DecodeError::Damaged);
+    }
     Ok(UsageHistory {
         folded_through_ms: file.folded_through_ms,
         segments: file.segments,

@@ -102,3 +102,12 @@ it("shows why clearing failed", async () => {
 
   expect(await screen.findByRole("alert")).toHaveTextContent("Could not clear the usage history: denied");
 });
+
+it("says when what is kept cannot be read", async () => {
+  calls.usageHistoryStatus.mockRejectedValue({ kind: "message", message: "worker failed" });
+  renderCard();
+
+  const card = await screen.findByRole("region", { name: "Usage history" });
+  await waitFor(() => expect(card).toHaveTextContent("Could not read the usage history: worker failed"));
+  expect(screen.queryByRole("button", { name: "Clear history" })).toBeNull();
+});

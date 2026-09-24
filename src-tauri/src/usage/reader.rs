@@ -10,6 +10,11 @@ use super::transcripts::{
     UsageRecord,
 };
 
+/// A transcript last written more than this before an instant holds no record from that instant
+/// on. The allowance covers local days that begin before UTC midnight (up to 14 hours) and record
+/// clocks that disagree with the filesystem's.
+pub const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
+
 #[derive(Debug, Clone)]
 pub struct TranscriptFile {
     pub path: PathBuf,

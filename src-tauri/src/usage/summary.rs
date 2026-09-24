@@ -4,44 +4,34 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Arc;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, TimeZone, Utc};
 use chrono_tz::Tz;
 
 use crate::dto::{
-    AdapterError, AgentId, UsageBucketDto, UsageCostSource, UsageHistoryState,
-    UsageHistoryStatusDto, UsagePricingDto, UsageSourceDto, UsageSourceStatus, UsageSummaryDto,
-    UsageSummaryInput, UsageTokenTotalsDto,
+    AdapterError, AgentId, UsageBucketDto, UsageCostSource, UsagePricingDto, UsageSourceDto,
+    UsageSourceStatus, UsageSummaryDto, UsageSummaryInput, UsageTokenTotalsDto,
 };
-use crate::paths::{claude_root_for, codex_root_for, user_home};
+use crate::paths::user_home;
 
 use super::aggregate::{
     AggregateOptions as AggOpts, CostSource, Resolution as AggResolution, UsageAggregator,
     UsageBucket,
 };
-use super::cache_io::atomic_write;
-use super::history::{
-    clear_history, fold_cutoff_ms, fold_due, history_path_for, load_history, persist_history,
-    FoldedRow, LoadedHistory, UsageHistory,
-};
+use super::history::{history_fingerprint, HistoryStore};
 use super::pricing::{ensure_rates, LITELLM_RATES_URL};
-use super::scan_cache::{
-    decode_scan_cache, encode_scan_cache, prune_scan_cache, PruneOptions, ScanCache,
-};
+use super::reader::MTIME_SLACK_MS;
 use super::source_index::{
-    inventory_sources, normalize_path, prepare_sources, reconcile_inventory, source_index_path_for,
-    unchanged_snapshot, SourceRoot, SourceSnapshot,
+    inventory_sources, prepare_sources, reconcile_inventory, unchanged_snapshot,
 };
-use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_for, summary_key};
+use super::sources::{
+    all_roots, load_scan_cache, lock_usage_files, prune_and_persist_scan_cache, source_roots_for,
+    UsagePaths,
+};
+use super::summary_cache::{load_summary_hit, store_summary, summary_key};
 use super::transcripts::{richest_copies, UsageProvider as Provider};
 
-const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
-/// Out of the way of startup's own reads.
-const FIRST_FOLD_DELAY: Duration = Duration::from_secs(90);
-/// A fold is due once a day at most; a check that finds none reads only the history file.
-const FOLD_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 
 fn now_ms() -> i64 {
@@ -49,11 +39,6 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-fn usage_cache_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 #[cfg(test)]
@@ -85,191 +70,6 @@ fn pause_before_publish_if_requested() {
 
 #[cfg(not(test))]
 fn pause_before_publish_if_requested() {}
-
-fn scan_cache_path_for(home: &Path) -> PathBuf {
-    home.join(".on-n-off").join("usage-scan-cache.json")
-}
-
-fn load_scan_cache(path: &Path) -> ScanCache {
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return ScanCache::new();
-    };
-    let Ok(doc) = serde_json::from_str(&raw) else {
-        return ScanCache::new();
-    };
-    decode_scan_cache(&doc)
-}
-
-fn persist_scan_cache(path: &Path, cache: &ScanCache) {
-    let doc = encode_scan_cache(cache);
-    if let Ok(raw) = serde_json::to_string(&doc) {
-        let _ = atomic_write(path, &raw);
-    }
-}
-
-fn resolve_claude_transcript_dir(home: &Path) -> PathBuf {
-    let nested = claude_root_for(home).join("projects");
-    if nested.is_dir() {
-        return nested;
-    }
-    let flat = home.join("projects");
-    if flat.is_dir() {
-        return flat;
-    }
-    nested
-}
-
-fn resolve_codex_transcript_dir(home: &Path) -> PathBuf {
-    codex_root_for(home).join("sessions")
-}
-
-/// Where Codex moves a session's rollout when the session is archived, mtime intact. The usage it
-/// recorded is still Codex usage, reported under the same source as `sessions/`.
-fn resolve_codex_archive_dir(home: &Path) -> PathBuf {
-    codex_root_for(home).join("archived_sessions")
-}
-
-/// The files a usage read keeps under `~/.on-n-off/`.
-struct UsagePaths {
-    scan_cache: PathBuf,
-    summary: PathBuf,
-    source_index: PathBuf,
-    history: PathBuf,
-}
-
-impl UsagePaths {
-    fn for_home(home: &Path) -> Self {
-        Self {
-            scan_cache: scan_cache_path_for(home),
-            summary: summary_cache_path_for(home),
-            source_index: source_index_path_for(home),
-            history: history_path_for(home),
-        }
-    }
-}
-
-/// One source per provider, shown under its first root; a source may scan several roots.
-fn source_roots_for(home: &Path) -> [(Provider, Vec<SourceRoot>); 2] {
-    [
-        (Provider::Claude, vec![resolve_claude_transcript_dir(home)]),
-        (
-            Provider::Codex,
-            vec![
-                resolve_codex_transcript_dir(home),
-                resolve_codex_archive_dir(home),
-            ],
-        ),
-    ]
-    .map(|(provider, paths)| {
-        let roots: Vec<SourceRoot> = paths
-            .into_iter()
-            .map(|path| SourceRoot { provider, path })
-            .collect();
-        (provider, roots)
-    })
-}
-
-/// The usage history as a read found it (see `history`).
-enum HistoryState {
-    /// Folds may add to it; a history not written yet starts empty.
-    Writable {
-        history: UsageHistory,
-        recovered: bool,
-    },
-    /// It does not read: counted around, never folded over or written.
-    Unreadable,
-}
-
-impl HistoryState {
-    fn load(path: &Path) -> Self {
-        match load_history(path) {
-            LoadedHistory::Missing => Self::Writable {
-                history: UsageHistory::default(),
-                recovered: false,
-            },
-            LoadedHistory::Ready { history, recovered } => Self::Writable { history, recovered },
-            LoadedHistory::Unreadable => Self::Unreadable,
-        }
-    }
-
-    fn folded_through_ms(&self) -> Option<i64> {
-        match self {
-            Self::Writable { history, .. } => history.folded_through_ms(),
-            Self::Unreadable => None,
-        }
-    }
-
-    fn rows(&self) -> &[FoldedRow] {
-        match self {
-            Self::Writable { history, .. } => history.rows(),
-            Self::Unreadable => &[],
-        }
-    }
-
-    /// Folds the records that have aged past the cutoff, when a fold is due and every one of them
-    /// can be read: every root walked, and every transcript that may hold one read now or from
-    /// its cached parse. A transcript still being written counts what it holds; its records old
-    /// enough to fold were written days ago. Returns whether the scan cache gained a parse.
-    fn fold_if_due(
-        &mut self,
-        snapshot: &SourceSnapshot,
-        file_cache: &mut ScanCache,
-        path: &Path,
-        now_ms: i64,
-    ) -> bool {
-        let Self::Writable { history, recovered } = self else {
-            return false;
-        };
-        let through = history.folded_through_ms();
-        if !fold_due(through, now_ms) || !snapshot.walked_every_root() {
-            return false;
-        }
-        let prepared = prepare_sources(snapshot, file_cache, i64::MIN, through);
-        if prepared.unread_files > 0 {
-            return prepared.scan_cache_dirty;
-        }
-        let records = richest_copies(prepared.files.iter().map(|file| file.records.as_slice()));
-        let mut folded = history.clone();
-        folded.fold(records, fold_cutoff_ms(now_ms), now_ms);
-        match persist_history(path, &folded, *recovered) {
-            Ok(()) => {
-                *history = folded;
-                *recovered = false;
-            }
-            Err(error) => eprintln!("usage history: could not save a fold: {error}"),
-        }
-        prepared.scan_cache_dirty
-    }
-}
-
-/// Drops what the scan cache no longer needs (deleted, outside every root, or folded) and saves
-/// it when anything changed.
-fn prune_and_persist_scan_cache(
-    path: &Path,
-    file_cache: &mut ScanCache,
-    snapshot: &SourceSnapshot,
-    roots: &[SourceRoot],
-    folded_through_ms: Option<i64>,
-    dirty: bool,
-) {
-    let live_paths = snapshot.live_paths();
-    let active_roots: Vec<String> = roots
-        .iter()
-        .map(|root| normalize_path(&root.path))
-        .collect();
-    let pruned = prune_scan_cache(
-        file_cache,
-        PruneOptions {
-            live_paths: &live_paths,
-            active_roots: &active_roots,
-            walked_roots: snapshot.successfully_walked_root_paths(),
-            folded_through_ms,
-        },
-    );
-    if dirty || pruned > 0 {
-        persist_scan_cache(path, file_cache);
-    }
-}
 
 fn parse_iso_ms(value: &str) -> Option<i64> {
     DateTime::parse_from_rfc3339(value)
@@ -362,138 +162,13 @@ fn missing_source(provider: Provider, dir: &Path) -> UsageSourceDto {
 
 /// Scan local transcripts and return aggregated usage (priced when rates exist).
 pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, AdapterError> {
-    read_summary_from(input, user_home, now_ms())
-}
-
-/// Folds usage in the background, so it is kept even when the Usage screen is never opened: a
-/// little after launch, then every hour.
-pub fn spawn_history_folding() {
-    let spawned = std::thread::Builder::new()
-        .name("usage-history".into())
-        .spawn(|| {
-            std::thread::sleep(FIRST_FOLD_DELAY);
-            loop {
-                if let Err(error) = user_home().and_then(|home| fold_history_in(&home, now_ms())) {
-                    eprintln!("usage history: {}", error.message);
-                }
-                std::thread::sleep(FOLD_CHECK_INTERVAL);
-            }
-        });
-    if let Err(error) = spawned {
-        eprintln!("usage history: could not start folding: {error}");
-    }
-}
-
-pub fn usage_history_status() -> Result<UsageHistoryStatusDto, AdapterError> {
-    Ok(history_status_in(&user_home()?))
-}
-
-/// Clears the history and says what it holds now.
-pub fn clear_usage_history() -> Result<UsageHistoryStatusDto, AdapterError> {
-    let home = user_home()?;
-    clear_history_in(&home)?;
-    Ok(history_status_in(&home))
-}
-
-/// Folds what has aged past the cutoff without reading a summary, so usage is kept even when the
-/// Usage screen is never opened. Reads only the history file unless a fold is due.
-pub(crate) fn fold_history_in(home: &Path, now_ms: i64) -> Result<(), AdapterError> {
-    let paths = UsagePaths::for_home(home);
-    let roots: Vec<SourceRoot> = source_roots_for(home)
-        .into_iter()
-        .flat_map(|(_, roots)| roots)
-        .collect();
-    let _cache_guard = usage_cache_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut history = HistoryState::load(&paths.history);
-    if matches!(history, HistoryState::Unreadable) || !fold_due(history.folded_through_ms(), now_ms)
-    {
-        return Ok(());
-    }
-    let inventory = inventory_sources(&roots);
-    let mut file_cache = load_scan_cache(&paths.scan_cache);
-    let (snapshot, mut dirty) = match unchanged_snapshot(&paths.source_index, &inventory) {
-        Some(snapshot) => (snapshot, false),
-        None => {
-            let reconciled = reconcile_inventory(
-                &paths.source_index,
-                inventory,
-                &mut file_cache,
-                history.folded_through_ms(),
-            );
-            (reconciled.snapshot, reconciled.scan_cache_dirty)
-        }
-    };
-    dirty |= history.fold_if_due(&snapshot, &mut file_cache, &paths.history, now_ms);
-    prune_and_persist_scan_cache(
-        &paths.scan_cache,
-        &mut file_cache,
-        &snapshot,
-        &roots,
-        history.folded_through_ms(),
-        dirty,
-    );
-    Ok(())
-}
-
-/// How far back the usage history reaches and how much room it takes.
-pub(crate) fn history_status_in(home: &Path) -> UsageHistoryStatusDto {
-    let path = history_path_for(home);
-    let bytes = std::fs::metadata(&path).map_or(0, |metadata| metadata.len());
-    let iso = |ms: i64| {
-        Utc.timestamp_millis_opt(ms)
-            .single()
-            .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true))
-    };
-    let (state, kept_since, folded_through) = match load_history(&path) {
-        LoadedHistory::Missing => (UsageHistoryState::Empty, None, None),
-        LoadedHistory::Unreadable => (UsageHistoryState::Unreadable, None, None),
-        LoadedHistory::Ready { history, .. } => {
-            let kept_since = history.kept_since_ms();
-            let state = if kept_since.is_some() {
-                UsageHistoryState::Kept
-            } else {
-                UsageHistoryState::Empty
-            };
-            (
-                state,
-                kept_since.and_then(iso),
-                history.folded_through_ms().and_then(iso),
-            )
-        }
-    };
-    UsageHistoryStatusDto {
-        state,
-        kept_since,
-        folded_through,
-        bytes,
-    }
-}
-
-/// Forgets every folded row. Usage whose transcript is still on disk is counted from it again and
-/// folded again once due; usage only the history held is gone.
-pub(crate) fn clear_history_in(home: &Path) -> Result<(), AdapterError> {
-    let paths = UsagePaths::for_home(home);
-    let _cache_guard = usage_cache_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let io_error = |error: std::io::Error| {
-        AdapterError::message(format!("Could not clear the usage history: {error}"))
-    };
-    clear_history(&paths.history).map_err(io_error)?;
-    // A stored summary counted the cleared rows; the source signature alone would not notice.
-    match std::fs::remove_file(&paths.summary) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(io_error(error)),
-        _ => Ok(()),
-    }
+    read_summary_from(input, user_home)
 }
 
 /// The home is resolved only once the input has passed validation, as `read_summary` always has.
 fn read_summary_from(
     input: UsageSummaryInput,
     home: impl FnOnce() -> Result<PathBuf, AdapterError>,
-    fold_now_ms: i64,
 ) -> Result<UsageSummaryDto, AdapterError> {
     if input.since_day > input.until_day {
         return Err(AdapterError::message(format!(
@@ -545,12 +220,13 @@ fn read_summary_from(
     // released today, a price change) never serves a summary priced with the old one. The
     // parsed table is memoised on the file, so this costs one metadata read on the fast path.
     let rates = ensure_rates(&home, started_ms, input.force);
-    let key = summary_key(&input, rates.fetched_at_ms);
+    let key = summary_key(
+        &input,
+        rates.fetched_at_ms,
+        &history_fingerprint(&paths.history),
+    );
     let source_roots = source_roots_for(&home);
-    let roots: Vec<SourceRoot> = source_roots
-        .iter()
-        .flat_map(|(_, roots)| roots.iter().cloned())
-        .collect();
+    let roots = all_roots(&source_roots);
     let (signature_start_ms, signature_end_ms) = source_window_bounds(&input);
     let window_start_ms = since_time_ms.unwrap_or_else(|| {
         DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", input.since_day))
@@ -559,9 +235,7 @@ fn read_summary_from(
     }) - MTIME_SLACK_MS;
 
     let (source_snapshot, source_signature, prepared_sources, history) = {
-        let _cache_guard = usage_cache_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _files = lock_usage_files();
         let inventory = inventory_sources(&roots);
         let unchanged = unchanged_snapshot(&paths.source_index, &inventory);
         if let Some(snapshot) = unchanged.as_ref() {
@@ -574,17 +248,15 @@ fn read_summary_from(
         }
 
         let mut file_cache = load_scan_cache(&paths.scan_cache);
-        let mut history = HistoryState::load(&paths.history);
-        let (source_snapshot, mut scan_cache_dirty, summary_already_checked) =
+        // Read, never folded here: the background fold owns that (`folding`).
+        let history = HistoryStore::open(paths.history.clone());
+        let watermark = history.watermark();
+        let (source_snapshot, scan_cache_dirty, summary_already_checked) =
             if let Some(snapshot) = unchanged {
                 (snapshot, false, true)
             } else {
-                let reconciled = reconcile_inventory(
-                    &paths.source_index,
-                    inventory,
-                    &mut file_cache,
-                    history.folded_through_ms(),
-                );
+                let reconciled =
+                    reconcile_inventory(&paths.source_index, inventory, &mut file_cache, watermark);
                 (reconciled.snapshot, reconciled.scan_cache_dirty, false)
             };
         let source_signature = source_snapshot.signature(signature_start_ms, signature_end_ms);
@@ -593,25 +265,18 @@ fn read_summary_from(
                 return Ok(hit);
             }
         }
-        scan_cache_dirty |= history.fold_if_due(
-            &source_snapshot,
-            &mut file_cache,
-            &paths.history,
-            fold_now_ms,
-        );
-        let folded_through_ms = history.folded_through_ms();
         let prepared_sources = prepare_sources(
             &source_snapshot,
             &mut file_cache,
             window_start_ms,
-            folded_through_ms,
+            watermark,
         );
         prune_and_persist_scan_cache(
             &paths.scan_cache,
             &mut file_cache,
             &source_snapshot,
             &roots,
-            folded_through_ms,
+            watermark,
             scan_cache_dirty || prepared_sources.scan_cache_dirty,
         );
         (source_snapshot, source_signature, prepared_sources, history)
@@ -641,11 +306,11 @@ fn read_summary_from(
     );
     // Below the watermark the history is the count: a transcript's copy of a folded record, a
     // resumed session's included, is not counted again.
-    let folded_through_ms = history.folded_through_ms();
+    let watermark = history.watermark();
     let mut session_ids: HashMap<Provider, HashSet<&str>> = HashMap::new();
     for record in records
         .into_iter()
-        .filter(|record| folded_through_ms.is_none_or(|through| record.timestamp_ms >= through))
+        .filter(|record| !watermark.is_folded(record.timestamp_ms))
     {
         if aggregator.add(record) && !record.session_id.is_empty() {
             session_ids
@@ -654,7 +319,10 @@ fn read_summary_from(
                 .insert(&record.session_id);
         }
     }
-    for row in history.rows() {
+    let folded_rows = history.history().map_or(&[][..], |history| {
+        history.rows_between(signature_start_ms, signature_end_ms)
+    });
+    for row in folded_rows {
         if aggregator.add_folded(row) {
             session_ids
                 .entry(row.provider)
@@ -718,9 +386,7 @@ fn read_summary_from(
     pause_before_publish_if_requested();
 
     {
-        let _cache_guard = usage_cache_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _files = lock_usage_files();
         if source_snapshot.is_complete()
             && prepared_sources.complete
             && source_snapshot.persisted_generation_is_current(&paths.source_index)

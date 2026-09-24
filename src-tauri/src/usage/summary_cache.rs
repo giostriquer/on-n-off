@@ -31,11 +31,16 @@ pub fn summary_cache_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-summary-cache.json")
 }
 
-/// The cache key for one window priced with one rate table: a re-fetched table (a newly listed
-/// model, a price change) must not serve yesterday's costs.
-pub fn summary_key(input: &UsageSummaryInput, rates_fetched_at_ms: Option<i64>) -> String {
+/// The cache key for one window priced with one rate table and counted with one usage history: a
+/// re-fetched table (a newly listed model, a price change) must not serve yesterday's costs, and
+/// a fold or a clear must not serve a summary of the history before it.
+pub fn summary_key(
+    input: &UsageSummaryInput,
+    rates_fetched_at_ms: Option<i64>,
+    history_fingerprint: &str,
+) -> String {
     format!(
-        "{}|rates:{}",
+        "{}|rates:{}|history:{history_fingerprint}",
         window_key(input),
         rates_fetched_at_ms.unwrap_or(0)
     )

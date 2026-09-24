@@ -10,7 +10,7 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::history::holds_only_folded;
+use super::history::Watermark;
 use super::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 use super::transcripts::{richest_copies, TokenTotals, UsageProvider, UsageRecord};
 
@@ -244,8 +244,8 @@ pub struct PruneOptions<'a> {
     pub live_paths: &'a HashSet<String>,
     pub active_roots: &'a [String],
     pub walked_roots: &'a [String],
-    /// Files whose every record is below this are in the usage history and leave the cache.
-    pub folded_through_ms: Option<i64>,
+    /// Files whose every record the usage history holds leave the cache.
+    pub watermark: Watermark,
 }
 
 pub fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usize {
@@ -267,7 +267,7 @@ pub fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usi
                 .iter()
                 .map(|record| record.timestamp_ms)
                 .max();
-            holds_only_folded(cached.mtime_ms, newest, options.folded_through_ms)
+            options.watermark.holds_only_folded(cached.mtime_ms, newest)
         });
         if !under_active || deleted || folded {
             cache.remove(&path);

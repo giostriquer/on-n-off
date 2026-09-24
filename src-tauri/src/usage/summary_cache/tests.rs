@@ -55,9 +55,37 @@ fn summary_key_changes_with_the_rate_table() {
         until_time: None,
         force: false,
     };
-    assert_ne!(summary_key(&input, Some(1)), summary_key(&input, Some(2)));
-    assert_ne!(summary_key(&input, None), summary_key(&input, Some(1)));
-    assert!(summary_key(&input, Some(7)).starts_with(&window_key(&input)));
+    assert_ne!(
+        summary_key(&input, Some(1), "none"),
+        summary_key(&input, Some(2), "none")
+    );
+    assert_ne!(
+        summary_key(&input, None, "none"),
+        summary_key(&input, Some(1), "none")
+    );
+    assert!(summary_key(&input, Some(7), "none").starts_with(&window_key(&input)));
+}
+
+/// A fold or a clear rewrites the history; a summary counted with the old one must not serve.
+#[test]
+fn summary_key_changes_with_the_usage_history() {
+    let input = UsageSummaryInput {
+        since_day: "2026-08-01".into(),
+        until_day: "2026-08-31".into(),
+        time_zone: "UTC".into(),
+        resolution: Some("day".into()),
+        since_time: None,
+        until_time: None,
+        force: false,
+    };
+    assert_ne!(
+        summary_key(&input, Some(1), "none"),
+        summary_key(&input, Some(1), "812:17")
+    );
+    assert_ne!(
+        summary_key(&input, Some(1), "812:17"),
+        summary_key(&input, Some(1), "812:18")
+    );
 }
 
 #[test]

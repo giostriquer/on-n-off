@@ -246,19 +246,27 @@ gone nothing can rebuild it.
   are not counted twice. It moves forward only, to the UTC midnight a week before now, so a fold
   runs at most once a day. A transcript whose records all sit below it (or that was last written
   36 hours before it) leaves the scan cache and is never parsed again, even after an index rebuild.
-- **When it folds.** At a Usage read that finds a fold due, and from a background thread 90
-  seconds after launch and hourly after that, so usage is kept even if the screen is never opened.
-  A fold needs every root walked and every transcript that may hold a record in range read, now or
-  from its cached parse; a transcript still being written counts what it holds, since its records
-  old enough to fold were written days ago. Otherwise it waits for the next attempt.
+- **When it folds.** Only in `usage/folding.rs`'s background thread, 90 seconds after launch and
+  hourly after that, so usage is kept even if the screen is never opened; a Usage read only reads
+  the history. A fold needs every root walked and every transcript that may hold a record in range
+  read, now or from its cached parse; a transcript still being written counts what it holds,
+  since its records old enough to fold were written days ago. Otherwise it waits for the next
+  check. A transcript that cannot be read holds it back only until it is a week past the cutoff
+  unread: by then it never will read, and waiting longer would let the provider delete the rest.
+- **Summaries.** The summary cache key carries the history file's size and mtime, so a fold or a
+  clear never serves a summary counted with the history before it.
 - **When the file does not read.** It is never written over: the previous good file is kept as
-  `.bak` and read in its place, and the unreadable one is set aside under a new name. A file a
-  newer on-n-off wrote, or one with no readable backup, is left alone; Usage counts transcripts
-  alone until the user clears it.
+  `.bak` and read in its place, and the unreadable one is copied aside under a new name before
+  the new file replaces it. A file a newer on-n-off wrote, or one with no readable backup, is left
+  alone; Usage counts transcripts alone until the user clears it. A history is written only once
+  it reads back as itself, and a file whose rows are out of slot order or at or past its
+  watermark does not read.
 - **Limits.** A parser fix reaches only records newer than the watermark. A transcript that shows
   up later holding records older than it (copied from another machine, restored from a backup)
-  is not counted. Settings shows how far back the history reaches and can clear it; clearing
-  forgets what only the history held and counts what the transcripts still hold again.
+  is not counted. A wall clock far ahead at a fold sets the watermark ahead with it, hiding usage
+  recorded after the clock is corrected until real time passes it; Clear recovers. Settings shows
+  how far back the history reaches and can clear it; clearing forgets what only the history held
+  and counts what the transcripts still hold again.
 
 ## Cross-cutting plumbing
 

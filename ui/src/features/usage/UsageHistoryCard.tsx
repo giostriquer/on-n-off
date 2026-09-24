@@ -46,7 +46,9 @@ export function UsageHistoryCard() {
       </div>
       <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
         <div className="min-w-0 flex-1 text-[12px] text-[var(--mute)]" aria-live="polite">
-          {current && describe(current)}
+          {current
+            ? describe(current)
+            : status.error && `Could not read the usage history: ${parseInvokeError(status.error).message}`}
         </div>
         {clearable && !confirming && (
           <button type="button" className={BUTTON} onClick={() => setConfirming(true)}>
