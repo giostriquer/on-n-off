@@ -398,7 +398,9 @@ pub(crate) const LOCK_STALE: Duration = Duration::from_secs(60);
 /// Claude Code abandons a config file's lock after ten seconds.
 const CONFIG_LOCK_STALE: Duration = Duration::from_secs(10);
 
-/// How often a held lock with a heartbeat is touched: far inside every staleness limit.
+/// How often every held lock is touched. Far inside each staleness limit, and inside the seven and
+/// a half seconds after which Claude Code 2.1.282, finding a refresh lock whose time has not moved,
+/// starts asking whether its holder is still alive.
 const HEARTBEAT: Duration = Duration::from_secs(2);
 
 /// Which of Claude Code's locks to take.
@@ -412,9 +414,13 @@ pub(crate) enum LockScope<'a> {
 
 impl LockScope<'_> {
     /// The lock directories in the order Claude Code takes them — two processes that disagree
-    /// about the order deadlock — each with the age after which it counts as abandoned.
+    /// about the order deadlock — each with the age after which it counts as abandoned. The legacy
+    /// lock sits beside the config dir's real path, as Claude Code resolves it, so a config dir
+    /// reached through a link locks the directory Claude Code locks.
     fn paths(self, dir: &ConfigDir) -> Vec<(PathBuf, Duration)> {
-        let mut legacy = dir.path.as_os_str().to_owned();
+        let mut legacy = fs::canonicalize(&dir.path)
+            .unwrap_or_else(|_| dir.path.clone())
+            .into_os_string();
         legacy.push(".lock");
         let mut paths = vec![
             (dir.path.join(".oauth_refresh.lock"), LOCK_STALE),
@@ -442,6 +448,12 @@ pub(crate) enum LockError {
 /// They are directories, taken with `mkdir` because that is atomic on every filesystem either
 /// implementation runs on. One already there yields at once unless it is stale, in which case its
 /// holder is gone and it is broken, as Claude Code breaks one.
+///
+/// While held, every lock is touched every [`HEARTBEAT`], as Claude Code touches its own. Nothing
+/// done under them is bounded by the minute after which Claude Code breaks a lock that has gone
+/// quiet — the Keychain probe allows ninety seconds for its prompt, an account lookup thirty and a
+/// Keychain write twenty — so without the heartbeat Claude Code would break a lock this process
+/// still holds. A lock taken away all the same shows as [`ClaudeLocks::lost`].
 #[derive(Debug)]
 pub(crate) struct ClaudeLocks {
     held: Vec<PathBuf>,
@@ -467,25 +479,19 @@ impl ClaudeLocks {
         scope: LockScope<'_>,
         now: SystemTime,
     ) -> Result<Self, LockError> {
+        // Claude Code creates its config dir before locking in it, and so does this.
+        fs::create_dir_all(&dir.path).map_err(|error| LockError::Unavailable(error.to_string()))?;
         let mut locks = Self {
             held: Vec::new(),
             heartbeat: None,
             lost: Arc::new(AtomicBool::new(false)),
         };
         for (path, stale) in scope.paths(dir) {
-            if matches!(scope, LockScope::Refresh) {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|error| LockError::Unavailable(error.to_string()))?;
-                }
-            }
             // `?` drops `locks`, which releases whatever it had already taken.
             take(&path, stale, now)?;
             locks.held.push(path);
         }
-        if matches!(scope, LockScope::RefreshAndConfig(_)) {
-            locks.heartbeat = Some(Heartbeat::start(locks.held.clone(), locks.lost.clone()));
-        }
+        locks.heartbeat = Some(Heartbeat::start(locks.held.clone(), locks.lost.clone()));
         Ok(locks)
     }
 

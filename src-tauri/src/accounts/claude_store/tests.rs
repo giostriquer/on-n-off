@@ -269,6 +269,57 @@ fn a_held_legacy_lock_yields_and_releases_the_refresh_lock_already_taken() {
     );
 }
 
+fn backdate(path: &Path, seconds: u64) {
+    let then = SystemTime::now() - Duration::from_secs(seconds);
+    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(then)).unwrap();
+}
+
+fn fresh(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .is_ok_and(|at| at.elapsed().unwrap_or_default() < Duration::from_secs(60))
+}
+
+/// A renewal can hold the refresh locks past Claude Code's minute: the Keychain prompt alone may
+/// take ninety seconds. Kept fresh while held, the locks are never judged abandoned under it.
+#[test]
+fn the_refresh_locks_are_kept_fresh_while_held() {
+    let home = scratch_dir("renew-heartbeat");
+    let held = refresh_lock(&home, SystemTime::now()).unwrap();
+    let paths = [
+        home.join(".claude").join(".oauth_refresh.lock"),
+        home.join(".claude.lock"),
+    ];
+    for path in &paths {
+        backdate(path, 3600);
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !paths.iter().all(|path| fresh(path)) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the refresh locks were not touched while held"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    drop(held);
+}
+
+/// Claude Code takes its legacy lock beside the config dir's real path, so a config dir reached
+/// through a link locks the same directory Claude Code does.
+#[cfg(unix)]
+#[test]
+fn the_legacy_lock_sits_beside_the_real_config_dir() {
+    let home = scratch_dir("renew-linked");
+    fs::create_dir_all(home.join("dotfiles").join("claude")).unwrap();
+    std::os::unix::fs::symlink(home.join("dotfiles").join("claude"), home.join(".claude")).unwrap();
+
+    let held = refresh_lock(&home, SystemTime::now()).unwrap();
+    assert!(home.join("dotfiles").join("claude.lock").is_dir());
+    assert!(!home.join(".claude.lock").exists());
+    drop(held);
+    assert!(!home.join("dotfiles").join("claude.lock").exists());
+}
+
 /// The lock taken first is the last one given back, so a process waiting on it never finds the
 /// others still held behind it.
 #[test]

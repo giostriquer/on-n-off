@@ -19,10 +19,9 @@
 #[cfg(any(target_os = "macos", test))]
 use crate::process::CommandOutcome;
 
-/// Deadline for one `security` call. Renewal writes under Claude Code's refresh locks, which it
-/// holds without a heartbeat and which Claude Code breaks after a minute, so this sits comfortably
-/// inside that: a write that outlives the lock is a write racing whoever broke it; `claude_renew`
-/// pins the relation. Activation's native locks are heartbeated and put no such bound on it.
+/// Deadline for one `security` write. Writes happen under Claude Code's locks, which are kept
+/// fresh while held (`claude_store::ClaudeLocks`), so this only bounds how long a stuck tool can
+/// keep them; it still sits inside the minute after which Claude Code breaks a quiet lock.
 #[cfg(target_os = "macos")]
 pub(super) const DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
 

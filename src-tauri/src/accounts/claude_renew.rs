@@ -69,7 +69,7 @@ pub(crate) enum RenewError {
 
 /// The stored login this process has already had refused, so a dead grant is sent once rather
 /// than every five minutes for as long as the user leaves it alone — which would also mean taking
-/// both of Claude Code's lock directories on that same schedule, forever.
+/// Claude Code's refresh locks on that same schedule, forever.
 ///
 /// Identified by its store and its timestamps rather than by the token: Claude Code rewrites
 /// `expiresAt` on every renewal, so a login differing in them is a different login and worth
@@ -150,9 +150,8 @@ pub(crate) fn current_login<P: Fn() -> KeychainProbe>(
 ///
 /// The store is read *under* the lock, Keychain probe included: acting on what it says while
 /// holding the lock is the whole mechanism for not redeeming a token another process has already
-/// replaced. Everything the lock covers — the probe, the write's preparation, the grant, the
-/// commit — is deadline-bounded to stay inside [`claude_store::LOCK_STALE`], so Claude Code never
-/// breaks a lock this still holds.
+/// replaced. The lock is kept fresh while held, so Claude Code never breaks it under a probe
+/// waiting on its prompt, a slow grant or a Keychain write.
 fn renew<P: Fn() -> KeychainProbe>(
     home: &Path,
     keychain: &P,
