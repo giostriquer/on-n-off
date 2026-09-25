@@ -48,10 +48,14 @@ backup store for tokens.
 `accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
 existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
 store under its locks. Where Claude's login lives and how it is locked belongs to
-`accounts/claude_store.rs`, which the renewal, Limits and the account switch share: the store
-Claude Code's own read would use (a Keychain item that parses, token or not, else the credentials
-file; an unreadable Keychain refuses every write), the Keychain item under Claude Code's own
-account name first, and one lock protocol. The same grant/parser implementation also serves private vault renewal
+`accounts/claude_store.rs`, which the renewal, Limits and the account switch share: Claude
+Code's dirs as it resolves them (`CLAUDE_CONFIG_DIR` untrimmed and NFC-normalized, with
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` moving the credentials, the locks and the Keychain entry's name),
+the store Claude Code's own read would use (a Keychain item that parses, token or not, else the
+credentials file; an unreadable Keychain refuses every write), the Keychain item under Claude
+Code's own account name first, and one lock protocol. A renewal whose refresh lock the heartbeat
+finds taken away sends no grant. An emptied `claudeAiOauth`, Claude Code's sign-out, is no native
+login. The same grant/parser implementation also serves private vault renewal
 under the saved-account journal. Limits consumes access-only projections. The one projection that
 carries a credential is `native::codex_metadata_and_access`: the signed-in Codex login's identity
 and its access token alone (never its refresh or id token, never the login JSON), wrapped in
@@ -132,14 +136,19 @@ subscription dates read from the logins, through `read_revision`.
 
 The guaranteed target is the default native CLI home. Custom native homes, selected Codex config
 profiles, ephemeral/alternate Codex backends, environment credentials and detected forced-login
-policies currently defer to the official client. Existing model/endpoints/API-key configuration is
+policies currently defer to the official client. A Claude home chosen by `CLAUDE_CONFIG_DIR` is such
+a custom home for account changes, although Limits and the renewal follow it; a store that only
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` moved is not refused, and the switch reads, locks and writes it
+where Claude Code does. Existing model/endpoints/API-key configuration is
 never rewritten to simulate a switch. Native Codex file/keyring/auto backends are selected from
 config; unreadable protected storage is not treated as a missing login. macOS native account reads use the same system `security` reader as Limits, finding
 Claude Code's item under its own account name before the account a service-only lookup names,
 with a bounded subprocess deadline, and native account writes and
 removals go through the same tool (`accounts/keychain.rs`), never the process's own ad-hoc-signed
-Keychain identity, so one "Always Allow" survives updates and Claude Code's own refreshes. Claude uses scoped Keychain
-entries only for isolated sign-in, deriving their names from the raw NFC-normalized home path.
+Keychain identity, so one "Always Allow" survives updates and Claude Code's own refreshes. Claude's Keychain entry is
+scoped, its name derived from the NFC-normalized storage path, for an isolated sign-in and wherever
+`CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR` chose the store; an isolated sign-in never
+inherits the latter.
 On macOS, real Claude sign-ins retain the OS home so Security can locate the login Keychain;
 `CLAUDE_CONFIG_DIR` isolates the CLI configuration and selects its scoped credential entry.
 Disposable file-backed tests still redirect the OS home and never use the real Keychain.

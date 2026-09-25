@@ -126,8 +126,10 @@ refresh in the background. Config, plugins, MCP settings and sessions are preser
 Each provider is read the way that provider intends, and active login renewal remains native-store-owned:
 
 - **Claude** — read the stored access token from the store Claude Code itself reads
-  (`accounts/claude_store.rs`: its macOS Keychain item via `/usr/bin/security` when that parses,
-  else `~/.claude/.credentials.json`), verify it against `/api/oauth/profile`, then read
+  (`accounts/claude_store.rs`: in the dirs Claude Code resolves from `CLAUDE_CONFIG_DIR` and
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR`, its macOS Keychain item via `/usr/bin/security` when that
+  parses, else the storage dir's `.credentials.json`), verify it against `/api/oauth/profile`,
+  then read
   `/api/oauth/usage?cedar_ember=1&skip_spend=1`. The query adds the saved rate-limit resets
   (`cedar_ember`) to the same answer. It is optional: a refused query falls back to the plain read
   rather than failing it, and a read that cannot tell keeps the remembered count. The resets are

@@ -92,7 +92,8 @@ fn cell_of(result: Result<Stored, StoreError>, path: &Path) -> Cell {
 
 /// What Claude Code's next read would find, and where a write would go, for every combination of
 /// what the Keychain entry and the credentials file hold. Rows are the Keychain, columns the file:
-/// no file, a login, no token, broken.
+/// no file, a login, no token, broken. The two `KeychainError` cells are the intended difference
+/// from Claude Code, which reads them as signed out.
 #[test]
 fn the_store_truth_table() {
     use Cell::{FileMalformed, KeychainError, Read};

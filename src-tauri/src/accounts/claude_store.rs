@@ -1,6 +1,13 @@
-//! Claude Code's native store: which Keychain item or credentials file holds its signed-in login,
-//! read with Claude Code's own precedence; how that item is found; the lock directories Claude
-//! Code takes around changing it; and the writes of the `claudeAiOauth` document itself.
+//! Claude Code's native store: where its dirs are ([`dirs`], honouring `CLAUDE_CONFIG_DIR` and
+//! `CLAUDE_SECURESTORAGE_CONFIG_DIR`); which Keychain item or credentials file holds its signed-in
+//! login, read with Claude Code's own precedence ([`read`]); how that item is found; the lock
+//! directories Claude Code takes around changing it; and the writes of the `claudeAiOauth`
+//! document itself.
+//!
+//! Everything here follows Claude Code 2.1.282, with one intended difference: when the Keychain
+//! cannot be read and the credentials file holds no document, Claude Code reads a signed-out
+//! user, while this reports the Keychain's failure, because a login may well be behind it and
+//! "sign in again" would be the wrong advice.
 //!
 //! Every on-n-off path that reads or writes Claude's login comes through here — the Limits read,
 //! the renewal in [`super::claude_renew`] and the account switch in [`super::native`] — so the
@@ -217,10 +224,11 @@ impl std::fmt::Display for StoreError {
 /// - A Keychain entry that parses as JSON is the login, token or not. Claude Code signs out by
 ///   emptying it, so an entry without a token is a signed-out user, never a reason to look past
 ///   it to an older login in the file.
-/// - An entry that is not JSON, or no entry, leaves it to `<config dir>/.credentials.json`.
+/// - An entry that is not JSON, or no entry, leaves it to `<storage dir>/.credentials.json`.
 /// - A Keychain that cannot be read (denied, not answered, locked) leaves the read to the file
 ///   too, but only a file that holds a document can answer for it: with nothing there the
-///   Keychain's failure is the answer, because a login may be behind it. And a write refuses.
+///   Keychain's failure is the answer, because a login may be behind it. Claude Code reads that
+///   case as signed out; the difference is intended. And a write refuses.
 pub(crate) fn read(dir: &StorageDir, keychain: KeychainProbe) -> Result<Stored, StoreError> {
     let unread = match keychain {
         Ok(Some(secret)) => match serde_json::from_str::<Value>(&secret) {
