@@ -44,7 +44,7 @@ pub struct ProviderData {
     pub provider: AgentId,
     pub status: LimitsStatus,
     pub message: Option<String>,
-    /// In the order the popover lists them.
+    /// In the card's order, which the popover lists them in: weekly, session, model.
     pub windows: Vec<LimitWindowDto>,
     /// The window the ring and the figure show, by id.
     pub headline_window_id: Option<String>,

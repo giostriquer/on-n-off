@@ -184,8 +184,8 @@ public enum InnerQuota: Equatable, Sendable {
 }
 
 /// One provider cell as the host projected it (`NotchProvider` in `side_notch/model.rs`): its
-/// windows in the order the popover lists them, the window its ring leads with and what its inner
-/// ring shows. The helper draws these and decides none of them.
+/// windows in the card's order (weekly, session, model), which the popover keeps, the window its
+/// ring leads with and what its inner ring shows. The helper draws these and decides none of them.
 public struct Provider: Codable, Equatable, Identifiable, Sendable {
   public var id: ProviderId { provider }
   public let provider: ProviderId

@@ -180,14 +180,17 @@ fn only_the_signed_in_account_reaches_the_notch() {
     assert_eq!(NotchProvider::current(Vec::new()), None);
 }
 
+/// The popover lists a card's windows as the Limits screen does, in the card's own order: weekly,
+/// then session, then per model. The projection keeps that order rather than sorting again.
 #[test]
-fn the_popover_lists_the_session_then_weekly_then_model() {
+fn the_popover_lists_the_windows_weekly_first_as_the_card_orders_them() {
     let cell = project(signed_in(
         AgentId::Claude,
         vec![
             weekly("weekly_all"),
             session("session"),
             model("weekly_fable", "Weekly · Fable"),
+            model("weekly_opus", "Weekly · Opus"),
         ],
     ));
     let ids: Vec<&str> = cell
@@ -195,5 +198,8 @@ fn the_popover_lists_the_session_then_weekly_then_model() {
         .iter()
         .map(|window| window.id.as_str())
         .collect();
-    assert_eq!(ids, ["session", "weekly_all", "weekly_fable"]);
+    assert_eq!(
+        ids,
+        ["weekly_all", "session", "weekly_fable", "weekly_opus"]
+    );
 }

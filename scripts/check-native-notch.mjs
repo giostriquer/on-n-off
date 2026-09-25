@@ -75,8 +75,8 @@ const fixture = edge => ({
     error: null,
   },
   providers: [
-    // The host sends the windows in the popover's order and names the ring's windows by id.
-    { provider: 'claude', status: 'ok', currentAccount: true, plan: 'max', windows: [quota('session', '5 hour · all models', 'session', 32, 3), quota('weekly_all', 'Weekly · all models', 'weekly', 7, 100), quota('weekly_scoped:Fable', 'Weekly · Fable', 'model', 13, 100)], headlineWindowId: 'weekly_all', innerRing: { kind: 'fable', windowId: 'weekly_scoped:Fable' }, sessions: [session('a', 'repo-28', 'Desktop', 'repo', 'idle', 0), session('b', 'tool-d2', 'Terminal', 'tool', 'working', 2)] },
+    // The host sends the windows weekly first, as the card orders them, and names the ring's by id.
+    { provider: 'claude', status: 'ok', currentAccount: true, plan: 'max', windows: [quota('weekly_all', 'Weekly · all models', 'weekly', 7, 100), quota('session', '5 hour · all models', 'session', 32, 3), quota('weekly_scoped:Fable', 'Weekly · Fable', 'model', 13, 100)], headlineWindowId: 'weekly_all', innerRing: { kind: 'fable', windowId: 'weekly_scoped:Fable' }, sessions: [session('a', 'repo-28', 'Desktop', 'repo', 'idle', 0), session('b', 'tool-d2', 'Terminal', 'tool', 'working', 2)] },
     // Codex reports only its weekly window; a business member's credit share fills the inner ring.
     { provider: 'codex', status: 'ok', currentAccount: true, plan: 'self_serve_business_prolite', windows: [quota('primary', 'Weekly · all models', 'weekly', 49, 140)], headlineWindowId: 'primary', innerRing: { kind: 'workspaceShare' }, workspaceCredits: { usedPercent: 32, resetsAt: at(7 * 86_400_000), left: '17,000 of 25,000 left', renewed: '25,000 of 25,000 left' }, sessions: [session('c', 'tool-42', 'Desktop', 'tool', 'working', 0)] },
     { provider: 'antigravity', status: 'unsupported', currentAccount: true, message: 'Antigravity has no subscription limits to show.', windows: [], sessions: [] },

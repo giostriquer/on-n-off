@@ -287,8 +287,8 @@ fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
 }
 
 /// One provider cell as both notches draw it, projected once from the current account's card: its
-/// windows in the order the popover lists them, the window its ring and figure lead with, and what
-/// its inner ring shows. The macOS helper and the Windows painter draw it and decide none of it;
+/// windows in the card's order (weekly, session, model, as the Limits screen lists them), the window
+/// its ring and figure lead with, and what its inner ring shows. The macOS helper and the Windows painter draw it and decide none of it;
 /// what depends on the clock (a window's percent now, its reset note) stays with them, since they
 /// redraw between reads.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -328,8 +328,7 @@ impl NotchProvider {
     pub fn current(entries: Vec<ProviderLimitsDto>) -> Option<Self> {
         let card = entries.into_iter().find(|entry| entry.current_account)?;
         let readable = card.status == LimitsStatus::Ok;
-        let mut windows = card.reading.windows;
-        windows.sort_by_key(|window| popover_rank(window.kind));
+        let windows = card.reading.windows;
         let headline_window_id = readable
             .then(|| headline_window(card.provider, &windows))
             .flatten()
@@ -358,16 +357,6 @@ impl NotchProvider {
             inner_ring,
             workspace_credits: card.reading.workspace_credits,
         })
-    }
-}
-
-/// The popover's order: the current session first, then weekly, then per model.
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-fn popover_rank(kind: LimitWindowKind) -> u8 {
-    match kind {
-        LimitWindowKind::Session => 0,
-        LimitWindowKind::Weekly => 1,
-        LimitWindowKind::Model => 2,
     }
 }
 

@@ -51,27 +51,27 @@ fn visual_dump() {
     settings.display_id = Some("d1".into());
     settings.providers = RAIL_ORDER.to_vec();
 
-    // Realistic Claude entry with the labels the live API produces.
+    // Realistic Claude entry with the labels the live API produces, in the card's order.
     let claude = ProviderData {
         provider: AgentId::Claude,
         status: LimitsStatus::Ok,
         message: None,
         windows: vec![
             LimitWindowDto {
-                id: "w1".into(),
-                label: "5 hour · all models".into(),
-                kind: LimitWindowKind::Session,
-                used_percent: 72.0,
-                resets_at: Some("2026-09-03T19:59:00Z".into()),
-                window_seconds: None,
-                observed_at: "2026-09-03T10:00:00Z".into(),
-            },
-            LimitWindowDto {
                 id: "w2".into(),
                 label: "Weekly · all models".into(),
                 kind: LimitWindowKind::Weekly,
                 used_percent: 27.0,
                 resets_at: Some("2026-09-07T10:59:00Z".into()),
+                window_seconds: None,
+                observed_at: "2026-09-03T10:00:00Z".into(),
+            },
+            LimitWindowDto {
+                id: "w1".into(),
+                label: "5 hour · all models".into(),
+                kind: LimitWindowKind::Session,
+                used_percent: 72.0,
+                resets_at: Some("2026-09-03T19:59:00Z".into()),
                 window_seconds: None,
                 observed_at: "2026-09-03T10:00:00Z".into(),
             },

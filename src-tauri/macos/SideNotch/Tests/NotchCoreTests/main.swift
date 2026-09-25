@@ -76,12 +76,12 @@ final class NotchTests {
     let fable = quota("model", 58, label: "Weekly · Fable", id: "weekly_scoped:Fable")
     let entry = provider(
       windows: [
-        quota("session", 73, label: "5 hour · all models", id: "session"),
-        quota("weekly", 41, id: "weekly_all"), fable,
+        quota("weekly", 41, id: "weekly_all"),
+        quota("session", 73, label: "5 hour · all models", id: "session"), fable,
       ], headline: "weekly_all", inner: .fable(windowId: "weekly_scoped:Fable"))
     expectEqual(entry.headline?.usedPercent, 41)
     expectEqual(entry.inner, InnerQuota.fable(fable))
-    expectEqual(entry.windows.map(\.usedPercent), [73, 41, 58])
+    expectEqual(entry.windows.map(\.usedPercent), [41, 73, 58])
     // Nothing named, nothing on the rings.
     let unnamed = provider(windows: [quota("weekly", 41)])
     expectNil(unnamed.headline)
