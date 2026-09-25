@@ -2,8 +2,13 @@ use super::*;
 use crate::paths::scratch_dir;
 use std::fs;
 
+/// The account in the identity file Claude Code keeps under `home`.
 pub fn read_claude_account(home: &Path) -> Option<LimitsAccountDto> {
-    read_claude_identity(home).map(|identity| identity.account)
+    read_claude_identity(&identity_file(home)).map(|identity| identity.account)
+}
+
+fn identity_file(home: &Path) -> std::path::PathBuf {
+    claude_store::native_dirs(home).unwrap().config_file(home)
 }
 
 const CLAUDE_JSON: &str = r#"{"claudeAiOauth":{"accessToken":"kc-token","refreshToken":"r","expiresAt":1787022473402,"scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":"default_claude_max_5x"}}"#;
@@ -181,7 +186,7 @@ fn claude_account_comes_from_claude_json_oauth_account() {
         r#"{"oauthAccount":{"accountUuid":"uuid-1","emailAddress":"me@example.com","organizationName":"Org","organizationUuid":"org-1"},"userID":"x"}"#,
     );
     assert_eq!(
-        read_claude_identity(&home),
+        read_claude_identity(&identity_file(&home)),
         Some(ClaudeIdentity {
             account: LimitsAccountDto {
                 legacy_id: None,

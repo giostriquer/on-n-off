@@ -128,7 +128,10 @@ fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
         if let Some(text) = alternate {
             fs::write(root.path().join(".claude.json"), text).unwrap();
         }
-        let identity = crate::limits::credentials::read_claude_identity(root.path()).unwrap();
+        let identity_file = claude_store::native_dirs(root.path())
+            .unwrap()
+            .config_file(root.path());
+        let identity = crate::limits::credentials::read_claude_identity(&identity_file).unwrap();
         assert_eq!(identity.account.id, "legacy-user");
         let (url, request) = crate::http::serve_once(
             "200 OK",

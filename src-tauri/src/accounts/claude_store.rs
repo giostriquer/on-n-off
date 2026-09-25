@@ -110,12 +110,44 @@ pub(crate) struct Dirs {
     pub(crate) secure_storage: Option<SecureStorage>,
 }
 
-#[cfg(test)]
 impl Dirs {
     /// The storage dir: the config dir, unless `secure_storage` moved it.
     pub(crate) fn storage(&self) -> StorageDir {
         StorageDir::of(&self.config, self.custom, self.secure_storage.as_ref())
     }
+
+    /// The file Claude Code keeps its signed-in account in: `.config.json` in the config dir when
+    /// an older Claude Code left one, else `.claude.json` in the config dir `CLAUDE_CONFIG_DIR`
+    /// chose, or in `home`.
+    pub(crate) fn config_file(&self, home: &Path) -> PathBuf {
+        let legacy = self.config.join(".config.json");
+        if legacy.exists() {
+            legacy
+        } else if self.custom {
+            self.config.join(".claude.json")
+        } else {
+            home.join(".claude.json")
+        }
+    }
+}
+
+/// The environment on-n-off reads its providers' settings from: the process's own. A test binary
+/// sees only a disposable `ON_N_OFF_HOME` instead, so no test can follow a developer's
+/// `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME` to a real home, find
+/// the Keychain entry under a developer's own account name, or read the login Keychain at all. A
+/// test that needs another environment hands one to [`dirs`] or `NativeStore::resolve_from`.
+#[cfg(not(test))]
+pub(crate) fn process_env(name: &str) -> Option<OsString> {
+    std::env::var_os(name)
+}
+#[cfg(test)]
+pub(crate) fn process_env(name: &str) -> Option<OsString> {
+    (name == "ON_N_OFF_HOME").then(|| OsString::from("disposable"))
+}
+
+/// Claude Code's dirs under `home`, for this process's environment.
+pub(crate) fn native_dirs(home: &Path) -> Result<Dirs, String> {
+    dirs(home, &process_env)
 }
 
 /// The name of the variable that moves Claude Code's storage away from its config dir.
@@ -288,16 +320,11 @@ fn read_document(path: &Path) -> Result<Option<Value>, StoreError> {
         .map_err(|error| StoreError::FileMalformed(format!("{}: {error}", path.display())))
 }
 
-/// `Ok(None)` when the file does not exist; `Err` for any other I/O or JSON failure.
-pub(crate) fn read_json_file(path: &Path) -> Result<Option<Value>, String> {
-    read_document(path).map_err(|error| error.to_string())
-}
-
 /// Probe the macOS Keychain for the login Claude Code keeps for `dir`, the way Limits reads it. A
 /// disposable `ON_N_OFF_HOME` never reads the real login.
 #[cfg(target_os = "macos")]
 pub(crate) fn keychain_probe(dir: &StorageDir) -> KeychainProbe {
-    isolated_keychain(std::env::var_os("ON_N_OFF_HOME").is_some(), || {
+    isolated_keychain(process_env("ON_N_OFF_HOME").is_some(), || {
         keychain_secret(&dir.service())
     })
 }
@@ -334,17 +361,11 @@ pub(crate) fn claude_code_account(env: &dyn Fn(&str) -> Option<std::ffi::OsStrin
         .unwrap_or_else(|| "claude-code-user".into())
 }
 
-/// This process's name for Claude Code's Keychain entry. A test binary sees no environment here,
-/// so every test resolves the fallback name and never a developer's own.
+/// This process's name for Claude Code's Keychain entry. A test binary resolves the fallback name,
+/// never a developer's own: [`process_env`] shows it no `$USER`.
 #[cfg(target_os = "macos")]
 fn own_account() -> String {
-    claude_code_account(&|name| {
-        if cfg!(test) {
-            None
-        } else {
-            std::env::var_os(name)
-        }
-    })
+    claude_code_account(&process_env)
 }
 
 /// Deadline for an attribute lookup, which prints no secret and raises no prompt.

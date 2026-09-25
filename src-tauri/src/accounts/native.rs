@@ -137,22 +137,9 @@ impl Target {
         }
     }
 }
-/// The environment [`NativeStore::resolve`] reads: the process's own. A test binary sees only a
-/// disposable `ON_N_OFF_HOME` instead, so no test can follow a developer's `CLAUDE_CONFIG_DIR` or
-/// `CODEX_HOME` to a real home, or choose the login Keychain; a test that needs another
-/// environment hands it to `resolve_from`.
-#[cfg(not(test))]
-fn process_env(name: &str) -> Option<OsString> {
-    std::env::var_os(name)
-}
-#[cfg(test)]
-fn process_env(name: &str) -> Option<OsString> {
-    (name == "ON_N_OFF_HOME").then(|| OsString::from("disposable"))
-}
-
 impl NativeStore {
     pub fn resolve(provider: AgentId, home: &Path) -> Result<Self, String> {
-        Self::resolve_from(provider, home, &process_env)
+        Self::resolve_from(provider, home, &claude_store::process_env)
     }
     fn resolve_from(
         provider: AgentId,
@@ -162,6 +149,7 @@ impl NativeStore {
         // ON_N_OFF_HOME always isolates tests and development from real native homes.
         let disposable = lookup("ON_N_OFF_HOME").is_some();
         let mut secure_storage = None;
+        let mut claude_config_file = None;
         let (config_home, custom) = match provider {
             AgentId::Codex => {
                 let override_home = if disposable {
@@ -180,23 +168,13 @@ impl NativeStore {
             }
             AgentId::Claude => {
                 let dirs = claude_store::dirs(home, lookup)?;
+                claude_config_file = Some(dirs.config_file(home));
                 secure_storage = dirs.secure_storage;
                 (dirs.config, dirs.custom)
             }
             _ => return Err("Profiles are unsupported for this provider.".into()),
         };
-        let config_file = if provider == AgentId::Claude {
-            let legacy = config_home.join(".config.json");
-            if legacy.exists() {
-                legacy
-            } else if custom {
-                config_home.join(".claude.json")
-            } else {
-                home.join(".claude.json")
-            }
-        } else {
-            config_home.join("config.toml")
-        };
+        let config_file = claude_config_file.unwrap_or_else(|| config_home.join("config.toml"));
         Ok(Self {
             provider,
             config_home,
@@ -372,13 +350,7 @@ impl NativeStore {
     }
     fn verify_claude(&self, profile_url: &str) -> Result<(), String> {
         if !self.custom {
-            let probe = |dir: &StorageDir| {
-                if self.use_keychain {
-                    claude_store::keychain_probe(dir)
-                } else {
-                    Ok(None)
-                }
-            };
+            let probe = |_: &StorageDir| self.claude_keychain();
             let lookup = super::claude_renew::current_login(
                 &self.claude_dir(),
                 &probe,

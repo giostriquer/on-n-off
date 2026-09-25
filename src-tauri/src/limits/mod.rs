@@ -259,17 +259,10 @@ fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
         now_ms,
         ..
     } = sources;
-    let selected_identity = read_claude_identity(home);
-    let account = selected_identity
-        .as_ref()
-        .map(|identity| identity.account.clone())
-        .unwrap_or_else(default_account);
-    // Reading the Claude login includes renewing it: an access token lives eight hours and Claude
-    // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
-    // broken login. Keeping that inside the read means the memo stores the renewed login like any
-    // other, and the rejected-token retry below gets the renewal too.
-    let storage = match crate::accounts::native::NativeStore::resolve(AgentId::Claude, home) {
-        Ok(native) => native.claude_dir(),
+    // Where Claude Code keeps its account and its login, under whatever `CLAUDE_CONFIG_DIR` and
+    // `CLAUDE_SECURESTORAGE_CONFIG_DIR` say: resolved once, for both reads below.
+    let dirs = match claude_store::native_dirs(home) {
+        Ok(dirs) => dirs,
         Err(why) => {
             let message = format!("Could not read the stored login: {why}");
             return finish(
@@ -280,6 +273,16 @@ fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
             );
         }
     };
+    let selected_identity = read_claude_identity(&dirs.config_file(home));
+    let account = selected_identity
+        .as_ref()
+        .map(|identity| identity.account.clone())
+        .unwrap_or_else(default_account);
+    // Reading the Claude login includes renewing it: an access token lives eight hours and Claude
+    // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
+    // broken login. Keeping that inside the read means the memo stores the renewed login like any
+    // other, and the rejected-token retry below gets the renewal too.
+    let storage = dirs.storage();
     let read_credential = || claude_renew::current_login(&storage, &keychain, now_ms, claude.token);
     let attempt = |lookup| claude_limits(lookup, &selected_identity, claude.profile, claude.usage);
     let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);

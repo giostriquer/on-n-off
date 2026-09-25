@@ -133,12 +133,11 @@ pub(crate) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential>
     })
 }
 
-/// Which Claude account the CLI is signed into, from `<home>/.claude.json`'s `oauthAccount`
-/// (Claude Code rewrites it on every login). `None` when the file or the fields are absent.
-pub(crate) fn read_claude_identity(home: &Path) -> Option<ClaudeIdentity> {
-    let native =
-        crate::accounts::native::NativeStore::resolve(crate::dto::AgentId::Claude, home).ok()?;
-    let value = claude_store::read_json_file(&native.config_file).ok()??;
+/// Which Claude account the CLI is signed into, from `oauthAccount` in the identity file Claude Code
+/// rewrites on every login (`claude_store::Dirs::config_file`). `None` when the file or the fields
+/// are absent.
+pub(crate) fn read_claude_identity(config_file: &Path) -> Option<ClaudeIdentity> {
+    let value = read_json_file(config_file).ok()??;
     let account = value.get("oauthAccount")?;
     Some(ClaudeIdentity {
         account: LimitsAccountDto {
@@ -148,6 +147,17 @@ pub(crate) fn read_claude_identity(home: &Path) -> Option<ClaudeIdentity> {
         },
         organization_id: optional_string(account.get("organizationUuid")),
     })
+}
+
+/// `Ok(None)` when the file does not exist; `Err` for any other I/O or JSON failure.
+fn read_json_file(path: &Path) -> Result<Option<Value>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str::<Value>(&raw)
+            .map(Some)
+            .map_err(|error| format!("{}: {error}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("{}: {error}", path.display())),
+    }
 }
 
 /// Where a looked-up login came from. Claude Code rotates the access token before its recorded
