@@ -63,6 +63,7 @@ fn write_rollout(path: &Path, session: &str, at_iso: &str, usage: Value, written
 /// - Claude `session.jsonl`: `msg_a` on 2026-08-07 (a partial line, then the billed one), folded,
 ///   and `msg_b` on 2026-08-20, read from the transcript.
 /// - Claude `gone.jsonl`: `msg_g` on 2026-08-10, folded, and the transcript deleted after.
+/// - Claude `notes.jsonl`: written on 2026-08-19 and holding no usage at all.
 /// - Codex: one live rollout and one archived rollout, both on 2026-08-18.
 fn write_fixture_home(home: &Path) {
     write_rates(home);
@@ -107,6 +108,21 @@ fn write_fixture_home(home: &Path) {
     set_mtime(
         &home.join(".claude/projects/proj/gone.jsonl"),
         "2026-08-10T12:00:01Z",
+    );
+    write_claude_lines(
+        home,
+        "notes.jsonl",
+        &[json!({
+            "type": "user",
+            "timestamp": "2026-08-19T08:00:00.000Z",
+            "sessionId": "sess-notes",
+            "message": { "role": "user", "content": "placeholder" }
+        })
+        .to_string()],
+    );
+    set_mtime(
+        &home.join(".claude/projects/proj/notes.jsonl"),
+        "2026-08-19T08:00:01Z",
     );
     write_rollout(
         &home.join(".codex/sessions/2026/08/18/rollout-live.jsonl"),
@@ -226,7 +242,7 @@ fn expected(cache_hit: bool) -> Value {
                 "provider": "claude",
                 "status": "ok",
                 "scannedFiles": 1,
-                "skippedFiles": 0,
+                "skippedFiles": 1,
                 "malformedRecords": 0,
                 "distinctSessions": 2,
                 "resolvedPath": "~/.claude/projects"
