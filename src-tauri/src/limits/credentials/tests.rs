@@ -386,3 +386,92 @@ fn disposable_home_does_not_read_or_renew_the_real_keychain_login() {
     assert_eq!(result, Ok(None));
     assert_eq!(calls.get(), 0);
 }
+
+/// What one cell of the store truth table is expected to yield.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cell {
+    /// The Keychain entry's login.
+    Keychain,
+    /// The credentials file's login.
+    File,
+    /// No login anywhere.
+    Nothing,
+    /// A failure that names the Keychain.
+    KeychainError,
+    /// A failure that names the credentials file.
+    FileError,
+}
+
+/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
+const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
+
+fn keychain_states() -> [(&'static str, KeychainProbe); 5] {
+    [
+        ("no item", Ok(None)),
+        ("a login", Ok(Some(CLAUDE_JSON.to_string()))),
+        ("no token", Ok(Some(SIGNED_OUT.to_string()))),
+        ("invalid JSON", Ok(Some("{ not json".to_string()))),
+        (
+            "unreadable",
+            Err("Keychain lookup failed (User canceled the operation.)".to_string()),
+        ),
+    ]
+}
+
+fn file_states() -> [(&'static str, Option<String>); 4] {
+    [
+        ("no file", None),
+        (
+            "a login",
+            Some(CLAUDE_JSON.replace("kc-token", "file-token")),
+        ),
+        ("no token", Some(SIGNED_OUT.to_string())),
+        ("broken", Some("{ not json".to_string())),
+    ]
+}
+
+fn cell_of(result: &Result<Option<(ClaudeStore, Value)>, String>, path: &Path) -> Cell {
+    match result {
+        Ok(Some((ClaudeStore::Keychain, document))) => {
+            assert_eq!(document["claudeAiOauth"]["accessToken"], "kc-token");
+            Cell::Keychain
+        }
+        Ok(Some((ClaudeStore::File(from), document))) => {
+            assert_eq!(from, path);
+            assert_eq!(document["claudeAiOauth"]["accessToken"], "file-token");
+            Cell::File
+        }
+        Ok(None) => Cell::Nothing,
+        Err(why) if why.contains(&path.display().to_string()) => Cell::FileError,
+        Err(why) => {
+            assert!(why.contains("Keychain"), "{why}");
+            Cell::KeychainError
+        }
+    }
+}
+
+/// Which store the Limits read and the renewal take the login from, for every combination of
+/// what the Keychain entry and the credentials file hold. Rows are the Keychain, columns the
+/// file: no file, a login, no token, broken.
+#[test]
+fn the_login_document_truth_table() {
+    use Cell::{File, FileError, Keychain, KeychainError, Nothing};
+    let expected = [
+        [Nothing, File, Nothing, FileError],
+        [Keychain, Keychain, Keychain, Keychain],
+        [Nothing, File, Nothing, FileError],
+        [KeychainError, File, KeychainError, KeychainError],
+        [KeychainError, File, KeychainError, KeychainError],
+    ];
+    for ((keychain, probe), row) in keychain_states().into_iter().zip(expected) {
+        for ((file, contents), want) in file_states().into_iter().zip(row) {
+            let home = scratch_dir("limits-truth");
+            let path = home.join(".claude").join(".credentials.json");
+            if let Some(contents) = contents {
+                write(&home, ".claude/.credentials.json", &contents);
+            }
+            let got = cell_of(&claude_login_document(&home, probe.clone()), &path);
+            assert_eq!(got, want, "Keychain: {keychain}; file: {file}");
+        }
+    }
+}

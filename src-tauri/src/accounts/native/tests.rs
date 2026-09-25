@@ -388,3 +388,164 @@ fn the_access_projection_refuses_a_login_whose_claims_name_another_workspace() {
 
     assert!(codex_metadata_and_access(root.path()).is_err());
 }
+
+/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
+const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
+
+/// The account switch's read of a store that has no Keychain to consult, for each thing the
+/// credentials file can hold. Only the presence of `claudeAiOauth` decides, so an emptied login
+/// still reads as one.
+#[test]
+fn the_native_claude_read_of_the_credentials_file() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let file = native.config_home.join(".credentials.json");
+    assert!(native.read().unwrap().is_none(), "no file");
+
+    fs::write(
+        &file,
+        r#"{"claudeAiOauth":{"accessToken":"file-token"},"mcpOAuth":{"s":"t"}}"#,
+    )
+    .unwrap();
+    let login = native.read().unwrap().unwrap();
+    assert_eq!(
+        login.auth,
+        json!({"claudeAiOauth":{"accessToken":"file-token"}}),
+        "only the login is read, never the MCP tokens beside it"
+    );
+
+    fs::write(&file, SIGNED_OUT).unwrap();
+    let emptied = native.read().unwrap().unwrap();
+    assert_eq!(emptied.auth["claudeAiOauth"]["accessToken"], "");
+
+    fs::write(&file, r#"{"mcpOAuth":{"s":"t"}}"#).unwrap();
+    assert!(native.read().unwrap().is_none(), "no claudeAiOauth");
+
+    fs::write(&file, "{ not json").unwrap();
+    assert_eq!(
+        native.read().err().as_deref(),
+        Some("The native credential document is malformed. It has not been changed.")
+    );
+}
+
+/// Claude Code's refresh lock, its legacy lock beside the config home, and the config file's lock,
+/// in the order they are taken.
+fn native_lock_paths(native: &NativeStore) -> [PathBuf; 3] {
+    let mut legacy = native.config_home.as_os_str().to_owned();
+    legacy.push(".lock");
+    let mut config = native.config_file.as_os_str().to_owned();
+    config.push(".lock");
+    [
+        native.config_home.join(".oauth_refresh.lock"),
+        legacy.into(),
+        config.into(),
+    ]
+}
+
+fn backdate(path: &Path, seconds: u64) {
+    let then = std::time::SystemTime::now() - Duration::from_secs(seconds);
+    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(then)).unwrap();
+}
+
+/// Polls `done` for up to ten seconds, well past two heartbeats.
+fn eventually(what: &str, done: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+const BUSY: &str = "Claude is updating its login or configuration. Retry after it finishes.";
+
+#[test]
+fn any_one_held_native_lock_refuses_and_leaves_none_of_the_others_taken() {
+    for held in 0..3 {
+        let root = tempfile::tempdir().unwrap();
+        let native = claude(root.path());
+        let paths = native_lock_paths(&native);
+        fs::create_dir(&paths[held]).unwrap();
+
+        assert_eq!(native.lock().err().as_deref(), Some(BUSY), "lock {held}");
+        for (at, path) in paths.iter().enumerate() {
+            assert_eq!(path.exists(), at == held, "lock {held} held: {path:?}");
+        }
+    }
+}
+
+/// Claude Code abandons its refresh locks after a minute and the config file's after ten seconds.
+#[test]
+fn a_native_lock_left_behind_is_broken_only_once_stale_for_its_kind() {
+    for (held, age, broken) in [
+        (0, 30, false),
+        (0, 61, true),
+        (1, 30, false),
+        (1, 61, true),
+        (2, 5, false),
+        (2, 11, true),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let native = claude(root.path());
+        let paths = native_lock_paths(&native);
+        fs::create_dir(&paths[held]).unwrap();
+        backdate(&paths[held], age);
+
+        let lock = native.lock();
+        assert_eq!(lock.is_ok(), broken, "lock {held}, {age}s old");
+    }
+}
+
+/// While held, every lock is touched often enough that Claude Code never judges it abandoned.
+#[test]
+fn held_native_locks_are_kept_fresh_and_released_on_drop() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let guard = native.lock().unwrap();
+    let paths = native_lock_paths(&native);
+    for path in &paths {
+        backdate(path, 3600);
+    }
+    let fresh = |path: &Path| {
+        fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|at| at.elapsed().unwrap_or_default() < Duration::from_secs(60))
+    };
+    eventually("the heartbeat refreshes every held lock", || {
+        paths.iter().all(|path| fresh(path))
+    });
+
+    drop(guard);
+    assert!(paths.iter().all(|path| !path.exists()));
+}
+
+/// A lock another process broke means the write is no longer coordinated with Claude Code, so it
+/// must not happen.
+#[test]
+fn a_native_lock_broken_under_the_holder_stops_the_write() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let credentials = native.config_home.join(".credentials.json");
+    fs::write(&credentials, r#"{"claudeAiOauth":{"accessToken":"old"}}"#).unwrap();
+    let guard = native.lock().unwrap();
+    fs::remove_dir(&native_lock_paths(&native)[0]).unwrap();
+    eventually("the heartbeat notices the lost lock", || {
+        guard.ensure().is_err()
+    });
+
+    let incoming = Login {
+        auth: json!({"claudeAiOauth":{"accessToken":"incoming"}}),
+        account: json!({"accountUuid":"b","organizationUuid":"org-b"}),
+    };
+    assert_eq!(
+        native
+            .write_locked(Some(&incoming), guard.as_ref())
+            .err()
+            .as_deref(),
+        Some("Native credential coordination was lost. Protected recovery has been retained.")
+    );
+    assert_eq!(
+        fs::read_to_string(&credentials).unwrap(),
+        r#"{"claudeAiOauth":{"accessToken":"old"}}"#
+    );
+    assert!(!native.config_file.exists());
+}

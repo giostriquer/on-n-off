@@ -402,3 +402,18 @@ fn the_credentials_file_is_written_private() {
         assert_eq!(mode & 0o777, 0o600, "the file holds a refresh token");
     }
 }
+
+/// The refresh lock is taken first. When the legacy lock beside the config home is held, the
+/// renewal yields and gives back the one it had already taken.
+#[test]
+fn a_held_legacy_lock_yields_and_releases_the_refresh_lock_already_taken() {
+    let home = scratch_dir("renew-legacy-held");
+    fs::create_dir_all(home.join(".claude.lock")).unwrap();
+
+    assert_eq!(RefreshLock::acquire(&home).unwrap_err(), RenewError::Busy);
+    assert!(!home.join(".claude").join(".oauth_refresh.lock").exists());
+    assert!(
+        home.join(".claude.lock").is_dir(),
+        "another holder's lock is theirs to release"
+    );
+}
