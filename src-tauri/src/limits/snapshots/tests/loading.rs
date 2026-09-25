@@ -297,3 +297,20 @@ fn a_remembered_codex_file_with_only_hidden_windows_is_not_loaded() {
 
     assert!(store.load(AgentId::Codex).is_empty());
 }
+
+/// The hidden-window rule is Codex's: another provider's remembered windows load whatever they are
+/// called.
+#[test]
+fn another_providers_remembered_windows_load_whatever_their_names() {
+    let home = scratch_dir("limits-snap-hidden-rule-is-codexs");
+    let store = SnapshotStore::for_home(&home);
+    let mut claude = snapshot(AgentId::Claude, "user-1", "a@x", "2026-08-17T10:00:00.000Z");
+    let mut named_like_hidden = claude.reading.windows[0].clone();
+    named_like_hidden.id = "extra:codex_bengalfox".into();
+    named_like_hidden.label = "Weekly · GPT-Reserve".into();
+    named_like_hidden.kind = LimitWindowKind::Model;
+    claude.reading.windows.push(named_like_hidden);
+    store.save(&claude).unwrap();
+
+    assert_eq!(store.load(AgentId::Claude)[0].reading.windows.len(), 2);
+}
