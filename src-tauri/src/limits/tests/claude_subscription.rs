@@ -10,7 +10,7 @@ fn a_claude_read_carries_the_subscription_status_its_profile_reports() {
     write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
     let (profile_url, profile_request) = serve_once("200 OK", PROFILE_PAST_DUE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
 
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
     profile_request.join().unwrap();
@@ -27,7 +27,7 @@ fn a_profile_without_a_subscription_status_still_reads() {
     write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
 
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
     profile_request.join().unwrap();

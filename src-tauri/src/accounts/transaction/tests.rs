@@ -263,6 +263,7 @@ struct Running {
     wrote: std::cell::Cell<bool>,
     readback_locked: std::cell::Cell<Option<bool>>,
     verified: std::cell::Cell<usize>,
+    verified_locked: std::cell::Cell<bool>,
 }
 struct Guard(std::rc::Rc<std::cell::Cell<bool>>);
 impl NativeGuard for Guard {}
@@ -297,6 +298,9 @@ impl Native for Running {
     }
     fn verify(&self) -> Result<(), String> {
         self.verified.set(self.verified.get() + 1);
+        if self.locked.get() {
+            self.verified_locked.set(true);
+        }
         if let Some(then) = &self.client.in_verify {
             *self.store.live.borrow_mut() = then.clone();
         }
@@ -332,6 +336,7 @@ fn running(client: Client) -> (Database, Running, String, String) {
         wrote: Default::default(),
         readback_locked: Default::default(),
         verified: Default::default(),
+        verified_locked: Default::default(),
     };
     (db, native, a, b)
 }
@@ -435,6 +440,39 @@ fn reads_the_published_login_back_under_the_native_locks() {
     let (mut db, native, _, b) = running(Client::default());
     switch(&mut db, &native, &b, false).0.unwrap();
     assert_eq!(native.readback_locked.get(), Some(true));
+}
+
+/// Verification renews an expired Claude login, and the renewal takes the native locks itself: run
+/// under them, it would find them busy and fail the account change, while Claude Code waited on
+/// them for as long as verification took. So neither activation nor recovery verifies while it
+/// holds them.
+#[test]
+fn verification_never_runs_under_the_native_locks() {
+    let (mut db, native, _, b) = running(Client::default());
+    switch(&mut db, &native, &b, false).0.unwrap();
+    assert_eq!(native.verified.get(), 1);
+    assert!(
+        !native.verified_locked.get(),
+        "activation verified under the locks"
+    );
+
+    let (mut db, native, _, b) = running(Client {
+        after_write: Some(Some(in_workspace("a", "client-refreshed-a", "one"))),
+        ..Default::default()
+    });
+    assert!(switch(&mut db, &native, &b, false).0.is_err());
+    assert!(db.recovery.is_some());
+    recover(&mut db, &native, &mut |_| Ok(())).unwrap();
+    assert_eq!(
+        native.verified.get(),
+        1,
+        "recovery verified the login a client rotated"
+    );
+    assert!(
+        !native.verified_locked.get(),
+        "recovery verified under the locks"
+    );
+    assert!(db.recovery.is_none());
 }
 
 #[test]

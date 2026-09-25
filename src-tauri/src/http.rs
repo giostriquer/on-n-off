@@ -271,6 +271,32 @@ pub(crate) fn serve_sequence(
     serve("/graphql", responses, |requests| requests)
 }
 
+/// Like `serve_once_capturing`, but runs `observe` the moment the request has arrived and before
+/// it is answered, so a test can see what the code under test holds while it waits on the reply.
+#[cfg(test)]
+pub(crate) fn serve_once_observing<R: Send + 'static>(
+    status_line: &str,
+    body: &str,
+    observe: impl FnOnce() -> R + Send + 'static,
+) -> (String, std::thread::JoinHandle<(CapturedRequest, R)>) {
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let slot = std::sync::Arc::clone(&observed);
+    let mut observe = Some(observe);
+    serve_with(
+        "/token",
+        &[(status_line, &[], body)],
+        move || {
+            if let Some(observe) = observe.take() {
+                *slot.lock().unwrap() = Some(observe());
+            }
+        },
+        move |mut requests| {
+            let seen = observed.lock().unwrap().take().unwrap();
+            (requests.remove(0), seen)
+        },
+    )
+}
+
 /// The one loopback server behind the fixtures above: it answers one connection per entry at
 /// `path`, in order, reads each request's head and its `Content-Length` body, and hands what it
 /// captured to `finish`, which shapes what the thread returns.
@@ -279,6 +305,17 @@ fn serve<T: Send + 'static>(
     path: &str,
     responses: &[(&str, &[&str], &str)],
     finish: fn(Vec<CapturedRequest>) -> T,
+) -> (String, std::thread::JoinHandle<T>) {
+    serve_with(path, responses, || {}, finish)
+}
+
+/// `serve`, running `on_request` once each request has been read and before it is answered.
+#[cfg(test)]
+fn serve_with<T: Send + 'static>(
+    path: &str,
+    responses: &[(&str, &[&str], &str)],
+    mut on_request: impl FnMut() + Send + 'static,
+    finish: impl FnOnce(Vec<CapturedRequest>) -> T + Send + 'static,
 ) -> (String, std::thread::JoinHandle<T>) {
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -336,6 +373,7 @@ fn serve<T: Send + 'static>(
                 head,
                 body: String::from_utf8_lossy(&request[head_end..body_end]).to_string(),
             });
+            on_request();
             let response = format!(
                 "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()

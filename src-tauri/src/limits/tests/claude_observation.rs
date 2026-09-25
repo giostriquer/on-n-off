@@ -74,7 +74,7 @@ impl ClaudeObservationRig {
             Sources {
                 home: &self.home,
                 memo: &self.memo,
-                keychain: || Ok(None),
+                keychain: |_| Ok(None),
                 claude: refused_endpoints(&refused),
                 now_ms: LOGIN_EXPIRES_AT_MS + 1,
             },
@@ -165,7 +165,7 @@ fn verified_claude_read_supersedes_its_legacy_user_card() {
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: ClaudeEndpoints {
                 token: &refused_url(),
                 profile: &profile,

@@ -173,18 +173,15 @@ fn prune_keeps_live_history_and_incomplete_roots() {
             records: Arc::new(vec![]),
         },
     );
-    let live = HashSet::from([
-        "/root/old.jsonl".to_string(),
-        "/root/live.jsonl".to_string(),
-    ]);
-    let active_roots = vec!["/root".to_string(), "/pending".to_string()];
-    let walked_roots = vec!["/root".to_string()];
     let removed = prune_scan_cache(
         &mut cache,
-        PruneOptions {
-            live_paths: &live,
-            active_roots: &active_roots,
-            walked_roots: &walked_roots,
+        &PruneOptions {
+            live_paths: HashSet::from([
+                "/root/old.jsonl".to_string(),
+                "/root/live.jsonl".to_string(),
+            ]),
+            active_roots: vec!["/root".to_string(), "/pending".to_string()],
+            walked_roots: vec!["/root".to_string()],
             watermark: crate::usage::history::Watermark::NONE,
         },
     );

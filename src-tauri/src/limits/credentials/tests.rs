@@ -2,8 +2,13 @@ use super::*;
 use crate::paths::scratch_dir;
 use std::fs;
 
+/// The account in the identity file Claude Code keeps under `home`.
 pub fn read_claude_account(home: &Path) -> Option<LimitsAccountDto> {
-    read_claude_identity(home).map(|identity| identity.account)
+    read_claude_identity(&identity_file(home)).map(|identity| identity.account)
+}
+
+fn identity_file(home: &Path) -> std::path::PathBuf {
+    claude_store::native_dirs(home).unwrap().config_file(home)
 }
 
 const CLAUDE_JSON: &str = r#"{"claudeAiOauth":{"accessToken":"kc-token","refreshToken":"r","expiresAt":1787022473402,"scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":"default_claude_max_5x"}}"#;
@@ -24,7 +29,11 @@ fn claude_prefers_the_keychain_entry_over_the_credentials_file() {
         ".claude/.credentials.json",
         &CLAUDE_JSON.replace("kc-token", "file-token"),
     );
-    match read_claude_credential(&home, Ok(Some(CLAUDE_JSON.to_string())), NOW_MS) {
+    match read_claude_credential(
+        &StorageDir::default_in(&home),
+        Ok(Some(CLAUDE_JSON.to_string())),
+        NOW_MS,
+    ) {
         CredentialLookup::Found(cred) => {
             assert_eq!(cred.token, "kc-token");
             assert_eq!(cred.expires_at_ms, Some(1787022473402));
@@ -42,7 +51,7 @@ fn claude_falls_back_to_the_credentials_file_when_the_keychain_has_no_entry() {
         ".claude/.credentials.json",
         &CLAUDE_JSON.replace("kc-token", "file-token"),
     );
-    match read_claude_credential(&home, Ok(None), NOW_MS) {
+    match read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS) {
         CredentialLookup::Found(cred) => assert_eq!(cred.token, "file-token"),
         other => panic!("expected Found, got {other:?}"),
     }
@@ -52,7 +61,7 @@ fn claude_falls_back_to_the_credentials_file_when_the_keychain_has_no_entry() {
 fn claude_without_any_stored_login_is_missing() {
     let home = scratch_dir("limits-cred");
     assert_eq!(
-        read_claude_credential(&home, Ok(None), NOW_MS),
+        read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS),
         CredentialLookup::Missing
     );
 }
@@ -62,18 +71,22 @@ fn claude_token_past_its_expiry_is_expired_from_either_source() {
     let home = scratch_dir("limits-cred");
     let after = 1787022473402 + 1;
     assert_eq!(
-        read_claude_credential(&home, Ok(Some(CLAUDE_JSON.to_string())), after),
+        read_claude_credential(
+            &StorageDir::default_in(&home),
+            Ok(Some(CLAUDE_JSON.to_string())),
+            after
+        ),
         CredentialLookup::Expired { renewable: true }
     );
     write(&home, ".claude/.credentials.json", CLAUDE_JSON);
     assert_eq!(
-        read_claude_credential(&home, Ok(None), after),
+        read_claude_credential(&StorageDir::default_in(&home), Ok(None), after),
         CredentialLookup::Expired { renewable: true }
     );
     // A credential without `expiresAt` is trusted; the endpoint decides.
     let no_expiry = CLAUDE_JSON.replace(r#""expiresAt":1787022473402,"#, "");
     assert!(matches!(
-        read_claude_credential(&home, Ok(Some(no_expiry)), after),
+        read_claude_credential(&StorageDir::default_in(&home), Ok(Some(no_expiry)), after),
         CredentialLookup::Found(_)
     ));
 }
@@ -89,13 +102,13 @@ fn an_expired_claude_token_is_renewable_only_while_its_refresh_token_lives() {
         &format!(r#""refreshToken":"r","refreshTokenExpiresAt":{after},"#),
     );
     assert_eq!(
-        read_claude_credential(&home, Ok(Some(dated)), after),
+        read_claude_credential(&StorageDir::default_in(&home), Ok(Some(dated)), after),
         CredentialLookup::Expired { renewable: false },
         "a refresh token at its own expiry cannot renew anything"
     );
     let no_refresh = CLAUDE_JSON.replace(r#""refreshToken":"r","#, "");
     assert_eq!(
-        read_claude_credential(&home, Ok(Some(no_refresh)), after),
+        read_claude_credential(&StorageDir::default_in(&home), Ok(Some(no_refresh)), after),
         CredentialLookup::Expired { renewable: false }
     );
 }
@@ -103,7 +116,11 @@ fn an_expired_claude_token_is_renewable_only_while_its_refresh_token_lives() {
 #[test]
 fn claude_keychain_denial_is_unreadable_unless_the_file_covers_it() {
     let home = scratch_dir("limits-cred");
-    match read_claude_credential(&home, Err("Keychain access denied".to_string()), NOW_MS) {
+    match read_claude_credential(
+        &StorageDir::default_in(&home),
+        Err("Keychain access denied".to_string()),
+        NOW_MS,
+    ) {
         CredentialLookup::Unreadable(message) => {
             assert!(message.contains("Keychain access denied"))
         }
@@ -111,7 +128,11 @@ fn claude_keychain_denial_is_unreadable_unless_the_file_covers_it() {
     }
     write(&home, ".claude/.credentials.json", CLAUDE_JSON);
     assert!(matches!(
-        read_claude_credential(&home, Err("denied".to_string()), NOW_MS),
+        read_claude_credential(
+            &StorageDir::default_in(&home),
+            Err("denied".to_string()),
+            NOW_MS
+        ),
         CredentialLookup::Found(_)
     ));
 }
@@ -121,26 +142,36 @@ fn claude_credentials_without_an_access_token_count_as_signed_out_from_either_so
     let home = scratch_dir("limits-cred");
     let no_token = r#"{"claudeAiOauth":{"expiresAt":1}}"#;
     assert_eq!(
-        read_claude_credential(&home, Ok(Some(no_token.to_string())), NOW_MS),
+        read_claude_credential(
+            &StorageDir::default_in(&home),
+            Ok(Some(no_token.to_string())),
+            NOW_MS
+        ),
         CredentialLookup::Missing
     );
     write(&home, ".claude/.credentials.json", no_token);
     assert_eq!(
-        read_claude_credential(&home, Ok(None), NOW_MS),
+        read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS),
         CredentialLookup::Missing
     );
 }
 
+/// A credentials file that is not JSON cannot be read. A Keychain entry that is not JSON is one
+/// Claude Code reads past, as if it were not there.
 #[test]
-fn claude_malformed_json_is_unreadable_from_either_source() {
+fn a_malformed_credentials_file_is_unreadable_and_a_malformed_keychain_entry_is_skipped() {
     let home = scratch_dir("limits-cred");
-    assert!(matches!(
-        read_claude_credential(&home, Ok(Some("{not json".to_string())), NOW_MS),
-        CredentialLookup::Unreadable(_)
-    ));
+    assert_eq!(
+        read_claude_credential(
+            &StorageDir::default_in(&home),
+            Ok(Some("{not json".to_string())),
+            NOW_MS
+        ),
+        CredentialLookup::Missing
+    );
     write(&home, ".claude/.credentials.json", "{not json");
     assert!(matches!(
-        read_claude_credential(&home, Ok(None), NOW_MS),
+        read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS),
         CredentialLookup::Unreadable(_)
     ));
 }
@@ -155,7 +186,7 @@ fn claude_account_comes_from_claude_json_oauth_account() {
         r#"{"oauthAccount":{"accountUuid":"uuid-1","emailAddress":"me@example.com","organizationName":"Org","organizationUuid":"org-1"},"userID":"x"}"#,
     );
     assert_eq!(
-        read_claude_identity(&home),
+        read_claude_identity(&identity_file(&home)),
         Some(ClaudeIdentity {
             account: LimitsAccountDto {
                 legacy_id: None,
@@ -279,65 +310,6 @@ fn debug_output_never_contains_the_token() {
     assert!(printed.contains("<redacted>"));
 }
 
-#[test]
-fn security_tool_outcomes_map_to_probe_results() {
-    assert_eq!(
-        interpret_security_outcome(true, "  {\"a\":1}\n", ""),
-        Ok(Some("{\"a\":1}".to_string()))
-    );
-    assert_eq!(interpret_security_outcome(true, "\n", ""), Ok(None));
-    assert_eq!(
-        interpret_security_outcome(
-            false,
-            "",
-            "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain."
-        ),
-        Ok(None)
-    );
-    let denied = interpret_security_outcome(
-        false,
-        "",
-        "security: SecKeychainItemCopyContent: User canceled the operation.",
-    )
-    .unwrap_err();
-    assert!(denied.contains("User canceled"), "{denied}");
-    assert!(denied.contains("click Allow"), "{denied}");
-}
-
-/// The renewal writes back to the store this reports, so which one it picks and when it falls
-/// through are the same question the read answers — and it has to stay one answer. A Keychain
-/// entry that holds no usable login must not shadow a file that does.
-#[test]
-fn the_login_document_names_the_store_it_came_from_and_falls_through_like_the_read() {
-    let home = scratch_dir("limits-store");
-    let file_json = CLAUDE_JSON.replace("kc-token", "file-token");
-    write(&home, ".claude/.credentials.json", &file_json);
-    let path = home.join(".claude").join(".credentials.json");
-
-    let (store, document) = claude_login_document(&home, Ok(Some(CLAUDE_JSON.to_string())))
-        .unwrap()
-        .unwrap();
-    assert_eq!(store, ClaudeStore::Keychain);
-    assert_eq!(document["claudeAiOauth"]["accessToken"], "kc-token");
-
-    let (store, document) = claude_login_document(&home, Ok(None)).unwrap().unwrap();
-    assert_eq!(store, ClaudeStore::File(path.clone()));
-    assert_eq!(document["claudeAiOauth"]["accessToken"], "file-token");
-
-    // JSON without a login, and JSON that will not parse: both let the file behind have its turn,
-    // exactly as `read_claude_credential` does.
-    for shadow in [r#"{"claudeAiOauth":{}}"#, "{ not json"] {
-        let (store, _) = claude_login_document(&home, Ok(Some(shadow.to_string())))
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            store,
-            ClaudeStore::File(path.clone()),
-            "a useless Keychain entry must not shadow a usable file: {shadow}"
-        );
-    }
-}
-
 /// The two agree by construction, and this is what says so: whatever store the document came from,
 /// the credential the read hands out is the one parsed from that same document.
 #[test]
@@ -349,40 +321,91 @@ fn the_read_and_the_document_lookup_never_disagree_about_the_login() {
         Ok(Some(CLAUDE_JSON.replace("kc-token", "other").to_string())),
         Ok(Some("{ not json".to_string())),
     ] {
-        let document = claude_login_document(&home, probe.clone())
+        let document = claude_store::read(&StorageDir::default_in(&home), probe.clone())
             .unwrap()
-            .map(|(_, document)| document);
+            .document;
         let expected = document.as_ref().and_then(parse_claude_credential);
-        match read_claude_credential(&home, probe, NOW_MS) {
+        match read_claude_credential(&StorageDir::default_in(&home), probe, NOW_MS) {
             CredentialLookup::Found(credential) => assert_eq!(Some(credential), expected),
             other => panic!("expected a login, got {other:?}"),
         }
     }
 }
 
-/// A guessed account name would file a second Keychain item under the same service, and the read
-/// matches on service alone, so it could then return either one.
-#[test]
-fn the_keychain_account_is_read_off_the_entry_rather_than_guessed() {
-    let dump = "keychain: \"/Users/me/Library/Keychains/login.keychain-db\"\n\
-        attributes:\n    \
-        \"acct\"<blob>=\"giovanne.striquer\"\n    \
-        \"svce\"<blob>=\"Claude Code-credentials\"\n";
-    assert_eq!(
-        parse_keychain_account(dump).as_deref(),
-        Some("giovanne.striquer")
-    );
-    assert_eq!(parse_keychain_account("attributes:\n"), None);
-    assert_eq!(parse_keychain_account("    \"acct\"<blob>=\"\"\n"), None);
+/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
+const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
+
+/// What the Limits read reports, told apart by the fixture each store holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reported {
+    KeychainLogin,
+    FileLogin,
+    SignedOut,
+    KeychainUnreadable,
+    FileUnreadable,
 }
 
+fn reported(lookup: CredentialLookup<ClaudeCredential>, file: &Path) -> Reported {
+    match lookup {
+        CredentialLookup::Found(login) if login.token == "kc-token" => Reported::KeychainLogin,
+        CredentialLookup::Found(login) if login.token == "file-token" => Reported::FileLogin,
+        CredentialLookup::Missing => Reported::SignedOut,
+        CredentialLookup::Unreadable(why) if why.contains(&file.display().to_string()) => {
+            Reported::FileUnreadable
+        }
+        CredentialLookup::Unreadable(why) if why.contains("User canceled") => {
+            Reported::KeychainUnreadable
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// The Limits read takes the login from the store Claude Code would read it from: a Keychain entry
+/// that parses wins even without a token, which is how Claude Code signs out; one that is not JSON
+/// or cannot be read leaves it to the credentials file. When the Keychain cannot be read and the
+/// file holds nothing, the Keychain's failure is reported, because a login may be behind it. Rows
+/// are the Keychain, columns the file: no file, a login, no token, broken.
 #[test]
-fn disposable_home_does_not_read_or_renew_the_real_keychain_login() {
-    let calls = std::cell::Cell::new(0);
-    let result = isolated_keychain(true, || {
-        calls.set(calls.get() + 1);
-        Ok(Some("real-native-credential".into()))
-    });
-    assert_eq!(result, Ok(None));
-    assert_eq!(calls.get(), 0);
+fn the_limits_read_takes_the_login_from_the_store_claude_code_reads() {
+    use Reported::{FileLogin, FileUnreadable, KeychainLogin, KeychainUnreadable, SignedOut};
+    let keychain: [(&str, KeychainProbe); 5] = [
+        ("no item", Ok(None)),
+        ("a login", Ok(Some(CLAUDE_JSON.to_string()))),
+        ("no token", Ok(Some(SIGNED_OUT.to_string()))),
+        ("invalid JSON", Ok(Some("{ not json".to_string()))),
+        (
+            "unreadable",
+            Err("Keychain lookup failed (User canceled the operation.)".to_string()),
+        ),
+    ];
+    let files = [
+        ("no file", None),
+        (
+            "a login",
+            Some(CLAUDE_JSON.replace("kc-token", "file-token")),
+        ),
+        ("no token", Some(SIGNED_OUT.to_string())),
+        ("broken", Some("{ not json".to_string())),
+    ];
+    let expected = [
+        [SignedOut, FileLogin, SignedOut, FileUnreadable],
+        [KeychainLogin, KeychainLogin, KeychainLogin, KeychainLogin],
+        [SignedOut, SignedOut, SignedOut, SignedOut],
+        [SignedOut, FileLogin, SignedOut, FileUnreadable],
+        [KeychainUnreadable, FileLogin, SignedOut, KeychainUnreadable],
+    ];
+    for ((item, probe), row) in keychain.into_iter().zip(expected) {
+        for ((file, contents), want) in files.clone().into_iter().zip(row) {
+            let home = scratch_dir("limits-precedence");
+            let path = home.join(".claude").join(".credentials.json");
+            if let Some(contents) = contents {
+                write(&home, ".claude/.credentials.json", &contents);
+            }
+            let got = reported(
+                read_claude_credential(&StorageDir::default_in(&home), probe.clone(), NOW_MS),
+                &path,
+            );
+            assert_eq!(got, want, "Keychain: {item}; file: {file}");
+        }
+    }
 }

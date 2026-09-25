@@ -125,8 +125,11 @@ refresh in the background. Config, plugins, MCP settings and sessions are preser
 
 Each provider is read the way that provider intends, and active login renewal remains native-store-owned:
 
-- **Claude** — read the stored access token (macOS Keychain via `/usr/bin/security`, else
-  `~/.claude/.credentials.json`), verify it against `/api/oauth/profile`, then read
+- **Claude** — read the stored access token from the store Claude Code itself reads
+  (`accounts/claude_store.rs`: in the dirs Claude Code resolves from `CLAUDE_CONFIG_DIR` and
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR`, its macOS Keychain item via `/usr/bin/security` when that
+  parses, else the storage dir's `.credentials.json`), verify it against `/api/oauth/profile`,
+  then read
   `/api/oauth/usage?cedar_ember=1&skip_spend=1`. The query adds the saved rate-limit resets
   (`cedar_ember`) to the same answer. It is optional: a refused query falls back to the plain read
   rather than failing it, and a read that cannot tell keeps the remembered count. The resets are
@@ -134,17 +137,19 @@ Each provider is read the way that provider intends, and active login renewal re
 
   That token lives eight hours and Claude Code renews it only while Claude Code is running, so
   on-n-off — which runs continuously — renews it too rather than reporting an expired login at a
-  signed-in user. `accounts/claude_renew.rs` is the only place that reads the refresh token or
-  writes Claude's store, and it does the same thing Claude Code does: the same two lock
-  directories in the same order, the same grant against the same client id, the same stored shape,
-  and a re-read under the lock so a login another process just renewed is used rather than
-  redeemed again.
+  signed-in user. `accounts/claude_renew.rs` is the only place that redeems the refresh token,
+  and it does the same thing Claude Code does, through `accounts/claude_store.rs` for everything
+  about the store: the same refresh lock directories in the same order (`.oauth_refresh.lock`,
+  then the legacy lock beside the config dir's real path), kept fresh while held; the same
+  `.storage-write.lock` around the read and the write, taken by the one writer the account switch
+  uses too; the same grant against the login's own client id; the same stored shape; and a re-read
+  under the locks so a login another process just renewed is used rather than redeemed again.
 
   The work is ordered around the redemption, because that is the point of no return: the issuer
   rotates the refresh token, so from the reply until the store is written the only live credential
   is a value on the stack. Everything that can fail on its own account — resolving the Keychain
-  entry's account, proving the credentials file's directory will take a temporary — happens
-  *before* the grant, leaving one `rename` or one `security -U` after it. A refresh token the
+  entry's account, creating a private temporary beside the credentials file, refusing one that is
+  a link — happens *before* the grant, leaving one `security -U` or one synced rename after it. A refresh token the
   issuer refuses is reported as needing a new sign-in, and not sent again while the store still
   holds it; a renewal that succeeds and then cannot be stored says exactly that, with the reason,
   because by then the old token is spent and only signing in again will clear it.
@@ -191,6 +196,14 @@ priceable-looking model the table lacks lets the next scan re-fetch after an hou
 refresh button re-fetches at once. The summary cache key carries the table's fetch time, so a new
 table can never serve costs computed from an old one.
 
+The summary and the background fold read transcripts the same way, through `usage/sources.rs`,
+under the one lock every read and write of the usage files takes. `Sources::open` walks the roots
+and brings the source index up to date, which is enough to answer the summary's cache check before
+any record is read. `Sources::read` then returns the records, from each transcript's cached parse
+where it still holds, and `Sources::finish` saves the scan cache, pruned with the watermark it is
+given, and releases the lock. Every path out of a read runs it, a summary served from the cache
+included, so what bringing the index up to date parsed is never parsed again.
+
 Three reading rules carry the accuracy, each pinned by a test:
 
 - **One record per copy group, its richest copy, before anything is counted.** Claude Code writes
@@ -209,8 +222,8 @@ Three reading rules carry the accuracy, each pinned by a test:
   Codex source.
 
 A transcript still being written while it is read (a live session) counts what it holds at that
-moment instead of dropping out of the total. `source_index::read_stable_records` parses a file
-up to twice and reports whether its size and mtime held still (`TranscriptRead`):
+moment instead of dropping out of the total. A read parses a file up to twice and reports whether
+its size and mtime held still (`TranscriptRead`, in `usage/sources/source_index.rs`):
 
 - A file that held still but no longer matches the inventory counts what it holds now.
 - One that kept moving, or went away after a parse, counts the last parse that succeeded.
@@ -322,7 +335,7 @@ the code today; a change that moves one updates its row.
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
 | Account details | `plan` and `subscription_status` on `Reading` |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); what a fresh read keeps from it is the remember policy, `Reading::keeping` (`limits/reading.rs`) |
-| Native store | `NativeStore` (`accounts/native.rs`); Claude's login is also read by `claude_login_document` (`limits/credentials.rs`) |
-| Transcript source | `SourceSnapshot` and its entries (`usage/source_index.rs`), walked by `inventory_sources` |
+| Native store | `NativeStore` (`accounts/native.rs`); for Claude, where the login lives, how it is read and written and Claude Code's locks around it are `accounts/claude_store.rs` |
+| Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |
 | Watermark | `Watermark` (`usage/history.rs`) |
 | Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs` |

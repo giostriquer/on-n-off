@@ -8,6 +8,7 @@ fn claude(root: &Path) -> NativeStore {
         config_file: root.join(".claude.json"),
         custom: false,
         use_keychain: false,
+        secure_storage: None,
     }
 }
 #[test]
@@ -127,7 +128,10 @@ fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
         if let Some(text) = alternate {
             fs::write(root.path().join(".claude.json"), text).unwrap();
         }
-        let identity = crate::limits::credentials::read_claude_identity(root.path()).unwrap();
+        let identity_file = claude_store::native_dirs(root.path())
+            .unwrap()
+            .config_file(root.path());
+        let identity = crate::limits::credentials::read_claude_identity(&identity_file).unwrap();
         assert_eq!(identity.account.id, "legacy-user");
         let (url, request) = crate::http::serve_once(
             "200 OK",
@@ -142,98 +146,6 @@ fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
         assert!(native.verify_claude(&url).is_err());
         request.join().unwrap();
     }
-}
-
-/// Activation's Keychain path on macOS sends `security` exactly the commands the shared writer
-/// builds, and nothing else: the login as one `add-generic-password -U` with the secret
-/// hex-encoded, a removal as one `delete-generic-password` naming account and service. A write
-/// back through the `keyring` crate — this process's own identity, which is what prompted on
-/// every switch — would send nothing here and fail this test.
-#[cfg(target_os = "macos")]
-#[test]
-fn the_keyring_target_writes_and_deletes_through_security() {
-    use crate::accounts::keychain::{with_test_runner, Runner};
-    use crate::process::CommandOutcome;
-
-    let ok: Runner = |_| CommandOutcome::Exited {
-        success: true,
-        stdout: String::new(),
-        stderr: String::new(),
-    };
-    // Synthetic names on purpose: anyone re-checking this guard by putting the `keyring` crate
-    // back would otherwise file a second item under Claude Code's own service, which the
-    // service-only read could then return instead of the real login.
-    let target = Target::Keyring {
-        service: "on-n-off seam rehearsal".into(),
-        account: "on-n-off-test".into(),
-    };
-    let login = json!({"claudeAiOauth": {"accessToken": "one", "note": "a \"quoted\" word"}});
-    let hex: String = serde_json::to_vec(&login)
-        .unwrap()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-
-    let (result, sent) = with_test_runner(ok, || target.write(Some(&login)));
-    assert_eq!(result, Ok(()));
-    assert_eq!(
-        sent,
-        vec![format!(
-            "add-generic-password -U -a \"on-n-off-test\" -s \"on-n-off seam rehearsal\" -X \"{hex}\"\n"
-        )]
-    );
-
-    let (result, sent) = with_test_runner(ok, || target.write(None));
-    assert_eq!(result, Ok(()));
-    assert_eq!(
-        sent,
-        vec![
-            "delete-generic-password -a \"on-n-off-test\" -s \"on-n-off seam rehearsal\"\n"
-                .to_string()
-        ]
-    );
-
-    let refused: Runner = |_| CommandOutcome::Exited {
-        success: false,
-        stdout: String::new(),
-        stderr: "User interaction is not allowed.".to_string(),
-    };
-    let (result, _) = with_test_runner(refused, || target.write(Some(&login)));
-    assert_eq!(
-        result,
-        Err("Keychain write failed (User interaction is not allowed).".to_string()),
-        "the refusal reads as a sentence, for the transaction to prefix its own"
-    );
-}
-
-/// The same path against the real tool, on a throwaway entry: publish, read back, remove, remove
-/// again. What it proves beyond the test above is the wiring to `security` itself.
-///
-/// `cargo test --manifest-path src-tauri/Cargo.toml rehearse_the_keyring_target -- --ignored`
-#[cfg(target_os = "macos")]
-#[test]
-#[ignore = "writes a throwaway Keychain entry; not part of CI"]
-fn rehearse_the_keyring_target_through_security() {
-    let entry = crate::accounts::keychain::ThrowawayEntry {
-        service: "on-n-off native keychain rehearsal",
-        account: "on-n-off-test",
-    };
-    let target = Target::Keyring {
-        service: entry.service.into(),
-        account: entry.account.into(),
-    };
-    let login = json!({"claudeAiOauth": {"accessToken": "one", "note": "a \"quoted\" word"}});
-    target.write(Some(&login)).unwrap();
-    assert_eq!(target.read().unwrap(), Some(login));
-    target.write(None).unwrap();
-    assert_eq!(target.read().unwrap(), None);
-    target.write(None).unwrap();
-    assert_eq!(
-        target.read().unwrap(),
-        None,
-        "removing an entry already gone is not an error"
-    );
-    drop(entry);
 }
 
 /// An environment holding exactly `vars`, for `resolve_from`.
@@ -290,6 +202,28 @@ fn outside_a_disposable_home_the_provider_override_and_the_keychain_apply() {
     assert_eq!(store.config_file, root.path().join(".claude.json"));
     assert!(!store.custom);
     assert!(store.use_keychain);
+}
+
+/// Claude's config home is `CLAUDE_CONFIG_DIR` as Claude Code reads it: NFC-normalized, never
+/// trimmed.
+#[test]
+fn the_claude_config_home_is_claude_config_dir_as_claude_code_reads_it() {
+    let root = tempfile::tempdir().unwrap();
+    let mut padded = root.path().join("claude").into_os_string();
+    padded.push(" ");
+    for (value, config) in [
+        (
+            root.path().join("cafe\u{301}"),
+            root.path().join("caf\u{e9}"),
+        ),
+        (PathBuf::from(&padded), PathBuf::from(&padded)),
+    ] {
+        let env = [("CLAUDE_CONFIG_DIR", value.clone())];
+        let store =
+            NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
+        assert_eq!(store.config_home, config, "{value:?}");
+        assert_eq!(store.config_file, config.join(".claude.json"));
+    }
 }
 
 #[test]
@@ -388,3 +322,308 @@ fn the_access_projection_refuses_a_login_whose_claims_name_another_workspace() {
 
     assert!(codex_metadata_and_access(root.path()).is_err());
 }
+
+/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
+const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
+
+/// The account switch's read of a store that has no Keychain to consult, for each thing the
+/// credentials file can hold. A login needs an access token: Claude Code signs out by emptying
+/// `claudeAiOauth`, so an emptied one is no login, as it is for Limits.
+#[test]
+fn the_native_claude_read_of_the_credentials_file() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let file = native.config_home.join(".credentials.json");
+    assert!(native.read().unwrap().is_none(), "no file");
+
+    fs::write(
+        &file,
+        r#"{"claudeAiOauth":{"accessToken":"file-token"},"mcpOAuth":{"s":"t"}}"#,
+    )
+    .unwrap();
+    let login = native.read().unwrap().unwrap();
+    assert_eq!(
+        login.auth,
+        json!({"claudeAiOauth":{"accessToken":"file-token"}}),
+        "only the login is read, never the MCP tokens beside it"
+    );
+
+    for signed_out in [
+        SIGNED_OUT,
+        r#"{"claudeAiOauth":{"accessToken":"  ","refreshToken":"r"}}"#,
+        r#"{"claudeAiOauth":{"refreshToken":"r"}}"#,
+    ] {
+        fs::write(&file, signed_out).unwrap();
+        assert!(
+            native.read().unwrap().is_none(),
+            "an emptied login is no login: {signed_out}"
+        );
+    }
+
+    fs::write(&file, r#"{"mcpOAuth":{"s":"t"}}"#).unwrap();
+    assert!(native.read().unwrap().is_none(), "no claudeAiOauth");
+
+    fs::write(&file, "{ not json").unwrap();
+    assert_eq!(
+        native.read().err().as_deref(),
+        Some("The native credential document is malformed. It has not been changed.")
+    );
+}
+
+/// Claude Code's refresh lock, its legacy lock beside the config home, and the config file's lock,
+/// in the order they are taken.
+fn native_lock_paths(native: &NativeStore) -> [PathBuf; 3] {
+    let mut legacy = native.config_home.as_os_str().to_owned();
+    legacy.push(".lock");
+    let mut config = native.config_file.as_os_str().to_owned();
+    config.push(".lock");
+    [
+        native.config_home.join(".oauth_refresh.lock"),
+        legacy.into(),
+        config.into(),
+    ]
+}
+
+fn backdate(path: &Path, seconds: u64) {
+    let then = std::time::SystemTime::now() - Duration::from_secs(seconds);
+    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(then)).unwrap();
+}
+
+/// Polls `done` for up to ten seconds, well past two heartbeats.
+fn eventually(what: &str, done: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+const BUSY: &str = "Claude is updating its login or configuration. Retry after it finishes.";
+
+#[test]
+fn any_one_held_native_lock_refuses_and_leaves_none_of_the_others_taken() {
+    for held in 0..3 {
+        let root = tempfile::tempdir().unwrap();
+        let native = claude(root.path());
+        let paths = native_lock_paths(&native);
+        fs::create_dir(&paths[held]).unwrap();
+
+        assert_eq!(native.lock().err().as_deref(), Some(BUSY), "lock {held}");
+        for (at, path) in paths.iter().enumerate() {
+            assert_eq!(path.exists(), at == held, "lock {held} held: {path:?}");
+        }
+    }
+}
+
+/// Claude Code abandons its refresh locks after a minute and the config file's after ten seconds.
+#[test]
+fn a_native_lock_left_behind_is_broken_only_once_stale_for_its_kind() {
+    for (held, age, broken) in [
+        (0, 30, false),
+        (0, 61, true),
+        (1, 30, false),
+        (1, 61, true),
+        (2, 5, false),
+        (2, 11, true),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let native = claude(root.path());
+        let paths = native_lock_paths(&native);
+        fs::create_dir(&paths[held]).unwrap();
+        backdate(&paths[held], age);
+
+        let lock = native.lock();
+        assert_eq!(lock.is_ok(), broken, "lock {held}, {age}s old");
+    }
+}
+
+/// While held, every lock is touched often enough that Claude Code never judges it abandoned.
+#[test]
+fn held_native_locks_are_kept_fresh_and_released_on_drop() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let guard = native.lock().unwrap();
+    let paths = native_lock_paths(&native);
+    for path in &paths {
+        backdate(path, 3600);
+    }
+    let fresh = |path: &Path| {
+        fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|at| at.elapsed().unwrap_or_default() < Duration::from_secs(60))
+    };
+    eventually("the heartbeat refreshes every held lock", || {
+        paths.iter().all(|path| fresh(path))
+    });
+
+    drop(guard);
+    assert!(paths.iter().all(|path| !path.exists()));
+}
+
+/// A lock another process broke means the write is no longer coordinated with Claude Code, so it
+/// must not happen.
+#[test]
+fn a_native_lock_broken_under_the_holder_stops_the_write() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let credentials = native.config_home.join(".credentials.json");
+    fs::write(&credentials, r#"{"claudeAiOauth":{"accessToken":"old"}}"#).unwrap();
+    let guard = native.lock().unwrap();
+    fs::remove_dir(&native_lock_paths(&native)[0]).unwrap();
+    eventually("the heartbeat notices the lost lock", || {
+        guard.ensure().is_err()
+    });
+
+    let incoming = Login {
+        auth: json!({"claudeAiOauth":{"accessToken":"incoming"}}),
+        account: json!({"accountUuid":"b","organizationUuid":"org-b"}),
+    };
+    assert_eq!(
+        native.write_locked(Some(&incoming), guard).err().as_deref(),
+        Some("Native credential coordination was lost. Protected recovery has been retained.")
+    );
+    assert_eq!(
+        fs::read_to_string(&credentials).unwrap(),
+        r#"{"claudeAiOauth":{"accessToken":"old"}}"#
+    );
+    assert!(!native.config_file.exists());
+}
+
+fn incoming() -> Login {
+    Login {
+        auth: json!({"claudeAiOauth":{"accessToken":"incoming"}}),
+        account: json!({"accountUuid":"b","organizationUuid":"org-b"}),
+    }
+}
+
+/// Claude Code takes `.storage-write.lock` around every change to its credentials. While another
+/// process holds it, the switch writes neither half.
+#[test]
+fn a_switch_yields_while_claude_code_writes_its_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let credentials = native.config_home.join(".credentials.json");
+    fs::write(&credentials, r#"{"claudeAiOauth":{"accessToken":"old"}}"#).unwrap();
+    let lock = native.config_home.join(".storage-write.lock");
+    fs::create_dir(&lock).unwrap();
+
+    assert_eq!(native.write(Some(&incoming())).err().as_deref(), Some(BUSY));
+    assert_eq!(
+        fs::read_to_string(&credentials).unwrap(),
+        r#"{"claudeAiOauth":{"accessToken":"old"}}"#
+    );
+    assert!(!native.config_file.exists());
+    assert!(lock.is_dir());
+
+    fs::remove_dir(&lock).unwrap();
+    native.write(Some(&incoming())).unwrap();
+    assert!(!lock.exists(), "released once the write is done");
+}
+
+/// A credentials file that is a link is refused before either half of the switch is written.
+#[cfg(unix)]
+#[test]
+fn a_switch_refuses_a_linked_credentials_file_before_writing_anything() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let elsewhere = root.path().join("elsewhere.json");
+    fs::write(&elsewhere, r#"{"claudeAiOauth":{"accessToken":"old"}}"#).unwrap();
+    let file = native.config_home.join(".credentials.json");
+    std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
+
+    assert_eq!(
+        native.write(Some(&incoming())).err().as_deref(),
+        Some("Refusing to replace a linked credential file.")
+    );
+    assert!(fs::symlink_metadata(&file)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(!native.config_file.exists(), "the identity was not patched");
+}
+
+/// A credentials file that cannot be read is an error, never a missing login, and the switch
+/// writes nothing over it.
+#[test]
+fn an_unreadable_credentials_file_is_an_error_and_nothing_is_written() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    fs::create_dir(native.config_home.join(".credentials.json")).unwrap();
+
+    assert_eq!(
+        native.read().err().as_deref(),
+        Some("Cannot read native credentials.")
+    );
+    assert_eq!(
+        native.write(Some(&incoming())).err().as_deref(),
+        Some("Cannot read native credentials.")
+    );
+    assert!(!native.config_file.exists(), "the identity was not patched");
+}
+
+/// A Claude login past its expiry that cannot renew itself fails verification before anything is
+/// asked of the network.
+#[test]
+fn verification_refuses_an_expired_login_that_cannot_renew() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    fs::write(
+        native.config_home.join(".credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"old","expiresAt":1}}"#,
+    )
+    .unwrap();
+    fs::write(
+        &native.config_file,
+        r#"{"oauthAccount":{"accountUuid":"a","organizationUuid":"org-a"}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        native
+            .verify_claude(&crate::http::refused_url())
+            .err()
+            .as_deref(),
+        Some("Could not renew the native Claude login. Sign in again if it has expired.")
+    );
+}
+
+/// Only a lock another process holds is worth waiting on. One that cannot be created at all is
+/// reported for what it is, not as Claude being busy.
+#[test]
+fn a_native_lock_that_cannot_be_created_says_why_instead_of_busy() {
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    let blocker = root.path().join("not-a-directory");
+    fs::write(&blocker, "").unwrap();
+    native.config_home = blocker.join(".claude");
+
+    let refused = native.lock().err().unwrap();
+    assert!(
+        refused.starts_with("Cannot take Claude Code's locks: "),
+        "{refused}"
+    );
+    assert_ne!(refused, BUSY);
+}
+
+/// A storage-write lock that cannot be created is reported as that lock, not as a bare I/O error.
+#[test]
+fn a_storage_lock_that_cannot_be_created_is_named_in_the_error() {
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    let blocker = root.path().join("not-a-directory");
+    fs::write(&blocker, "").unwrap();
+    native.config_home = blocker.join(".claude");
+
+    let refused = native
+        .write_locked(Some(&incoming()), Box::new(()))
+        .err()
+        .unwrap();
+    assert!(
+        refused.starts_with("Cannot take Claude Code's storage lock: "),
+        "{refused}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+mod keychain;
+mod secure_storage;

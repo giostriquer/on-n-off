@@ -6,39 +6,38 @@
 //! signed in the whole time, with no way back except going to type in a terminal.
 //!
 //! This is the one place that redeems Claude's active refresh token and writes
-//! the result back to Claude Code's own store. It cooperates rather than races: the same two lock
+//! the result back to Claude Code's own store. It cooperates rather than races: the same lock
 //! directories in the same order, the same grant against the same client id, the same stored
-//! shape, and [`credentials::claude_login_document`] rather than a second opinion about which
-//! store holds the login. Claude Code is built for that — it takes the lock around every refresh
-//! of its own and re-reads under it to notice one another process already did.
+//! shape, and [`claude_store`] rather than a second opinion about which store holds the login or
+//! how to lock it. Claude Code is built for that — it takes the lock around every refresh of its
+//! own and re-reads under it to notice one another process already did.
 //!
 //! **The redemption is the point of no return.** The issuer rotates the refresh token on most
 //! renewals, which kills the old one as soon as the reply is written; from then until the store
 //! is written, the only live credential the user has is a value on this stack. So the work is
-//! ordered around that instant rather than recovered from afterwards: [`Writer::prepare`] resolves
-//! and proves the write *before* the grant is sent, and everything left after it is one `rename`
-//! or one `security -U`. What cannot be moved earlier is reported as [`RenewError::Stranded`],
-//! which says on-n-off spent the login and could not store it, because by then "run `claude` to
-//! renew it" is advice that cannot work.
+//! ordered around that instant rather than recovered from afterwards: [`claude_store::PendingWrite::prove`]
+//! resolves and proves the write *before* the grant is sent, and everything left after it is one
+//! `rename` or one `security -U`. What cannot be moved earlier is reported as
+//! [`RenewError::Stranded`], which says on-n-off spent the login and could not store it, because
+//! by then "run `claude` to renew it" is advice that cannot work.
 //!
 //! Nothing leaves this module holding a refresh token. Callers get a [`ClaudeCredential`], which
 //! carries only the access token and whether a refresh token exists.
 
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
 
 use serde_json::{json, Value};
 
-use crate::http::{post_grant, HttpError};
-use crate::limits::credentials::{
-    self, ClaudeCredential, ClaudeStore, CredentialLookup, KeychainProbe,
+use super::claude_store::{
+    self, BeginError, ClaudeLocks, ClaudeStore, KeychainProbe, LockError, LockScope, StorageDir,
 };
+use crate::http::{post_grant, HttpError};
+use crate::limits::credentials::{self, ClaudeCredential, CredentialLookup};
 use crate::limits::json::optional_string;
 
 /// Claude Code's own token endpoint and OAuth client. A refresh token is issued to one client and
-/// refused to any other, so these are not ours to choose.
+/// refused to any other, so these are not ours to choose; a login that names its own `clientId`
+/// is redeemed for that one instead (see [`client_id`]).
 pub(crate) const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
@@ -51,15 +50,11 @@ const DEFAULT_SCOPES: [&str; 5] = [
     "user:file_upload",
 ];
 
-/// Claude Code treats a refresh lock older than a minute as abandoned. Matching that is what makes
-/// the two implementations take turns instead of both deciding the other is stuck — and it is the
-/// budget everything between `acquire` and release has to fit inside.
-const LOCK_STALE: Duration = Duration::from_secs(60);
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RenewError {
-    /// Another process holds Claude Code's refresh lock. Its renewal is the one that should win,
-    /// and the caller keeps the message it already had rather than redeeming the same token twice.
+    /// Another process holds Claude Code's refresh lock, took it away while this renewal held it,
+    /// or is writing its credentials. Its change is the one that should win, and the caller keeps
+    /// the message it already had rather than redeeming the same token twice.
     Busy,
     /// The issuer refused the refresh token itself. Only a new sign-in helps.
     Rejected,
@@ -73,9 +68,31 @@ pub(crate) enum RenewError {
     Stranded(String),
 }
 
+impl From<LockError> for RenewError {
+    fn from(error: LockError) -> Self {
+        match error {
+            LockError::Busy => Self::Busy,
+            LockError::Unavailable(why) => Self::Unavailable(why),
+        }
+    }
+}
+
+impl From<BeginError> for RenewError {
+    fn from(error: BeginError) -> Self {
+        match error {
+            BeginError::Busy => Self::Busy,
+            BeginError::Lock(why) => {
+                Self::Unavailable(format!("Cannot take Claude Code's storage lock: {why}"))
+            }
+            BeginError::Store(error) => Self::Unavailable(error.to_string()),
+            BeginError::Unavailable(why) => Self::Unavailable(why),
+        }
+    }
+}
+
 /// The stored login this process has already had refused, so a dead grant is sent once rather
 /// than every five minutes for as long as the user leaves it alone — which would also mean taking
-/// both of Claude Code's lock directories on that same schedule, forever.
+/// Claude Code's refresh locks on that same schedule, forever.
 ///
 /// Identified by its store and its timestamps rather than by the token: Claude Code rewrites
 /// `expiresAt` on every renewal, so a login differing in them is a different login and worth
@@ -126,17 +143,17 @@ fn identify(store: &ClaudeStore, oauth: &Value) -> LoginId {
 /// This is the whole answer to "what is the Claude login right now", so every caller gets the
 /// renewal — including the re-read that follows a rejected token, where the stored login may be a
 /// renewable expired one rather than a dead one.
-pub(crate) fn current_login<P: Fn() -> KeychainProbe>(
-    home: &Path,
+pub(crate) fn current_login<P: Fn(&StorageDir) -> KeychainProbe>(
+    dir: &StorageDir,
     keychain: &P,
     now_ms: i64,
     token_url: &str,
 ) -> CredentialLookup<ClaudeCredential> {
-    let lookup = credentials::read_claude_credential(home, keychain(), now_ms);
+    let lookup = credentials::read_claude_credential(dir, keychain(dir), now_ms);
     if !matches!(lookup, CredentialLookup::Expired { renewable: true }) {
         return lookup;
     }
-    match renew(home, keychain, now_ms, token_url, &REFUSED) {
+    match renew(dir, keychain, now_ms, token_url, &REFUSED) {
         Ok(credential) => CredentialLookup::Found(credential),
         // Only a new sign-in helps, so say that rather than offer a renewal that would fail again.
         Err(RenewError::Rejected) => CredentialLookup::Expired { renewable: false },
@@ -156,19 +173,21 @@ pub(crate) fn current_login<P: Fn() -> KeychainProbe>(
 ///
 /// The store is read *under* the lock, Keychain probe included: acting on what it says while
 /// holding the lock is the whole mechanism for not redeeming a token another process has already
-/// replaced. Everything the lock covers — the probe, the write's preparation, the grant, the
-/// commit — is deadline-bounded to stay inside [`LOCK_STALE`], so Claude Code never breaks a lock
-/// this still holds.
-fn renew<P: Fn() -> KeychainProbe>(
-    home: &Path,
+/// replaced. The lock is kept fresh while held, so Claude Code never breaks it under a probe
+/// waiting on its prompt, a slow grant or a Keychain write.
+fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
+    dir: &StorageDir,
     keychain: &P,
     now_ms: i64,
     token_url: &str,
     refused: &RefusedLogin,
 ) -> Result<ClaudeCredential, RenewError> {
-    let _lock = RefreshLock::acquire(home)?;
-    let (target, mut document) = credentials::claude_login_document(home, keychain())
-        .map_err(RenewError::Unavailable)?
+    let lock = ClaudeLocks::acquire(dir, LockScope::Refresh)?;
+    let held = || lock.lost();
+    // Read under Claude Code's storage-write lock too, before anything else:
+    // the document written back is a change to this one, and nothing can land in between.
+    let (document, pending) = claude_store::begin(dir, keychain, &held)?;
+    let mut document = document
         .ok_or_else(|| RenewError::Unavailable("no stored Claude login to renew".to_string()))?;
 
     // Under the lock the store is authoritative. Another process having renewed while we waited is
@@ -182,7 +201,7 @@ fn renew<P: Fn() -> KeychainProbe>(
     let oauth = document
         .get("claudeAiOauth")
         .ok_or_else(|| RenewError::Unavailable("stored login has no claudeAiOauth".to_string()))?;
-    let identity = identify(&target, oauth);
+    let identity = identify(pending.source(), oauth);
     if refused.matches(&identity) {
         return Err(RenewError::Rejected);
     }
@@ -190,12 +209,25 @@ fn renew<P: Fn() -> KeychainProbe>(
     // store changed under us into one that needs a sign-in rather than a refresh.
     let refresh_token = optional_string(oauth.get("refreshToken")).ok_or(RenewError::Rejected)?;
     let scopes = scopes(oauth);
+    let client_id = client_id(oauth).to_string();
 
-    // Everything about the write that can fail for reasons unrelated to the reply fails here,
-    // where failing costs nothing. What is left afterwards is one rename or one `security -U`.
-    let writer = Writer::prepare(&target).map_err(RenewError::Unavailable)?;
+    // Only now, with a renewal actually due, is the write proven: a fresh or refused login found
+    // above never pays for a Keychain lookup or a temporary, and a proof that fails cannot stand in
+    // for either answer.
+    let write = pending.prove()?;
 
-    let reply = post_grant(token_url, &request_body(&refresh_token, &scopes)).map_err(|error| {
+    // Last check before the point of no return. A lock taken away while this held it was judged
+    // abandoned by another process, which may be renewing or rewriting this same login right
+    // now: its change is the one that should win, and redeeming here could strand whichever
+    // loses.
+    if write.lost() {
+        return Err(RenewError::Busy);
+    }
+    let reply = post_grant(
+        token_url,
+        &request_body(&refresh_token, &scopes, &client_id),
+    )
+    .map_err(|error| {
         match error {
             // 400 `invalid_grant` is how the issuer says the refresh token is spent or revoked.
             HttpError::Unauthorized | HttpError::Status(400) => {
@@ -211,9 +243,7 @@ fn renew<P: Fn() -> KeychainProbe>(
 
     // Past here the old refresh token is dead and `document` holds the only live one.
     apply(&mut document, &reply, now_ms).map_err(RenewError::Stranded)?;
-    let raw = serde_json::to_string(&document)
-        .map_err(|error| RenewError::Stranded(error.to_string()))?;
-    writer.commit(&raw).map_err(RenewError::Stranded)?;
+    write.commit(&document).map_err(RenewError::Stranded)?;
     refused.forget();
     // Parsed back out of what was written, so the credential returned is provably the stored one.
     credentials::parse_claude_credential(&document)
@@ -228,87 +258,36 @@ pub(super) fn renew_private(auth: &Value, now_ms: i64, token_url: &str) -> Resul
         .ok_or("Missing private Claude login.")?;
     let token =
         optional_string(oauth.get("refreshToken")).ok_or("Missing private renewal token.")?;
-    let reply = post_grant(token_url, &request_body(&token, &scopes(oauth)))
-        .map_err(|_| "Could not renew the private Claude login. Sign in again if needed.")?;
+    let reply = post_grant(
+        token_url,
+        &request_body(&token, &scopes(oauth), client_id(oauth)),
+    )
+    .map_err(|_| "Could not renew the private Claude login. Sign in again if needed.")?;
     let mut auth = auth.clone();
     apply(&mut auth, &reply, now_ms)
         .map_err(|_| "The private renewal reply was incomplete. Sign in again.")?;
     Ok(auth)
 }
 
-/// A store write resolved and proven before anything is redeemed.
-///
-/// `prepare` does the parts that can fail on their own account: reading the Keychain entry's
-/// account, or creating the private temporary the file store renames into. `commit` is then the
-/// single irreversible step, small enough to sit comfortably inside the refresh lock's minute.
-struct Writer {
-    target: WriterTarget,
-}
-
-enum WriterTarget {
-    Keychain { account: String },
-    File { path: PathBuf, temporary: PathBuf },
-}
-
-impl Writer {
-    fn prepare(target: &ClaudeStore) -> Result<Self, String> {
-        let target = match target {
-            ClaudeStore::Keychain => WriterTarget::Keychain {
-                account: keychain_account()?,
-            },
-            ClaudeStore::File(path) => {
-                let temporary = path.with_extension("json.on-n-off");
-                // Created empty and private now, so a directory that will not take it says so
-                // before the grant rather than after.
-                write_private(&temporary, "")
-                    .map_err(|error| format!("{}: {error}", temporary.display()))?;
-                WriterTarget::File {
-                    path: path.clone(),
-                    temporary,
-                }
-            }
-        };
-        Ok(Self { target })
-    }
-
-    fn commit(self, raw: &str) -> Result<(), String> {
-        match &self.target {
-            WriterTarget::Keychain { account } => super::keychain::write(
-                credentials::CLAUDE_KEYCHAIN_SERVICE,
-                account,
-                raw.as_bytes(),
-            ),
-            WriterTarget::File { path, temporary } => {
-                write_private(temporary, raw)
-                    .map_err(|error| format!("{}: {error}", temporary.display()))?;
-                fs::rename(temporary, path).map_err(|error| format!("{}: {error}", path.display()))
-            }
-        }
-    }
-}
-
-impl Drop for Writer {
-    /// The temporary never outlives the attempt. A successful commit renamed it away, and a failed
-    /// one leaves a live refresh token in a file Claude Code does not know about and will never
-    /// rotate — the same objection that keeps `ConfigIo` out of this module. The user has to sign
-    /// in again either way; an orphaned secret does not help them do it.
-    fn drop(&mut self) {
-        if let WriterTarget::File { temporary, .. } = &self.target {
-            let _ = fs::remove_file(temporary);
-        }
-    }
-}
-
 /// The grant Claude Code sends, field for field. `scope` is required: the issuer narrows a refresh
 /// to the scopes asked for, and a login that came back without them is one the usage endpoint
 /// would refuse.
-fn request_body(refresh_token: &str, scopes: &[String]) -> Value {
+fn request_body(refresh_token: &str, scopes: &[String], client_id: &str) -> Value {
     json!({
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
-        "client_id": CLIENT_ID,
+        "client_id": client_id,
         "scope": scopes.join(" "),
     })
+}
+
+/// The OAuth client the login was issued to: its stored `clientId` when it names one, as Claude
+/// Code 2.1.282 sends it (`clientId ?? CLIENT_ID`), otherwise Claude Code's own.
+fn client_id(oauth: &Value) -> &str {
+    oauth
+        .get("clientId")
+        .and_then(Value::as_str)
+        .unwrap_or(CLIENT_ID)
 }
 
 fn scopes(oauth: &Value) -> Vec<String> {
@@ -373,115 +352,6 @@ fn apply(document: &mut Value, reply: &Value, now_ms: i64) -> Result<(), String>
 
 fn seconds(value: Option<&Value>) -> Option<i64> {
     value.and_then(Value::as_i64).filter(|seconds| *seconds > 0)
-}
-
-/// The credentials file holds a refresh token, so it is created 0600 and never handed to
-/// `ConfigIo`, whose backups would copy the secret somewhere Claude Code neither knows about nor
-/// rotates.
-#[cfg(unix)]
-fn write_private(path: &Path, raw: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(raw.as_bytes())?;
-    file.sync_all()
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, raw: &str) -> std::io::Result<()> {
-    fs::write(path, raw)
-}
-
-/// The account Claude Code files its entry under, read off the entry rather than guessed. `-U`
-/// matches on service *and* account, so a wrong guess would file a second item under the same
-/// service, and the read — which matches on service alone — could then return either one.
-#[cfg(target_os = "macos")]
-fn keychain_account() -> Result<String, String> {
-    credentials::keychain_claude_account()
-        .ok_or_else(|| "could not read the Claude Keychain entry's account".to_string())
-}
-
-/// Mirrors `keychain_claude_json`'s stub: these platforms have no such entry, and the file store
-/// is the one their read will have chosen.
-#[cfg(not(target_os = "macos"))]
-fn keychain_account() -> Result<String, String> {
-    Err("this platform has no Claude Code Keychain entry".to_string())
-}
-
-/// Claude Code's two refresh locks, held for one renewal and released when this value drops.
-///
-/// They are directories, taken with `mkdir` because that is atomic on every filesystem either
-/// implementation runs on. Every step taken while they are held is deadline-bounded to stay well
-/// inside [`LOCK_STALE`], so there is no heartbeat to keep up and no window in which the other
-/// side breaks a lock this process still believes it holds.
-#[derive(Debug)]
-struct RefreshLock {
-    held: Vec<PathBuf>,
-}
-
-impl RefreshLock {
-    fn acquire(home: &Path) -> Result<Self, RenewError> {
-        Self::acquire_at(home, SystemTime::now())
-    }
-
-    /// `now` is a parameter so the staleness branch is reachable from a test without waiting a
-    /// minute or backdating a directory the filesystem may not let us touch.
-    fn acquire_at(home: &Path, now: SystemTime) -> Result<Self, RenewError> {
-        let config = home.join(".claude");
-        // Same order as Claude Code: two processes that disagree about the order deadlock.
-        let paths = [
-            config.join(".oauth_refresh.lock"),
-            home.join(".claude.lock"),
-        ];
-        let mut lock = Self { held: Vec::new() };
-        for path in paths {
-            // `?` drops `lock`, which releases whatever it had already taken.
-            take(&path, now)?;
-            lock.held.push(path);
-        }
-        Ok(lock)
-    }
-}
-
-fn take(path: &Path, now: SystemTime) -> Result<(), RenewError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| RenewError::Unavailable(error.to_string()))?;
-    }
-    match fs::create_dir(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            if !is_stale(path, now) {
-                return Err(RenewError::Busy);
-            }
-            // Whoever left it behind is gone; Claude Code breaks an abandoned lock the same way,
-            // and this inherits the same race between two processes that both judged it stale.
-            let _ = fs::remove_dir(path);
-            fs::create_dir(path).map_err(|_| RenewError::Busy)
-        }
-        Err(error) => Err(RenewError::Unavailable(error.to_string())),
-    }
-}
-
-fn is_stale(path: &Path, now: SystemTime) -> bool {
-    let Ok(modified) = fs::metadata(path).and_then(|meta| meta.modified()) else {
-        return false;
-    };
-    now.duration_since(modified)
-        .is_ok_and(|age| age > LOCK_STALE)
-}
-
-impl Drop for RefreshLock {
-    fn drop(&mut self) {
-        for path in self.held.drain(..).rev() {
-            let _ = fs::remove_dir(path);
-        }
-    }
 }
 
 #[cfg(test)]
