@@ -161,3 +161,33 @@ fn a_newer_save_that_could_not_tell_leaves_no_lapsed_count_in_the_file() {
     assert_eq!(the_file(&store).get("resetCredits"), None);
     let _ = fs::remove_dir_all(&home);
 }
+
+/// No version writes an offer to a file, and one that is there anyway is never read back: an offer
+/// is withdrawn the moment the account is under its limit again.
+#[test]
+fn an_offer_in_a_snapshot_file_is_not_loaded() {
+    let home = scratch_dir("limits-snap-file-shape-offer");
+    let store = SnapshotStore::for_home(&home);
+    fs::create_dir_all(store.dir()).unwrap();
+    fs::write(
+        store.dir().join("codex-acct_1-00000000.json"),
+        json!({
+            "schemaVersion": 2,
+            "provider": "codex",
+            "account": {"id": "acct-1"},
+            "windows": [
+                {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
+                 "usedPercent": 40.0, "observedAt": "2026-08-17T10:00:00.000Z"}
+            ],
+            "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let loaded = store.load(AgentId::Codex);
+
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].reading.reset_offer, None);
+    let _ = fs::remove_dir_all(&home);
+}
