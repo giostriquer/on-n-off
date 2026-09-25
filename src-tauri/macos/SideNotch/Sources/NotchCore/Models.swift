@@ -232,13 +232,7 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
   /// Whether every window the host names is one it sent, and a share it puts on the inner ring came
   /// with it. A message that names anything else is refused rather than drawn in part.
   public var referencesAreSent: Bool {
-    let sent = { (id: String) in windows.contains { $0.id == id } }
-    let headlineSent = headlineWindowId.map(sent) ?? true
-    switch innerRing {
-    case .fable(let id)?: return headlineSent && sent(id)
-    case .workspaceShare?: return headlineSent && workspaceCredits != nil
-    case nil: return headlineSent
-    }
+    (headlineWindowId == nil || headline != nil) && (innerRing == nil || inner != nil)
   }
 
   /// Whether the popover shows any remembered value: windows or a credit share. A paused account that
