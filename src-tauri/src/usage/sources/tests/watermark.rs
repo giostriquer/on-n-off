@@ -38,6 +38,25 @@ fn a_transcript_last_written_well_before_the_watermark_is_indexed_unread() {
     let _ = std::fs::remove_dir_all(home);
 }
 
+/// Indexing records the same span for a transcript whose records the history holds whether or not
+/// the scan cache still holds its parse, so a summary's signature does not change with the cache.
+#[test]
+fn a_transcript_last_written_well_before_the_watermark_signs_the_same_parsed_or_not() {
+    let home = scratch_dir("usage-sources-folded-signature");
+    write_long_folded(&home);
+    open_and_finish(&home, Watermark::NONE);
+    let index = source_index_path_for(&home);
+    std::fs::remove_file(&index).unwrap();
+
+    let with_parse = signature(&home, watermark(), AUGUST_START, SEPTEMBER_START);
+    std::fs::remove_file(&index).unwrap();
+    let _ = std::fs::remove_file(scan_cache_path_for(&home));
+    let without_parse = signature(&home, watermark(), AUGUST_START, SEPTEMBER_START);
+
+    assert_eq!(with_parse, without_parse);
+    let _ = std::fs::remove_dir_all(home);
+}
+
 /// Written recently, so its mtime alone would have it read; its newest record is folded.
 #[test]
 fn a_transcript_whose_newest_record_is_folded_is_not_read_however_recently_written() {

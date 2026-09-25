@@ -527,6 +527,24 @@ fn inspect_changed_file(
     scan_cache_dirty: &mut bool,
     watermark: Watermark,
 ) -> (SourceEntry, bool) {
+    // Everything it holds is already folded: its bounds are never needed, so it is not read. This
+    // comes before the scan cache, so the entry, and the signature over it, is the same whether or
+    // not the cache still holds a parse of it.
+    if watermark.holds_only_folded(observed.mtime_ms, None) {
+        return (
+            SourceEntry {
+                provider,
+                path: normalized,
+                size: observed.size,
+                mtime_ms: observed.mtime_ms,
+                min_record_ms: None,
+                max_record_ms: None,
+                resolved: true,
+            },
+            true,
+        );
+    }
+
     if let Some(cached) = scan_cache.get(&normalized) {
         if cached.is_parse_of(provider, observed.size, observed.mtime_ms) {
             let (min_record_ms, max_record_ms) = record_bounds(&cached.records);
@@ -543,22 +561,6 @@ fn inspect_changed_file(
                 true,
             );
         }
-    }
-
-    // Everything it holds is already folded: its bounds are never needed, so it is not read.
-    if watermark.holds_only_folded(observed.mtime_ms, None) {
-        return (
-            SourceEntry {
-                provider,
-                path: normalized,
-                size: observed.size,
-                mtime_ms: observed.mtime_ms,
-                min_record_ms: None,
-                max_record_ms: None,
-                resolved: true,
-            },
-            true,
-        );
     }
 
     let parsed =
