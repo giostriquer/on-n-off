@@ -334,7 +334,7 @@ the code today; a change that moves one updates its row.
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
 | Account details | `plan` and `subscription_status` on `Reading` |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); what a fresh read keeps from it is the remember policy, `Reading::keeping` (`limits/reading.rs`) |
-| Native store | `NativeStore` (`accounts/native.rs`); Claude's login is also read by `claude_login_document` (`limits/credentials.rs`) |
+| Native store | `NativeStore` (`accounts/native.rs`); for Claude, where the login lives, how it is read and written and Claude Code's locks around it are `accounts/claude_store.rs` |
 | Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |
 | Watermark | `Watermark` (`usage/history.rs`) |
 | Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs` |
