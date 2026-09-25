@@ -71,6 +71,38 @@ describe("visibleLimitWindows", () => {
 
     expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:team-reserve"]);
   });
+
+  const codex = (windows: LimitWindow[]): ProviderLimits => ({ provider: "codex", status: "ok", currentAccount: true, windows });
+
+  it("hides Codex's internal buckets by id, whatever their label says", () => {
+    const entry = codex([
+      { ...window, id: "extra:codex_bengalfox", label: "5 hour · Bengal preview" },
+      { ...window, id: "extra:base_model_inference:secondary", label: "Weekly · Inference" },
+      { ...window, id: "extra:codex_bengalfox_next", label: "Weekly · Next" },
+      { ...window, id: "codex_bengalfox", label: "Weekly · Unprefixed" },
+    ]);
+
+    expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:codex_bengalfox_next", "codex_bengalfox"]);
+  });
+
+  it("hides the reserve and Spark windows by the name after the last dot, whatever their id", () => {
+    const entry = codex([
+      { ...window, id: "extra:reserve", label: "Weekly · GPT-Reserve" },
+      { ...window, id: "extra:spark", label: "5 hour ·  gpt-5.3-codex-SPARK " },
+      { ...window, id: "extra:spark-first", label: "GPT-5.3-Codex-Spark · weekly" },
+    ]);
+
+    expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:spark-first"]);
+  });
+
+  it("leaves every other provider's windows alone", () => {
+    const entry: ProviderLimits = {
+      ...codex([{ ...window, id: "extra:codex_bengalfox", label: "Weekly · GPT-Reserve" }]),
+      provider: "claude",
+    };
+
+    expect(visibleLimitWindows(entry)).toEqual(entry.windows);
+  });
 });
 
 describe("usageLeft", () => {

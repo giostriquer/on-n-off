@@ -179,6 +179,8 @@ describe("LimitsPopover", () => {
       { id: "extra:reserve", label: "Weekly · GPT-RESERVE", kind: "model", usedPercent: 0, observedAt: "2026-08-18T12:00:00Z" },
       { id: "extra:spark", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, observedAt: "2026-08-18T12:00:00Z" },
       { id: "extra:spark:secondary", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, observedAt: "2026-08-18T12:00:00Z" },
+      // Hidden by its bucket id alone: the label names nothing hidden.
+      { id: "extra:codex_bengalfox", label: "Weekly · Bengal preview", kind: "model", usedPercent: 0, observedAt: "2026-08-18T12:00:00Z" },
       { id: "extra:gpt-5.6-luna", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 6, observedAt: "2026-08-18T12:00:00Z" },
     );
     readLimits.mockImplementation((provider: AgentId) =>
@@ -189,6 +191,7 @@ describe("LimitsPopover", () => {
     const account = await screen.findByRole("article", { name: "Codex limits · current@codex.example" });
     expect(within(account).queryByText(/GPT-RESERVE/i)).toBeNull();
     expect(within(account).queryByText(/GPT-5\.3-Codex-Spark/i)).toBeNull();
+    expect(within(account).queryByText(/Bengal preview/i)).toBeNull();
     expect(within(account).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" })).toBeTruthy();
   });
 

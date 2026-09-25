@@ -189,3 +189,6 @@ pub(super) fn kind_rank(kind: LimitWindowKind) -> u8 {
         LimitWindowKind::Model => 2,
     }
 }
+
+#[cfg(test)]
+mod tests;

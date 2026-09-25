@@ -97,6 +97,52 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
     assert_eq!(merged.plan.as_deref(), Some("max"));
 }
 
+/// A remembered window merged into a paused read takes its place in the order every surface shows:
+/// weekly, then session, then per model.
+#[test]
+fn merged_windows_list_weekly_then_session_then_model() {
+    let at = "2026-08-18T03:07:53.000Z";
+    let own = Reading {
+        windows: vec![
+            observed(
+                "fable",
+                "Weekly · Fable",
+                LimitWindowKind::Model,
+                5.0,
+                None,
+                at,
+            ),
+            observed(
+                "session",
+                "5 hour · all models",
+                LimitWindowKind::Session,
+                6.0,
+                None,
+                at,
+            ),
+        ],
+        ..Reading::default()
+    };
+    let remembered = Reading {
+        windows: vec![observed(
+            "weekly_all",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            7.0,
+            None,
+            "2026-08-17T15:00:00Z",
+        )],
+        ..Reading::default()
+    };
+
+    let ids: Vec<String> = paused(own, remembered)
+        .windows
+        .into_iter()
+        .map(|window| window.id)
+        .collect();
+    assert_eq!(ids, ["weekly_all", "session", "fable"]);
+}
+
 #[test]
 fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
     let reset_credits = Some(crate::dto::LimitsResetCreditsDto {

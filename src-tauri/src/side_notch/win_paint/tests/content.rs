@@ -1,55 +1,114 @@
 use super::*;
 
-#[test]
-fn codex_hides_internal_windows_from_both_ring_and_popover() {
-    let provider = ProviderData {
+/// How many windows the popover of a Codex account with `windows` draws a bar for.
+fn codex_popover_bars(windows: Vec<LimitWindowDto>) -> usize {
+    let (planned, _) = popover_render(ProviderData {
         provider: AgentId::Codex,
         status: LimitsStatus::Ok,
         message: None,
-        windows: vec![
-            LimitWindowDto {
-                id: "w-session".into(),
-                label: "Session".into(),
-                kind: LimitWindowKind::Session,
-                used_percent: 10.0,
-                resets_at: None,
-                window_seconds: None,
-                observed_at: "2026-09-01T10:00:00Z".into(),
-            },
-            LimitWindowDto {
-                id: "extra:base_model_inference".into(),
-                label: "Weekly · gpt-5.3-codex-spark".into(),
-                kind: LimitWindowKind::Model,
-                used_percent: 90.0,
-                resets_at: None,
-                window_seconds: None,
-                observed_at: "2026-09-01T10:00:00Z".into(),
-            },
-        ],
+        windows,
         workspace_credits: None,
         sessions: Vec::new(),
-    };
-    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let planned = plan(
-        &settings(),
-        &displays,
-        &data(vec![CellData::Provider(provider)]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
-    )
-    .unwrap();
-    let popover = planned.popover.unwrap();
-    let bars = popover
+    });
+    planned
+        .popover
+        .expect("the popover is open")
         .entries
         .iter()
         .filter(|(item, _)| matches!(item, PopItem::Bar { .. }))
-        .count();
-    assert_eq!(
-        bars, 1,
-        "the internal codex window never reaches the popover"
+        .count()
+}
+
+#[test]
+fn codex_hides_its_internal_buckets_by_id_whatever_their_label() {
+    let bars = codex_popover_bars(vec![
+        window("w-session", "Session", LimitWindowKind::Session, 10.0),
+        window(
+            "extra:base_model_inference",
+            "Weekly · Inference",
+            LimitWindowKind::Model,
+            90.0,
+        ),
+        window(
+            "extra:codex_bengalfox:secondary",
+            "Weekly · Bengal preview",
+            LimitWindowKind::Model,
+            90.0,
+        ),
+    ]);
+    assert_eq!(bars, 1, "only the session window reaches the popover");
+}
+
+#[test]
+fn codex_hides_the_reserve_and_spark_windows_by_label_whatever_their_id() {
+    let bars = codex_popover_bars(vec![
+        window("w-session", "Session", LimitWindowKind::Session, 10.0),
+        window(
+            "extra:spark",
+            "Weekly · gpt-5.3-codex-spark",
+            LimitWindowKind::Model,
+            90.0,
+        ),
+        window(
+            "extra:reserve",
+            "Weekly · GPT-Reserve",
+            LimitWindowKind::Model,
+            90.0,
+        ),
+    ]);
+    assert_eq!(bars, 1, "only the session window reaches the popover");
+}
+
+/// The label of a cell whose account reports `windows`.
+fn ring_label(provider: AgentId, windows: Vec<LimitWindowDto>) -> String {
+    let mut data = claude_with(windows);
+    data.provider = provider;
+    match cell_content(&CellData::Provider(data)) {
+        CellContent::Provider { label, .. } => label,
+        _ => panic!("wrong content kind"),
+    }
+}
+
+#[test]
+fn claudes_ring_leads_with_its_weekly_over_its_session() {
+    let label = ring_label(
+        AgentId::Claude,
+        vec![
+            window(
+                "session",
+                "5 hour · all models",
+                LimitWindowKind::Session,
+                73.0,
+            ),
+            window(
+                "weekly_all",
+                "Weekly · all models",
+                LimitWindowKind::Weekly,
+                41.0,
+            ),
+        ],
     );
+    assert_eq!(label, "41%");
+}
+
+#[test]
+fn codexs_ring_leads_with_its_session_when_it_reports_one() {
+    let windows = vec![
+        window(
+            "secondary",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            10.0,
+        ),
+        window(
+            "primary",
+            "5 hour · all models",
+            LimitWindowKind::Session,
+            20.0,
+        ),
+    ];
+    assert_eq!(ring_label(AgentId::Codex, windows.clone()), "20%");
+    assert_eq!(ring_label(AgentId::Codex, windows[..1].to_vec()), "10%");
 }
 #[test]
 fn unreadable_providers_fall_back_to_the_dash_label() {
