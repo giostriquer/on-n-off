@@ -19,11 +19,10 @@
 #[cfg(any(target_os = "macos", test))]
 use crate::process::CommandOutcome;
 
-/// Deadline for one `security` write. Writes happen under Claude Code's locks, which are kept
-/// fresh while held (`claude_store::ClaudeLocks`), so this only bounds how long a stuck tool can
-/// keep them; it still sits inside the minute after which Claude Code breaks a quiet lock.
+/// Deadline for one `security` write or delete: it bounds how long a stuck tool can hold Claude
+/// Code's locks.
 #[cfg(target_os = "macos")]
-pub(super) const DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+const DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Store `raw` as the secret of the item filed under `service` and `account`, replacing an entry
 /// that already exists.

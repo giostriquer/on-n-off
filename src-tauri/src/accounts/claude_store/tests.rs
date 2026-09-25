@@ -390,12 +390,6 @@ fn locks_are_released_innermost_first() {
     );
 }
 
-#[cfg(target_os = "macos")]
-#[test]
-fn the_keychain_write_deadline_fits_inside_the_lock_it_is_held_under() {
-    assert!(crate::accounts::keychain::DEADLINE < LOCK_STALE);
-}
-
 /// The account name Claude Code files its Keychain entry under: `$USER`, else the login name, and
 /// a fixed name when that is not one `security` can take as-is.
 #[test]

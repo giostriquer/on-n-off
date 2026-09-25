@@ -35,9 +35,8 @@ pub(crate) type KeychainProbe = Result<Option<String>, String>;
 /// The name of Claude Code's Keychain entry for its default config dir. Read and write share it: a
 /// second copy that drifted would mean writing a renewed login to an entry nothing reads.
 ///
-/// Deliberately not gated to macOS. The renewal names the store it is writing to on every
-/// platform, and the stub that answers "there is no Keychain here" is chosen inside
-/// `accounts::keychain::write`, not by making the name itself disappear.
+/// Not gated to macOS: [`StorageDir::service`] names the entry on every platform, and on Windows
+/// a write to it is refused before anything is attempted, by `write_account`'s stub.
 pub(crate) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 /// Claude Code's storage dir: where its credentials file and lock directories live, and whose path
@@ -592,18 +591,27 @@ impl CredentialWrite<'_> {
 
 /// Claude Code treats a refresh lock older than a minute as abandoned. Matching that is what makes
 /// the two implementations take turns instead of both deciding the other is stuck.
-pub(crate) const LOCK_STALE: Duration = Duration::from_secs(60);
+const LOCK_STALE: Duration = Duration::from_secs(60);
 
-/// Claude Code abandons a config file's lock after ten seconds.
+/// Claude Code abandons a config file's lock after ten seconds: the smallest staleness of any lock
+/// taken here.
 const CONFIG_LOCK_STALE: Duration = Duration::from_secs(10);
 
 /// Claude Code abandons its credentials' write lock after fifteen seconds.
 const STORAGE_WRITE_STALE: Duration = Duration::from_secs(15);
 
-/// How often every held lock is touched. Far inside each staleness limit, and inside the seven and
-/// a half seconds after which Claude Code 2.1.282, finding a refresh lock whose time has not moved,
-/// starts asking whether its holder is still alive.
+/// How long Claude Code 2.1.282 watches a refresh lock whose time has not moved before it starts
+/// asking whether its holder is still alive.
+const CLAUDE_CODE_LIVENESS: Duration = Duration::from_millis(7500);
+
+/// How often every held lock is touched.
 const HEARTBEAT: Duration = Duration::from_secs(2);
+
+// A held lock must never look abandoned: the heartbeat has to land several times over within the
+// smallest staleness limit and within Claude Code's liveness watch, or a slow tick breaks a lock
+// this process still holds, or has Claude Code ask whether its holder is alive.
+const _: () = assert!(HEARTBEAT.as_millis() * 3 <= CONFIG_LOCK_STALE.as_millis());
+const _: () = assert!(HEARTBEAT.as_millis() * 3 <= CLAUDE_CODE_LIVENESS.as_millis());
 
 /// Which of Claude Code's locks to take, in the storage dir.
 #[derive(Debug, Clone, Copy)]
