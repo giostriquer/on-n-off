@@ -221,9 +221,9 @@ private struct MeterCell: View {
       return nil
     }
   }
+  /// The host names only a weekly window as the headline, so a ring with one is the weekly's.
   private var period: String {
-    headline.map { $0.kind == "weekly" ? "weekly" : "5 hour" }
-      ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
+    headline.map { _ in "weekly" } ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
   }
   private var description: String {
     let name = providerName(id)

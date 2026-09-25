@@ -140,7 +140,7 @@ function ProviderColumn({
 }
 
 /** Account identity stays prominent; workspace ids are never displayed. */
-function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, activeWithoutUsage, savedRefreshDetail }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null; subscription?: ReactNode; profile?: SavedProfile; menu?: ReactNode; activeWithoutUsage?: boolean; savedRefreshDetail?: string | null }) {
+function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, activeWithoutHeadline, savedRefreshDetail }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null; subscription?: ReactNode; profile?: SavedProfile; menu?: ReactNode; activeWithoutHeadline?: boolean; savedRefreshDetail?: string | null }) {
   const name = providerLabel(provider);
   const label = profile?.email ?? entry?.account?.label ?? null;
   const plan = planLabel(entry?.plan, provider);
@@ -152,7 +152,7 @@ function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, a
           <div className="truncate text-[13px] font-semibold" title={label ?? name}>{label ?? name}</div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-        {activeWithoutUsage && <ActiveAccountDot />}
+        {activeWithoutHeadline && <ActiveAccountDot />}
         {subscription}
         {savedRefreshDetail && <UsageStatusBadge detail={savedRefreshDetail} />}
         {plan ? (
@@ -192,7 +192,7 @@ function AccountCard({
   const { message, refreshPaused, updatedAt, savedRefreshDetail } = presentation;
 
   const subscription = <AccountSubscriptionBadge entry={entry} now={now} freshness={presentation} />;
-  const header = (menu: ReactNode) => <CardHeader savedRefreshDetail={savedRefreshDetail} activeWithoutUsage={active && !headline} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
+  const header = (menu: ReactNode) => <CardHeader savedRefreshDetail={savedRefreshDetail} activeWithoutHeadline={active && !headline} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
   const content = <>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 
