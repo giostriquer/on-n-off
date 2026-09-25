@@ -22,7 +22,7 @@ _Avoid_: snapshot, observation set
 
 **Headline window**:
 The quota window a card or the notch leads with: its weekly window. A card that has none leads with
-nothing.
+nothing; a read that reports other windows but misses it keeps the last one read.
 _Avoid_: hero, primary
 
 **Figure**:
