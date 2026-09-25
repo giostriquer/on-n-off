@@ -2,7 +2,7 @@
 //! read parses only what changed.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -11,6 +11,8 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::source_index::{normalize_path, SourceRoot, SourceSnapshot};
+use crate::usage::cache_io::atomic_write;
 use crate::usage::history::Watermark;
 use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 use crate::usage::transcripts::{richest_copies, TokenTotals, UsageProvider, UsageRecord};
@@ -67,7 +69,55 @@ struct SerializedFile {
     r: Vec<Value>,
 }
 
-pub(super) fn encode_scan_cache(cache: &ScanCache) -> Value {
+pub(super) fn scan_cache_path_for(home: &Path) -> PathBuf {
+    home.join(".on-n-off").join("usage-scan-cache.json")
+}
+
+/// The scan cache kept at `path`: empty when there is none or it does not read.
+pub(super) fn load_scan_cache(path: &Path) -> ScanCache {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return ScanCache::new();
+    };
+    let Ok(doc) = serde_json::from_str(&raw) else {
+        return ScanCache::new();
+    };
+    decode_scan_cache(&doc)
+}
+
+/// Drops what the scan cache no longer needs: transcripts deleted from a root walked to the end,
+/// outside every root, or whose records the history holds by `watermark`. Saves it at `path` when
+/// that, or a read (`changed`), changed it.
+pub(super) fn prune_and_save(
+    path: &Path,
+    cache: &mut ScanCache,
+    snapshot: &SourceSnapshot,
+    roots: &[SourceRoot],
+    watermark: Watermark,
+    changed: bool,
+) {
+    let live_paths = snapshot.live_paths();
+    let active_roots: Vec<String> = roots
+        .iter()
+        .map(|root| normalize_path(&root.path))
+        .collect();
+    let pruned = prune_scan_cache(
+        cache,
+        PruneOptions {
+            live_paths: &live_paths,
+            active_roots: &active_roots,
+            walked_roots: snapshot.successfully_walked_root_paths(),
+            watermark,
+        },
+    );
+    if changed || pruned > 0 {
+        let doc = encode_scan_cache(cache);
+        if let Ok(raw) = serde_json::to_string(&doc) {
+            let _ = atomic_write(path, &raw);
+        }
+    }
+}
+
+fn encode_scan_cache(cache: &ScanCache) -> Value {
     let mut models: Vec<String> = Vec::new();
     let mut sessions: Vec<String> = Vec::new();
     let mut model_index: HashMap<String, usize> = HashMap::new();
@@ -129,7 +179,7 @@ pub(super) fn encode_scan_cache(cache: &ScanCache) -> Value {
     .unwrap_or(Value::Null)
 }
 
-pub(super) fn decode_scan_cache(document: &Value) -> ScanCache {
+fn decode_scan_cache(document: &Value) -> ScanCache {
     #[cfg(test)]
     SCAN_CACHE_DECODE_COUNT.set(SCAN_CACHE_DECODE_COUNT.get() + 1);
     let mut cache = ScanCache::new();
@@ -248,15 +298,15 @@ pub(super) fn decode_scan_cache(document: &Value) -> ScanCache {
     cache
 }
 
-pub(super) struct PruneOptions<'a> {
-    pub(super) live_paths: &'a HashSet<String>,
-    pub(super) active_roots: &'a [String],
-    pub(super) walked_roots: &'a [String],
+struct PruneOptions<'a> {
+    live_paths: &'a HashSet<String>,
+    active_roots: &'a [String],
+    walked_roots: &'a [String],
     /// Files whose every record the usage history holds leave the cache.
-    pub(super) watermark: Watermark,
+    watermark: Watermark,
 }
 
-pub(super) fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usize {
+fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usize {
     let mut removed = 0;
     let keys: Vec<String> = cache.keys().cloned().collect();
     for path in keys {

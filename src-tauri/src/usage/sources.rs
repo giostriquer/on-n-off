@@ -20,13 +20,12 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use crate::paths::{claude_root_for, codex_root_for};
 
-use super::cache_io::atomic_write;
 use super::history::Watermark;
 use super::reader::MTIME_SLACK_MS;
 use super::transcripts::{richest_copies, UsageProvider, UsageRecord};
-use scan_cache::{decode_scan_cache, encode_scan_cache, prune_scan_cache, PruneOptions, ScanCache};
+use scan_cache::{load_scan_cache, prune_and_save, scan_cache_path_for, ScanCache};
 use source_index::{
-    inventory_sources, normalize_path, prepare_sources, reconcile_inventory, source_index_path_for,
+    inventory_sources, prepare_sources, reconcile_inventory, source_index_path_for,
     unchanged_snapshot, PreparedSourceFile, SourceRoot, SourceSnapshot,
 };
 
@@ -54,10 +53,6 @@ pub fn lock_usage_files() -> UsageFilesLock {
             .lock()
             .unwrap_or_else(PoisonError::into_inner),
     }
-}
-
-fn scan_cache_path_for(home: &Path) -> PathBuf {
-    home.join(".on-n-off").join("usage-scan-cache.json")
 }
 
 /// The transcript sources under the usage-files lock; see the module documentation for the two
@@ -156,7 +151,7 @@ impl Sources {
     /// holds. Then releases the lock. `watermark` is asked for only when the scan cache was loaded.
     pub fn finish(self, watermark: impl FnOnce() -> Watermark) -> SeenSources {
         if let Some(mut scan_cache) = self.scan_cache {
-            prune_and_persist_scan_cache(
+            prune_and_save(
                 &self.scan_cache_path,
                 &mut scan_cache,
                 &self.seen.snapshot,
@@ -300,48 +295,6 @@ fn resolve_codex_archive_dir(home: &Path) -> PathBuf {
     codex_root_for(home).join("archived_sessions")
 }
 
-fn load_scan_cache(path: &Path) -> ScanCache {
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return ScanCache::new();
-    };
-    let Ok(doc) = serde_json::from_str(&raw) else {
-        return ScanCache::new();
-    };
-    decode_scan_cache(&doc)
-}
-
-/// Drops what the scan cache no longer needs (deleted, outside every root, or held by the
-/// history) and saves it when anything changed.
-fn prune_and_persist_scan_cache(
-    path: &Path,
-    file_cache: &mut ScanCache,
-    snapshot: &SourceSnapshot,
-    roots: &[SourceRoot],
-    watermark: Watermark,
-    dirty: bool,
-) {
-    let live_paths = snapshot.live_paths();
-    let active_roots: Vec<String> = roots
-        .iter()
-        .map(|root| normalize_path(&root.path))
-        .collect();
-    let pruned = prune_scan_cache(
-        file_cache,
-        PruneOptions {
-            live_paths: &live_paths,
-            active_roots: &active_roots,
-            walked_roots: snapshot.successfully_walked_root_paths(),
-            watermark,
-        },
-    );
-    if dirty || pruned > 0 {
-        let doc = encode_scan_cache(file_cache);
-        if let Ok(raw) = serde_json::to_string(&doc) {
-            let _ = atomic_write(path, &raw);
-        }
-    }
-}
-
 /// Where the scan cache for `home` is kept, for tests that damage or restore it.
 #[cfg(test)]
 pub(crate) fn scan_cache_file(home: &Path) -> PathBuf {
@@ -359,7 +312,7 @@ pub(crate) fn source_index_file(home: &Path) -> PathBuf {
 #[cfg(test)]
 pub(crate) fn cached_record_count(home: &Path, transcript: &Path) -> Option<usize> {
     load_scan_cache(&scan_cache_path_for(home))
-        .get(&normalize_path(transcript))
+        .get(&source_index::normalize_path(transcript))
         .map(|cached| cached.records.len())
 }
 
