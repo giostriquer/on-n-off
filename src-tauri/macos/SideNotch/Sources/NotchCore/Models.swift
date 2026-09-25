@@ -191,7 +191,6 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
   public let provider: ProviderId
   public let status: String
   public let currentAccount: Bool
-  public let plan: String?
   public let message: String?
   public let windows: [Quota]
   public let headlineWindowId: String?
@@ -200,14 +199,13 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
   public let workspaceCredits: WorkspaceCredits?
 
   public init(
-    provider: ProviderId, status: String, currentAccount: Bool, plan: String?, message: String?,
+    provider: ProviderId, status: String, currentAccount: Bool, message: String?,
     windows: [Quota], headlineWindowId: String? = nil, innerRing: InnerRing? = nil,
     sessions: [Session] = [], workspaceCredits: WorkspaceCredits? = nil
   ) {
     self.provider = provider
     self.status = status
     self.currentAccount = currentAccount
-    self.plan = plan
     self.message = message
     self.windows = windows
     self.headlineWindowId = headlineWindowId

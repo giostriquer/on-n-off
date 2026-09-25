@@ -39,7 +39,6 @@ struct NativeProvider {
     provider: AgentId,
     status: LimitsStatus,
     current_account: bool,
-    plan: Option<String>,
     message: Option<String>,
     windows: Vec<LimitWindowDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,7 +66,6 @@ impl From<NotchProvider> for NativeProvider {
             provider: cell.provider,
             status: cell.status,
             current_account: true,
-            plan: cell.plan,
             message: cell.message,
             windows: cell.windows,
             headline_window_id: cell.headline_window_id,

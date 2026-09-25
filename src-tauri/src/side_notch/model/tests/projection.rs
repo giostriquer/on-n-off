@@ -181,11 +181,9 @@ fn only_the_signed_in_account_reaches_the_notch() {
         current_account: false,
         ..signed_in(AgentId::Codex, vec![weekly("primary")])
     };
-    let mut current = signed_in(AgentId::Codex, vec![session("primary")]);
-    current.reading.plan = Some("pro".into());
+    let current = signed_in(AgentId::Codex, vec![session("primary")]);
 
     let cell = NotchProvider::current(vec![remembered.clone(), current]).expect("the current one");
-    assert_eq!(cell.plan.as_deref(), Some("pro"));
     assert_eq!(cell.windows[0].kind, LimitWindowKind::Session);
     assert_eq!(NotchProvider::current(vec![remembered]), None);
     assert_eq!(NotchProvider::current(Vec::new()), None);

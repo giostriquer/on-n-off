@@ -31,13 +31,16 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
     ])).unwrap();
     let entry = current_provider(entries).unwrap();
     assert_eq!(entry.status, LimitsStatus::SignedOut);
-    assert_eq!(entry.plan.as_deref(), Some("max"));
     let payload = serde_json::to_value(MessageProvider {
         entry: &entry,
         sessions: &[],
     })
     .unwrap();
     assert!(payload.get("account").is_none());
+    assert!(
+        payload.get("plan").is_none(),
+        "the helper draws no plan, so none is sent"
+    );
     assert!(payload.get("credits").is_none());
     assert!(payload.get("workspaceCredits").is_none());
     assert_eq!(payload["provider"], "claude");
@@ -104,7 +107,6 @@ fn the_message_lists_selected_providers_in_rail_order_with_their_sessions() {
         provider,
         status: LimitsStatus::Ok,
         current_account: true,
-        plan: None,
         message: None,
         windows: Vec::new(),
         headline_window_id: None,

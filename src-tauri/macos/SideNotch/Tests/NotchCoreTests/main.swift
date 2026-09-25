@@ -18,7 +18,7 @@ final class NotchTests {
     headline: String? = nil, inner: InnerRing? = nil
   ) -> Provider {
     Provider(
-      provider: name, status: status, currentAccount: current, plan: "max", message: nil,
+      provider: name, status: status, currentAccount: current, message: nil,
       windows: windows, headlineWindowId: headline, innerRing: inner)
   }
   func rail(
@@ -110,7 +110,7 @@ final class NotchTests {
 
   func testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside() {
     let entry = Provider(
-      provider: .codex, status: "ok", currentAccount: true, plan: "business", message: nil,
+      provider: .codex, status: "ok", currentAccount: true, message: nil,
       windows: [quota("weekly", 31, label: "Weekly · all models", id: "primary")],
       headlineWindowId: "primary", innerRing: .workspaceShare, workspaceCredits: credits(32))
     expectEqual(entry.headline?.usedPercent, 31)
@@ -143,7 +143,7 @@ final class NotchTests {
   /// windows or a remembered share.
   func testAPausedAccountWithOnlyAShareStillHasObservedValues() {
     let share = Provider(
-      provider: .codex, status: "failed", currentAccount: true, plan: nil, message: "Paused",
+      provider: .codex, status: "failed", currentAccount: true, message: "Paused",
       windows: [], workspaceCredits: credits(32))
     expectEqual(share.hasObservedValues, true)
     expectEqual(provider(.codex, windows: [quota("weekly", 31)], status: "failed").hasObservedValues, true)

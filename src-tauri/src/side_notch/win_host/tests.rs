@@ -20,7 +20,6 @@ fn provider_entry(provider: AgentId, percent: f64) -> NotchProvider {
     NotchProvider {
         provider,
         status: LimitsStatus::Ok,
-        plan: None,
         message: None,
         headline_window_id: Some("w".into()),
         inner_ring: None,

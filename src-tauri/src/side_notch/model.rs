@@ -296,7 +296,6 @@ fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
 pub struct NotchProvider {
     pub provider: AgentId,
     pub status: LimitsStatus,
-    pub plan: Option<String>,
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
     /// The window the ring and the figure show, by id: the headline window, the first of weekly,
@@ -351,7 +350,6 @@ impl NotchProvider {
         Some(Self {
             provider: card.provider,
             status: card.status,
-            plan: card.reading.plan,
             message: card.message,
             windows,
             headline_window_id,
