@@ -11,7 +11,6 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::source_index::{normalize_path, SourceRoot, SourceSnapshot};
 use crate::usage::cache_io::atomic_write;
 use crate::usage::history::Watermark;
 use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
@@ -85,30 +84,15 @@ pub(super) fn load_scan_cache(path: &Path) -> ScanCache {
 }
 
 /// Drops what the scan cache no longer needs: transcripts deleted from a root walked to the end,
-/// outside every root, or whose records the history holds by `watermark`. Saves it at `path` when
-/// that, or a read (`changed`), changed it.
+/// outside every root, or whose records the history holds (`PruneOptions`). Saves it at `path`
+/// when that, or a read (`changed`), changed it.
 pub(super) fn prune_and_save(
     path: &Path,
     cache: &mut ScanCache,
-    snapshot: &SourceSnapshot,
-    roots: &[SourceRoot],
-    watermark: Watermark,
+    options: &PruneOptions,
     changed: bool,
 ) {
-    let live_paths = snapshot.live_paths();
-    let active_roots: Vec<String> = roots
-        .iter()
-        .map(|root| normalize_path(&root.path))
-        .collect();
-    let pruned = prune_scan_cache(
-        cache,
-        PruneOptions {
-            live_paths: &live_paths,
-            active_roots: &active_roots,
-            walked_roots: snapshot.successfully_walked_root_paths(),
-            watermark,
-        },
-    );
+    let pruned = prune_scan_cache(cache, options);
     if changed || pruned > 0 {
         let doc = encode_scan_cache(cache);
         if let Ok(raw) = serde_json::to_string(&doc) {
@@ -298,15 +282,19 @@ fn decode_scan_cache(document: &Value) -> ScanCache {
     cache
 }
 
-struct PruneOptions<'a> {
-    live_paths: &'a HashSet<String>,
-    active_roots: &'a [String],
-    walked_roots: &'a [String],
+/// What the scan cache is kept for, in paths normalized as the source index keys them.
+pub(super) struct PruneOptions {
+    /// Every transcript indexed now.
+    pub(super) live_paths: HashSet<String>,
+    /// Every root: a parse outside all of them leaves the cache.
+    pub(super) active_roots: Vec<String>,
+    /// The roots walked to the end: a parse under one of them that is not indexed was deleted.
+    pub(super) walked_roots: Vec<String>,
     /// Files whose every record the usage history holds leave the cache.
-    watermark: Watermark,
+    pub(super) watermark: Watermark,
 }
 
-fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usize {
+fn prune_scan_cache(cache: &mut ScanCache, options: &PruneOptions) -> usize {
     let mut removed = 0;
     let keys: Vec<String> = cache.keys().cloned().collect();
     for path in keys {

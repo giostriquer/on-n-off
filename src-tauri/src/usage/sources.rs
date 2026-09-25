@@ -154,9 +154,7 @@ impl Sources {
             prune_and_save(
                 &self.scan_cache_path,
                 &mut scan_cache,
-                &self.seen.snapshot,
-                &all_roots(&self.seen.source_roots),
-                watermark(),
+                &self.seen.snapshot.prune_options(watermark()),
                 self.scan_cache_dirty,
             );
         }

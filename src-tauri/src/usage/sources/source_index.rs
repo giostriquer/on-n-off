@@ -3,14 +3,16 @@
 //! [`SourceSnapshot::signature`] validates cached Usage summaries, and [`prepare_sources`] reads
 //! the records of the transcripts a read needs.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
-use super::scan_cache::{dedupe_within_file, CachedFile, ScanCache, USAGE_SCAN_CACHE_VERSION};
+use super::scan_cache::{
+    dedupe_within_file, CachedFile, PruneOptions, ScanCache, USAGE_SCAN_CACHE_VERSION,
+};
 use crate::usage::cache_io::atomic_write;
 use crate::usage::history::Watermark;
 use crate::usage::reader::{inventory_transcript_files, read_transcript_records, TranscriptFile};
@@ -414,12 +416,15 @@ impl SourceSnapshot {
             .all(|root| self.successfully_walked_roots.contains(&root.path))
     }
 
-    pub(super) fn live_paths(&self) -> HashSet<String> {
-        self.entries.keys().cloned().collect()
-    }
-
-    pub(super) fn successfully_walked_root_paths(&self) -> &[String] {
-        &self.successfully_walked_roots
+    /// What the scan cache is kept for now: the transcripts indexed, under the roots indexed (the
+    /// current roots, each once), those walked to the end this time, and `watermark`.
+    pub(super) fn prune_options(&self, watermark: Watermark) -> PruneOptions {
+        PruneOptions {
+            live_paths: self.entries.keys().cloned().collect(),
+            active_roots: self.roots.values().map(|root| root.path.clone()).collect(),
+            walked_roots: self.successfully_walked_roots.clone(),
+            watermark,
+        }
     }
 }
 
