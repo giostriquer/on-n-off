@@ -185,7 +185,7 @@ fn token_expired(cli: &str, renewable: bool) -> String {
 
 /// The canonical window order every surface shows: weekly, then session, then per model, windows
 /// of one kind in the order their provider gave them. A card's windows take it where they are
-/// produced ([`finish`]) and where a paused read merges remembered ones in (`reading::merged`).
+/// produced ([`finish`]) and wherever the remember policy adds remembered ones (`reading.rs`).
 pub(super) fn kind_rank(kind: LimitWindowKind) -> u8 {
     match kind {
         LimitWindowKind::Weekly => 0,

@@ -143,6 +143,139 @@ fn merged_windows_list_weekly_then_session_then_model() {
     assert_eq!(ids, ["weekly_all", "session", "fable"]);
 }
 
+/// A read that answers without its weekly window keeps the remembered weekly, dated when it was
+/// read, so a card never leads with its session. Its other windows are its own: the remembered
+/// per-model window is not kept.
+#[test]
+fn an_answer_without_a_weekly_window_keeps_the_remembered_weekly() {
+    let answered = Outcome::Answered {
+        asked_what_was_spent: false,
+        asked_about_renewal: false,
+    };
+    let own = Reading {
+        windows: vec![observed(
+            "session",
+            "5 hour · all models",
+            LimitWindowKind::Session,
+            17.0,
+            None,
+            "2026-08-18T03:07:53.000Z",
+        )],
+        ..Reading::default()
+    };
+    let remembered = Reading {
+        windows: vec![
+            observed(
+                "weekly_all",
+                "Weekly · all models",
+                LimitWindowKind::Weekly,
+                39.0,
+                Some("2026-08-24T12:00:00Z"),
+                "2026-08-17T15:00:00Z",
+            ),
+            observed(
+                "weekly_opus",
+                "Weekly · Opus",
+                LimitWindowKind::Model,
+                91.0,
+                None,
+                "2026-08-17T15:00:00Z",
+            ),
+        ],
+        ..Reading::default()
+    };
+
+    let kept = own.clone().keeping(remembered.clone(), answered);
+    let summary: Vec<(&str, f64, &str)> = kept
+        .windows
+        .iter()
+        .map(|window| {
+            (
+                window.id.as_str(),
+                window.used_percent,
+                window.observed_at.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("weekly_all", 39.0, "2026-08-17T15:00:00Z"),
+            ("session", 17.0, "2026-08-18T03:07:53.000Z"),
+        ]
+    );
+
+    // A read that reports its own weekly keeps it, and nothing of the remembered one.
+    let mut with_weekly = own;
+    with_weekly.windows.insert(
+        0,
+        observed(
+            "weekly_all",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            63.0,
+            None,
+            "2026-08-18T03:07:53.000Z",
+        ),
+    );
+    let kept = with_weekly.keeping(remembered, answered);
+    let used: Vec<f64> = kept.windows.iter().map(|w| w.used_percent).collect();
+    assert_eq!(used, [63.0, 17.0]);
+}
+
+/// The rule's boundary: a read that reports other windows but no weekly keeps the remembered weekly;
+/// one that reports no windows at all keeps none of them, so a read of figures alone clears the
+/// windows it no longer reports.
+#[test]
+fn only_an_answer_with_other_windows_keeps_the_remembered_weekly() {
+    let answered = Outcome::Answered {
+        asked_what_was_spent: false,
+        asked_about_renewal: false,
+    };
+    let remembered = Reading {
+        windows: vec![observed(
+            "weekly_all",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            39.0,
+            None,
+            "2026-08-17T15:00:00Z",
+        )],
+        ..Reading::default()
+    };
+    let session_only = Reading {
+        windows: vec![observed(
+            "session",
+            "5 hour · all models",
+            LimitWindowKind::Session,
+            17.0,
+            None,
+            "2026-08-18T03:07:53.000Z",
+        )],
+        ..Reading::default()
+    };
+    let figures_only = Reading {
+        credits: Some(crate::dto::LimitsCreditsDto {
+            balance: "3".to_string(),
+            unlimited: false,
+        }),
+        ..Reading::default()
+    };
+
+    let ids = |reading: Reading| -> Vec<String> {
+        reading
+            .windows
+            .into_iter()
+            .map(|window| window.id)
+            .collect()
+    };
+    assert_eq!(
+        ids(session_only.keeping(remembered.clone(), answered)),
+        ["weekly_all", "session"]
+    );
+    assert!(ids(figures_only.keeping(remembered, answered)).is_empty());
+}
+
 #[test]
 fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
     let reset_credits = Some(crate::dto::LimitsResetCreditsDto {
@@ -390,13 +523,16 @@ fn a_card_keeps_the_term_it_remembers_when_a_read_could_not_tell() {
     assert_eq!(claude.reading.subscription, None);
 }
 
-/// A reading with every field known, each told apart by `tag`, as wire JSON.
+/// A reading with every field known, each told apart by `tag`, as wire JSON. Its windows are a
+/// weekly and a session.
 fn every_field(tag: &str, used: f64) -> Value {
     json!({
         "plan": tag,
         "subscriptionStatus": tag,
         "windows": [{"id": tag, "label": tag, "kind": "weekly", "usedPercent": used,
-                     "observedAt": "2026-08-17T10:00:00.000Z"}],
+                     "observedAt": "2026-08-17T10:00:00.000Z"},
+                    {"id": format!("{tag}-session"), "label": tag, "kind": "session",
+                     "usedPercent": used, "observedAt": "2026-08-17T10:00:00.000Z"}],
         "credits": {"balance": tag, "unlimited": false},
         "workspaceCredits": {"limit": "25000", "used": tag, "usedPercent": used, "reached": false},
         "creditsSpent": {"last7Days": used, "last30Days": used},
@@ -411,16 +547,19 @@ fn reading(value: Value) -> Reading {
 }
 
 /// The whole policy in one table: for each field and each way a read can go, what the reading
-/// keeps where the read did not report the field. Where it did, its own value always stands (a
-/// failed read's own windows are merged with the remembered ones instead).
+/// keeps where the read did not report the field; for windows, where it reported its session but
+/// not its weekly. Where it did, its own value always stands (a failed read's own windows are
+/// merged with the remembered ones instead).
 #[test]
 fn the_remember_policy_field_by_field() {
     #[derive(Debug, Clone, Copy)]
     enum Kept {
         Remembered,
+        /// Of the remembered windows, only the weekly one, beside the read's own.
+        RememberedWeekly,
         Nothing,
     }
-    use Kept::{Nothing, Remembered};
+    use Kept::{Nothing, Remembered, RememberedWeekly};
     let answered = |asked_what_was_spent, asked_about_renewal| Outcome::Answered {
         asked_what_was_spent,
         asked_about_renewal,
@@ -440,7 +579,16 @@ fn the_remember_policy_field_by_field() {
             "subscriptionStatus",
             [Nothing, Nothing, Nothing, Nothing, Remembered],
         ),
-        ("windows", [Nothing, Nothing, Nothing, Nothing, Remembered]),
+        (
+            "windows",
+            [
+                RememberedWeekly,
+                RememberedWeekly,
+                RememberedWeekly,
+                RememberedWeekly,
+                Remembered,
+            ],
+        ),
         ("credits", [Nothing, Nothing, Nothing, Nothing, Remembered]),
         (
             "workspaceCredits",
@@ -462,7 +610,7 @@ fn the_remember_policy_field_by_field() {
         for (outcome, cell) in outcomes.into_iter().zip(cells) {
             let mut unreported = own.clone();
             if field == "windows" {
-                unreported[field] = json!([]);
+                unreported[field] = json!([own[field][1]]);
             } else {
                 unreported.as_object_mut().unwrap().remove(field);
             }
@@ -470,10 +618,19 @@ fn the_remember_policy_field_by_field() {
                 reading(unreported).keeping(reading(remembered.clone()), outcome),
             )
             .unwrap();
-            let expected = match cell {
-                Remembered => Some(remembered[field].clone()),
-                Nothing if field == "windows" => Some(json!([])),
-                Nothing => None,
+            // The windows are weekly then session, and a card lists them in that order.
+            let (own_session, remembered_weekly) = (&own["windows"][1], &remembered["windows"][0]);
+            let expected = match (field, cell) {
+                ("windows", RememberedWeekly) => Some(json!([remembered_weekly, own_session])),
+                ("windows", Remembered) => Some(json!([
+                    remembered_weekly,
+                    own_session,
+                    remembered["windows"][1]
+                ])),
+                ("windows", Nothing) => Some(json!([own_session])),
+                (_, Remembered) => Some(remembered[field].clone()),
+                (_, RememberedWeekly) => unreachable!("only windows keep the remembered weekly"),
+                (_, Nothing) => None,
             };
             assert_eq!(
                 kept.get(field).cloned(),
@@ -486,9 +643,12 @@ fn the_remember_policy_field_by_field() {
             )
             .unwrap();
             let expected = match (field, outcome) {
-                ("windows", Outcome::Failed) => {
-                    json!([own["windows"][0], remembered["windows"][0]])
-                }
+                ("windows", Outcome::Failed) => json!([
+                    own["windows"][0],
+                    remembered["windows"][0],
+                    own["windows"][1],
+                    remembered["windows"][1]
+                ]),
                 _ => own[field].clone(),
             };
             assert_eq!(kept[field], expected, "{field} reported, {outcome:?}");
