@@ -207,4 +207,24 @@ fn a_remembered_count_past_its_expiry_is_not_kept_by_a_read_that_cannot_tell() {
         usage_with_saved_resets(r#"{"eligible":false,"ineligible_reason":"surface","grants":[]}"#);
     assert_eq!(read_counts(&rig, &surface), (None, None));
     assert_eq!(read_counts(&rig, &surface), (None, None));
+    assert_eq!(
+        stored_reset_credits(&rig),
+        [Some(serde_json::json!({
+            "availableCount": 1,
+            "nextExpiresAt": "2020-01-01T00:00:00+00:00"
+        }))],
+        "the store writes the lapsed count back, and only loading hides it"
+    );
+}
+
+/// The banked-reset block of every snapshot file under `rig`'s home, as written.
+fn stored_reset_credits(rig: &Rig) -> Vec<Option<serde_json::Value>> {
+    std::fs::read_dir(rig.home.join(".on-n-off/limits"))
+        .unwrap()
+        .map(|entry| {
+            let raw = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            let stored: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            stored.get("resetCredits").cloned()
+        })
+        .collect()
 }

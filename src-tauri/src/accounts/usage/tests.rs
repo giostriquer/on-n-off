@@ -602,3 +602,86 @@ fn a_saved_personal_plan_read_drops_the_cards_figure() {
 
     assert_eq!(entries[0].credits_spent, None);
 }
+
+/// `profile` as a saved Codex account, and its card with every figure known, as the card list holds
+/// it before a poll: remembered, not the signed-in account.
+fn remembered_codex_card(profile: &mut Profile) -> ProviderLimitsDto {
+    profile.identity.provider = AgentId::Codex;
+    serde_json::from_value(json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": profile.identity.observation_key(), "label": "a@example.com"},
+        "currentAccount": false,
+        "plan": "business",
+        "subscriptionStatus": "active",
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 40.0,
+             "observedAt": "2026-09-19T00:00:00Z"}
+        ],
+        "credits": {"balance": "0", "unlimited": false},
+        "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0, "reached": false},
+        "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7},
+        "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
+                         "checkedAt": "2026-09-19T00:00:00Z"},
+        "resetCredits": {"availableCount": 1}
+    }))
+    .unwrap()
+}
+
+/// A failed poll shows the card's whole remembered reading under the failure, its term included.
+#[test]
+fn a_failed_saved_read_keeps_the_cards_whole_reading() {
+    let mut profile = profile();
+    let remembered = remembered_codex_card(&mut profile);
+    let mut entries = vec![remembered.clone()];
+
+    merge(&mut entries, &profile, Some(Err("paused".into())));
+
+    let mut expected = serde_json::to_value(&remembered).unwrap();
+    expected["status"] = json!("failed");
+    expected["message"] = json!("paused");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(serde_json::to_value(&entries[0]).unwrap(), expected);
+}
+
+/// A poll that answered with its plan and one window: the account details and balances it did
+/// not report are gone, and only the figures it could not tell are kept.
+#[test]
+fn an_answered_saved_read_keeps_only_the_figures_it_could_not_tell() {
+    let mut profile = profile();
+    let remembered = remembered_codex_card(&mut profile);
+    let mut entries = vec![remembered];
+    let answered: ProviderLimitsDto = serde_json::from_value(json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": profile.identity.observation_key(), "label": "a@example.com"},
+        "currentAccount": false,
+        "plan": "business",
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 50.0,
+             "observedAt": "2026-09-20T00:00:00Z"}
+        ]
+    }))
+    .unwrap();
+
+    merge(&mut entries, &profile, Some(Ok(answered)));
+
+    assert_eq!(
+        serde_json::to_value(&entries[0]).unwrap(),
+        json!({
+            "provider": "codex",
+            "status": "ok",
+            "account": {"id": profile.identity.observation_key(), "label": "a@example.com"},
+            "currentAccount": false,
+            "plan": "business",
+            "windows": [
+                {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
+                 "usedPercent": 50.0, "observedAt": "2026-09-20T00:00:00Z"}
+            ],
+            "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7},
+            "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
+                             "checkedAt": "2026-09-19T00:00:00Z"},
+            "resetCredits": {"availableCount": 1}
+        })
+    );
+}

@@ -1,3 +1,5 @@
+mod file_shape;
+
 use super::*;
 use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto};
 use crate::paths::scratch_dir;

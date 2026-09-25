@@ -4,6 +4,7 @@ mod claude_renewal;
 mod claude_subscription;
 mod credits_spent;
 mod memory;
+mod remembered_reading;
 mod renewal;
 
 use super::*;
