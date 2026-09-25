@@ -172,20 +172,15 @@ pub struct LimitsAccountDto {
     pub label: Option<String>,
 }
 
-/// Subscription rate-limit snapshot for one provider account. Provider-side problems are encoded
-/// in `status` + `message` rather than returned as errors so the UI can render each provider
-/// independently. `current_account: false` marks a remembered account the provider is no longer
-/// signed into. Each window carries its own observation time.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Everything one read reported about one account: its quota windows, its figures (the values
+/// beside them: credit balance, workspace credits, credits spent, banked resets, subscription term,
+/// reset offer) and its account details (plan and subscription status). The card
+/// ([`ProviderLimitsDto`]) and the remembered reading on disk (`limits/snapshots.rs`) both flatten
+/// it into their JSON, so its fields are listed once. What a later read keeps of a remembered
+/// reading is decided field by field in `limits/reading.rs`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ProviderLimitsDto {
-    pub provider: AgentId,
-    pub status: LimitsStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account: Option<LimitsAccountDto>,
-    pub current_account: bool,
+pub struct Reading {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
     /// Claude only: `organization.subscription_status` from the profile read (`active`,
@@ -209,7 +204,7 @@ pub struct ProviderLimitsDto {
     pub reset_offer: Option<LimitsResetOfferDto>,
 }
 
-impl ProviderLimitsDto {
+impl Reading {
     /// Whether this read observed anything about the account worth keeping: quota windows or any
     /// of the figures beside them. One definition for every place that decides that.
     pub fn has_observations(&self) -> bool {
@@ -233,12 +228,62 @@ impl ProviderLimitsDto {
             .as_ref()
             .is_some_and(|resets| resets.available_count > 0)
     }
+}
 
-    /// A successful read that could not tell how many resets are banked keeps the count `previous`
-    /// knew; one that answered, 0 included, replaces it.
-    pub fn keep_reset_credits_from(&mut self, previous: &Self) {
-        if self.reset_credits.is_none() {
-            self.reset_credits.clone_from(&previous.reset_credits);
+/// Subscription rate-limit snapshot for one provider account. Provider-side problems are encoded
+/// in `status` + `message` rather than returned as errors so the UI can render each provider
+/// independently. `current_account: false` marks a remembered account the provider is no longer
+/// signed into. Each window carries its own observation time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderLimitsDto {
+    pub provider: AgentId,
+    pub status: LimitsStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<LimitsAccountDto>,
+    pub current_account: bool,
+    /// What the read reported, or what is remembered of the account where it could not say.
+    #[serde(flatten)]
+    pub reading: Reading,
+}
+
+/// Test cards, built up from an empty successful read of one signed-in account:
+/// `ProviderLimitsDto::for_test(AgentId::Codex, "acct-1").with_reading(Reading { plan, ..Default::default() })`,
+/// or struct-update syntax for the status and message.
+#[cfg(test)]
+impl ProviderLimitsDto {
+    pub fn for_test(provider: AgentId, account_id: &str) -> Self {
+        Self {
+            provider,
+            status: LimitsStatus::Ok,
+            message: None,
+            account: Some(LimitsAccountDto {
+                id: account_id.to_string(),
+                legacy_id: None,
+                label: None,
+            }),
+            current_account: true,
+            reading: Reading::default(),
         }
+    }
+
+    pub fn labelled(mut self, label: &str) -> Self {
+        if let Some(account) = &mut self.account {
+            account.label = Some(label.to_string());
+        }
+        self
+    }
+
+    pub fn with_legacy_id(mut self, legacy_id: &str) -> Self {
+        if let Some(account) = &mut self.account {
+            account.legacy_id = Some(legacy_id.to_string());
+        }
+        self
+    }
+
+    pub fn with_reading(self, reading: Reading) -> Self {
+        Self { reading, ..self }
     }
 }

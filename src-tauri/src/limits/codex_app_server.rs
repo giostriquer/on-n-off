@@ -229,8 +229,10 @@ pub(super) fn backend_reads(
     urls: BackendUrls<'_>,
     now: chrono::DateTime<chrono::Utc>,
 ) {
-    parsed.credits_spent = super::credits_spent::signed_in(access, parsed, urls.credit_usage, now);
-    parsed.subscription = super::renewal::signed_in(access, parsed, urls.subscriptions, now);
+    parsed.reading.credits_spent =
+        super::credits_spent::signed_in(access, parsed, urls.credit_usage, now);
+    parsed.reading.subscription =
+        super::renewal::signed_in(access, parsed, urls.subscriptions, now);
 }
 
 /// `read`, with the app-server process and what runs once the card's account is confirmed (the
@@ -631,14 +633,14 @@ fn normalize_app_server(
         .map(str::trim)
         .filter(|email| !email.is_empty())
         .map(str::to_string);
-    let mut parsed = super::codex::parse_codex(&session.rate_limits);
-    parsed.plan = account
+    let mut reading = super::codex::parse_codex(&session.rate_limits);
+    reading.plan = account
         .plan_type
         .as_deref()
         .map(str::trim)
         .filter(|plan| !plan.is_empty())
         .map(str::to_string)
-        .or(parsed.plan);
+        .or(reading.plan);
     // One read of the native store confirms the account and takes the access projection the term
     // read needs for every card, and the spending read for a workspace plan (`renewal::signed_in`,
     // `credits_spent::signed_in`).
@@ -666,11 +668,14 @@ fn normalize_app_server(
                 .map(|email| format!("email:{}", email.to_lowercase()))
         })
         .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string());
-    parsed.account = Some(crate::dto::LimitsAccountDto {
-        legacy_id,
-        id: account_id,
-        label: email,
-    });
+    let parsed = Parsed {
+        account: Some(crate::dto::LimitsAccountDto {
+            legacy_id,
+            id: account_id,
+            label: email,
+        }),
+        reading,
+    };
     Ok((parsed, access))
 }
 

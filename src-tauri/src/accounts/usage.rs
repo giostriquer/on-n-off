@@ -7,7 +7,7 @@ use super::{
     transaction::Native,
 };
 use crate::{
-    dto::{AgentId, LimitsStatus, ProviderLimitsDto},
+    dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     http::{HttpError, RateLimitReset},
 };
 use std::{
@@ -324,42 +324,37 @@ fn merge(
     if existing.is_some_and(|i| entries[i].current_account) {
         return;
     }
-    let dto = match result {
-        Ok(mut dto) => {
-            if let Some(i) = existing {
-                crate::limits::keep_remembered_from(&mut dto, &entries[i]);
-            }
-            dto
-        }
+    let remembered = existing.map(|i| &entries[i]);
+    let mut dto = match result {
+        Ok(dto) => dto,
+        // A failed poll read nothing of its own: the card keeps its identity and shows what it
+        // remembers under the failure.
         Err(error) => {
-            let mut dto =
-                existing
-                    .map(|i| entries[i].clone())
-                    .unwrap_or_else(|| ProviderLimitsDto {
-                        provider: profile.identity.provider,
-                        status: LimitsStatus::Failed,
-                        message: None,
-                        account: Some(crate::dto::LimitsAccountDto {
-                            id: key,
-                            label: profile.email.clone(),
-                            legacy_id: None,
-                        }),
-                        current_account: false,
-                        plan: None,
-                        subscription_status: None,
-                        windows: vec![],
-                        credits: None,
-                        workspace_credits: None,
-                        credits_spent: None,
-                        subscription: None,
-                        reset_credits: None,
-                        reset_offer: None,
-                    });
-            dto.status = LimitsStatus::Failed;
-            dto.message = Some(error);
-            dto
+            let (provider, account, current_account) = match remembered {
+                Some(card) => (card.provider, card.account.clone(), card.current_account),
+                None => (
+                    profile.identity.provider,
+                    Some(crate::dto::LimitsAccountDto {
+                        id: key,
+                        label: profile.email.clone(),
+                        legacy_id: None,
+                    }),
+                    false,
+                ),
+            };
+            ProviderLimitsDto {
+                provider,
+                status: LimitsStatus::Failed,
+                message: Some(error),
+                account,
+                current_account,
+                reading: Reading::default(),
+            }
         }
     };
+    if let Some(remembered) = remembered.map(|card| card.reading.clone()) {
+        crate::limits::keep_remembered(&mut dto, remembered);
+    }
     if let Some(i) = existing {
         entries[i] = dto;
     } else {

@@ -43,7 +43,6 @@ fn an_expired_claude_login_is_renewed_from_its_refresh_token_before_the_read() {
                 profile: &profile_url,
                 usage: &usage_url,
             },
-            claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: after,
         },
     );

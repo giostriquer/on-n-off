@@ -17,7 +17,7 @@ fn a_claude_read_carries_the_subscription_status_its_profile_reports() {
     usage_request.join().unwrap();
 
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
-    assert_eq!(dto.subscription_status.as_deref(), Some("past_due"));
+    assert_eq!(dto.reading.subscription_status.as_deref(), Some("past_due"));
     let _ = fs::remove_dir_all(&home);
 }
 
@@ -34,19 +34,19 @@ fn a_profile_without_a_subscription_status_still_reads() {
     usage_request.join().unwrap();
 
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
-    assert_eq!(dto.subscription_status, None);
+    assert_eq!(dto.reading.subscription_status, None);
     let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn the_subscription_status_crosses_to_the_ui_in_camel_case() {
     let mut dto = finish(AgentId::Claude, LimitsStatus::Ok, None, Parsed::default());
-    dto.subscription_status = Some("canceled".to_string());
+    dto.reading.subscription_status = Some("canceled".to_string());
 
     let value = serde_json::to_value(&dto).unwrap();
 
     assert_eq!(value["subscriptionStatus"], "canceled");
-    dto.subscription_status = None;
+    dto.reading.subscription_status = None;
     assert!(serde_json::to_value(&dto)
         .unwrap()
         .get("subscriptionStatus")

@@ -76,6 +76,7 @@ pub(super) fn merge_recent(
             })
             .flat_map(|(account_index, account)| {
                 account
+                    .reading
                     .windows
                     .iter()
                     .enumerate()
@@ -87,7 +88,7 @@ pub(super) fn merge_recent(
             continue;
         }
         let (account_index, window_index) = matches[0];
-        let window = &mut accounts[account_index].windows[window_index];
+        let window = &mut accounts[account_index].reading.windows[window_index];
         window.used_percent = observation.used_percent;
         window.resets_at = Some(
             observation

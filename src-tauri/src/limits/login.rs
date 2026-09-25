@@ -54,7 +54,7 @@ fn read_with(
     };
     if dto.status != LimitsStatus::Ok
         || dto.account.as_ref()?.id != identity.observation_key()
-        || !dto.has_observations()
+        || !dto.reading.has_observations()
     {
         return None;
     }

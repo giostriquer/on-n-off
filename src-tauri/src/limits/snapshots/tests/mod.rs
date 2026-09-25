@@ -1,5 +1,8 @@
+mod file_shape;
+mod loading;
+
 use super::*;
-use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{AgentId, LimitWindowKind, LimitsCreditsDto, LimitsStatus, ProviderLimitsDto};
 use crate::paths::scratch_dir;
 use std::fs;
 
@@ -10,33 +13,20 @@ impl SnapshotStore {
 }
 
 fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> ProviderLimitsDto {
-    let mut dto = ProviderLimitsDto {
-        provider,
-        status: LimitsStatus::Ok,
-        message: None,
-        account: Some(LimitsAccountDto {
-            legacy_id: None,
-            id: id.to_string(),
-            label: Some(label.to_string()),
-        }),
-        current_account: true,
-        plan: Some("pro".to_string()),
-        subscription_status: None,
-        windows: vec![super::super::json::window(
-            "primary",
-            "Weekly · all models",
-            LimitWindowKind::Weekly,
-            42.0,
-            Some("2026-08-24T23:34:33+00:00".to_string()),
-        )],
-        credits: None,
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
-    };
-    for window in &mut dto.windows {
+    let mut dto = ProviderLimitsDto::for_test(provider, id)
+        .labelled(label)
+        .with_reading(Reading {
+            plan: Some("pro".to_string()),
+            windows: vec![super::super::json::window(
+                "primary",
+                "Weekly · all models",
+                LimitWindowKind::Weekly,
+                42.0,
+                Some("2026-08-24T23:34:33+00:00".to_string()),
+            )],
+            ..Reading::default()
+        });
+    for window in &mut dto.reading.windows {
         window.observed_at = observed_at.to_string();
     }
     dto
@@ -120,8 +110,8 @@ fn saved_snapshots_load_back_per_provider_newest_first_and_not_current() {
     assert!(codex
         .iter()
         .all(|dto| !dto.current_account && dto.status == LimitsStatus::Ok));
-    assert_eq!(codex[0].windows[0].used_percent, 42.0);
-    assert_eq!(codex[0].plan.as_deref(), Some("pro"));
+    assert_eq!(codex[0].reading.windows[0].used_percent, 42.0);
+    assert_eq!(codex[0].reading.plan.as_deref(), Some("pro"));
 
     let claude = store.load(AgentId::Claude);
     assert_eq!(claude.len(), 1);
@@ -144,12 +134,15 @@ fn saving_the_same_account_again_replaces_its_snapshot() {
         ))
         .unwrap();
     let mut newer = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    newer.windows[0].used_percent = 7.0;
+    newer.reading.windows[0].used_percent = 7.0;
     store.save(&newer).unwrap();
     let loaded = store.load(AgentId::Codex);
     assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0].windows[0].used_percent, 7.0);
-    assert_eq!(loaded[0].windows[0].observed_at, "2026-08-17T10:00:00.000Z");
+    assert_eq!(loaded[0].reading.windows[0].used_percent, 7.0);
+    assert_eq!(
+        loaded[0].reading.windows[0].observed_at,
+        "2026-08-17T10:00:00.000Z"
+    );
 }
 
 #[test]
@@ -157,16 +150,19 @@ fn an_older_save_cannot_replace_a_newer_snapshot_for_the_same_account() {
     let home = scratch_dir("limits-snap-freshness");
     let store = SnapshotStore::for_home(&home);
     let mut newer = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    newer.windows[0].used_percent = 7.0;
+    newer.reading.windows[0].used_percent = 7.0;
     store.save(&newer).unwrap();
     let mut older = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-16T10:00:00.000Z");
-    older.windows[0].used_percent = 99.0;
+    older.reading.windows[0].used_percent = 99.0;
 
     store.save(&older).unwrap();
 
     let loaded = store.load(AgentId::Codex);
-    assert_eq!(loaded[0].windows[0].used_percent, 7.0);
-    assert_eq!(loaded[0].windows[0].observed_at, "2026-08-17T10:00:00.000Z");
+    assert_eq!(loaded[0].reading.windows[0].used_percent, 7.0);
+    assert_eq!(
+        loaded[0].reading.windows[0].observed_at,
+        "2026-08-17T10:00:00.000Z"
+    );
 }
 
 #[test]
@@ -181,36 +177,23 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
             "2000-01-01T00:00:00.000Z",
         ))
         .unwrap();
-    let credits_only = ProviderLimitsDto {
-        provider: AgentId::Codex,
-        status: LimitsStatus::Ok,
-        message: None,
-        account: Some(LimitsAccountDto {
-            legacy_id: None,
-            id: "acct-1".to_string(),
-            label: Some("a@x".to_string()),
-        }),
-        current_account: true,
-        plan: Some("pro".to_string()),
-        subscription_status: None,
-        windows: Vec::new(),
-        credits: Some(LimitsCreditsDto {
-            balance: "3".to_string(),
-            unlimited: false,
-        }),
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
-    };
+    let credits_only = ProviderLimitsDto::for_test(AgentId::Codex, "acct-1")
+        .labelled("a@x")
+        .with_reading(Reading {
+            plan: Some("pro".to_string()),
+            credits: Some(LimitsCreditsDto {
+                balance: "3".to_string(),
+                unlimited: false,
+            }),
+            ..Reading::default()
+        });
 
     store.save(&credits_only).unwrap();
 
     let loaded = store.load(AgentId::Codex);
     assert_eq!(loaded.len(), 1);
-    assert!(loaded[0].windows.is_empty());
-    assert_eq!(loaded[0].credits, credits_only.credits);
+    assert!(loaded[0].reading.windows.is_empty());
+    assert_eq!(loaded[0].reading.credits, credits_only.reading.credits);
 }
 
 #[test]
@@ -226,7 +209,7 @@ fn snapshots_require_an_account_and_observations_but_not_an_ok_endpoint_status()
         "empty@x",
         "2026-08-17T10:00:00.000Z",
     );
-    empty.windows.clear();
+    empty.reading.windows.clear();
     assert!(store.save(&empty).is_err());
     let mut failed = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
     failed.status = LimitsStatus::Failed;
@@ -234,7 +217,7 @@ fn snapshots_require_an_account_and_observations_but_not_an_ok_endpoint_status()
     let loaded = store.load(AgentId::Codex);
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].account.as_ref().unwrap().id, "acct-1");
-    assert_eq!(loaded[0].windows[0].used_percent, 42.0);
+    assert_eq!(loaded[0].reading.windows[0].used_percent, 42.0);
 }
 
 #[test]
@@ -297,24 +280,6 @@ fn ids_that_sanitise_alike_stay_distinct_files() {
 }
 
 #[test]
-fn obsolete_v1_snapshots_are_ignored_without_rewriting_them() {
-    let home = scratch_dir("limits-snap");
-    let store = SnapshotStore::for_home(&home);
-    fs::create_dir_all(store.dir()).unwrap();
-    let path = store.dir().join("claude-uuid1-00000000.json");
-    fs::write(
-        &path,
-        r#"{"provider":"claude","status":"ok","account":{"id":"uuid-1"},"live":true,"plan":"max","windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":42,"resetsAt":"2026-08-17T10:00:00Z"}],"fetchedAt":"2026-08-10T10:00:00.000Z"}"#,
-    )
-    .unwrap();
-    let loaded = store.load(AgentId::Claude);
-    assert!(loaded.is_empty());
-    let unchanged = fs::read_to_string(path).unwrap();
-    assert!(unchanged.contains("\"fetchedAt\""));
-    assert!(!unchanged.contains("\"schemaVersion\""));
-}
-
-#[test]
 fn account_ids_are_made_safe_for_file_names() {
     let home = scratch_dir("limits-snap");
     let store = SnapshotStore::for_home(&home);
@@ -360,7 +325,7 @@ fn simultaneous_store_instances_cannot_replace_a_newer_observation_with_an_older
                         "me@x",
                         &format!("2026-09-13T12:00:{second:02}Z"),
                     );
-                    dto.windows[0].used_percent = f64::from(second);
+                    dto.reading.windows[0].used_percent = f64::from(second);
                     start.wait();
                     SnapshotStore::for_home(home).save(&dto).unwrap();
                 });
@@ -369,46 +334,10 @@ fn simultaneous_store_instances_cannot_replace_a_newer_observation_with_an_older
         let loaded = SnapshotStore::for_home(home.path()).load(AgentId::Codex);
         assert_eq!(loaded.len(), 1);
         assert_eq!(
-            loaded[0].windows[0].used_percent, 15.0,
+            loaded[0].reading.windows[0].used_percent, 15.0,
             "concurrent publication lost the newest usage"
         );
     }
-}
-
-#[test]
-fn remembered_reset_credits_survive_a_reload_and_older_snapshots_load_without_them() {
-    let home = scratch_dir("limits-snap-reset-credits");
-    let store = SnapshotStore::for_home(&home);
-    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
-        available_count: 1,
-        next_expires_at: Some("2100-09-01T12:00:00+00:00".to_string()),
-    });
-    store.save(&dto).unwrap();
-    assert_eq!(
-        store.load(AgentId::Codex)[0].reset_credits,
-        dto.reset_credits
-    );
-
-    // A snapshot written before on-n-off knew about reset credits has no such key.
-    let path = fs::read_dir(store.dir())
-        .unwrap()
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
-        .unwrap();
-    let mut stored: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(stored
-        .as_object_mut()
-        .unwrap()
-        .remove("resetCredits")
-        .is_some());
-    fs::write(&path, stored.to_string()).unwrap();
-
-    let loaded = store.load(AgentId::Codex);
-    assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0].reset_credits, None);
 }
 
 #[test]
@@ -416,8 +345,8 @@ fn a_successful_read_with_only_banked_resets_is_remembered_and_dated() {
     let home = scratch_dir("limits-snap-reset-credits-only");
     let store = SnapshotStore::for_home(&home);
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.windows.clear();
-    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+    dto.reading.windows.clear();
+    dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: None,
     });
@@ -426,36 +355,36 @@ fn a_successful_read_with_only_banked_resets_is_remembered_and_dated() {
 
     let loaded = store.load(AgentId::Codex);
     assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0].reset_credits, dto.reset_credits);
+    assert_eq!(loaded[0].reading.reset_credits, dto.reading.reset_credits);
 }
 
 #[test]
 fn quota_windows_credits_and_banked_resets_each_count_as_an_observation() {
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    assert!(dto.has_observations());
-    dto.windows.clear();
-    assert!(!dto.has_observations());
-    dto.credits = Some(LimitsCreditsDto {
+    assert!(dto.reading.has_observations());
+    dto.reading.windows.clear();
+    assert!(!dto.reading.has_observations());
+    dto.reading.credits = Some(LimitsCreditsDto {
         balance: "0".to_string(),
         unlimited: false,
     });
-    assert!(dto.has_observations());
-    dto.credits = None;
+    assert!(dto.reading.has_observations());
+    dto.reading.credits = None;
     // Every current Codex read reports a count, usually 0; on its own that observed nothing.
-    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+    dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 0,
         next_expires_at: None,
     });
-    assert!(!dto.has_observations());
-    dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+    assert!(!dto.reading.has_observations());
+    dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: None,
     });
-    assert!(dto.has_observations());
-    dto.reset_credits = None;
+    assert!(dto.reading.has_observations());
+    dto.reading.reset_credits = None;
     // An offer is what the provider is selling right now, not something observed about the account.
-    dto.reset_offer = Some(crate::dto::LimitsResetOfferDto { price: None });
-    assert!(!dto.has_observations());
+    dto.reading.reset_offer = Some(crate::dto::LimitsResetOfferDto { price: None });
+    assert!(!dto.reading.has_observations());
 }
 
 #[test]
@@ -463,7 +392,7 @@ fn a_paid_reset_offer_is_never_written_to_a_snapshot_or_read_back_from_one() {
     let home = scratch_dir("limits-snap-reset-offer");
     let store = SnapshotStore::for_home(&home);
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.reset_offer = Some(crate::dto::LimitsResetOfferDto {
+    dto.reading.reset_offer = Some(crate::dto::LimitsResetOfferDto {
         price: Some(crate::dto::LimitsPriceDto {
             amount_minor_units: 800,
             currency: "USD".to_string(),
@@ -484,7 +413,7 @@ fn a_paid_reset_offer_is_never_written_to_a_snapshot_or_read_back_from_one() {
     assert!(store
         .load(AgentId::Codex)
         .iter()
-        .all(|remembered| remembered.reset_offer.is_none()));
+        .all(|remembered| remembered.reading.reset_offer.is_none()));
 }
 
 #[test]
@@ -495,15 +424,18 @@ fn a_windowless_read_that_reports_no_banked_resets_keeps_the_remembered_windows(
     store.save(&remembered).unwrap();
     // The shape a current Codex CLI returns when it reports no windows: the count is still there.
     let mut windowless = remembered.clone();
-    windowless.windows.clear();
-    windowless.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+    windowless.reading.windows.clear();
+    windowless.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 0,
         next_expires_at: None,
     });
 
     assert!(store.save(&windowless).is_err());
 
-    assert_eq!(store.load(AgentId::Codex)[0].windows, remembered.windows);
+    assert_eq!(
+        store.load(AgentId::Codex)[0].reading.windows,
+        remembered.reading.windows
+    );
 }
 
 #[test]
@@ -516,8 +448,8 @@ fn saving_after_a_merge_rewrites_only_the_accounts_the_merge_changed() {
         "c@x",
         "2026-08-17T10:00:00.000Z",
     );
-    credits_only.windows.clear();
-    credits_only.credits = Some(LimitsCreditsDto {
+    credits_only.reading.windows.clear();
+    credits_only.reading.credits = Some(LimitsCreditsDto {
         balance: "3".to_string(),
         unlimited: false,
     });
@@ -540,8 +472,8 @@ fn saving_after_a_merge_rewrites_only_the_accounts_the_merge_changed() {
     let credits_before = stored("acct-credits");
     let before = vec![credits_only.clone(), windowed.clone()];
     let mut after = before.clone();
-    after[1].windows[0].used_percent = 60.0;
-    after[1].windows[0].observed_at = "2026-08-17T11:00:00.000Z".to_string();
+    after[1].reading.windows[0].used_percent = 60.0;
+    after[1].reading.windows[0].observed_at = "2026-08-17T11:00:00.000Z".to_string();
 
     store.save_changed(&before, &after);
 
@@ -563,120 +495,23 @@ fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_an
         })
     };
     let mut remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    remembered.reset_credits = banked(1);
+    remembered.reading.reset_credits = banked(1);
     store.save(&remembered).unwrap();
 
     let unknown = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T11:00:00.000Z");
     store.save(&unknown).unwrap();
     let loaded = store.load(AgentId::Codex);
-    assert_eq!(loaded[0].windows, unknown.windows);
-    assert_eq!(loaded[0].reset_credits, banked(1));
+    assert_eq!(loaded[0].reading.windows, unknown.reading.windows);
+    assert_eq!(loaded[0].reading.reset_credits, banked(1));
 
     // An answer replaces the stored count, even one observed at the same moment.
     let mut answered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T11:00:00.000Z");
-    answered.reset_credits = banked(0);
+    answered.reading.reset_credits = banked(0);
     store.save(&answered).unwrap();
-    assert_eq!(store.load(AgentId::Codex)[0].reset_credits, banked(0));
-}
-
-/// A remembered count stops at its soonest known expiry: by then at least one reset has lapsed and
-/// what is left is not known until a read answers again. The windows beside it stay remembered, and
-/// a snapshot left with nothing observed is not loaded, as none would be saved.
-#[test]
-fn a_remembered_banked_reset_count_past_its_soonest_expiry_loads_as_unknown() {
-    let home = scratch_dir("limits-snap-reset-credits-lapsed");
-    let store = SnapshotStore::for_home(&home);
-    let save = |id: &str, windows: bool, next_expires_at: Option<&str>| {
-        let mut dto = snapshot(AgentId::Codex, id, "a@x", "2026-08-17T10:00:00.000Z");
-        if !windows {
-            dto.windows.clear();
-        }
-        dto.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
-            available_count: 2,
-            next_expires_at: next_expires_at.map(str::to_owned),
-        });
-        store.save(&dto).unwrap();
-        dto
-    };
-    let lapsed = save("lapsed", true, Some("2020-01-01T00:00:00+00:00"));
-    let ahead = save("ahead", true, Some("2100-01-01T00:00:00+00:00"));
-    let undated = save("undated", true, None);
-    save(
-        "lapsed-count-only",
-        false,
-        Some("2020-01-01T00:00:00+00:00"),
-    );
-
-    let loaded = store.load(AgentId::Codex);
-    let find = |id: &str| {
-        loaded
-            .iter()
-            .find(|dto| dto.account.as_ref().is_some_and(|account| account.id == id))
-    };
-    assert_eq!(find("lapsed").unwrap().reset_credits, None);
-    assert_eq!(find("lapsed").unwrap().windows, lapsed.windows);
-    assert_eq!(find("ahead").unwrap().reset_credits, ahead.reset_credits);
     assert_eq!(
-        find("undated").unwrap().reset_credits,
-        undated.reset_credits
+        store.load(AgentId::Codex)[0].reading.reset_credits,
+        banked(0)
     );
-    assert!(find("lapsed-count-only").is_none());
-    assert_eq!(loaded.len(), 3);
-}
-
-/// A saved account whose only observation was a count that has since lapsed stops replacing the
-/// history it superseded, since it no longer holds an observation. Forgetting it still takes that
-/// history with it, as it did while the count stood.
-#[test]
-fn forgetting_an_account_whose_count_lapsed_still_removes_the_history_it_replaced() {
-    let home = scratch_dir("limits-snap-lapsed-forget");
-    let store = SnapshotStore::for_home(&home);
-    store
-        .save(&snapshot(
-            AgentId::Codex,
-            "team",
-            "a@x",
-            "2026-08-17T10:00:00.000Z",
-        ))
-        .unwrap();
-    let mut scoped = snapshot(
-        AgentId::Codex,
-        "profile:abc",
-        "a@x",
-        "2026-08-17T11:00:00.000Z",
-    );
-    scoped.account.as_mut().unwrap().legacy_id = Some("team".to_string());
-    scoped.windows.clear();
-    scoped.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
-        available_count: 1,
-        next_expires_at: Some("2020-01-01T00:00:00+00:00".to_string()),
-    });
-    store.save(&scoped).unwrap();
-    let ids = |store: &SnapshotStore| {
-        store
-            .load(AgentId::Codex)
-            .into_iter()
-            .map(|dto| dto.account.unwrap().id)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(ids(&store), ["team"]);
-
-    store.forget(AgentId::Codex, "profile:abc").unwrap();
-    assert!(ids(&store).is_empty());
-}
-
-#[test]
-fn a_count_lapses_at_its_expiry_itself() {
-    let expires_at = "2026-09-22T12:00:00+00:00";
-    let resets = crate::dto::LimitsResetCreditsDto {
-        available_count: 2,
-        next_expires_at: Some(expires_at.to_string()),
-    };
-    let at = parse_observed_at(expires_at).unwrap();
-    let expiry = resets.next_expires_at.as_deref();
-    assert!(passed(expiry, at));
-    assert!(!passed(expiry, at - chrono::Duration::seconds(1)));
-    assert!(!passed(None, at), "no known expiry never lapses");
 }
 
 /// A remembered workspace-credit share is kept whether or not its reset has passed.
@@ -694,24 +529,27 @@ fn a_remembered_workspace_credit_share_outlives_its_reset() {
         })
     };
     let mut current = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    current.workspace_credits = share("2100-10-01T00:00:00.000Z");
+    current.reading.workspace_credits = share("2100-10-01T00:00:00.000Z");
     store.save(&current).unwrap();
     assert_eq!(
-        store.load(AgentId::Codex)[0].workspace_credits,
-        current.workspace_credits
+        store.load(AgentId::Codex)[0].reading.workspace_credits,
+        current.reading.workspace_credits
     );
 
     // Past its reset the share has renewed, which the card shows as a window's passed reset is shown;
     // dropping it would bring back the own balance of 0 the share stands in for.
     let mut renewed = snapshot(AgentId::Codex, "acct-2", "b@x", "2026-08-17T10:00:00.000Z");
-    renewed.workspace_credits = share("2026-08-18T00:00:00.000Z");
+    renewed.reading.workspace_credits = share("2026-08-18T00:00:00.000Z");
     store.save(&renewed).unwrap();
     let loaded = store.load(AgentId::Codex);
     let second = loaded
         .iter()
         .find(|dto| dto.account.as_ref().unwrap().id == "acct-2")
         .unwrap();
-    assert_eq!(second.workspace_credits, renewed.workspace_credits);
+    assert_eq!(
+        second.reading.workspace_credits,
+        renewed.reading.workspace_credits
+    );
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -719,10 +557,10 @@ fn a_remembered_workspace_credit_share_outlives_its_reset() {
 #[test]
 fn a_workspace_credit_share_alone_counts_as_an_observation() {
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.windows.clear();
-    assert!(!dto.has_observations());
+    dto.reading.windows.clear();
+    assert!(!dto.reading.has_observations());
 
-    dto.workspace_credits = Some(crate::dto::LimitsWorkspaceCreditsDto {
+    dto.reading.workspace_credits = Some(crate::dto::LimitsWorkspaceCreditsDto {
         limit: "25000".to_string(),
         used: "8000".to_string(),
         used_percent: 32.0,
@@ -730,7 +568,7 @@ fn a_workspace_credit_share_alone_counts_as_an_observation() {
         reached: false,
     });
 
-    assert!(dto.has_observations());
+    assert!(dto.reading.has_observations());
 }
 
 /// A failed read that carries only a remembered share observed nothing: dating it now would make an
@@ -740,7 +578,7 @@ fn a_failed_read_carrying_only_a_remembered_share_is_not_saved() {
     let home = scratch_dir("limits-snap-failed-share");
     let store = SnapshotStore::for_home(&home);
     let mut remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    remembered.workspace_credits = Some(crate::dto::LimitsWorkspaceCreditsDto {
+    remembered.reading.workspace_credits = Some(crate::dto::LimitsWorkspaceCreditsDto {
         limit: "25000".to_string(),
         used: "8000".to_string(),
         used_percent: 32.0,
@@ -750,11 +588,14 @@ fn a_failed_read_carrying_only_a_remembered_share_is_not_saved() {
     store.save(&remembered).unwrap();
     let mut failed = remembered.clone();
     failed.status = LimitsStatus::Failed;
-    failed.windows.clear();
+    failed.reading.windows.clear();
 
     assert!(store.save(&failed).is_err());
 
-    assert_eq!(store.load(AgentId::Codex)[0].windows, remembered.windows);
+    assert_eq!(
+        store.load(AgentId::Codex)[0].reading.windows,
+        remembered.reading.windows
+    );
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -772,12 +613,12 @@ fn a_remembered_credits_spent_figure_loads_back() {
     let home = scratch_dir("limits-snap-credits-spent");
     let store = SnapshotStore::for_home(&home);
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.credits_spent = credits_spent(18303.4);
+    dto.reading.credits_spent = credits_spent(18303.4);
     store.save(&dto).unwrap();
 
     assert_eq!(
-        store.load(AgentId::Codex)[0].credits_spent,
-        dto.credits_spent
+        store.load(AgentId::Codex)[0].reading.credits_spent,
+        dto.reading.credits_spent
     );
     let _ = std::fs::remove_dir_all(&home);
 }
@@ -786,59 +627,22 @@ fn a_remembered_credits_spent_figure_loads_back() {
 #[test]
 fn credits_spent_alone_counts_as_an_observation() {
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.windows.clear();
-    assert!(!dto.has_observations());
+    dto.reading.windows.clear();
+    assert!(!dto.reading.has_observations());
 
-    dto.credits_spent = credits_spent(0.0);
+    dto.reading.credits_spent = credits_spent(0.0);
 
-    assert!(dto.has_observations());
-}
-
-/// The subscription status is remembered with the account, and a snapshot written before it existed
-/// still loads, without one.
-#[test]
-fn a_remembered_snapshot_keeps_the_subscription_status() {
-    let home = scratch_dir("limits-snap-subscription-status");
-    let store = SnapshotStore::for_home(&home);
-    let mut dto = snapshot(AgentId::Claude, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.subscription_status = Some("past_due".to_string());
-    store.save(&dto).unwrap();
-
-    assert_eq!(
-        store.load(AgentId::Claude)[0]
-            .subscription_status
-            .as_deref(),
-        Some("past_due")
-    );
-
-    let old = serde_json::json!({
-        "schemaVersion": 2, "provider": "claude",
-        "account": {"id": "acct-2", "label": "b@x"},
-        "windows": [{"id": "seven_day", "label": "Weekly", "kind": "weekly", "usedPercent": 10.0,
-                     "observedAt": "2026-08-17T10:00:00.000Z"}]
-    });
-    std::fs::write(
-        home.join(".on-n-off/limits/claude-acct_2-00000000.json"),
-        old.to_string(),
-    )
-    .unwrap();
-    let loaded = store.load(AgentId::Claude);
-    let older = loaded
-        .iter()
-        .find(|dto| dto.account.as_ref().unwrap().id == "acct-2")
-        .expect("a snapshot written before the field loads");
-    assert_eq!(older.subscription_status, None);
-    let _ = std::fs::remove_dir_all(&home);
+    assert!(dto.reading.has_observations());
 }
 
 /// A subscription status is metadata, like the plan: on its own it is not an observation worth a card.
 #[test]
 fn a_subscription_status_alone_is_not_an_observation() {
     let mut dto = snapshot(AgentId::Claude, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.windows.clear();
-    dto.subscription_status = Some("past_due".to_string());
+    dto.reading.windows.clear();
+    dto.reading.subscription_status = Some("past_due".to_string());
 
-    assert!(!dto.has_observations());
+    assert!(!dto.reading.has_observations());
 }
 
 /// Every writer stores its own read, so one that could not tell what was spent must not erase the
@@ -849,24 +653,24 @@ fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_stored_figure() {
     let store = SnapshotStore::for_home(&home);
     let business = |observed_at: &str| {
         let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", observed_at);
-        dto.plan = Some("business".to_string());
+        dto.reading.plan = Some("business".to_string());
         dto
     };
     let mut dto = business("2026-08-17T10:00:00.000Z");
-    dto.credits_spent = credits_spent(18303.4);
+    dto.reading.credits_spent = credits_spent(18303.4);
     store.save(&dto).unwrap();
 
     store.save(&business("2026-08-17T11:00:00.000Z")).unwrap();
     assert_eq!(
-        store.load(AgentId::Codex)[0].credits_spent,
+        store.load(AgentId::Codex)[0].reading.credits_spent,
         credits_spent(18303.4)
     );
 
     let mut answered = business("2026-08-17T12:00:00.000Z");
-    answered.credits_spent = credits_spent(5.0);
+    answered.reading.credits_spent = credits_spent(5.0);
     store.save(&answered).unwrap();
     assert_eq!(
-        store.load(AgentId::Codex)[0].credits_spent,
+        store.load(AgentId::Codex)[0].reading.credits_spent,
         credits_spent(5.0)
     );
     let _ = std::fs::remove_dir_all(&home);
@@ -881,36 +685,6 @@ fn term(will_renew: bool) -> Option<crate::dto::LimitsSubscriptionDto> {
     })
 }
 
-/// The term is remembered with the card, and a snapshot written before it existed loads without one.
-#[test]
-fn a_remembered_term_loads_back() {
-    let home = scratch_dir("limits-snap-term");
-    let store = SnapshotStore::for_home(&home);
-    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.subscription = term(false);
-    store.save(&dto).unwrap();
-    assert_eq!(store.load(AgentId::Codex)[0].subscription, term(false));
-
-    let old = serde_json::json!({
-        "schemaVersion": 2, "provider": "codex",
-        "account": {"id": "acct-2", "label": "b@x"},
-        "windows": [{"id": "primary", "label": "Weekly", "kind": "weekly", "usedPercent": 10.0,
-                     "observedAt": "2026-08-17T10:00:00.000Z"}]
-    });
-    std::fs::write(
-        home.join(".on-n-off/limits/codex-acct_2-00000000.json"),
-        old.to_string(),
-    )
-    .unwrap();
-    let loaded = store.load(AgentId::Codex);
-    let older = loaded
-        .iter()
-        .find(|dto| dto.account.as_ref().unwrap().id == "acct-2")
-        .expect("a snapshot written before the field loads");
-    assert_eq!(older.subscription, None);
-    let _ = std::fs::remove_dir_all(&home);
-}
-
 /// A writer that could not tell the term must not erase the one on disk; one that answered
 /// replaces it, and a Claude card never keeps one.
 #[test]
@@ -918,7 +692,7 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
     let home = scratch_dir("limits-snap-term-kept");
     let store = SnapshotStore::for_home(&home);
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.subscription = term(false);
+    dto.reading.subscription = term(false);
     store.save(&dto).unwrap();
 
     store
@@ -929,15 +703,21 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
             "2026-08-17T11:00:00.000Z",
         ))
         .unwrap();
-    assert_eq!(store.load(AgentId::Codex)[0].subscription, term(false));
+    assert_eq!(
+        store.load(AgentId::Codex)[0].reading.subscription,
+        term(false)
+    );
 
     let mut answered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T12:00:00.000Z");
-    answered.subscription = term(true);
+    answered.reading.subscription = term(true);
     store.save(&answered).unwrap();
-    assert_eq!(store.load(AgentId::Codex)[0].subscription, term(true));
+    assert_eq!(
+        store.load(AgentId::Codex)[0].reading.subscription,
+        term(true)
+    );
 
     let mut claude = snapshot(AgentId::Claude, "acct-c", "c@x", "2026-08-17T10:00:00.000Z");
-    claude.subscription = term(true);
+    claude.reading.subscription = term(true);
     store.save(&claude).unwrap();
     store
         .save(&snapshot(
@@ -947,7 +727,7 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
             "2026-08-17T11:00:00.000Z",
         ))
         .unwrap();
-    assert_eq!(store.load(AgentId::Claude)[0].subscription, None);
+    assert_eq!(store.load(AgentId::Claude)[0].reading.subscription, None);
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -958,8 +738,8 @@ fn a_personal_plan_read_drops_the_stored_figure() {
     let home = scratch_dir("limits-snap-credits-spent-personal");
     let store = SnapshotStore::for_home(&home);
     let mut business = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    business.plan = Some("business".to_string());
-    business.credits_spent = credits_spent(18303.4);
+    business.reading.plan = Some("business".to_string());
+    business.reading.credits_spent = credits_spent(18303.4);
     store.save(&business).unwrap();
 
     store
@@ -971,6 +751,6 @@ fn a_personal_plan_read_drops_the_stored_figure() {
         ))
         .unwrap();
 
-    assert_eq!(store.load(AgentId::Codex)[0].credits_spent, None);
+    assert_eq!(store.load(AgentId::Codex)[0].reading.credits_spent, None);
     let _ = std::fs::remove_dir_all(&home);
 }
