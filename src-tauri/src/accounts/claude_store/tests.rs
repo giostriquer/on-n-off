@@ -428,9 +428,127 @@ fn env(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<std::ffi::OsString> {
     }
 }
 
+/// An environment holding exactly `vars`, whose values may be any path.
+fn env_os(vars: Vec<(&'static str, std::ffi::OsString)>) -> impl Fn(&str) -> Option<OsString> {
+    move |name| {
+        vars.iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.clone())
+    }
+}
+
+/// The Keychain entry a scoped dir at `path` names, worked out apart from `StorageDir::service`.
+fn scoped_service(path: &Path) -> String {
+    let hash = crate::sha::sha256_hex(path.to_str().unwrap().as_bytes());
+    format!("{CLAUDE_KEYCHAIN_SERVICE}-{}", &hash[..8])
+}
+
+/// `path` with `suffix` appended to its last component, as an environment value.
+fn with_suffix(path: &Path, suffix: &str) -> OsString {
+    let mut value = path.as_os_str().to_owned();
+    value.push(suffix);
+    value
+}
+
+/// The config dir follows `CLAUDE_CONFIG_DIR` exactly as set — untrimmed, NFC-normalized — and a
+/// set one scopes the Keychain entry by a hash of the resolved path, on every platform.
+#[test]
+fn the_config_dir_follows_claude_config_dir_on_every_platform() {
+    let home = scratch_dir("config-dir");
+    let work = home.join(".claude-work");
+    for (value, config) in [
+        (work.clone().into_os_string(), work.clone()),
+        (
+            with_suffix(&home.join("claude"), " "),
+            PathBuf::from(with_suffix(&home.join("claude"), " ")),
+        ),
+        (
+            home.join("cafe\u{301}").into_os_string(),
+            home.join("caf\u{e9}"),
+        ),
+    ] {
+        let dirs = dirs(&home, &env_os(vec![("CLAUDE_CONFIG_DIR", value.clone())])).unwrap();
+        assert_eq!(dirs.config, config, "{value:?}");
+        assert!(dirs.custom, "{value:?}");
+        assert_eq!(
+            dirs.storage().credentials_file(),
+            config.join(".credentials.json")
+        );
+        assert_eq!(
+            dirs.storage().service(),
+            scoped_service(&config),
+            "{value:?}"
+        );
+    }
+
+    let default = dirs(&home, &env_os(vec![])).unwrap();
+    assert_eq!(default.config, home.join(".claude"));
+    assert!(!default.custom);
+    assert_eq!(default.storage().service(), CLAUDE_KEYCHAIN_SERVICE);
+}
+
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves the storage and leaves the config dir, on every
+/// platform. Set but empty, it puts the storage back in `~/.claude` under the unscoped entry.
+#[test]
+fn the_secure_storage_dir_moves_the_store_on_every_platform() {
+    let home = scratch_dir("secure-storage");
+    let work = home.join(".claude-work").into_os_string();
+    let secure = home.join("secure");
+    for (vars, config, storage, service) in [
+        (
+            vec![(SECURE_STORAGE_VAR, secure.clone().into_os_string())],
+            home.join(".claude"),
+            secure.clone(),
+            scoped_service(&secure),
+        ),
+        (
+            vec![
+                ("CLAUDE_CONFIG_DIR", work.clone()),
+                (SECURE_STORAGE_VAR, secure.clone().into_os_string()),
+            ],
+            home.join(".claude-work"),
+            secure.clone(),
+            scoped_service(&secure),
+        ),
+        (
+            vec![
+                ("CLAUDE_CONFIG_DIR", work.clone()),
+                (SECURE_STORAGE_VAR, OsString::new()),
+            ],
+            home.join(".claude-work"),
+            home.join(".claude"),
+            CLAUDE_KEYCHAIN_SERVICE.to_string(),
+        ),
+    ] {
+        let dirs = dirs(&home, &env_os(vars.clone())).unwrap();
+        assert_eq!(dirs.config, config, "{vars:?}");
+        assert_eq!(
+            dirs.storage().credentials_file(),
+            storage.join(".credentials.json"),
+            "{vars:?}"
+        );
+        assert_eq!(dirs.storage().service(), service, "{vars:?}");
+    }
+
+    assert_eq!(
+        dirs(&home, &env_os(vec![(SECURE_STORAGE_VAR, "secure".into())])).err(),
+        Some("The provider home must be an absolute path.".to_string())
+    );
+    let disposable = dirs(
+        &home,
+        &env_os(vec![
+            ("ON_N_OFF_HOME", home.clone().into_os_string()),
+            (SECURE_STORAGE_VAR, secure.into_os_string()),
+        ]),
+    )
+    .unwrap();
+    assert_eq!(disposable.storage(), StorageDir::default_in(&home));
+}
+
 /// Claude Code 2.1.282's config dir is `CLAUDE_CONFIG_DIR` exactly as set, NFC-normalized, else
 /// `~/.claude`; set, it scopes the Keychain entry by a hash of that path. The hashes here were
-/// worked out by hand from the literal paths.
+/// worked out by hand from the literal paths, which are absolute only on Unix.
+#[cfg(unix)]
 #[test]
 fn the_config_dir_is_claude_config_dir_as_claude_code_reads_it() {
     let home = Path::new("/Users/me");
@@ -497,7 +615,9 @@ fn a_disposable_home_keeps_the_default_dirs_whatever_the_environment_says() {
 
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves Claude Code's storage — the credentials file, the lock
 /// directories and the path that names the Keychain entry — and leaves the config dir where it
-/// was. Set but empty, it puts the storage back in `~/.claude` under the unscoped entry.
+/// was. Set but empty, it puts the storage back in `~/.claude` under the unscoped entry. The
+/// hashes were worked out by hand from the literal paths, which are absolute only on Unix.
+#[cfg(unix)]
 #[test]
 fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
     let home = Path::new("/Users/me");

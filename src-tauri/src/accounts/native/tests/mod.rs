@@ -298,18 +298,20 @@ fn outside_a_disposable_home_the_provider_override_and_the_keychain_apply() {
 #[test]
 fn the_claude_config_home_is_claude_config_dir_as_claude_code_reads_it() {
     let root = tempfile::tempdir().unwrap();
+    let mut padded = root.path().join("claude").into_os_string();
+    padded.push(" ");
     for (value, config) in [
-        ("/Users/me/cafe\u{301}", "/Users/me/caf\u{e9}"),
-        ("/Users/me/claude ", "/Users/me/claude "),
+        (
+            root.path().join("cafe\u{301}"),
+            root.path().join("caf\u{e9}"),
+        ),
+        (PathBuf::from(&padded), PathBuf::from(&padded)),
     ] {
-        let env = [("CLAUDE_CONFIG_DIR", PathBuf::from(value))];
+        let env = [("CLAUDE_CONFIG_DIR", value.clone())];
         let store =
             NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
-        assert_eq!(store.config_home, PathBuf::from(config), "{value:?}");
-        assert_eq!(
-            store.config_file,
-            PathBuf::from(config).join(".claude.json")
-        );
+        assert_eq!(store.config_home, config, "{value:?}");
+        assert_eq!(store.config_file, config.join(".claude.json"));
     }
 }
 
