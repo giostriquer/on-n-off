@@ -16,12 +16,15 @@ struct CodexEndpoints<'a> {
     reset_credits: &'a str,
     /// What a workspace member spent (`credits_spent.rs`); asked only for a workspace plan.
     credit_usage: &'a str,
+    /// The subscription's term (`renewal.rs`); asked for every account.
+    subscriptions: &'a str,
 }
 
 const CODEX: CodexEndpoints<'static> = CodexEndpoints {
     usage: CODEX_USAGE_URL,
     reset_credits: CODEX_RESET_CREDITS_URL,
     credit_usage: credits_spent::CODEX_CREDIT_USAGE_URL,
+    subscriptions: renewal::CODEX_SUBSCRIPTIONS_URL,
 };
 
 pub(crate) fn read(identity: &Identity, auth: &Value) -> Result<ProviderLimitsDto, HttpError> {
@@ -94,21 +97,23 @@ fn read_at(
             .then(|| get_json(codex.reset_credits, &headers).ok())
             .flatten();
             let mut parsed = parse_codex_usage(&payload, details.as_ref())?;
-            // Only a workspace pools credits, and like the detail read, spending never decides
-            // the read: a member the endpoint refuses just has no figure.
+            // The backend reads never decide the read: an account the endpoint refuses just has
+            // no figure. Only a workspace pools credits, so only one is asked what it spent.
+            let access = crate::accounts::native::CodexAccess {
+                observation_key: identity.observation_key(),
+                workspace_id: identity.workspace_id.clone(),
+                token: crate::accounts::model::AccessToken::new(token),
+            };
             if parsed
                 .plan
                 .as_deref()
                 .is_some_and(credits_spent::is_codex_workspace_plan)
             {
-                parsed.credits_spent = credits_spent::read_backed_off(
-                    &identity.observation_key(),
-                    &crate::accounts::model::AccessToken::new(token),
-                    &identity.workspace_id,
-                    codex.credit_usage,
-                    Utc::now(),
-                );
+                parsed.credits_spent =
+                    credits_spent::read_backed_off(&access, codex.credit_usage, Utc::now());
             }
+            parsed.subscription =
+                renewal::read_backed_off(&access, codex.subscriptions, Utc::now());
             parsed
         }
         _ => return Err(HttpError::Unauthorized),

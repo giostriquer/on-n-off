@@ -181,10 +181,11 @@ the provider has no running clients; failures retain the private directory for l
 New usage and subscription observation keys contain both user and workspace. Legacy observations remain
 historical, with no inferred ownership. Unattributed session usage cannot advance new scoped
 profiles. Organization-only Claude Desktop samples are also excluded from user-scoped history.
-Subscription dates appear directly on account cards, read from the ID token of the signed-in login or
-of the saved profile. A saved profile's token is read from the vault without using its OAuth
-credentials or changing the active CLI. The date queries share one cache that account changes
-invalidate.
+Subscription terms appear directly on account cards. The term (whether the plan renews) is read during
+the usage read with the login's own access token: the signed-in login's after the app-server identity
+check, a saved profile's from the vault, without changing the active CLI; it is remembered with the
+card's other figures. The fallback date comes from the ID token of the signed-in login or of the saved
+profile, read locally, and its queries share one cache that account changes invalidate.
 
 ## References and verification
 

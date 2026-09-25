@@ -487,8 +487,6 @@ fn scoped_codex_observation_carries_its_previous_workspace_key() {
     assert_eq!(account.label.as_deref(), Some("me@example.com"));
 }
 
-/// Both of the identity check's reads are held to it: a personal plan's metadata read, and a
-/// workspace plan's read that also takes the access token, which must never pass another account.
 #[test]
 fn rejects_native_identity_changes_during_an_app_server_read() {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -822,13 +820,13 @@ fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() 
         &home,
         false,
         |_| Ok(business_session(&codex_home, "chatgpt")),
-        |access: Option<CodexAccess>, account: Option<&str>, plan: Option<&str>| {
+        |parsed: &mut Parsed, access: Option<&CodexAccess>| {
             asked.borrow_mut().push((
-                access.map(|access| (access.observation_key, access.token.authorization())),
-                account.map(str::to_string),
-                plan.map(str::to_string),
+                access.map(|access| (access.observation_key.clone(), access.token.authorization())),
+                parsed.account.as_ref().map(|account| account.id.clone()),
+                parsed.plan.clone(),
             ));
-            Some(spent.clone())
+            parsed.credits_spent = Some(spent.clone());
         },
     )
     .unwrap();
@@ -844,6 +842,68 @@ fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() 
     );
 }
 
+/// The backend reads run with the login's own token, for the card the identity check confirmed,
+/// and both figures land on that card: its term, and what it spent as a workspace member.
+#[test]
+fn a_signed_in_read_takes_its_term_and_spending_with_its_own_token_once_the_account_is_confirmed() {
+    let home = business_home("codex-app-server-term");
+    let codex_home = home.join(".codex");
+    super::super::renewal::forget("acct-1");
+    super::super::credits_spent::forget("acct-1");
+    let (url, request) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        r#"{"active_until":"2026-09-28T16:22:34Z","will_renew":false,"cancellation_outcome":"user_cancelled"}"#,
+    );
+    let today = chrono::Utc::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+    let (breakdown, spending) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        &json!({"units": "credits", "data": [{"date": today, "models": [{"model": "m", "credits": 5.5}]}]})
+            .to_string(),
+    );
+
+    let parsed = read_with(
+        &home,
+        false,
+        |_| Ok(business_session(&codex_home, "chatgpt")),
+        |parsed: &mut Parsed, access: Option<&CodexAccess>| {
+            backend_reads(
+                parsed,
+                access,
+                BackendUrls {
+                    credit_usage: &breakdown,
+                    subscriptions: &url,
+                },
+                chrono::Utc::now(),
+            );
+        },
+    )
+    .unwrap();
+    let head = request.join().unwrap().head;
+    let spending_head = spending.join().unwrap().head;
+
+    let term = parsed.subscription.expect("the term is on the card");
+    assert!(!term.will_renew);
+    assert_eq!(term.note, Some(crate::dto::SubscriptionNote::Cancelled));
+    assert!(head.contains("account_id=acct-1"), "{head}");
+    assert!(head.contains("Bearer fixture-access"), "{head}");
+    assert_eq!(
+        parsed.credits_spent.map(|spent| spent.last_7_days),
+        Some(5.5),
+        "what the member spent is on the card too"
+    );
+    assert!(
+        spending_head.contains("Bearer fixture-access"),
+        "{spending_head}"
+    );
+    super::super::renewal::forget("acct-1");
+    super::super::credits_spent::forget("acct-1");
+}
+
 /// A read that fails, or a login that is not a ChatGPT one, is never asked what it spent.
 #[test]
 fn a_failed_signed_in_read_never_asks_what_it_spent() {
@@ -854,15 +914,13 @@ fn a_failed_signed_in_read_never_asks_what_it_spent() {
         &home,
         false,
         |_| Ok(business_session(&codex_home, "apiKey")),
-        |_: Option<CodexAccess>, _: Option<&str>, _: Option<&str>| {
-            panic!("asked what an API key spent")
-        },
+        |_: &mut Parsed, _: Option<&CodexAccess>| panic!("asked what an API key spent"),
     );
     let no_process = read_with(
         &home,
         false,
         |_| Err::<FakeTransport, _>("codex is not installed".to_string()),
-        |_: Option<CodexAccess>, _: Option<&str>, _: Option<&str>| panic!("asked without a read"),
+        |_: &mut Parsed, _: Option<&CodexAccess>| panic!("asked without a read"),
     );
 
     assert!(matches!(not_chatgpt, Err(AppServerFailure::Unsupported(_))));
@@ -901,21 +959,22 @@ fn a_workspace_plan_takes_its_access_from_the_identity_check() {
     assert_eq!(access.token.authorization(), "Bearer fixture-access");
 }
 
-/// A personal plan is never asked what it spent, so its identity check leaves the token alone.
 #[test]
-fn a_personal_plan_takes_no_access_from_the_identity_check() {
+fn a_personal_plan_takes_the_access_projection_too_for_the_term_read() {
     let (session, before) = signed_in_on("pro", "codex-app-server-no-access");
 
     let (parsed, access) = normalize_app_server(session, before).unwrap();
 
-    assert!(access.is_none());
+    assert_eq!(
+        access.map(|access| access.observation_key),
+        Some("acct-1".to_string())
+    );
     assert_eq!(parsed.account.unwrap().id, "acct-1");
 }
 
-/// The account's plan outranks the rate-limit bucket's, and it is the plan that decides whether the
-/// access token is taken.
+/// The account's plan outranks the rate-limit bucket's.
 #[test]
-fn the_accounts_plan_decides_the_card_and_whether_its_token_is_taken() {
+fn the_accounts_plan_decides_the_card() {
     let codex_home = business_home("codex-app-server-plan-precedence").join(".codex");
     let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
     let session = AppServerResult {

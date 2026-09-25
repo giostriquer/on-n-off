@@ -47,6 +47,18 @@ export type LimitsCreditsSpent = {
   updatedAt?: string | null;
 };
 
+/**
+ * A Codex subscription's term, as ChatGPT's own billing endpoint reports it: the end of the paid
+ * period and whether it renews then. Metadata beside the plan, not an observation.
+ */
+export type LimitsSubscription = {
+  activeUntil: string;
+  willRenew: boolean;
+  /** What the endpoint says about the end of the period, when it says anything. */
+  note?: "cancelled" | "planChange" | "pastDue" | null;
+  checkedAt: string;
+};
+
 /** Codex banked rate-limit resets: one-time resets saved to the account until used or expired. */
 export type LimitsResetCredits = {
   availableCount: number;
@@ -94,6 +106,8 @@ export type ProviderLimits = {
   credits?: LimitsCredits | null;
   workspaceCredits?: LimitsWorkspaceCredits | null;
   creditsSpent?: LimitsCreditsSpent | null;
+  /** Codex only: the subscription's term from the billing endpoint. */
+  subscription?: LimitsSubscription | null;
   resetCredits?: LimitsResetCredits | null;
   /** A paid reset offered right now. Absent whenever the account is not at its limit. */
   resetOffer?: LimitsResetOffer | null;

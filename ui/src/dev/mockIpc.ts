@@ -10,7 +10,7 @@
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
-import { bankedResetsClaude, bankedResetsCodex, claudeSubscriptionStatusClaude, claudeWithoutReset, creditsSpentCodex, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex, workspaceCreditsCodex } from "./limitsFixtures";
+import { bankedResetsClaude, bankedResetsCodex, claudeSubscriptionStatusClaude, claudeWithoutReset, creditsSpentCodex, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex, subscriptionBadgesCodex, workspaceCreditsCodex } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageHistoryStatus, UsageSummary } from "$lib/usageTypes";
 
@@ -32,7 +32,7 @@ const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
 // Scenarios this file answers for itself. `SCENARIOS` holds the pull-request ones.
 const LOCAL_SCENARIOS = [
-  "subscriptionMissing", "accountLogin", "accountLocked",
+  "subscriptionMissing", "subscriptionBadges", "accountLogin", "accountLocked",
   "accountDuplicate", "accountClients", "claudeMissingReset", "catalog",
   "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "workspaceCredits", "creditsSpent", "claudeSubscriptionStatus", "hooks", "mcpSources",
 ];
@@ -306,6 +306,7 @@ const handlers: Record<string, Handler> = {
     if (scenario === "sameEmailWorkspaces" && args.agentId === "codex") return sameEmailWorkspacesCodex();
     if (scenario === "workspaceCredits" && args.agentId === "codex") return workspaceCreditsCodex();
     if (scenario === "creditsSpent" && args.agentId === "codex") return creditsSpentCodex();
+    if (scenario === "subscriptionBadges" && args.agentId === "codex") return subscriptionBadgesCodex();
     if (scenario === "claudeSubscriptionStatus" && args.agentId === "claude") return claudeSubscriptionStatusClaude();
     const entries = limitsFor(args.agentId);
     if (scenario !== "accountDuplicate" || args.agentId !== "codex") return entries;

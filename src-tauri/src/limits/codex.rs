@@ -126,6 +126,8 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
         // Spending comes from its own endpoint, asked after this parse for a workspace plan
         // (`limits/credits_spent.rs`): by the saved read, or after the signed-in read's identity check.
         credits_spent: None,
+        // The term too (`limits/renewal.rs`), for every Codex card.
+        subscription: None,
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
         reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
     }

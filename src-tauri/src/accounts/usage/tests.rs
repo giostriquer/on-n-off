@@ -547,6 +547,30 @@ fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_cards_figure() {
     assert_eq!(entries[0].credits_spent, spent);
 }
 
+/// A saved read whose term read failed or was backing off keeps the term the card had.
+#[test]
+fn a_saved_read_that_could_not_tell_the_term_keeps_the_cards_term() {
+    let profile = profile();
+    let term = Some(crate::dto::LimitsSubscriptionDto {
+        active_until: "2026-09-28T16:22:34Z".to_string(),
+        will_renew: false,
+        note: Some(crate::dto::SubscriptionNote::Cancelled),
+        checked_at: "2026-09-25T12:00:00Z".to_string(),
+    });
+    let mut entries = vec![];
+    let mut first = codex_reading(&profile, "pro");
+    first.subscription.clone_from(&term);
+    merge(&mut entries, &profile, Some(Ok(first)));
+
+    merge(
+        &mut entries,
+        &profile,
+        Some(Ok(codex_reading(&profile, "pro"))),
+    );
+
+    assert_eq!(entries[0].subscription, term);
+}
+
 /// A saved Codex read on `plan`.
 fn codex_reading(profile: &Profile, plan: &str) -> ProviderLimitsDto {
     ProviderLimitsDto {

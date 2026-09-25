@@ -327,8 +327,7 @@ fn merge(
     let dto = match result {
         Ok(mut dto) => {
             if let Some(i) = existing {
-                dto.keep_reset_credits_from(&entries[i]);
-                crate::limits::credits_spent::keep_credits_spent_from(&mut dto, &entries[i]);
+                crate::limits::keep_remembered_from(&mut dto, &entries[i]);
             }
             dto
         }
@@ -352,6 +351,7 @@ fn merge(
                         credits: None,
                         workspace_credits: None,
                         credits_spent: None,
+                        subscription: None,
                         reset_credits: None,
                         reset_offer: None,
                     });

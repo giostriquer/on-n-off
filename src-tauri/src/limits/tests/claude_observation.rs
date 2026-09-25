@@ -69,6 +69,7 @@ impl ClaudeObservationRig {
                 credits: None,
                 workspace_credits: None,
                 credits_spent: None,
+                subscription: None,
                 reset_credits: None,
                 reset_offer: None,
             })

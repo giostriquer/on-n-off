@@ -32,6 +32,7 @@ fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> Prov
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -199,6 +200,7 @@ fn a_newer_successful_credits_only_snapshot_removes_old_quota_windows() {
         }),
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -867,6 +869,85 @@ fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_stored_figure() {
         store.load(AgentId::Codex)[0].credits_spent,
         credits_spent(5.0)
     );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+fn term(will_renew: bool) -> Option<crate::dto::LimitsSubscriptionDto> {
+    Some(crate::dto::LimitsSubscriptionDto {
+        active_until: "2026-09-28T16:22:34Z".to_string(),
+        will_renew,
+        note: (!will_renew).then_some(crate::dto::SubscriptionNote::Cancelled),
+        checked_at: "2026-09-25T12:00:00Z".to_string(),
+    })
+}
+
+/// The term is remembered with the card, and a snapshot written before it existed loads without one.
+#[test]
+fn a_remembered_term_loads_back() {
+    let home = scratch_dir("limits-snap-term");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.subscription = term(false);
+    store.save(&dto).unwrap();
+    assert_eq!(store.load(AgentId::Codex)[0].subscription, term(false));
+
+    let old = serde_json::json!({
+        "schemaVersion": 2, "provider": "codex",
+        "account": {"id": "acct-2", "label": "b@x"},
+        "windows": [{"id": "primary", "label": "Weekly", "kind": "weekly", "usedPercent": 10.0,
+                     "observedAt": "2026-08-17T10:00:00.000Z"}]
+    });
+    std::fs::write(
+        home.join(".on-n-off/limits/codex-acct_2-00000000.json"),
+        old.to_string(),
+    )
+    .unwrap();
+    let loaded = store.load(AgentId::Codex);
+    let older = loaded
+        .iter()
+        .find(|dto| dto.account.as_ref().unwrap().id == "acct-2")
+        .expect("a snapshot written before the field loads");
+    assert_eq!(older.subscription, None);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A writer that could not tell the term must not erase the one on disk; one that answered
+/// replaces it, and a Claude card never keeps one.
+#[test]
+fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
+    let home = scratch_dir("limits-snap-term-kept");
+    let store = SnapshotStore::for_home(&home);
+    let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
+    dto.subscription = term(false);
+    store.save(&dto).unwrap();
+
+    store
+        .save(&snapshot(
+            AgentId::Codex,
+            "acct-1",
+            "a@x",
+            "2026-08-17T11:00:00.000Z",
+        ))
+        .unwrap();
+    assert_eq!(store.load(AgentId::Codex)[0].subscription, term(false));
+
+    let mut answered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T12:00:00.000Z");
+    answered.subscription = term(true);
+    store.save(&answered).unwrap();
+    assert_eq!(store.load(AgentId::Codex)[0].subscription, term(true));
+
+    let mut claude = snapshot(AgentId::Claude, "acct-c", "c@x", "2026-08-17T10:00:00.000Z");
+    claude.subscription = term(true);
+    store.save(&claude).unwrap();
+    store
+        .save(&snapshot(
+            AgentId::Claude,
+            "acct-c",
+            "c@x",
+            "2026-08-17T11:00:00.000Z",
+        ))
+        .unwrap();
+    assert_eq!(store.load(AgentId::Claude)[0].subscription, None);
     let _ = std::fs::remove_dir_all(&home);
 }
 
