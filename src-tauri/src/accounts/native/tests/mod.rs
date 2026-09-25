@@ -598,8 +598,11 @@ fn a_native_lock_that_cannot_be_created_says_why_instead_of_busy() {
     native.config_home = blocker.join(".claude");
 
     let refused = native.lock().err().unwrap();
+    assert!(
+        refused.starts_with("Cannot take Claude Code's locks: "),
+        "{refused}"
+    );
     assert_ne!(refused, BUSY);
-    assert!(!refused.is_empty());
 }
 
 /// A storage-write lock that cannot be created is reported as that lock, not as a bare I/O error.

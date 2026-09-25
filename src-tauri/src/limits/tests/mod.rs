@@ -581,7 +581,15 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
         .contains("sign in again"));
 }
 
-/// Live probe against the real home: Keychain read + one GET per provider (read-only).
+/// Live probe against the real home, read-only: one read per provider, printed.
+///
+/// Claude reads only the real home's `~/.claude/.credentials.json`: a test build's sealed
+/// environment (`paths::process_env`) treats every home as disposable, so `CLAUDE_CONFIG_DIR`,
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR` and the Claude Code Keychain entry are out of its reach, and
+/// a login kept in the Keychain reads as signed out here. Codex runs its own `codex app-server`,
+/// and its native store reads a keyring login through the real `security` when its config selects
+/// one, which is what `with_real_keychain` allows.
+///
 /// `cargo test --manifest-path src-tauri/Cargo.toml probe_real_home_limits -- --ignored --nocapture`
 #[test]
 #[ignore = "real-home network probe; not part of CI"]
