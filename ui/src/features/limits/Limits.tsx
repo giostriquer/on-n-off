@@ -11,7 +11,7 @@ import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
+import { headlineWindow, presentLimitAccount, presentLimitWindow } from "./limitPresentation";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { accountCards, orderAccountCards } from "./accountCards";
@@ -186,13 +186,13 @@ function AccountCard({
   const account = entry.account ?? null;
   const label = profile?.email ?? account?.label ?? null;
   const title = label ? `${name} limits · ${label}` : `${name} limits`;
-  const [hero, ...rest] = entry.windows;
+  const { headline, rest } = headlineWindow(entry);
   const active = !!account && (profile?.active ?? entry.currentAccount);
   const presentation = presentLimitAccount(entry, `${name} limits are unavailable.`);
   const { message, refreshPaused, updatedAt, savedRefreshDetail } = presentation;
 
   const subscription = <AccountSubscriptionBadge entry={entry} now={now} freshness={presentation} />;
-  const header = (menu: ReactNode) => <CardHeader savedRefreshDetail={savedRefreshDetail} activeWithoutUsage={active && !hero} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
+  const header = (menu: ReactNode) => <CardHeader savedRefreshDetail={savedRefreshDetail} activeWithoutUsage={active && !headline} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
   const content = <>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 
@@ -202,15 +202,15 @@ function AccountCard({
 
       {message ? (
         <p
-          className={`px-3.5 ${hero ? "pt-1.5" : "py-4"} text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
+          className={`px-3.5 ${headline ? "pt-1.5" : "py-4"} text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
         >
           {message}
         </p>
       ) : null}
 
-      {hero ? (
+      {headline ? (
         <>
-          <HeroWindow active={active} window={hero} provider={entry.provider} now={now} />
+          <HeadlineWindow active={active} window={headline} provider={entry.provider} now={now} />
           {rest.map((window) => (
             <WindowRow
               key={window.id}
@@ -248,8 +248,8 @@ function ActiveAccountDot() {
     className="size-[7px] shrink-0 rounded-full bg-[var(--live)] shadow-[0_0_8px_var(--live)]" />;
 }
 
-/** The first (weekly) window as the card's headline, in the Overview's big-number idiom. */
-function HeroWindow({
+/** The card's headline window, in the Overview's big-number idiom. */
+function HeadlineWindow({
   active,
   window,
   provider,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, presentWorkspaceShare } from "./limitPresentation";
+import { hasObservations, headlineWindow, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, presentWorkspaceShare } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -54,6 +54,25 @@ describe("presentLimitWindow", () => {
     expect(presented.text).toBe("12%");
     expect(presented.note).toBe("");
     expect(presentLimitWindow({ ...window, resetsAt: "soon" }, NOW).text).toBe("93%");
+  });
+});
+
+describe("headlineWindow", () => {
+  const card = (windows: LimitWindow[]): ProviderLimits => ({ provider: "claude", status: "ok", currentAccount: true, windows });
+  const weekly: LimitWindow = { ...window, id: "weekly_all", label: "Weekly · all models", kind: "weekly" };
+  const session: LimitWindow = { ...window, id: "session", kind: "session" };
+  const fable: LimitWindow = { ...window, id: "weekly_fable", label: "Weekly · Fable", kind: "model" };
+
+  it("leads with the weekly window and keeps the rest in the order the backend sent", () => {
+    expect(headlineWindow(card([weekly, session, fable]))).toEqual({ headline: weekly, rest: [session, fable] });
+  });
+
+  it("leads with the session when the card has no weekly window", () => {
+    expect(headlineWindow(card([session, fable]))).toEqual({ headline: session, rest: [fable] });
+  });
+
+  it("has no headline without windows", () => {
+    expect(headlineWindow(card([]))).toEqual({ headline: undefined, rest: [] });
   });
 });
 

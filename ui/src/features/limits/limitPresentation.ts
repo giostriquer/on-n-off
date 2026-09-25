@@ -36,6 +36,16 @@ export type LimitAccountPresentation = {
 };
 
 /**
+ * A card's headline window, the one it leads with, and the windows that follow it as rows. The
+ * headline window is the first of weekly, session, model; the backend sends a card's windows in
+ * that order, so it is the first one, and the rest keep the order they came in.
+ */
+export function headlineWindow(entry: ProviderLimits): { headline: LimitWindow | undefined; rest: LimitWindow[] } {
+  const [headline, ...rest] = entry.windows;
+  return { headline, rest };
+}
+
+/**
  * Present one independently observed quota window. An observation describes only the cycle it was
  * taken in: once the window's own reset passes, the figure it carried belongs to a spent cycle and
  * the quota it measured has renewed. Account status cannot keep a prior cycle's number current.
