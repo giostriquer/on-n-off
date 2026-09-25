@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import { useSharedRead } from "$lib/useSharedRead";
 
+/** A card's paid-through date. Account changes replace it through the shared `accounts` read. */
 export function useCodexSubscription(accountId: string, refresh = true) {
-  useSharedRead("subscription:codex");
+  useSharedRead("accounts");
   return useQuery({
     queryKey: ["subscription", "codex", accountId],
     queryFn: () => api.readCodexSubscription(accountId),

@@ -62,7 +62,7 @@ pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
         Ok(v) => (v, None),
         Err(e) => (None, Some(e)),
     };
-    let db = if home.join(".on-n-off/accounts/vault.enc").exists() {
+    let db = if store::Store::vault_exists(&home) {
         store::Store::open_read(&home)?.load()?
     } else {
         store::Database::default()
@@ -100,7 +100,7 @@ pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
 /// Explicitly retry vault authorization without changing profiles or the native CLI login.
 pub fn unlock() -> Result<(), String> {
     let home = home()?;
-    if !home.join(".on-n-off/accounts/vault.enc").exists() {
+    if !store::Store::vault_exists(&home) {
         return Ok(());
     }
     store::Store::open(&home, false)?.load().map(|_| ())
@@ -292,7 +292,6 @@ pub fn sign_out(provider: AgentId) -> Result<(), String> {
     result
 }
 fn changed(provider: AgentId) {
-    crate::subscription::browser::invalidate_identity();
     crate::limits_refresh::account_changed(provider);
     crate::read_revision::announce(crate::read_revision::Source::Accounts);
 }
@@ -304,21 +303,21 @@ pub use login::{add, cancel};
 
 pub(crate) mod discovery;
 
-/// Keep the account-operation lease through the consumer's final identity-bound write.
-/// Billing receives only identity metadata, never saved OAuth credentials.
-pub(crate) fn with_saved_billing_identity<T>(
+/// The `https://api.openai.com/auth` claims of a saved Codex profile's ID token: identity and plan
+/// metadata, never its tokens. `None` for an unknown key, a profile without a login, or a device
+/// with no vault; an error when the vault exists and cannot be read right now.
+pub(crate) fn saved_codex_claims(
     home: &std::path::Path,
     key: &str,
-    consume: impl FnOnce(Result<Option<model::Identity>, String>) -> T,
-) -> T {
-    if !key.starts_with("profile:") || !home.join(".on-n-off/accounts/vault.enc").exists() {
-        return consume(Ok(None));
+) -> Result<Option<serde_json::Value>, String> {
+    if !model::Identity::is_profile_key(key) || !store::Store::vault_exists(home) {
+        return Ok(None);
     }
-    match store::Store::open_read(home) {
-        Ok(store) => store.with_billing_identity(key, consume),
-        Err(error) => consume(Err(error)),
-    }
+    Ok(store::Store::open_read(home)?.load()?.codex_claims(key))
 }
+
+#[cfg(test)]
+pub(crate) use store::tests::saved_codex_fixture;
 
 #[cfg(test)]
 mod tests;

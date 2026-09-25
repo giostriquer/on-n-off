@@ -42,7 +42,7 @@ pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<Provider
     let Ok(home) = super::home() else {
         return;
     };
-    if !home.join(".on-n-off/accounts/vault.enc").exists() {
+    if !Store::vault_exists(&home) {
         return;
     }
     let open = || Store::open_read(&home);

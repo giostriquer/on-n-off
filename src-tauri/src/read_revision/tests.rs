@@ -32,17 +32,8 @@ fn every_source_has_its_own_wire_name() {
         Source::LimitsClaude.name(),
         Source::LimitsCodex.name(),
         Source::GithubPrs.name(),
-        Source::SubscriptionCodex.name(),
     ];
-    assert_eq!(
-        names,
-        [
-            "limits:claude",
-            "limits:codex",
-            "github:prs",
-            "subscription:codex"
-        ]
-    );
+    assert_eq!(names, ["limits:claude", "limits:codex", "github:prs"]);
     assert_eq!(
         names.iter().collect::<std::collections::HashSet<_>>().len(),
         names.len(),

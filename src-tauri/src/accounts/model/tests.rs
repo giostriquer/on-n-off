@@ -1,6 +1,16 @@
 use super::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde_json::json;
+
+/// An unsigned ID token whose `https://api.openai.com/auth` claims are `claims`, shaped the way
+/// `claims()` decodes it: fixtures across the crate build their logins from it.
+pub(crate) fn id_token(claims: &Value) -> String {
+    let payload = json!({"https://api.openai.com/auth": claims});
+    format!(
+        "header.{}.signature",
+        URL_SAFE_NO_PAD.encode(payload.to_string())
+    )
+}
 fn auth(user: &str, workspace: &str) -> Value {
     let claims = json!({"sub":user,"https://api.openai.com/auth":{"chatgpt_user_id":user,"chatgpt_account_id":workspace}});
     json!({"tokens":{"id_token":format!("e30.{}.sig",URL_SAFE_NO_PAD.encode(claims.to_string())),"access_token":"access","refresh_token":"renewable","account_id":workspace}})

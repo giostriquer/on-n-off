@@ -1,50 +1,42 @@
 import { TooltipButton } from "$lib/TooltipButton";
+import { formatShortDate } from "$lib/limitsFormat";
 import { useCodexSubscription } from "$lib/useCodexSubscription";
-import type { SubscriptionReading } from "$lib/subscriptionTypes";
+import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { claudeSubscriptionStatus } from "./claudeSubscriptionStatus";
 import type { LimitAccountPresentation } from "./limitPresentation";
 import "./SubscriptionBadge.css";
 
-const DAY = 86_400_000;
 function exactDate(value: string) {
   return new Date(value).toLocaleString(undefined, {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 }
 
-export function SubscriptionBadge({ reading, now }: {reading: SubscriptionReading; now: number}) {
-  const metadata = reading.metadata;
-  const until = metadata?.date ? Date.parse(metadata.date) : NaN;
-  if (!metadata || !Number.isFinite(until)) return null;
-  const remaining = until - now;
-  const billing = metadata.source === "billing";
-  const expires = billing && metadata.kind === "expires";
-  const renews = billing && metadata.kind === "renews";
-  const elapsed = remaining <= 0;
-  const progress = expires ? Math.max(0, Math.min(1, 1 - remaining / (7 * DAY))) : 0;
-  const tone = expires && elapsed ? "expired" : expires && remaining <= 7 * DAY ? "warning" : "neutral";
-  const label = expires ? "No renewal" : renews && !elapsed ? "Auto-renew" : "Unconfirmed";
-  const verb = expires ? elapsed ? "Recorded expiry:" : "Expires" : renews ? elapsed ? "Renewal was due" : "Renews" : "Paid through";
-  const days = Math.ceil(remaining / DAY);
-  const countdown = remaining < DAY ? "Less than 1 day remaining" : `${days} day${days === 1 ? "" : "s"} remaining`;
+/**
+ * How long a Codex plan is paid for, as its login's ID token says. The token carries no renewal or
+ * cancellation status (see PROVIDERS.md), so the badge names the date and the tooltip says what it
+ * does not know. A date that has passed shows nothing: a lapsed period says nothing about the
+ * current one.
+ */
+export function SubscriptionBadge({ subscription, now }: { subscription: SubscriptionDate | null; now: number }) {
+  const until = subscription ? Date.parse(subscription.date) : NaN;
+  if (!subscription || !Number.isFinite(until) || until <= now) return null;
+  const short = formatShortDate(subscription.date, { yearUnlessSameAs: now });
+  const checked = subscription.checkedAt && Number.isFinite(Date.parse(subscription.checkedAt)) ? exactDate(subscription.checkedAt) : null;
   const tooltip = <>
-    <div>{verb} {exactDate(metadata.date!)}</div>
-    {expires && !elapsed && <div>{countdown}</div>}
-    {!billing && <div>Renewal status unknown.</div>}
-    {elapsed && <div>Current subscription status needs confirmation.</div>}
-    {(metadata.stale || reading.unavailable) && <div>Last known billing information.</div>}
-    {metadata.checkedAt && Number.isFinite(Date.parse(metadata.checkedAt)) && <div className="mt-1 text-[11px] text-[var(--mute)]">Last checked {exactDate(metadata.checkedAt)}</div>}
+    <div>Paid through {exactDate(subscription.date)}</div>
+    <div>Renewal status unknown. The login says how long the plan is paid for, not whether it renews.</div>
+    {checked && <div className="mt-1 text-[11px] text-[var(--mute)]">Confirmed by OpenAI {checked}</div>}
   </>;
-  return <TooltipButton label={`Subscription status: ${label}`} tooltip={tooltip} className={`type-badge subscription-badge subscription-badge--${tone}`}>
-    {tone === "warning" && <span aria-hidden="true" className="subscription-badge-fill" style={{width: `${progress * 100}%`, backgroundColor: `color-mix(in srgb, var(--expiry-fill-start), var(--expiry-fill-end) ${progress * 100}%)`}} />}
-    <span className="relative">{label}</span>
+  return <TooltipButton label={`Subscription paid through ${short}`} tooltip={tooltip} className="type-badge subscription-badge subscription-badge--neutral">
+    Until {short}
   </TooltipButton>;
 }
 
 export function CodexSubscriptionBadge({accountId, current, now}: {accountId: string; current: boolean; now: number}) {
   const query = useCodexSubscription(accountId, current);
-  return <SubscriptionBadge reading={query.data ?? {metadata: null, connected: false, unavailable: false}} now={now} />;
+  return <SubscriptionBadge subscription={query.data ?? null} now={now} />;
 }
 
 /**
@@ -63,13 +55,13 @@ export function ClaudeSubscriptionStatusBadge({ status, lastKnown, checkedAt }: 
   </>;
   return <TooltipButton label={`Subscription status: ${badge.label}`} tooltip={tooltip}
     className={`type-badge subscription-badge subscription-badge--${badge.tone}`}>
-    <span className="relative">{badge.label}</span>
+    {badge.label}
   </TooltipButton>;
 }
 
 /**
- * The subscription badge a card's header shows, whichever provider it is: Codex's dated billing
- * badge, or Claude's status. `freshness` is the card's own presentation, so the badge says what the
+ * The subscription badge a card's header shows, whichever provider it is: Codex's paid-through
+ * date, or Claude's status. `freshness` is the card's own presentation, so the badge says what the
  * card says about how current it is.
  */
 export function AccountSubscriptionBadge({ entry, now, freshness }: {

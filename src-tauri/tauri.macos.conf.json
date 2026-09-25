@@ -2,9 +2,7 @@
   "bundle": {
     "macOS": {
       "files": {
-        "Helpers/on-n-off-notch.app": "binaries/on-n-off-notch.app",
-        "Helpers/on-n-off-billing": "binaries/on-n-off-billing",
-        "Resources/BrowserBilling_BrowserBilling.bundle": "binaries/BrowserBilling_BrowserBilling.bundle"
+        "Helpers/on-n-off-notch.app": "binaries/on-n-off-notch.app"
       }
     }
   }

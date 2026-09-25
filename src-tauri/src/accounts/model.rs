@@ -94,9 +94,14 @@ impl Identity {
     pub fn observation_key(&self) -> String {
         let tuple = serde_json::to_vec(&(self.provider, &self.user_id, &self.workspace_id))
             .expect("serializable identity");
-        format!("profile:{}", crate::sha::sha256_hex(&tuple))
+        format!("{PROFILE_KEY_PREFIX}{}", crate::sha::sha256_hex(&tuple))
+    }
+    /// Whether an observation key names a scoped profile, as opposed to a legacy workspace id.
+    pub fn is_profile_key(key: &str) -> bool {
+        key.starts_with(PROFILE_KEY_PREFIX)
     }
 }
+const PROFILE_KEY_PREFIX: &str = "profile:";
 pub fn codex_observation_key(workspace: &str, claims: &Value) -> String {
     claims
         .get("chatgpt_user_id")
@@ -114,4 +119,4 @@ pub fn codex_observation_key(workspace: &str, claims: &Value) -> String {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

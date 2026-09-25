@@ -67,14 +67,15 @@ impl Login {
     }
 }
 impl Database {
-    pub fn billing_identity(&self, key: &str) -> Option<Identity> {
-        self.profiles
-            .iter()
-            .find(|p| {
-                p.identity.provider == crate::dto::AgentId::Codex
-                    && p.identity.observation_key() == key
-            })
-            .map(|p| p.identity.clone())
+    /// The ID-token claims of the saved Codex profile with this observation key, when it has a login.
+    pub fn codex_claims(&self, key: &str) -> Option<Value> {
+        let profile = self.profiles.iter().find(|p| {
+            p.identity.provider == crate::dto::AgentId::Codex && p.identity.observation_key() == key
+        })?;
+        super::model::claims(&profile.login.as_ref()?.auth)
+            .ok()?
+            .get("https://api.openai.com/auth")
+            .cloned()
     }
     pub fn reenroll(&mut self, identity: &Identity) {
         self.ignored_accounts.retain(|ignored| ignored != identity);
@@ -272,6 +273,11 @@ impl Store {
         })?;
         Ok((root, lease))
     }
+    /// Whether this home has a saved-profile vault at all, so a read for a device that never saved
+    /// an account neither unlocks nor creates one.
+    pub fn vault_exists(home: &std::path::Path) -> bool {
+        home.join(".on-n-off/accounts/vault.enc").exists()
+    }
     pub fn open(home: &std::path::Path, create: bool) -> Result<Self, String> {
         Self::open_with_key(home, create, |root, create| {
             super::vault::key(root, create, true)
@@ -307,16 +313,6 @@ impl Store {
             _lease: lease,
         })
     }
-    pub fn with_billing_identity<T>(
-        self,
-        key: &str,
-        consume: impl FnOnce(Result<Option<Identity>, String>) -> T,
-    ) -> T {
-        let identity = self.load().map(|db| db.billing_identity(key));
-        let result = consume(identity);
-        drop(self);
-        result
-    }
     pub fn load(&self) -> Result<Database, String> {
         match std::fs::read(self.root.join("vault.enc")) {
             Ok(bytes) => {
@@ -338,4 +334,4 @@ impl Store {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

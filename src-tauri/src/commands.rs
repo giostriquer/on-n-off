@@ -470,40 +470,17 @@ pub async fn save_notch_settings(
     Ok(snapshot)
 }
 
-/// Cached Codex ID-token metadata plus optional account-scoped billing enrichment.
+/// The Codex account's paid-through date, from the ID token of the signed-in login or the saved
+/// profile: a local read with no network, no browser and nothing persisted.
 #[tauri::command]
 pub async fn read_codex_subscription(
-    app: tauri::AppHandle,
     account_id: String,
-) -> Result<crate::subscription::SubscriptionReading, AdapterError> {
+) -> Result<Option<crate::subscription::SubscriptionDate>, AdapterError> {
     blocking("subscription read", move || {
         let home = crate::paths::user_home()?;
-        crate::subscription::read(&app, &home, &account_id).map_err(AdapterError::message)
+        crate::subscription::read(&home, &account_id).map_err(AdapterError::message)
     })
     .await
-}
-#[tauri::command]
-pub async fn connect_codex_billing(
-    app: tauri::AppHandle,
-    account_id: String,
-) -> Result<(), AdapterError> {
-    let selected = account_id.clone();
-    blocking("subscription identity", move || {
-        let home = crate::paths::user_home()?;
-        crate::subscription::validate_account(&home, &selected).map_err(AdapterError::message)
-    })
-    .await?;
-    blocking("browser billing import", move || {
-        crate::subscription::connect(&app, account_id).map_err(AdapterError::message)
-    })
-    .await
-}
-#[tauri::command]
-pub async fn disconnect_codex_billing(
-    app: tauri::AppHandle,
-    account_id: String,
-) -> Result<(), AdapterError> {
-    crate::subscription::disconnect(&app, Some(&account_id)).map_err(AdapterError::message)
 }
 
 #[tauri::command]

@@ -118,8 +118,8 @@ remembered again. A later verified native sign-in with a new credential can be r
 The encrypted journal is persisted before any native write. ConfigIo owns narrow oauthAccount
 configuration publication, validation and rollback; the account journal is its protected backup
 participant. Claude credential publication merges only `claudeAiOauth`, preserving current MCP
-OAuth entries. Successful account changes replace the shared limits reading and cancel in-flight
-billing work through `read_revision`; a late account A observation cannot become account B's data.
+OAuth entries. Successful account changes replace the shared limits reading, and the Codex
+subscription dates read from the logins, through `read_revision`.
 
 ## Native scope and limitations
 
@@ -178,19 +178,13 @@ Isolated login directories have a lease and a provider marker. Completion/cancel
 only their scoped secrets. Abandoned directories are recovered only after the lease is free and
 the provider has no running clients; failures retain the private directory for later recovery.
 
-New usage/billing observation keys contain both user and workspace. Legacy observations remain
+New usage and subscription observation keys contain both user and workspace. Legacy observations remain
 historical, with no inferred ownership. Unattributed session usage cannot advance new scoped
 profiles. Organization-only Claude Desktop samples are also excluded from user-scoped history.
-Billing dates appear directly on account cards; Connect/Retry billing lives in account controls.
-Saved profiles expose an observation key and an identity-only billing projection. The browser
-reader can verify inactive saved accounts without using their OAuth credentials or changing the
-active CLI. Automatic browser reads begin for saved profiles (or a native account with prior
-billing) and retain a persisted 24-hour attempt cooldown, including first failures. Interactive
-browser access remains an explicit account action. Billing metadata queries share one cache
-between Limits and account controls.
-Browser billing verifies stable user identity and authenticated membership when the
-browser default workspace differs, then repeats the session check after reading the date.
-Inaccessible browser profiles produce inconclusive errors, not instructions asserting wrong login.
+Subscription dates appear directly on account cards, read from the ID token of the signed-in login or
+of the saved profile. A saved profile's token is read from the vault without using its OAuth
+credentials or changing the active CLI. The date queries share one cache that account changes
+invalidate.
 
 ## References and verification
 
@@ -208,14 +202,11 @@ Real browser sign-in, provider revocation, macOS Keychain interoperability and W
 storage require designated-account validation on those platforms. Fixture tests and a read-only
 app boot do not prove these live operations. Full CI belongs to the PR, not local execution.
 
-Billing eligibility errors remain retryable IPC errors rather than absent-account results.
-The final saved-identity lookup holds the account-operation lease through metadata publication,
-so profile removal either finishes before that lookup or waits until publication has finished.
-The UI rereads eligibility on mount and account-change events; browser access remains subject
-to the persisted daily cooldown.
+A vault that cannot be read right now is a retryable IPC error for the subscription read, not an
+absent date.
 
 Account management is embedded in Limits cards. The Limits header contains one Add account picker for Claude and Codex;
-each card owns its usage, billing date, primary action and optional category. Saved identities
+each card owns its usage, subscription date, primary action and optional category. Saved identities
 join observations only by exact observation key, and remain visible when usage reads fail.
 The picker and Settings share the global automatic-saving opt-in preference. Inactive Remove account removes
 the saved login and usage card; active Remove saved login keeps the native login and usage card.
@@ -239,7 +230,4 @@ Legacy deletion passes an optional expected email through the existing Forget co
 rechecks that email under the snapshot write lock and refuses changed or unreadable history;
 older callers that omit the guard retain the existing command behavior.
 
-Manual billing requests wait for an existing import, releasing the state mutex while waiting,
-and take priority over new automatic checks. The wait is bounded to 90 seconds; account changes
-cancel pending requests. Final identity validation and generation checks still govern publication.
-Billing errors occupy a full-width line below aligned account action buttons.
+

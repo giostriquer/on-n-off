@@ -2,7 +2,7 @@
 //
 //   bun scripts/stamp-source-times.mjs src-tauri/macos
 //
-// The macOS jobs restore the Swift packages' .build directories from the Actions cache. SwiftPM
+// The macOS jobs restore the Swift package's .build directory from the Actions cache. SwiftPM
 // decides what to recompile by comparing each source's modification time with the one it recorded,
 // and a fresh checkout writes every file at the time of the checkout, so without this every run
 // would recompile the packages' own modules against a cache that already held them. Stamping

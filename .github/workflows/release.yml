@@ -147,12 +147,6 @@ jobs:
         with:
           configuration: release
 
-      # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
-      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
-      - name: Resolve Swift package dependencies
-        if: runner.os == 'macOS'
-        run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
-
       # Restores the release-profile cache that the Bundle workflow saves on main. A tag ref
       # cannot share a cache it writes with anything else, so this job never saves one.
       #
