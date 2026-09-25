@@ -166,3 +166,28 @@ fn a_cached_parse_serves_only_while_both_size_and_mtime_match() {
     assert!(read.complete);
     let _ = std::fs::remove_dir_all(home);
 }
+
+/// A read from an instant reads every transcript last written up to 36 hours before it, the
+/// allowance for local days that begin before UTC midnight and clocks that disagree, and none
+/// written earlier.
+#[test]
+fn a_read_from_an_instant_reads_transcripts_written_up_to_36_hours_before_it() {
+    let home = scratch_dir("usage-sources-read-slack");
+    let from_ms = AUGUST_START;
+    let edge = transcript_path(&home, "edge.jsonl");
+    let earlier = transcript_path(&home, "earlier.jsonl");
+    write_records(&edge, &[record("2026-08-01T01:00:00.000Z", "msg-edge", 20)]);
+    write_records(
+        &earlier,
+        &[record("2026-08-01T02:00:00.000Z", "msg-earlier", 30)],
+    );
+    set_mtime_ms(&edge, from_ms - 36 * 60 * 60 * 1000);
+    set_mtime_ms(&earlier, from_ms - 36 * 60 * 60 * 1000 - 1);
+
+    let mut sources = open(&home, Watermark::NONE);
+    let read = sources.read(from_ms, Watermark::NONE);
+    sources.finish(|| Watermark::NONE);
+
+    assert_eq!(output_tokens(&read), [20]);
+    let _ = std::fs::remove_dir_all(home);
+}

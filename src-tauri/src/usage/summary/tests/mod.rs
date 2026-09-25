@@ -724,6 +724,33 @@ fn hourly_windows_need_exact_bounds_at_most_a_day_apart() {
     }
 }
 
+/// A local day east of UTC begins the evening before in UTC. A transcript last written then, hours
+/// before the UTC midnight the window names, still holds the first local day's usage.
+#[test]
+fn a_window_east_of_utc_reads_transcripts_written_before_its_utc_midnight() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-summary-east-of-utc");
+    let path = write_single_claude_record(&home, "tokyo.jsonl", "2026-07-31T20:00:00.000Z", 20);
+    set_mtime(&path, "2026-07-31T20:00:01Z");
+
+    let summary = read_offline(
+        &home,
+        UsageSummaryInput {
+            time_zone: "Asia/Tokyo".into(),
+            ..august_input(false)
+        },
+    );
+
+    assert_eq!(output_tokens(&summary), 20);
+    let days: Vec<&str> = summary
+        .buckets
+        .iter()
+        .map(|bucket| bucket.day.as_str())
+        .collect();
+    assert_eq!(days, ["2026-08-01"]);
+    let _ = std::fs::remove_dir_all(home);
+}
+
 /// The bound is inclusive: exactly 24 hours is the only hourly window the Usage screen sends
 /// (`ui/src/lib/usageFormat.ts`), so refusing it would blank that view.
 #[test]
