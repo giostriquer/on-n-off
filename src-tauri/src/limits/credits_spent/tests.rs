@@ -1,5 +1,7 @@
 use super::*;
+use crate::limits::backend_memo;
 use serde_json::json;
+use std::time::Instant;
 
 fn now() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-09-24T12:00:00Z")
@@ -211,33 +213,31 @@ fn was_asked(listener: &std::net::TcpListener) -> bool {
 #[test]
 fn a_failed_read_backs_off_before_the_account_is_asked_again() {
     let key = account("backoff");
-    let token = AccessToken::new("t");
     assert_eq!(
-        read_backed_off(&key, &token, "team", &crate::http::refused_url(), now()),
+        read_backed_off(&projection(&key), &crate::http::refused_url(), now()),
         None
     );
     let (listener, url) = never_asked();
 
-    assert_eq!(read_backed_off(&key, &token, "team", &url, now()), None);
+    assert_eq!(read_backed_off(&projection(&key), &url, now()), None);
     assert!(!was_asked(&listener), "asked again while backing off");
 
     // Another account is not held back by this one's failure.
     let (url, request) =
         crate::http::serve_once("200 OK", &breakdown(&[("2026-09-24", &[1.0])]).to_string());
-    assert!(read_backed_off(&account("backoff-other"), &token, "team", &url, now()).is_some());
+    assert!(read_backed_off(&projection(&account("backoff-other")), &url, now()).is_some());
     request.join().unwrap();
 }
 
 #[test]
 fn a_successful_read_does_not_hold_the_next_one_back() {
     let key = account("success");
-    let token = AccessToken::new("t");
     let body = breakdown(&[("2026-09-24", &[1.0])]).to_string();
     let (url, requests) =
         crate::http::serve_sequence(&[("200 OK", &[], &body), ("200 OK", &[], &body)]);
 
-    assert!(read_backed_off(&key, &token, "team", &url, now()).is_some());
-    assert!(read_backed_off(&key, &token, "team", &url, now()).is_some());
+    assert!(read_backed_off(&projection(&key), &url, now()).is_some());
+    assert!(read_backed_off(&projection(&key), &url, now()).is_some());
     assert_eq!(requests.join().unwrap().len(), 2);
 }
 
@@ -248,6 +248,15 @@ fn access(key: &str) -> Option<CodexAccess> {
         workspace_id: "team".to_string(),
         token: AccessToken::new("native-access"),
     })
+}
+
+/// A saved account's projection, as the saved read builds it.
+fn projection(key: &str) -> CodexAccess {
+    CodexAccess {
+        observation_key: key.to_string(),
+        workspace_id: "team".to_string(),
+        token: AccessToken::new("t"),
+    }
 }
 
 /// The signed-in card has no token of its own (app-server reads it), so its login's access token is
@@ -261,10 +270,9 @@ fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
         &breakdown(&[("2026-09-24", &[18303.4])]).to_string(),
     );
 
-    let spent = signed_in_with(
-        access(&key),
-        Some(&key),
-        Some("self_serve_business_prolite"),
+    let spent = signed_in(
+        access(&key).as_ref(),
+        &Parsed::for_card(Some(&key), Some("self_serve_business_prolite")),
         &url,
         now(),
     );
@@ -284,7 +292,12 @@ fn a_personal_signed_in_card_is_never_asked() {
     let (listener, url) = never_asked();
     for plan in [Some("pro"), Some("plus"), None] {
         let key = account("personal");
-        let spent = signed_in_with(access(&key), Some(&key), plan, &url, now());
+        let spent = signed_in(
+            access(&key).as_ref(),
+            &Parsed::for_card(Some(&key), plan),
+            &url,
+            now(),
+        );
         assert_eq!(spent, None, "{plan:?}");
     }
     assert!(!was_asked(&listener));
@@ -295,10 +308,9 @@ fn a_personal_signed_in_card_is_never_asked() {
 fn access_that_is_not_the_cards_account_is_not_asked() {
     let (listener, url) = never_asked();
     for handed in [access(&account("other-login")), None] {
-        let spent = signed_in_with(
-            handed,
-            Some("the-cards-account"),
-            Some("business"),
+        let spent = signed_in(
+            handed.as_ref(),
+            &Parsed::for_card(Some("the-cards-account"), Some("business")),
             &url,
             now(),
         );
@@ -307,43 +319,12 @@ fn access_that_is_not_the_cards_account_is_not_asked() {
     assert!(!was_asked(&listener));
 }
 
-#[test]
-fn each_failure_in_a_row_doubles_the_wait_up_to_sixteen_intervals_and_an_hour() {
-    let minute = Duration::from_secs(60);
-    for (count, intervals) in [(1, 1), (2, 2), (3, 4), (4, 8), (5, 16), (6, 16), (40, 16)] {
-        assert_eq!(
-            backoff_delay(count, minute),
-            minute * intervals,
-            "failure {count}"
-        );
-    }
-    assert_eq!(
-        backoff_delay(1, Duration::from_secs(7200)),
-        Duration::from_secs(3600)
-    );
-    assert_eq!(
-        backoff_delay(3, Duration::from_secs(1000)),
-        Duration::from_secs(3600)
-    );
-}
-
-/// Backoff state for an account, as if its last failure's wait had already run out.
 fn failed_before(key: &str, count: u32) {
-    let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
-    FAILURES
-        .get_or_init(Mutex::default)
-        .lock()
-        .unwrap()
-        .insert(key.to_string(), (expired, count));
+    MEMO.failed_before(key, count);
 }
 
 fn backoff_of(key: &str) -> Option<(Instant, u32)> {
-    FAILURES
-        .get_or_init(Mutex::default)
-        .lock()
-        .unwrap()
-        .get(key)
-        .copied()
+    MEMO.backoff_of(key)
 }
 
 /// Another failure once the wait has run out counts toward a longer one.
@@ -354,19 +335,13 @@ fn a_further_failure_waits_longer() {
 
     let before = Instant::now();
     assert_eq!(
-        read_backed_off(
-            &key,
-            &AccessToken::new("t"),
-            "team",
-            &crate::http::refused_url(),
-            now()
-        ),
+        read_backed_off(&projection(&key), &crate::http::refused_url(), now()),
         None
     );
     let after = Instant::now();
 
     let (until, count) = backoff_of(&key).unwrap();
-    let wait = backoff_delay(3, crate::limits_refresh::poll_interval());
+    let wait = backend_memo::backoff_delay(3, crate::limits_refresh::poll_interval());
     assert_eq!(count, 3);
     assert!(until >= before + wait && until <= after + wait);
 }
@@ -380,7 +355,7 @@ fn a_success_after_failures_clears_the_accounts_backoff() {
     let (url, request) =
         crate::http::serve_once("200 OK", &breakdown(&[("2026-09-24", &[1.0])]).to_string());
 
-    assert!(read_backed_off(&key, &AccessToken::new("t"), "team", &url, now()).is_some());
+    assert!(read_backed_off(&projection(&key), &url, now()).is_some());
     request.join().unwrap();
 
     assert_eq!(backoff_of(&key), None);

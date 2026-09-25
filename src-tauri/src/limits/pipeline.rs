@@ -132,6 +132,7 @@ pub(super) fn finish(
         credits: parsed.credits,
         workspace_credits: parsed.workspace_credits,
         credits_spent: parsed.credits_spent,
+        subscription: parsed.subscription,
         reset_credits: parsed.reset_credits,
         reset_offer: parsed.reset_offer,
     }

@@ -14,7 +14,7 @@ use super::Parsed;
 use crate::accounts::native::CodexAccess;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
-use crate::dto::{AgentId, LimitsCreditsSpentDto, ResetCreditOutcome};
+use crate::dto::{AgentId, ResetCreditOutcome};
 
 const APP_SERVER_TIMEOUT: Duration = Duration::from_secs(30);
 const STDOUT_LINE_LIMIT: usize = 1024 * 1024;
@@ -204,21 +204,42 @@ fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> R
 }
 
 pub(super) fn read(home: &Path, force: bool) -> Result<Parsed, AppServerFailure> {
-    read_with(
-        home,
-        force,
-        ProcessTransport::spawn,
-        super::credits_spent::signed_in,
-    )
+    read_with(home, force, ProcessTransport::spawn, |parsed, access| {
+        backend_reads(parsed, access, LIVE_BACKEND, chrono::Utc::now());
+    })
 }
 
-/// `read`, with the app-server process and the spending read (`credits_spent::signed_in`, given the
-/// login's access projection, the card's account and its plan) replaceable for tests.
+/// The endpoints the backend reads ask once the card's account is confirmed.
+#[derive(Clone, Copy)]
+pub(super) struct BackendUrls<'a> {
+    pub(super) credit_usage: &'a str,
+    pub(super) subscriptions: &'a str,
+}
+
+const LIVE_BACKEND: BackendUrls<'static> = BackendUrls {
+    credit_usage: super::credits_spent::CODEX_CREDIT_USAGE_URL,
+    subscriptions: super::renewal::CODEX_SUBSCRIPTIONS_URL,
+};
+
+/// The reads that take the confirmed card's access projection: what a workspace member spent, and
+/// the subscription's term. Neither decides the read; each is no figure when it fails.
+pub(super) fn backend_reads(
+    parsed: &mut Parsed,
+    access: Option<&CodexAccess>,
+    urls: BackendUrls<'_>,
+    now: chrono::DateTime<chrono::Utc>,
+) {
+    parsed.credits_spent = super::credits_spent::signed_in(access, parsed, urls.credit_usage, now);
+    parsed.subscription = super::renewal::signed_in(access, parsed, urls.subscriptions, now);
+}
+
+/// `read`, with the app-server process and what runs once the card's account is confirmed (the
+/// backend reads that take its access projection) replaceable for tests.
 fn read_with<T: JsonLineTransport>(
     home: &Path,
     force: bool,
     spawn: impl FnOnce(&Path) -> Result<T, String>,
-    spent: impl FnOnce(Option<CodexAccess>, Option<&str>, Option<&str>) -> Option<LimitsCreditsSpentDto>,
+    after_identity: impl FnOnce(&mut Parsed, Option<&CodexAccess>),
 ) -> Result<Parsed, AppServerFailure> {
     let expected_codex_home = home.join(".codex");
     let before = crate::accounts::native::codex_metadata(&expected_codex_home)
@@ -230,11 +251,7 @@ fn read_with<T: JsonLineTransport>(
         .map_err(|error| AppServerFailure::Failed(classify_query_failure(error, exit_status)))?;
     let (mut parsed, access) = normalize_app_server(session, before)?;
     // Only now is the card's account confirmed, and `access` was taken by that check.
-    parsed.credits_spent = spent(
-        access,
-        parsed.account.as_ref().map(|account| account.id.as_str()),
-        parsed.plan.as_deref(),
-    );
+    after_identity(&mut parsed, access.as_ref());
     Ok(parsed)
 }
 
@@ -601,8 +618,8 @@ fn response_result<T: DeserializeOwned>(message: &Value, method: &str) -> Result
 }
 
 /// The card for the account app-server read, once the native login is confirmed to be the account
-/// captured before it started; for a workspace plan, with that login's access projection for the
-/// spending read, taken in the same read of the native store as the check.
+/// captured before it started, with that login's access projection taken in the same read of the
+/// native store as the check.
 fn normalize_app_server(
     session: AppServerResult,
     before: Option<(String, Value)>,
@@ -622,23 +639,12 @@ fn normalize_app_server(
         .filter(|plan| !plan.is_empty())
         .map(str::to_string)
         .or(parsed.plan);
-    // One read of the native store confirms the account; for a workspace plan the same read also
-    // takes the access projection the spending read needs (`credits_spent::signed_in`).
-    let (after, access) = if parsed
-        .plan
-        .as_deref()
-        .is_some_and(super::credits_spent::is_codex_workspace_plan)
-    {
-        crate::accounts::native::codex_metadata_and_access(&session.codex_home)
-            .map_err(AppServerFailure::Failed)?
-            .map_or((None, None), |(metadata, access)| (Some(metadata), access))
-    } else {
-        (
-            crate::accounts::native::codex_metadata(&session.codex_home)
-                .map_err(AppServerFailure::Failed)?,
-            None,
-        )
-    };
+    // One read of the native store confirms the account and takes the access projection the term
+    // read needs for every card, and the spending read for a workspace plan (`renewal::signed_in`,
+    // `credits_spent::signed_in`).
+    let (after, access) = crate::accounts::native::codex_metadata_and_access(&session.codex_home)
+        .map_err(AppServerFailure::Failed)?
+        .map_or((None, None), |(metadata, access)| (Some(metadata), access));
     if before.as_ref().map(|(id, _)| id) != after.as_ref().map(|(id, _)| id) {
         return Err(AppServerFailure::Failed(
             "The signed-in account changed while reading usage. Retry after sign-in finishes."

@@ -5,13 +5,11 @@
 //! share of the pooled credits either (`individualLimit` is null), so spending is the one credit
 //! figure a member can see. The workspace-wide endpoint the app's admins read answers a member 403.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
-
 use chrono::{DateTime, Days, NaiveDate, SecondsFormat, Utc};
 use serde_json::Value;
 
+use super::backend_memo::PerAccount;
+use super::Parsed;
 use crate::accounts::model::AccessToken;
 use crate::accounts::native::CodexAccess;
 use crate::dto::{AgentId, LimitsCreditsSpentDto, ProviderLimitsDto};
@@ -145,51 +143,19 @@ pub(crate) fn read(
     parse(&payload, now)
 }
 
-/// Accounts whose last spending read failed, and when each may be asked again.
-static FAILURES: OnceLock<Mutex<HashMap<String, (Instant, u32)>>> = OnceLock::new();
+/// What each account answered lately is not kept: spending moves with every day's use, so every
+/// refresh asks, and only a failure holds the account back.
+static MEMO: PerAccount<LimitsCreditsSpentDto> = PerAccount::new(None);
 
-/// `read`, unless this account's last one failed recently. The read sits in series with the usage
-/// read, and every request here is bounded by `http`'s timeout, so an endpoint that fails or hangs
-/// would otherwise add up to that timeout to every refresh. After a failure the account waits a
-/// poll interval, doubling with each further failure up to an hour, as a saved account's polling
-/// does (`accounts/usage.rs`); a success clears it. A skipped read is no figure, which the card
-/// fills from the one it remembers.
-pub(crate) fn read_backed_off(
-    account: &str,
-    token: &AccessToken,
-    workspace_id: &str,
+/// `read` for the account `access` belongs to, unless its last read failed recently.
+pub(super) fn read_backed_off(
+    access: &CodexAccess,
     url: &str,
     now: DateTime<Utc>,
 ) -> Option<LimitsCreditsSpentDto> {
-    let failures = FAILURES.get_or_init(Mutex::default);
-    let previous = failures
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(account)
-        .copied();
-    if previous.is_some_and(|(until, _)| Instant::now() < until) {
-        return None;
-    }
-    let spent = read(token, workspace_id, url, now);
-    let mut failures = failures
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if spent.is_some() {
-        failures.remove(account);
-    } else {
-        let count = previous.map_or(1, |(_, count)| count.saturating_add(1));
-        let delay = backoff_delay(count, crate::limits_refresh::poll_interval());
-        failures.insert(account.to_string(), (Instant::now() + delay, count));
-    }
-    spent
-}
-
-/// How long an account waits after its `count`th failure in a row: one poll interval, doubling with
-/// each further failure up to sixteen intervals, and never more than an hour.
-fn backoff_delay(count: u32, interval: Duration) -> Duration {
-    interval
-        .saturating_mul(1 << count.saturating_sub(1).min(4))
-        .min(Duration::from_secs(3600))
+    MEMO.read_backed_off(&access.observation_key, || {
+        read(&access.token, &access.workspace_id, url, now)
+    })
 }
 
 /// The signed-in Codex account's spending, asked with its own access token: app-server reads that
@@ -199,34 +165,25 @@ fn backoff_delay(count: u32, interval: Duration) -> Duration {
 /// asked only for a workspace plan, with the access projection the read's identity check took from
 /// the login it confirmed (`codex_app_server::normalize_app_server`), and only for that card.
 pub(super) fn signed_in(
-    access: Option<CodexAccess>,
-    account_id: Option<&str>,
-    plan: Option<&str>,
-) -> Option<LimitsCreditsSpentDto> {
-    signed_in_with(access, account_id, plan, CODEX_CREDIT_USAGE_URL, Utc::now())
-}
-
-fn signed_in_with(
-    access: Option<CodexAccess>,
-    account_id: Option<&str>,
-    plan: Option<&str>,
+    access: Option<&CodexAccess>,
+    parsed: &Parsed,
     url: &str,
     now: DateTime<Utc>,
 ) -> Option<LimitsCreditsSpentDto> {
-    if !plan.is_some_and(is_codex_workspace_plan) {
+    if !parsed.plan.as_deref().is_some_and(is_codex_workspace_plan) {
         return None;
     }
     let access = access?;
-    if account_id != Some(access.observation_key.as_str()) {
+    if parsed.account.as_ref().map(|account| account.id.as_str()) != Some(&access.observation_key) {
         return None;
     }
-    read_backed_off(
-        &access.observation_key,
-        &access.token,
-        &access.workspace_id,
-        url,
-        now,
-    )
+    read_backed_off(access, url, now)
+}
+
+/// Drop what is remembered about `account`, so a test starts from nothing.
+#[cfg(test)]
+pub(super) fn forget(account: &str) {
+    MEMO.forget(account);
 }
 
 #[cfg(test)]

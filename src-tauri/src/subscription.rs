@@ -3,8 +3,9 @@
 //! `chatgpt_subscription_last_checked`, when OpenAI last confirmed it. Codex refreshes the token
 //! as it runs and `accounts/usage_renew.rs` refreshes saved logins, so the date keeps up without a
 //! browser session, a network call or a Keychain item of its own. The claim says how long the
-//! plan is paid for, not whether it renews, and the UI says so. No access or refresh token is
-//! read here.
+//! plan is paid for, not whether it renews: that comes from the billing endpoint, read beside the
+//! card's usage (`limits/renewal.rs`), and this date is the card's fallback when that read has
+//! never answered. No access or refresh token is read here.
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;

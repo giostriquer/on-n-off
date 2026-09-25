@@ -4,6 +4,7 @@ mod claude_renewal;
 mod claude_subscription;
 mod credits_spent;
 mod memory;
+mod renewal;
 
 use super::*;
 use crate::dto::{LimitWindowKind, LimitsPriceDto, LimitsResetOfferDto, LimitsWorkspaceCreditsDto};
@@ -36,6 +37,7 @@ fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     }
@@ -845,6 +847,12 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             last_30_days: 20299.7,
             updated_at: Some("2026-09-24T19:00:00Z".to_string()),
         }),
+        subscription: Some(crate::dto::LimitsSubscriptionDto {
+            active_until: "2026-09-28T16:22:34Z".to_string(),
+            will_renew: false,
+            note: Some(crate::dto::SubscriptionNote::Cancelled),
+            checked_at: "2026-09-25T12:00:00Z".to_string(),
+        }),
         reset_credits: Some(LimitsResetCreditsDto {
             available_count: 1,
             next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
@@ -868,6 +876,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             "credits": {"balance": "3", "unlimited": false},
             "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0, "resetsAt": "2026-10-01T12:00:00+00:00", "reached": true},
             "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7, "updatedAt": "2026-09-24T19:00:00Z"},
+            "subscription": {"activeUntil": "2026-09-28T16:22:34Z", "willRenew": false, "note": "cancelled", "checkedAt": "2026-09-25T12:00:00Z"},
             "resetCredits": {"availableCount": 1, "nextExpiresAt": "2026-09-01T12:00:00+00:00"},
             "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
         })
@@ -886,10 +895,28 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
     assert!(value.get("credits").is_none());
     assert!(value.get("workspaceCredits").is_none());
     assert!(value.get("creditsSpent").is_none());
+    assert!(value.get("subscription").is_none());
     assert!(value.get("resetCredits").is_none());
     assert!(value.get("resetOffer").is_none());
     assert!(value.get("account").is_none());
     assert_eq!(value["currentAccount"], true);
+}
+
+/// Every note crosses under the name the UI matches on, and comes back from a snapshot the same way.
+#[test]
+fn every_subscription_note_keeps_its_wire_name() {
+    use crate::dto::SubscriptionNote;
+    for (note, wire) in [
+        (SubscriptionNote::Cancelled, "cancelled"),
+        (SubscriptionNote::PlanChange, "planChange"),
+        (SubscriptionNote::PastDue, "pastDue"),
+    ] {
+        assert_eq!(serde_json::to_value(note).unwrap(), serde_json::json!(wire));
+        assert_eq!(
+            serde_json::from_value::<SubscriptionNote>(serde_json::json!(wire)).unwrap(),
+            note
+        );
+    }
 }
 
 /// Claude Code's access token lasts 8 hours and the CLI renews it from its refresh token on

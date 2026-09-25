@@ -722,9 +722,10 @@ fn codex_identity(login: &Login) -> Result<Option<(String, Value)>, String> {
     )))
 }
 
-/// The signed-in Codex login's access token, beside the identity it belongs to, for the one request
-/// on-n-off makes with that login itself: a workspace member's spending (`limits/credits_spent.rs`),
-/// a read-only GET the user chose to allow on 2026-09-24. Only the access token leaves accounts.
+/// The signed-in Codex login's access token, beside the identity it belongs to, for the two requests
+/// on-n-off makes with that login itself: a workspace member's spending (`limits/credits_spent.rs`)
+/// and the subscription's term (`limits/renewal.rs`), read-only GETs the user chose to allow on
+/// 2026-09-24 and 2026-09-25. Only the access token leaves accounts.
 pub(crate) struct CodexAccess {
     /// The same key `codex_metadata` gives, so the caller can match the token to a card.
     pub observation_key: String,
@@ -738,7 +739,7 @@ pub(crate) type CodexMetadata = (String, Value);
 
 /// `codex_metadata`, and the login's access projection when it holds an access token, from one
 /// read of the native store: the signed-in read's identity check after the app-server handshake
-/// takes it for a workspace plan, so the spending read costs no read of its own. `None` for no
+/// takes it, so the backend reads cost no read of their own. `None` for no
 /// login; the access is `None` for a login without an access token.
 pub(crate) fn codex_metadata_and_access(
     config_home: &Path,

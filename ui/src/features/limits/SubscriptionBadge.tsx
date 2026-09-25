@@ -1,42 +1,32 @@
 import { TooltipButton } from "$lib/TooltipButton";
-import { formatShortDate } from "$lib/limitsFormat";
 import { useCodexSubscription } from "$lib/useCodexSubscription";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsSubscription, ProviderLimits } from "$lib/limitsTypes";
 import { claudeSubscriptionStatus } from "./claudeSubscriptionStatus";
+import { codexSubscriptionTerm } from "./codexSubscriptionTerm";
 import type { LimitAccountPresentation } from "./limitPresentation";
 import "./SubscriptionBadge.css";
 
-function exactDate(value: string) {
-  return new Date(value).toLocaleString(undefined, {
-    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  });
-}
-
-/**
- * How long a Codex plan is paid for, as its login's ID token says. The token carries no renewal or
- * cancellation status (see PROVIDERS.md), so the badge names the date and the tooltip says what it
- * does not know. A date that has passed shows nothing: a lapsed period says nothing about the
- * current one.
- */
-export function SubscriptionBadge({ subscription, now }: { subscription: SubscriptionDate | null; now: number }) {
-  const until = subscription ? Date.parse(subscription.date) : NaN;
-  if (!subscription || !Number.isFinite(until) || until <= now) return null;
-  const short = formatShortDate(subscription.date, { yearUnlessSameAs: now });
-  const checked = subscription.checkedAt && Number.isFinite(Date.parse(subscription.checkedAt)) ? exactDate(subscription.checkedAt) : null;
+/** The Codex badge: `codexSubscriptionTerm` decides what it says; this only draws it. */
+export function SubscriptionBadge({ term, paidThrough, now }: { term?: LimitsSubscription | null; paidThrough: SubscriptionDate | null; now: number }) {
+  const shown = codexSubscriptionTerm(term, paidThrough, now);
+  if (!shown) return null;
   const tooltip = <>
-    <div>Paid through {exactDate(subscription.date)}</div>
-    <div>Renewal status unknown. The login says how long the plan is paid for, not whether it renews.</div>
-    {checked && <div className="mt-1 text-[11px] text-[var(--mute)]">Confirmed by OpenAI {checked}</div>}
+    <div>{shown.headline}</div>
+    {shown.countdown && <div>{shown.countdown}</div>}
+    {shown.note && <div>{shown.note}</div>}
+    {shown.caveat && <div>{shown.caveat}</div>}
+    {shown.checked && <div className="mt-1 text-[11px] text-[var(--mute)]">{shown.checked}</div>}
   </>;
-  return <TooltipButton label={`Subscription paid through ${short}`} tooltip={tooltip} className="type-badge subscription-badge subscription-badge--neutral">
-    Until {short}
+  return <TooltipButton label={shown.name} tooltip={tooltip} className={`type-badge subscription-badge subscription-badge--${shown.tone}`}>
+    {shown.tone === "warning" && <span aria-hidden="true" className="subscription-badge-fill" style={{width: `${shown.progress * 100}%`, backgroundColor: `color-mix(in srgb, var(--expiry-fill-start), var(--expiry-fill-end) ${shown.progress * 100}%)`}} />}
+    <span className="relative">{shown.label}</span>
   </TooltipButton>;
 }
 
-export function CodexSubscriptionBadge({accountId, current, now}: {accountId: string; current: boolean; now: number}) {
+export function CodexSubscriptionBadge({accountId, current, term, now}: {accountId: string; current: boolean; term?: LimitsSubscription | null; now: number}) {
   const query = useCodexSubscription(accountId, current);
-  return <SubscriptionBadge subscription={query.data ?? null} now={now} />;
+  return <SubscriptionBadge term={term} paidThrough={query.data ?? null} now={now} />;
 }
 
 /**
@@ -55,7 +45,7 @@ export function ClaudeSubscriptionStatusBadge({ status, lastKnown, checkedAt }: 
   </>;
   return <TooltipButton label={`Subscription status: ${badge.label}`} tooltip={tooltip}
     className={`type-badge subscription-badge subscription-badge--${badge.tone}`}>
-    {badge.label}
+    <span className="relative">{badge.label}</span>
   </TooltipButton>;
 }
 
@@ -69,7 +59,7 @@ export function AccountSubscriptionBadge({ entry, now, freshness }: {
 }) {
   if (entry.provider === "codex") {
     return entry.account
-      ? <CodexSubscriptionBadge accountId={entry.account.id} current={entry.currentAccount} now={now} />
+      ? <CodexSubscriptionBadge accountId={entry.account.id} current={entry.currentAccount} term={entry.subscription} now={now} />
       : null;
   }
   if (entry.provider === "claude") {

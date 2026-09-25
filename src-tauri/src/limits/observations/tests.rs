@@ -34,6 +34,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -66,6 +67,7 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     });
@@ -139,6 +141,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -165,6 +168,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: reset_credits.clone(),
         // A remembered account can carry no offer, and merging must not invent one either.
         reset_offer: Some(crate::dto::LimitsResetOfferDto {
@@ -200,6 +204,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -219,6 +224,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: reset_credits.clone(),
         reset_offer: None,
     });
@@ -262,6 +268,7 @@ fn a_paused_refresh_keeps_the_remembered_workspace_credit_share() {
         credits: None,
         workspace_credits,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -307,6 +314,7 @@ fn a_paused_refresh_keeps_the_remembered_credits_spent() {
         credits: None,
         workspace_credits: None,
         credits_spent,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     };
@@ -346,6 +354,7 @@ fn a_paused_refresh_keeps_the_remembered_subscription_status() {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     };

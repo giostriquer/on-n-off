@@ -84,6 +84,33 @@ pub struct LimitsCreditsSpentDto {
     pub updated_at: Option<String>,
 }
 
+/// A Codex subscription's term, as ChatGPT's own billing endpoint reports it for the account: the
+/// end of the paid period and whether it renews then (`limits/renewal.rs`). Metadata beside the
+/// plan, like `subscription_status`, never an observation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsSubscriptionDto {
+    /// RFC 3339: the end of the paid period.
+    pub active_until: String,
+    pub will_renew: bool,
+    /// What the endpoint says about the end of the period, when it says anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<SubscriptionNote>,
+    /// RFC 3339: when the term was read.
+    pub checked_at: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SubscriptionNote {
+    /// The subscription was cancelled and ends with the paid period.
+    Cancelled,
+    /// Another plan takes over at the end of the paid period.
+    PlanChange,
+    /// A payment is overdue.
+    PastDue,
+}
+
 /// Banked rate-limit resets: one-time resets saved to the account until used or expired. Codex's
 /// can be spent from on-n-off; Claude's are only reported, and spent with Claude Code's `/limit-reset`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -172,6 +199,9 @@ pub struct ProviderLimitsDto {
     pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credits_spent: Option<LimitsCreditsSpentDto>,
+    /// Codex only: the subscription's term from the billing endpoint (`limits/renewal.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription: Option<LimitsSubscriptionDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_credits: Option<LimitsResetCreditsDto>,
     /// Never remembered: an offer withdrawn between reads must disappear with it.

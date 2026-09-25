@@ -41,6 +41,8 @@ struct StoredSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     credits_spent: Option<crate::dto::LimitsCreditsSpentDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    subscription: Option<crate::dto::LimitsSubscriptionDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     reset_credits: Option<LimitsResetCreditsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observed_at: Option<String>,
@@ -88,15 +90,17 @@ impl SnapshotStore {
             return Ok(());
         }
         let mut stored = StoredSnapshot::from_dto(dto, incoming_latest);
-        // `ProviderLimitsDto::keep_reset_credits_from` and `keep_credits_spent_from`, applied to
-        // what is on disk: every writer stores its own read, and one that could not tell the
-        // banked-reset count or what was spent must not erase it.
+        // `limits::keep_remembered_from`, applied to what is on disk: every writer stores its own
+        // read, and one that could not tell a remembered figure must not erase it.
         if let Some(existing) = existing {
             if stored.reset_credits.is_none() {
                 stored.reset_credits = existing.reset_credits;
             }
             if stored.credits_spent.is_none() && super::credits_spent::asks_what_was_spent(dto) {
                 stored.credits_spent = existing.credits_spent;
+            }
+            if stored.subscription.is_none() && super::renewal::asks_about_renewal(dto) {
+                stored.subscription = existing.subscription;
             }
         }
         write_stored(&path, stored)
@@ -231,6 +235,7 @@ impl StoredSnapshot {
             credits: dto.credits.clone(),
             workspace_credits: dto.workspace_credits.clone(),
             credits_spent: dto.credits_spent.clone(),
+            subscription: dto.subscription.clone(),
             reset_credits: dto.reset_credits.clone(),
             observed_at: Some(observed_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
         }
@@ -258,6 +263,7 @@ impl StoredSnapshot {
             // passed reset; it is kept, since dropping it would bring back the own balance of 0.
             workspace_credits: self.workspace_credits,
             credits_spent: self.credits_spent,
+            subscription: self.subscription,
             reset_credits: self
                 .reset_credits
                 .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),

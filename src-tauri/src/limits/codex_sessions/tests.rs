@@ -33,6 +33,7 @@ fn remembered(id: &str, reset_at: &str) -> ProviderLimitsDto {
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     }

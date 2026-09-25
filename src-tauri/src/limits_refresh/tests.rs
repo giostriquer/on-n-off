@@ -24,6 +24,7 @@ fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> Pr
         credits: None,
         workspace_credits: None,
         credits_spent: None,
+        subscription: None,
         reset_credits: None,
         reset_offer: None,
     }

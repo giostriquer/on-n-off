@@ -28,6 +28,7 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
             usage: "unused",
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
     .unwrap();
@@ -62,6 +63,7 @@ fn saved_claude_carries_the_subscription_status_its_profile_reports() {
             usage: "unused",
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
     .unwrap();
@@ -92,6 +94,7 @@ fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
             usage: "unused",
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
     .unwrap();
@@ -130,6 +133,7 @@ fn saved_claude_falls_back_to_the_plain_read_when_the_reset_query_is_refused() {
             usage: "unused",
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
     .unwrap();
@@ -177,6 +181,7 @@ fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
                     usage: "unused",
                     reset_credits: "unused",
                     credit_usage: "unused",
+                    subscriptions: "unused",
                 },
             )
             .unwrap();
@@ -212,6 +217,7 @@ fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
             usage: &url,
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
     .unwrap();
@@ -256,6 +262,7 @@ fn saved_codex_reads_the_members_share_of_the_workspace_credits() {
             usage: &url,
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
     .unwrap();
@@ -290,6 +297,7 @@ fn saved_codex_takes_the_shares_meter_from_what_codex_says_remains() {
             usage: &url,
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
     .unwrap();
@@ -315,6 +323,7 @@ fn saved_codex_marks_a_members_used_up_share_reached() {
             usage: &url,
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
     .unwrap();
@@ -354,6 +363,7 @@ fn read_codex(usage: &str, resets: &str) -> Result<ProviderLimitsDto, HttpError>
             usage,
             reset_credits: resets,
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     )
 }
@@ -494,6 +504,7 @@ fn wrong_claude_identity_stops_before_usage() {
             usage: "unused",
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     );
     p.join().unwrap();
@@ -515,6 +526,7 @@ fn matching_claude_user_in_another_workspace_is_rejected_before_usage() {
             usage: "unused",
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     );
     request.join().unwrap();
@@ -536,6 +548,7 @@ fn codex_quota_for_another_account_is_rejected() {
             usage: &url,
             reset_credits: "unused",
             credit_usage: "unused",
+            subscriptions: "unused",
         },
     );
     request.join().unwrap();
@@ -559,6 +572,54 @@ fn spending(days: &[(u64, &[f64])]) -> String {
         "group_by": "day",
     })
     .to_string()
+}
+
+/// The term is asked with the saved account's token for its own workspace and lands on its card,
+/// and the same user's other workspace has a term of its own.
+#[test]
+fn a_saved_codex_read_takes_the_term_for_its_own_workspace() {
+    let usage = r#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":604800}}}"#;
+    let who = member("term");
+    let read_term = |who: &Identity, body: &str| {
+        let (usage_url, u) = serve_once("200 OK", usage);
+        let (subscriptions, s) = serve_once_capturing("200 OK", &[], body);
+        let dto = read_at(
+            who,
+            &json!({"tokens":{"access_token":"fixture-access"}}),
+            "unused",
+            "unused",
+            CodexEndpoints {
+                usage: &usage_url,
+                reset_credits: "unused",
+                credit_usage: "unused",
+                subscriptions: &subscriptions,
+            },
+        )
+        .unwrap();
+        u.join().unwrap();
+        (dto, s.join().unwrap().head)
+    };
+
+    let (dto, head) = read_term(
+        &who,
+        r#"{"active_until":"2026-09-28T16:22:34Z","will_renew":false,"cancellation_outcome":"user_cancelled"}"#,
+    );
+    let term = dto.subscription.expect("the term is on the card");
+    assert!(!term.will_renew);
+    assert_eq!(term.note, Some(crate::dto::SubscriptionNote::Cancelled));
+    assert!(head.contains("account_id=team"), "{head}");
+    assert!(head.contains("Bearer fixture-access"), "{head}");
+
+    let other = Identity {
+        workspace_id: "other".into(),
+        ..who.clone()
+    };
+    let (dto, head) = read_term(
+        &other,
+        r#"{"active_until":"2026-10-28T16:22:34Z","will_renew":true}"#,
+    );
+    assert!(dto.subscription.unwrap().will_renew);
+    assert!(head.contains("account_id=other"), "{head}");
 }
 
 /// A saved Codex member of workspace `team`. Each test names its own member, because a failed
@@ -585,6 +646,7 @@ fn read_codex_spending(
             usage,
             reset_credits: "unused",
             credit_usage: spending,
+            subscriptions: "unused",
         },
     )
 }
@@ -720,6 +782,7 @@ fn a_saved_claude_team_or_enterprise_account_is_never_asked_what_it_spent() {
                 usage: "unused",
                 reset_credits: "unused",
                 credit_usage: &credit_usage,
+                subscriptions: "unused",
             },
         )
         .unwrap();

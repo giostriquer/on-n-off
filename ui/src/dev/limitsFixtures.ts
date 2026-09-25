@@ -44,6 +44,7 @@ const CODEX: ProviderLimits[] = [
       { id: "extra:spark:secondary", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(7 * 24 * 60), windowSeconds: 604_800, observedAt: OBSERVED },
     ],
     credits: { balance: "0", unlimited: false },
+    subscription: { activeUntil: at(26 * 24 * 60), willRenew: true, checkedAt: at(-30) },
   },
   {
     provider: "codex",
@@ -55,10 +56,37 @@ const CODEX: ProviderLimits[] = [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 97, resetsAt: at(-85), windowSeconds: 604_800, observedAt: REMEMBERED_OBSERVED },
       { id: "extra:spark", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(-4 * 24 * 60 - 7 * 60), windowSeconds: 18_000, observedAt: REMEMBERED_OBSERVED },
     ],
+    subscription: { activeUntil: at(3 * 24 * 60 + 12 * 60), willRenew: false, note: "cancelled", checkedAt: at(-26 * 60) },
   },
 ];
 
 const LIMITS: Partial<Record<AgentId, ProviderLimits[]>> = { claude: CLAUDE, codex: CODEX };
+
+/**
+ * `?mock=subscriptionBadges`: one Codex card per state of the term badge, from a plan that renews
+ * to one whose end has passed, with each note, and one card the endpoint never answered for, which
+ * has only the login token's date.
+ */
+export function subscriptionBadgesCodex(): ProviderLimits[] {
+  const template = { ...CODEX[0], windows: CODEX[0].windows.filter(window => window.kind === "weekly"), credits: null };
+  const cases: Array<[string, ProviderLimits["subscription"]]> = [
+    ["renewal", { activeUntil: at(30 * 24 * 60), willRenew: true, checkedAt: at(-30) }],
+    ["later", { activeUntil: at(14 * 24 * 60), willRenew: false, checkedAt: at(-30) }],
+    ["halfway", { activeUntil: at(3.5 * 24 * 60), willRenew: false, note: "cancelled", checkedAt: at(-30) }],
+    ["deadline", { activeUntil: at(60), willRenew: false, note: "cancelled", checkedAt: at(-30) }],
+    ["passed", { activeUntil: at(-24 * 60), willRenew: false, note: "cancelled", checkedAt: at(-30) }],
+    ["overdue-renewal", { activeUntil: at(-24 * 60), willRenew: true, note: "pastDue", checkedAt: at(-30) }],
+    ["plan-change", { activeUntil: at(9 * 24 * 60), willRenew: true, note: "planChange", checkedAt: at(-30) }],
+    ["token-only", null],
+  ];
+  return cases.map(([id, subscription], index) => ({
+    ...template,
+    account: { id: `badge:${id}`, label: `${id}@example.com` },
+    currentAccount: index === 0,
+    windows: template.windows.map(window => ({ ...window, usedPercent: 25 + index * 8 })),
+    subscription,
+  }));
+}
 
 /** A saved Claude account whose five-hour session has not started. */
 export function claudeWithoutReset(): ProviderLimits[] {

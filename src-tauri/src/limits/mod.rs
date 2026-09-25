@@ -8,6 +8,7 @@
 //! time, successful reads are also remembered per account (numbers only) so accounts the user
 //! has switched away from stay visible with each window's observation time.
 
+mod backend_memo;
 mod claude;
 mod claude_desktop;
 use crate::accounts::claude_renew;
@@ -20,6 +21,7 @@ pub(crate) mod json;
 pub(crate) mod login;
 mod observations;
 mod pipeline;
+mod renewal;
 pub(crate) mod saved;
 mod snapshots;
 
@@ -66,8 +68,40 @@ struct Parsed {
     credits: Option<LimitsCreditsDto>,
     workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     credits_spent: Option<crate::dto::LimitsCreditsSpentDto>,
+    subscription: Option<crate::dto::LimitsSubscriptionDto>,
     reset_credits: Option<LimitsResetCreditsDto>,
     reset_offer: Option<crate::dto::LimitsResetOfferDto>,
+}
+
+#[cfg(test)]
+impl Parsed {
+    /// A read for one card, with only what the backend reads decide by: its account and plan.
+    pub(super) fn for_card(account: Option<&str>, plan: Option<&str>) -> Self {
+        Self {
+            account: account.map(|id| LimitsAccountDto {
+                legacy_id: None,
+                id: id.to_string(),
+                label: None,
+            }),
+            plan: plan.map(str::to_string),
+            subscription_status: None,
+            windows: Vec::new(),
+            credits: None,
+            workspace_credits: None,
+            credits_spent: None,
+            subscription: None,
+            reset_credits: None,
+            reset_offer: None,
+        }
+    }
+}
+
+/// A successful read that could not tell a remembered figure keeps `previous`'s: the banked
+/// resets, what was spent and the subscription's term, each under its own rule.
+pub(crate) fn keep_remembered_from(card: &mut ProviderLimitsDto, previous: &ProviderLimitsDto) {
+    card.keep_reset_credits_from(previous);
+    credits_spent::keep_credits_spent_from(card, previous);
+    renewal::keep_subscription_from(card, previous);
 }
 
 /// The three services one Claude read talks to, together so adding a fourth costs one field and
@@ -230,8 +264,7 @@ fn aggregate_accounts(
     let current = if current.status == LimitsStatus::Ok {
         let mut current = current;
         if let Some(prior) = &prior {
-            current.keep_reset_credits_from(prior);
-            credits_spent::keep_credits_spent_from(&mut current, prior);
+            keep_remembered_from(&mut current, prior);
         }
         current
     } else {

@@ -908,6 +908,34 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
 });
 
 
+it.each([true, false])("shows the billing term through a header badge (usage available: %s)", async (hasUsage) => {
+  vi.mocked(readCodexSubscription).mockClear().mockResolvedValueOnce(null);
+  const codex = okCodex({ subscription: { activeUntil: "2026-10-10T12:00:00Z", willRenew: false, note: "cancelled", checkedAt: NOW } });
+  if (!hasUsage) codex.windows = [];
+  answer([okClaude()], [codex]);
+  renderLimits();
+  const badge = await screen.findByRole("button", {name: "Subscription status: No renewal"});
+  expect(badge.closest("header")).toHaveTextContent("Pro ×20");
+  fireEvent.focus(badge);
+  expect(screen.getByRole("tooltip")).toHaveTextContent(/Expires/);
+  expect(screen.getByRole("tooltip")).toHaveTextContent("Cancelled: the plan ends with this period.");
+  fireEvent.keyDown(document, {key:"Escape"});
+  expect(screen.queryByRole("tooltip")).toBeNull();
+});
+
+it("turns a plan's last minute red on the local minute clock without rereading", async () => {
+  vi.useFakeTimers({toFake:["Date", "setInterval", "clearInterval"]});
+  vi.setSystemTime(new Date(NOW));
+  vi.mocked(readCodexSubscription).mockClear().mockResolvedValueOnce(null);
+  answer([okClaude()], [okCodex({ subscription: { activeUntil: new Date(Date.parse(NOW) + 30_000).toISOString(), willRenew: false, checkedAt: NOW } })]);
+  renderLimits();
+  const badge = await screen.findByRole("button", {name: "Subscription status: No renewal"});
+  expect(badge).toHaveClass("subscription-badge--warning");
+  await act(async () => { vi.advanceTimersByTime(60_000); });
+  expect(badge).toHaveClass("subscription-badge--expired");
+  expect(readCodexSubscription).toHaveBeenCalledTimes(1);
+});
+
 it("drops the badge on the local minute clock once the paid period ends, without rereading", async () => {
   vi.useFakeTimers({toFake:["Date", "setInterval", "clearInterval"]});
   vi.setSystemTime(new Date(NOW));
