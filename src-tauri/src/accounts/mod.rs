@@ -304,6 +304,8 @@ impl Accounts {
         Ok(())
     }
 
+    /// Announced once the change is durable, whether the switch then succeeds or fails: a
+    /// rollback may have touched the native login. A sign-in is announced only once published.
     fn use_profile(
         &self,
         provider: AgentId,
@@ -369,6 +371,8 @@ impl Accounts {
         result
     }
 
+    /// Announced once the forgotten logins are durable, whether the logout then succeeds or not:
+    /// a failed logout may still have changed the native login.
     fn sign_out(&self, provider: AgentId) -> Result<(), String> {
         let change = activity::change(provider)?;
         let native = self.native(provider)?;

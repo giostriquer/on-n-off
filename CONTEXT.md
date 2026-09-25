@@ -41,6 +41,14 @@ _Avoid_: cache, snapshot (the file that stores it)
 Where a provider's own CLI keeps its signed-in login: a Keychain item or a credentials file.
 _Avoid_: credential source
 
+**Saved profile**:
+A login on-n-off keeps encrypted for a provider account, so the user can switch back to it.
+_Avoid_: saved account, vault entry
+
+**Account change**:
+An action that changes which logins are saved or which one the provider's CLI uses: save, remove,
+use, sign out, sign in.
+
 ### Usage
 
 **Transcript source**:

@@ -214,6 +214,7 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         return Err("The isolated login could not be cleaned from protected storage. Its private recovery directory was retained.".into());
     }
     result?;
+    // Unlike a use or a sign-out, only a published sign-in changed anything to announce.
     super::changed(provider);
     Ok(())
 }

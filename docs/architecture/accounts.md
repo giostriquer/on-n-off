@@ -24,11 +24,14 @@ independently. A running client can therefore retain its credential generation.
 Each private renewal holds a per-profile cross-process lease and first writes an encrypted intent.
 An ambiguous response or crash leaves that intent, preventing another redemption of the same
 possibly consumed token. A complete reply is encrypted before vault publication; the next poll
-can recover it without another grant. Publication checks profile identity, credential generation
-and ownership. An unfinished renewal blocks activation of its source generation until recovery
+can recover it without another grant. Publication checks that the profile still holds the renewed
+generation and still owns its renewal, and deliberately not the sign-in epoch: the refresh token is
+already spent, so an account change that left this profile alone must not discard the renewed
+login. An unfinished renewal blocks activation of its source generation until recovery
 or a new sign-in. No renewal secret enters ordinary backups or DTOs. Usage publication separately
-checks the account epoch and current login while holding the vault lease briefly; HTTP runs
-without the vault publication lock. Removal, logout and reauthentication reject late usage.
+checks the sign-in epoch and the login it read with while holding the vault lease briefly; HTTP
+runs without the vault lease. Any account change, removal, logout and reauthentication included,
+rejects late usage.
 
 Ownership covers credentials issued and managed through the app's normal flows. It cannot
 coordinate copies manually exported to an unrelated client or machine. Profiles saved from a
@@ -44,6 +47,20 @@ account operation retries. Native OAuth payloads are not cached by this mechanis
 credentials have separate in-memory types; only metadata DTOs cross IPC. The entire persisted
 registry, including recovery records, is encrypted. This feature never uses ConfigIo's ordinary
 backup store for tokens.
+
+`accounts/store.rs` owns how the vault changes. An account change (save, remove, use, recover,
+sign out, or a sign-in's publication) goes through `Store::change`: a pending recovery refuses it
+(recovery instead requires one), it bumps the persisted sign-in epoch, persists, and releases the
+vault lease before returning, so the caller announces it after release. `change_then` runs what must
+follow under the same lease once the change is durable: a switch's native write, the official
+logout. A category edit is a metadata change, allowed during recovery and bumping nothing. Turning
+remembering on bumps the epoch but is allowed during recovery, since it changes no login. Work too
+slow to hold the lease (an isolated sign-in, a remembered login's verification, a usage read, a
+private renewal) takes a `Ticket` first and publishes through `Store::publish`, which rechecks under
+the lease what the ticket guards and bumps nothing: the epoch for a sign-in, a remembered login and
+a usage reading (a reading also holds its login generation), and only the profile's login and
+ownership for a renewal. A pending recovery rejects every ticket. The epoch and the recovery journal
+are private to the store.
 
 `accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
 existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
@@ -102,7 +119,7 @@ without starting a CLI or writing auth.json.
 An in-process reservation and a cross-process shared/exclusive activity lease exclude provider
 reads from account activation. A separate lease serializes vault access. Existing vault keys are unlocked before acquiring the shared storage lease, so an OS prompt does
 not block another provider's file transaction. Initial key/vault creation remains serialized.
-Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Completed saves release their leases before announcing account changes. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks
+Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Every account change releases its leases before it is announced. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks
 (Claude Code's refresh lock, its legacy lock beside the config dir's real path, and the config
 file's lock) cover the outgoing reread, durable journal and publication; the credential write goes
 through `claude_store::begin`, the one writer the renewal uses too, which takes Claude Code's
@@ -114,26 +131,32 @@ the lock guard and returns the store as read back under it, so verification, whi
 take the same locks, cannot run while they are held. Every held lock has a heartbeat. Claude verification compares the authenticated
 user and organization with the exact resolved native identity file, including legacy configuration. All network
 and filesystem work happens on blocking workers, outside UI/state mutexes. Cancellation is scoped
-to an operation UUID, including cancel-before-start. A persisted generation rejects late sign-in
-publication after logout, removal or activation in any manager instance, and during recovery.
+to an operation UUID, including cancel-before-start. The persisted sign-in epoch rejects a late
+sign-in publication after any account change in any manager instance, and so does a pending
+recovery.
 Pending reauthentication is preserved when switching away; Save current refuses to overwrite it.
 
 Remembering consent lives in a private metadata preference beside the vault. It is checked before
 credential access and again under the vault lease before publication. Enable proves the protected
 vault is usable first. Disabling needs only the publication file lease and consent write, so it
 works even if the vault is damaged or unavailable. The UI reads consent independently from account
-credentials. Publication rechecks consent; re-enabling advances the persisted operation generation,
+credentials. Publication rechecks consent; re-enabling advances the persisted sign-in epoch,
 so an earlier check cannot save after disable/re-enable. Turning it off retains existing profiles. Discovery
-verification releases the vault lease; publication reacquires it, rechecks consent, epoch, recovery,
-exclusions and exact native credential equality, then holds the native lock through encrypted save.
+verification releases the vault lease; publication reacquires it, rechecks consent, then its ticket
+(epoch and recovery), exclusions and exact native credential equality, then holds the native lock
+through encrypted save.
 Logout suppresses the outgoing credential fingerprint so an unchanged failed logout is not silently
 remembered again. A later verified native sign-in with a new credential can be remembered.
 
 The encrypted journal is persisted before any native write. ConfigIo owns narrow oauthAccount
 configuration publication, validation and rollback; the account journal is its protected backup
 participant. Claude credential publication merges only `claudeAiOauth`, preserving current MCP
-OAuth entries. Successful account changes replace the shared limits reading, and the Codex
-subscription dates read from the logins, through `read_revision`.
+OAuth entries. Every account change replaces the shared Limits reading, and the Codex subscription
+dates read from the logins, through `read_revision` once its leases are released: save current and
+remove for the provider whose card they add or remove. Use and sign out do so even when their
+native half fails, because a rollback or a failed logout may still have changed the native login;
+a sign-in does so only once published, and a change refused before it wrote anything is not
+announced. A category edit announces only the account list.
 
 ## Native scope and limitations
 
@@ -219,6 +242,9 @@ Focused tests use disposable homes, fake native verification boundaries, real fi
 authenticated encryption and browser/HTTP fixtures. They cover identity separation, newer outgoing
 generations, wrong-user reauthentication, cancellation, partial publication, recovery, MCP
 preservation, corrupted vaults and browser workspace membership. Tests do not use personal accounts.
+The account operations run on `Accounts` (`accounts/mod.rs`), which tests build from a scratch home
+whose vault the fixture key unlocks, a fake native store, fake running clients and a notifier that
+records what it heard; a test build fails any test that reaches the OS credential store.
 
 Real browser sign-in, provider revocation, macOS Keychain interoperability and Windows credential
 storage require designated-account validation on those platforms. Fixture tests and a read-only

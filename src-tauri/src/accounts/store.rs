@@ -51,7 +51,8 @@ const RECOVER_FIRST: &str = "Recover the interrupted account change first.";
 /// A sign-in or a remembered login whose ticket no longer holds.
 const SIGN_IN_CHANGED: &str = "The account state changed while sign-in was running. Start sign-in again after recovery or account changes finish.";
 
-/// Which account change `Store::change` makes, and so which of its rules it follows.
+/// Which change `Store::change` makes to the vault, and so which of its rules it follows: an
+/// account change (`Account`, `SignIn`, `Recovery`), remembering turned on, or a metadata edit.
 pub enum ChangeKind<'t> {
     /// Changes which logins are saved or which one a CLI uses (save, remove, use, sign out):
     /// refused during a pending recovery, and rejects every sign-in in flight.
@@ -513,7 +514,7 @@ impl Store {
         Sealer(self.key)
     }
 
-    /// Makes one account change under this store's lease: refuses it by `kind`'s rule, bumps the
+    /// Makes one change under this store's lease: refuses it by `kind`'s rule, bumps the
     /// sign-in epoch unless it is a metadata edit, lets `edit` change the database, persists it and
     /// releases the lease before returning, so the caller announces the change after release.
     pub fn change<T>(
