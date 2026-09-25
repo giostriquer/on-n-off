@@ -3,7 +3,7 @@
 use super::{
     model,
     native::NativeStore,
-    store::{Login, Profile, Store},
+    store::{Guard, Login, Profile, Store, Ticket},
     transaction::Native,
 };
 use crate::{
@@ -45,7 +45,7 @@ pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<Provider
     if !Store::vault_exists(&home) {
         return;
     }
-    let open = || Store::open_read(&home);
+    let open = || Store::open_existing(&home);
     let native = NativeStore::resolve(provider, &home).and_then(|n| n.read());
     refresh_with(&home, provider, force, entries, native, &open, &|profile| {
         fetch_profile(&home, profile, &open)
@@ -81,9 +81,10 @@ fn refresh_with(
     let Ok(db) = open().and_then(|s| s.load()) else {
         return;
     };
-    if db.recovery.is_some() {
+    // A pending recovery refuses the ticket: no saved account is polled until it is recovered.
+    let Ok(ticket) = db.ticket(Guard::SignIn) else {
         return;
-    }
+    };
     let profiles: Vec<_> = db
         .profiles
         .into_iter()
@@ -98,9 +99,8 @@ fn refresh_with(
             let tasks: Vec<_> = batch
                 .iter()
                 .map(|profile| {
-                    let open = &open;
-                    scope
-                        .spawn(move || poll_with(home, profile, db.login_epoch, force, open, fetch))
+                    let (open, ticket) = (&open, &ticket);
+                    scope.spawn(move || poll_with(home, profile, ticket, force, open, fetch))
                 })
                 .collect();
             tasks
@@ -117,7 +117,7 @@ fn refresh_with(
 fn poll_with(
     home: &Path,
     profile: &Profile,
-    epoch: u64,
+    ticket: &Ticket,
     force: bool,
     open: &dyn Fn() -> Result<Store, String>,
     fetch: &dyn Fn(&Profile) -> FetchResult,
@@ -136,24 +136,13 @@ fn poll_with(
         if previous.rejected
             || (Instant::now() < previous.next && (!force || previous.error.is_some()))
         {
-            let store = open().ok()?;
-            let db = store.load().ok()?;
-            if db.allow_publication(epoch).is_err()
-                || !db.profiles.iter().any(|p| {
-                    p.id == profile.id
-                        && p.identity == profile.identity
-                        && p.login
-                            .as_ref()
-                            .is_some_and(|l| l.fingerprint() == fingerprint)
-                })
-            {
-                return None;
-            }
+            open().ok()?.recheck(&ticket.holding(profile, login)).ok()?;
             return previous.error.clone().map(Err);
         }
     }
     let fetched = fetch(profile);
-    let fingerprint = fetched.login.as_ref()?.fingerprint();
+    let fetched_login = fetched.login?;
+    let fingerprint = fetched_login.fingerprint();
     let result = fetched.result;
     let (error, rejected, retry) = match &result {
         Ok(_) => (None, false, Duration::ZERO),
@@ -212,15 +201,9 @@ fn poll_with(
     // Removal, reauthentication and logout can proceed while HTTP is in flight. Recheck under
     // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
     let store = open().ok()?;
-    let db = store.load().ok()?;
-    let current = db
-        .profiles
-        .iter()
-        .find(|p| p.id == profile.id && p.identity == profile.identity)?;
-    if db.allow_publication(epoch).is_err() || current.login.as_ref()?.fingerprint() != fingerprint
-    {
-        return None;
-    }
+    store
+        .recheck(&ticket.holding(profile, &fetched_login))
+        .ok()?;
     match result {
         Ok(mut dto) => {
             if dto

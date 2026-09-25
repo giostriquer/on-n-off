@@ -82,13 +82,14 @@ fn persisted_vault_roundtrip_never_exposes_tokens_in_plaintext() {
 #[test]
 fn another_manager_logout_invalidates_an_earlier_signin_after_reload() {
     let mut db = Database::default();
-    let started = db.login_epoch;
+    let started = db.ticket(Guard::SignIn).unwrap();
     db.invalidate_logins().unwrap();
     let reloaded: Database = serde_json::from_slice(&serde_json::to_vec(&db).unwrap()).unwrap();
-    assert!(reloaded.allow_publication(started).is_err());
+    assert!(reloaded.check(&started).is_err());
 }
 #[test]
 fn pending_recovery_refuses_login_publication_even_at_current_epoch() {
+    let started = Database::default().ticket(Guard::SignIn).unwrap();
     let db = Database {
         recovery: Some(super::super::transaction::Recovery {
             target_id: "target".into(),
@@ -97,7 +98,11 @@ fn pending_recovery_refuses_login_publication_even_at_current_epoch() {
         }),
         ..Database::default()
     };
-    assert!(db.allow_publication(db.login_epoch).is_err());
+    assert!(db.check(&started).is_err());
+    assert!(
+        db.ticket(Guard::SignIn).is_err(),
+        "nor does a sign-in start"
+    );
 }
 
 #[test]
@@ -503,3 +508,5 @@ fn a_vault_from_before_the_later_fields_loads_without_them() {
     assert_eq!(profile.label, "Email unavailable");
     assert_eq!(profile.category, None, "a default name is not a category");
 }
+
+mod protocol;

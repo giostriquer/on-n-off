@@ -15,7 +15,7 @@ fn two_profiles(harness: &Harness) -> (String, String) {
 fn using_a_profile_publishes_its_login_and_keeps_the_latest_outgoing_one() {
     let harness = Harness::new();
     let (a, b) = two_profiles(&harness);
-    let sign_in = harness.sign_in_epoch();
+    let sign_in = harness.sign_in();
 
     harness
         .accounts()
@@ -36,8 +36,8 @@ fn using_a_profile_publishes_its_login_and_keeps_the_latest_outgoing_one() {
     };
     assert_eq!(login(&a), Some("a2".into()));
     assert_eq!(login(&b), Some("b1".into()));
-    assert!(vault.recovery.is_none());
-    assert!(!harness.vouches(sign_in));
+    assert!(vault.recovery().is_none());
+    assert!(!harness.vouches(&sign_in));
     assert_eq!(*harness.clients.asked.borrow(), ["activation safe"]);
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
@@ -95,7 +95,7 @@ fn a_login_with_an_unfinished_private_renewal_is_not_used() {
         db.profiles[1].usage_renewal_owned = true;
         db.profiles[1].clone()
     });
-    let open = || super::super::store::Store::open_read(harness.path());
+    let open = || super::super::store::Store::open_existing(harness.path());
     assert!(
         super::super::usage_renew::renew_owned(harness.path(), &profile, &open, &|_| {
             Err("connection lost".into())
@@ -127,7 +127,7 @@ fn a_failed_switch_restores_the_outgoing_login_and_is_still_announced() {
         .is_err());
 
     assert_eq!(harness.live(), Some("a2".into()));
-    assert!(harness.vault().recovery.is_none());
+    assert!(harness.vault().recovery().is_none());
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
@@ -143,16 +143,16 @@ fn using_a_profile_during_a_pending_recovery_leaves_the_native_login() {
         .is_err());
 
     assert_eq!(harness.live(), Some("a2".into()));
-    assert!(harness.vault().recovery.is_some());
+    assert!(harness.vault().recovery().is_some());
 }
 
 #[test]
 fn recovery_restores_the_outgoing_login_with_clients_closed() {
     let harness = Harness::new();
     let (_, b) = two_profiles(&harness);
+    let sign_in = harness.sign_in();
     harness.interrupted(&b, Some(claude("a", "a2")));
     harness.signed_in(Some(claude("b", "b1")));
-    let sign_in = harness.sign_in_epoch();
 
     harness
         .accounts()
@@ -160,8 +160,8 @@ fn recovery_restores_the_outgoing_login_with_clients_closed() {
         .unwrap();
 
     assert_eq!(harness.live(), Some("a2".into()));
-    assert!(harness.vault().recovery.is_none());
-    assert!(!harness.vouches(sign_in));
+    assert!(harness.vault().recovery().is_none());
+    assert!(!harness.vouches(&sign_in));
     assert_eq!(*harness.clients.asked.borrow(), ["closed"]);
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
@@ -191,7 +191,7 @@ fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
     let b = harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
     let c = harness.saved(identity(AgentId::Codex, "a", "team"), claude("a", "c1"));
     harness.signed_in(Some(claude("a", "a2")));
-    let sign_in = harness.sign_in_epoch();
+    let sign_in = harness.sign_in();
 
     harness.accounts().sign_out(AgentId::Claude).unwrap();
 
@@ -209,7 +209,7 @@ fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
     assert!(!kept(&a) && !kept(&other));
     assert!(kept(&b) && kept(&c));
     assert_eq!(vault.ignored_credentials, [claude("a", "a2").fingerprint()]);
-    assert!(!harness.vouches(sign_in));
+    assert!(!harness.vouches(&sign_in));
     assert_eq!(*harness.clients.asked.borrow(), ["closed"]);
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }

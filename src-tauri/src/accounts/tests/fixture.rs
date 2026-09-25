@@ -2,7 +2,7 @@
 //! store, fake running clients and a notifier that records what it heard.
 use super::super::{
     model::Identity,
-    store::{Database, Login, Store},
+    store::{ChangeKind, Database, Guard, Login, Store, Ticket},
     transaction::{Native, Recovery},
     Accounts, Clients, NativeAccount, Notify,
 };
@@ -194,13 +194,13 @@ impl Harness {
     pub fn heard(&self) -> Vec<(Heard, bool)> {
         self.recorder.heard.take()
     }
-    /// Change the vault as a fixture, outside any operation under test.
+    /// Change the vault as a fixture, outside any operation under test: a write no rule refuses
+    /// and that rejects nothing in flight.
     pub fn seed<T>(&self, edit: impl FnOnce(&mut Database) -> T) -> T {
-        let store = Store::open(self.path(), true).unwrap();
-        let mut db = store.load().unwrap();
-        let value = edit(&mut db);
-        store.persist(&db).unwrap();
-        value
+        Store::open(self.path(), true)
+            .unwrap()
+            .change(ChangeKind::Metadata, |db| Ok(edit(db)))
+            .unwrap()
     }
     /// Save `login` as a profile of `identity` and give back its id.
     pub fn saved(&self, identity: Identity, login: Login) -> String {
@@ -212,26 +212,29 @@ impl Harness {
             .as_ref()
             .map(|login| FakeNative(self.native.clone()).identify(login).unwrap());
         self.seed(|db| {
-            db.recovery = Some(Recovery {
+            db.begin_recovery(Recovery {
                 target_id: target.into(),
                 outgoing,
                 outgoing_identity,
-            });
+            })
         });
     }
     pub fn vault(&self) -> Database {
-        Store::open_read(self.path()).unwrap().load().unwrap()
+        Store::open_existing(self.path()).unwrap().load().unwrap()
     }
     /// The sealed vault as it is on disk: any write replaces it, since every seal takes a new nonce.
     pub fn sealed(&self) -> Option<Vec<u8>> {
         std::fs::read(self.path().join(".on-n-off/accounts/vault.enc")).ok()
     }
-    /// The sign-in epoch a sign-in starting now would publish against.
-    pub fn sign_in_epoch(&self) -> u64 {
-        self.vault().login_epoch
+    /// The ticket a sign-in starting now would publish against.
+    pub fn sign_in(&self) -> Ticket {
+        self.vault().ticket(Guard::SignIn).unwrap()
     }
-    /// Whether a sign-in that started at `epoch` could still publish.
-    pub fn vouches(&self, epoch: u64) -> bool {
-        self.vault().allow_publication(epoch).is_ok()
+    /// Whether a sign-in that took `ticket` could still publish.
+    pub fn vouches(&self, ticket: &Ticket) -> bool {
+        Store::open_existing(self.path())
+            .unwrap()
+            .recheck(ticket)
+            .is_ok()
     }
 }

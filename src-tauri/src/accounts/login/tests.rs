@@ -122,7 +122,10 @@ fn usage_from_another_identity_cannot_attach_by_matching_email() {
     assert!(prepared.usage.is_none());
 }
 
-use super::super::{store::Store, transaction::Recovery};
+use super::super::{
+    store::{ChangeKind, Database, Store},
+    transaction::Recovery,
+};
 
 /// A scratch home whose vault is unlocked by the fixture key.
 fn vault_home() -> tempfile::TempDir {
@@ -141,12 +144,25 @@ fn finished(user: &str) -> PreparedLogin {
         login,
     }
 }
-/// Change the vault the way an account change or an interrupted switch would, meanwhile.
-fn meanwhile(home: &std::path::Path, edit: impl FnOnce(&mut super::super::store::Database)) {
-    let store = Store::open(home, false).unwrap();
-    let mut db = store.load().unwrap();
-    edit(&mut db);
-    store.persist(&db).unwrap();
+fn saved(home: &std::path::Path) -> Database {
+    Store::open_existing(home).unwrap().load().unwrap()
+}
+/// Change the vault the way another account operation would, meanwhile.
+fn meanwhile(home: &std::path::Path, kind: ChangeKind<'_>, edit: impl FnOnce(&mut Database)) {
+    Store::open(home, false)
+        .unwrap()
+        .change(kind, |db| {
+            edit(db);
+            Ok(())
+        })
+        .unwrap();
+}
+fn interrupted() -> Recovery {
+    Recovery {
+        target_id: "switching".into(),
+        outgoing: None,
+        outgoing_identity: None,
+    }
 }
 fn signing_in(registry: &Mutex<Registry>, id: &str) -> Arc<AtomicBool> {
     let mut registry = registry.lock().unwrap();
@@ -158,13 +174,13 @@ fn signing_in(registry: &Mutex<Registry>, id: &str) -> Arc<AtomicBool> {
 fn a_published_sign_in_awaits_activation_owns_its_renewal_and_rejects_older_sign_ins() {
     let home = vault_home();
     let registry = Mutex::new(Registry::default());
-    let epoch = start(home.path(), AgentId::Codex, None).unwrap();
+    let ticket = start(home.path(), AgentId::Codex, None).unwrap();
     let canceled = signing_in(&registry, "first");
 
     publish(
         &registry,
         home.path(),
-        epoch,
+        &ticket,
         "first",
         &canceled,
         None,
@@ -172,8 +188,8 @@ fn a_published_sign_in_awaits_activation_owns_its_renewal_and_rejects_older_sign
     )
     .unwrap();
 
-    let saved = Store::open_read(home.path()).unwrap().load().unwrap();
-    let profile = &saved.profiles[0];
+    let vault = saved(home.path());
+    let profile = &vault.profiles[0];
     assert!(profile.login == Some(fixture_login("user", "team", "isolated")));
     assert!(profile.pending_activation && profile.usage_renewal_owned);
     assert!(
@@ -185,7 +201,7 @@ fn a_published_sign_in_awaits_activation_owns_its_renewal_and_rejects_older_sign
         publish(
             &registry,
             home.path(),
-            epoch,
+            &ticket,
             "second",
             &canceled,
             None,
@@ -194,31 +210,28 @@ fn a_published_sign_in_awaits_activation_owns_its_renewal_and_rejects_older_sign
         .is_err(),
         "a sign-in that started before this one was published cannot publish"
     );
-    let saved = Store::open_read(home.path()).unwrap().load().unwrap();
-    assert_eq!(saved.profiles.len(), 1);
+    assert_eq!(saved(home.path()).profiles.len(), 1);
 }
 
 #[test]
 fn an_account_change_or_a_pending_recovery_during_sign_in_rejects_its_publication() {
-    let interruptions: [&dyn Fn(&mut super::super::store::Database); 2] =
-        [&|db| db.invalidate_logins().unwrap(), &|db| {
-            db.recovery = Some(Recovery {
-                target_id: "switching".into(),
-                outgoing: None,
-                outgoing_identity: None,
-            })
-        }];
-    for interruption in interruptions {
+    for recovering in [false, true] {
         let home = vault_home();
         let registry = Mutex::new(Registry::default());
-        let epoch = start(home.path(), AgentId::Codex, None).unwrap();
+        let ticket = start(home.path(), AgentId::Codex, None).unwrap();
         let canceled = signing_in(&registry, "operation");
-        meanwhile(home.path(), interruption);
+        if recovering {
+            meanwhile(home.path(), ChangeKind::Metadata, |db| {
+                db.begin_recovery(interrupted())
+            });
+        } else {
+            meanwhile(home.path(), ChangeKind::Account, |_| {});
+        }
 
         let error = publish(
             &registry,
             home.path(),
-            epoch,
+            &ticket,
             "operation",
             &canceled,
             None,
@@ -227,8 +240,7 @@ fn an_account_change_or_a_pending_recovery_during_sign_in_rejects_its_publicatio
         .unwrap_err();
 
         assert!(error.starts_with("The account state changed"), "{error}");
-        let saved = Store::open_read(home.path()).unwrap().load().unwrap();
-        assert!(saved.profiles.is_empty());
+        assert!(saved(home.path()).profiles.is_empty());
         assert!(!home.path().join(".on-n-off/limits").exists());
     }
 }
@@ -237,7 +249,7 @@ fn an_account_change_or_a_pending_recovery_during_sign_in_rejects_its_publicatio
 fn a_canceled_sign_in_is_not_published() {
     let home = vault_home();
     let registry = Mutex::new(Registry::default());
-    let epoch = start(home.path(), AgentId::Codex, None).unwrap();
+    let ticket = start(home.path(), AgentId::Codex, None).unwrap();
     let canceled = signing_in(&registry, "operation");
     registry.lock().unwrap().cancel("operation");
 
@@ -245,7 +257,7 @@ fn a_canceled_sign_in_is_not_published() {
         publish(
             &registry,
             home.path(),
-            epoch,
+            &ticket,
             "operation",
             &canceled,
             None,
@@ -253,40 +265,35 @@ fn a_canceled_sign_in_is_not_published() {
         ),
         Err("Sign-in was canceled.".into())
     );
-    let saved = Store::open_read(home.path()).unwrap().load().unwrap();
-    assert!(saved.profiles.is_empty());
+    assert!(saved(home.path()).profiles.is_empty());
 }
 
 #[test]
 fn a_sign_in_does_not_start_during_a_pending_recovery_or_for_a_profile_no_longer_saved() {
     let home = vault_home();
     let codex = finished("user");
-    let saved = {
-        let store = Store::open(home.path(), true).unwrap();
-        let mut db = store.load().unwrap();
-        let id = db.save(codex.identity, codex.login, None).unwrap();
-        store.persist(&db).unwrap();
-        id
-    };
-    assert!(start(home.path(), AgentId::Codex, Some(&saved)).is_ok());
+    let id = Store::open(home.path(), true)
+        .unwrap()
+        .change(ChangeKind::Metadata, |db| {
+            db.save(codex.identity, codex.login, None)
+        })
+        .unwrap();
+    let refusal = |provider, expected: Option<&str>| start(home.path(), provider, expected).err();
+    assert_eq!(refusal(AgentId::Codex, Some(&id)), None);
     assert_eq!(
-        start(home.path(), AgentId::Claude, Some(&saved)),
-        Err("Profile no longer exists.".into()),
+        refusal(AgentId::Claude, Some(&id)).as_deref(),
+        Some("Profile no longer exists."),
         "a Codex profile cannot be signed in again as Claude"
     );
     assert_eq!(
-        start(home.path(), AgentId::Codex, Some("removed")),
-        Err("Profile no longer exists.".into())
+        refusal(AgentId::Codex, Some("removed")).as_deref(),
+        Some("Profile no longer exists.")
     );
-    meanwhile(home.path(), |db| {
-        db.recovery = Some(Recovery {
-            target_id: saved.clone(),
-            outgoing: None,
-            outgoing_identity: None,
-        })
+    meanwhile(home.path(), ChangeKind::Metadata, |db| {
+        db.begin_recovery(interrupted())
     });
     assert_eq!(
-        start(home.path(), AgentId::Codex, None),
-        Err("Recover the interrupted account change first.".into())
+        refusal(AgentId::Codex, None).as_deref(),
+        Some("Recover the interrupted account change first.")
     );
 }

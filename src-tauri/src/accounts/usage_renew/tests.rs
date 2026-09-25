@@ -1,30 +1,48 @@
 use super::*;
 use crate::{
-    accounts::{model, store::Database},
+    accounts::{
+        model,
+        store::{ChangeKind, Database},
+    },
     dto::AgentId,
 };
 use serde_json::json;
 use std::cell::Cell;
 
 fn setup(home: &Path, owned: bool) -> Profile {
-    let store = open(home);
-    let mut db = Database::default();
     let login = Login {
         auth: json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"original","expiresAt":1}}),
         account: json!({"accountUuid":"user","organizationUuid":"team"}),
     };
-    db.save(
-        model::identity(AgentId::Claude, &login.auth, &login.account).unwrap(),
-        login,
-        None,
-    )
-    .unwrap();
-    db.profiles[0].usage_renewal_owned = owned;
-    store.persist(&db).unwrap();
-    db.profiles[0].clone()
+    saved(home, AgentId::Claude, login, owned)
+}
+/// Save `login` as the vault's one profile, owning its renewal or not, and give it back.
+fn saved(home: &Path, provider: AgentId, login: Login, owned: bool) -> Profile {
+    open(home)
+        .change(ChangeKind::Metadata, |db| {
+            let identity = model::identity(provider, &login.auth, &login.account)?;
+            db.save(identity, login, None)?;
+            db.profiles[0].usage_renewal_owned = owned;
+            Ok(db.profiles[0].clone())
+        })
+        .unwrap()
 }
 fn open(home: &Path) -> Store {
     Store::open_with_key(home, true, |_, _| Ok([7; 32])).unwrap()
+}
+/// Change the vault as another account operation would, meanwhile.
+fn meanwhile(home: &Path, kind: ChangeKind<'_>, edit: impl FnOnce(&mut Database)) {
+    open(home)
+        .change(kind, |db| {
+            edit(db);
+            Ok(())
+        })
+        .unwrap();
+}
+/// Whether `profile`'s login may be activated, as `use` asks before it switches.
+fn ready(home: &Path, profile: &Profile) -> Result<(), String> {
+    let store = open(home);
+    activation_ready(&store.root.join("usage-renewals"), &store.sealer(), profile)
 }
 fn rotated(login: &Login) -> Login {
     let mut login = login.clone();
@@ -132,10 +150,7 @@ fn removing_profile_during_renewal_does_not_resurrect_it() {
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
     let result = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
-        let store = open(home.path());
-        let mut db = store.load().unwrap();
-        db.profiles.clear();
-        store.persist(&db).unwrap();
+        meanwhile(home.path(), ChangeKind::Account, |db| db.profiles.clear());
         Ok(rotated(login))
     });
     assert!(result.is_err());
@@ -150,10 +165,7 @@ fn an_unrelated_account_change_during_renewal_still_publishes_the_renewed_login(
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
     let login = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
-        let store = open(home.path());
-        let mut db = store.load().unwrap();
-        db.invalidate_logins().unwrap();
-        store.persist(&db).unwrap();
+        meanwhile(home.path(), ChangeKind::Account, |_| {});
         Ok(rotated(login))
     })
     .unwrap();
@@ -172,25 +184,23 @@ fn a_pending_recovery_rejects_the_renewed_login_and_keeps_the_reply_for_later() 
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
     let result = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
-        let store = open(home.path());
-        let mut db = store.load().unwrap();
-        db.recovery = Some(super::super::transaction::Recovery {
-            target_id: profile.id.clone(),
-            outgoing: None,
-            outgoing_identity: None,
+        meanwhile(home.path(), ChangeKind::Metadata, |db| {
+            db.begin_recovery(super::super::transaction::Recovery {
+                target_id: profile.id.clone(),
+                outgoing: None,
+                outgoing_identity: None,
+            })
         });
-        store.persist(&db).unwrap();
         Ok(rotated(login))
     });
     assert!(result.is_err());
-    let store = open(home.path());
-    let saved = store.load().unwrap().profiles.remove(0);
+    let saved = open(home.path()).load().unwrap().profiles.remove(0);
     assert_eq!(
         saved.login.as_ref().unwrap().auth["claudeAiOauth"]["refreshToken"],
         "original"
     );
     assert!(
-        activation_ready(&store, &saved).is_err(),
+        ready(home.path(), &saved).is_err(),
         "the completed reply stays journaled, so the spent source is never activated"
     );
 }
@@ -218,7 +228,7 @@ fn a_completed_reply_recovers_after_publication_failure_without_another_grant() 
         }
     )
     .is_err());
-    assert!(activation_ready(&open(home.path()), &p).is_err());
+    assert!(ready(home.path(), &p).is_err());
     let result = renew_owned(home.path(), &p, &|| Ok(open(home.path())), &|login| {
         calls.set(calls.get() + 1);
         Ok(rotated(login))
@@ -226,9 +236,8 @@ fn a_completed_reply_recovers_after_publication_failure_without_another_grant() 
     .unwrap();
     assert_eq!(calls.get(), 1);
     assert_eq!(result.auth["claudeAiOauth"]["refreshToken"], "new-refresh");
-    let store = open(home.path());
-    let current = store.load().unwrap().profiles.remove(0);
-    assert!(activation_ready(&store, &current).is_ok());
+    let current = open(home.path()).load().unwrap().profiles.remove(0);
+    assert!(ready(home.path(), &current).is_ok());
 }
 #[test]
 fn changed_ownership_during_renewal_never_overwrites_the_native_shadow() {
@@ -236,10 +245,9 @@ fn changed_ownership_during_renewal_never_overwrites_the_native_shadow() {
     let p = setup(home.path(), true);
     assert!(
         renew_owned(home.path(), &p, &|| Ok(open(home.path())), &|login| {
-            let store = open(home.path());
-            let mut db = store.load().unwrap();
-            db.profiles[0].usage_renewal_owned = false;
-            store.persist(&db).unwrap();
+            meanwhile(home.path(), ChangeKind::Account, |db| {
+                db.profiles[0].usage_renewal_owned = false
+            });
             Ok(rotated(login))
         })
         .is_err()
@@ -285,24 +293,13 @@ fn private_claude_grant_preserves_scope_and_saves_rotated_credentials() {
 fn private_codex_grant_retains_identity_when_reply_omits_id_token() {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     let home = tempfile::tempdir().unwrap();
-    let store = open(home.path());
-    let mut db = Database::default();
     let claims = json!({"https://api.openai.com/auth":{"chatgpt_user_id":"user","chatgpt_account_id":"team"}});
     let jwt = format!("e30.{}.sig", URL_SAFE_NO_PAD.encode(claims.to_string()));
     let login = Login {
         auth: json!({"tokens":{"access_token":"old","refresh_token":"original","id_token":jwt,"account_id":"team"}}),
         account: Value::Null,
     };
-    db.save(
-        model::identity(AgentId::Codex, &login.auth, &login.account).unwrap(),
-        login,
-        None,
-    )
-    .unwrap();
-    db.profiles[0].usage_renewal_owned = true;
-    store.persist(&db).unwrap();
-    let p = db.profiles.remove(0);
-    drop(store);
+    let p = saved(home.path(), AgentId::Codex, login, true);
     let (url, server) = crate::http::serve_once_capturing(
         "200 OK",
         &[],

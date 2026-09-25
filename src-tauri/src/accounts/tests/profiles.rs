@@ -7,7 +7,7 @@ fn saving_the_current_login_keeps_it_as_a_profile_and_rejects_sign_ins_in_flight
     let harness = Harness::new();
     harness.signed_in(Some(claude("a", "a1")));
     harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
-    let sign_in = harness.sign_in_epoch();
+    let sign_in = harness.sign_in();
 
     harness.accounts().save_current(AgentId::Claude).unwrap();
 
@@ -21,7 +21,7 @@ fn saving_the_current_login_keeps_it_as_a_profile_and_rejects_sign_ins_in_flight
     assert_eq!(saved.label, "a@example.com");
     assert!(!saved.pending_activation && !saved.usage_renewal_owned);
     assert_eq!(vault.profiles.len(), 2);
-    assert!(!harness.vouches(sign_in));
+    assert!(!harness.vouches(&sign_in));
     assert_eq!(harness.live(), Some("a1".into()), "the CLI keeps its login");
 }
 
@@ -88,7 +88,7 @@ fn saving_refuses_during_a_pending_recovery_without_writing() {
 fn a_category_edit_persists_without_rejecting_sign_ins_in_flight() {
     let harness = Harness::new();
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
-    let sign_in = harness.sign_in_epoch();
+    let sign_in = harness.sign_in();
 
     harness
         .accounts()
@@ -99,7 +99,7 @@ fn a_category_edit_persists_without_rejecting_sign_ins_in_flight() {
         harness.vault().profiles[0].category.as_deref(),
         Some("Client A / research")
     );
-    assert!(harness.vouches(sign_in));
+    assert!(harness.vouches(&sign_in));
     assert_eq!(harness.heard(), [(Heard::Accounts, true)]);
 }
 
@@ -117,10 +117,7 @@ fn a_category_edit_is_allowed_during_a_pending_recovery_and_keeps_the_journal() 
     let vault = harness.vault();
     assert_eq!(vault.profiles[0].category.as_deref(), Some("Client B"));
     assert_eq!(
-        vault
-            .recovery
-            .as_ref()
-            .map(|journal| journal.target_id.as_str()),
+        vault.recovery().map(|journal| journal.target_id.as_str()),
         Some(target.as_str())
     );
 }
@@ -130,7 +127,7 @@ fn removing_a_profile_excludes_its_account_from_remembering_and_rejects_sign_ins
     let harness = Harness::new();
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
     let b = harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
-    let sign_in = harness.sign_in_epoch();
+    let sign_in = harness.sign_in();
 
     harness.accounts().remove(&a).unwrap();
 
@@ -141,7 +138,7 @@ fn removing_a_profile_excludes_its_account_from_remembering_and_rejects_sign_ins
         vault.ignored_accounts,
         [identity(AgentId::Claude, "a", "team")]
     );
-    assert!(!harness.vouches(sign_in));
+    assert!(!harness.vouches(&sign_in));
 }
 
 #[test]

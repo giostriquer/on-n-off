@@ -4,7 +4,7 @@
 //! before vault publication and can be adopted after a failed save.
 use super::{
     model,
-    store::{Login, Profile, Store},
+    store::{Guard, Login, Profile, Sealer, Store},
     vault,
 };
 use crate::{dto::AgentId, file_lease::FileLease};
@@ -16,14 +16,6 @@ use std::path::Path;
 struct Journal {
     fingerprint: String,
     login: Option<Login>,
-}
-
-fn matches(profile: &Profile, expected: &Profile) -> bool {
-    profile.id == expected.id
-        && profile.identity == expected.identity
-        && profile.usage_renewal_owned
-        && profile.login.as_ref().map(Login::fingerprint)
-            == expected.login.as_ref().map(Login::fingerprint)
 }
 
 /// Serializes grants for one profile across threads and app instances, without waiting.
@@ -53,21 +45,18 @@ pub(super) fn renew_owned(
         .as_ref()
         .ok_or("Sign in again to refresh this account.")?;
     let store = open()?;
-    let db = store.load()?;
-    if db.recovery.is_some() || !db.profiles.iter().any(|p| matches(p, profile)) {
-        return Err("The saved login changed before renewal.".into());
-    }
+    let ticket = store.load()?.ticket(Guard::Renewal(profile))?;
     let root = home.join(".on-n-off/accounts/usage-renewals");
     std::fs::create_dir_all(&root).map_err(|_| "Cannot prepare protected renewal storage.")?;
     let id = crate::sha::sha256_hex(profile.id.as_bytes());
     let _lease = acquire_renewal_lease(&root, &id)?;
     let path = root.join(format!("{id}.enc"));
-    let key = store.key;
+    let sealer = store.sealer();
     drop(store); // Vault publication lock never spans a provider request.
     let fingerprint = source.fingerprint();
     let previous = match std::fs::read(&path) {
         Ok(bytes) => Some(
-            serde_json::from_slice::<Journal>(&vault::unseal(&key, &bytes)?)
+            serde_json::from_slice::<Journal>(&sealer.unseal(&bytes)?)
                 .map_err(|_| "The protected renewal record is unreadable.")?,
         ),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -75,7 +64,7 @@ pub(super) fn renew_owned(
     };
     let save = |journal: &Journal| -> Result<(), String> {
         let bytes = serde_json::to_vec(journal).map_err(|_| "Cannot encode protected renewal.")?;
-        vault::atomic_write(&path, &vault::seal(&key, &bytes)?)
+        vault::atomic_write(&path, &sealer.seal(&bytes)?)
     };
     let renewed = if let Some(journal) = previous.filter(|j| j.fingerprint == fingerprint) {
         journal
@@ -98,18 +87,16 @@ pub(super) fn renew_owned(
     {
         return Err("Renewal returned a different account. Sign in again.".into());
     }
-    let store = open()?;
-    let mut db = store.load()?;
-    if db.recovery.is_some() {
-        return Err("An account change needs recovery.".into());
-    }
-    let target = db
-        .profiles
-        .iter_mut()
-        .find(|p| matches(p, profile))
-        .ok_or("The saved login changed during renewal.")?;
-    target.login = Some(renewed.clone());
-    store.persist(&db)?;
+    // Only this profile's login and ownership vouch for the renewed login, never the epoch.
+    open()?.publish(&ticket, |db| {
+        let target = db
+            .profiles
+            .iter_mut()
+            .find(|p| p.id == profile.id)
+            .ok_or("The saved login changed during renewal.")?;
+        target.login = Some(renewed.clone());
+        Ok(())
+    })?;
     // A leftover completed journal is harmless: its source fingerprint no longer matches.
     let _ = std::fs::remove_file(path);
     Ok(renewed)
@@ -117,8 +104,12 @@ pub(super) fn renew_owned(
 
 /// Activation must not publish a source token whose renewal may already have consumed it.
 /// The provider's exclusive activity lease excludes a concurrent polling attempt here.
-pub(super) fn activation_ready(store: &Store, profile: &Profile) -> Result<(), String> {
-    let path = store.root.join("usage-renewals").join(format!(
+pub(super) fn activation_ready(
+    renewals: &Path,
+    sealer: &Sealer,
+    profile: &Profile,
+) -> Result<(), String> {
+    let path = renewals.join(format!(
         "{}.enc",
         crate::sha::sha256_hex(profile.id.as_bytes())
     ));
@@ -127,7 +118,7 @@ pub(super) fn activation_ready(store: &Store, profile: &Profile) -> Result<(), S
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_) => return Err("Cannot read the protected renewal record.".into()),
     };
-    let journal: Journal = serde_json::from_slice(&vault::unseal(&store.key, &bytes)?)
+    let journal: Journal = serde_json::from_slice(&sealer.unseal(&bytes)?)
         .map_err(|_| "The protected renewal record is unreadable.")?;
     if profile
         .login

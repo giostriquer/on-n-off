@@ -148,7 +148,7 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
     let native = native::NativeStore::resolve(provider, &home)?;
     native.preflight()?;
     // Unlock storage before asking the user to sign in, so a denied vault cannot strand a login.
-    let epoch = start(&home, provider, expected.as_deref())?;
+    let ticket = start(&home, provider, expected.as_deref())?;
     let root = home.join(".on-n-off/accounts/logins");
     std::fs::create_dir_all(&root).map_err(|_| "Cannot create isolated sign-in storage.")?;
     let scratch = tempfile::Builder::new()
@@ -200,7 +200,7 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         publish(
             &LOGIN,
             &home,
-            epoch,
+            &ticket,
             &id,
             &canceled,
             expected.as_deref(),
@@ -219,13 +219,12 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
 }
 
 /// What a sign-in is checked against before the official client runs: no pending recovery, and
-/// the profile it signs in again still saved for this provider. Gives the sign-in epoch.
-fn start(home: &Path, provider: AgentId, expected: Option<&str>) -> Result<u64, String> {
+/// the profile it signs in again still saved for this provider. Gives the ticket its publication
+/// is checked against.
+fn start(home: &Path, provider: AgentId, expected: Option<&str>) -> Result<store::Ticket, String> {
     let store = store::Store::open(home, true)?;
     let db = store.load()?;
-    if db.recovery.is_some() {
-        return Err("Recover the interrupted account change first.".into());
-    }
+    let ticket = db.ticket(store::Guard::SignIn)?;
     if let Some(id) = expected {
         if !db
             .profiles
@@ -235,15 +234,15 @@ fn start(home: &Path, provider: AgentId, expected: Option<&str>) -> Result<u64, 
             return Err("Profile no longer exists.".into());
         }
     }
-    Ok(db.login_epoch)
+    Ok(ticket)
 }
 
 /// Publishes a finished sign-in into the vault as a profile awaiting activation that owns its
-/// renewal, unless it was canceled or an account change ran meanwhile.
+/// renewal: an account change, refused if the sign-in was canceled or its ticket no longer holds.
 fn publish(
     registry: &Mutex<Registry>,
     home: &Path,
-    epoch: u64,
+    ticket: &store::Ticket,
     id: &str,
     canceled: &AtomicBool,
     expected: Option<&str>,
@@ -254,34 +253,38 @@ fn publish(
         login,
         usage,
     } = prepared;
-    let store = store::Store::open(home, false)?;
-    let mut db = store.load()?;
-    // Cancellation/removal is checked at publication, not merely when the child exits.
-    let operation = registry
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if canceled.load(Ordering::Acquire) || !operation.current(id) {
-        return Err("Sign-in was canceled.".into());
-    }
-    db.allow_publication(epoch)?;
-    db.invalidate_logins()?;
-    db.reenroll(&identity);
-    let saved_id = db.save(identity, login, expected)?;
-    let profile = db
-        .profiles
-        .iter_mut()
-        .find(|p| p.id == saved_id)
-        .ok_or("Saved profile disappeared.")?;
-    profile.pending_activation = true;
-    profile.usage_renewal_owned = true;
-    store.persist(&db)?;
-    if let Some(usage) = usage {
-        // Only a successfully published login may add observations. Quota storage failure
-        // must not discard a valid login; its previous history remains untouched.
-        let _ = crate::limits::login::remember(home, &usage);
-    }
-    drop(operation);
-    Ok(())
+    store::Store::open(home, false)?.change_then(
+        store::ChangeKind::SignIn(ticket),
+        |db| {
+            // Cancellation/removal is checked at publication, not merely when the child exits,
+            // and holds off a cancel until the publication is durable.
+            let operation = registry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if canceled.load(Ordering::Acquire) || !operation.current(id) {
+                return Err("Sign-in was canceled.".into());
+            }
+            db.reenroll(&identity);
+            let saved_id = db.save(identity, login, expected)?;
+            let profile = db
+                .profiles
+                .iter_mut()
+                .find(|p| p.id == saved_id)
+                .ok_or("Saved profile disappeared.")?;
+            profile.pending_activation = true;
+            profile.usage_renewal_owned = true;
+            Ok(operation)
+        },
+        |operation, _, _| {
+            if let Some(usage) = usage {
+                // Only a successfully published login may add observations. Quota storage
+                // failure must not discard a valid login; its previous history remains untouched.
+                let _ = crate::limits::login::remember(home, &usage);
+            }
+            drop(operation);
+            Ok(())
+        },
+    )?
 }
 
 /// Recover only app-created, abandoned login homes after their provider processes have exited.

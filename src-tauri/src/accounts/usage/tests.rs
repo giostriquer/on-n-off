@@ -1,4 +1,5 @@
 use super::*;
+use crate::accounts::store::{ChangeKind, Database};
 use serde_json::json;
 fn profile() -> Profile {
     let mut db = super::super::store::Database::default();
@@ -79,19 +80,38 @@ fn inactive_results_never_replace_the_active_account() {
 }
 
 fn stored(home: &Path) -> Profile {
-    let store = open(home);
-    let mut db = super::super::store::Database::default();
     let mut p = profile();
     p.login = Some(Login {
         auth: json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"refresh"}}),
         account: json!({"accountUuid":"user","organizationUuid":"team"}),
     });
-    db.profiles.push(p.clone());
-    store.persist(&db).unwrap();
+    rewrite(home, |db| db.profiles.push(p.clone()));
     p
 }
 fn open(home: &Path) -> Store {
     Store::open_with_key(home, true, |_, _| Ok([8; 32])).unwrap()
+}
+/// A fixture write: no rule refuses it, and it rejects nothing in flight.
+fn rewrite(home: &Path, edit: impl FnOnce(&mut Database)) {
+    open(home)
+        .change(ChangeKind::Metadata, |db| {
+            edit(db);
+            Ok(())
+        })
+        .unwrap();
+}
+/// An account change, which rejects every reading in flight.
+fn account_change(home: &Path, edit: impl FnOnce(&mut Database)) {
+    open(home)
+        .change(ChangeKind::Account, |db| {
+            edit(db);
+            Ok(())
+        })
+        .unwrap();
+}
+/// The ticket a refresh starting now takes.
+fn ticket(home: &Path) -> Ticket {
+    open(home).load().unwrap().ticket(Guard::SignIn).unwrap()
 }
 fn reading(profile: &Profile) -> ProviderLimitsDto {
     let mut entries = vec![];
@@ -115,12 +135,17 @@ fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
     let before = std::fs::read(home.path().join(".on-n-off/accounts/vault.enc")).unwrap();
-    let result = poll_with(home.path(), &p, 0, false, &|| Ok(open(home.path())), &|p| {
-        FetchResult {
+    let result = poll_with(
+        home.path(),
+        &p,
+        &ticket(home.path()),
+        false,
+        &|| Ok(open(home.path())),
+        &|p| FetchResult {
             login: p.login.clone(),
             result: Ok(reading(p)),
-        }
-    })
+        },
+    )
     .unwrap()
     .unwrap();
     assert_eq!(result.reading.windows[0].used_percent, 42.0);
@@ -141,22 +166,27 @@ fn removal_or_reauthentication_during_http_discards_the_late_read() {
     for remove in [true, false] {
         let home = tempfile::tempdir().unwrap();
         let p = stored(home.path());
-        let result = poll_with(home.path(), &p, 0, false, &|| Ok(open(home.path())), &|p| {
-            let store = open(home.path());
-            let mut db = store.load().unwrap();
-            if remove {
-                db.profiles.clear();
-            } else {
-                db.profiles[0].login.as_mut().unwrap().auth["claudeAiOauth"]["accessToken"] =
-                    json!("replacement");
-            }
-            db.invalidate_logins().unwrap();
-            store.persist(&db).unwrap();
-            FetchResult {
-                login: p.login.clone(),
-                result: Ok(reading(p)),
-            }
-        });
+        let result = poll_with(
+            home.path(),
+            &p,
+            &ticket(home.path()),
+            false,
+            &|| Ok(open(home.path())),
+            &|p| {
+                account_change(home.path(), |db| {
+                    if remove {
+                        db.profiles.clear();
+                    } else {
+                        db.profiles[0].login.as_mut().unwrap().auth["claudeAiOauth"]
+                            ["accessToken"] = json!("replacement");
+                    }
+                });
+                FetchResult {
+                    login: p.login.clone(),
+                    result: Ok(reading(p)),
+                }
+            },
+        );
         assert!(result.is_none());
         assert!(!home.path().join(".on-n-off/limits").exists());
     }
@@ -167,16 +197,20 @@ fn removal_or_reauthentication_during_http_discards_the_late_read() {
 fn an_unrelated_account_change_during_http_discards_the_late_read() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
-    let result = poll_with(home.path(), &p, 0, false, &|| Ok(open(home.path())), &|p| {
-        let store = open(home.path());
-        let mut db = store.load().unwrap();
-        db.invalidate_logins().unwrap();
-        store.persist(&db).unwrap();
-        FetchResult {
-            login: p.login.clone(),
-            result: Ok(reading(p)),
-        }
-    });
+    let result = poll_with(
+        home.path(),
+        &p,
+        &ticket(home.path()),
+        false,
+        &|| Ok(open(home.path())),
+        &|p| {
+            account_change(home.path(), |_| {});
+            FetchResult {
+                login: p.login.clone(),
+                result: Ok(reading(p)),
+            }
+        },
+    );
     assert!(result.is_none());
     assert!(!home.path().join(".on-n-off/limits").exists());
 }
@@ -184,20 +218,26 @@ fn an_unrelated_account_change_during_http_discards_the_late_read() {
 fn a_pending_recovery_during_http_discards_the_late_read() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
-    let result = poll_with(home.path(), &p, 0, false, &|| Ok(open(home.path())), &|p| {
-        let store = open(home.path());
-        let mut db = store.load().unwrap();
-        db.recovery = Some(super::super::transaction::Recovery {
-            target_id: p.id.clone(),
-            outgoing: None,
-            outgoing_identity: None,
-        });
-        store.persist(&db).unwrap();
-        FetchResult {
-            login: p.login.clone(),
-            result: Ok(reading(p)),
-        }
-    });
+    let result = poll_with(
+        home.path(),
+        &p,
+        &ticket(home.path()),
+        false,
+        &|| Ok(open(home.path())),
+        &|p| {
+            rewrite(home.path(), |db| {
+                db.begin_recovery(super::super::transaction::Recovery {
+                    target_id: p.id.clone(),
+                    outgoing: None,
+                    outgoing_identity: None,
+                })
+            });
+            FetchResult {
+                login: p.login.clone(),
+                result: Ok(reading(p)),
+            }
+        },
+    );
     assert!(result.is_none());
     assert!(!home.path().join(".on-n-off/limits").exists());
 }
@@ -211,7 +251,7 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
         let result = poll_with(
             home.path(),
             &p,
-            0,
+            &ticket(home.path()),
             force,
             &|| Ok(open(home.path())),
             &|_| {
@@ -229,15 +269,11 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
     let mut other = p.clone();
     other.id = "other-profile".into();
     other.identity.user_id = "other".into();
-    let store = open(home.path());
-    let mut db = store.load().unwrap();
-    db.profiles.push(other.clone());
-    store.persist(&db).unwrap();
-    drop(store);
+    rewrite(home.path(), |db| db.profiles.push(other.clone()));
     assert!(poll_with(
         home.path(),
         &other,
-        0,
+        &ticket(home.path()),
         false,
         &|| Ok(open(home.path())),
         &|p| FetchResult {
@@ -252,32 +288,38 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
 fn a_new_credential_retries_a_previously_rejected_account() {
     let home = tempfile::tempdir().unwrap();
     let mut p = stored(home.path());
-    assert!(
-        poll_with(home.path(), &p, 0, false, &|| Ok(open(home.path())), &|p| {
+    assert!(poll_with(
+        home.path(),
+        &p,
+        &ticket(home.path()),
+        false,
+        &|| Ok(open(home.path())),
+        &|p| {
             FetchResult {
                 login: p.login.clone(),
                 result: Err(HttpError::Unauthorized),
             }
-        })
-        .unwrap()
-        .is_err()
-    );
+        }
+    )
+    .unwrap()
+    .is_err());
     p.login.as_mut().unwrap().auth["claudeAiOauth"]["accessToken"] = json!("new-access");
-    let store = open(home.path());
-    let mut db = store.load().unwrap();
-    db.profiles[0] = p.clone();
-    store.persist(&db).unwrap();
-    drop(store);
-    assert!(
-        poll_with(home.path(), &p, 0, false, &|| Ok(open(home.path())), &|p| {
+    rewrite(home.path(), |db| db.profiles[0] = p.clone());
+    assert!(poll_with(
+        home.path(),
+        &p,
+        &ticket(home.path()),
+        false,
+        &|| Ok(open(home.path())),
+        &|p| {
             FetchResult {
                 login: p.login.clone(),
                 result: Ok(reading(p)),
             }
-        })
-        .unwrap()
-        .is_ok()
-    );
+        }
+    )
+    .unwrap()
+    .is_ok());
 }
 
 #[test]
@@ -288,16 +330,13 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
         let result = poll_with(
             home.path(),
             &p,
-            0,
+            &ticket(home.path()),
             false,
             &|| Ok(open(home.path())),
             &|_| {
-                let store = open(home.path());
-                let mut db = store.load().unwrap();
-                let login = db.profiles[0].login.as_mut().unwrap();
+                let mut login = p.login.clone().unwrap();
                 login.auth["claudeAiOauth"]["accessToken"] = json!("rotated");
-                let login = login.clone();
-                store.persist(&db).unwrap();
+                rewrite(home.path(), |db| db.profiles[0].login = Some(login.clone()));
                 FetchResult {
                     login: Some(login),
                     result: Err(if rejected {
@@ -310,9 +349,14 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
         );
         assert!(result.expect("rotation error must remain visible").is_err());
         let p = open(home.path()).load().unwrap().profiles.remove(0);
-        let result = poll_with(home.path(), &p, 0, true, &|| Ok(open(home.path())), &|_| {
-            panic!("forced refresh must retain the renewed generation's backoff")
-        });
+        let result = poll_with(
+            home.path(),
+            &p,
+            &ticket(home.path()),
+            true,
+            &|| Ok(open(home.path())),
+            &|_| panic!("forced refresh must retain the renewed generation's backoff"),
+        );
         assert!(result.unwrap().is_err());
     }
 }
@@ -323,11 +367,7 @@ fn native_api_key_login_does_not_block_saved_subscription_polling() {
     let home = tempfile::tempdir().unwrap();
     let mut p = stored(home.path());
     p.identity.provider = AgentId::Codex;
-    let store = open(home.path());
-    let mut db = store.load().unwrap();
-    db.profiles[0] = p.clone();
-    store.persist(&db).unwrap();
-    drop(store);
+    rewrite(home.path(), |db| db.profiles[0] = p.clone());
     let calls = AtomicUsize::new(0);
     let mut entries = vec![];
     refresh_with(
@@ -430,11 +470,7 @@ fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_result
     active.id = "active-profile".into();
     active.identity.user_id = "active-user".into();
     active.login.as_mut().unwrap().account["accountUuid"] = json!("active-user");
-    let store = open(home.path());
-    let mut db = store.load().unwrap();
-    db.profiles.push(active.clone());
-    store.persist(&db).unwrap();
-    drop(store);
+    rewrite(home.path(), |db| db.profiles.push(active.clone()));
     let calls = std::sync::Arc::new(AtomicUsize::new(0));
     let native_calls = AtomicUsize::new(0);
     let mut current = reading(&active);
@@ -554,14 +590,21 @@ fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_
         .enumerate()
     {
         let mut entries = remembered(home.path(), AgentId::Claude);
-        let result = poll_with(home.path(), &p, 0, true, &|| Ok(open(home.path())), &|p| {
-            let mut dto = reading(p);
-            dto.reading.windows[0].observed_at = observed_at.into();
-            FetchResult {
-                login: p.login.clone(),
-                result: Ok(dto),
-            }
-        });
+        let result = poll_with(
+            home.path(),
+            &p,
+            &ticket(home.path()),
+            true,
+            &|| Ok(open(home.path())),
+            &|p| {
+                let mut dto = reading(p);
+                dto.reading.windows[0].observed_at = observed_at.into();
+                FetchResult {
+                    login: p.login.clone(),
+                    result: Ok(dto),
+                }
+            },
+        );
         merge(&mut entries, &p, result);
         assert_eq!(
             entries[0].reading.reset_credits, banked,

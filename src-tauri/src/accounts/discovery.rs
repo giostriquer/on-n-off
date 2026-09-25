@@ -2,7 +2,7 @@
 //! Consent is checked before credential access and again under the publication lease.
 use super::{
     model::Identity,
-    store::{Database, Login, Store},
+    store::{ChangeKind, Database, Guard, Login, Store, Ticket},
     transaction::Native,
 };
 use crate::dto::AgentId;
@@ -50,10 +50,13 @@ fn set_enabled_in(
         return super::vault::atomic_write(&root.join("remembering.json"), b"{\"enabled\":false}");
     }
     let store = open(true)?;
-    let mut db = store.load()?;
-    db.invalidate_logins()?;
-    store.persist(&db)?;
-    super::vault::atomic_write(&store.root.join("remembering.json"), b"{\"enabled\":true}")
+    let consent = store.root.join("remembering.json");
+    // Consent is written only once the bumped epoch is durable, under the same lease.
+    store.change_then(
+        ChangeKind::Remembering,
+        |_| Ok(()),
+        |(), _, _| super::vault::atomic_write(&consent, b"{\"enabled\":true}"),
+    )?
 }
 
 fn index(provider: AgentId) -> usize {
@@ -94,9 +97,6 @@ fn eligible(db: &Database, identity: &Identity, login: &Login) -> bool {
         })
 }
 fn candidate(native: &dyn Native, db: &Database) -> Result<Option<Login>, String> {
-    if db.recovery.is_some() {
-        return Ok(None);
-    }
     let Some(login) = native.read()? else {
         return Ok(None);
     };
@@ -113,30 +113,36 @@ fn candidate(native: &dyn Native, db: &Database) -> Result<Option<Login>, String
     }
     Ok(Some(login))
 }
+/// Saves `login` as a profile once consent, the ticket, the exclusions and the exact native
+/// credential all still hold under the vault lease, holding the native locks through the save.
 fn publish(
-    db: &mut Database,
+    store: Store,
+    ticket: &Ticket,
     native: &dyn Native,
     login: Login,
-    epoch: u64,
     remember: bool,
-    persist: &mut dyn FnMut(&Database) -> Result<(), String>,
 ) -> Result<bool, String> {
     if !remember {
         return Ok(false);
     }
-    db.allow_publication(epoch)?;
-    let identity = native.identify(&login)?;
-    if !eligible(db, &identity, &login) {
-        return Ok(false);
-    }
-    let locks = native.lock()?;
-    if native.read()?.as_ref() != Some(&login) {
-        return Err("The CLI login changed before it could be saved. Automatic remembering will check again.".into());
-    }
-    locks.ensure()?;
-    db.save(identity, login, None)?;
-    persist(db)?;
-    Ok(true)
+    store.publish_then(
+        ticket,
+        |db| {
+            let identity = native.identify(&login)?;
+            if !eligible(db, &identity, &login) {
+                return Ok(None);
+            }
+            let locks = native.lock()?;
+            if native.read()?.as_ref() != Some(&login) {
+                return Err("The CLI login changed before it could be saved. Automatic remembering will check again.".into());
+            }
+            locks.ensure()?;
+            db.save(identity, login, None)?;
+            Ok(Some(locks))
+        },
+        // The native locks cover the save and go before the vault lease.
+        |locks, _, _| Ok(locks.is_some()),
+    )?
 }
 fn poll_home(home: &Path, provider: AgentId) -> Result<bool, String> {
     if !enabled(home)? {
@@ -146,22 +152,19 @@ fn poll_home(home: &Path, provider: AgentId) -> Result<bool, String> {
         .ok_or("An account change is running. Automatic remembering will retry.")?;
     let native = super::native::NativeStore::resolve(provider, home)?;
     native.preflight()?;
-    let (db, epoch) = {
-        let store = Store::open_read(home)?;
-        let db = store.load()?;
-        let epoch = db.login_epoch;
-        (db, epoch)
+    let db = Store::open_existing(home)?.load()?;
+    // Nothing is remembered while an interrupted switch awaits recovery.
+    let Ok(ticket) = db.ticket(Guard::SignIn) else {
+        return Ok(false);
     };
     let Some(login) = candidate(&native, &db)? else {
         return Ok(false);
     };
     // Network verification holds no vault lease. Recheck consent, epoch, recovery, exclusions
     // and the exact native credential under the leases before publishing its protected copy.
-    let store = Store::open_read(home)?;
-    let mut db = store.load()?;
-    publish(&mut db, &native, login, epoch, enabled(home)?, &mut |db| {
-        store.persist(db)
-    })
+    let store = Store::open_existing(home)?;
+    let remember = enabled(home)?;
+    publish(store, &ticket, &native, login, remember)
 }
 pub fn setup(app: &mut tauri::App) {
     crate::monitor::spawn::<AccountDiscovery, _, _>(app, run);
