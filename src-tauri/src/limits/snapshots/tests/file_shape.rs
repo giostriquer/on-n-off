@@ -127,3 +127,37 @@ fn a_newer_save_that_could_not_tell_keeps_only_the_remembered_figures_in_the_fil
     );
     let _ = fs::remove_dir_all(&home);
 }
+
+/// A remembered count whose soonest expiry has passed is not known any more, so a newer read that
+/// could not tell the count leaves none in the file, as none is loaded from it.
+#[test]
+fn a_newer_save_that_could_not_tell_leaves_no_lapsed_count_in_the_file() {
+    let home = scratch_dir("limits-snap-file-shape-lapsed");
+    let store = SnapshotStore::for_home(&home);
+    let read = |observed_at: &str, reset_credits: Value| {
+        card(json!({
+            "provider": "codex",
+            "status": "ok",
+            "account": {"id": "acct-1"},
+            "currentAccount": true,
+            "windows": [
+                {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
+                 "usedPercent": 60.0, "observedAt": observed_at}
+            ],
+            "resetCredits": reset_credits
+        }))
+    };
+    store
+        .save(&read(
+            "2026-08-17T10:00:00.000Z",
+            json!({"availableCount": 2, "nextExpiresAt": "2020-01-01T00:00:00+00:00"}),
+        ))
+        .unwrap();
+
+    store
+        .save(&read("2026-08-17T11:00:00.000Z", Value::Null))
+        .unwrap();
+
+    assert_eq!(the_file(&store).get("resetCredits"), None);
+    let _ = fs::remove_dir_all(&home);
+}

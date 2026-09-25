@@ -214,11 +214,8 @@ fn a_remembered_count_past_its_expiry_is_not_kept_by_a_read_that_cannot_tell() {
     assert_eq!(read_counts(&rig, &surface), (None, None));
     assert_eq!(
         stored_reset_credits(&rig),
-        [Some(serde_json::json!({
-            "availableCount": 1,
-            "nextExpiresAt": "2020-01-01T00:00:00+00:00"
-        }))],
-        "the store writes the lapsed count back, and only loading hides it"
+        [None],
+        "the lapsed count is not written back to disk either"
     );
 }
 

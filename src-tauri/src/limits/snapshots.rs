@@ -49,7 +49,7 @@ impl SnapshotStore {
     /// Persist canonical account observations. Dated local or remembered windows remain
     /// trustworthy while refresh is unavailable; a successful read with only credits or banked
     /// resets is dated when it reaches this storage boundary. What the card could not tell is kept
-    /// from the reading already stored for the account, by the remember policy's answered column
+    /// from what the account's stored reading still says, by the remember policy's answered column
     /// (`limits/reading.rs`): the card already carries what its own read kept.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
@@ -81,9 +81,8 @@ impl SnapshotStore {
         // Every writer stores its own card, and one that could not tell a remembered figure must
         // not erase it.
         if let Some(existing) = existing {
-            stored.reading = stored
-                .reading
-                .keeping(existing.reading, Outcome::answered(dto));
+            let remembered = still_known(existing.reading, Utc::now());
+            stored.reading = stored.reading.keeping(remembered, Outcome::answered(dto));
         }
         write_stored(&path, stored)
     }
@@ -227,26 +226,31 @@ impl StoredSnapshot {
             .or_else(|| newest(&self.reading.windows))
     }
 
-    /// The card a remembered reading shows. A share past its reset has renewed, which the card
-    /// shows as it shows a window's passed reset; it is kept, since dropping it would bring back
-    /// the own balance of 0.
+    /// The card a remembered reading shows at `now`.
     fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
-        let reading = self.reading;
         ProviderLimitsDto {
             provider: self.provider,
             status: LimitsStatus::Ok,
             message: None,
             account: Some(self.account),
             current_account: false,
-            reading: Reading {
-                reset_credits: reading
-                    .reset_credits
-                    .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),
-                // A live offer belongs to the read that saw it and is never remembered.
-                reset_offer: None,
-                ..reading
-            },
+            reading: still_known(self.reading, now),
         }
+    }
+}
+
+/// What a stored reading still says at `now`, for the card that shows it and for the save that
+/// keeps from it alike. A banked-reset count whose soonest known expiry has passed is no longer
+/// known, and a live offer belongs to the read that saw it. A share past its reset has renewed,
+/// which the card shows as it shows a window's passed reset; it is kept, since dropping it would
+/// bring back the own balance of 0.
+fn still_known(reading: Reading, now: DateTime<Utc>) -> Reading {
+    Reading {
+        reset_credits: reading
+            .reset_credits
+            .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),
+        reset_offer: None,
+        ..reading
     }
 }
 
