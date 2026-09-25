@@ -15,7 +15,7 @@
 //! **The redemption is the point of no return.** The issuer rotates the refresh token on most
 //! renewals, which kills the old one as soon as the reply is written; from then until the store
 //! is written, the only live credential the user has is a value on this stack. So the work is
-//! ordered around that instant rather than recovered from afterwards: [`claude_store::begin`]
+//! ordered around that instant rather than recovered from afterwards: [`claude_store::PendingWrite::prove`]
 //! resolves and proves the write *before* the grant is sent, and everything left after it is one
 //! `rename` or one `security -U`. What cannot be moved earlier is reported as
 //! [`RenewError::Stranded`], which says on-n-off spent the login and could not store it, because
@@ -184,7 +184,7 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
 ) -> Result<ClaudeCredential, RenewError> {
     let lock = ClaudeLocks::acquire(dir, LockScope::Refresh)?;
     let held = || lock.lost();
-    // Read under Claude Code's storage-write lock too, and the write proven, before anything else:
+    // Read under Claude Code's storage-write lock too, before anything else:
     // the document written back is a change to this one, and nothing can land in between.
     let (document, pending) = claude_store::begin(dir, keychain, &held)?;
     let mut document = document
