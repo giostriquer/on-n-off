@@ -23,7 +23,7 @@ fn cancellation_is_scoped_and_old_operations_cannot_publish() {
 }
 
 use super::super::store::Login;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto, ProviderLimitsDto};
+use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto};
 use serde_json::json;
 use std::cell::RefCell;
 
@@ -54,14 +54,11 @@ fn fixture_login(user: &str, workspace: &str, generation: &str) -> Login {
 }
 fn usage(identity: &Identity) -> ProviderLimitsDto {
     ProviderLimitsDto {
-        account: Some(LimitsAccountDto {
-            id: identity.observation_key(),
-            legacy_id: Some(identity.workspace_id.clone()),
-            label: Some("same@example.com".into()),
-        }),
         current_account: false,
-        ..ProviderLimitsDto::for_test(AgentId::Codex, &identity.observation_key()).with_reading(
-            crate::dto::Reading {
+        ..ProviderLimitsDto::for_test(AgentId::Codex, &identity.observation_key())
+            .labelled("same@example.com")
+            .with_legacy_id(&identity.workspace_id)
+            .with_reading(crate::dto::Reading {
                 plan: Some("pro".into()),
                 windows: vec![LimitWindowDto {
                     id: "primary".into(),
@@ -73,8 +70,7 @@ fn usage(identity: &Identity) -> ProviderLimitsDto {
                     observed_at: "2026-09-13T12:00:00Z".into(),
                 }],
                 ..Default::default()
-            },
-        )
+            })
     }
 }
 #[test]

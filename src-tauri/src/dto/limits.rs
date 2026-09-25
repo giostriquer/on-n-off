@@ -276,6 +276,13 @@ impl ProviderLimitsDto {
         self
     }
 
+    pub fn with_legacy_id(mut self, legacy_id: &str) -> Self {
+        if let Some(account) = &mut self.account {
+            account.legacy_id = Some(legacy_id.to_string());
+        }
+        self
+    }
+
     pub fn with_reading(self, reading: Reading) -> Self {
         Self { reading, ..self }
     }
