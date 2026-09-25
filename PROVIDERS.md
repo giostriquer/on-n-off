@@ -214,7 +214,8 @@ ranks keep the backend's order, newest observation first. The rule lives in
 `planMultiplier` helpers; the backend itself still hands accounts over newest first.
 
 Native Codex file, keyring, and auto storage are handled explicitly. Ephemeral or alternate
-credential backends, selected Codex configuration profiles, custom native homes, environment auth
+credential backends, selected Codex configuration profiles, custom native homes (a Claude home
+chosen by `CLAUDE_CONFIG_DIR`, or a store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved), environment auth
 and detected forced-login policies are refused with guidance to use the official CLI. Claude's
 isolated login uses the custom-home Keychain namespace on macOS; activation preserves shared MCP
 OAuth and all unrelated configuration fields. Ordinary Claude activation allows running clients,

@@ -136,10 +136,11 @@ subscription dates read from the logins, through `read_revision`.
 
 The guaranteed target is the default native CLI home. Custom native homes, selected Codex config
 profiles, ephemeral/alternate Codex backends, environment credentials and detected forced-login
-policies currently defer to the official client. A Claude home chosen by `CLAUDE_CONFIG_DIR` is such
-a custom home for account changes, although Limits and the renewal follow it; a store that only
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` moved is not refused, and the switch reads, locks and writes it
-where Claude Code does. Existing model/endpoints/API-key configuration is
+policies currently defer to the official client. A Claude home chosen by `CLAUDE_CONFIG_DIR`, and a
+store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved (to another dir, or to a scoped Keychain entry by
+naming the default dir), are such custom homes: account changes refuse them, while Limits and the
+renewal follow them where Claude Code keeps the login. Set but empty, that variable leaves the
+default store in place. Existing model/endpoints/API-key configuration is
 never rewritten to simulate a switch. Native Codex file/keyring/auto backends are selected from
 config; unreadable protected storage is not treated as a missing login. macOS native account reads use the same system `security` reader as Limits, finding
 Claude Code's item under its own account name before the account a service-only lookup names,

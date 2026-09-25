@@ -212,7 +212,9 @@ impl NativeStore {
         Ok(store)
     }
     pub fn preflight(&self) -> Result<(), String> {
-        if self.custom {
+        // A store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved is as custom as a home the provider's
+        // own variable chose: account changes defer to the official client for both.
+        if self.custom || self.storage_moved() {
             return Err("Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.".into());
         }
 
@@ -294,6 +296,11 @@ impl NativeStore {
     /// Claude Code's config dir for this store.
     pub(crate) fn claude_dir(&self) -> StorageDir {
         StorageDir::of(&self.config_home, self.custom, self.secure_storage.as_ref())
+    }
+    /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` keeps Claude's login somewhere other than the config home
+    /// alone would: another dir, or the same one under a scoped Keychain entry.
+    fn storage_moved(&self) -> bool {
+        self.claude_dir() != StorageDir::new(self.config_home.clone(), self.custom)
     }
     /// Claude's login, from the store Claude Code would read it from. A disposable ON_N_OFF_HOME
     /// uses file fixtures unless it is an explicit isolated login.

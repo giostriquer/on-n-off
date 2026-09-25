@@ -66,3 +66,41 @@ fn an_isolated_claude_sign_in_never_inherits_a_secure_storage_dir() {
         "removed from the child's environment"
     );
 }
+
+/// What account changes say about a native home the environment chose.
+const CUSTOM_HOME: &str = "Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.";
+
+/// A store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved is a custom native home like one
+/// `CLAUDE_CONFIG_DIR` chose, so account changes defer to the official client for it. Named
+/// explicitly, even `~/.claude` moves the login to a scoped Keychain entry. Set but empty, the
+/// variable leaves the default store where it was, and account changes go on as usual.
+#[test]
+fn account_changes_defer_to_the_official_client_for_a_moved_store() {
+    let root = tempfile::tempdir().unwrap();
+    let preflight = |variable: &str, value: PathBuf| {
+        let env = [(variable, value)];
+        let store =
+            NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
+        store.preflight()
+    };
+
+    for moved in [root.path().join("secure"), root.path().join(".claude")] {
+        assert_eq!(
+            preflight(SECURE_STORAGE, moved.clone()).err().as_deref(),
+            Some(CUSTOM_HOME),
+            "{moved:?}"
+        );
+    }
+    assert_eq!(
+        preflight("CLAUDE_CONFIG_DIR", root.path().join("work"))
+            .err()
+            .as_deref(),
+        Some(CUSTOM_HOME),
+        "the same refusal as for a CLAUDE_CONFIG_DIR home"
+    );
+    assert_ne!(
+        preflight(SECURE_STORAGE, PathBuf::new()).err().as_deref(),
+        Some(CUSTOM_HOME),
+        "set but empty, the store is the default one"
+    );
+}
