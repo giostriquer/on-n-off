@@ -10,24 +10,23 @@ fn ring_label(provider: AgentId, windows: Vec<LimitWindowDto>) -> String {
 
 #[test]
 fn claudes_ring_leads_with_its_weekly_over_its_session() {
-    let label = ring_label(
-        AgentId::Claude,
-        vec![
-            window(
-                "session",
-                "5 hour · all models",
-                LimitWindowKind::Session,
-                73.0,
-            ),
-            window(
-                "weekly_all",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                41.0,
-            ),
-        ],
+    let weekly = window(
+        "weekly_all",
+        "Weekly · all models",
+        LimitWindowKind::Weekly,
+        41.0,
     );
-    assert_eq!(label, "41%");
+    let session = window(
+        "session",
+        "5 hour · all models",
+        LimitWindowKind::Session,
+        73.0,
+    );
+    assert_eq!(
+        ring_label(AgentId::Claude, vec![weekly, session.clone()]),
+        "41%"
+    );
+    assert_eq!(ring_label(AgentId::Claude, vec![session]), "73%");
 }
 
 #[test]

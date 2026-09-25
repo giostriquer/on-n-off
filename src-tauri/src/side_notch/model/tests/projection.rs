@@ -28,12 +28,16 @@ fn model(id: &str, label: &str) -> LimitWindowDto {
     window(id, label, LimitWindowKind::Model)
 }
 
-/// The signed-in account's card for `provider`, reporting `windows` in the order a card lists them.
+/// The signed-in account's card for `provider` when a read reports `windows`, which the pipeline
+/// puts in the order every card lists them.
 fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
-    ProviderLimitsDto::for_test(provider, "acct").with_reading(Reading {
-        windows,
-        ..Reading::default()
-    })
+    crate::limits::signed_in_card(
+        provider,
+        Reading {
+            windows,
+            ..Reading::default()
+        },
+    )
 }
 
 fn project(card: ProviderLimitsDto) -> NotchProvider {
@@ -209,4 +213,37 @@ fn the_popover_lists_the_windows_weekly_first_as_the_card_orders_them() {
         ids,
         ["weekly_all", "session", "weekly_fable", "weekly_opus"]
     );
+}
+
+/// From an app-server read to the notch: Codex reports its session as `primary` and its weekly as
+/// `secondary`, beside a Spark bucket. The reader drops Spark, the card puts weekly first, and the
+/// ring leads with it.
+#[test]
+fn a_codex_read_reaches_the_notch_weekly_first_without_its_hidden_windows() {
+    let main = serde_json::json!({"limitId": "codex",
+        "primary": {"usedPercent": 30, "windowDurationMins": 300, "resetsAt": 1787273137},
+        "secondary": {"usedPercent": 60, "windowDurationMins": 10080, "resetsAt": 1787838960}});
+    let card = crate::limits::codex_card(
+        serde_json::json!({
+            "rateLimits": main,
+            "rateLimitsByLimitId": {
+                "codex": main,
+                "codex_bengalfox": {"limitId": "codex_bengalfox",
+                    "limitName": "GPT-5.3-Codex-Spark",
+                    "primary": {"usedPercent": 99, "windowDurationMins": 300}}
+            }
+        }),
+        "acct",
+        "2026-09-01T10:00:00Z",
+    );
+
+    let cell = project(card);
+    let ids: Vec<&str> = cell
+        .windows
+        .iter()
+        .map(|window| window.id.as_str())
+        .collect();
+    assert_eq!(ids, ["secondary", "primary"]);
+    assert_eq!(cell.headline_window_id.as_deref(), Some("secondary"));
+    assert_eq!(cell.inner_ring, None);
 }

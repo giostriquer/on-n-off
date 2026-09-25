@@ -112,6 +112,26 @@ pub(crate) fn codex_card(
     )
 }
 
+/// The signed-in account's card a read reporting `reading` becomes: the pipeline's own card, so its
+/// windows come in the order every card lists them whatever order they are given in. For tests
+/// elsewhere that must not hand a consumer an order no read produces.
+#[cfg(test)]
+pub(crate) fn signed_in_card(provider: AgentId, reading: Reading) -> ProviderLimitsDto {
+    finish(
+        provider,
+        LimitsStatus::Ok,
+        None,
+        Parsed {
+            account: Some(LimitsAccountDto {
+                legacy_id: None,
+                id: "acct".to_string(),
+                label: None,
+            }),
+            reading,
+        },
+    )
+}
+
 /// The three services one Claude read talks to, together so adding a fourth costs one field and
 /// not an edit at every call site.
 #[derive(Debug, Clone, Copy)]

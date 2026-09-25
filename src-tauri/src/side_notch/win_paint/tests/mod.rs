@@ -20,12 +20,16 @@ fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Dis
         mirrored: false,
     }
 }
-/// The signed-in account's card for `provider`, reporting `windows`.
+/// The signed-in account's card for `provider` when a read reports `windows`, which the pipeline
+/// puts in the order every card lists them: the painter is never handed an order no read produces.
 fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
-    ProviderLimitsDto::for_test(provider, "acct").with_reading(Reading {
-        windows,
-        ..Reading::default()
-    })
+    crate::limits::signed_in_card(
+        provider,
+        Reading {
+            windows,
+            ..Reading::default()
+        },
+    )
 }
 /// What the painter is handed for `card`: the host's projection of it, without live sessions.
 fn projected(card: ProviderLimitsDto) -> ProviderData {
@@ -79,16 +83,19 @@ fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderData {
 }
 /// A Codex business member's card: the weekly window, which is all Codex reports, and a credit share.
 fn codex_member_card(share: LimitsWorkspaceCreditsDto) -> ProviderLimitsDto {
-    ProviderLimitsDto::for_test(AgentId::Codex, "acct").with_reading(Reading {
-        windows: vec![window(
-            "primary",
-            "Weekly · all models",
-            LimitWindowKind::Weekly,
-            31.0,
-        )],
-        workspace_credits: Some(share),
-        ..Reading::default()
-    })
+    crate::limits::signed_in_card(
+        AgentId::Codex,
+        Reading {
+            windows: vec![window(
+                "primary",
+                "Weekly · all models",
+                LimitWindowKind::Weekly,
+                31.0,
+            )],
+            workspace_credits: Some(share),
+            ..Reading::default()
+        },
+    )
 }
 fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderData {
     projected(codex_member_card(share))
