@@ -1,7 +1,23 @@
 use std::env;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::dto::AdapterError;
+
+/// The environment on-n-off reads its providers' settings from: the process's own. A test binary
+/// sees only a disposable `ON_N_OFF_HOME` instead, so no test can follow a developer's
+/// `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME` to a real home, find the
+/// Claude Code Keychain entry under a developer's own account name, or read the login Keychain at
+/// all. A test that needs another environment hands one to the resolver it tests
+/// (`accounts::claude_store::dirs`, `NativeStore::resolve_from`).
+#[cfg(not(test))]
+pub(crate) fn process_env(name: &str) -> Option<OsString> {
+    env::var_os(name)
+}
+#[cfg(test)]
+pub(crate) fn process_env(name: &str) -> Option<OsString> {
+    (name == "ON_N_OFF_HOME").then(|| OsString::from("disposable"))
+}
 
 pub fn user_home() -> Result<PathBuf, AdapterError> {
     if let Ok(root) = env::var("ON_N_OFF_HOME") {

@@ -139,7 +139,7 @@ impl Target {
 }
 impl NativeStore {
     pub fn resolve(provider: AgentId, home: &Path) -> Result<Self, String> {
-        Self::resolve_from(provider, home, &claude_store::process_env)
+        Self::resolve_from(provider, home, &crate::paths::process_env)
     }
     fn resolve_from(
         provider: AgentId,
