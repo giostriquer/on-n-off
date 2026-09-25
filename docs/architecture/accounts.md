@@ -106,8 +106,8 @@ Brief contention waits on blocking workers (up to ten seconds); it never bypasse
 (Claude Code's refresh lock, its legacy lock beside the config dir's real path, and the config
 file's lock) cover the outgoing reread, durable journal and publication; the credential write goes
 through `claude_store::begin`, the one writer the renewal uses too, which takes Claude Code's
-`.storage-write.lock`, reads the store under it and refuses a linked credentials file before either
-half of the change is written. A lock that cannot be taken at all is reported with its reason;
+`.storage-write.lock` and reads the store under it; its proof, made before either half of the
+change is written, refuses a linked credentials file. A lock that cannot be taken at all is reported with its reason;
 only one another process holds reads as Claude being busy. They are released for verification/renewal, while the
 exclusive activity lease remains held through completion or recovery: the locked write consumes
 the lock guard and returns the store as read back under it, so verification, which may renew and
