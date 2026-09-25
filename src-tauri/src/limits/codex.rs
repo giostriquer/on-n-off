@@ -12,6 +12,13 @@ use crate::dto::{
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
+/// Codex's internal buckets, which it reports like any other limit and no surface shows: matched
+/// by the id this reader gives their windows, `extra:<bucket>` or `extra:<bucket>:<slot>`.
+const HIDDEN_BUCKETS: [&str; 2] = ["base_model_inference", "codex_bengalfox"];
+/// The reserve and the retired Spark preview, matched by the model name a window's label ends with
+/// (after its last `·`, trimmed, in any case), whatever bucket reports them.
+const HIDDEN_NAMES: [&str; 2] = ["gpt-reserve", "gpt-5.3-codex-spark"];
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RateLimitsResponse {
@@ -111,6 +118,8 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
             }
         }
     }
+    // Dropped here, so no consumer ever sees them: not the cards, the monitor or the notches.
+    windows.retain(|window| !is_hidden(window));
     Reading {
         plan: main.plan_type.clone(),
         subscription_status: None,
@@ -128,6 +137,25 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
         reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
     }
+}
+
+/// Whether `window` is one no surface shows: a Codex internal bucket, or the reserve or Spark.
+fn is_hidden(window: &LimitWindowDto) -> bool {
+    let name = window
+        .label
+        .rsplit('·')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    HIDDEN_NAMES.contains(&name.as_str())
+        || window.id.strip_prefix("extra:").is_some_and(|bucket| {
+            HIDDEN_BUCKETS.iter().any(|hidden| {
+                bucket
+                    .strip_prefix(hidden)
+                    .is_some_and(|slot| slot.is_empty() || slot.starts_with(':'))
+            })
+        })
 }
 
 fn bucket_windows(id: &str, bucket: &RateLimitBucket, main: bool) -> Vec<LimitWindowDto> {
