@@ -141,15 +141,15 @@ Each provider is read the way that provider intends, and active login renewal re
   and it does the same thing Claude Code does, through `accounts/claude_store.rs` for everything
   about the store: the same refresh lock directories in the same order (`.oauth_refresh.lock`,
   then the legacy lock beside the config dir's real path), kept fresh while held; the same
-  `.storage-write.lock` around the write; the same grant against the login's own client id; the
-  same stored shape; and a re-read under the lock so a login another process just renewed is used
-  rather than redeemed again.
+  `.storage-write.lock` around the read and the write, taken by the one writer the account switch
+  uses too; the same grant against the login's own client id; the same stored shape; and a re-read
+  under the locks so a login another process just renewed is used rather than redeemed again.
 
   The work is ordered around the redemption, because that is the point of no return: the issuer
   rotates the refresh token, so from the reply until the store is written the only live credential
   is a value on the stack. Everything that can fail on its own account — resolving the Keychain
-  entry's account, proving the credentials file's directory will take a temporary — happens
-  *before* the grant, leaving one `rename` or one `security -U` after it. A refresh token the
+  entry's account, creating a private temporary beside the credentials file, refusing one that is
+  a link — happens *before* the grant, leaving one `security -U` or one synced rename after it. A refresh token the
   issuer refuses is reported as needing a new sign-in, and not sent again while the store still
   holds it; a renewal that succeeds and then cannot be stored says exactly that, with the reason,
   because by then the old token is spent and only signing in again will clear it.

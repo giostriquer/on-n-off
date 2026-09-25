@@ -104,8 +104,11 @@ reads from account activation. A separate lease serializes vault access. Existin
 not block another provider's file transaction. Initial key/vault creation remains serialized.
 Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Completed saves release their leases before announcing account changes. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks
 (Claude Code's refresh lock, its legacy lock beside the config dir's real path, and the config
-file's lock) cover the outgoing reread, durable journal and publication; the credential write also
-takes Claude Code's `.storage-write.lock`. They are released for verification/renewal, while the
+file's lock) cover the outgoing reread, durable journal and publication; the credential write goes
+through `claude_store::begin`, the one writer the renewal uses too, which takes Claude Code's
+`.storage-write.lock`, reads the store under it and refuses a linked credentials file before either
+half of the change is written. A lock that cannot be taken at all is reported with its reason;
+only one another process holds reads as Claude being busy. They are released for verification/renewal, while the
 exclusive activity lease remains held through completion or recovery: the locked write consumes
 the lock guard and returns the store as read back under it, so verification, which may renew and
 take the same locks, cannot run while they are held. Every held lock has a heartbeat. Claude verification compares the authenticated
