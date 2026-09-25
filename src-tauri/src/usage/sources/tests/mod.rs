@@ -122,24 +122,30 @@ fn unchanged_sources_keep_their_index_and_window_signature() {
     let _ = std::fs::remove_dir_all(home);
 }
 
+/// A read made before the transcript was created is stale once the index is saved again, even
+/// when the transcripts on disk are back as that read saw them.
 #[test]
 fn a_created_transcript_changes_the_signature_of_a_window_it_falls_in() {
     let home = scratch_dir("usage-sources-create");
+    std::fs::create_dir_all(home.join(".claude").join("projects")).unwrap();
     let before = open(&home, Watermark::NONE);
     let before_signature = before.signature(AUGUST_START, SEPTEMBER_START);
     let before_seen = before.finish(|| Watermark::NONE);
 
+    let created_path = transcript_path(&home, "created.jsonl");
     write_records(
-        &transcript_path(&home, "created.jsonl"),
+        &created_path,
         &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)],
     );
     let created = open(&home, Watermark::NONE);
     let created_signature = created.signature(AUGUST_START, SEPTEMBER_START);
     let created_seen = created.finish(|| Watermark::NONE);
+    let created_unchanged = unchanged(&created_seen);
+    std::fs::remove_file(&created_path).unwrap();
 
     assert_ne!(created_signature, before_signature);
-    assert!(!unchanged(&before_seen));
-    assert!(unchanged(&created_seen));
+    assert!(created_unchanged);
+    assert!(!unchanged(&before_seen), "the index was saved since");
     let _ = std::fs::remove_dir_all(home);
 }
 
