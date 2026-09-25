@@ -114,7 +114,8 @@ fn a_reply_missing_the_token_or_its_lifetime_is_refused_rather_than_stored() {
 
 #[test]
 fn the_grant_names_claude_codes_client_and_the_scopes_the_login_was_issued() {
-    let body = request_body("rt", &scopes(&stored()["claudeAiOauth"]));
+    let oauth = &stored()["claudeAiOauth"];
+    let body = request_body("rt", &scopes(oauth), client_id(oauth));
     assert_eq!(body["grant_type"], "refresh_token");
     assert_eq!(body["refresh_token"], "rt");
     assert_eq!(body["client_id"], CLIENT_ID);
@@ -390,4 +391,31 @@ fn a_renewal_yields_while_claude_code_writes_its_credentials() {
         "past fifteen seconds the lock is abandoned, and the renewal goes on to the issuer"
     );
     assert!(!lock.exists(), "and released once the renewal is done");
+}
+
+/// A login issued to another OAuth client names it, and its refresh token is redeemable only by
+/// that client, so the grant sends the login's own `clientId`, as Claude Code does. A login that
+/// names none gets Claude Code's.
+#[test]
+fn the_grant_names_the_client_the_login_was_issued_to() {
+    let mut document = stored();
+    document["claudeAiOauth"]["clientId"] = json!("acme-client");
+    let home = home_with("renew-client", &document);
+    let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
+
+    assert!(matches!(
+        login(&home, &token_url),
+        CredentialLookup::Found(_)
+    ));
+    let grant: Value = serde_json::from_str(&request.join().unwrap().body).unwrap();
+    assert_eq!(grant["client_id"], "acme-client");
+
+    let home = home_with("renew-default-client", &stored());
+    let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
+    assert!(matches!(
+        login(&home, &token_url),
+        CredentialLookup::Found(_)
+    ));
+    let grant: Value = serde_json::from_str(&request.join().unwrap().body).unwrap();
+    assert_eq!(grant["client_id"], CLIENT_ID);
 }

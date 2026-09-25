@@ -37,7 +37,8 @@ use crate::limits::credentials::{self, ClaudeCredential, CredentialLookup};
 use crate::limits::json::optional_string;
 
 /// Claude Code's own token endpoint and OAuth client. A refresh token is issued to one client and
-/// refused to any other, so these are not ours to choose.
+/// refused to any other, so these are not ours to choose; a login that names its own `clientId`
+/// is redeemed for that one instead (see [`client_id`]).
 pub(crate) const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
@@ -193,6 +194,7 @@ fn renew<P: Fn() -> KeychainProbe>(
     // store changed under us into one that needs a sign-in rather than a refresh.
     let refresh_token = optional_string(oauth.get("refreshToken")).ok_or(RenewError::Rejected)?;
     let scopes = scopes(oauth);
+    let client_id = client_id(oauth).to_string();
 
     // Everything about the write that can fail for reasons unrelated to the reply fails here,
     // where failing costs nothing. What is left afterwards is one rename or one `security -U`.
@@ -201,7 +203,11 @@ fn renew<P: Fn() -> KeychainProbe>(
         LockError::Unavailable(why) => RenewError::Unavailable(why),
     })?;
 
-    let reply = post_grant(token_url, &request_body(&refresh_token, &scopes)).map_err(|error| {
+    let reply = post_grant(
+        token_url,
+        &request_body(&refresh_token, &scopes, &client_id),
+    )
+    .map_err(|error| {
         match error {
             // 400 `invalid_grant` is how the issuer says the refresh token is spent or revoked.
             HttpError::Unauthorized | HttpError::Status(400) => {
@@ -234,8 +240,11 @@ pub(super) fn renew_private(auth: &Value, now_ms: i64, token_url: &str) -> Resul
         .ok_or("Missing private Claude login.")?;
     let token =
         optional_string(oauth.get("refreshToken")).ok_or("Missing private renewal token.")?;
-    let reply = post_grant(token_url, &request_body(&token, &scopes(oauth)))
-        .map_err(|_| "Could not renew the private Claude login. Sign in again if needed.")?;
+    let reply = post_grant(
+        token_url,
+        &request_body(&token, &scopes(oauth), client_id(oauth)),
+    )
+    .map_err(|_| "Could not renew the private Claude login. Sign in again if needed.")?;
     let mut auth = auth.clone();
     apply(&mut auth, &reply, now_ms)
         .map_err(|_| "The private renewal reply was incomplete. Sign in again.")?;
@@ -245,13 +254,22 @@ pub(super) fn renew_private(auth: &Value, now_ms: i64, token_url: &str) -> Resul
 /// The grant Claude Code sends, field for field. `scope` is required: the issuer narrows a refresh
 /// to the scopes asked for, and a login that came back without them is one the usage endpoint
 /// would refuse.
-fn request_body(refresh_token: &str, scopes: &[String]) -> Value {
+fn request_body(refresh_token: &str, scopes: &[String], client_id: &str) -> Value {
     json!({
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
-        "client_id": CLIENT_ID,
+        "client_id": client_id,
         "scope": scopes.join(" "),
     })
+}
+
+/// The OAuth client the login was issued to: its stored `clientId` when it names one, as Claude
+/// Code 2.1.282 sends it (`clientId ?? CLIENT_ID`), otherwise Claude Code's own.
+fn client_id(oauth: &Value) -> &str {
+    oauth
+        .get("clientId")
+        .and_then(Value::as_str)
+        .unwrap_or(CLIENT_ID)
 }
 
 fn scopes(oauth: &Value) -> Vec<String> {
