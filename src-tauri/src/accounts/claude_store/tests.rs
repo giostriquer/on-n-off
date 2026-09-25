@@ -203,7 +203,7 @@ fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
     let storage_write = dir.join(".storage-write.lock");
     let never_lost = || false;
 
-    let (document, writer) = begin(
+    let (document, pending) = begin(
         &StorageDir::default_in(&home),
         &|_: &StorageDir| Ok(None),
         &never_lost,
@@ -213,6 +213,8 @@ fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
         document.unwrap()["claudeAiOauth"]["accessToken"],
         "kc-token"
     );
+    assert_eq!(files(), 1, "nothing is created before the write is proven");
+    let writer = pending.prove().unwrap();
     assert_eq!(
         files(),
         2,
@@ -234,14 +236,16 @@ fn the_credentials_file_is_written_private() {
     let path = home.join(".claude").join(".credentials.json");
     let never_lost = || false;
 
-    let (document, writer) = begin(
+    let (document, pending) = begin(
         &StorageDir::default_in(&home),
         &|_: &StorageDir| Ok(None),
         &never_lost,
     )
     .unwrap();
     assert_eq!(document, None);
-    writer
+    pending
+        .prove()
+        .unwrap()
         .commit(&serde_json::json!({"claudeAiOauth":{"accessToken":"new"}}))
         .unwrap();
     assert_eq!(
@@ -435,9 +439,12 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
         let dir = StorageDir::default_in(&scratch_dir("renew-keychain-account"));
         let never_lost = || false;
         let keychain = |_: &StorageDir| Ok(Some("{}".to_string()));
-        let (_, write) = begin(&dir, &keychain, &never_lost).unwrap();
-        assert_eq!(write.store(), &ClaudeStore::Keychain);
-        write.commit(&serde_json::json!({"claudeAiOauth":{}}))
+        let (_, pending) = begin(&dir, &keychain, &never_lost).unwrap();
+        assert_eq!(pending.source(), &ClaudeStore::Keychain);
+        pending
+            .prove()
+            .unwrap()
+            .commit(&serde_json::json!({"claudeAiOauth":{}}))
     });
     assert_eq!(committed, Ok(()));
     let add = sent
@@ -726,7 +733,8 @@ fn a_credential_write_knows_when_any_lock_it_relies_on_is_lost() {
     let dir = StorageDir::default_in(&home);
     let caller_lost = std::cell::Cell::new(false);
     let held = || caller_lost.get();
-    let (_, write) = begin(&dir, &|_: &StorageDir| Ok(None), &held).unwrap();
+    let (_, pending) = begin(&dir, &|_: &StorageDir| Ok(None), &held).unwrap();
+    let write = pending.prove().unwrap();
     assert!(!write.lost());
 
     caller_lost.set(true);

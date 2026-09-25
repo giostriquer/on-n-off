@@ -516,13 +516,14 @@ impl NativeStore {
         // storage-write lock, going to the store Claude Code's next read uses.
         let held = || locks.ensure().is_err();
         let keychain = |_: &StorageDir| self.claude_keychain();
-        let (document, write) = claude_store::begin(&self.claude_dir(), &keychain, &held).map_err(
-            |error| match error {
-                BeginError::Busy => BUSY.into(),
-                BeginError::Store(error) => store_error(error),
-                BeginError::Unavailable(why) => why,
-            },
-        )?;
+        let begin_error = |error| match error {
+            BeginError::Busy => BUSY.to_string(),
+            BeginError::Store(error) => store_error(error),
+            BeginError::Unavailable(why) => why,
+        };
+        let (document, pending) =
+            claude_store::begin(&self.claude_dir(), &keychain, &held).map_err(begin_error)?;
+        let write = pending.prove().map_err(begin_error)?;
         let mut auth = document.unwrap_or_else(|| json!({}));
         let object = auth
             .as_object_mut()

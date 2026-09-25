@@ -471,13 +471,22 @@ impl From<LockError> for BeginError {
 
 /// One change to Claude Code's credentials: the only way on-n-off writes them.
 ///
-/// [`begin`] takes Claude Code's `.storage-write.lock`, reads the store under it and proves the
-/// write: the Keychain entry's account, or a private temporary beside the credentials file. What
-/// is left for [`CredentialWrite::commit`] is one `security -U` or one rename, and the document
-/// it writes is a change to the one read under the lock, so no credential write of Claude Code's
-/// can land in between. The lock is held until this value drops.
+/// [`begin`] takes Claude Code's `.storage-write.lock` and reads the store under it, and
+/// [`PendingWrite::prove`] then proves the write: the Keychain entry's account, or a private
+/// temporary beside the credentials file. What is left for [`CredentialWrite::commit`] is one
+/// `security -U` or one rename, and the document it writes is a change to the one read under the
+/// lock, so no credential write of Claude Code's can land in between. The lock is held until the
+/// write drops.
+pub(crate) struct PendingWrite<'a> {
+    dir: StorageDir,
+    target: Result<ClaudeStore, String>,
+    source: ClaudeStore,
+    storage: ClaudeLocks,
+    held: &'a dyn Fn() -> bool,
+}
+
+/// A [`PendingWrite`] proven: nothing left that can fail on its own account but the write itself.
 pub(crate) struct CredentialWrite<'a> {
-    store: ClaudeStore,
     target: WriteTarget,
     storage: ClaudeLocks,
     held: &'a dyn Fn() -> bool,
@@ -494,63 +503,77 @@ enum WriteTarget {
     },
 }
 
-/// Begin a change to the credentials in `dir`, reading the store with `keychain` under Claude
-/// Code's storage-write lock. `held` says whether a lock the caller holds around the change was
-/// taken away. Returns what the store holds, `None` for nothing, and the write.
-///
-/// Refused when the Keychain could not be read, since which store Claude Code reads next is then
-/// unknown, and when the credentials file is a link: replacing it would cut the link and leave the
-/// login where Claude Code no longer looks.
+/// Begin a change to the credentials in `dir`: take Claude Code's storage-write lock and read the
+/// store under it with `keychain`. `held` says whether a lock the caller holds around the change
+/// was taken away. Returns what the store holds, `None` for nothing, and the write, still to be
+/// proven: a caller that finds it has nothing to write never pays for the proof.
 pub(crate) fn begin<'a>(
     dir: &StorageDir,
     keychain: &dyn Fn(&StorageDir) -> KeychainProbe,
     held: &'a dyn Fn() -> bool,
-) -> Result<(Option<Value>, CredentialWrite<'a>), BeginError> {
+) -> Result<(Option<Value>, PendingWrite<'a>), BeginError> {
     let storage = ClaudeLocks::acquire(dir, LockScope::StorageWrite)?;
     let stored = read(dir, keychain(dir)).map_err(BeginError::Store)?;
-    let store = stored.target.map_err(BeginError::Unavailable)?;
-    let target = match &store {
-        ClaudeStore::Keychain => {
-            let service = dir.service();
-            WriteTarget::Keychain {
-                account: write_account(&service).map_err(BeginError::Unavailable)?,
-                service,
-            }
-        }
-        ClaudeStore::File(path) => {
-            if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
-                return Err(BeginError::Unavailable(
-                    "Refusing to replace a linked credential file.".into(),
-                ));
-            }
-            // Created now, private and beside the file, so a directory that will not take it
-            // says so before anything is written, or redeemed.
-            let temporary = tempfile::NamedTempFile::new_in(&dir.path).map_err(|error| {
-                BeginError::Unavailable(format!("{}: {error}", dir.path.display()))
-            })?;
-            WriteTarget::File {
-                path: path.clone(),
-                temporary,
-            }
-        }
-    };
+    let source = stored
+        .target
+        .clone()
+        .unwrap_or_else(|_| ClaudeStore::File(dir.credentials_file()));
     Ok((
         stored.document,
-        CredentialWrite {
-            store,
-            target,
+        PendingWrite {
+            dir: dir.clone(),
+            target: stored.target,
+            source,
             storage,
             held,
         },
     ))
 }
 
-impl CredentialWrite<'_> {
-    /// The store the write goes to: the one Claude Code's next read uses.
-    pub(crate) fn store(&self) -> &ClaudeStore {
-        &self.store
+impl<'a> PendingWrite<'a> {
+    /// The store the document came from: the Keychain entry, or the credentials file.
+    pub(crate) fn source(&self) -> &ClaudeStore {
+        &self.source
     }
 
+    /// Prove the write, before anything is written or redeemed. Refused when the Keychain could
+    /// not be read, since which store Claude Code reads next is then unknown, and when the
+    /// credentials file is a link: replacing it would cut the link and leave the login where
+    /// Claude Code no longer looks.
+    pub(crate) fn prove(self) -> Result<CredentialWrite<'a>, BeginError> {
+        let store = self.target.map_err(BeginError::Unavailable)?;
+        let target = match store {
+            ClaudeStore::Keychain => {
+                let service = self.dir.service();
+                WriteTarget::Keychain {
+                    account: write_account(&service).map_err(BeginError::Unavailable)?,
+                    service,
+                }
+            }
+            ClaudeStore::File(path) => {
+                if fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+                    return Err(BeginError::Unavailable(
+                        "Refusing to replace a linked credential file.".into(),
+                    ));
+                }
+                // Created now, private and beside the file, so a directory that will not take it
+                // says so before anything is written, or redeemed.
+                let temporary =
+                    tempfile::NamedTempFile::new_in(&self.dir.path).map_err(|error| {
+                        BeginError::Unavailable(format!("{}: {error}", self.dir.path.display()))
+                    })?;
+                WriteTarget::File { path, temporary }
+            }
+        };
+        Ok(CredentialWrite {
+            target,
+            storage: self.storage,
+            held: self.held,
+        })
+    }
+}
+
+impl CredentialWrite<'_> {
     /// Whether a lock this change relies on was taken away while held: the caller's own, or the
     /// storage-write lock. Whatever is written after that is uncoordinated.
     pub(crate) fn lost(&self) -> bool {

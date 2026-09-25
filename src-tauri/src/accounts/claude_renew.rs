@@ -183,7 +183,7 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
     let held = || lock.lost();
     // Read under Claude Code's storage-write lock too, and the write proven, before anything else:
     // the document written back is a change to this one, and nothing can land in between.
-    let (document, write) = claude_store::begin(dir, keychain, &held)?;
+    let (document, pending) = claude_store::begin(dir, keychain, &held)?;
     let mut document = document
         .ok_or_else(|| RenewError::Unavailable("no stored Claude login to renew".to_string()))?;
 
@@ -198,7 +198,7 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
     let oauth = document
         .get("claudeAiOauth")
         .ok_or_else(|| RenewError::Unavailable("stored login has no claudeAiOauth".to_string()))?;
-    let identity = identify(write.store(), oauth);
+    let identity = identify(pending.source(), oauth);
     if refused.matches(&identity) {
         return Err(RenewError::Rejected);
     }
@@ -207,6 +207,11 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
     let refresh_token = optional_string(oauth.get("refreshToken")).ok_or(RenewError::Rejected)?;
     let scopes = scopes(oauth);
     let client_id = client_id(oauth).to_string();
+
+    // Only now, with a renewal actually due, is the write proven: a fresh or refused login found
+    // above never pays for a Keychain lookup or a temporary, and a proof that fails cannot stand in
+    // for either answer.
+    let write = pending.prove()?;
 
     // Last check before the point of no return. A lock taken away while this held it was judged
     // abandoned by another process, which may be renewing or rewriting this same login right

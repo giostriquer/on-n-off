@@ -655,3 +655,42 @@ fn the_locks_are_held_while_the_grant_is_in_flight() {
     let (_, held) = request.join().unwrap();
     assert_eq!(held, (true, true), "(refresh lock, storage-write lock)");
 }
+
+/// A login this process has already had refused, and one another process renewed while this one
+/// waited, are answered under the lock before any write is proven: no Keychain lookup, on every
+/// poll that finds them, and no failed proof standing in for the fresh login.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_refused_or_fresh_login_under_the_lock_is_answered_without_proving_a_write() {
+    use crate::accounts::keychain::with_test_runner;
+    use crate::process::CommandOutcome;
+    let home = scratch_dir("renew-no-proof");
+    let dir = StorageDir::default_in(&home);
+    let no_account = |_: &str| CommandOutcome::Exited {
+        success: false,
+        stdout: String::new(),
+        stderr: "The specified item could not be found in the keychain.".to_string(),
+    };
+
+    let refused = RefusedLogin::new();
+    refused.remember((ClaudeStore::Keychain, NOW_MS - 1, Some(NOW_MS + 600_000)));
+    let expired = |_: &StorageDir| Ok(Some(stored().to_string()));
+    let (result, sent) = with_test_runner(no_account, || {
+        renew(&dir, &expired, NOW_MS, &refused_url(), &refused)
+    });
+    assert_eq!(result.unwrap_err(), RenewError::Rejected);
+    assert!(sent.is_empty(), "nothing was proven: {sent:?}");
+
+    let mut theirs = stored();
+    theirs["claudeAiOauth"]["accessToken"] = json!("theirs");
+    theirs["claudeAiOauth"]["expiresAt"] = json!(NOW_MS + 1);
+    let fresh = move |_: &StorageDir| Ok(Some(theirs.to_string()));
+    let (result, sent) = with_test_runner(no_account, || {
+        renew(&dir, &fresh, NOW_MS, &refused_url(), &RefusedLogin::new())
+    });
+    assert_eq!(
+        result.map(|credential| credential.token),
+        Ok("theirs".into())
+    );
+    assert!(sent.is_empty(), "nothing was proven: {sent:?}");
+}
