@@ -9,6 +9,7 @@ deliberately short.
 | Read before you… | Document |
 | --- | --- |
 | work on a subsystem you do not know | [`docs/architecture/`](docs/architecture/) |
+| name a domain concept in code, docs or a PR | [`CONTEXT.md`](CONTEXT.md) |
 | touch `cli_locate.rs`, `process.rs`, `scripts/`, or CI | [`OS.md`](OS.md) |
 | change a provider adapter | [`PROVIDERS.md`](PROVIDERS.md) — update it in the same change |
 | hand off or smoke-test a build | [`HANDOFF.md`](HANDOFF.md) |
