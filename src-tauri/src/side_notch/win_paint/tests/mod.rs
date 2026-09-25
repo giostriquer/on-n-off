@@ -25,6 +25,7 @@ fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Dis
 fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
     crate::limits::signed_in_card(
         provider,
+        "acct",
         Reading {
             windows,
             ..Reading::default()
@@ -85,6 +86,7 @@ fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderData {
 fn codex_member_card(share: LimitsWorkspaceCreditsDto) -> ProviderLimitsDto {
     crate::limits::signed_in_card(
         AgentId::Codex,
+        "acct",
         Reading {
             windows: vec![window(
                 "primary",

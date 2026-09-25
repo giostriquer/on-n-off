@@ -33,6 +33,7 @@ fn model(id: &str, label: &str) -> LimitWindowDto {
 fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
     crate::limits::signed_in_card(
         provider,
+        "acct",
         Reading {
             windows,
             ..Reading::default()

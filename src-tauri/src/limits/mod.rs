@@ -97,26 +97,18 @@ pub(crate) fn codex_card(
     for window in &mut reading.windows {
         window.observed_at = observed_at.to_string();
     }
-    finish(
-        AgentId::Codex,
-        LimitsStatus::Ok,
-        None,
-        Parsed {
-            account: Some(LimitsAccountDto {
-                legacy_id: None,
-                id: account_id.to_string(),
-                label: None,
-            }),
-            reading,
-        },
-    )
+    signed_in_card(AgentId::Codex, account_id, reading)
 }
 
-/// The signed-in account's card a read reporting `reading` becomes: the pipeline's own card, so its
-/// windows come in the order every card lists them whatever order they are given in. For tests
-/// elsewhere that must not hand a consumer an order no read produces.
+/// The card a read of the signed-in account `account_id` reporting `reading` becomes: the pipeline's
+/// own card, so its windows come in the order every card lists them whatever order they are given
+/// in. For tests elsewhere that must not hand a consumer an order no read produces.
 #[cfg(test)]
-pub(crate) fn signed_in_card(provider: AgentId, reading: Reading) -> ProviderLimitsDto {
+pub(crate) fn signed_in_card(
+    provider: AgentId,
+    account_id: &str,
+    reading: Reading,
+) -> ProviderLimitsDto {
     finish(
         provider,
         LimitsStatus::Ok,
@@ -124,7 +116,7 @@ pub(crate) fn signed_in_card(provider: AgentId, reading: Reading) -> ProviderLim
         Parsed {
             account: Some(LimitsAccountDto {
                 legacy_id: None,
-                id: "acct".to_string(),
+                id: account_id.to_string(),
                 label: None,
             }),
             reading,
