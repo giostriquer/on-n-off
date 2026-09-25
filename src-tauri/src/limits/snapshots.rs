@@ -49,8 +49,8 @@ impl SnapshotStore {
     /// Persist canonical account observations. Dated local or remembered windows remain
     /// trustworthy while refresh is unavailable; a successful read with only credits or banked
     /// resets is dated when it reaches this storage boundary. What the card could not tell is kept
-    /// from what the account's stored reading still says, by the remember policy's answered column
-    /// (`limits/reading.rs`): the card already carries what its own read kept.
+    /// from what the account's stored reading still says, by the remember policy's column for a
+    /// stored card (`Outcome::for_stored`): the card already carries what its own read kept.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
@@ -82,7 +82,7 @@ impl SnapshotStore {
         // not erase it.
         if let Some(existing) = existing {
             let remembered = existing.reading.as_of(Utc::now());
-            stored.reading = stored.reading.keeping(remembered, Outcome::answered(dto));
+            stored.reading = stored.reading.keeping(remembered, Outcome::for_stored(dto));
         }
         write_stored(&path, stored)
     }

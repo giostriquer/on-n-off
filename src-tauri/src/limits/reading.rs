@@ -36,11 +36,19 @@ pub(crate) enum Outcome {
 
 impl Outcome {
     /// A read of `card` that answered.
-    pub(crate) fn answered(card: &ProviderLimitsDto) -> Self {
+    fn answered(card: &ProviderLimitsDto) -> Self {
         Self::Answered {
             asked_what_was_spent: super::credits_spent::asks_what_was_spent(card),
             asked_about_renewal: super::renewal::asks_about_renewal(card),
         }
+    }
+
+    /// The column the snapshot store applies when it writes `card` over the account's file. Every
+    /// writer's card has already kept what its own read could not tell, failed reads included, so
+    /// whatever its status only the figures fetched beside a usage read can still be missing from
+    /// it: the answered column.
+    pub(super) fn for_stored(card: &ProviderLimitsDto) -> Self {
+        Self::answered(card)
     }
 
     /// How `card`'s read went, as its status records it.
