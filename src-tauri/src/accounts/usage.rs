@@ -345,15 +345,7 @@ fn merge(
                             legacy_id: None,
                         }),
                         current_account: false,
-                        plan: None,
-                        subscription_status: None,
-                        windows: vec![],
-                        credits: None,
-                        workspace_credits: None,
-                        credits_spent: None,
-                        subscription: None,
-                        reset_credits: None,
-                        reset_offer: None,
+                        reading: crate::dto::Reading::default(),
                     });
             dto.status = LimitsStatus::Failed;
             dto.message = Some(error);

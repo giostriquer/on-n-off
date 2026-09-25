@@ -23,9 +23,7 @@ fn cancellation_is_scoped_and_old_operations_cannot_publish() {
 }
 
 use super::super::store::Login;
-use crate::dto::{
-    LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto,
-};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto, ProviderLimitsDto};
 use serde_json::json;
 use std::cell::RefCell;
 
@@ -56,32 +54,27 @@ fn fixture_login(user: &str, workspace: &str, generation: &str) -> Login {
 }
 fn usage(identity: &Identity) -> ProviderLimitsDto {
     ProviderLimitsDto {
-        provider: AgentId::Codex,
-        status: LimitsStatus::Ok,
-        message: None,
         account: Some(LimitsAccountDto {
             id: identity.observation_key(),
             legacy_id: Some(identity.workspace_id.clone()),
             label: Some("same@example.com".into()),
         }),
         current_account: false,
-        plan: Some("pro".into()),
-        subscription_status: None,
-        credits: None,
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
-        windows: vec![LimitWindowDto {
-            id: "primary".into(),
-            label: "Weekly · all models".into(),
-            kind: LimitWindowKind::Weekly,
-            used_percent: 42.0,
-            window_seconds: Some(604800),
-            resets_at: None,
-            observed_at: "2026-09-13T12:00:00Z".into(),
-        }],
+        ..ProviderLimitsDto::for_test(AgentId::Codex, &identity.observation_key()).with_reading(
+            crate::dto::Reading {
+                plan: Some("pro".into()),
+                windows: vec![LimitWindowDto {
+                    id: "primary".into(),
+                    label: "Weekly · all models".into(),
+                    kind: LimitWindowKind::Weekly,
+                    used_percent: 42.0,
+                    window_seconds: Some(604800),
+                    resets_at: None,
+                    observed_at: "2026-09-13T12:00:00Z".into(),
+                }],
+                ..Default::default()
+            },
+        )
     }
 }
 #[test]
@@ -95,8 +88,8 @@ fn sign_in_keeps_usage_with_the_new_profile_and_saves_the_latest_cli_generation(
     let snapshot = prepared
         .usage
         .expect("newly signed-in account must carry its usage");
-    assert_eq!(snapshot.windows[0].used_percent, 42.0);
-    assert_eq!(snapshot.plan.as_deref(), Some("pro"));
+    assert_eq!(snapshot.reading.windows[0].used_percent, 42.0);
+    assert_eq!(snapshot.reading.plan.as_deref(), Some("pro"));
     assert!(!snapshot.current_account);
     assert_eq!(
         prepared.login.auth["tokens"]["refresh_token"],

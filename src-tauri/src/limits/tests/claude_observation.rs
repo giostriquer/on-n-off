@@ -1,7 +1,7 @@
 //! A verified Claude user's remembered history, from the outside: shown as it was written when the
 //! live read fails, and kept apart from the user-only history of the legacy key it replaces.
 
-use crate::dto::LimitWindowKind;
+use crate::dto::{LimitWindowDto, LimitWindowKind};
 use crate::http::{refused_url, serve_once};
 use crate::limits::json::window;
 use crate::limits::tests::refused_endpoints;
@@ -45,35 +45,24 @@ impl ClaudeObservationRig {
     }
     fn remember_as(&self, id: &str, observed_at: &str, used_percent: f64) {
         SnapshotStore::for_home(&self.home)
-            .save(&ProviderLimitsDto {
-                provider: AgentId::Claude,
-                status: LimitsStatus::Ok,
-                message: None,
-                account: Some(LimitsAccountDto {
-                    legacy_id: None,
-                    id: id.to_string(),
-                    label: Some("me@example.com".to_string()),
-                }),
-                current_account: true,
-                plan: Some("pro".to_string()),
-                subscription_status: None,
-                windows: vec![LimitWindowDto {
-                    observed_at: observed_at.to_string(),
-                    ..window(
-                        "weekly_all",
-                        "Weekly · all models",
-                        LimitWindowKind::Weekly,
-                        used_percent,
-                        None,
-                    )
-                }],
-                credits: None,
-                workspace_credits: None,
-                credits_spent: None,
-                subscription: None,
-                reset_credits: None,
-                reset_offer: None,
-            })
+            .save(
+                &ProviderLimitsDto::for_test(AgentId::Claude, id)
+                    .labelled("me@example.com")
+                    .with_reading(Reading {
+                        plan: Some("pro".to_string()),
+                        windows: vec![LimitWindowDto {
+                            observed_at: observed_at.to_string(),
+                            ..window(
+                                "weekly_all",
+                                "Weekly · all models",
+                                LimitWindowKind::Weekly,
+                                used_percent,
+                                None,
+                            )
+                        }],
+                        ..Reading::default()
+                    }),
+            )
             .unwrap();
     }
 
@@ -112,9 +101,10 @@ fn a_failed_read_shows_the_verified_users_remembered_history() {
         dtos[0].message.as_deref(),
         Some("Access token expired — send a prompt with `claude` to renew it, then refresh here.")
     );
-    assert_eq!(dtos[0].plan.as_deref(), Some("pro"));
+    assert_eq!(dtos[0].reading.plan.as_deref(), Some("pro"));
     assert_eq!(
         dtos[0]
+            .reading
             .windows
             .iter()
             .map(|window| (
@@ -127,6 +117,7 @@ fn a_failed_read_shows_the_verified_users_remembered_history() {
         [("weekly_all", LimitWindowKind::Weekly, 39.0, None)]
     );
     assert!(dtos[0]
+        .reading
         .windows
         .iter()
         .all(|window| window.observed_at == "2026-08-17T15:00:00.000Z"));
@@ -140,6 +131,7 @@ fn a_remembered_offset_timestamp_is_shown_as_it_was_written() {
     let dtos = rig.read();
 
     let weekly = dtos[0]
+        .reading
         .windows
         .iter()
         .find(|window| window.id == "weekly_all")
@@ -155,10 +147,10 @@ fn legacy_user_only_snapshot_is_retained_without_assigning_it_to_a_workspace() {
     let rows = rig.read();
     assert_eq!(rows.len(), 2);
     assert!(rows[0].account.as_ref().unwrap().id.starts_with("profile:"));
-    assert!(rows[0].windows.is_empty());
+    assert!(rows[0].reading.windows.is_empty());
     assert_eq!(rows[1].account.as_ref().unwrap().id, "uuid-1");
     assert!(!rows[1].current_account);
-    assert_eq!(rows[1].windows[0].used_percent, 39.0);
+    assert_eq!(rows[1].reading.windows[0].used_percent, 39.0);
 }
 
 #[test]
@@ -215,6 +207,10 @@ fn claude_max_plan_uses_known_login_tiers_and_keeps_unknown_tiers_generic() {
         let result = claude_limits(CredentialLookup::Found(credential), &None, &profile, &usage);
         profile_request.join().unwrap();
         usage_request.join().unwrap();
-        assert_eq!(result.dto.plan.as_deref(), Some(expected), "tier: {tier:?}");
+        assert_eq!(
+            result.dto.reading.plan.as_deref(),
+            Some(expected),
+            "tier: {tier:?}"
+        );
     }
 }

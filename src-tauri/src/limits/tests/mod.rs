@@ -9,7 +9,10 @@ mod remembered_reading;
 mod renewal;
 
 use super::*;
-use crate::dto::{LimitWindowKind, LimitsPriceDto, LimitsResetOfferDto, LimitsWorkspaceCreditsDto};
+use crate::dto::{
+    LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
+    LimitsResetOfferDto, LimitsWorkspaceCreditsDto,
+};
 use crate::http::{head_header, refused_url, serve_once, serve_sequence, HttpError};
 use crate::paths::scratch_dir;
 use credentials::read_claude_credential;
@@ -33,15 +36,11 @@ fn provider_read_guards_serialize_only_the_same_provider() {
 fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
     Parsed {
         account: None,
-        plan: Some("max".to_string()),
-        subscription_status: None,
-        windows,
-        credits: None,
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
+        reading: Reading {
+            plan: Some("max".to_string()),
+            windows,
+            ..Reading::default()
+        },
     }
 }
 
@@ -74,7 +73,7 @@ fn missing_login_is_signed_out_and_names_the_cli() {
     assert_eq!(dto.provider, AgentId::Claude);
     assert_eq!(dto.status, LimitsStatus::SignedOut);
     assert!(dto.message.as_deref().unwrap().contains("`claude`"));
-    assert!(dto.windows.is_empty());
+    assert!(dto.reading.windows.is_empty());
 }
 
 #[test]
@@ -201,10 +200,11 @@ fn a_successful_load_is_ok_with_windows_ordered_weekly_session_model() {
     );
     assert_eq!(dto.status, LimitsStatus::Ok);
     assert_eq!(dto.message, None);
-    assert_eq!(dto.plan.as_deref(), Some("max"));
-    let ids: Vec<&str> = dto.windows.iter().map(|w| w.id.as_str()).collect();
+    assert_eq!(dto.reading.plan.as_deref(), Some("max"));
+    let ids: Vec<&str> = dto.reading.windows.iter().map(|w| w.id.as_str()).collect();
     assert_eq!(ids, ["w", "s", "m", "m2"]);
     assert!(dto
+        .reading
         .windows
         .iter()
         .all(|window| { chrono::DateTime::parse_from_rfc3339(&window.observed_at).is_ok() }));
@@ -329,10 +329,10 @@ fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
         "{usage_head}"
     );
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
-    assert_eq!(dto.plan.as_deref(), Some("max"));
+    assert_eq!(dto.reading.plan.as_deref(), Some("max"));
     assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
     assert!(dto.current_account);
-    let ids: Vec<&str> = dto.windows.iter().map(|w| w.id.as_str()).collect();
+    let ids: Vec<&str> = dto.reading.windows.iter().map(|w| w.id.as_str()).collect();
     assert_eq!(ids, ["weekly_all", "session"]);
 }
 
@@ -367,7 +367,7 @@ fn claude_rejects_usage_when_the_authenticated_profile_is_a_different_account() 
         "{:?}",
         dto.message
     );
-    assert!(dto.windows.is_empty());
+    assert!(dto.reading.windows.is_empty());
 }
 
 #[test]
@@ -393,7 +393,7 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
 
     assert_eq!(dto.status, LimitsStatus::Failed);
     assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
-    assert!(dto.windows.is_empty());
+    assert!(dto.reading.windows.is_empty());
 }
 
 #[test]
@@ -409,61 +409,54 @@ fn providers_without_a_subscription_are_unsupported() {
 
 #[test]
 fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
-    let ok = ProviderLimitsDto {
-        provider: AgentId::Codex,
-        status: LimitsStatus::Ok,
-        message: None,
-        account: Some(LimitsAccountDto {
-            legacy_id: None,
-            id: "acct-1".to_string(),
-            label: Some("me@example.com".to_string()),
-        }),
-        current_account: true,
-        plan: Some("pro".to_string()),
-        subscription_status: None,
-        windows: vec![LimitWindowDto {
-            observed_at: "2026-08-17T20:00:00.000Z".to_string(),
-            ..window(
-                "primary",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                2.5,
-                None,
-            )
-        }],
-        credits: Some(LimitsCreditsDto {
-            balance: "3".to_string(),
-            unlimited: false,
-        }),
-        workspace_credits: Some(LimitsWorkspaceCreditsDto {
-            limit: "25000".to_string(),
-            used: "8000".to_string(),
-            used_percent: 32.0,
-            resets_at: Some("2026-10-01T12:00:00+00:00".to_string()),
-            reached: true,
-        }),
-        credits_spent: Some(crate::dto::LimitsCreditsSpentDto {
-            last_7_days: 18303.4,
-            last_30_days: 20299.7,
-            updated_at: Some("2026-09-24T19:00:00Z".to_string()),
-        }),
-        subscription: Some(crate::dto::LimitsSubscriptionDto {
-            active_until: "2026-09-28T16:22:34Z".to_string(),
-            will_renew: false,
-            note: Some(crate::dto::SubscriptionNote::Cancelled),
-            checked_at: "2026-09-25T12:00:00Z".to_string(),
-        }),
-        reset_credits: Some(LimitsResetCreditsDto {
-            available_count: 1,
-            next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
-        }),
-        reset_offer: Some(LimitsResetOfferDto {
-            price: Some(LimitsPriceDto {
-                amount_minor_units: 800,
-                currency: "USD".to_string(),
+    let ok = ProviderLimitsDto::for_test(AgentId::Codex, "acct-1")
+        .labelled("me@example.com")
+        .with_reading(Reading {
+            plan: Some("pro".to_string()),
+            windows: vec![LimitWindowDto {
+                observed_at: "2026-08-17T20:00:00.000Z".to_string(),
+                ..window(
+                    "primary",
+                    "Weekly · all models",
+                    LimitWindowKind::Weekly,
+                    2.5,
+                    None,
+                )
+            }],
+            credits: Some(LimitsCreditsDto {
+                balance: "3".to_string(),
+                unlimited: false,
             }),
-        }),
-    };
+            workspace_credits: Some(LimitsWorkspaceCreditsDto {
+                limit: "25000".to_string(),
+                used: "8000".to_string(),
+                used_percent: 32.0,
+                resets_at: Some("2026-10-01T12:00:00+00:00".to_string()),
+                reached: true,
+            }),
+            credits_spent: Some(crate::dto::LimitsCreditsSpentDto {
+                last_7_days: 18303.4,
+                last_30_days: 20299.7,
+                updated_at: Some("2026-09-24T19:00:00Z".to_string()),
+            }),
+            subscription: Some(crate::dto::LimitsSubscriptionDto {
+                active_until: "2026-09-28T16:22:34Z".to_string(),
+                will_renew: false,
+                note: Some(crate::dto::SubscriptionNote::Cancelled),
+                checked_at: "2026-09-25T12:00:00Z".to_string(),
+            }),
+            reset_credits: Some(LimitsResetCreditsDto {
+                available_count: 1,
+                next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
+            }),
+            reset_offer: Some(LimitsResetOfferDto {
+                price: Some(LimitsPriceDto {
+                    amount_minor_units: 800,
+                    currency: "USD".to_string(),
+                }),
+            }),
+            ..Reading::default()
+        });
     assert_eq!(
         serde_json::to_value(&ok).unwrap(),
         json!({
@@ -601,11 +594,11 @@ fn probe_real_home_limits() {
                     dto.current_account,
                     dto.account,
                     dto.status,
-                    dto.plan,
+                    dto.reading.plan,
                     dto.message,
-                    dto.credits
+                    dto.reading.credits
                 );
-            for window in &dto.windows {
+            for window in &dto.reading.windows {
                 println!(
                     "  [{:?}] {} ({}) used={}% resets_at={:?} observed_at={}",
                     window.kind,

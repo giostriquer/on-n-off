@@ -61,10 +61,10 @@ fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
             provider: entry.provider,
             status: entry.status,
             current_account: true,
-            plan: entry.plan,
+            plan: entry.reading.plan,
             message: entry.message,
-            windows: entry.windows,
-            workspace_credits: entry.workspace_credits.map(|share| {
+            windows: entry.reading.windows,
+            workspace_credits: entry.reading.workspace_credits.map(|share| {
                 let wording = workspace_share_wording(&share);
                 NativeWorkspaceCredits {
                     used_percent: share.used_percent,

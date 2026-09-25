@@ -1,6 +1,6 @@
 //! A signed-in business card's spending, through the remembered-accounts pipeline.
 
-use crate::dto::{LimitWindowKind, LimitsCreditsSpentDto};
+use crate::dto::{LimitWindowKind, LimitsAccountDto, LimitsCreditsDto, LimitsCreditsSpentDto};
 use crate::limits::json::window;
 use crate::limits::*;
 use crate::paths::scratch_dir;
@@ -31,27 +31,29 @@ fn business_card(
                 id: id.to_string(),
                 label: Some(format!("{id}@example.com")),
             }),
-            plan: ok.then(|| "self_serve_business_prolite".to_string()),
-            windows: if ok {
-                vec![window(
-                    "primary",
-                    "Weekly · all models",
-                    LimitWindowKind::Weekly,
-                    12.0,
-                    None,
-                )]
-            } else {
-                Vec::new()
+            reading: Reading {
+                plan: ok.then(|| "self_serve_business_prolite".to_string()),
+                windows: if ok {
+                    vec![window(
+                        "primary",
+                        "Weekly · all models",
+                        LimitWindowKind::Weekly,
+                        12.0,
+                        None,
+                    )]
+                } else {
+                    Vec::new()
+                },
+                credits: ok.then(|| LimitsCreditsDto {
+                    balance: "0".to_string(),
+                    unlimited: false,
+                }),
+                credits_spent,
+                ..Reading::default()
             },
-            credits: ok.then(|| LimitsCreditsDto {
-                balance: "0".to_string(),
-                unlimited: false,
-            }),
-            credits_spent,
-            ..Parsed::default()
         },
     );
-    for window in &mut dto.windows {
+    for window in &mut dto.reading.windows {
         window.observed_at = "2026-09-24T12:00:00.000Z".to_string();
     }
     dto
@@ -79,7 +81,7 @@ fn a_business_card_keeps_what_it_spent_after_an_account_switch() {
 
     let remembered = card(&listed, "acct-a");
     assert!(!remembered.current_account);
-    assert_eq!(remembered.credits_spent, spent(18303.4));
+    assert_eq!(remembered.reading.credits_spent, spent(18303.4));
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -97,7 +99,7 @@ fn a_failed_signed_in_read_keeps_what_the_card_spent() {
 
     let current = card(&listed, "acct-a");
     assert_eq!(current.status, LimitsStatus::Failed);
-    assert_eq!(current.credits_spent, spent(18303.4));
+    assert_eq!(current.reading.credits_spent, spent(18303.4));
 }
 
 /// A read whose spending read failed or was backing off could not tell what was spent: like a read
@@ -113,15 +115,21 @@ fn a_read_that_could_not_tell_what_was_spent_keeps_the_remembered_figure() {
 
     let listed = aggregate_accounts(&store, business_card("acct-a", LimitsStatus::Ok, None));
 
-    assert_eq!(card(&listed, "acct-a").credits_spent, spent(18303.4));
-    assert_eq!(store.load(AgentId::Codex)[0].credits_spent, spent(18303.4));
+    assert_eq!(
+        card(&listed, "acct-a").reading.credits_spent,
+        spent(18303.4)
+    );
+    assert_eq!(
+        store.load(AgentId::Codex)[0].reading.credits_spent,
+        spent(18303.4)
+    );
 
     // A read that answered replaces it.
     let listed = aggregate_accounts(
         &store,
         business_card("acct-a", LimitsStatus::Ok, spent(5.0)),
     );
-    assert_eq!(card(&listed, "acct-a").credits_spent, spent(5.0));
+    assert_eq!(card(&listed, "acct-a").reading.credits_spent, spent(5.0));
 }
 
 /// An account that moved to a personal plan pools nothing and is never asked again, so its next read
@@ -135,12 +143,12 @@ fn a_personal_plan_read_drops_the_remembered_figure() {
         business_card("acct-a", LimitsStatus::Ok, spent(18303.4)),
     );
     let mut personal = business_card("acct-a", LimitsStatus::Ok, None);
-    personal.plan = Some("pro".to_string());
+    personal.reading.plan = Some("pro".to_string());
 
     let listed = aggregate_accounts(&store, personal);
 
-    assert_eq!(card(&listed, "acct-a").credits_spent, None);
-    assert_eq!(store.load(AgentId::Codex)[0].credits_spent, None);
+    assert_eq!(card(&listed, "acct-a").reading.credits_spent, None);
+    assert_eq!(store.load(AgentId::Codex)[0].reading.credits_spent, None);
 }
 
 /// "team" is a Claude plan too; only a Codex workspace card is ever asked what it spent.
@@ -149,10 +157,10 @@ fn only_a_codex_workspace_card_is_asked_what_it_spent() {
     let mut card = business_card("acct-a", LimitsStatus::Ok, None);
     assert!(credits_spent::asks_what_was_spent(&card));
 
-    card.plan = Some("pro".to_string());
+    card.reading.plan = Some("pro".to_string());
     assert!(!credits_spent::asks_what_was_spent(&card));
 
     card.provider = AgentId::Claude;
-    card.plan = Some("team".to_string());
+    card.reading.plan = Some("team".to_string());
     assert!(!credits_spent::asks_what_was_spent(&card));
 }

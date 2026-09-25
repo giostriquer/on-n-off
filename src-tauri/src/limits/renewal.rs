@@ -47,8 +47,10 @@ pub(super) fn asks_about_renewal(card: &ProviderLimitsDto) -> bool {
 /// A successful read whose term read failed or was backing off keeps the term `previous` knew;
 /// one that answered replaces it.
 pub(super) fn keep_subscription_from(card: &mut ProviderLimitsDto, previous: &ProviderLimitsDto) {
-    if card.subscription.is_none() && asks_about_renewal(card) {
-        card.subscription.clone_from(&previous.subscription);
+    if card.reading.subscription.is_none() && asks_about_renewal(card) {
+        card.reading
+            .subscription
+            .clone_from(&previous.reading.subscription);
     }
 }
 

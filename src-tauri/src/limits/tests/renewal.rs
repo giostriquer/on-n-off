@@ -21,23 +21,22 @@ fn codex_card(
     subscription: Option<LimitsSubscriptionDto>,
 ) -> ProviderLimitsDto {
     let ok = status == LimitsStatus::Ok;
+    let mut parsed = Parsed::for_card(Some(id), Some("pro"));
+    parsed.reading.windows = vec![window(
+        "primary",
+        "Weekly · all models",
+        LimitWindowKind::Weekly,
+        42.0,
+        Some("2026-09-28T23:34:33+00:00".to_string()),
+    )];
+    parsed.reading.subscription = subscription;
     let mut dto = finish(
         AgentId::Codex,
         status,
         (!ok).then(|| "Refresh failed".to_string()),
-        Parsed {
-            windows: vec![window(
-                "primary",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                42.0,
-                Some("2026-09-28T23:34:33+00:00".to_string()),
-            )],
-            subscription,
-            ..Parsed::for_card(Some(id), Some("pro"))
-        },
+        parsed,
     );
-    for window in &mut dto.windows {
+    for window in &mut dto.reading.windows {
         window.observed_at = "2026-09-25T12:00:00.000Z".to_string();
     }
     dto
@@ -61,7 +60,7 @@ fn a_card_keeps_its_term_after_an_account_switch() {
 
     let remembered = card(&listed, "acct-a");
     assert!(!remembered.current_account);
-    assert_eq!(remembered.subscription, term(false));
+    assert_eq!(remembered.reading.subscription, term(false));
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -74,10 +73,13 @@ fn a_read_that_could_not_tell_the_term_keeps_the_remembered_one() {
     aggregate_accounts(&store, codex_card("acct-a", LimitsStatus::Ok, term(false)));
 
     let listed = aggregate_accounts(&store, codex_card("acct-a", LimitsStatus::Ok, None));
-    assert_eq!(card(&listed, "acct-a").subscription, term(false));
-    assert_eq!(store.load(AgentId::Codex)[0].subscription, term(false));
+    assert_eq!(card(&listed, "acct-a").reading.subscription, term(false));
+    assert_eq!(
+        store.load(AgentId::Codex)[0].reading.subscription,
+        term(false)
+    );
 
     let listed = aggregate_accounts(&store, codex_card("acct-a", LimitsStatus::Ok, term(true)));
-    assert_eq!(card(&listed, "acct-a").subscription, term(true));
+    assert_eq!(card(&listed, "acct-a").reading.subscription, term(true));
     let _ = std::fs::remove_dir_all(&home);
 }

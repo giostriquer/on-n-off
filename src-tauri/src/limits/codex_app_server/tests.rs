@@ -401,9 +401,9 @@ fn normalizes_the_chatgpt_account_and_rate_limits_without_reading_a_token() {
             label: Some("Me@Example.com".to_string()),
         })
     );
-    assert_eq!(parsed.plan.as_deref(), Some("pro"));
-    assert_eq!(parsed.windows.len(), 1);
-    assert_eq!(parsed.windows[0].used_percent, 42.0);
+    assert_eq!(parsed.reading.plan.as_deref(), Some("pro"));
+    assert_eq!(parsed.reading.windows.len(), 1);
+    assert_eq!(parsed.reading.windows[0].used_percent, 42.0);
 }
 
 #[test]
@@ -824,14 +824,14 @@ fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() 
             asked.borrow_mut().push((
                 access.map(|access| (access.observation_key.clone(), access.token.authorization())),
                 parsed.account.as_ref().map(|account| account.id.clone()),
-                parsed.plan.clone(),
+                parsed.reading.plan.clone(),
             ));
-            parsed.credits_spent = Some(spent.clone());
+            parsed.reading.credits_spent = Some(spent.clone());
         },
     )
     .unwrap();
 
-    assert_eq!(parsed.credits_spent, Some(spent));
+    assert_eq!(parsed.reading.credits_spent, Some(spent));
     assert_eq!(
         asked.into_inner(),
         vec![(
@@ -886,13 +886,16 @@ fn a_signed_in_read_takes_its_term_and_spending_with_its_own_token_once_the_acco
     let head = request.join().unwrap().head;
     let spending_head = spending.join().unwrap().head;
 
-    let term = parsed.subscription.expect("the term is on the card");
+    let term = parsed
+        .reading
+        .subscription
+        .expect("the term is on the card");
     assert!(!term.will_renew);
     assert_eq!(term.note, Some(crate::dto::SubscriptionNote::Cancelled));
     assert!(head.contains("account_id=acct-1"), "{head}");
     assert!(head.contains("Bearer fixture-access"), "{head}");
     assert_eq!(
-        parsed.credits_spent.map(|spent| spent.last_7_days),
+        parsed.reading.credits_spent.map(|spent| spent.last_7_days),
         Some(5.5),
         "what the member spent is on the card too"
     );
@@ -988,7 +991,7 @@ fn the_accounts_plan_decides_the_card() {
 
     let (parsed, access) = normalize_app_server(session, before).unwrap();
 
-    assert_eq!(parsed.plan.as_deref(), Some("business"));
+    assert_eq!(parsed.reading.plan.as_deref(), Some("business"));
     assert_eq!(
         access.map(|access| access.token.authorization()),
         Some("Bearer fixture-access".to_string())

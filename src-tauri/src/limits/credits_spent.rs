@@ -40,7 +40,12 @@ pub(crate) fn is_codex_workspace_plan(plan: &str) -> bool {
 
 /// Whether `card` is one that is asked what it spent: a Codex workspace plan.
 pub(crate) fn asks_what_was_spent(card: &ProviderLimitsDto) -> bool {
-    card.provider == AgentId::Codex && card.plan.as_deref().is_some_and(is_codex_workspace_plan)
+    card.provider == AgentId::Codex
+        && card
+            .reading
+            .plan
+            .as_deref()
+            .is_some_and(is_codex_workspace_plan)
 }
 
 /// A successful read whose spending read failed or was backing off could not tell what was spent,
@@ -48,8 +53,10 @@ pub(crate) fn asks_what_was_spent(card: &ProviderLimitsDto) -> bool {
 /// is ever asked, so a card on any other plan keeps nothing: an account that moved to a personal
 /// plan loses the figure it had on its next read.
 pub(crate) fn keep_credits_spent_from(card: &mut ProviderLimitsDto, previous: &ProviderLimitsDto) {
-    if card.credits_spent.is_none() && asks_what_was_spent(card) {
-        card.credits_spent.clone_from(&previous.credits_spent);
+    if card.reading.credits_spent.is_none() && asks_what_was_spent(card) {
+        card.reading
+            .credits_spent
+            .clone_from(&previous.reading.credits_spent);
     }
 }
 
@@ -170,7 +177,12 @@ pub(super) fn signed_in(
     url: &str,
     now: DateTime<Utc>,
 ) -> Option<LimitsCreditsSpentDto> {
-    if !parsed.plan.as_deref().is_some_and(is_codex_workspace_plan) {
+    if !parsed
+        .reading
+        .plan
+        .as_deref()
+        .is_some_and(is_codex_workspace_plan)
+    {
         return None;
     }
     let access = access?;

@@ -13,8 +13,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
-    LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
+    AgentId, LimitWindowDto, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading,
 };
 use crate::usage::cache_io::atomic_write;
 
@@ -23,27 +22,16 @@ const SNAPSHOT_SCHEMA_VERSION: u8 = 2;
 // and replacement together; this lock covers only local snapshot I/O, never provider calls.
 static SNAPSHOT_WRITES: Mutex<()> = Mutex::new(());
 
+/// One account's remembered reading as its file holds it: the reading's own keys beside the
+/// account, the schema version and the time that dates it. The live offer is never among them.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredSnapshot {
     schema_version: u8,
     provider: AgentId,
     account: LimitsAccountDto,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    plan: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    subscription_status: Option<String>,
-    windows: Vec<LimitWindowDto>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    credits: Option<LimitsCreditsDto>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    workspace_credits: Option<LimitsWorkspaceCreditsDto>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    credits_spent: Option<crate::dto::LimitsCreditsSpentDto>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    subscription: Option<crate::dto::LimitsSubscriptionDto>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    reset_credits: Option<LimitsResetCreditsDto>,
+    #[serde(flatten)]
+    reading: Reading,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observed_at: Option<String>,
 }
@@ -71,13 +59,13 @@ impl SnapshotStore {
             .account
             .as_ref()
             .ok_or_else(|| "snapshot has no account".to_string())?;
-        if !dto.has_observations() {
+        if !dto.reading.has_observations() {
             return Err("snapshot has no observations".to_string());
         }
         let path = self.dir.join(file_name(dto.provider, &account.id));
         let incoming_latest = latest_observed_at(dto).or_else(|| {
             // Figures have no observation time of their own; a successful read dates them here.
-            (dto.status == LimitsStatus::Ok && dto.has_figures()).then(Utc::now)
+            (dto.status == LimitsStatus::Ok && dto.reading.has_figures()).then(Utc::now)
         });
         let incoming_latest =
             incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
@@ -93,6 +81,7 @@ impl SnapshotStore {
         // `limits::keep_remembered_from`, applied to what is on disk: every writer stores its own
         // read, and one that could not tell a remembered figure must not erase it.
         if let Some(existing) = existing {
+            let (stored, existing) = (&mut stored.reading, existing.reading);
             if stored.reset_credits.is_none() {
                 stored.reset_credits = existing.reset_credits;
             }
@@ -124,7 +113,7 @@ impl SnapshotStore {
         without_superseded(
             self.stored(provider)
                 .into_iter()
-                .filter(ProviderLimitsDto::has_observations)
+                .filter(|dto| dto.reading.has_observations())
                 .collect(),
         )
     }
@@ -229,14 +218,11 @@ impl StoredSnapshot {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             provider: dto.provider,
             account: dto.account.clone().expect("caller checked account"),
-            plan: dto.plan.clone(),
-            subscription_status: dto.subscription_status.clone(),
-            windows: dto.windows.clone(),
-            credits: dto.credits.clone(),
-            workspace_credits: dto.workspace_credits.clone(),
-            credits_spent: dto.credits_spent.clone(),
-            subscription: dto.subscription.clone(),
-            reset_credits: dto.reset_credits.clone(),
+            // A live offer belongs to the read that saw it and is never remembered.
+            reading: Reading {
+                reset_offer: None,
+                ..dto.reading.clone()
+            },
             observed_at: Some(observed_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
         }
     }
@@ -245,30 +231,28 @@ impl StoredSnapshot {
         self.observed_at
             .as_deref()
             .and_then(parse_observed_at)
-            .or_else(|| latest_window_observed_at(&self.windows))
+            .or_else(|| latest_window_observed_at(&self.reading.windows))
     }
 
+    /// The card a remembered reading shows. A share past its reset has renewed, which the card
+    /// shows as it shows a window's passed reset; it is kept, since dropping it would bring back
+    /// the own balance of 0.
     fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
+        let reading = self.reading;
         ProviderLimitsDto {
             provider: self.provider,
             status: LimitsStatus::Ok,
             message: None,
             account: Some(self.account),
             current_account: false,
-            plan: self.plan,
-            subscription_status: self.subscription_status,
-            windows: self.windows,
-            credits: self.credits,
-            // A share past its reset has renewed, which the card shows as it shows a window's
-            // passed reset; it is kept, since dropping it would bring back the own balance of 0.
-            workspace_credits: self.workspace_credits,
-            credits_spent: self.credits_spent,
-            subscription: self.subscription,
-            reset_credits: self
-                .reset_credits
-                .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),
-            // A live offer belongs to the read that saw it and is never remembered.
-            reset_offer: None,
+            reading: Reading {
+                reset_credits: reading
+                    .reset_credits
+                    .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),
+                // A live offer belongs to the read that saw it and is never remembered.
+                reset_offer: None,
+                ..reading
+            },
         }
     }
 }
@@ -291,7 +275,7 @@ fn write_stored(path: &Path, stored: StoredSnapshot) -> Result<(), String> {
 }
 
 fn latest_observed_at(dto: &ProviderLimitsDto) -> Option<DateTime<Utc>> {
-    latest_window_observed_at(&dto.windows)
+    latest_window_observed_at(&dto.reading.windows)
 }
 
 fn latest_window_observed_at(windows: &[LimitWindowDto]) -> Option<DateTime<Utc>> {

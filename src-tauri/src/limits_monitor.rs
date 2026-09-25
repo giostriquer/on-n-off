@@ -197,7 +197,7 @@ fn observe(state: &mut MonitorState, snapshots: &[ProviderLimitsDto]) -> Vec<Lim
             .get(&snapshot.provider)
             .filter(|previous| previous.account_id == account.id);
         let mut windows = HashMap::new();
-        for window in &snapshot.windows {
+        for window in &snapshot.reading.windows {
             let before = previous.and_then(|previous| previous.windows.get(&window.id));
             let Some((observation, kind)) = observe_window(
                 before,

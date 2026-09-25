@@ -113,9 +113,10 @@ pub(super) fn finish(
     mut parsed: Parsed,
 ) -> ProviderLimitsDto {
     // Native and saved reads share the same card priority, regardless of endpoint order.
-    parsed.windows.sort_by_key(|window| kind_rank(window.kind));
+    let windows = &mut parsed.reading.windows;
+    windows.sort_by_key(|window| kind_rank(window.kind));
     let observed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-    for window in &mut parsed.windows {
+    for window in windows {
         if window.observed_at.is_empty() {
             window.observed_at.clone_from(&observed_at);
         }
@@ -126,15 +127,7 @@ pub(super) fn finish(
         message,
         account: parsed.account,
         current_account: true,
-        plan: parsed.plan,
-        subscription_status: parsed.subscription_status,
-        windows: parsed.windows,
-        credits: parsed.credits,
-        workspace_credits: parsed.workspace_credits,
-        credits_spent: parsed.credits_spent,
-        subscription: parsed.subscription,
-        reset_credits: parsed.reset_credits,
-        reset_offer: parsed.reset_offer,
+        reading: parsed.reading,
     }
 }
 

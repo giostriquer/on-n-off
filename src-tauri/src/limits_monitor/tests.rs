@@ -1,6 +1,6 @@
 use super::*;
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto,
+    AgentId, LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto, Reading,
 };
 use crate::paths::scratch_dir;
 use std::fs;
@@ -12,38 +12,25 @@ fn snapshot(
     used_percent: f64,
     resets_at: Option<&str>,
 ) -> ProviderLimitsDto {
-    ProviderLimitsDto {
-        provider,
-        status: LimitsStatus::Ok,
-        message: None,
-        account: Some(LimitsAccountDto {
-            legacy_id: None,
-            id: account_id.into(),
-            label: Some(account_label.into()),
-        }),
-        current_account: true,
-        plan: Some("pro".into()),
-        subscription_status: None,
-        windows: vec![LimitWindowDto {
-            id: "weekly".into(),
-            label: "Weekly · all models".into(),
-            kind: LimitWindowKind::Weekly,
-            used_percent,
-            resets_at: resets_at.map(str::to_string),
-            window_seconds: Some(7 * 24 * 60 * 60),
-            observed_at: "2026-08-19T12:00:00Z".into(),
-        }],
-        credits: None,
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
-    }
+    ProviderLimitsDto::for_test(provider, account_id)
+        .labelled(account_label)
+        .with_reading(Reading {
+            plan: Some("pro".into()),
+            windows: vec![LimitWindowDto {
+                id: "weekly".into(),
+                label: "Weekly · all models".into(),
+                kind: LimitWindowKind::Weekly,
+                used_percent,
+                resets_at: resets_at.map(str::to_string),
+                window_seconds: Some(7 * 24 * 60 * 60),
+                observed_at: "2026-08-19T12:00:00Z".into(),
+            }],
+            ..Reading::default()
+        })
 }
 
 fn observed_at(mut snapshot: ProviderLimitsDto, value: &str) -> ProviderLimitsDto {
-    snapshot.windows[0].observed_at = value.to_string();
+    snapshot.reading.windows[0].observed_at = value.to_string();
     snapshot
 }
 
@@ -76,12 +63,12 @@ fn a_model_limit_crossing_one_hundred_percent_notifies_once() {
         99.0,
         Some("2026-08-24T12:00:00Z"),
     );
-    before.windows[0].id = "weekly_fable".into();
-    before.windows[0].label = "Weekly · Fable".into();
-    before.windows[0].kind = LimitWindowKind::Model;
+    before.reading.windows[0].id = "weekly_fable".into();
+    before.reading.windows[0].label = "Weekly · Fable".into();
+    before.reading.windows[0].kind = LimitWindowKind::Model;
     let mut exhausted = before.clone();
-    exhausted.windows[0].used_percent = 100.0;
-    exhausted.windows[0].observed_at = "2026-08-19T13:00:00Z".into();
+    exhausted.reading.windows[0].used_percent = 100.0;
+    exhausted.reading.windows[0].observed_at = "2026-08-19T13:00:00Z".into();
     assert!(observe(&mut state, &[before]).is_empty());
 
     let events = observe(&mut state, std::slice::from_ref(&exhausted));
@@ -386,10 +373,10 @@ fn failed_and_remembered_snapshots_do_not_replace_the_notification_baseline() {
 
     let mut failed = before.clone();
     failed.status = LimitsStatus::Failed;
-    failed.windows.clear();
+    failed.reading.windows.clear();
     let mut remembered = before;
     remembered.current_account = false;
-    remembered.windows[0].used_percent = 0.0;
+    remembered.reading.windows[0].used_percent = 0.0;
     assert!(observe(&mut state, &[failed, remembered]).is_empty());
 
     let events = observe(

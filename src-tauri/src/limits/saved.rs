@@ -68,9 +68,11 @@ fn read_at(
             )?;
             Parsed {
                 account: Some(profile.account),
-                plan: credential.plan(),
-                subscription_status,
-                ..usage
+                reading: Reading {
+                    plan: credential.plan(),
+                    subscription_status,
+                    ..usage
+                },
             }
         }
         AgentId::Codex => {
@@ -96,7 +98,7 @@ fn read_at(
                 .is_some_and(|count| count > 0))
             .then(|| get_json(codex.reset_credits, &headers).ok())
             .flatten();
-            let mut parsed = parse_codex_usage(&payload, details.as_ref())?;
+            let mut reading = parse_codex_usage(&payload, details.as_ref())?;
             // The backend reads never decide the read: an account the endpoint refuses just has
             // no figure. Only a workspace pools credits, so only one is asked what it spent.
             let access = crate::accounts::native::CodexAccess {
@@ -104,17 +106,20 @@ fn read_at(
                 workspace_id: identity.workspace_id.clone(),
                 token: crate::accounts::model::AccessToken::new(token),
             };
-            if parsed
+            if reading
                 .plan
                 .as_deref()
                 .is_some_and(credits_spent::is_codex_workspace_plan)
             {
-                parsed.credits_spent =
+                reading.credits_spent =
                     credits_spent::read_backed_off(&access, codex.credit_usage, Utc::now());
             }
-            parsed.subscription =
+            reading.subscription =
                 renewal::read_backed_off(&access, codex.subscriptions, Utc::now());
-            parsed
+            Parsed {
+                account: None,
+                reading,
+            }
         }
         _ => return Err(HttpError::Unauthorized),
     };
@@ -130,7 +135,7 @@ fn read_at(
     });
     let mut dto = finish(identity.provider, LimitsStatus::Ok, None, parsed);
     dto.current_account = false;
-    if !dto.has_observations() {
+    if !dto.reading.has_observations() {
         return Err(HttpError::Parse(
             "Usage response contained no quota observations.".into(),
         ));
@@ -141,7 +146,7 @@ fn read_at(
 /// The HTTP response uses seconds and snake_case; the existing app-server parser uses minutes
 /// and camelCase. Map only the documented quota buckets, the credits, a business member's
 /// workspace-credit share and the banked resets. Missing reset inventory is unknown.
-fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Parsed, HttpError> {
+fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Reading, HttpError> {
     use serde_json::json;
     fn window(value: &Value) -> Value {
         if value.is_null() {

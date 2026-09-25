@@ -5,10 +5,9 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use super::json::window;
-use super::Parsed;
 use crate::dto::{
     LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
-    LimitsResetOfferDto, LimitsWorkspaceCreditsDto,
+    LimitsResetOfferDto, LimitsWorkspaceCreditsDto, Reading,
 };
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
@@ -90,7 +89,7 @@ struct RateLimitCredits {
     balance: Option<String>,
 }
 
-pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
+pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
     let fallback = &payload.rate_limits;
     let main_id = fallback
         .limit_id
@@ -113,8 +112,7 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Parsed {
         }
     }
     windows.sort_by_key(|window| super::pipeline::kind_rank(window.kind));
-    Parsed {
-        account: None,
+    Reading {
         plan: main.plan_type.clone(),
         subscription_status: None,
         windows,

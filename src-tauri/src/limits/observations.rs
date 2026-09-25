@@ -23,6 +23,7 @@ impl ObservedWindowSet {
     /// A remembered account's observations. Windows need a date to merge by; figures alone (a credit
     /// balance, banked resets) are kept without one.
     pub(super) fn from_account(dto: ProviderLimitsDto) -> Option<Self> {
+        let dto = dto.reading;
         let observed_at = dto
             .windows
             .iter()
@@ -49,9 +50,10 @@ impl ObservedWindowSet {
 /// of each window wins. Remembered plan, subscription-status and credit metadata fill what the read
 /// did not report.
 pub(super) fn merge_windows(
-    mut current: ProviderLimitsDto,
+    mut card: ProviderLimitsDto,
     remembered: Option<ObservedWindowSet>,
 ) -> ProviderLimitsDto {
+    let current = &mut card.reading;
     if let Some(remembered) = &remembered {
         current.plan = current.plan.take().or_else(|| remembered.plan.clone());
         current.subscription_status = current
@@ -99,7 +101,7 @@ pub(super) fn merge_windows(
     current
         .windows
         .sort_by_key(|window| super::pipeline::kind_rank(window.kind));
-    current
+    card
 }
 
 fn is_newer(incoming: &LimitWindowDto, existing: &LimitWindowDto) -> bool {

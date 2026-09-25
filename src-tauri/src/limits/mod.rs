@@ -30,8 +30,7 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::Utc;
 
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
-    LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto, ResetCreditOutcome,
+    AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
@@ -56,20 +55,12 @@ const DEFAULT_ACCOUNT: &str = "default";
 static CLAUDE_READ_LOCK: Mutex<()> = Mutex::new(());
 static CODEX_READ_LOCK: Mutex<()> = Mutex::new(());
 
-/// Provider-neutral content of a parsed usage payload; `Default` is the empty snapshot that
-/// accompanies every non-`ok` status.
+/// A parsed usage read: which account it is about, and its reading. `Default` is the empty read
+/// that accompanies every non-`ok` status.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Parsed {
     account: Option<LimitsAccountDto>,
-    plan: Option<String>,
-    subscription_status: Option<String>,
-    windows: Vec<LimitWindowDto>,
-    credits: Option<LimitsCreditsDto>,
-    workspace_credits: Option<LimitsWorkspaceCreditsDto>,
-    credits_spent: Option<crate::dto::LimitsCreditsSpentDto>,
-    subscription: Option<crate::dto::LimitsSubscriptionDto>,
-    reset_credits: Option<LimitsResetCreditsDto>,
-    reset_offer: Option<crate::dto::LimitsResetOfferDto>,
+    reading: Reading,
 }
 
 #[cfg(test)]
@@ -82,15 +73,10 @@ impl Parsed {
                 id: id.to_string(),
                 label: None,
             }),
-            plan: plan.map(str::to_string),
-            subscription_status: None,
-            windows: Vec::new(),
-            credits: None,
-            workspace_credits: None,
-            credits_spent: None,
-            subscription: None,
-            reset_credits: None,
-            reset_offer: None,
+            reading: Reading {
+                plan: plan.map(str::to_string),
+                ..Reading::default()
+            },
         }
     }
 }
@@ -375,9 +361,11 @@ fn claude_limits(
             )?;
             Ok(Parsed {
                 account: Some(profile.account),
-                plan: credential.plan(),
-                subscription_status,
-                ..usage
+                reading: Reading {
+                    plan: credential.plan(),
+                    subscription_status,
+                    ..usage
+                },
             })
         },
     )
@@ -387,7 +375,7 @@ fn claude_limits(
 /// query never decides the read: any answer other than a transport failure retries the plain URL,
 /// whose answer (a rejected login included) stands, with the resets unknown. A transport failure
 /// is not retried, since the plain read would only wait on the same network.
-fn claude_usage(usage_url: &str, headers: &[(&str, &str)]) -> Result<Parsed, HttpError> {
+fn claude_usage(usage_url: &str, headers: &[(&str, &str)]) -> Result<Reading, HttpError> {
     let payload = match get_json(&format!("{usage_url}?{CLAUDE_USAGE_QUERY}"), headers) {
         Err(HttpError::Network(error)) => return Err(HttpError::Network(error)),
         Err(_) => get_json(usage_url, headers)?,

@@ -223,46 +223,25 @@ fn the_signed_in_read_asks_only_for_the_confirmed_card() {
 
 #[test]
 fn a_card_keeps_the_term_it_remembers_when_a_read_could_not_tell() {
-    let previous = ProviderLimitsDto {
-        subscription: parse(&term(false), now()),
-        ..codex_card()
-    };
-    let mut silent = codex_card();
+    let previous = codex_card(parse(&term(false), now()));
+    let mut silent = codex_card(None);
     keep_subscription_from(&mut silent, &previous);
-    assert_eq!(silent.subscription, previous.subscription);
+    assert_eq!(silent.reading.subscription, previous.reading.subscription);
 
-    let mut answered = ProviderLimitsDto {
-        subscription: parse(&term(true), now()),
-        ..codex_card()
-    };
+    let mut answered = codex_card(parse(&term(true), now()));
     keep_subscription_from(&mut answered, &previous);
-    assert!(answered.subscription.unwrap().will_renew);
+    assert!(answered.reading.subscription.unwrap().will_renew);
 
-    let mut claude = codex_card();
+    let mut claude = codex_card(None);
     claude.provider = AgentId::Claude;
     keep_subscription_from(&mut claude, &previous);
-    assert!(claude.subscription.is_none());
+    assert!(claude.reading.subscription.is_none());
 }
 
-fn codex_card() -> ProviderLimitsDto {
-    ProviderLimitsDto {
-        provider: AgentId::Codex,
-        status: crate::dto::LimitsStatus::Ok,
-        message: None,
-        account: Some(crate::dto::LimitsAccountDto {
-            legacy_id: None,
-            id: "acct-1".into(),
-            label: None,
-        }),
-        current_account: true,
+fn codex_card(subscription: Option<LimitsSubscriptionDto>) -> ProviderLimitsDto {
+    ProviderLimitsDto::for_test(AgentId::Codex, "acct-1").with_reading(crate::dto::Reading {
         plan: Some("team".into()),
-        subscription_status: None,
-        windows: vec![],
-        credits: None,
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
-    }
+        subscription,
+        ..Default::default()
+    })
 }
