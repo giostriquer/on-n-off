@@ -85,6 +85,10 @@ fn visual_dump() {
                 observed_at: "2026-09-03T10:00:00Z".into(),
             },
         ],
+        headline_window_id: Some("w2".into()),
+        inner_ring: Some(model::InnerRing::Fable {
+            window_id: "w3".into(),
+        }),
         workspace_credits: None,
         sessions: vec![
             LiveSession {
@@ -118,6 +122,8 @@ fn visual_dump() {
             window_seconds: None,
             observed_at: "2026-09-03T10:00:00Z".into(),
         }],
+        headline_window_id: Some("c1".into()),
+        inner_ring: Some(model::InnerRing::WorkspaceShare),
         // A business workspace member: the credit share fills the inner ring.
         workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
             limit: "25000".into(),
@@ -133,6 +139,8 @@ fn visual_dump() {
         status: LimitsStatus::Unsupported,
         message: Some("Antigravity has no subscription limits to show.".into()),
         windows: Vec::new(),
+        headline_window_id: None,
+        inner_ring: None,
         workspace_credits: None,
         sessions: Vec::new(),
     };
@@ -141,6 +149,8 @@ fn visual_dump() {
         status: LimitsStatus::Ok,
         message: None,
         windows: Vec::new(),
+        headline_window_id: None,
+        inner_ring: None,
         workspace_credits: None,
         sessions: Vec::new(),
     };

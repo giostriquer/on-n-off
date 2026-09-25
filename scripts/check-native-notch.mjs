@@ -19,7 +19,7 @@ assert.equal(embedded.status, 0, `segedit could not read the helper's embedded I
 assert.ok(embedded.stdout.equals(readFileSync(infoPlist)), `${executable} embeds another Info.plist than ${infoPlist}: the helper was not relinked`);
 console.log('PASS helper embeds the current Info.plist');
 const settings = { enabled: false, displayId: null, edge: 'right', size: 'standard', show: 'always', providers: ['claude', 'codex', 'antigravity', 'cursor'], pullRequests: { enabled: true, lists: ['mine'] } };
-const snapshot = { version: 3, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
+const snapshot = { version: 4, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
 async function check(name, input, expectedAck, args = []) {
   const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   // Generous: the check is that the helper exits on EOF, not how fast a busy machine starts it.
@@ -51,7 +51,7 @@ async function check(name, input, expectedAck, args = []) {
 }
 await check('disabled snapshot acknowledged, parent EOF exits', JSON.stringify(snapshot) + '\n', true);
 await check('unsupported protocol rejected', JSON.stringify({ ...snapshot, version: 1 }) + '\n', false);
-await check('previous protocol rejected', JSON.stringify({ ...snapshot, version: 2 }) + '\n', false);
+await check('previous protocol rejected', JSON.stringify({ ...snapshot, version: 3 }) + '\n', false);
 await check('oversize frame rejected', ' '.repeat(262145), false);
 await check('parent closes before first snapshot', '', false);
 await check('parent EOF exits with the main queue unresponsive', '', false, ['--check-unresponsive-main']);
@@ -68,16 +68,17 @@ const pull = (number, title, ci, reviewDecision, mergeKind, isDraft) => ({
   author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z',
 });
 const fixture = edge => ({
-  version: 3, sequence: 1,
+  version: 4, sequence: 1,
   snapshot: {
     settings: { enabled: true, displayId: 'fixture', edge, size: 'standard', show: 'onHover', providers: ['claude', 'codex', 'antigravity', 'cursor'], pullRequests: { enabled: true, lists: ['mine', 'reviewRequested'] } },
     displays: [{ id: 'fixture', name: 'Fixture', x: 0, y: 0, width: 1920, height: 1080, workY: 25, workHeight: 1055, scale: 2, mirrored: false }],
     error: null,
   },
   providers: [
-    { provider: 'claude', status: 'ok', currentAccount: true, plan: 'max', windows: [quota('weekly_all', 'Weekly · all models', 'weekly', 7, 100), quota('session', '5 hour · all models', 'session', 32, 3), quota('weekly_scoped:Fable', 'Weekly · Fable', 'model', 13, 100)], sessions: [session('a', 'repo-28', 'Desktop', 'repo', 'idle', 0), session('b', 'tool-d2', 'Terminal', 'tool', 'working', 2)] },
+    // The host sends the windows in the popover's order and names the ring's windows by id.
+    { provider: 'claude', status: 'ok', currentAccount: true, plan: 'max', windows: [quota('session', '5 hour · all models', 'session', 32, 3), quota('weekly_all', 'Weekly · all models', 'weekly', 7, 100), quota('weekly_scoped:Fable', 'Weekly · Fable', 'model', 13, 100)], headlineWindowId: 'weekly_all', innerRing: { kind: 'fable', windowId: 'weekly_scoped:Fable' }, sessions: [session('a', 'repo-28', 'Desktop', 'repo', 'idle', 0), session('b', 'tool-d2', 'Terminal', 'tool', 'working', 2)] },
     // Codex reports only its weekly window; a business member's credit share fills the inner ring.
-    { provider: 'codex', status: 'ok', currentAccount: true, plan: 'self_serve_business_prolite', windows: [quota('primary', 'Weekly · all models', 'weekly', 49, 140)], workspaceCredits: { usedPercent: 32, resetsAt: at(7 * 86_400_000), left: '17,000 of 25,000 left', renewed: '25,000 of 25,000 left' }, sessions: [session('c', 'tool-42', 'Desktop', 'tool', 'working', 0)] },
+    { provider: 'codex', status: 'ok', currentAccount: true, plan: 'self_serve_business_prolite', windows: [quota('primary', 'Weekly · all models', 'weekly', 49, 140)], headlineWindowId: 'primary', innerRing: { kind: 'workspaceShare' }, workspaceCredits: { usedPercent: 32, resetsAt: at(7 * 86_400_000), left: '17,000 of 25,000 left', renewed: '25,000 of 25,000 left' }, sessions: [session('c', 'tool-42', 'Desktop', 'tool', 'working', 0)] },
     { provider: 'antigravity', status: 'unsupported', currentAccount: true, message: 'Antigravity has no subscription limits to show.', windows: [], sessions: [] },
     { provider: 'cursor', status: 'unsupported', currentAccount: true, message: 'Cursor has no subscription limits to show.', windows: [], sessions: [] },
   ],

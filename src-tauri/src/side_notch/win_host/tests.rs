@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::LimitWindowKind;
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto};
 use crate::side_notch::model::NotchSettings;
 use std::time::Duration;
 
@@ -16,11 +16,14 @@ fn snapshot() -> NotchSnapshot {
     }
 }
 
-fn provider_entry(provider: AgentId, percent: f64) -> NativeProvider {
-    NativeProvider {
+fn provider_entry(provider: AgentId, percent: f64) -> NotchProvider {
+    NotchProvider {
         provider,
         status: LimitsStatus::Ok,
+        plan: None,
         message: None,
+        headline_window_id: Some("w".into()),
+        inner_ring: None,
         windows: vec![LimitWindowDto {
             id: "w".into(),
             label: "Current session".into(),
@@ -81,9 +84,9 @@ fn current_provider_drops_everything_but_the_signed_in_account() {
         {"provider":"claude","status":"signedOut","currentAccount":true,"account":{"id":"private-id","label":"private-label"},"windows":[]}
     ]))
     .unwrap();
-    let entry = current_provider(entries).expect("the current account");
+    let entry = NotchProvider::current(entries).expect("the current account");
     assert_eq!(entry.status, LimitsStatus::SignedOut);
-    assert!(current_provider(Vec::new()).is_none());
+    assert!(NotchProvider::current(Vec::new()).is_none());
 }
 
 /// The painter draws a business member's credit share on the Codex cell's inner ring, so it has to
@@ -95,9 +98,9 @@ fn a_business_members_credit_share_reaches_the_codex_cell() {
          "workspaceCredits":{"limit":"25000","used":"8000","usedPercent":32.0,"reached":false}}
     ]))
     .unwrap();
-    let mut providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] =
+    let mut providers: [Poll<Option<NotchProvider>>; PROVIDER_COUNT] =
         [(); PROVIDER_COUNT].map(|_| Poll::new(None));
-    providers[1] = Poll::new(current_provider(entries));
+    providers[1] = Poll::new(NotchProvider::current(entries));
     let session_rows: Vec<Vec<LiveSession>> = vec![Vec::new(); PROVIDER_COUNT];
     let cells = rail_cells(&snapshot(), &providers, &session_rows, &Poll::new(None));
     match cells.first() {
@@ -114,7 +117,7 @@ fn a_business_members_credit_share_reaches_the_codex_cell() {
 
 #[test]
 fn rail_cells_list_selected_providers_in_rail_order_with_prs_last() {
-    let providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] =
+    let providers: [Poll<Option<NotchProvider>>; PROVIDER_COUNT] =
         [(); PROVIDER_COUNT].map(|_| Poll::new(None));
     let mut with_data = providers;
     with_data[0] = Poll::new(Some(provider_entry(AgentId::Claude, 10.0)));
@@ -188,7 +191,7 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_onsite() {
 
 #[test]
 fn a_rail_data_frame_carries_settings_cells_and_errors() {
-    let providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] =
+    let providers: [Poll<Option<NotchProvider>>; PROVIDER_COUNT] =
         [(); PROVIDER_COUNT].map(|_| Poll::new(None));
     let session_poll: Poll<Vec<Vec<LiveSession>>> = Poll::new(vec![Vec::new(); PROVIDER_COUNT]);
     let pulls: Poll<Option<GithubPrsDto>> = Poll::new(None);

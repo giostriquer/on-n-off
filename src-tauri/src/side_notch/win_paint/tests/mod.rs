@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::{LimitWindowKind, ProviderLimitsDto, Reading};
 use crate::side_notch::model::{Display, NotchSettings};
 
 mod content;
@@ -19,23 +20,33 @@ fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Dis
         mirrored: false,
     }
 }
-fn provider_data(provider: AgentId, percent: f64) -> ProviderData {
-    ProviderData {
-        provider,
-        status: LimitsStatus::Ok,
-        message: None,
-        windows: vec![LimitWindowDto {
-            id: "w".into(),
-            label: "Current session".into(),
-            kind: LimitWindowKind::Session,
-            used_percent: percent,
-            resets_at: None,
-            window_seconds: None,
-            observed_at: "2026-09-01T10:00:00Z".into(),
-        }],
-        workspace_credits: None,
-        sessions: Vec::new(),
+/// The signed-in account's card for `provider`, reporting `windows`.
+fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
+    ProviderLimitsDto::for_test(provider, "acct").with_reading(Reading {
+        windows,
+        ..Reading::default()
+    })
+}
+/// What the painter is handed for `card`: the host's projection of it, without live sessions.
+fn projected(card: ProviderLimitsDto) -> ProviderData {
+    ProviderData::new(
+        NotchProvider::current(vec![card]).expect("a signed-in account"),
+        Vec::new(),
+    )
+}
+fn session_window(percent: f64) -> LimitWindowDto {
+    LimitWindowDto {
+        id: "w".into(),
+        label: "Current session".into(),
+        kind: LimitWindowKind::Session,
+        used_percent: percent,
+        resets_at: None,
+        window_seconds: None,
+        observed_at: "2026-09-01T10:00:00Z".into(),
     }
+}
+fn provider_data(provider: AgentId, percent: f64) -> ProviderData {
+    projected(signed_in(provider, vec![session_window(percent)]))
 }
 fn settings() -> NotchSettings {
     NotchSettings {
@@ -64,21 +75,11 @@ fn window(id: &str, label: &str, kind: LimitWindowKind, percent: f64) -> LimitWi
     }
 }
 fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderData {
-    ProviderData {
-        provider: AgentId::Claude,
-        status: LimitsStatus::Ok,
-        message: None,
-        windows,
-        workspace_credits: None,
-        sessions: Vec::new(),
-    }
+    projected(signed_in(AgentId::Claude, windows))
 }
-/// A Codex business member: the weekly window, which is all Codex reports, and a credit share.
-fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderData {
-    ProviderData {
-        provider: AgentId::Codex,
-        status: LimitsStatus::Ok,
-        message: None,
+/// A Codex business member's card: the weekly window, which is all Codex reports, and a credit share.
+fn codex_member_card(share: LimitsWorkspaceCreditsDto) -> ProviderLimitsDto {
+    ProviderLimitsDto::for_test(AgentId::Codex, "acct").with_reading(Reading {
         windows: vec![window(
             "primary",
             "Weekly · all models",
@@ -86,8 +87,11 @@ fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderData {
             31.0,
         )],
         workspace_credits: Some(share),
-        sessions: Vec::new(),
-    }
+        ..Reading::default()
+    })
+}
+fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderData {
+    projected(codex_member_card(share))
 }
 /// The plan and its rendering for one open provider popover.
 fn popover_render(provider: ProviderData) -> (Plan, tiny_skia::Pixmap) {

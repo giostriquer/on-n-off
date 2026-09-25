@@ -155,7 +155,7 @@ private struct ProviderSection: View {
   let entry: Provider?
   let now: Date
   let metrics: NotchMetrics
-  private var windows: [Quota] { entry?.orderedWindows ?? [] }
+  private var windows: [Quota] { entry?.visibleWindows ?? [] }
   private var readable: Bool { entry?.status == "ok" && entry?.currentAccount == true }
 
   var body: some View {

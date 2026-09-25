@@ -11,12 +11,12 @@ mod marks;
 mod text;
 
 use super::model::{
-    layout, workspace_share_note, workspace_share_renewed, workspace_share_window,
-    workspace_share_wording, Edge, GithubList, NotchSettings, NotchSize, ShowMode,
+    self, layout, workspace_share_note, workspace_share_renewed, workspace_share_window,
+    workspace_share_wording, Edge, GithubList, NotchProvider, NotchSettings, NotchSize, ShowMode,
 };
 use crate::dto::{
-    AgentId, CiState, GithubStatus, LimitWindowDto, LimitWindowKind, LimitsStatus,
-    LimitsWorkspaceCreditsDto, MergeKind, ReviewDecision,
+    AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, LimitsWorkspaceCreditsDto,
+    MergeKind, ReviewDecision,
 };
 use crate::side_notch::sessions::LiveSession;
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
@@ -38,15 +38,35 @@ pub enum CellData {
     PullRequests(PrCellData),
 }
 
+/// One provider cell: the host's projection (`NotchProvider`) and the cell's live sessions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProviderData {
     pub provider: AgentId,
     pub status: LimitsStatus,
     pub message: Option<String>,
+    /// In the order the popover lists them.
     pub windows: Vec<LimitWindowDto>,
+    /// The window the ring and the figure show, by id.
+    pub headline_window_id: Option<String>,
+    pub inner_ring: Option<model::InnerRing>,
     /// A business workspace member's credit share, drawn on the Codex cell's inner ring.
     pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
     pub sessions: Vec<LiveSession>,
+}
+
+impl ProviderData {
+    pub fn new(cell: NotchProvider, sessions: Vec<LiveSession>) -> Self {
+        Self {
+            provider: cell.provider,
+            status: cell.status,
+            message: cell.message,
+            windows: cell.windows,
+            headline_window_id: cell.headline_window_id,
+            inner_ring: cell.inner_ring,
+            workspace_credits: cell.workspace_credits,
+            sessions,
+        }
+    }
 }
 
 /// The pull-request cell's data: only the selected lists, each capped, with the row
@@ -304,7 +324,7 @@ pub enum Badge {
 pub enum CellContent {
     Provider {
         provider: AgentId,
-        primary: Option<QuotaView>,
+        headline: Option<QuotaView>,
         inner: Option<InnerRing>,
         label: String,
     },
@@ -498,59 +518,37 @@ fn visible_windows(provider: &ProviderData) -> Vec<LimitWindowDto> {
         .collect()
 }
 
-/// Windows in popover order: the current session first, then weekly, then per-model.
-fn ordered_windows(provider: &ProviderData) -> Vec<LimitWindowDto> {
-    let rank = |kind: LimitWindowKind| match kind {
-        LimitWindowKind::Session => 0,
-        LimitWindowKind::Weekly => 1,
-        LimitWindowKind::Model => 2,
-    };
-    let mut windows = visible_windows(provider);
-    windows.sort_by_key(|w| rank(w.kind));
-    windows
-}
-
-/// The outer ring's window: Claude's weekly limit, otherwise the current session, then
-/// weekly. Only for a readable current account (the `Provider.primary` port).
-fn primary_quota(provider: &ProviderData) -> Option<QuotaView> {
-    if provider.status != LimitsStatus::Ok {
-        return None;
-    }
-    let visible = visible_windows(provider);
-    let window = if provider.provider == AgentId::Claude {
-        visible.iter().find(|w| w.kind == LimitWindowKind::Weekly)
-    } else {
-        visible
-            .iter()
-            .find(|w| w.kind == LimitWindowKind::Session)
-            .or_else(|| visible.iter().find(|w| w.kind == LimitWindowKind::Weekly))
-    }?;
-    Some(quota_view(window))
-}
-
-/// Claude's Fable weekly window, shown on an inner ring with its own label.
-fn fable_quota(provider: &ProviderData) -> Option<QuotaView> {
-    if provider.provider != AgentId::Claude || provider.status != LimitsStatus::Ok {
-        return None;
-    }
-    visible_windows(provider)
+/// The ring's and the figure's window: the one the host named.
+fn headline_quota(provider: &ProviderData) -> Option<QuotaView> {
+    let id = provider.headline_window_id.as_deref()?;
+    provider
+        .windows
         .iter()
-        .find(|w| {
-            w.kind == LimitWindowKind::Model && w.label.trim().to_lowercase() == "weekly · fable"
-        })
+        .find(|window| window.id == id)
         .map(quota_view)
 }
 
-/// A business workspace member's credit share, on the inner ring as Claude's Fable window is, while
-/// the outer ring and the label stay the weekly limit (the `Provider.credits` port).
-fn credits_quota(provider: &ProviderData) -> Option<QuotaView> {
-    if provider.status != LimitsStatus::Ok {
-        return None;
+/// The inner ring the host chose, in its own ink: Claude's Fable window in terracotta, or a business
+/// workspace member's credit share, while the outer ring and the label stay the headline window.
+fn inner_ring_of(provider: &ProviderData) -> Option<InnerRing> {
+    match provider.inner_ring.as_ref()? {
+        model::InnerRing::Fable { window_id } => provider
+            .windows
+            .iter()
+            .find(|window| &window.id == window_id)
+            .map(|window| InnerRing {
+                quota: quota_view(window),
+                ink: FABLE_ORANGE,
+                track: FABLE_TRACK,
+            }),
+        model::InnerRing::WorkspaceShare => {
+            provider.workspace_credits.as_ref().map(|share| InnerRing {
+                quota: quota_view(&workspace_share_window(share)),
+                ink: CREDITS_INK,
+                track: CREDITS_TRACK,
+            })
+        }
     }
-    provider
-        .workspace_credits
-        .as_ref()
-        .map(|share| quota_view(&workspace_share_window(share)))
 }
 
 fn list_title(list: GithubList) -> &'static str {
@@ -593,21 +591,9 @@ fn cell_content(data: &CellData) -> CellContent {
     match data {
         CellData::Provider(provider) => CellContent::Provider {
             provider: provider.provider,
-            primary: primary_quota(provider),
-            inner: fable_quota(provider)
-                .map(|quota| InnerRing {
-                    quota,
-                    ink: FABLE_ORANGE,
-                    track: FABLE_TRACK,
-                })
-                .or_else(|| {
-                    credits_quota(provider).map(|quota| InnerRing {
-                        quota,
-                        ink: CREDITS_INK,
-                        track: CREDITS_TRACK,
-                    })
-                }),
-            label: primary_quota(provider)
+            headline: headline_quota(provider),
+            inner: inner_ring_of(provider),
+            label: headline_quota(provider)
                 .and_then(|quota| quota.percent)
                 .map(format_percent)
                 .unwrap_or_else(|| "—".into()),
@@ -942,7 +928,7 @@ fn popover_entries(
                 detail: Option<String>,
             }
             let now = chrono::Utc::now();
-            let mut blocks: Vec<Block> = ordered_windows(provider)
+            let mut blocks: Vec<Block> = visible_windows(provider)
                 .iter()
                 .map(|window| Block {
                     label: window.label.clone(),
@@ -1927,12 +1913,12 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
     let (label, offset) = match &cell.content {
         CellContent::Provider {
             provider,
-            primary,
+            headline,
             inner,
             label,
         } => {
-            if let Some(primary) = primary {
-                let percent = primary.percent.unwrap_or(0.0);
+            if let Some(headline) = headline {
+                let percent = headline.percent.unwrap_or(0.0);
                 stroke_ring(
                     pixmap,
                     center.0,
@@ -1941,7 +1927,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     ring_stroke,
                     -90.0,
                     -90.0 + percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(primary.percent, provider_color(*provider)),
+                    meter_color(headline.percent, provider_color(*provider)),
                     true,
                     false,
                 );
@@ -1975,7 +1961,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                 );
             }
             marks::provider(*provider, glyph_rect, [255, 255, 255, 255], pixmap);
-            (label.clone(), if primary.is_some() { 2.0 } else { 0.0 })
+            (label.clone(), if headline.is_some() { 2.0 } else { 0.0 })
         }
         CellContent::PullRequests {
             segments,

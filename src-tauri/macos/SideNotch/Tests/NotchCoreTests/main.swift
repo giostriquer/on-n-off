@@ -14,11 +14,12 @@ final class NotchTests {
       observedAt: "2026-08-31T12:00:00Z")
   }
   func provider(
-    _ name: ProviderId = .claude, windows: [Quota], status: String = "ok", current: Bool = true
+    _ name: ProviderId = .claude, windows: [Quota], status: String = "ok", current: Bool = true,
+    headline: String? = nil, inner: InnerRing? = nil
   ) -> Provider {
     Provider(
       provider: name, status: status, currentAccount: current, plan: "max", message: nil,
-      windows: windows)
+      windows: windows, headlineWindowId: headline, innerRing: inner)
   }
   func rail(
     _ displayId: String, edge: Edge = .right, size: NotchSize = .standard,
@@ -69,22 +70,22 @@ final class NotchTests {
     expectEqual(meterInk(nil, base: claudeInk, at: now), unreadableInk)
   }
 
-  func testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst() {
-    for id in ["weekly_fable", "weekly_scoped:Fable"] {
-      let entry = provider(windows: [
-        quota("session", 73, label: "5 hour · all models", id: "session"), quota("weekly", 41),
-        quota("model", 58, label: "Weekly · Fable", id: id),
-      ])
-      expectEqual(entry.primary?.usedPercent, 41)
-      expectEqual(entry.fable?.usedPercent, 58)
-      expectEqual(entry.orderedWindows.map(\.usedPercent), [73, 41, 58])
-    }
-    let noWeekly = provider(windows: [
-      quota("session", 73), quota("model", 90, label: "Weekly · Opus"),
-    ])
-    expectNil(noWeekly.primary)
-    expectNil(noWeekly.fable)
-    expectNil(provider(windows: []).primary)
+  /// The host decides what each ring shows (`NotchProvider` in `side_notch/model.rs`); the helper
+  /// finds those windows by id and lists every window in the order it came.
+  func testTheRingsShowTheWindowsTheHostNamed() {
+    let fable = quota("model", 58, label: "Weekly · Fable", id: "weekly_scoped:Fable")
+    let entry = provider(
+      windows: [
+        quota("session", 73, label: "5 hour · all models", id: "session"),
+        quota("weekly", 41, id: "weekly_all"), fable,
+      ], headline: "weekly_all", inner: .fable(windowId: "weekly_scoped:Fable"))
+    expectEqual(entry.headline?.usedPercent, 41)
+    expectEqual(entry.inner, InnerQuota.fable(fable))
+    expectEqual(entry.visibleWindows.map(\.usedPercent), [73, 41, 58])
+    // Nothing named, nothing on the rings.
+    let unnamed = provider(windows: [quota("weekly", 41)])
+    expectNil(unnamed.headline)
+    expectNil(unnamed.inner)
   }
 
   /// The share as the host sends it: the reader's meter and the amounts already worded.
@@ -105,24 +106,14 @@ final class NotchTests {
   func testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside() {
     let entry = Provider(
       provider: .codex, status: "ok", currentAccount: true, plan: "business", message: nil,
-      windows: [quota("weekly", 31, label: "Weekly · all models")], workspaceCredits: credits(32))
-    expectEqual(entry.primary?.usedPercent, 31)
-    expectEqual(entry.credits?.percent(at: now), 32)
-    expectEqual(entry.credits?.label, "Workspace credits")
-    expectNil(entry.fable)
+      windows: [quota("weekly", 31, label: "Weekly · all models", id: "primary")],
+      headlineWindowId: "primary", innerRing: .workspaceShare, workspaceCredits: credits(32))
+    expectEqual(entry.headline?.usedPercent, 31)
+    expectEqual(entry.inner, InnerQuota.workspaceShare(credits(32).quota))
+    expectEqual(entry.inner?.quota.percent(at: now), 32)
+    expectEqual(entry.inner?.quota.label, "Workspace credits")
     // The weekly stays the headline: the share never joins the windows the popover lists.
-    expectEqual(entry.orderedWindows.map(\.label), ["Weekly · all models"])
-    for unreadable in [
-      Provider(
-        provider: .codex, status: "failed", currentAccount: true, plan: nil, message: nil,
-        windows: [], workspaceCredits: credits(32)),
-      Provider(
-        provider: .codex, status: "ok", currentAccount: false, plan: nil, message: nil,
-        windows: [], workspaceCredits: credits(32)),
-    ] {
-      expectNil(unreadable.credits)
-    }
-    expectNil(provider(.codex, windows: [quota("weekly", 31)]).credits)
+    expectEqual(entry.visibleWindows.map(\.label), ["Weekly · all models"])
   }
 
   /// The host words the amounts; the helper only picks the renewed wording once the reset has
@@ -154,26 +145,15 @@ final class NotchTests {
     expectEqual(provider(.codex, windows: [], status: "failed").hasObservedValues, false)
   }
 
-  func testUnavailableAndRememberedAccountsNeverPopulateRings() {
-    for entry in [
-      provider(windows: [quota("weekly", 99)], status: "failed"),
-      provider(windows: [quota("weekly", 99)], current: false),
-      provider(.cursor, windows: [], status: "unsupported"),
-    ] {
-      expectNil(entry.primary)
-      expectNil(entry.fable)
-    }
-  }
-
   func testWindowsRenewIndependentlyAndUnknownResetRemainsUsable() {
     let entry = provider(windows: [
       quota("weekly", 41),
       quota("model", 58, label: "Weekly · Fable", reset: "2026-01-01T00:00:00Z"),
     ])
-    expectEqual(entry.orderedWindows[0].percent(at: now), 41)
+    expectEqual(entry.windows[0].percent(at: now), 41)
     // A window past its own reset is back at zero, not unknown: the quota renewed.
-    expectEqual(entry.orderedWindows[1].percent(at: now), 0)
-    expectEqual(entry.orderedWindows[1].text(at: now), "0%")
+    expectEqual(entry.windows[1].percent(at: now), 0)
+    expectEqual(entry.windows[1].text(at: now), "0%")
     expectEqual(quota("weekly", 0.4, reset: "invalid").percent(at: now), 0.4)
     expectEqual(quota("weekly", 9, reset: "2027-01-15T08:00:00.000Z").percent(at: now), 0)
     // A figure that is not a usable percentage stays unknown, reset or not.
@@ -191,7 +171,7 @@ final class NotchTests {
     expectEqual(quota("weekly", 41).note(at: now), "")
   }
 
-  func testCodexPrefersSessionAndHidesInternalBuckets() {
+  func testCodexHidesInternalBuckets() {
     let entry = provider(
       .codex,
       windows: [
@@ -199,9 +179,7 @@ final class NotchTests {
         quota("model", 80, id: "extra:codex_bengalfox:weekly"), quota("weekly", 10),
         quota("session", 20),
       ])
-    expectEqual(entry.primary?.usedPercent, 20)
     expectEqual(entry.visibleWindows.count, 2)
-    expectEqual(provider(.codex, windows: [quota("weekly", 10)]).primary?.usedPercent, 10)
   }
 
   func testSessionAgesReadLikeTheReferenceApp() {
@@ -360,13 +338,13 @@ final class NotchTests {
 
   func testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions() throws {
     let valid =
-      #"{"version":3,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
+      #"{"version":4,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
     expectEqual(try HostMessage.decode(Data(valid.utf8)).sequence, 1)
     // An older host's message is refused rather than drawn in part, whichever version it speaks.
-    for older in ["1", "2"] {
+    for older in ["1", "2", "3"] {
       expectThrows(
         try HostMessage.decode(
-          Data(valid.replacingOccurrences(of: "\"version\":3", with: "\"version\":\(older)").utf8)))
+          Data(valid.replacingOccurrences(of: "\"version\":4", with: "\"version\":\(older)").utf8)))
     }
     expectThrows(
       try HostMessage.decode(Data((valid + String(repeating: " ", count: 262_144)).utf8)))
@@ -391,9 +369,10 @@ final class NotchTests {
     let withCredits = valid.replacingOccurrences(
       of: "\"providers\":[]",
       with:
-        #""providers":[{"provider":"codex","status":"ok","currentAccount":true,"windows":[],"sessions":[],"workspaceCredits":{"usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"}}]"#
+        #""providers":[{"provider":"codex","status":"ok","currentAccount":true,"windows":[],"innerRing":{"kind":"workspaceShare"},"sessions":[],"workspaceCredits":{"usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"}}]"#
     )
-    expectEqual(try HostMessage.decode(Data(withCredits.utf8)).providers[0].credits?.percent(at: now), 32)
+    expectEqual(
+      try HostMessage.decode(Data(withCredits.utf8)).providers[0].inner?.quota.percent(at: now), 32)
     expectThrows(
       try HostMessage.decode(
         Data(withCredits.replacingOccurrences(of: "\"usedPercent\":32", with: "\"usedPercent\":101").utf8)))
@@ -407,9 +386,31 @@ final class NotchTests {
     expectEqual(maxSessions, 12)
   }
 
+  /// The host names the ring's windows by id. A message naming a window it did not send, or putting
+  /// a share it did not send on the inner ring, is refused rather than drawn with an empty ring.
+  func testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames() throws {
+    let valid =
+      #"{"version":4,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[{"provider":"claude","status":"ok","currentAccount":true,"windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7,"observedAt":""},{"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13,"observedAt":""}],"headlineWindowId":"weekly_all","innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"},"sessions":[]}]}"#
+    let entry = try HostMessage.decode(Data(valid.utf8)).providers[0]
+    expectEqual(entry.headline?.usedPercent, 7)
+    expectEqual(entry.inner?.quota.usedPercent, 13)
+    for dangling in [
+      valid.replacingOccurrences(
+        of: "\"headlineWindowId\":\"weekly_all\"", with: "\"headlineWindowId\":\"session\""),
+      valid.replacingOccurrences(
+        of: "\"windowId\":\"weekly_scoped:Fable\"", with: "\"windowId\":\"weekly_fable\""),
+      valid.replacingOccurrences(
+        of: "{\"kind\":\"fable\",\"windowId\":\"weekly_scoped:Fable\"}",
+        with: "{\"kind\":\"workspaceShare\"}"),
+      valid.replacingOccurrences(of: "\"kind\":\"fable\"", with: "\"kind\":\"sparkles\""),
+    ] {
+      expectThrows(try HostMessage.decode(Data(dangling.utf8)))
+    }
+  }
+
   func testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows() throws {
     let valid =
-      #"{"version":3,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
+      #"{"version":4,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
     let pull =
       #"{"id":"node","number":42,"title":"ci: one concurrency group","url":"https://github.com/octo/tools/pull/42","repo":"octo/tools","author":"gio","isDraft":false,"reviewDecision":"APPROVED","ci":"success","mergeKind":"ready","updatedAt":"2026-09-01T10:00:00Z"}"#
     let withPulls = valid.replacingOccurrences(
@@ -461,14 +462,14 @@ final class NotchTests {
 
   func testClientActionsEncodeACompleteTypedProtocol() throws {
     let cases: [(ClientAction, [String: Any])] = [
-      (.ready, ["version": 3, "type": "ready"]),
-      (.ack(sequence: 42), ["version": 3, "type": "ack", "sequence": 42]),
-      (.screensChanged, ["version": 3, "type": "screensChanged"]),
-      (.refresh, ["version": 3, "type": "refresh"]),
-      (.openLimits, ["version": 3, "type": "openLimits"]),
-      (.openPullRequests, ["version": 3, "type": "openPullRequests"]),
-      (.setShow(.onHover), ["version": 3, "type": "setShow", "show": "onHover"]),
-      (.setShow(.always), ["version": 3, "type": "setShow", "show": "always"]),
+      (.ready, ["version": 4, "type": "ready"]),
+      (.ack(sequence: 42), ["version": 4, "type": "ack", "sequence": 42]),
+      (.screensChanged, ["version": 4, "type": "screensChanged"]),
+      (.refresh, ["version": 4, "type": "refresh"]),
+      (.openLimits, ["version": 4, "type": "openLimits"]),
+      (.openPullRequests, ["version": 4, "type": "openPullRequests"]),
+      (.setShow(.onHover), ["version": 4, "type": "setShow", "show": "onHover"]),
+      (.setShow(.always), ["version": 4, "type": "setShow", "show": "always"]),
     ]
     for (action, expected) in cases {
       let encoded = try JSONEncoder().encode(action)
@@ -503,13 +504,12 @@ func expectThrows<T>(_ value: @autoclosure () throws -> T, line: Int = #line) {
 }
 let checks = NotchTests()
 checks.testTheMeterRampOnlyEverMovesTowardTheTripRed()
-checks.testClaudeRingsShowWeeklyAndFableWhileThePopoverListsTheSessionFirst()
+checks.testTheRingsShowTheWindowsTheHostNamed()
 checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
 checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
 checks.testAPausedAccountWithOnlyAShareStillHasObservedValues()
-checks.testUnavailableAndRememberedAccountsNeverPopulateRings()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
-checks.testCodexPrefersSessionAndHidesInternalBuckets()
+checks.testCodexHidesInternalBuckets()
 checks.testSessionAgesReadLikeTheReferenceApp()
 checks.testRailFramesFollowTheSelectedUUIDOnEveryEdge()
 checks.testTheRailShrinksWithFewerProvidersAndHidesWithoutAnyOrWithoutRoom()
@@ -519,6 +519,7 @@ checks.testPresetsScaleTheWholeRailOnThePixelGrid()
 checks.testPillsHugTheEdgeCentredOnTheRail()
 checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
 try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
+try checks.testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames()
 try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()

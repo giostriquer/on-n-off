@@ -1,12 +1,15 @@
 use super::{
-    model::{layout, workspace_share_wording, GithubList, NotchSnapshot, RAIL_ORDER},
+    model::{
+        layout, workspace_share_wording, GithubList, InnerRing, NotchProvider, NotchSnapshot,
+        RAIL_ORDER,
+    },
     protocol::{Action, PROTOCOL_VERSION},
     sessions::{self, LiveSession},
     transport::{Connection, Lifetime},
 };
 use crate::dto::{
     AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, LimitWindowDto, LimitsStatus,
-    MergeKind, ProviderLimitsDto, ReviewDecision,
+    MergeKind, ReviewDecision,
 };
 use serde::Serialize;
 use std::{
@@ -29,6 +32,7 @@ struct Changed {
     snapshot: NotchSnapshot,
 }
 
+/// One provider on the wire: the cell `NotchProvider` projected, with the share already worded.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeProvider {
@@ -38,6 +42,10 @@ struct NativeProvider {
     plan: Option<String>,
     message: Option<String>,
     windows: Vec<LimitWindowDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    headline_window_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inner_ring: Option<InnerRing>,
     #[serde(skip_serializing_if = "Option::is_none")]
     workspace_credits: Option<NativeWorkspaceCredits>,
 }
@@ -53,18 +61,18 @@ struct NativeWorkspaceCredits {
     left: String,
     renewed: String,
 }
-fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
-    entries
-        .into_iter()
-        .find(|entry| entry.current_account)
-        .map(|entry| NativeProvider {
-            provider: entry.provider,
-            status: entry.status,
+impl From<NotchProvider> for NativeProvider {
+    fn from(cell: NotchProvider) -> Self {
+        Self {
+            provider: cell.provider,
+            status: cell.status,
             current_account: true,
-            plan: entry.reading.plan,
-            message: entry.message,
-            windows: entry.reading.windows,
-            workspace_credits: entry.reading.workspace_credits.map(|share| {
+            plan: cell.plan,
+            message: cell.message,
+            windows: cell.windows,
+            headline_window_id: cell.headline_window_id,
+            inner_ring: cell.inner_ring,
+            workspace_credits: cell.workspace_credits.map(|share| {
                 let wording = workspace_share_wording(&share);
                 NativeWorkspaceCredits {
                     used_percent: share.used_percent,
@@ -73,7 +81,8 @@ fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
                     renewed: wording.renewed,
                 }
             }),
-        })
+        }
+    }
 }
 /// One provider on the wire: its quota snapshot plus the live sessions read on their own cadence.
 #[derive(Serialize)]
@@ -601,7 +610,7 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                     let _ = sender.send(Read::Limits {
                         index,
                         revision,
-                        entry: current_provider(entries),
+                        entry: NotchProvider::current(entries).map(NativeProvider::from),
                     });
                 });
             }

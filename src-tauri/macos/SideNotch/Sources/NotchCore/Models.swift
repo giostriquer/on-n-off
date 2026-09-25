@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// Host ↔ helper message version. Bumped with every shape change so a stale helper fails loudly.
-public let protocolVersion = 3
+public let protocolVersion = 4
 /// Rows per provider in a message; mirrors `MAX_SESSIONS` on the host.
 public let maxSessions = 12
 
@@ -139,6 +139,53 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
   }
 }
 
+/// What a provider cell's inner ring shows, as the host chose it (`InnerRing` in
+/// `side_notch/model.rs`): Claude's Fable window, named by id, or a business member's workspace
+/// credit share.
+public enum InnerRing: Codable, Equatable, Sendable {
+  case fable(windowId: String)
+  case workspaceShare
+
+  private enum CodingKeys: String, CodingKey { case kind, windowId }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    switch try values.decode(String.self, forKey: .kind) {
+    case "fable": self = .fable(windowId: try values.decode(String.self, forKey: .windowId))
+    case "workspaceShare": self = .workspaceShare
+    default:
+      throw DecodingError.dataCorruptedError(
+        forKey: .kind, in: values, debugDescription: "Unknown inner ring")
+    }
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    switch self {
+    case .fable(let windowId):
+      try values.encode("fable", forKey: .kind)
+      try values.encode(windowId, forKey: .windowId)
+    case .workspaceShare:
+      try values.encode("workspaceShare", forKey: .kind)
+    }
+  }
+}
+
+/// The inner ring's quota: the Fable window, or the workspace share drawn as a window.
+public enum InnerQuota: Equatable, Sendable {
+  case fable(Quota)
+  case workspaceShare(Quota)
+
+  public var quota: Quota {
+    switch self {
+    case .fable(let quota), .workspaceShare(let quota): return quota
+    }
+  }
+}
+
+/// One provider cell as the host projected it (`NotchProvider` in `side_notch/model.rs`): its
+/// windows in the order the popover lists them, the window its ring leads with and what its inner
+/// ring shows. The helper draws these and decides none of them.
 public struct Provider: Codable, Equatable, Identifiable, Sendable {
   public var id: ProviderId { provider }
   public let provider: ProviderId
@@ -147,12 +194,15 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
   public let plan: String?
   public let message: String?
   public let windows: [Quota]
+  public let headlineWindowId: String?
+  public let innerRing: InnerRing?
   public let sessions: [Session]
   public let workspaceCredits: WorkspaceCredits?
 
   public init(
     provider: ProviderId, status: String, currentAccount: Bool, plan: String?, message: String?,
-    windows: [Quota], sessions: [Session] = [], workspaceCredits: WorkspaceCredits? = nil
+    windows: [Quota], headlineWindowId: String? = nil, innerRing: InnerRing? = nil,
+    sessions: [Session] = [], workspaceCredits: WorkspaceCredits? = nil
   ) {
     self.provider = provider
     self.status = status
@@ -160,6 +210,8 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     self.plan = plan
     self.message = message
     self.windows = windows
+    self.headlineWindowId = headlineWindowId
+    self.innerRing = innerRing
     self.sessions = sessions
     self.workspaceCredits = workspaceCredits
   }
@@ -176,40 +228,36 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     }
   }
 
-  /// Windows in popover order: the current session first, then weekly, then per-model.
-  public var orderedWindows: [Quota] {
-    let priority = ["session": 0, "weekly": 1, "model": 2]
-    return visibleWindows.sorted { priority[$0.kind, default: 3] < priority[$1.kind, default: 3] }
+  /// The window the ring and the figure show: the one the host named, which it names only for an
+  /// account it could read.
+  public var headline: Quota? {
+    headlineWindowId.flatMap { id in windows.first { $0.id == id } }
   }
 
-  /// The outer ring's window: Claude's weekly limit (its 5-hour window is in the popover),
-  /// otherwise the current session, falling back to weekly. Only for a readable current account.
-  public var primary: Quota? {
-    guard currentAccount, status == "ok" else { return nil }
-    if provider == .claude { return visibleWindows.first { $0.kind == "weekly" } }
-    return visibleWindows.first { $0.kind == "session" }
-      ?? visibleWindows.first { $0.kind == "weekly" }
-  }
-
-  /// Claude's Fable weekly window, shown on an inner ring with its own label.
-  public var fable: Quota? {
-    guard provider == .claude, currentAccount, status == "ok" else { return nil }
-    return visibleWindows.first {
-      $0.kind == "model"
-        && $0.label.trimmingCharacters(in: .whitespaces).lowercased() == "weekly · fable"
+  /// The inner ring's quota, as the host chose it.
+  public var inner: InnerQuota? {
+    switch innerRing {
+    case .fable(let id)?: return windows.first { $0.id == id }.map(InnerQuota.fable)
+    case .workspaceShare?: return workspaceCredits.map { .workspaceShare($0.quota) }
+    case nil: return nil
     }
   }
 
-  /// A business workspace member's credit share, on the inner ring as Claude's Fable window is, while
-  /// the outer ring and the label stay the weekly limit. Only for a readable current account.
-  public var credits: Quota? {
-    guard currentAccount, status == "ok" else { return nil }
-    return workspaceCredits?.quota
+  /// Whether every window the host names is one it sent, and a share it puts on the inner ring came
+  /// with it. A message that names anything else is refused rather than drawn in part.
+  public var referencesAreSent: Bool {
+    let sent = { (id: String) in windows.contains { $0.id == id } }
+    let headlineSent = headlineWindowId.map(sent) ?? true
+    switch innerRing {
+    case .fable(let id)?: return headlineSent && sent(id)
+    case .workspaceShare?: return headlineSent && workspaceCredits != nil
+    case nil: return headlineSent
+    }
   }
 
   /// Whether the popover shows any remembered value: windows or a credit share. A paused account that
   /// has some says they are the last observed.
-  public var hasObservedValues: Bool { !orderedWindows.isEmpty || workspaceCredits != nil }
+  public var hasObservedValues: Bool { !visibleWindows.isEmpty || workspaceCredits != nil }
 }
 
 public enum Edge: String, Codable, Sendable {
@@ -496,7 +544,7 @@ public struct HostMessage: Decodable, Sendable {
     guard value.version == protocolVersion, value.providers.count <= railProviderOrder.count,
       Set(value.providers.map(\.provider)).count == value.providers.count,
       value.providers.allSatisfy({ entry in
-        entry.currentAccount && entry.windows.count <= 100
+        entry.currentAccount && entry.windows.count <= 100 && entry.referencesAreSent
           && entry.windows.allSatisfy {
             (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
           }

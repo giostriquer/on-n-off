@@ -2,14 +2,7 @@ use super::*;
 
 /// How many windows the popover of a Codex account with `windows` draws a bar for.
 fn codex_popover_bars(windows: Vec<LimitWindowDto>) -> usize {
-    let (planned, _) = popover_render(ProviderData {
-        provider: AgentId::Codex,
-        status: LimitsStatus::Ok,
-        message: None,
-        windows,
-        workspace_credits: None,
-        sessions: Vec::new(),
-    });
+    let (planned, _) = popover_render(projected(signed_in(AgentId::Codex, windows)));
     planned
         .popover
         .expect("the popover is open")
@@ -61,9 +54,7 @@ fn codex_hides_the_reserve_and_spark_windows_by_label_whatever_their_id() {
 
 /// The label of a cell whose account reports `windows`.
 fn ring_label(provider: AgentId, windows: Vec<LimitWindowDto>) -> String {
-    let mut data = claude_with(windows);
-    data.provider = provider;
-    match cell_content(&CellData::Provider(data)) {
+    match cell_content(&CellData::Provider(projected(signed_in(provider, windows)))) {
         CellContent::Provider { label, .. } => label,
         _ => panic!("wrong content kind"),
     }
@@ -112,14 +103,16 @@ fn codexs_ring_leads_with_its_session_when_it_reports_one() {
 }
 #[test]
 fn unreadable_providers_fall_back_to_the_dash_label() {
-    let mut provider = provider_data(AgentId::Cursor, 50.0);
-    provider.status = LimitsStatus::Failed;
-    provider.message = Some("Could not read usage.".into());
-    let content = cell_content(&CellData::Provider(provider));
+    let mut failed = signed_in(AgentId::Cursor, vec![session_window(50.0)]);
+    failed.status = LimitsStatus::Failed;
+    failed.message = Some("Could not read usage.".into());
+    let content = cell_content(&CellData::Provider(projected(failed)));
     match content {
-        CellContent::Provider { label, primary, .. } => {
+        CellContent::Provider {
+            label, headline, ..
+        } => {
             assert_eq!(label, "—");
-            assert!(primary.is_none());
+            assert!(headline.is_none());
         }
         _ => panic!("wrong content kind"),
     }
@@ -156,10 +149,12 @@ fn a_reset_window_reads_as_zero_and_never_recites_its_spent_figure() {
     expired.resets_at = Some("2020-01-01T00:00:00Z".into());
     let content = cell_content(&CellData::Provider(claude_with(vec![expired.clone()])));
     match content {
-        CellContent::Provider { label, primary, .. } => {
+        CellContent::Provider {
+            label, headline, ..
+        } => {
             assert_eq!(label, "0%", "the quota renewed at the reset");
             assert_eq!(
-                primary.and_then(|quota| quota.percent),
+                headline.and_then(|quota| quota.percent),
                 Some(0.0),
                 "and the ring draws an empty arc rather than none at all"
             );
@@ -518,9 +513,11 @@ fn inner_ring(provider: ProviderData) -> Option<InnerRing> {
 fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
     let member = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
     match cell_content(&CellData::Provider(member.clone())) {
-        CellContent::Provider { label, primary, .. } => {
+        CellContent::Provider {
+            label, headline, ..
+        } => {
             assert_eq!(label, "31%", "the weekly stays the headline");
-            assert_eq!(primary.and_then(|quota| quota.percent), Some(31.0));
+            assert_eq!(headline.and_then(|quota| quota.percent), Some(31.0));
         }
         _ => panic!("wrong content kind"),
     }
@@ -549,9 +546,9 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
         }),
         "a share past its reset has renewed, as a window has"
     );
-    let mut unreadable = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
+    let mut unreadable = codex_member_card(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
     unreadable.status = LimitsStatus::Failed;
-    assert!(inner_ring(unreadable).is_none());
+    assert!(inner_ring(projected(unreadable)).is_none());
 }
 
 /// Claude's Fable window takes the same inner ring, in its own terracotta.
@@ -640,12 +637,12 @@ fn the_codex_popover_words_a_reached_and_a_renewed_share_as_the_app_does() {
 /// A paused account with only a remembered share still says the values below are last observed.
 #[test]
 fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
-    let mut paused = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
+    let mut paused = codex_member_card(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
     paused.status = LimitsStatus::Failed;
     paused.message = Some("Refresh failed.".into());
-    paused.windows.clear();
+    paused.reading.windows.clear();
 
-    let texts = popover_texts(paused);
+    let texts = popover_texts(projected(paused));
     assert!(
         texts.contains(&"Refresh paused. Last observed values below.".to_string()),
         "{texts:?}"

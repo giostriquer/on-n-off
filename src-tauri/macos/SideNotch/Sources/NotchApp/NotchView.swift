@@ -206,44 +206,45 @@ private struct MeterCell: View {
   let layout: RailLayout
   let metrics: NotchMetrics
   let action: () -> Void
-  private var primary: Quota? { entry?.primary }
-  /// The inner ring: Claude's Fable window, or a Codex workspace member's credit share, each in a
-  /// deeper shade of its provider's accent on its own dark track.
+  private var headline: Quota? { entry?.headline }
+  /// The inner ring the host chose: Claude's Fable window, or a Codex workspace member's credit
+  /// share, each in a deeper shade of its provider's accent on its own dark track.
   private var inner: (quota: Quota, name: String, ink: Ink, track: Color)? {
-    if let fable = entry?.fable {
-      return (fable, "Fable weekly", fableInk, Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255))
-    }
-    if let credits = entry?.credits {
+    switch entry?.inner {
+    case .fable(let quota)?:
+      return (quota, "Fable weekly", fableInk, Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255))
+    case .workspaceShare(let quota)?:
       return (
-        credits, "workspace credits", creditsInk, Color(red: 38 / 255, green: 41 / 255, blue: 45 / 255)
+        quota, "workspace credits", creditsInk, Color(red: 38 / 255, green: 41 / 255, blue: 45 / 255)
       )
+    case nil:
+      return nil
     }
-    return nil
   }
   private var period: String {
-    primary.map { $0.kind == "weekly" ? "weekly" : "5 hour" }
+    headline.map { $0.kind == "weekly" ? "weekly" : "5 hour" }
       ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
   }
   private var description: String {
     let name = providerName(id)
-    guard let primary = primary else { return "\(name), \(period)" }
-    let reached = primary.isReached(at: now) ? ", limit reached" : ""
+    guard let headline = headline else { return "\(name), \(period)" }
+    let reached = headline.isReached(at: now) ? ", limit reached" : ""
     let innerDescription = inner.map {
       ", \($0.name), \($0.quota.text(at: now)) used"
         + ($0.quota.isReached(at: now) ? ", limit reached" : "")
     } ?? ""
-    return "\(name), \(period), \(primary.text(at: now)) used\(reached)" + innerDescription
+    return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + innerDescription
   }
 
   var body: some View {
     RailCellChrome(
-      layout: layout, metrics: metrics, label: primary?.text(at: now) ?? "—",
-      labelOffset: primary == nil ? 0 : metrics.value(2), description: description,
+      layout: layout, metrics: metrics, label: headline?.text(at: now) ?? "—",
+      labelOffset: headline == nil ? 0 : metrics.value(2), description: description,
       active: active, action: action,
       ring: ZStack {
-        Circle().trim(from: 0, to: CGFloat(primary?.percent(at: now) ?? 0) / 100)
+        Circle().trim(from: 0, to: CGFloat(headline?.percent(at: now) ?? 0) / 100)
           .stroke(
-            meterColor(primary, provider: id, at: now),
+            meterColor(headline, provider: id, at: now),
             style: StrokeStyle(lineWidth: CGFloat(layout.ringStroke), lineCap: .round)
           )
           .rotationEffect(.degrees(-90))

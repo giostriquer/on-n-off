@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::ProviderLimitsDto;
 use crate::side_notch::model::NotchSettings;
 use crate::side_notch::sessions::SessionStatus;
 
@@ -15,6 +16,11 @@ fn outbound_delivery_is_dirty_driven_with_a_slow_heartbeat() {
     assert!(!delivery.due(now + Duration::from_secs(20)));
     assert!(delivery.due(now + HEARTBEAT_INTERVAL + Duration::from_secs(2)));
     assert!(HEARTBEAT_INTERVAL >= Duration::from_secs(30));
+}
+
+/// The provider the helper is sent for these cards.
+fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
+    NotchProvider::current(entries).map(NativeProvider::from)
 }
 
 #[test]
@@ -36,7 +42,33 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
     assert!(payload.get("workspaceCredits").is_none());
     assert_eq!(payload["provider"], "claude");
     assert_eq!(payload["sessions"], serde_json::json!([]));
+    assert!(payload.get("headlineWindowId").is_none());
+    assert!(payload.get("innerRing").is_none());
     assert!(current_provider(Vec::new()).is_none());
+}
+
+/// The helper finds the ring's windows by the ids the host names, in the shape it decodes.
+#[test]
+fn the_headline_and_the_inner_ring_travel_as_window_ids() {
+    let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
+        {"provider":"claude","status":"ok","currentAccount":true,"windows":[
+            {"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7.0,"observedAt":"2026-09-01T10:00:00Z"},
+            {"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13.0,"observedAt":"2026-09-01T10:00:00Z"}
+        ]}
+    ]))
+    .unwrap();
+    let entry = current_provider(entries).unwrap();
+    let payload = serde_json::to_value(MessageProvider {
+        entry: &entry,
+        sessions: &[],
+    })
+    .unwrap();
+
+    assert_eq!(payload["headlineWindowId"], "weekly_all");
+    assert_eq!(
+        payload["innerRing"],
+        serde_json::json!({"kind":"fable","windowId":"weekly_scoped:Fable"})
+    );
 }
 
 /// The helper draws the share on the Codex cell's inner ring with the reader's meter, and shows the
@@ -60,6 +92,10 @@ fn a_business_members_credit_share_travels_worded_with_the_readers_meter() {
         serde_json::json!({"usedPercent":40.0,"resetsAt":"2026-10-01T12:00:00+00:00",
             "left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"})
     );
+    assert_eq!(
+        payload["innerRing"],
+        serde_json::json!({"kind":"workspaceShare"})
+    );
 }
 
 #[test]
@@ -71,6 +107,8 @@ fn the_message_lists_selected_providers_in_rail_order_with_their_sessions() {
         plan: None,
         message: None,
         windows: Vec::new(),
+        headline_window_id: None,
+        inner_ring: None,
         workspace_credits: None,
     };
     let providers = [

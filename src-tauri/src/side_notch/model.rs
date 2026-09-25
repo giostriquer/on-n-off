@@ -1,8 +1,8 @@
 use crate::dto::AgentId;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-use crate::dto::LimitsWorkspaceCreditsDto;
-#[cfg(any(target_os = "windows", test))]
-use crate::dto::{LimitWindowDto, LimitWindowKind};
+use crate::dto::{
+    LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
+};
 use serde::{Deserialize, Serialize};
 
 /// A cell's width on screen (points at the standard size); a vertical rail is this thick.
@@ -284,6 +284,115 @@ fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
         1.0
     };
     (value * scale).round() / scale
+}
+
+/// One provider cell as both notches draw it, projected once from the current account's card: its
+/// windows in the order the popover lists them, the window its ring and figure lead with, and what
+/// its inner ring shows. The macOS helper and the Windows painter draw it and decide none of it;
+/// what depends on the clock (a window's percent now, its reset note) stays with them, since they
+/// redraw between reads.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotchProvider {
+    pub provider: AgentId,
+    pub status: LimitsStatus,
+    pub plan: Option<String>,
+    pub message: Option<String>,
+    pub windows: Vec<LimitWindowDto>,
+    /// The window the ring and the figure show, by id; none while the account cannot be read.
+    pub headline_window_id: Option<String>,
+    /// None while the account cannot be read, or when it has nothing to show there.
+    pub inner_ring: Option<InnerRing>,
+    pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
+}
+
+/// What a provider cell's inner ring shows: Claude's Fable weekly window, or a business member's
+/// share of the workspace credits. On the macOS wire, `{"kind":"fable","windowId":…}` or
+/// `{"kind":"workspaceShare"}`.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum InnerRing {
+    /// The Fable window, by id among the provider's windows.
+    #[serde(rename_all = "camelCase")]
+    Fable {
+        window_id: String,
+    },
+    WorkspaceShare,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+impl NotchProvider {
+    /// The current account's card among one provider's cards, projected; `None` without one.
+    /// Remembered accounts never reach the notch.
+    pub fn current(entries: Vec<ProviderLimitsDto>) -> Option<Self> {
+        let card = entries.into_iter().find(|entry| entry.current_account)?;
+        let readable = card.status == LimitsStatus::Ok;
+        let mut windows = card.reading.windows;
+        windows.sort_by_key(|window| popover_rank(window.kind));
+        let headline_window_id = readable
+            .then(|| headline_window(card.provider, &windows))
+            .flatten()
+            .map(|window| window.id.clone());
+        let inner_ring = readable
+            .then(|| {
+                fable_window(card.provider, &windows)
+                    .map(|window| InnerRing::Fable {
+                        window_id: window.id.clone(),
+                    })
+                    .or_else(|| {
+                        card.reading
+                            .workspace_credits
+                            .as_ref()
+                            .map(|_| InnerRing::WorkspaceShare)
+                    })
+            })
+            .flatten();
+        Some(Self {
+            provider: card.provider,
+            status: card.status,
+            plan: card.reading.plan,
+            message: card.message,
+            windows,
+            headline_window_id,
+            inner_ring,
+            workspace_credits: card.reading.workspace_credits,
+        })
+    }
+}
+
+/// The popover's order: the current session first, then weekly, then per model.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn popover_rank(kind: LimitWindowKind) -> u8 {
+    match kind {
+        LimitWindowKind::Session => 0,
+        LimitWindowKind::Weekly => 1,
+        LimitWindowKind::Model => 2,
+    }
+}
+
+/// Claude's weekly limit (its 5-hour window is in the popover); otherwise the current session,
+/// falling back to weekly.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn headline_window(provider: AgentId, windows: &[LimitWindowDto]) -> Option<&LimitWindowDto> {
+    let first = |kind: LimitWindowKind| windows.iter().find(|window| window.kind == kind);
+    if provider == AgentId::Claude {
+        first(LimitWindowKind::Weekly)
+    } else {
+        first(LimitWindowKind::Session).or_else(|| first(LimitWindowKind::Weekly))
+    }
+}
+
+/// Claude's Fable weekly window, which the Claude reader labels "Weekly · Fable" whatever its id.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn fable_window(provider: AgentId, windows: &[LimitWindowDto]) -> Option<&LimitWindowDto> {
+    if provider != AgentId::Claude {
+        return None;
+    }
+    windows.iter().find(|window| {
+        window.kind == LimitWindowKind::Model
+            && window.label.trim().to_lowercase() == "weekly · fable"
+    })
 }
 
 /// The side notch meter ramp, twin of `NotchCore/Meter.swift`.
