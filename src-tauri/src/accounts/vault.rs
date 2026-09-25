@@ -79,6 +79,13 @@ pub fn key(root: &Path, create: bool, retry: bool) -> KeyResult {
         .get_or_init(SessionKeys::default)
         .get(&scope, retry, || read_key(&scope, create))
 }
+/// A test that reaches the OS credential store has forgotten `tests::unlock_fixture` for its home;
+/// failing it here keeps the suite from reading or writing whoever runs it's real vault keys.
+#[cfg(test)]
+fn read_key(scope: &str, _create: bool) -> KeyResult {
+    panic!("a test reached the OS credential store for vault scope {scope}; unlock its home with vault::tests::unlock_fixture")
+}
+#[cfg(not(test))]
 fn read_key(scope: &str, create: bool) -> KeyResult {
     if !cfg!(any(target_os = "macos", windows)) {
         return Err("Protected profiles require macOS or Windows.".into());

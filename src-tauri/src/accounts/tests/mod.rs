@@ -47,3 +47,8 @@ fn account_actions_map_to_their_activation() {
     );
     assert_eq!(Activation::from_action("signOut"), None);
 }
+
+mod fixture;
+mod listing;
+mod profiles;
+mod switching;
