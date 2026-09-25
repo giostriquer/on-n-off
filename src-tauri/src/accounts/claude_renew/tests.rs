@@ -445,7 +445,7 @@ fn a_renewal_under_claude_config_dir_works_in_that_dir() {
         (name == "CLAUDE_CONFIG_DIR").then(|| work_var.clone())
     })
     .unwrap()
-    .storage;
+    .storage();
     let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
 
     let renewed = renew(
@@ -480,7 +480,7 @@ fn a_renewal_under_a_secure_storage_dir_works_in_that_dir() {
         (name == "CLAUDE_SECURESTORAGE_CONFIG_DIR").then(|| secure_var.clone())
     })
     .unwrap()
-    .storage;
+    .storage();
     let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
 
     let renewed = renew(

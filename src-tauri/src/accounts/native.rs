@@ -293,10 +293,7 @@ impl NativeStore {
     }
     /// Claude Code's config dir for this store.
     pub(crate) fn claude_dir(&self) -> StorageDir {
-        self.secure_storage.as_ref().map_or_else(
-            || StorageDir::new(self.config_home.clone(), self.custom),
-            |secure| secure.dir.clone(),
-        )
+        StorageDir::of(&self.config_home, self.custom, self.secure_storage.as_ref())
     }
     /// Claude's login, from the store Claude Code would read it from. A disposable ON_N_OFF_HOME
     /// uses file fixtures unless it is an explicit isolated login.

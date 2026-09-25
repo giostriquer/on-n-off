@@ -51,17 +51,30 @@ pub(crate) struct StorageDir {
     scoped: bool,
 }
 
+#[cfg(test)]
 impl StorageDir {
-    /// `<home>/.claude`, the default, whose Keychain entry is Claude Code's unscoped one.
+    /// `<home>/.claude`, the default, whose Keychain entry is Claude Code's unscoped one: what
+    /// [`dirs`] resolves for a disposable home.
     pub(crate) fn default_in(home: &Path) -> Self {
         Self {
             path: home.join(".claude"),
             scoped: false,
         }
     }
+}
 
+impl StorageDir {
     pub(crate) fn new(path: PathBuf, scoped: bool) -> Self {
         Self { path, scoped }
+    }
+
+    /// Where Claude Code keeps the login for the config dir `config`: that dir, scoped when
+    /// `CLAUDE_CONFIG_DIR` chose it (`custom`), unless `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved it.
+    pub(crate) fn of(config: &Path, custom: bool, secure_storage: Option<&SecureStorage>) -> Self {
+        secure_storage.map_or_else(
+            || Self::new(config.to_path_buf(), custom),
+            |secure| secure.dir.clone(),
+        )
     }
 
     pub(crate) fn credentials_file(&self) -> PathBuf {
@@ -94,9 +107,15 @@ pub(crate) struct Dirs {
     pub(crate) config: PathBuf,
     /// `CLAUDE_CONFIG_DIR` chose the config dir.
     pub(crate) custom: bool,
-    /// The storage dir: the config dir, unless `secure_storage` moved it.
-    pub(crate) storage: StorageDir,
     pub(crate) secure_storage: Option<SecureStorage>,
+}
+
+#[cfg(test)]
+impl Dirs {
+    /// The storage dir: the config dir, unless `secure_storage` moved it.
+    pub(crate) fn storage(&self) -> StorageDir {
+        StorageDir::of(&self.config, self.custom, self.secure_storage.as_ref())
+    }
 }
 
 /// The name of the variable that moves Claude Code's storage away from its config dir.
@@ -132,7 +151,6 @@ pub(crate) fn dirs(home: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Resul
         return Ok(Dirs {
             config: home.join(".claude"),
             custom: false,
-            storage: StorageDir::default_in(home),
             secure_storage: None,
         });
     }
@@ -150,10 +168,6 @@ pub(crate) fn dirs(home: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Resul
         })
         .transpose()?;
     Ok(Dirs {
-        storage: secure_storage.as_ref().map_or_else(
-            || StorageDir::new(config.clone(), chosen.is_some()),
-            |secure| secure.dir.clone(),
-        ),
         config,
         custom: chosen.is_some(),
         secure_storage,

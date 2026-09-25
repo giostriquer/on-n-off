@@ -456,14 +456,14 @@ fn the_config_dir_is_claude_config_dir_as_claude_code_reads_it() {
         let dirs = dirs(home, &env(&[("CLAUDE_CONFIG_DIR", value)])).unwrap();
         assert_eq!(dirs.config, PathBuf::from(config), "{value:?}");
         assert!(dirs.custom, "{value:?}");
-        assert_eq!(dirs.storage, StorageDir::new(PathBuf::from(config), true));
-        assert_eq!(dirs.storage.service(), service, "{value:?}");
+        assert_eq!(dirs.storage(), StorageDir::new(PathBuf::from(config), true));
+        assert_eq!(dirs.storage().service(), service, "{value:?}");
     }
 
     let default = dirs(home, &env(&[])).unwrap();
     assert_eq!(default.config, PathBuf::from("/Users/me/.claude"));
     assert!(!default.custom);
-    assert_eq!(default.storage.service(), "Claude Code-credentials");
+    assert_eq!(default.storage().service(), "Claude Code-credentials");
 }
 
 /// Set but empty is still set: Claude Code would use the empty path, relative to wherever it runs,
@@ -494,7 +494,7 @@ fn a_disposable_home_keeps_the_default_dirs_whatever_the_environment_says() {
     .unwrap();
     assert_eq!(dirs.config, PathBuf::from("/Users/me/.claude"));
     assert!(!dirs.custom);
-    assert_eq!(dirs.storage, StorageDir::default_in(home));
+    assert_eq!(dirs.storage(), StorageDir::default_in(home));
 }
 
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves Claude Code's storage — the credentials file, the lock
@@ -541,11 +541,11 @@ fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
         let dirs = dirs(home, &env(&vars)).unwrap();
         assert_eq!(dirs.config, PathBuf::from(config), "{vars:?}");
         assert_eq!(
-            dirs.storage.credentials_file(),
+            dirs.storage().credentials_file(),
             Path::new(storage).join(".credentials.json"),
             "{vars:?}"
         );
-        assert_eq!(dirs.storage.service(), service, "{vars:?}");
+        assert_eq!(dirs.storage().service(), service, "{vars:?}");
     }
 
     assert_eq!(
@@ -560,5 +560,5 @@ fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
         ]),
     )
     .unwrap();
-    assert_eq!(disposable.storage, StorageDir::default_in(home));
+    assert_eq!(disposable.storage(), StorageDir::default_in(home));
 }
