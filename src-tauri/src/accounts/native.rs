@@ -478,7 +478,11 @@ impl Native for NativeStore {
         } else {
             Value::Null
         };
-        if self.provider == AgentId::Claude && auth.get("claudeAiOauth").is_none() {
+        // Claude Code signs out by emptying `claudeAiOauth`, so a login needs an access token, by
+        // the same rule the Limits read applies.
+        if self.provider == AgentId::Claude
+            && crate::limits::credentials::parse_claude_credential(&auth).is_none()
+        {
             return Ok(None);
         }
         let auth = if self.provider == AgentId::Claude {

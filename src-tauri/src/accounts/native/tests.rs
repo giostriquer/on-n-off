@@ -478,8 +478,8 @@ fn the_access_projection_refuses_a_login_whose_claims_name_another_workspace() {
 const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
 
 /// The account switch's read of a store that has no Keychain to consult, for each thing the
-/// credentials file can hold. Only the presence of `claudeAiOauth` decides, so an emptied login
-/// still reads as one.
+/// credentials file can hold. A login needs an access token: Claude Code signs out by emptying
+/// `claudeAiOauth`, so an emptied one is no login, as it is for Limits.
 #[test]
 fn the_native_claude_read_of_the_credentials_file() {
     let root = tempfile::tempdir().unwrap();
@@ -499,9 +499,17 @@ fn the_native_claude_read_of_the_credentials_file() {
         "only the login is read, never the MCP tokens beside it"
     );
 
-    fs::write(&file, SIGNED_OUT).unwrap();
-    let emptied = native.read().unwrap().unwrap();
-    assert_eq!(emptied.auth["claudeAiOauth"]["accessToken"], "");
+    for signed_out in [
+        SIGNED_OUT,
+        r#"{"claudeAiOauth":{"accessToken":"  ","refreshToken":"r"}}"#,
+        r#"{"claudeAiOauth":{"refreshToken":"r"}}"#,
+    ] {
+        fs::write(&file, signed_out).unwrap();
+        assert!(
+            native.read().unwrap().is_none(),
+            "an emptied login is no login: {signed_out}"
+        );
+    }
 
     fs::write(&file, r#"{"mcpOAuth":{"s":"t"}}"#).unwrap();
     assert!(native.read().unwrap().is_none(), "no claudeAiOauth");
@@ -664,7 +672,8 @@ fn keychain_item(
 enum Found {
     Keychain,
     File,
-    /// A login whose token is empty, from either store.
+    /// A login whose token is empty, from either store: never an answer, since Claude Code's
+    /// sign-out empties the login.
     Emptied,
     Nothing,
     Malformed,
@@ -699,7 +708,7 @@ fn found(read: Result<Option<Login>, String>) -> Found {
 #[test]
 fn the_native_claude_read_truth_table() {
     use crate::accounts::keychain::with_test_runner;
-    use Found::{Denied, Emptied, File, Keychain, Malformed, Nothing};
+    use Found::{Denied, File, Keychain, Malformed, Nothing};
     let keychain = [
         ("no item", None),
         (
@@ -725,11 +734,11 @@ fn the_native_claude_read_truth_table() {
         ("broken", Some("{ not json")),
     ];
     let expected = [
-        [Nothing, File, Emptied, Malformed],
+        [Nothing, File, Nothing, Malformed],
         [Keychain, Keychain, Keychain, Keychain],
-        [Emptied, Emptied, Emptied, Emptied],
-        [Nothing, File, Emptied, Malformed],
-        [Denied, File, Emptied, Denied],
+        [Nothing, Nothing, Nothing, Nothing],
+        [Nothing, File, Nothing, Malformed],
+        [Denied, File, Nothing, Denied],
     ];
     for ((item, secret), row) in keychain.into_iter().zip(expected) {
         for ((file, contents), want) in files.into_iter().zip(row) {
