@@ -514,3 +514,36 @@ fn the_switch_reads_its_write_back_while_it_still_holds_the_locks() {
         "every read after the write saw the lock held: {reads:?}"
     );
 }
+
+/// Cleaning up an isolated sign-in deletes its own scoped Keychain entry and nothing else: never
+/// Claude Code's unscoped entry, which holds the user's real login.
+#[cfg(target_os = "macos")]
+#[test]
+fn cleaning_an_isolated_sign_in_deletes_only_its_scoped_entry() {
+    use crate::accounts::keychain::{fake_items, with_test_runner};
+    let root = tempfile::tempdir().unwrap();
+    let isolated = NativeStore::isolated(AgentId::Claude, root.path()).unwrap();
+    let hash = crate::sha::sha256_hex(root.path().join(".claude").to_str().unwrap().as_bytes());
+    let scoped = format!("Claude Code-credentials-{}", &hash[..8]);
+
+    let (cleaned, sent) = with_test_runner(fake_items(&[("claude-code-user", "{}")]), || {
+        isolated.clean_isolated()
+    });
+    assert_eq!(cleaned, Ok(()));
+    let deletes: Vec<&String> = sent
+        .iter()
+        .filter(|command| command.starts_with("delete-generic-password"))
+        .collect();
+    assert_eq!(
+        deletes,
+        [&format!(
+            "delete-generic-password -a \"claude-code-user\" -s \"{scoped}\"\n"
+        )]
+    );
+    assert!(
+        sent.iter()
+            .all(|command| !command.ends_with("Claude Code-credentials")
+                && !command.ends_with("\"Claude Code-credentials\"\n")),
+        "nothing touches the unscoped entry: {sent:?}"
+    );
+}
