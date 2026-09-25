@@ -222,9 +222,12 @@ impl Harness {
     pub fn vault(&self) -> Database {
         Store::open_existing(self.path()).unwrap().load().unwrap()
     }
-    /// The sealed vault as it is on disk: any write replaces it, since every seal takes a new nonce.
-    pub fn sealed(&self) -> Option<Vec<u8>> {
-        std::fs::read(self.path().join(".on-n-off/accounts/vault.enc")).ok()
+    /// A digest of the sealed vault on disk: any write changes it, since every seal takes a new
+    /// nonce.
+    pub fn sealed(&self) -> Option<String> {
+        std::fs::read(self.path().join(".on-n-off/accounts/vault.enc"))
+            .ok()
+            .map(|bytes| crate::sha::sha256_hex(&bytes))
     }
     /// The ticket a sign-in starting now would publish against.
     pub fn sign_in(&self) -> Ticket {

@@ -53,12 +53,9 @@ const SIGN_IN_CHANGED: &str = "The account state changed while sign-in was runni
 
 /// Which account change `Store::change` makes, and so which of its rules it follows.
 pub enum ChangeKind<'t> {
-    /// Changes which logins are saved or which one a CLI uses (save, remove, sign out): refused
-    /// during a pending recovery, and rejects every sign-in in flight.
+    /// Changes which logins are saved or which one a CLI uses (save, remove, use, sign out):
+    /// refused during a pending recovery, and rejects every sign-in in flight.
     Account,
-    /// Uses a saved profile: rejects every sign-in in flight. The activation refuses a pending
-    /// recovery itself, after the epoch is bumped.
-    Activation,
     /// Publishes a sign-in, which is itself an account change: refused unless its ticket still
     /// holds.
     SignIn(&'t Ticket),

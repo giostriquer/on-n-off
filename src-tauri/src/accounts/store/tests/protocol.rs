@@ -75,7 +75,6 @@ fn each_change_kind_is_refused_and_bumps_the_epoch_by_its_rule() {
     };
     let rules = [
         rule("account", || ChangeKind::Account, true, false, true),
-        rule("activation", || ChangeKind::Activation, false, false, true),
         rule("recovery", || ChangeKind::Recovery, false, true, true),
         rule(
             "remembering",

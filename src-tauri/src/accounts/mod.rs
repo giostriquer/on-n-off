@@ -322,7 +322,7 @@ impl Accounts {
         let sealer = store.sealer();
         let kind = match activation {
             Activation::Recover => store::ChangeKind::Recovery,
-            Activation::Ordinary | Activation::AlongsideClients => store::ChangeKind::Activation,
+            Activation::Ordinary | Activation::AlongsideClients => store::ChangeKind::Account,
         };
         let native: &dyn Native = native.as_ref();
         let result = store.change_then(

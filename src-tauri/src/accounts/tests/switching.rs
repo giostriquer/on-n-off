@@ -131,18 +131,29 @@ fn a_failed_switch_restores_the_outgoing_login_and_is_still_announced() {
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
+/// A pending recovery refuses a use before it writes anything, so it rejects no sign-in in
+/// flight, and leaves nothing to announce.
 #[test]
-fn using_a_profile_during_a_pending_recovery_leaves_the_native_login() {
+fn a_pending_recovery_refuses_a_use_before_anything_is_written() {
     let harness = Harness::new();
     let (_, b) = two_profiles(&harness);
     harness.interrupted(&b, Some(claude("a", "a2")));
+    let sealed = harness.sealed();
 
-    assert!(harness
-        .accounts()
-        .use_profile(AgentId::Claude, &b, Activation::Ordinary)
-        .is_err());
+    for activation in [Activation::Ordinary, Activation::AlongsideClients] {
+        let error = harness
+            .accounts()
+            .use_profile(AgentId::Claude, &b, activation)
+            .unwrap_err();
 
-    assert_eq!(harness.live(), Some("a2".into()));
+        assert_eq!(harness.sealed(), sealed, "{activation:?} wrote the vault");
+        assert!(harness.heard().is_empty(), "{activation:?} announced");
+        assert!(
+            error.starts_with("Recover the interrupted account change"),
+            "{error}"
+        );
+        assert_eq!(harness.live(), Some("a2".into()));
+    }
     assert!(harness.vault().recovery().is_some());
 }
 
