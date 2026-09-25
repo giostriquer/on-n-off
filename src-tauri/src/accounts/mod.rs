@@ -243,15 +243,16 @@ impl Accounts {
         let native = self.native(provider)?;
         native.preflight()?;
         native.verify()?;
-        let store = store::Store::open(&self.home, true)?;
-        let native_locks = native.lock()?;
-        let login = native
-            .read()?
-            .ok_or("Sign in with the official CLI before saving this account.")?;
-        let identity = native.identify(&login)?;
-        store.change_then(
+        store::Store::open(&self.home, true)?.change_then(
             store::ChangeKind::Account,
+            // Past the gate: a pending recovery refuses the save before the native locks are
+            // taken or the native login is read.
             |db| {
+                let native_locks = native.lock()?;
+                let login = native
+                    .read()?
+                    .ok_or("Sign in with the official CLI before saving this account.")?;
+                let identity = native.identify(&login)?;
                 if db
                     .profiles
                     .iter()
@@ -260,11 +261,12 @@ impl Accounts {
                     return Err("This account has a new saved sign-in awaiting activation. Use it before saving the current login.".into());
                 }
                 db.reenroll(&identity);
-                db.save(identity, login, None).map(drop)
+                db.save(identity, login, None)?;
+                Ok(native_locks)
             },
             // The native locks cover the save and go before the vault lease, so a publication
             // waiting on the vault never finds them still held.
-            |(), _, _| {
+            |native_locks, _, _| {
                 drop(native_locks);
                 Ok(())
             },

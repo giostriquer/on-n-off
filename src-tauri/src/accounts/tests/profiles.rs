@@ -84,6 +84,21 @@ fn saving_refuses_during_a_pending_recovery_without_writing() {
     assert!(harness.heard().is_empty());
 }
 
+/// A pending recovery refuses a save before it takes the native locks (Claude Code's) or reads
+/// the native login (the Keychain, on macOS).
+#[test]
+fn a_save_refused_by_a_pending_recovery_touches_no_native_lock_or_login() {
+    let harness = Harness::new();
+    let target = harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
+    harness.interrupted(&target, Some(claude("a", "a1")));
+    harness.signed_in(Some(claude("a", "a1")));
+
+    assert!(harness.accounts().save_current(AgentId::Claude).is_err());
+
+    assert_eq!(harness.native.locks.get(), 0, "took the native locks");
+    assert_eq!(harness.native.reads.get(), 0, "read the native login");
+}
+
 #[test]
 fn a_category_edit_persists_without_rejecting_sign_ins_in_flight() {
     let harness = Harness::new();

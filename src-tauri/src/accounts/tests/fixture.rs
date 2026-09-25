@@ -3,7 +3,7 @@
 use super::super::{
     model::Identity,
     store::{ChangeKind, Database, Guard, Login, Store, Ticket},
-    transaction::{Native, Recovery},
+    transaction::{Native, NativeGuard, Recovery},
     Accounts, Clients, NativeAccount, Notify,
 };
 use crate::dto::AgentId;
@@ -61,11 +61,19 @@ pub(super) struct NativeState {
     pub verify_error: RefCell<Option<String>>,
     pub logout_error: RefCell<Option<String>>,
     pub logouts: Cell<usize>,
+    /// How often the native locks were taken and the native login read: the Keychain on macOS.
+    pub locks: Cell<usize>,
+    pub reads: Cell<usize>,
 }
 #[derive(Clone)]
 struct FakeNative(Rc<NativeState>);
 impl Native for FakeNative {
+    fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
+        self.0.locks.set(self.0.locks.get() + 1);
+        Ok(Box::new(()))
+    }
     fn read(&self) -> Result<Option<Login>, String> {
+        self.0.reads.set(self.0.reads.get() + 1);
         Ok(self.0.live.borrow().clone())
     }
     fn identify(&self, login: &Login) -> Result<Identity, String> {
