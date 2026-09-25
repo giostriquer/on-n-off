@@ -504,6 +504,14 @@ impl Native for NativeStore {
         }
     }
 }
+impl super::NativeAccount for NativeStore {
+    fn preflight(&self) -> Result<(), String> {
+        NativeStore::preflight(self)
+    }
+    fn logout(&self) -> Result<(), String> {
+        NativeStore::logout(self)
+    }
+}
 impl NativeStore {
     /// The write itself, under `locks`: Codex's store as its config selects, or Claude's merged
     /// into the store Claude Code reads, beside the identity `ConfigIo` patches.
