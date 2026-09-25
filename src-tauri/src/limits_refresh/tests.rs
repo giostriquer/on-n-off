@@ -1,5 +1,4 @@
 use super::*;
-use crate::dto::LimitsAccountDto;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Barrier,
@@ -9,24 +8,9 @@ use std::time::{Duration, Instant};
 
 fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> ProviderLimitsDto {
     ProviderLimitsDto {
-        provider: AgentId::Claude,
         status,
-        message: None,
-        account: Some(LimitsAccountDto {
-            legacy_id: None,
-            id: account_id.into(),
-            label: None,
-        }),
         current_account,
-        plan: None,
-        subscription_status: None,
-        windows: Vec::new(),
-        credits: None,
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
+        ..ProviderLimitsDto::for_test(AgentId::Claude, account_id)
     }
 }
 

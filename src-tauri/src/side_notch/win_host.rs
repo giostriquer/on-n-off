@@ -136,8 +136,8 @@ fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
             provider: entry.provider,
             status: entry.status,
             message: entry.message,
-            windows: entry.windows,
-            workspace_credits: entry.workspace_credits,
+            windows: entry.reading.windows,
+            workspace_credits: entry.reading.workspace_credits,
         })
 }
 

@@ -10,8 +10,9 @@ use serde_json::Value;
 
 use super::credentials::ClaudeIdentity;
 use super::json::{humanize, optional_string, percent, window};
-use super::Parsed;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsResetCreditsDto};
+use crate::dto::{
+    LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsResetCreditsDto, Reading,
+};
 
 /// What `GET /api/oauth/profile` says about the login: whose it is, and the subscription status
 /// Anthropic reports for its organization. The status never decides the read.
@@ -47,11 +48,11 @@ pub(super) fn parse_profile(payload: &Value) -> Result<ClaudeProfile, String> {
 }
 
 /// Everything one usage payload says about the account: its windows and its saved resets.
-pub(super) fn parse_usage(payload: &Value, now: DateTime<Utc>) -> Parsed {
-    Parsed {
+pub(super) fn parse_usage(payload: &Value, now: DateTime<Utc>) -> Reading {
+    Reading {
         windows: parse_claude(payload),
         reset_credits: parse_reset_credits(payload, now),
-        ..Parsed::default()
+        ..Reading::default()
     }
 }
 

@@ -10,7 +10,6 @@
 
 mod backend_memo;
 mod claude;
-mod claude_desktop;
 use crate::accounts::claude_renew;
 mod codex;
 mod codex_app_server;
@@ -19,20 +18,21 @@ pub(crate) mod credentials;
 pub(crate) mod credits_spent;
 pub(crate) mod json;
 pub(crate) mod login;
-mod observations;
 mod pipeline;
+mod reading;
 mod renewal;
 pub(crate) mod saved;
 mod snapshots;
 
-use std::path::{Path, PathBuf};
+pub(crate) use reading::keep_remembered;
+
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
-    LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto, ResetCreditOutcome,
+    AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
@@ -40,7 +40,6 @@ use credentials::{
     read_claude_identity, ClaudeCredential, ClaudeIdentity, ClaudeLoginMemo, CredentialLookup,
     KeychainProbe, LoginSource, CLAUDE_LOGIN,
 };
-use observations::ObservedWindowSet;
 #[cfg(test)]
 use pipeline::resolve;
 use pipeline::{finish, resolve_provider, LoadFailureKind, ProviderLoadError, ResolveOutcome};
@@ -57,20 +56,12 @@ const DEFAULT_ACCOUNT: &str = "default";
 static CLAUDE_READ_LOCK: Mutex<()> = Mutex::new(());
 static CODEX_READ_LOCK: Mutex<()> = Mutex::new(());
 
-/// Provider-neutral content of a parsed usage payload; `Default` is the empty snapshot that
-/// accompanies every non-`ok` status.
+/// A parsed usage read: which account it is about, and its reading. `Default` is the empty read
+/// that accompanies every non-`ok` status.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Parsed {
     account: Option<LimitsAccountDto>,
-    plan: Option<String>,
-    subscription_status: Option<String>,
-    windows: Vec<LimitWindowDto>,
-    credits: Option<LimitsCreditsDto>,
-    workspace_credits: Option<LimitsWorkspaceCreditsDto>,
-    credits_spent: Option<crate::dto::LimitsCreditsSpentDto>,
-    subscription: Option<crate::dto::LimitsSubscriptionDto>,
-    reset_credits: Option<LimitsResetCreditsDto>,
-    reset_offer: Option<crate::dto::LimitsResetOfferDto>,
+    reading: Reading,
 }
 
 #[cfg(test)]
@@ -83,25 +74,12 @@ impl Parsed {
                 id: id.to_string(),
                 label: None,
             }),
-            plan: plan.map(str::to_string),
-            subscription_status: None,
-            windows: Vec::new(),
-            credits: None,
-            workspace_credits: None,
-            credits_spent: None,
-            subscription: None,
-            reset_credits: None,
-            reset_offer: None,
+            reading: Reading {
+                plan: plan.map(str::to_string),
+                ..Reading::default()
+            },
         }
     }
-}
-
-/// A successful read that could not tell a remembered figure keeps `previous`'s: the banked
-/// resets, what was spent and the subscription's term, each under its own rule.
-pub(crate) fn keep_remembered_from(card: &mut ProviderLimitsDto, previous: &ProviderLimitsDto) {
-    card.keep_reset_credits_from(previous);
-    credits_spent::keep_credits_spent_from(card, previous);
-    renewal::keep_subscription_from(card, previous);
 }
 
 /// The three services one Claude read talks to, together so adding a fourth costs one field and
@@ -121,7 +99,6 @@ struct Sources<'a, P: Fn() -> KeychainProbe> {
     memo: &'a ClaudeLoginMemo,
     keychain: P,
     claude: ClaudeEndpoints<'a>,
-    claude_desktop_history: PathBuf,
     now_ms: i64,
 }
 
@@ -143,7 +120,6 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             )]
         }
     };
-    let claude_desktop_history = claude_desktop::history_path(&home);
     read_limits_in(
         agent,
         force,
@@ -156,7 +132,6 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
                 profile: CLAUDE_PROFILE_URL,
                 usage: CLAUDE_USAGE_URL,
             },
-            claude_desktop_history,
             now_ms: Utc::now().timestamp_millis(),
         },
     )
@@ -199,9 +174,9 @@ fn read_limits_in<P: Fn() -> KeychainProbe>(
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
-    let (current, supplemental) = match agent {
+    let current = match agent {
         AgentId::Claude => claude_current(force, sources),
-        AgentId::Codex => (codex_limits(home, force), None),
+        AgentId::Codex => codex_limits(home, force),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
                 agent,
@@ -215,7 +190,7 @@ fn read_limits_in<P: Fn() -> KeychainProbe>(
         }
     };
     let store = SnapshotStore::for_home(home);
-    let mut accounts = aggregate_accounts(&store, current, supplemental);
+    let mut accounts = aggregate_accounts(&store, current);
     if agent == AgentId::Codex {
         let before = accounts.clone();
         if codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0 {
@@ -241,12 +216,11 @@ fn provider_read_guard(agent: AgentId) -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Merge every available observation for the current account, persist the canonical account view,
-/// then return it followed by the other remembered accounts, newest first.
+/// The current account's card, keeping what its read could not tell from the account's remembered
+/// reading, persisted; then the other remembered accounts, newest first.
 fn aggregate_accounts(
     store: &SnapshotStore,
-    current: ProviderLimitsDto,
-    supplemental: Option<ObservedWindowSet>,
+    mut current: ProviderLimitsDto,
 ) -> Vec<ProviderLimitsDto> {
     let current_account = current.account.as_ref().map(|account| account.id.clone());
     let mut remembered = store.load(current.provider);
@@ -261,19 +235,10 @@ fn aggregate_accounts(
             })
             .map(|index| remembered.remove(index))
     });
-    let current = if current.status == LimitsStatus::Ok {
-        let mut current = current;
-        if let Some(prior) = &prior {
-            keep_remembered_from(&mut current, prior);
-        }
-        current
-    } else {
-        observations::merge_windows(
-            current,
-            supplemental,
-            prior.and_then(ObservedWindowSet::from_account),
-        )
-    };
+    keep_remembered(
+        &mut current,
+        prior.map(|prior| prior.reading).unwrap_or_default(),
+    );
     let _ = store.save(&current);
     snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
 }
@@ -284,13 +249,12 @@ fn aggregate_accounts(
 fn claude_current<P: Fn() -> KeychainProbe>(
     force: bool,
     sources: Sources<'_, P>,
-) -> (ProviderLimitsDto, Option<ObservedWindowSet>) {
+) -> ProviderLimitsDto {
     let Sources {
         home,
         memo,
         keychain,
         claude,
-        claude_desktop_history,
         now_ms,
         ..
     } = sources;
@@ -299,9 +263,6 @@ fn claude_current<P: Fn() -> KeychainProbe>(
         .as_ref()
         .map(|identity| identity.account.clone())
         .unwrap_or_else(default_account);
-    let organization_id = selected_identity
-        .as_ref()
-        .and_then(|identity| identity.organization_id.clone());
     // Reading the Claude login includes renewing it: an access token lives eight hours and Claude
     // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
     // broken login. Keeping that inside the read means the memo stores the renewed login like any
@@ -331,17 +292,6 @@ fn claude_current<P: Fn() -> KeychainProbe>(
     {
         memo.clear();
     }
-    // Desktop history identifies an organization, never its user. Do not attach it to a user profile.
-    let local_observations = (selected_identity.is_none() && loaded.dto.status != LimitsStatus::Ok)
-        .then(|| {
-            organization_id
-                .as_deref()
-                .and_then(|organization_id| {
-                    claude_desktop::read_latest(&claude_desktop_history, organization_id)
-                })
-                .map(|usage| ObservedWindowSet::local(usage.observed_at, usage.windows))
-        })
-        .flatten();
     if let (Some(identity), Some(account)) = (&selected_identity, &mut loaded.dto.account) {
         if let Some(workspace) = &identity.organization_id {
             account.legacy_id = Some(identity.account.id.clone());
@@ -353,7 +303,7 @@ fn claude_current<P: Fn() -> KeychainProbe>(
             .observation_key();
         }
     }
-    (loaded.dto, local_observations)
+    loaded.dto
 }
 
 /// Claude: verify the stored token's profile, then read usage with the OAuth beta header. The plan
@@ -402,9 +352,11 @@ fn claude_limits(
             )?;
             Ok(Parsed {
                 account: Some(profile.account),
-                plan: credential.plan(),
-                subscription_status,
-                ..usage
+                reading: Reading {
+                    plan: credential.plan(),
+                    subscription_status,
+                    ..usage
+                },
             })
         },
     )
@@ -414,7 +366,7 @@ fn claude_limits(
 /// query never decides the read: any answer other than a transport failure retries the plain URL,
 /// whose answer (a rejected login included) stands, with the resets unknown. A transport failure
 /// is not retried, since the plain read would only wait on the same network.
-fn claude_usage(usage_url: &str, headers: &[(&str, &str)]) -> Result<Parsed, HttpError> {
+fn claude_usage(usage_url: &str, headers: &[(&str, &str)]) -> Result<Reading, HttpError> {
     let payload = match get_json(&format!("{usage_url}?{CLAUDE_USAGE_QUERY}"), headers) {
         Err(HttpError::Network(error)) => return Err(HttpError::Network(error)),
         Err(_) => get_json(usage_url, headers)?,

@@ -36,9 +36,9 @@ fn isolated_claude_sign_in_keeps_a_scoped_dated_snapshot_without_reading_the_act
     profile_request.join().unwrap();
     usage_request.join().unwrap();
     assert!(!dto.current_account);
-    assert_eq!(dto.plan.as_deref(), Some("max ×20"));
-    assert_eq!(dto.windows[0].used_percent, 61.0);
-    assert!(!dto.windows[0].observed_at.is_empty());
+    assert_eq!(dto.reading.plan.as_deref(), Some("max ×20"));
+    assert_eq!(dto.reading.windows[0].used_percent, 61.0);
+    assert!(!dto.reading.windows[0].observed_at.is_empty());
     let account = dto.account.as_ref().unwrap();
     assert!(account.id.starts_with("profile:"));
     assert_eq!(account.legacy_id.as_deref(), Some("user"));
@@ -46,7 +46,7 @@ fn isolated_claude_sign_in_keeps_a_scoped_dated_snapshot_without_reading_the_act
     remember(home.path(), &dto).unwrap();
     let reloaded = SnapshotStore::for_home(home.path()).load(AgentId::Claude);
     assert_eq!(reloaded.len(), 1);
-    assert_eq!(reloaded[0].windows, dto.windows);
+    assert_eq!(reloaded[0].reading.windows, dto.reading.windows);
     assert_eq!(reloaded[0].account, dto.account);
     assert!(!home.path().join(".claude").exists());
     assert!(!home.path().join(".claude.json").exists());
@@ -76,7 +76,12 @@ fn saved_claude_session_keeps_the_reported_percentage_and_optional_reset() {
         usage_request.join().unwrap();
         remember(home.path(), &dto).unwrap();
         let saved = SnapshotStore::for_home(home.path()).load(AgentId::Claude);
-        let session = saved[0].windows.iter().find(|w| w.id == "session").unwrap();
+        let session = saved[0]
+            .reading
+            .windows
+            .iter()
+            .find(|w| w.id == "session")
+            .unwrap();
         assert_eq!(session.used_percent, 0.0);
         assert_eq!(session.resets_at.as_deref(), reset);
     }
@@ -108,32 +113,22 @@ fn wrong_claude_user_or_workspace_never_contributes_usage() {
 fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_windows() {
     let home = tempfile::tempdir().unwrap();
     let mut legacy = ProviderLimitsDto {
-        provider: AgentId::Codex,
-        status: LimitsStatus::Ok,
-        message: None,
         current_account: false,
-        plan: Some("pro".into()),
-        subscription_status: None,
-        credits: None,
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
-        account: Some(LimitsAccountDto {
-            id: "team".into(),
-            label: Some("me@example.com".into()),
-            legacy_id: None,
-        }),
-        windows: vec![super::super::json::window(
-            "primary",
-            "Weekly · all models",
-            crate::dto::LimitWindowKind::Weekly,
-            100.0,
-            None,
-        )],
+        ..ProviderLimitsDto::for_test(AgentId::Codex, "team")
+            .labelled("me@example.com")
+            .with_reading(Reading {
+                plan: Some("pro".into()),
+                windows: vec![super::super::json::window(
+                    "primary",
+                    "Weekly · all models",
+                    crate::dto::LimitWindowKind::Weekly,
+                    100.0,
+                    None,
+                )],
+                ..Reading::default()
+            })
     };
-    legacy.windows[0].observed_at = "2026-09-11T12:00:00Z".into();
+    legacy.reading.windows[0].observed_at = "2026-09-11T12:00:00Z".into();
     remember(home.path(), &legacy).unwrap();
     let mut unrelated = legacy.clone();
     unrelated.account.as_mut().unwrap().id = "other-team".into();
@@ -141,8 +136,8 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
     let mut fresh = legacy.clone();
     fresh.account.as_mut().unwrap().id = "profile:verified-user-team".into();
     fresh.account.as_mut().unwrap().legacy_id = Some("team".into());
-    fresh.windows[0].used_percent = 42.0;
-    fresh.windows[0].observed_at = "2026-09-13T12:00:00Z".into();
+    fresh.reading.windows[0].used_percent = 42.0;
+    fresh.reading.windows[0].observed_at = "2026-09-13T12:00:00Z".into();
     remember(home.path(), &fresh).unwrap();
     let cards = SnapshotStore::for_home(home.path()).load(AgentId::Codex);
     assert_eq!(cards.len(), 2);
@@ -150,9 +145,9 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
         cards[0].account.as_ref().unwrap().id,
         "profile:verified-user-team"
     );
-    assert_eq!(cards[0].windows[0].used_percent, 42.0);
+    assert_eq!(cards[0].reading.windows[0].used_percent, 42.0);
     assert_eq!(cards[1].account.as_ref().unwrap().id, "other-team");
-    assert_eq!(cards[1].windows[0].used_percent, 100.0);
+    assert_eq!(cards[1].reading.windows[0].used_percent, 100.0);
     // The superseded original remains on disk, with its original identity and observations.
     assert_eq!(
         std::fs::read_dir(home.path().join(".on-n-off/limits"))

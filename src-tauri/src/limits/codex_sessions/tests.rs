@@ -1,41 +1,29 @@
 use chrono::{DateTime, Utc};
 
 use super::*;
-use crate::dto::{
-    AgentId, LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto,
-};
+use crate::dto::{AgentId, LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
 use crate::paths::scratch_dir;
 use std::fs::{self, OpenOptions};
 use std::io::Write as _;
 
 fn remembered(id: &str, reset_at: &str) -> ProviderLimitsDto {
     ProviderLimitsDto {
-        provider: AgentId::Codex,
-        status: LimitsStatus::Ok,
-        message: None,
-        account: Some(LimitsAccountDto {
-            legacy_id: None,
-            id: id.to_string(),
-            label: Some(format!("{id}@example.com")),
-        }),
         current_account: false,
-        plan: Some("pro".to_string()),
-        subscription_status: None,
-        windows: vec![LimitWindowDto {
-            id: "primary".to_string(),
-            label: "Weekly · all models".to_string(),
-            kind: LimitWindowKind::Weekly,
-            used_percent: 86.0,
-            resets_at: Some(reset_at.to_string()),
-            window_seconds: Some(604_800),
-            observed_at: "2026-08-20T02:39:06.754Z".to_string(),
-        }],
-        credits: None,
-        workspace_credits: None,
-        credits_spent: None,
-        subscription: None,
-        reset_credits: None,
-        reset_offer: None,
+        ..ProviderLimitsDto::for_test(AgentId::Codex, id)
+            .labelled(&format!("{id}@example.com"))
+            .with_reading(Reading {
+                plan: Some("pro".to_string()),
+                windows: vec![LimitWindowDto {
+                    id: "primary".to_string(),
+                    label: "Weekly · all models".to_string(),
+                    kind: LimitWindowKind::Weekly,
+                    used_percent: 86.0,
+                    resets_at: Some(reset_at.to_string()),
+                    window_seconds: Some(604_800),
+                    observed_at: "2026-08-20T02:39:06.754Z".to_string(),
+                }],
+                ..Reading::default()
+            })
     }
 }
 
@@ -60,12 +48,12 @@ fn a_newer_session_observation_updates_the_uniquely_matching_remembered_account(
     let updates = merge_recent(&home, now, &mut accounts);
 
     assert_eq!(updates, 1);
-    assert_eq!(accounts[0].windows[0].used_percent, 96.0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 96.0);
     assert_eq!(
-        accounts[0].windows[0].observed_at,
+        accounts[0].reading.windows[0].observed_at,
         "2026-08-20T06:58:07.093Z"
     );
-    assert_eq!(accounts[1].windows[0].used_percent, 86.0);
+    assert_eq!(accounts[1].reading.windows[0].used_percent, 86.0);
 }
 
 #[test]
@@ -87,7 +75,7 @@ fn session_reconciliation_never_reads_an_unbounded_file_prefix() {
     let updates = merge_recent(&home, now, &mut accounts);
 
     assert_eq!(updates, 0);
-    assert_eq!(accounts[0].windows[0].used_percent, 86.0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
 }
 
 #[test]
@@ -109,7 +97,7 @@ fn session_reconciliation_reads_a_limit_event_inside_the_bounded_tail() {
     let updates = merge_recent(&home, now, &mut accounts);
 
     assert_eq!(updates, 1);
-    assert_eq!(accounts[0].windows[0].used_percent, 96.0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 96.0);
 }
 
 #[test]
@@ -172,7 +160,7 @@ fn session_reconciliation_has_a_bounded_file_count() {
     let updates = merge_recent(&home, now, &mut accounts);
 
     assert_eq!(updates, 0);
-    assert_eq!(accounts[0].windows[0].used_percent, 86.0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
 }
 
 #[test]
@@ -198,7 +186,7 @@ fn an_ambiguous_session_observation_does_not_change_any_account() {
     assert_eq!(updates, 0);
     assert!(accounts
         .iter()
-        .all(|account| account.windows[0].used_percent == 86.0));
+        .all(|account| account.reading.windows[0].used_percent == 86.0));
 }
 
 #[test]
@@ -212,13 +200,13 @@ fn a_session_observation_does_not_match_a_window_without_an_exact_duration() {
     )
     .unwrap();
     let mut accounts = vec![remembered("acct-a", "2026-08-24T23:34:33Z")];
-    accounts[0].windows[0].window_seconds = None;
+    accounts[0].reading.windows[0].window_seconds = None;
     let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
         .unwrap()
         .with_timezone(&Utc);
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
-    assert_eq!(accounts[0].windows[0].used_percent, 86.0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
 }
 
 #[test]
@@ -232,7 +220,10 @@ fn duplicate_matching_windows_in_one_account_are_ambiguous() {
     )
     .unwrap();
     let mut account = remembered("acct-a", "2026-08-24T23:34:33Z");
-    account.windows.push(account.windows[0].clone());
+    account
+        .reading
+        .windows
+        .push(account.reading.windows[0].clone());
     let mut accounts = vec![account];
     let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
         .unwrap()
@@ -240,6 +231,7 @@ fn duplicate_matching_windows_in_one_account_are_ambiguous() {
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
     assert!(accounts[0]
+        .reading
         .windows
         .iter()
         .all(|window| window.used_percent == 86.0));
@@ -263,5 +255,5 @@ fn an_unattributed_session_observation_never_overrides_the_current_account() {
         .with_timezone(&Utc);
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
-    assert_eq!(accounts[0].windows[0].used_percent, 86.0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
 }
