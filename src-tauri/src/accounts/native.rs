@@ -1,8 +1,8 @@
 //! Narrow native-store access. No whole-home restores and no provider endpoint/config rewriting.
 use super::{
     claude_store::{
-        self, BeginError, ClaudeLocks, KeychainProbe, LockScope, SecureStorage, StorageDir,
-        StoreError, Stored,
+        self, BeginError, ClaudeLocks, KeychainProbe, LockError, LockScope, SecureStorage,
+        StorageDir, StoreError, Stored,
     },
     model::{self, Identity},
     store::Login,
@@ -453,7 +453,10 @@ impl Native for NativeStore {
             LockScope::RefreshAndConfig(&self.config_file),
         )
         .map(|guard| Box::new(guard) as Box<dyn NativeGuard>)
-        .map_err(|_| BUSY.into())
+        .map_err(|error| match error {
+            LockError::Busy => BUSY.into(),
+            LockError::Unavailable(why) => format!("Cannot take Claude Code's locks: {why}"),
+        })
     }
     fn read(&self) -> Result<Option<Login>, String> {
         let auth = if self.provider == AgentId::Claude {

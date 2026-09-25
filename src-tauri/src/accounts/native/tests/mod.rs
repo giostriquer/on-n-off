@@ -584,6 +584,21 @@ fn verification_refuses_an_expired_login_that_cannot_renew() {
     );
 }
 
+/// Only a lock another process holds is worth waiting on. One that cannot be created at all is
+/// reported for what it is, not as Claude being busy.
+#[test]
+fn a_native_lock_that_cannot_be_created_says_why_instead_of_busy() {
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    let blocker = root.path().join("not-a-directory");
+    fs::write(&blocker, "").unwrap();
+    native.config_home = blocker.join(".claude");
+
+    let refused = native.lock().err().unwrap();
+    assert_ne!(refused, BUSY);
+    assert!(!refused.is_empty());
+}
+
 #[cfg(target_os = "macos")]
 mod keychain;
 mod secure_storage;
