@@ -1,6 +1,7 @@
 use super::*;
 use crate::dto::{AgentId, LimitWindowKind, LimitsSubscriptionDto};
 use crate::limits::json::window;
+use serde_json::{json, Value};
 
 fn observed(
     id: &str,
@@ -123,10 +124,10 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
         ..Reading::default()
     };
 
-    assert_eq!(
-        paused(Reading::default(), remembered).reset_credits,
-        reset_credits
-    );
+    let merged = paused(Reading::default(), remembered);
+
+    assert_eq!(merged.reset_credits, reset_credits);
+    assert_eq!(merged.reset_offer, None);
 }
 
 #[test]
@@ -327,4 +328,110 @@ fn a_card_keeps_the_term_it_remembers_when_a_read_could_not_tell() {
     let mut claude = card(AgentId::Claude, None);
     keep_remembered(&mut claude, remembered());
     assert_eq!(claude.reading.subscription, None);
+}
+
+/// A reading with every field known, each told apart by `tag`, as wire JSON.
+fn every_field(tag: &str, used: f64) -> Value {
+    json!({
+        "plan": tag,
+        "subscriptionStatus": tag,
+        "windows": [{"id": tag, "label": tag, "kind": "weekly", "usedPercent": used,
+                     "observedAt": "2026-08-17T10:00:00.000Z"}],
+        "credits": {"balance": tag, "unlimited": false},
+        "workspaceCredits": {"limit": "25000", "used": tag, "usedPercent": used, "reached": false},
+        "creditsSpent": {"last7Days": used, "last30Days": used},
+        "subscription": {"activeUntil": tag, "willRenew": false, "checkedAt": tag},
+        "resetCredits": {"availableCount": 1, "nextExpiresAt": tag},
+        "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
+    })
+}
+
+fn reading(value: Value) -> Reading {
+    serde_json::from_value(value).expect("a reading")
+}
+
+/// The whole policy in one table: for each field and each way a read can go, what the reading
+/// keeps where the read did not report the field. Where it did, its own value always stands (a
+/// failed read's own windows are merged with the remembered ones instead).
+#[test]
+fn the_remember_policy_field_by_field() {
+    #[derive(Debug, Clone, Copy)]
+    enum Kept {
+        Remembered,
+        Nothing,
+    }
+    use Kept::{Nothing, Remembered};
+    let answered = |asked_what_was_spent, asked_about_renewal| Outcome::Answered {
+        asked_what_was_spent,
+        asked_about_renewal,
+    };
+    let outcomes = [
+        answered(false, false),
+        answered(true, false),
+        answered(false, true),
+        answered(true, true),
+        Outcome::Failed,
+    ];
+    // Columns follow `outcomes`: answered and asked nothing, asked what was spent, asked about
+    // renewal, asked both; failed.
+    let table = [
+        ("plan", [Nothing, Nothing, Nothing, Nothing, Remembered]),
+        (
+            "subscriptionStatus",
+            [Nothing, Nothing, Nothing, Nothing, Remembered],
+        ),
+        ("windows", [Nothing, Nothing, Nothing, Nothing, Remembered]),
+        ("credits", [Nothing, Nothing, Nothing, Nothing, Remembered]),
+        (
+            "workspaceCredits",
+            [Nothing, Nothing, Nothing, Nothing, Remembered],
+        ),
+        (
+            "creditsSpent",
+            [Nothing, Remembered, Nothing, Remembered, Remembered],
+        ),
+        (
+            "subscription",
+            [Nothing, Nothing, Remembered, Remembered, Remembered],
+        ),
+        ("resetCredits", [Remembered; 5]),
+        ("resetOffer", [Nothing; 5]),
+    ];
+    let (own, remembered) = (every_field("own", 1.0), every_field("remembered", 2.0));
+    for (field, cells) in table {
+        for (outcome, cell) in outcomes.into_iter().zip(cells) {
+            let mut unreported = own.clone();
+            if field == "windows" {
+                unreported[field] = json!([]);
+            } else {
+                unreported.as_object_mut().unwrap().remove(field);
+            }
+            let kept = serde_json::to_value(
+                reading(unreported).keeping(reading(remembered.clone()), outcome),
+            )
+            .unwrap();
+            let expected = match cell {
+                Remembered => Some(remembered[field].clone()),
+                Nothing if field == "windows" => Some(json!([])),
+                Nothing => None,
+            };
+            assert_eq!(
+                kept.get(field).cloned(),
+                expected,
+                "{field} not reported, {outcome:?}"
+            );
+
+            let kept = serde_json::to_value(
+                reading(own.clone()).keeping(reading(remembered.clone()), outcome),
+            )
+            .unwrap();
+            let expected = match (field, outcome) {
+                ("windows", Outcome::Failed) => {
+                    json!([own["windows"][0], remembered["windows"][0]])
+                }
+                _ => own[field].clone(),
+            };
+            assert_eq!(kept[field], expected, "{field} reported, {outcome:?}");
+        }
+    }
 }
