@@ -178,6 +178,20 @@ describe("Limits", () => {
     expect(within(card("Claude limits · me@claude.example")).getByText("Max ×5")).toBeTruthy();
   });
 
+  it("moves the active account's dot into the header when it has no headline window", async () => {
+    answer([okClaude()], [okCodex({ windows: [] }), { ...staleCodex(), windows: [] }]);
+    renderLimits();
+    const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+    const indicators = within(region).getAllByRole("img", { name: "Active account" });
+    expect(indicators).toHaveLength(1);
+    expect(region.querySelector("header")!.contains(indicators[0])).toBe(true);
+    const headerDot = (name: string) => card(name).querySelector("header")!.querySelector("[aria-label='Active account']");
+    // With a headline window the dot sits beside it instead, and an inactive account has none.
+    expect(headerDot("Claude limits · me@claude.example")).toBeNull();
+    await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    expect(headerDot("Codex limits · personal@codex.example")).toBeNull();
+  });
+
   it("opens account actions from the header and dismisses them with Escape or an outside click", async () => {
     answer([okClaude()], [okCodex(), staleCodex()]);
     renderLimits();

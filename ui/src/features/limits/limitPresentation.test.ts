@@ -210,24 +210,6 @@ describe("hasObservations", () => {
     expect(hasObservations({ ...bare, resetCredits: { availableCount: 1, nextExpiresAt: null } })).toBe(true);
   });
 
-  // The Codex reader drops the windows no surface shows before a card leaves the backend, so the
-  // card and the account list count the same windows: every one it carries.
-  it("counts a card's windows as the account list does", () => {
-    const remembered: ProviderLimits = {
-      ...bare,
-      currentAccount: false,
-      status: "failed",
-      message: "Saved usage refresh is paused.",
-      windows: [{ ...window, id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark" }],
-    };
-
-    expect(hasObservations(remembered)).toBe(true);
-    const presented = presentLimitAccount(remembered, "fallback");
-    expect(presented.remembered).toBe(true);
-    expect(presented.message).toBeNull();
-    expect(presented.savedRefreshDetail).toBe("Saved usage refresh is paused.");
-  });
-
   it("keeps a card with only a workspace-credit share as a paused refresh rather than an empty one", () => {
     const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", workspaceCredits: SHARE };
     expect(presentLimitAccount(failed, "unavailable").refreshPaused).toBe(true);

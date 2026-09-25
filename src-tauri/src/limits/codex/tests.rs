@@ -127,11 +127,14 @@ fn the_reader_drops_the_reserve_and_spark_buckets_by_name_whatever_their_id() {
         ("reserve", "GPT-Reserve"),
         ("spark", "  gpt-5.3-codex-SPARK "),
         ("team_reserve", "Team GPT-Reserve"),
+        ("reserve_team", "GPT-Reserve · Team"),
     ]);
     assert_eq!(
         ids(&reading),
         [
             "primary",
+            "extra:reserve_team",
+            "extra:reserve_team:secondary",
             "extra:team_reserve",
             "extra:team_reserve:secondary"
         ]

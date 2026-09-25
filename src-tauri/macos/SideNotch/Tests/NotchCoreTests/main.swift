@@ -72,16 +72,21 @@ final class NotchTests {
 
   /// The host decides what each ring shows (`NotchProvider` in `side_notch/model.rs`); the helper
   /// finds those windows by id and lists every window in the order it came.
+  /// The popover lists the windows in the order they came, which the host pins
+  /// (`side_notch/model/tests/projection.rs`); here they come in another order on purpose, so only
+  /// a lookup by id finds the named ones: neither the first window nor the first per-model one.
   func testTheRingsShowTheWindowsTheHostNamed() {
     let fable = quota("model", 58, label: "Weekly · Fable", id: "weekly_scoped:Fable")
     let entry = provider(
       windows: [
+        quota("session", 73, label: "5 hour · all models", id: "session"),
         quota("weekly", 41, id: "weekly_all"),
-        quota("session", 73, label: "5 hour · all models", id: "session"), fable,
+        quota("model", 90, label: "Weekly · Opus", id: "weekly_scoped:Opus"), fable,
       ], headline: "weekly_all", inner: .fable(windowId: "weekly_scoped:Fable"))
+    expectEqual(entry.headline?.id, "weekly_all")
     expectEqual(entry.headline?.usedPercent, 41)
     expectEqual(entry.inner, InnerQuota.fable(fable))
-    expectEqual(entry.windows.map(\.usedPercent), [41, 73, 58])
+    expectEqual(entry.inner?.quota.usedPercent, 58)
     // Nothing named, nothing on the rings.
     let unnamed = provider(windows: [quota("weekly", 41)])
     expectNil(unnamed.headline)
