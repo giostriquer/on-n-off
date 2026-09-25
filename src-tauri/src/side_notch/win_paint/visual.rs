@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading};
 use crate::side_notch::model::{Display, NotchSettings, ShowMode, RAIL_ORDER};
 
 fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Display {
@@ -22,6 +22,19 @@ fn settings() -> NotchSettings {
         enabled: true,
         ..NotchSettings::default()
     }
+}
+
+/// The cell the host projects for the signed-in account's card: `reading`, read as `status` says.
+fn projected(
+    provider: AgentId,
+    status: LimitsStatus,
+    message: Option<&str>,
+    reading: Reading,
+) -> NotchProvider {
+    let mut card = crate::limits::signed_in_card(provider, "acct", reading);
+    card.status = status;
+    card.message = message.map(str::to_owned);
+    NotchProvider::current(vec![card]).expect("a signed-in account")
 }
 
 #[allow(dead_code)]
@@ -53,45 +66,43 @@ fn visual_dump() {
 
     // Realistic Claude entry with the labels the live API produces, in the card's order.
     let claude = ProviderData {
-        cell: NotchProvider {
-            provider: AgentId::Claude,
-            status: LimitsStatus::Ok,
-            message: None,
-            windows: vec![
-                LimitWindowDto {
-                    id: "w2".into(),
-                    label: "Weekly · all models".into(),
-                    kind: LimitWindowKind::Weekly,
-                    used_percent: 27.0,
-                    resets_at: Some("2026-09-07T10:59:00Z".into()),
-                    window_seconds: None,
-                    observed_at: "2026-09-03T10:00:00Z".into(),
-                },
-                LimitWindowDto {
-                    id: "w1".into(),
-                    label: "5 hour · all models".into(),
-                    kind: LimitWindowKind::Session,
-                    used_percent: 72.0,
-                    resets_at: Some("2026-09-03T19:59:00Z".into()),
-                    window_seconds: None,
-                    observed_at: "2026-09-03T10:00:00Z".into(),
-                },
-                LimitWindowDto {
-                    id: "w3".into(),
-                    label: "Weekly · Fable".into(),
-                    kind: LimitWindowKind::Model,
-                    used_percent: 100.0,
-                    resets_at: Some("2026-09-07T10:59:00Z".into()),
-                    window_seconds: None,
-                    observed_at: "2026-09-03T10:00:00Z".into(),
-                },
-            ],
-            headline_window_id: Some("w2".into()),
-            inner_ring: Some(InnerRing::Fable {
-                window_id: "w3".into(),
-            }),
-            workspace_credits: None,
-        },
+        cell: projected(
+            AgentId::Claude,
+            LimitsStatus::Ok,
+            None,
+            Reading {
+                windows: vec![
+                    LimitWindowDto {
+                        id: "w2".into(),
+                        label: "Weekly · all models".into(),
+                        kind: LimitWindowKind::Weekly,
+                        used_percent: 27.0,
+                        resets_at: Some("2026-09-07T10:59:00Z".into()),
+                        window_seconds: None,
+                        observed_at: "2026-09-03T10:00:00Z".into(),
+                    },
+                    LimitWindowDto {
+                        id: "w1".into(),
+                        label: "5 hour · all models".into(),
+                        kind: LimitWindowKind::Session,
+                        used_percent: 72.0,
+                        resets_at: Some("2026-09-03T19:59:00Z".into()),
+                        window_seconds: None,
+                        observed_at: "2026-09-03T10:00:00Z".into(),
+                    },
+                    LimitWindowDto {
+                        id: "w3".into(),
+                        label: "Weekly · Fable".into(),
+                        kind: LimitWindowKind::Model,
+                        used_percent: 100.0,
+                        resets_at: Some("2026-09-07T10:59:00Z".into()),
+                        window_seconds: None,
+                        observed_at: "2026-09-03T10:00:00Z".into(),
+                    },
+                ],
+                ..Reading::default()
+            },
+        ),
         sessions: vec![
             LiveSession {
                 id: "s1".into(),
@@ -112,54 +123,44 @@ fn visual_dump() {
         ],
     };
     let codex = ProviderData {
-        cell: NotchProvider {
-            provider: AgentId::Codex,
-            status: LimitsStatus::Ok,
-            message: None,
-            windows: vec![LimitWindowDto {
-                id: "c1".into(),
-                label: "Weekly · all models".into(),
-                kind: LimitWindowKind::Weekly,
-                used_percent: 47.0,
-                resets_at: Some("2026-09-07T10:59:00Z".into()),
-                window_seconds: None,
-                observed_at: "2026-09-03T10:00:00Z".into(),
-            }],
-            headline_window_id: Some("c1".into()),
-            inner_ring: Some(InnerRing::WorkspaceShare),
-            // A business workspace member: the credit share fills the inner ring.
-            workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
-                limit: "25000".into(),
-                used: "8000".into(),
-                used_percent: 32.0,
-                resets_at: Some("2026-10-01T12:00:00Z".into()),
-                reached: false,
-            }),
-        },
+        cell: projected(
+            AgentId::Codex,
+            LimitsStatus::Ok,
+            None,
+            Reading {
+                windows: vec![LimitWindowDto {
+                    id: "c1".into(),
+                    label: "Weekly · all models".into(),
+                    kind: LimitWindowKind::Weekly,
+                    used_percent: 47.0,
+                    resets_at: Some("2026-09-07T10:59:00Z".into()),
+                    window_seconds: None,
+                    observed_at: "2026-09-03T10:00:00Z".into(),
+                }],
+                // A business workspace member: the credit share fills the inner ring.
+                workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
+                    limit: "25000".into(),
+                    used: "8000".into(),
+                    used_percent: 32.0,
+                    resets_at: Some("2026-10-01T12:00:00Z".into()),
+                    reached: false,
+                }),
+                ..Reading::default()
+            },
+        ),
         sessions: Vec::new(),
     };
     let antigravity = ProviderData {
-        cell: NotchProvider {
-            provider: AgentId::Antigravity,
-            status: LimitsStatus::Unsupported,
-            message: Some("Antigravity has no subscription limits to show.".into()),
-            windows: Vec::new(),
-            headline_window_id: None,
-            inner_ring: None,
-            workspace_credits: None,
-        },
+        cell: projected(
+            AgentId::Antigravity,
+            LimitsStatus::Unsupported,
+            Some("Antigravity has no subscription limits to show."),
+            Reading::default(),
+        ),
         sessions: Vec::new(),
     };
     let cursor = ProviderData {
-        cell: NotchProvider {
-            provider: AgentId::Cursor,
-            status: LimitsStatus::Ok,
-            message: None,
-            windows: Vec::new(),
-            headline_window_id: None,
-            inner_ring: None,
-            workspace_credits: None,
-        },
+        cell: projected(AgentId::Cursor, LimitsStatus::Ok, None, Reading::default()),
         sessions: Vec::new(),
     };
     let pr_cell = PrCellData {

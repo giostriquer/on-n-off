@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn rendering_is_deterministic_and_lands_ink_where_planned() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let cells = vec![CellData::Provider(provider_data(AgentId::Claude, 42.0))];
+    let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let planned = plan(
         &settings(),
         &displays,
@@ -42,7 +42,7 @@ fn rendering_is_deterministic_and_lands_ink_where_planned() {
 #[test]
 fn the_collapsed_pill_renders_only_the_strip() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let cells = vec![CellData::Provider(provider_data(AgentId::Claude, 42.0))];
+    let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let mut hover_settings = settings();
     hover_settings.show = ShowMode::OnHover;
     let planned = plan(&hover_settings, &displays, &data(cells), Hover::default()).expect("fits");
@@ -101,7 +101,7 @@ fn the_hover_strip_is_a_capsule_along_its_length() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let mut hover_settings = settings();
     hover_settings.show = ShowMode::OnHover;
-    let cells = vec![CellData::Provider(provider_data(AgentId::Claude, 42.0))];
+    let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let planned = plan(&hover_settings, &displays, &data(cells), Hover::default()).expect("fits");
     let pill = planned.pill.expect("collapsed shows the strip");
     let pixmap = render(&planned);
@@ -122,7 +122,7 @@ fn the_hover_strip_is_a_capsule_along_its_length() {
 #[test]
 fn hovering_the_cap_lightens_the_ear() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let cells = vec![CellData::Provider(provider_data(AgentId::Claude, 42.0))];
+    let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let dark = plan(
         &settings(),
         &displays,
@@ -152,7 +152,7 @@ fn hovering_the_cap_lightens_the_ear() {
 #[test]
 fn the_cap_pin_says_which_show_mode_is_on() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let cells = vec![CellData::Provider(provider_data(AgentId::Claude, 42.0))];
+    let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let hover = Hover {
         cap_hovered: true,
         ..Hover::default()
@@ -305,7 +305,7 @@ fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
     let mut planned = plan(
         &settings(),
         &displays,
-        &data(vec![CellData::Provider(provider_data(
+        &data(vec![CellData::Provider(session_only(
             AgentId::Claude,
             42.0,
         ))]),

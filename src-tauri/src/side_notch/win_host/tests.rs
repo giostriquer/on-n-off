@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::side_notch::model::NotchSettings;
 use std::time::Duration;
 
@@ -16,24 +16,25 @@ fn snapshot() -> NotchSnapshot {
     }
 }
 
+/// The cell the host projects for a signed-in account whose weekly window is `percent` used.
 fn provider_entry(provider: AgentId, percent: f64) -> NotchProvider {
-    NotchProvider {
+    let card = crate::limits::signed_in_card(
         provider,
-        status: LimitsStatus::Ok,
-        message: None,
-        headline_window_id: Some("w".into()),
-        inner_ring: None,
-        windows: vec![LimitWindowDto {
-            id: "w".into(),
-            label: "Current session".into(),
-            kind: LimitWindowKind::Session,
-            used_percent: percent,
-            resets_at: None,
-            window_seconds: None,
-            observed_at: "2026-09-01T10:00:00Z".into(),
-        }],
-        workspace_credits: None,
-    }
+        "acct",
+        Reading {
+            windows: vec![LimitWindowDto {
+                id: "weekly".into(),
+                label: "Weekly · all models".into(),
+                kind: LimitWindowKind::Weekly,
+                used_percent: percent,
+                resets_at: None,
+                window_seconds: None,
+                observed_at: "2026-09-01T10:00:00Z".into(),
+            }],
+            ..Reading::default()
+        },
+    );
+    NotchProvider::current(vec![card]).expect("a signed-in account")
 }
 
 #[test]

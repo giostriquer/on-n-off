@@ -108,7 +108,7 @@ fn the_popover_places_inward_from_the_edge_and_clamps_to_the_work_area() {
 #[test]
 fn plan_hides_when_layout_hides_and_rails_when_it_fits() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let cells = vec![CellData::Provider(provider_data(AgentId::Claude, 42.0))];
+    let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let planned = plan(&settings(), &displays, &data(cells), Hover::default()).expect("fits");
     assert_eq!(planned.cells.len(), 1);
     assert_eq!(planned.window.w, 76.0);
@@ -132,7 +132,7 @@ fn plan_hides_when_layout_hides_and_rails_when_it_fits() {
 #[test]
 fn the_popover_unions_with_the_rail_and_places_zones() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let cells = vec![CellData::Provider(provider_data(AgentId::Claude, 42.0))];
+    let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let planned = plan(
         &settings(),
         &displays,
@@ -256,7 +256,7 @@ fn the_popover_tail_points_at_its_own_cell() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells: Vec<CellData> = (0..5)
         .map(|index| {
-            CellData::Provider(provider_data(
+            CellData::Provider(session_only(
                 [
                     AgentId::Claude,
                     AgentId::Codex,
@@ -327,8 +327,8 @@ fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
     // The pull-request cell is last, so its popover is centred low and the card no
     // longer starts at the window's top edge.
     let cells = vec![
-        CellData::Provider(provider_data(AgentId::Claude, 42.0)),
-        CellData::Provider(provider_data(AgentId::Codex, 42.0)),
+        CellData::Provider(session_only(AgentId::Claude, 42.0)),
+        CellData::Provider(session_only(AgentId::Codex, 42.0)),
         CellData::PullRequests(pulls),
     ];
     let last = cells.len() - 1;

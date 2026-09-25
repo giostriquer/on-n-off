@@ -299,10 +299,11 @@ pub struct NotchProvider {
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
     /// The window the ring and the figure show, by id: the headline window, which is the weekly
-    /// window. None for a card without one, and while the account cannot be read.
-    pub headline_window_id: Option<String>,
+    /// window. None for a card without one, and while the account cannot be read. Private, like
+    /// `inner_ring`, so only `current` decides them and they always name what `windows` holds.
+    headline_window_id: Option<String>,
     /// None while the account cannot be read, or when it has nothing to show there.
-    pub inner_ring: Option<InnerRing>,
+    inner_ring: Option<InnerRing>,
     pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
 }
 
@@ -349,6 +350,18 @@ impl NotchProvider {
             inner_ring,
             workspace_credits,
         })
+    }
+}
+
+/// The names the projection chose, as the macOS helper receives them over the pipe.
+#[cfg(target_os = "macos")]
+impl NotchProvider {
+    pub fn headline_window_id(&self) -> Option<&str> {
+        self.headline_window_id.as_deref()
+    }
+
+    pub fn inner_ring(&self) -> Option<&InnerRing> {
+        self.inner_ring.as_ref()
     }
 }
 

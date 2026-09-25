@@ -50,7 +50,9 @@ fn session_window(percent: f64) -> LimitWindowDto {
         observed_at: "2026-09-01T10:00:00Z".into(),
     }
 }
-fn provider_data(provider: AgentId, percent: f64) -> ProviderData {
+/// A cell whose account reports only its session, `percent` used: the popover lists it, and with no
+/// weekly window the ring leads with nothing and the figure is a dash.
+fn session_only(provider: AgentId, percent: f64) -> ProviderData {
     projected(signed_in(provider, vec![session_window(percent)]))
 }
 fn settings() -> NotchSettings {

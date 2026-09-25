@@ -62,14 +62,16 @@ struct NativeWorkspaceCredits {
 }
 impl From<NotchProvider> for NativeProvider {
     fn from(cell: NotchProvider) -> Self {
+        let headline_window_id = cell.headline_window_id().map(str::to_owned);
+        let inner_ring = cell.inner_ring().cloned();
         Self {
             provider: cell.provider,
             status: cell.status,
             current_account: true,
             message: cell.message,
             windows: cell.windows,
-            headline_window_id: cell.headline_window_id,
-            inner_ring: cell.inner_ring,
+            headline_window_id,
+            inner_ring,
             workspace_credits: cell.workspace_credits.map(|share| {
                 let wording = workspace_share_wording(&share);
                 NativeWorkspaceCredits {
