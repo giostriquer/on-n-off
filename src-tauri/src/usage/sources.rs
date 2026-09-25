@@ -304,8 +304,8 @@ fn resolve_codex_archive_dir(home: &Path) -> PathBuf {
     codex_root_for(home).join("archived_sessions")
 }
 
-/// Where the scan cache for `home` is kept, for tests that damage or restore it.
-#[cfg(test)]
+/// Where the scan cache for `home` is kept, for the unix-only tests that remove it.
+#[cfg(all(test, unix))]
 pub(crate) fn scan_cache_file(home: &Path) -> PathBuf {
     scan_cache_path_for(home)
 }
