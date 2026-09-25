@@ -189,6 +189,13 @@ priceable-looking model the table lacks lets the next scan re-fetch after an hou
 refresh button re-fetches at once. The summary cache key carries the table's fetch time, so a new
 table can never serve costs computed from an old one.
 
+The summary and the background fold read transcripts the same way, through `usage/sources.rs`,
+under the one lock every read and write of the usage files takes. `Sources::open` walks the roots
+and brings the source index up to date, which is enough to answer the summary's cache check before
+any record is read. `Sources::read` then returns the records, from each transcript's cached parse
+where it still holds, and `Sources::finish` saves the scan cache, pruned with the watermark it is
+given, and releases the lock.
+
 Three reading rules carry the accuracy, each pinned by a test:
 
 - **One record per copy group, its richest copy, before anything is counted.** Claude Code writes
@@ -207,8 +214,8 @@ Three reading rules carry the accuracy, each pinned by a test:
   Codex source.
 
 A transcript still being written while it is read (a live session) counts what it holds at that
-moment instead of dropping out of the total. `source_index::read_stable_records` parses a file
-up to twice and reports whether its size and mtime held still (`TranscriptRead`):
+moment instead of dropping out of the total. A read parses a file up to twice and reports whether
+its size and mtime held still (`TranscriptRead`, in `usage/sources/source_index.rs`):
 
 - A file that held still but no longer matches the inventory counts what it holds now.
 - One that kept moving, or went away after a parse, counts the last parse that succeeded.

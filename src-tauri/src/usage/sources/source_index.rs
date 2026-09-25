@@ -1,4 +1,7 @@
-//! Small transcript inventory used to validate cached Usage summaries.
+//! The source index: every transcript under the roots with its size, mtime and the span of its
+//! records, persisted so that an unchanged walk answers without parsing anything. Its
+//! [`SourceSnapshot::signature`] validates cached Usage summaries, and [`prepare_sources`] reads
+//! the records of the transcripts a read needs.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -7,13 +10,13 @@ use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
-use super::cache_io::atomic_write;
-use super::history::Watermark;
-use super::reader::{inventory_transcript_files, read_transcript_records, TranscriptFile};
 use super::scan_cache::{dedupe_within_file, CachedFile, ScanCache, USAGE_SCAN_CACHE_VERSION};
-use super::transcripts::{UsageProvider, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
+use crate::usage::cache_io::atomic_write;
+use crate::usage::history::Watermark;
+use crate::usage::reader::{inventory_transcript_files, read_transcript_records, TranscriptFile};
+use crate::usage::transcripts::{UsageProvider, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
 
-pub const USAGE_SOURCE_INDEX_VERSION: u32 = 3;
+pub(crate) const USAGE_SOURCE_INDEX_VERSION: u32 = 3;
 
 #[cfg(test)]
 mod test_support;
@@ -24,9 +27,9 @@ pub(crate) use test_support::{
 };
 
 #[derive(Debug, Clone)]
-pub struct SourceRoot {
-    pub provider: UsageProvider,
-    pub path: PathBuf,
+pub(super) struct SourceRoot {
+    pub(super) provider: UsageProvider,
+    pub(super) path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -61,7 +64,7 @@ struct SourceIndexFile {
 }
 
 #[derive(Debug, Clone)]
-pub struct SourceSnapshot {
+pub(super) struct SourceSnapshot {
     generation: u64,
     roots: BTreeMap<String, SourceRootEntry>,
     entries: BTreeMap<String, SourceEntry>,
@@ -69,43 +72,34 @@ pub struct SourceSnapshot {
     complete: bool,
 }
 
-pub struct ReconcileOutcome {
-    pub snapshot: SourceSnapshot,
-    pub scan_cache_dirty: bool,
+pub(super) struct ReconcileOutcome {
+    pub(super) snapshot: SourceSnapshot,
+    pub(super) scan_cache_dirty: bool,
 }
 
-pub struct SourceInventory {
+pub(super) struct SourceInventory {
     roots: Vec<(SourceRoot, RootInventory)>,
 }
 
-pub struct PreparedSourceFile {
-    pub provider: UsageProvider,
-    pub records: Arc<Vec<UsageRecord>>,
+pub(super) struct PreparedSourceFile {
+    pub(super) provider: UsageProvider,
+    pub(super) records: Arc<Vec<UsageRecord>>,
 }
 
-pub struct PreparedSources {
-    pub files: Vec<PreparedSourceFile>,
-    pub complete: bool,
-    pub scan_cache_dirty: bool,
+pub(super) struct PreparedSources {
+    pub(super) files: Vec<PreparedSourceFile>,
+    pub(super) complete: bool,
+    pub(super) scan_cache_dirty: bool,
     /// The paths and mtimes of files no parse succeeded on and no cached parse stands in for:
     /// their records are unknown.
-    pub unread_files: Vec<(String, i64)>,
+    pub(super) unread_files: Vec<(String, i64)>,
 }
 
-pub fn source_index_path_for(home: &Path) -> PathBuf {
+pub(super) fn source_index_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-source-index.json")
 }
 
-#[cfg(test)]
-pub fn reconcile(
-    path: &Path,
-    roots: &[SourceRoot],
-    scan_cache: &mut ScanCache,
-) -> ReconcileOutcome {
-    reconcile_inventory(path, inventory_sources(roots), scan_cache, Watermark::NONE)
-}
-
-pub fn inventory_sources(roots: &[SourceRoot]) -> SourceInventory {
+pub(super) fn inventory_sources(roots: &[SourceRoot]) -> SourceInventory {
     let roots = roots
         .iter()
         .cloned()
@@ -117,7 +111,10 @@ pub fn inventory_sources(roots: &[SourceRoot]) -> SourceInventory {
     SourceInventory { roots }
 }
 
-pub fn unchanged_snapshot(path: &Path, inventory: &SourceInventory) -> Option<SourceSnapshot> {
+pub(super) fn unchanged_snapshot(
+    path: &Path,
+    inventory: &SourceInventory,
+) -> Option<SourceSnapshot> {
     let previous = load_index(path)?;
     let current = current_inventory_from(&inventory.roots);
     if !current.complete
@@ -128,9 +125,10 @@ pub fn unchanged_snapshot(path: &Path, inventory: &SourceInventory) -> Option<So
             .entries
             .into_iter()
             .all(|(path, (provider, size, mtime_ms))| {
-                previous.entries.get(&path).is_some_and(|entry| {
-                    entry.provider == provider && entry.size == size && entry.mtime_ms == mtime_ms
-                })
+                previous
+                    .entries
+                    .get(&path)
+                    .is_some_and(|entry| entry.describes(provider, size, mtime_ms))
             })
     {
         return None;
@@ -141,7 +139,7 @@ pub fn unchanged_snapshot(path: &Path, inventory: &SourceInventory) -> Option<So
 
 /// Brings the index up to date with `inventory`, parsing each new or changed transcript for its
 /// record bounds, except one that holds only records the usage history already has.
-pub fn reconcile_inventory(
+pub(super) fn reconcile_inventory(
     path: &Path,
     inventory: SourceInventory,
     scan_cache: &mut ScanCache,
@@ -196,9 +194,7 @@ fn reconcile_inventories(
             let unchanged = previous_entry
                 .filter(|entry| {
                     entry.resolved
-                        && entry.provider == root.provider
-                        && entry.size == observed.size
-                        && entry.mtime_ms == observed.mtime_ms
+                        && entry.describes(root.provider, observed.size, observed.mtime_ms)
                 })
                 .cloned();
 
@@ -330,17 +326,24 @@ fn retain_previous_under_root(
     }
 }
 
+impl SourceEntry {
+    /// The entry is of the transcript `provider` wrote, as it is now: same size, same mtime.
+    fn describes(&self, provider: UsageProvider, size: u64, mtime_ms: i64) -> bool {
+        self.provider == provider && self.size == size && self.mtime_ms == mtime_ms
+    }
+}
+
 impl SourceSnapshot {
     #[cfg(test)]
-    pub fn generation(&self) -> u64 {
+    pub(super) fn generation(&self) -> u64 {
         self.generation
     }
 
-    pub fn is_complete(&self) -> bool {
+    pub(super) fn is_complete(&self) -> bool {
         self.complete && self.entries.values().all(|entry| entry.resolved)
     }
 
-    pub fn signature(&self, window_start_ms: i64, window_end_ms: i64) -> String {
+    pub(super) fn signature(&self, window_start_ms: i64, window_end_ms: i64) -> String {
         let mut hash = Fnv64::new();
         hash.add_u64(USAGE_SOURCE_INDEX_VERSION as u64);
         hash.add_u64(USAGE_TRANSCRIPT_PARSER_VERSION as u64);
@@ -371,7 +374,7 @@ impl SourceSnapshot {
         )
     }
 
-    pub fn inventory_is_current(&self, roots: &[SourceRoot]) -> bool {
+    pub(super) fn inventory_is_current(&self, roots: &[SourceRoot]) -> bool {
         let current = current_inventory(roots);
         if !current.complete
             || current.roots != self.roots
@@ -383,13 +386,13 @@ impl SourceSnapshot {
             .entries
             .into_iter()
             .all(|(path, (provider, size, mtime_ms))| {
-                self.entries.get(&path).is_some_and(|entry| {
-                    entry.provider == provider && entry.size == size && entry.mtime_ms == mtime_ms
-                })
+                self.entries
+                    .get(&path)
+                    .is_some_and(|entry| entry.describes(provider, size, mtime_ms))
             })
     }
 
-    pub fn persisted_generation_is_current(&self, path: &Path) -> bool {
+    pub(super) fn persisted_generation_is_current(&self, path: &Path) -> bool {
         load_index(path).is_some_and(|index| {
             index.generation == self.generation
                 && index.roots == self.roots
@@ -397,7 +400,7 @@ impl SourceSnapshot {
         })
     }
 
-    pub fn root_is_present(&self, root: &SourceRoot) -> bool {
+    pub(super) fn root_is_present(&self, root: &SourceRoot) -> bool {
         let normalized = normalize_path(&root.path);
         self.roots
             .get(&root_key(root.provider, &normalized))
@@ -405,24 +408,24 @@ impl SourceSnapshot {
     }
 
     /// Every root was walked to the end this time: no transcript can be missing from the index.
-    pub fn walked_every_root(&self) -> bool {
+    pub(super) fn walked_every_root(&self) -> bool {
         self.roots
             .values()
             .all(|root| self.successfully_walked_roots.contains(&root.path))
     }
 
-    pub fn live_paths(&self) -> HashSet<String> {
+    pub(super) fn live_paths(&self) -> HashSet<String> {
         self.entries.keys().cloned().collect()
     }
 
-    pub fn successfully_walked_root_paths(&self) -> &[String] {
+    pub(super) fn successfully_walked_root_paths(&self) -> &[String] {
         &self.successfully_walked_roots
     }
 }
 
 /// The records of every transcript written since `window_start_ms`, except those holding only
 /// records the usage history already has.
-pub fn prepare_sources(
+pub(super) fn prepare_sources(
     snapshot: &SourceSnapshot,
     scan_cache: &mut ScanCache,
     window_start_ms: i64,
@@ -437,11 +440,13 @@ pub fn prepare_sources(
         entry.mtime_ms >= window_start_ms
             && !watermark.holds_only_folded(entry.mtime_ms, entry.max_record_ms)
     }) {
+        // A parse of this provider's transcript: current, or stale and kept in reserve for a read
+        // that fails.
         let cached = scan_cache
             .get(&entry.path)
             .filter(|cached| cached.provider == entry.provider);
         let records = match cached {
-            Some(cached) if cached.size == entry.size && cached.mtime_ms == entry.mtime_ms => {
+            Some(cached) if cached.is_parse_of(entry.provider, entry.size, entry.mtime_ms) => {
                 Some(Arc::clone(&cached.records))
             }
             _ => {
@@ -523,10 +528,7 @@ fn inspect_changed_file(
     watermark: Watermark,
 ) -> (SourceEntry, bool) {
     if let Some(cached) = scan_cache.get(&normalized) {
-        if cached.provider == provider
-            && cached.size == observed.size
-            && cached.mtime_ms == observed.mtime_ms
-        {
+        if cached.is_parse_of(provider, observed.size, observed.mtime_ms) {
             let (min_record_ms, max_record_ms) = record_bounds(&cached.records);
             return (
                 SourceEntry {
@@ -600,7 +602,7 @@ fn inspect_changed_file(
 
 /// What reading one transcript saw.
 #[derive(Debug)]
-pub enum TranscriptRead {
+enum TranscriptRead {
     /// The file held still across a parse: its identity and the records it holds.
     Stable {
         size: u64,
@@ -614,7 +616,7 @@ pub enum TranscriptRead {
     Failed,
 }
 
-pub fn read_stable_records(
+fn read_stable_records(
     path: &Path,
     provider: UsageProvider,
     initial_size: u64,
@@ -735,7 +737,7 @@ fn entry_intersects_window(entry: &SourceEntry, start_ms: i64, end_ms: i64) -> b
     }
 }
 
-pub fn normalize_path(path: &Path) -> String {
+pub(super) fn normalize_path(path: &Path) -> String {
     let normalized = path.to_string_lossy().replace('\\', "/");
     if cfg!(windows) {
         normalized.to_lowercase()

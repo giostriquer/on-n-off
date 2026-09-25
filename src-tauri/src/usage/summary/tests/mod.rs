@@ -3,11 +3,11 @@ use super::*;
 use crate::dto::{UsageCostSource, UsagePricingStatus, UsageSourceStatus};
 use crate::paths::scratch_dir;
 use crate::usage::pricing;
-use crate::usage::scan_cache::{reset_scan_cache_decode_count, scan_cache_decode_count};
-use crate::usage::source_index::{
-    normalize_path, reset_transcript_parse_count, transcript_parse_count,
+use crate::usage::sources::{
+    cached_record_count, reset_scan_cache_decode_count, reset_transcript_parse_count,
+    scan_cache_decode_count, transcript_parse_count, USAGE_SCAN_CACHE_VERSION,
+    USAGE_SOURCE_INDEX_VERSION,
 };
-use crate::usage::sources::{load_scan_cache, scan_cache_path_for};
 use crate::usage::summary_cache::summary_cache_path_for;
 
 mod cache;
@@ -166,14 +166,8 @@ fn incompatible_and_partial_cache_documents_rebuild_together() {
     assert!(!migrated.cache_hit);
     assert_eq!(output_tokens(&migrated), 20);
     for (cache_name, expected_version) in [
-        (
-            "usage-source-index.json",
-            super::super::source_index::USAGE_SOURCE_INDEX_VERSION,
-        ),
-        (
-            "usage-scan-cache.json",
-            super::super::scan_cache::USAGE_SCAN_CACHE_VERSION,
-        ),
+        ("usage-source-index.json", USAGE_SOURCE_INDEX_VERSION),
+        ("usage-scan-cache.json", USAGE_SCAN_CACHE_VERSION),
         (
             "usage-summary-cache.json",
             super::super::summary_cache::USAGE_SUMMARY_CACHE_VERSION,
@@ -566,8 +560,7 @@ fn retained_history_recent_window_keeps_old_live_cached_records() {
         1,
         "the aged file is outside August"
     );
-    let cache = load_scan_cache(&scan_cache_path_for(&home));
-    assert!(cache.contains_key(&normalize_path(&old_path)));
+    assert!(cached_record_count(&home, &old_path).is_some());
     reset_transcript_parse_count();
 
     let full_time = read_offline(&home, full_time_input(true));
@@ -589,8 +582,7 @@ fn retained_history_deleted_historical_file_is_pruned() {
     read_offline(&home, full_time_input(true));
     std::fs::remove_file(&old_path).unwrap();
     read_offline(&home, august_input(true));
-    let cache = load_scan_cache(&scan_cache_path_for(&home));
-    assert!(!cache.contains_key(&normalize_path(&old_path)));
+    assert!(cached_record_count(&home, &old_path).is_none());
 
     let _ = std::fs::remove_dir_all(home);
 }
@@ -606,8 +598,7 @@ fn retained_history_mixed_age_totals_equal_from_scratch_scan() {
     let warm = read_offline(&home, full_time_input(true));
     assert_eq!(output_tokens(&warm), 30);
     assert_eq!(record_count(&warm), 2);
-    let warm_cache = load_scan_cache(&scan_cache_path_for(&home));
-    assert!(warm_cache.contains_key(&normalize_path(&old_path)));
+    assert!(cached_record_count(&home, &old_path).is_some());
     for cache_name in [
         "usage-source-index.json",
         "usage-scan-cache.json",

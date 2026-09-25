@@ -1,4 +1,5 @@
-//! Durable per-file scan cache keyed by `(path, size, mtime)`.
+//! Durable per-file scan cache keyed by `(path, size, mtime)`: each transcript's last parse, so a
+//! read parses only what changed.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -10,12 +11,12 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::history::Watermark;
-use super::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
-use super::transcripts::{richest_copies, TokenTotals, UsageProvider, UsageRecord};
+use crate::usage::history::Watermark;
+use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
+use crate::usage::transcripts::{richest_copies, TokenTotals, UsageProvider, UsageRecord};
 
 /// v4: rows carry the one-hour cache-write share at index 10.
-pub const USAGE_SCAN_CACHE_VERSION: u32 = 4;
+pub(crate) const USAGE_SCAN_CACHE_VERSION: u32 = 4;
 
 #[cfg(test)]
 thread_local! {
@@ -33,14 +34,21 @@ pub(crate) fn scan_cache_decode_count() -> usize {
 }
 
 #[derive(Debug, Clone)]
-pub struct CachedFile {
-    pub size: u64,
-    pub mtime_ms: i64,
-    pub provider: UsageProvider,
-    pub records: Arc<Vec<UsageRecord>>,
+pub(super) struct CachedFile {
+    pub(super) size: u64,
+    pub(super) mtime_ms: i64,
+    pub(super) provider: UsageProvider,
+    pub(super) records: Arc<Vec<UsageRecord>>,
 }
 
-pub type ScanCache = HashMap<String, CachedFile>;
+impl CachedFile {
+    /// A parse of the transcript `provider` wrote, as it is now: same size, same mtime.
+    pub(super) fn is_parse_of(&self, provider: UsageProvider, size: u64, mtime_ms: i64) -> bool {
+        self.provider == provider && self.size == size && self.mtime_ms == mtime_ms
+    }
+}
+
+pub(super) type ScanCache = HashMap<String, CachedFile>;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedCache {
@@ -59,7 +67,7 @@ struct SerializedFile {
     r: Vec<Value>,
 }
 
-pub fn encode_scan_cache(cache: &ScanCache) -> Value {
+pub(super) fn encode_scan_cache(cache: &ScanCache) -> Value {
     let mut models: Vec<String> = Vec::new();
     let mut sessions: Vec<String> = Vec::new();
     let mut model_index: HashMap<String, usize> = HashMap::new();
@@ -121,7 +129,7 @@ pub fn encode_scan_cache(cache: &ScanCache) -> Value {
     .unwrap_or(Value::Null)
 }
 
-pub fn decode_scan_cache(document: &Value) -> ScanCache {
+pub(super) fn decode_scan_cache(document: &Value) -> ScanCache {
     #[cfg(test)]
     SCAN_CACHE_DECODE_COUNT.set(SCAN_CACHE_DECODE_COUNT.get() + 1);
     let mut cache = ScanCache::new();
@@ -240,15 +248,15 @@ pub fn decode_scan_cache(document: &Value) -> ScanCache {
     cache
 }
 
-pub struct PruneOptions<'a> {
-    pub live_paths: &'a HashSet<String>,
-    pub active_roots: &'a [String],
-    pub walked_roots: &'a [String],
+pub(super) struct PruneOptions<'a> {
+    pub(super) live_paths: &'a HashSet<String>,
+    pub(super) active_roots: &'a [String],
+    pub(super) walked_roots: &'a [String],
     /// Files whose every record the usage history holds leave the cache.
-    pub watermark: Watermark,
+    pub(super) watermark: Watermark,
 }
 
-pub fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usize {
+pub(super) fn prune_scan_cache(cache: &mut ScanCache, options: PruneOptions<'_>) -> usize {
     let mut removed = 0;
     let keys: Vec<String> = cache.keys().cloned().collect();
     for path in keys {
@@ -283,7 +291,7 @@ fn path_under_root(path: &str, root: &str) -> bool {
 
 /// One file's records with each Claude message's lines collapsed to its richest copy (see
 /// `richest_copies`), which keeps the cache small; the scan collapses copies across files again.
-pub fn dedupe_within_file(records: &[UsageRecord]) -> Vec<UsageRecord> {
+pub(super) fn dedupe_within_file(records: &[UsageRecord]) -> Vec<UsageRecord> {
     richest_copies([records]).into_iter().cloned().collect()
 }
 

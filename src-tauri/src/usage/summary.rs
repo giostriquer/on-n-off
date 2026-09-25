@@ -1,5 +1,9 @@
-//! Orchestrates transcript scan + pricing into a UsageSummaryDto.
+//! The Usage summary: a window's usage counted from the transcript sources (`sources`) and the
+//! folded rows of the usage history (`history`), priced (`pricing`) into a UsageSummaryDto. What is
+//! its own is the window and when a count is final: when a stored summary may be served
+//! (`summary_cache`), and when one may be stored.
 
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
@@ -21,16 +25,9 @@ use super::aggregate::{
 };
 use super::history::{history_fingerprint, HistoryStore};
 use super::pricing::{ensure_rates, LITELLM_RATES_URL};
-use super::reader::MTIME_SLACK_MS;
-use super::source_index::{
-    inventory_sources, prepare_sources, reconcile_inventory, unchanged_snapshot,
-};
-use super::sources::{
-    all_roots, load_scan_cache, lock_usage_files, prune_and_persist_scan_cache, source_roots_for,
-    UsagePaths,
-};
+use super::sources::{lock_usage_files, Sources, UsagePaths};
 use super::summary_cache::{load_summary_hit, store_summary, summary_key};
-use super::transcripts::{richest_copies, UsageProvider as Provider};
+use super::transcripts::UsageProvider as Provider;
 
 const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 
@@ -225,62 +222,29 @@ fn read_summary_from(
         rates.fetched_at_ms,
         &history_fingerprint(&paths.history),
     );
-    let source_roots = source_roots_for(&home);
-    let roots = all_roots(&source_roots);
     let (signature_start_ms, signature_end_ms) = source_window_bounds(&input);
-    let window_start_ms = since_time_ms.unwrap_or_else(|| {
+    let since_ms = since_time_ms.unwrap_or_else(|| {
         DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", input.since_day))
             .map(|dt| dt.timestamp_millis())
             .unwrap_or(0)
-    }) - MTIME_SLACK_MS;
+    });
 
-    let (source_snapshot, source_signature, prepared_sources, history) = {
-        let _files = lock_usage_files();
-        let inventory = inventory_sources(&roots);
-        let unchanged = unchanged_snapshot(&paths.source_index, &inventory);
-        if let Some(snapshot) = unchanged.as_ref() {
-            let signature = snapshot.signature(signature_start_ms, signature_end_ms);
-            if snapshot.is_complete() && !input.force {
-                if let Some(hit) = load_summary_hit(&paths.summary, &key, &signature) {
-                    return Ok(hit);
-                }
-            }
+    // Read, never folded here: the background fold owns that (`folding`). Opened under the lock,
+    // once the sources need its watermark, so a summary served from the cache never reads it.
+    let open_history = || HistoryStore::open(paths.history.clone());
+    let history = OnceCell::new();
+    let mut transcripts = Sources::open(lock_usage_files(), &home, || {
+        history.get_or_init(open_history).watermark()
+    });
+    let source_signature = transcripts.signature(signature_start_ms, signature_end_ms);
+    if transcripts.is_complete() && !input.force {
+        if let Some(hit) = load_summary_hit(&paths.summary, &key, &source_signature) {
+            return Ok(hit);
         }
-
-        let mut file_cache = load_scan_cache(&paths.scan_cache);
-        // Read, never folded here: the background fold owns that (`folding`).
-        let history = HistoryStore::open(paths.history.clone());
-        let watermark = history.watermark();
-        let (source_snapshot, scan_cache_dirty, summary_already_checked) =
-            if let Some(snapshot) = unchanged {
-                (snapshot, false, true)
-            } else {
-                let reconciled =
-                    reconcile_inventory(&paths.source_index, inventory, &mut file_cache, watermark);
-                (reconciled.snapshot, reconciled.scan_cache_dirty, false)
-            };
-        let source_signature = source_snapshot.signature(signature_start_ms, signature_end_ms);
-        if !summary_already_checked && source_snapshot.is_complete() && !input.force {
-            if let Some(hit) = load_summary_hit(&paths.summary, &key, &source_signature) {
-                return Ok(hit);
-            }
-        }
-        let prepared_sources = prepare_sources(
-            &source_snapshot,
-            &mut file_cache,
-            window_start_ms,
-            watermark,
-        );
-        prune_and_persist_scan_cache(
-            &paths.scan_cache,
-            &mut file_cache,
-            &source_snapshot,
-            &roots,
-            watermark,
-            scan_cache_dirty || prepared_sources.scan_cache_dirty,
-        );
-        (source_snapshot, source_signature, prepared_sources, history)
-    };
+    }
+    let history = history.into_inner().unwrap_or_else(open_history);
+    let source_read = transcripts.read(since_ms, history.watermark());
+    let seen_sources = transcripts.finish(|| history.watermark());
 
     let rates_arc = rates.table.clone();
 
@@ -297,21 +261,11 @@ fn read_summary_from(
 
     // Copies of one record across files (resumed Claude sessions, a Codex rollout listed under
     // both roots) collapse before anything is counted, so the totals and the session counts both
-    // follow the copy that is counted.
-    let records = richest_copies(
-        prepared_sources
-            .files
-            .iter()
-            .map(|file| file.records.as_slice()),
-    );
-    // Below the watermark the history is the count: a transcript's copy of a folded record, a
-    // resumed session's included, is not counted again.
-    let watermark = history.watermark();
+    // follow the copy that is counted. Below the watermark the history is the count: a
+    // transcript's copy of a folded record, a resumed session's included, is not counted again.
+    let records = source_read.records();
     let mut session_ids: HashMap<Provider, HashSet<&str>> = HashMap::new();
-    for record in records
-        .into_iter()
-        .filter(|record| !watermark.is_folded(record.timestamp_ms))
-    {
+    for record in records {
         if aggregator.add(record) && !record.session_id.is_empty() {
             session_ids
                 .entry(record.provider)
@@ -332,30 +286,21 @@ fn read_summary_from(
     }
 
     let mut sources = Vec::new();
-    for (provider, roots) in &source_roots {
-        let dir = &roots[0].path;
-        if !roots
-            .iter()
-            .any(|root| source_snapshot.root_is_present(root))
-        {
-            sources.push(missing_source(*provider, dir));
+    for source in seen_sources.providers() {
+        if !source.present {
+            sources.push(missing_source(source.provider, source.dir));
             continue;
         }
-        let files = prepared_sources
-            .files
-            .iter()
-            .filter(|file| file.provider == *provider);
-        let skipped_files = files.clone().filter(|file| file.records.is_empty()).count() as u64;
-        let scanned_files = files.count() as u64 - skipped_files;
+        let (scanned_files, skipped_files) = source_read.files_read(source.provider);
         sources.push(UsageSourceDto {
-            provider: provider_agent(*provider),
+            provider: provider_agent(source.provider),
             status: UsageSourceStatus::Ok,
             scanned_files,
             skipped_files,
             malformed_records: 0,
-            distinct_sessions: session_ids.get(provider).map_or(0, HashSet::len) as u64,
+            distinct_sessions: session_ids.get(&source.provider).map_or(0, HashSet::len) as u64,
             message: None,
-            resolved_path: dir.to_string_lossy().to_string(),
+            resolved_path: source.dir.to_string_lossy().to_string(),
         });
     }
     let aggregated = aggregator.finish();
@@ -386,14 +331,9 @@ fn read_summary_from(
     pause_before_publish_if_requested();
 
     {
-        let _files = lock_usage_files();
+        let lock = lock_usage_files();
         // A summary counted around a history that did not read would undercount once it reads.
-        if source_snapshot.is_complete()
-            && prepared_sources.complete
-            && history.history().is_some()
-            && source_snapshot.persisted_generation_is_current(&paths.source_index)
-            && source_snapshot.inventory_is_current(&roots)
-        {
+        if source_read.complete && history.history().is_some() && seen_sources.unchanged(&lock) {
             store_summary(&paths.summary, &key, &source_signature, &dto);
         }
     }

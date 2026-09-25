@@ -8,12 +8,10 @@ use crate::paths::scratch_dir;
 use crate::usage::folding::{clear_history_in, fold_history_in, history_status_in, FoldChecks};
 use crate::usage::history::{history_path_for, FoldedRow, HistoryStore, Watermark};
 use crate::usage::pricing;
-use crate::usage::source_index::normalize_path;
-use crate::usage::source_index::{
-    reset_transcript_parse_count, source_index_path_for, transcript_parse_count,
-    with_live_transcript,
+use crate::usage::sources::{
+    cached_record_count, reset_transcript_parse_count, transcript_parse_count,
+    with_live_transcript, UsagePaths,
 };
-use crate::usage::sources::{load_scan_cache, scan_cache_path_for};
 use crate::usage::summary_cache::summary_cache_path_for;
 
 /// Two weeks after the fixtures' 2026-08-07: the fold cutoff is 2026-08-14, so August's first week
@@ -69,7 +67,11 @@ fn write_lines(home: &Path, name: &str, lines: &[String], written: &str) -> Path
 }
 
 fn scan_cache_holds(home: &Path, path: &Path) -> bool {
-    load_scan_cache(&scan_cache_path_for(home)).contains_key(&normalize_path(path))
+    cached_record_count(home, path).is_some()
+}
+
+fn source_index_path_for(home: &Path) -> PathBuf {
+    UsagePaths::for_home(home).source_index
 }
 
 #[test]
