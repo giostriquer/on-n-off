@@ -9,6 +9,7 @@ deliberately short.
 | Read before you… | Document |
 | --- | --- |
 | work on a subsystem you do not know | [`docs/architecture/`](docs/architecture/) |
+| name a domain concept in code, docs or a PR | [`CONTEXT.md`](CONTEXT.md) |
 | touch `cli_locate.rs`, `process.rs`, `scripts/`, or CI | [`OS.md`](OS.md) |
 | change a provider adapter | [`PROVIDERS.md`](PROVIDERS.md) — update it in the same change |
 | hand off or smoke-test a build | [`HANDOFF.md`](HANDOFF.md) |
@@ -182,8 +183,8 @@ user data.
   `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
   `http::{serve_once, serve_once_capturing, refused_url, head_header}`, `plugin_meta::with_fetch_text`,
-  `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::scan_cache` counters, `github/fixtures.rs`,
-  `limits/claude_desktop::history_path_for_home`. Single-consumer helpers stay in that module's
+  `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::scan_cache` counters,
+  `github/fixtures.rs`. Single-consumer helpers stay in that module's
   own tests file; adapter test constructors stay in the adapter files, because `item_install`
   tests use them across domains.
 - Keep every test file under 1000 lines. Frontend tests stay co-located as `*.test.ts(x)`.

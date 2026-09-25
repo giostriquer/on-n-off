@@ -41,12 +41,12 @@ fn the_live_claude_read_asks_for_saved_resets_and_the_card_carries_their_count()
     );
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
     assert_eq!(
-        dto.windows.len(),
+        dto.reading.windows.len(),
         1,
         "the windows still come from the same read"
     );
     assert_eq!(
-        dto.reset_credits,
+        dto.reading.reset_credits,
         Some(LimitsResetCreditsDto {
             available_count: 1,
             next_expires_at: Some("2099-10-05T00:00:00+00:00".to_string()),
@@ -84,9 +84,9 @@ fn a_refused_reset_query_falls_back_to_the_plain_read_instead_of_failing_the_log
         Some("Bearer kc-token")
     );
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
-    assert_eq!(dto.windows.len(), 2);
+    assert_eq!(dto.reading.windows.len(), 2);
     assert_eq!(
-        dto.reset_credits, None,
+        dto.reading.reset_credits, None,
         "a read that was not asked is unknown"
     );
 }
@@ -157,8 +157,13 @@ fn read_counts(rig: &Rig, usage: &str) -> (Option<u32>, Option<u32>) {
         .find(|dto| dto.account == card.account)
         .unwrap();
     (
-        card.reset_credits.map(|resets| resets.available_count),
-        stored.reset_credits.map(|resets| resets.available_count),
+        card.reading
+            .reset_credits
+            .map(|resets| resets.available_count),
+        stored
+            .reading
+            .reset_credits
+            .map(|resets| resets.available_count),
     )
 }
 
@@ -207,4 +212,21 @@ fn a_remembered_count_past_its_expiry_is_not_kept_by_a_read_that_cannot_tell() {
         usage_with_saved_resets(r#"{"eligible":false,"ineligible_reason":"surface","grants":[]}"#);
     assert_eq!(read_counts(&rig, &surface), (None, None));
     assert_eq!(read_counts(&rig, &surface), (None, None));
+    assert_eq!(
+        stored_reset_credits(&rig),
+        [None],
+        "the lapsed count is not written back to disk either"
+    );
+}
+
+/// The banked-reset block of every snapshot file under `rig`'s home, as written.
+fn stored_reset_credits(rig: &Rig) -> Vec<Option<serde_json::Value>> {
+    std::fs::read_dir(rig.home.join(".on-n-off/limits"))
+        .unwrap()
+        .map(|entry| {
+            let raw = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            let stored: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            stored.get("resetCredits").cloned()
+        })
+        .collect()
 }

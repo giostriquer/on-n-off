@@ -35,8 +35,8 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
     p.join().unwrap();
     let request = u.join().unwrap();
     assert!(request.head.contains("Bearer fixture-access"));
-    assert_eq!(dto.windows[0].used_percent, 61.0);
-    assert!(!dto.windows[0].observed_at.is_empty());
+    assert_eq!(dto.reading.windows[0].used_percent, 61.0);
+    assert!(!dto.reading.windows[0].observed_at.is_empty());
     assert!(!dto.current_account);
     assert_eq!(
         dto.account.unwrap().id,
@@ -70,7 +70,7 @@ fn saved_claude_carries_the_subscription_status_its_profile_reports() {
     p.join().unwrap();
     u.join().unwrap();
 
-    assert_eq!(dto.subscription_status.as_deref(), Some("canceled"));
+    assert_eq!(dto.reading.subscription_status.as_deref(), Some("canceled"));
 }
 
 #[test]
@@ -105,9 +105,11 @@ fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
         request_line.contains("?cedar_ember=1&skip_spend=1 "),
         "{request_line}"
     );
-    assert_eq!(dto.windows[0].used_percent, 61.0);
+    assert_eq!(dto.reading.windows[0].used_percent, 61.0);
     assert_eq!(
-        dto.reset_credits.map(|resets| resets.available_count),
+        dto.reading
+            .reset_credits
+            .map(|resets| resets.available_count),
         Some(1)
     );
 }
@@ -145,8 +147,8 @@ fn saved_claude_falls_back_to_the_plain_read_when_the_reset_query_is_refused() {
         .next()
         .unwrap_or_default()
         .contains('?'));
-    assert_eq!(dto.windows[0].used_percent, 61.0);
-    assert_eq!(dto.reset_credits, None);
+    assert_eq!(dto.reading.windows[0].used_percent, 61.0);
+    assert_eq!(dto.reading.reset_credits, None);
 }
 
 #[test]
@@ -190,7 +192,7 @@ fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
 
             assert!(!dto.current_account);
             assert_eq!(
-                dto.windows
+                dto.reading.windows
                     .iter()
                     .map(|window| (window.kind, window.used_percent))
                     .collect::<Vec<_>>(),
@@ -227,19 +229,32 @@ fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
         .to_lowercase()
         .contains("chatgpt-account-id: team"));
     assert!(request.head.contains("Bearer fixture-access"));
-    assert_eq!(dto.plan.as_deref(), Some("pro"));
-    assert_eq!(dto.windows.len(), 3);
-    let session = dto.windows.iter().find(|w| w.id == "primary").unwrap();
-    let weekly = dto.windows.iter().find(|w| w.id == "secondary").unwrap();
+    assert_eq!(dto.reading.plan.as_deref(), Some("pro"));
+    assert_eq!(dto.reading.windows.len(), 3);
+    let session = dto
+        .reading
+        .windows
+        .iter()
+        .find(|w| w.id == "primary")
+        .unwrap();
+    let weekly = dto
+        .reading
+        .windows
+        .iter()
+        .find(|w| w.id == "secondary")
+        .unwrap();
     assert_eq!(session.used_percent, 42.0);
     assert_eq!(session.window_seconds, Some(18000));
     assert_eq!(weekly.used_percent, 73.0);
-    assert_eq!(dto.windows[2].kind, crate::dto::LimitWindowKind::Model);
-    assert_eq!(dto.credits.unwrap().balance, "12");
-    assert!(!dto.current_account);
-    assert!(dto.reset_offer.is_none());
     assert_eq!(
-        dto.reset_credits, None,
+        dto.reading.windows[2].kind,
+        crate::dto::LimitWindowKind::Model
+    );
+    assert_eq!(dto.reading.credits.unwrap().balance, "12");
+    assert!(!dto.current_account);
+    assert!(dto.reading.reset_offer.is_none());
+    assert_eq!(
+        dto.reading.reset_credits, None,
         "no count in the body is unknown, not zero"
     );
 }
@@ -269,7 +284,7 @@ fn saved_codex_reads_the_members_share_of_the_workspace_credits() {
     request.join().unwrap();
 
     assert_eq!(
-        dto.workspace_credits,
+        dto.reading.workspace_credits,
         Some(crate::dto::LimitsWorkspaceCreditsDto {
             limit: "25000".to_string(),
             used: "8000".to_string(),
@@ -303,7 +318,10 @@ fn saved_codex_takes_the_shares_meter_from_what_codex_says_remains() {
     .unwrap();
     request.join().unwrap();
 
-    assert_eq!(dto.workspace_credits.expect("a share").used_percent, 32.0);
+    assert_eq!(
+        dto.reading.workspace_credits.expect("a share").used_percent,
+        32.0
+    );
 }
 
 /// A saved member at their cap reads as used up, which only `spend_control.reached` says.
@@ -329,7 +347,7 @@ fn saved_codex_marks_a_members_used_up_share_reached() {
     .unwrap();
     request.join().unwrap();
 
-    let share = dto.workspace_credits.expect("a share");
+    let share = dto.reading.workspace_credits.expect("a share");
     assert_eq!(share.used, "25000");
     assert!(share.reached);
 }
@@ -399,13 +417,13 @@ fn saved_codex_reads_the_banked_reset_count_and_the_soonest_expiry_of_an_availab
     assert!(detail.to_lowercase().contains("chatgpt-account-id: team"));
     // The detail read answered in full, so its count wins over the usage body's 2, as in Codex.
     assert_eq!(
-        dto.reset_credits,
+        dto.reading.reset_credits,
         Some(LimitsResetCreditsDto {
             available_count: 3,
             next_expires_at: Some("2026-10-10T12:00:00+00:00".to_owned()),
         })
     );
-    assert_eq!(dto.windows[0].used_percent, 42.0);
+    assert_eq!(dto.reading.windows[0].used_percent, 42.0);
 }
 
 /// Codex's own app-server keeps the usage body's count when the detail read fails, and one credit
@@ -429,14 +447,14 @@ fn saved_codex_keeps_the_count_when_the_expiry_read_fails() {
         requests.join().unwrap();
 
         assert_eq!(
-            dto.reset_credits,
+            dto.reading.reset_credits,
             Some(LimitsResetCreditsDto {
                 available_count: 2,
                 next_expires_at: None,
             }),
             "{detail:?}"
         );
-        assert_eq!(dto.windows[0].used_percent, 42.0);
+        assert_eq!(dto.reading.windows[0].used_percent, 42.0);
     }
 }
 
@@ -465,7 +483,7 @@ fn saved_codex_reports_zero_banked_resets_without_asking_for_their_detail() {
     );
 
     assert_eq!(
-        dto.reset_credits,
+        dto.reading.reset_credits,
         Some(LimitsResetCreditsDto {
             available_count: 0,
             next_expires_at: None,
@@ -484,8 +502,8 @@ fn saved_codex_treats_a_malformed_banked_reset_count_as_unknown() {
         let dto = read_codex(&usage, &resets).unwrap();
         requests.join().unwrap();
 
-        assert_eq!(dto.reset_credits, None, "{count}");
-        assert_eq!(dto.windows[0].used_percent, 42.0, "{count}");
+        assert_eq!(dto.reading.reset_credits, None, "{count}");
+        assert_eq!(dto.reading.windows[0].used_percent, 42.0, "{count}");
     }
 }
 
@@ -604,7 +622,7 @@ fn a_saved_codex_read_takes_the_term_for_its_own_workspace() {
         &who,
         r#"{"active_until":"2026-09-28T16:22:34Z","will_renew":false,"cancellation_outcome":"user_cancelled"}"#,
     );
-    let term = dto.subscription.expect("the term is on the card");
+    let term = dto.reading.subscription.expect("the term is on the card");
     assert!(!term.will_renew);
     assert_eq!(term.note, Some(crate::dto::SubscriptionNote::Cancelled));
     assert!(head.contains("account_id=team"), "{head}");
@@ -618,7 +636,7 @@ fn a_saved_codex_read_takes_the_term_for_its_own_workspace() {
         &other,
         r#"{"active_until":"2026-10-28T16:22:34Z","will_renew":true}"#,
     );
-    assert!(dto.subscription.unwrap().will_renew);
+    assert!(dto.reading.subscription.unwrap().will_renew);
     assert!(head.contains("account_id=other"), "{head}");
 }
 
@@ -695,14 +713,14 @@ fn saved_codex_reads_what_a_workspace_member_spent() {
         .to_lowercase()
         .contains("chatgpt-account-id: team"));
     assert_eq!(
-        dto.credits_spent,
+        dto.reading.credits_spent,
         Some(crate::dto::LimitsCreditsSpentDto {
             last_7_days: 170.5,
             last_30_days: 1170.5,
             updated_at: Some("2026-09-24T19:00:00Z".to_string()),
         })
     );
-    assert_eq!(dto.windows[0].used_percent, 12.0);
+    assert_eq!(dto.reading.windows[0].used_percent, 12.0);
 }
 
 /// Only a workspace pools credits, so a personal plan is never asked what it spent.
@@ -728,7 +746,7 @@ fn saved_codex_never_asks_a_personal_plan_what_it_spent() {
         Err(std::io::ErrorKind::WouldBlock),
         "a personal plan has no pooled credits to ask about"
     );
-    assert_eq!(dto.credits_spent, None);
+    assert_eq!(dto.reading.credits_spent, None);
 }
 
 /// As with the banked-reset detail, the spending read never decides the usage read: a member the
@@ -755,8 +773,8 @@ fn a_spending_read_that_fails_leaves_the_usage_read_standing() {
         .unwrap();
         requests.join().unwrap();
 
-        assert_eq!(dto.credits_spent, None, "{status}");
-        assert_eq!(dto.windows[0].used_percent, 12.0, "{status}");
+        assert_eq!(dto.reading.credits_spent, None, "{status}");
+        assert_eq!(dto.reading.windows[0].used_percent, 12.0, "{status}");
     }
 }
 
@@ -789,12 +807,12 @@ fn a_saved_claude_team_or_enterprise_account_is_never_asked_what_it_spent() {
         p.join().unwrap();
         u.join().unwrap();
 
-        assert_eq!(dto.plan.as_deref(), Some(plan));
+        assert_eq!(dto.reading.plan.as_deref(), Some(plan));
         assert_eq!(
             spending.accept().map(|_| ()).map_err(|error| error.kind()),
             Err(std::io::ErrorKind::WouldBlock),
             "a Claude {plan} account asked what it spent"
         );
-        assert_eq!(dto.credits_spent, None);
+        assert_eq!(dto.reading.credits_spent, None);
     }
 }

@@ -198,7 +198,7 @@ the provider has no running clients; failures retain the private directory for l
 
 New usage and subscription observation keys contain both user and workspace. Legacy observations remain
 historical, with no inferred ownership. Unattributed session usage cannot advance new scoped
-profiles. Organization-only Claude Desktop samples are also excluded from user-scoped history.
+profiles. on-n-off does not read Claude Desktop's organization-only usage samples at all.
 Subscription terms appear directly on account cards. The term (whether the plan renews) is read during
 the usage read with the login's own access token: the signed-in login's after the app-server identity
 check, a saved profile's from the vault, without changing the active CLI; it is remembered with the

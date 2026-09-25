@@ -23,7 +23,7 @@ fn a_failed_inactive_read_preserves_its_last_numbers_and_timestamp() {
     let profile = profile();
     let mut entries = vec![];
     merge(&mut entries, &profile, Some(Err("paused".into())));
-    entries[0].windows.push(crate::dto::LimitWindowDto {
+    entries[0].reading.windows.push(crate::dto::LimitWindowDto {
         id: "weekly".into(),
         label: "Weekly".into(),
         kind: crate::dto::LimitWindowKind::Weekly,
@@ -34,8 +34,11 @@ fn a_failed_inactive_read_preserves_its_last_numbers_and_timestamp() {
     });
     merge(&mut entries, &profile, Some(Err("unavailable".into())));
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].windows[0].used_percent, 73.0);
-    assert_eq!(entries[0].windows[0].observed_at, "2026-09-01T00:00:00Z");
+    assert_eq!(entries[0].reading.windows[0].used_percent, 73.0);
+    assert_eq!(
+        entries[0].reading.windows[0].observed_at,
+        "2026-09-01T00:00:00Z"
+    );
     assert_eq!(entries[0].status, LimitsStatus::Failed);
     assert!(!entries[0].current_account);
 }
@@ -51,17 +54,17 @@ fn a_saved_read_that_cannot_tell_keeps_the_banked_reset_count_and_an_answer_repl
     };
     let read = |reset_credits| {
         let mut dto = reading(&profile);
-        dto.reset_credits = reset_credits;
+        dto.reading.reset_credits = reset_credits;
         Some(Ok(dto))
     };
     let mut entries = vec![];
 
     merge(&mut entries, &profile, read(banked(1)));
     merge(&mut entries, &profile, read(None));
-    assert_eq!(entries[0].reset_credits, banked(1));
+    assert_eq!(entries[0].reading.reset_credits, banked(1));
 
     merge(&mut entries, &profile, read(banked(0)));
-    assert_eq!(entries[0].reset_credits, banked(0));
+    assert_eq!(entries[0].reading.reset_credits, banked(0));
 }
 
 #[test]
@@ -96,7 +99,7 @@ fn reading(profile: &Profile) -> ProviderLimitsDto {
     let mut dto = entries.remove(0);
     dto.status = LimitsStatus::Ok;
     dto.message = None;
-    dto.windows = vec![crate::dto::LimitWindowDto {
+    dto.reading.windows = vec![crate::dto::LimitWindowDto {
         id: "weekly".into(),
         label: "Weekly".into(),
         kind: crate::dto::LimitWindowKind::Weekly,
@@ -120,7 +123,7 @@ fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
     })
     .unwrap()
     .unwrap();
-    assert_eq!(result.windows[0].used_percent, 42.0);
+    assert_eq!(result.reading.windows[0].used_percent, 42.0);
     assert!(home
         .path()
         .join(".on-n-off/limits")
@@ -306,7 +309,7 @@ fn native_api_key_login_does_not_block_saved_subscription_polling() {
         },
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert_eq!(entries[0].windows[0].used_percent, 42.0);
+    assert_eq!(entries[0].reading.windows[0].used_percent, 42.0);
 }
 
 fn policy_profile(provider: AgentId, owned: bool, expired: bool) -> Profile {
@@ -396,7 +399,7 @@ fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_result
     let native_calls = AtomicUsize::new(0);
     let mut current = reading(&active);
     current.current_account = true;
-    current.windows[0].used_percent = 19.0;
+    current.reading.windows[0].used_percent = 19.0;
     let fetch_calls = calls.clone();
     TEST_REFRESH.with(|fixture| {
         *fixture.borrow_mut() = Some(Box::new(move |force, entries| {
@@ -434,7 +437,7 @@ fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_result
     assert_eq!(first, cached);
     assert_eq!(first.len(), 2);
     assert_eq!(first[0], current);
-    assert_eq!(first[1].windows[0].used_percent, 42.0);
+    assert_eq!(first[1].reading.windows[0].used_percent, 42.0);
     assert!(!first[1].current_account);
 }
 
@@ -503,7 +506,7 @@ fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_
         next_expires_at: None,
     });
     let mut reading_with_count = reading(&p);
-    reading_with_count.reset_credits.clone_from(&banked);
+    reading_with_count.reading.reset_credits.clone_from(&banked);
     remember(home.path(), &reading_with_count).unwrap();
 
     for (refresh, observed_at) in ["2026-09-20T00:00:00Z", "2026-09-21T00:00:00Z"]
@@ -513,14 +516,17 @@ fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_
         let mut entries = remembered(home.path(), AgentId::Claude);
         let result = poll_with(home.path(), &p, 0, true, &|| Ok(open(home.path())), &|p| {
             let mut dto = reading(p);
-            dto.windows[0].observed_at = observed_at.into();
+            dto.reading.windows[0].observed_at = observed_at.into();
             FetchResult {
                 login: p.login.clone(),
                 result: Ok(dto),
             }
         });
         merge(&mut entries, &p, result);
-        assert_eq!(entries[0].reset_credits, banked, "refresh {refresh}");
+        assert_eq!(
+            entries[0].reading.reset_credits, banked,
+            "refresh {refresh}"
+        );
     }
 }
 
@@ -535,7 +541,7 @@ fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_cards_figure() {
     });
     let mut entries = vec![];
     let mut first = codex_reading(&profile, "business");
-    first.credits_spent.clone_from(&spent);
+    first.reading.credits_spent.clone_from(&spent);
     merge(&mut entries, &profile, Some(Ok(first)));
 
     merge(
@@ -544,7 +550,7 @@ fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_cards_figure() {
         Some(Ok(codex_reading(&profile, "business"))),
     );
 
-    assert_eq!(entries[0].credits_spent, spent);
+    assert_eq!(entries[0].reading.credits_spent, spent);
 }
 
 /// A saved read whose term read failed or was backing off keeps the term the card had.
@@ -559,7 +565,7 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_cards_term() {
     });
     let mut entries = vec![];
     let mut first = codex_reading(&profile, "pro");
-    first.subscription.clone_from(&term);
+    first.reading.subscription.clone_from(&term);
     merge(&mut entries, &profile, Some(Ok(first)));
 
     merge(
@@ -568,16 +574,15 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_cards_term() {
         Some(Ok(codex_reading(&profile, "pro"))),
     );
 
-    assert_eq!(entries[0].subscription, term);
+    assert_eq!(entries[0].reading.subscription, term);
 }
 
 /// A saved Codex read on `plan`.
 fn codex_reading(profile: &Profile, plan: &str) -> ProviderLimitsDto {
-    ProviderLimitsDto {
-        provider: AgentId::Codex,
-        plan: Some(plan.to_string()),
-        ..reading(profile)
-    }
+    let mut dto = reading(profile);
+    dto.provider = AgentId::Codex;
+    dto.reading.plan = Some(plan.to_string());
+    dto
 }
 
 /// An account now on a personal plan pools nothing and is never asked what it spent: the figure it
@@ -587,7 +592,7 @@ fn a_saved_personal_plan_read_drops_the_cards_figure() {
     let profile = profile();
     let mut entries = vec![];
     let mut first = codex_reading(&profile, "business");
-    first.credits_spent = Some(crate::dto::LimitsCreditsSpentDto {
+    first.reading.credits_spent = Some(crate::dto::LimitsCreditsSpentDto {
         last_7_days: 18303.4,
         last_30_days: 20299.7,
         updated_at: None,
@@ -600,5 +605,88 @@ fn a_saved_personal_plan_read_drops_the_cards_figure() {
         Some(Ok(codex_reading(&profile, "pro"))),
     );
 
-    assert_eq!(entries[0].credits_spent, None);
+    assert_eq!(entries[0].reading.credits_spent, None);
+}
+
+/// `profile` as a saved Codex account, and its card with every figure known, as the card list holds
+/// it before a poll: remembered, not the signed-in account.
+fn remembered_codex_card(profile: &mut Profile) -> ProviderLimitsDto {
+    profile.identity.provider = AgentId::Codex;
+    serde_json::from_value(json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": profile.identity.observation_key(), "label": "a@example.com"},
+        "currentAccount": false,
+        "plan": "business",
+        "subscriptionStatus": "active",
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 40.0,
+             "observedAt": "2026-09-19T00:00:00Z"}
+        ],
+        "credits": {"balance": "0", "unlimited": false},
+        "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0, "reached": false},
+        "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7},
+        "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
+                         "checkedAt": "2026-09-19T00:00:00Z"},
+        "resetCredits": {"availableCount": 1}
+    }))
+    .unwrap()
+}
+
+/// A failed poll shows the card's whole remembered reading under the failure, its term included.
+#[test]
+fn a_failed_saved_read_keeps_the_cards_whole_reading() {
+    let mut profile = profile();
+    let remembered = remembered_codex_card(&mut profile);
+    let mut entries = vec![remembered.clone()];
+
+    merge(&mut entries, &profile, Some(Err("paused".into())));
+
+    let mut expected = serde_json::to_value(&remembered).unwrap();
+    expected["status"] = json!("failed");
+    expected["message"] = json!("paused");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(serde_json::to_value(&entries[0]).unwrap(), expected);
+}
+
+/// A poll that answered with its plan and one window: the account details and balances it did
+/// not report are gone, and only the figures it could not tell are kept.
+#[test]
+fn an_answered_saved_read_keeps_only_the_figures_it_could_not_tell() {
+    let mut profile = profile();
+    let remembered = remembered_codex_card(&mut profile);
+    let mut entries = vec![remembered];
+    let answered: ProviderLimitsDto = serde_json::from_value(json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": profile.identity.observation_key(), "label": "a@example.com"},
+        "currentAccount": false,
+        "plan": "business",
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 50.0,
+             "observedAt": "2026-09-20T00:00:00Z"}
+        ]
+    }))
+    .unwrap();
+
+    merge(&mut entries, &profile, Some(Ok(answered)));
+
+    assert_eq!(
+        serde_json::to_value(&entries[0]).unwrap(),
+        json!({
+            "provider": "codex",
+            "status": "ok",
+            "account": {"id": profile.identity.observation_key(), "label": "a@example.com"},
+            "currentAccount": false,
+            "plan": "business",
+            "windows": [
+                {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
+                 "usedPercent": 50.0, "observedAt": "2026-09-20T00:00:00Z"}
+            ],
+            "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7},
+            "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
+                             "checkedAt": "2026-09-19T00:00:00Z"},
+            "resetCredits": {"availableCount": 1}
+        })
+    );
 }

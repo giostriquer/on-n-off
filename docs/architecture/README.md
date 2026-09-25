@@ -166,7 +166,9 @@ Each provider is read the way that provider intends, and active login renewal re
 
 Because each CLI stores one login at a time, successful reads are remembered per account (numbers
 only, under `~/.on-n-off/limits/`) so an account the user has switched away from stays visible
-with its last observation time rather than vanishing.
+with its last observation time rather than vanishing. What a later read keeps of that remembered
+reading, after it answers and after it fails, is one policy for every writer, in
+`limits/reading.rs`.
 
 ### Pull requests
 
@@ -311,3 +313,20 @@ flowchart LR
 Snapshots under `~/.on-n-off/` exist so a signed-out account or an offline launch still shows the
 last trustworthy numbers rather than an empty screen. They are numbers and metadata — never
 credentials.
+
+## Glossary
+
+The words are defined in [`CONTEXT.md`](../../CONTEXT.md). This table says where each one lives in
+the code today; a change that moves one updates its row.
+
+| Term | Where it lives |
+| --- | --- |
+| Quota window | `LimitWindowDto` (`dto/limits.rs`) |
+| Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
+| Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
+| Account details | `plan` and `subscription_status` on `Reading` |
+| Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); what a fresh read keeps from it is the remember policy, `Reading::keeping` (`limits/reading.rs`) |
+| Native store | `NativeStore` (`accounts/native.rs`); Claude's login is also read by `claude_login_document` (`limits/credentials.rs`) |
+| Transcript source | `SourceSnapshot` and its entries (`usage/source_index.rs`), walked by `inventory_sources` |
+| Watermark | `Watermark` (`usage/history.rs`) |
+| Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs` |

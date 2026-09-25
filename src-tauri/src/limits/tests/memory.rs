@@ -1,4 +1,4 @@
-use crate::dto::LimitWindowKind;
+use crate::dto::{LimitWindowKind, LimitsAccountDto};
 use crate::limits::json::window;
 use crate::limits::*;
 use crate::paths::scratch_dir;
@@ -18,25 +18,21 @@ fn ok_snapshot(provider: AgentId, id: &str, label: &str, used: f64) -> ProviderL
         None,
         Parsed {
             account: Some(account(id, label)),
-            plan: Some("pro".to_string()),
-            subscription_status: None,
-            windows: vec![window(
-                "primary",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                used,
-                None,
-            )],
-            credits: None,
-            workspace_credits: None,
-            credits_spent: None,
-            subscription: None,
-            reset_credits: None,
-            reset_offer: None,
+            reading: Reading {
+                plan: Some("pro".to_string()),
+                windows: vec![window(
+                    "primary",
+                    "Weekly · all models",
+                    LimitWindowKind::Weekly,
+                    used,
+                    None,
+                )],
+                ..Reading::default()
+            },
         },
     );
     let observed_at = format!("2026-08-17T{:02}:00:00.000Z", used as u32 % 24);
-    for window in &mut dto.windows {
+    for window in &mut dto.reading.windows {
         window.observed_at.clone_from(&observed_at);
     }
     dto
@@ -54,15 +50,15 @@ fn current_read_is_remembered_once_ahead_of_other_accounts() {
         .unwrap();
 
     let mut current = ok_snapshot(AgentId::Codex, "acct-a", "a@x", 50.0);
-    current.windows[0].observed_at = "2026-08-17T23:00:00.000Z".to_string();
-    let listed = aggregate_accounts(&store, current, None);
+    current.reading.windows[0].observed_at = "2026-08-17T23:00:00.000Z".to_string();
+    let listed = aggregate_accounts(&store, current);
     let summary: Vec<(&str, bool, f64)> = listed
         .iter()
         .map(|dto| {
             (
                 dto.account.as_ref().unwrap().id.as_str(),
                 dto.current_account,
-                dto.windows[0].used_percent,
+                dto.reading.windows[0].used_percent,
             )
         })
         .collect();
@@ -72,7 +68,7 @@ fn current_read_is_remembered_once_ahead_of_other_accounts() {
         .into_iter()
         .find(|dto| dto.account.as_ref().unwrap().id == "acct-a")
         .unwrap();
-    assert_eq!(remembered_a.windows[0].used_percent, 50.0);
+    assert_eq!(remembered_a.reading.windows[0].used_percent, 50.0);
 }
 
 #[test]
@@ -89,7 +85,7 @@ fn failed_anonymous_read_hides_no_remembered_account_and_saves_nothing() {
         Parsed::default(),
     );
 
-    let listed = aggregate_accounts(&store, signed_out, None);
+    let listed = aggregate_accounts(&store, signed_out);
 
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].status, LimitsStatus::SignedOut);
@@ -108,19 +104,22 @@ fn successful_read_without_an_account_is_not_remembered() {
         LimitsStatus::Ok,
         None,
         Parsed {
-            plan: Some("max".to_string()),
-            windows: vec![window(
-                "w",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                1.0,
-                None,
-            )],
-            ..Parsed::default()
+            account: None,
+            reading: Reading {
+                plan: Some("max".to_string()),
+                windows: vec![window(
+                    "w",
+                    "Weekly · all models",
+                    LimitWindowKind::Weekly,
+                    1.0,
+                    None,
+                )],
+                ..Reading::default()
+            },
         },
     );
 
-    let listed = aggregate_accounts(&store, anonymous, None);
+    let listed = aggregate_accounts(&store, anonymous);
 
     assert_eq!(listed.len(), 1);
     assert!(store.load(AgentId::Codex).is_empty());
@@ -146,7 +145,7 @@ fn failed_read_keeps_the_signed_in_accounts_last_numbers_in_one_card() {
         },
     );
 
-    let listed = aggregate_accounts(&store, stalled, None);
+    let listed = aggregate_accounts(&store, stalled);
 
     assert_eq!(listed.len(), 2, "no blank card above the account's numbers");
     assert_eq!(listed[0].status, LimitsStatus::Unauthenticated);
@@ -155,41 +154,14 @@ fn failed_read_keeps_the_signed_in_accounts_last_numbers_in_one_card() {
         listed[0].current_account,
         "it is still the signed-in account"
     );
-    assert_eq!(listed[0].windows[0].used_percent, 39.0);
-    assert_eq!(listed[0].plan.as_deref(), Some("pro"));
-    assert_eq!(listed[0].windows[0].observed_at, "2026-08-17T15:00:00.000Z");
+    assert_eq!(listed[0].reading.windows[0].used_percent, 39.0);
+    assert_eq!(listed[0].reading.plan.as_deref(), Some("pro"));
+    assert_eq!(
+        listed[0].reading.windows[0].observed_at,
+        "2026-08-17T15:00:00.000Z"
+    );
     assert_eq!(listed[1].account.as_ref().unwrap().id, "uuid-b");
     assert!(!listed[1].current_account);
-}
-
-#[test]
-fn successful_endpoint_windows_persist_without_local_supplementation() {
-    let home = scratch_dir("limits-memory-successful-local-merge");
-    let store = SnapshotStore::for_home(&home);
-    let mut current = ok_snapshot(AgentId::Claude, "uuid-a", "a@x", 50.0);
-    current.windows[0].id = "weekly_all".to_string();
-    current.windows[0].observed_at = "2026-08-20T12:00:00.000Z".to_string();
-    let supplemental = ObservedWindowSet::local(
-        chrono::DateTime::parse_from_rfc3339("2026-08-20T13:00:00.000Z")
-            .unwrap()
-            .with_timezone(&Utc),
-        vec![window(
-            "session",
-            "5 hour · all models",
-            LimitWindowKind::Session,
-            75.0,
-            None,
-        )],
-    );
-
-    let listed = aggregate_accounts(&store, current, Some(supplemental));
-
-    assert_eq!(listed[0].windows.len(), 1);
-    assert_eq!(listed[0].windows[0].id, "weekly_all");
-    assert_eq!(listed[0].windows[0].used_percent, 50.0);
-    let persisted = store.load(AgentId::Claude);
-    assert_eq!(persisted[0].windows.len(), 1);
-    assert_eq!(persisted[0].windows[0].id, "weekly_all");
 }
 
 fn scoped_snapshot(
@@ -221,14 +193,14 @@ fn upgraded_identity_shows_one_card_and_stays_deduplicated_after_reload() {
             ))
             .unwrap();
         let current = scoped_snapshot(provider, "profile:scoped-a", "legacy-a", "a@x", 5.0);
-        let listed = aggregate_accounts(&store, current, None);
+        let listed = aggregate_accounts(&store, current);
         assert_eq!(
             listed.len(),
             2,
             "one active card plus the other remembered account"
         );
         assert_eq!(
-            listed[0].windows[0].used_percent, 5.0,
+            listed[0].reading.windows[0].used_percent, 5.0,
             "legacy windows are not transferred"
         );
         assert_eq!(
@@ -276,7 +248,7 @@ fn identity_upgrade_does_not_merge_accounts_by_email_or_workspace_alone() {
         ))
         .unwrap();
     let current = scoped_snapshot(AgentId::Codex, "profile:current", "workspace-a", "a@x", 5.0);
-    let listed = aggregate_accounts(&store, current, None);
+    let listed = aggregate_accounts(&store, current);
     assert_eq!(listed.len(), 4);
     assert_eq!(SnapshotStore::for_home(&home).load(AgentId::Codex).len(), 4);
 }
@@ -290,11 +262,11 @@ fn failed_upgrade_keeps_unscoped_history_without_attributing_it_to_the_new_ident
         .unwrap();
     let mut current = scoped_snapshot(AgentId::Codex, "profile:current", "workspace-a", "a@x", 5.0);
     current.status = LimitsStatus::Failed;
-    current.windows.clear();
-    let listed = aggregate_accounts(&store, current, None);
+    current.reading.windows.clear();
+    let listed = aggregate_accounts(&store, current);
     assert_eq!(listed.len(), 2);
-    assert!(listed[0].windows.is_empty());
-    assert_eq!(listed[1].windows[0].used_percent, 70.0);
+    assert!(listed[0].reading.windows.is_empty());
+    assert_eq!(listed[1].reading.windows[0].used_percent, 70.0);
 }
 
 #[test]
@@ -313,8 +285,8 @@ fn saved_scoped_history_never_hides_a_current_unscoped_error() {
     let mut current = ok_snapshot(AgentId::Claude, "user-a", "a@x", 0.0);
     current.status = LimitsStatus::Failed;
     current.message = Some("Current account could not be verified".into());
-    current.windows.clear();
-    let listed = aggregate_accounts(&store, current, None);
+    current.reading.windows.clear();
+    let listed = aggregate_accounts(&store, current);
     assert_eq!(
         listed.len(),
         2,
@@ -326,5 +298,5 @@ fn saved_scoped_history_never_hides_a_current_unscoped_error() {
         listed[0].message.as_deref(),
         Some("Current account could not be verified")
     );
-    assert!(listed[0].windows.is_empty());
+    assert!(listed[0].reading.windows.is_empty());
 }
