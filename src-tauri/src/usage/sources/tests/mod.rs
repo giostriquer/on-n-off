@@ -3,10 +3,12 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+use super::test_support::{
+    at, month_start, mtime_ms, record, set_mtime_ms, transcript_path, write_records,
+};
 use super::*;
 use crate::paths::scratch_dir;
 use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
@@ -14,61 +16,18 @@ use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 mod read;
 mod watermark;
 
-const JULY_START: i64 = 1_783_036_800_000;
-const AUGUST_START: i64 = 1_785_715_200_000;
-const SEPTEMBER_START: i64 = 1_788_393_600_000;
-
-fn transcript_path(home: &Path, name: &str) -> PathBuf {
-    home.join(".claude")
-        .join("projects")
-        .join("fixture")
-        .join(name)
-}
-
-fn record(timestamp: &str, message_id: &str, output_tokens: u64) -> String {
-    json!({
-        "type": "assistant",
-        "timestamp": timestamp,
-        "sessionId": "sources-session",
-        "message": {
-            "id": message_id,
-            "model": "claude-fable-5",
-            "usage": {
-                "input_tokens": 1,
-                "cache_creation_input_tokens": 0,
-                "cache_read_input_tokens": 0,
-                "output_tokens": output_tokens
-            }
-        }
-    })
-    .to_string()
-}
-
-fn write_records(path: &Path, records: &[String]) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, format!("{}\n", records.join("\n"))).unwrap();
-}
-
 fn append_record(path: &Path, record: &str) {
     let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
     writeln!(file, "{record}").unwrap();
 }
 
-fn set_mtime_ms(path: &Path, mtime_ms: i64) {
-    let file = std::fs::File::options().write(true).open(path).unwrap();
-    file.set_modified(UNIX_EPOCH + Duration::from_millis(mtime_ms as u64))
-        .unwrap();
-}
-
 /// Rewrites `path` with a record of the same length and moves its mtime five seconds on, so only
 /// the mtime tells the two versions apart.
 fn rewrite_same_size_later(path: &Path, record: &str) {
-    let before = std::fs::metadata(path).unwrap();
+    let (size, mtime) = (std::fs::metadata(path).unwrap().len(), mtime_ms(path));
     write_records(path, &[record.to_string()]);
-    let file = std::fs::File::options().write(true).open(path).unwrap();
-    file.set_modified(before.modified().unwrap() + Duration::from_secs(5))
-        .unwrap();
-    assert_eq!(file.metadata().unwrap().len(), before.len());
+    set_mtime_ms(path, mtime + 5_000);
+    assert_eq!(std::fs::metadata(path).unwrap().len(), size);
 }
 
 /// Sources opened on `home` with `watermark`; the lock is held until they finish.
@@ -109,12 +68,12 @@ fn unchanged_sources_keep_their_index_and_window_signature() {
     let path = transcript_path(&home, "august.jsonl");
     write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
     let first = open(&home, Watermark::NONE);
-    let first_signature = first.signature(AUGUST_START, SEPTEMBER_START);
+    let first_signature = first.signature(month_start(8), month_start(9));
     let first_seen = first.finish(|| Watermark::NONE);
     assert_eq!(cached_record_count(&home, &path), Some(1));
     reset_transcript_parse_count();
 
-    let second = signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START);
+    let second = signature(&home, Watermark::NONE, month_start(8), month_start(9));
 
     assert_eq!(second, first_signature);
     assert_eq!(transcript_parse_count(), 0);
@@ -129,7 +88,7 @@ fn a_created_transcript_changes_the_signature_of_a_window_it_falls_in() {
     let home = scratch_dir("usage-sources-create");
     std::fs::create_dir_all(home.join(".claude").join("projects")).unwrap();
     let before = open(&home, Watermark::NONE);
-    let before_signature = before.signature(AUGUST_START, SEPTEMBER_START);
+    let before_signature = before.signature(month_start(8), month_start(9));
     let before_seen = before.finish(|| Watermark::NONE);
 
     let created_path = transcript_path(&home, "created.jsonl");
@@ -138,7 +97,7 @@ fn a_created_transcript_changes_the_signature_of_a_window_it_falls_in() {
         &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)],
     );
     let created = open(&home, Watermark::NONE);
-    let created_signature = created.signature(AUGUST_START, SEPTEMBER_START);
+    let created_signature = created.signature(month_start(8), month_start(9));
     let created_seen = created.finish(|| Watermark::NONE);
     let created_unchanged = unchanged(&created_seen);
     std::fs::remove_file(&created_path).unwrap();
@@ -154,10 +113,10 @@ fn an_appended_transcript_changes_the_signature_and_its_cached_parse() {
     let home = scratch_dir("usage-sources-append");
     let path = transcript_path(&home, "append.jsonl");
     write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
-    let before = signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START);
+    let before = signature(&home, Watermark::NONE, month_start(8), month_start(9));
 
     append_record(&path, &record("2026-08-08T04:05:13.944Z", "msg-2", 25));
-    let appended = signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START);
+    let appended = signature(&home, Watermark::NONE, month_start(8), month_start(9));
 
     assert_ne!(appended, before);
     assert_eq!(cached_record_count(&home, &path), Some(2));
@@ -169,17 +128,17 @@ fn a_same_size_rewrite_with_a_new_mtime_changes_both_windows_it_moves_between() 
     let home = scratch_dir("usage-sources-rewrite");
     let path = transcript_path(&home, "rewrite.jsonl");
     write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-a", 20)]);
-    let august_before = signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START);
-    let july_before = signature(&home, Watermark::NONE, JULY_START, AUGUST_START);
+    let august_before = signature(&home, Watermark::NONE, month_start(8), month_start(9));
+    let july_before = signature(&home, Watermark::NONE, month_start(7), month_start(8));
 
     rewrite_same_size_later(&path, &record("2026-07-07T04:05:13.944Z", "msg-j", 20));
 
     assert_ne!(
-        signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START),
+        signature(&home, Watermark::NONE, month_start(8), month_start(9)),
         august_before
     );
     assert_ne!(
-        signature(&home, Watermark::NONE, JULY_START, AUGUST_START),
+        signature(&home, Watermark::NONE, month_start(7), month_start(8)),
         july_before
     );
     let _ = std::fs::remove_dir_all(home);
@@ -190,12 +149,12 @@ fn a_deleted_transcript_changes_the_signature_of_its_previous_window() {
     let home = scratch_dir("usage-sources-delete");
     let path = transcript_path(&home, "delete.jsonl");
     write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
-    let before = signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START);
+    let before = signature(&home, Watermark::NONE, month_start(8), month_start(9));
 
     std::fs::remove_file(path).unwrap();
 
     assert_ne!(
-        signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START),
+        signature(&home, Watermark::NONE, month_start(8), month_start(9)),
         before
     );
     let _ = std::fs::remove_dir_all(home);
@@ -213,8 +172,8 @@ fn a_window_signature_ignores_a_change_outside_the_window() {
         &august_path,
         &[record("2026-08-07T04:05:13.944Z", "msg-a", 20)],
     );
-    let july_before = signature(&home, Watermark::NONE, JULY_START, AUGUST_START);
-    let august_before = signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START);
+    let july_before = signature(&home, Watermark::NONE, month_start(7), month_start(8));
+    let august_before = signature(&home, Watermark::NONE, month_start(8), month_start(9));
 
     append_record(
         &august_path,
@@ -222,11 +181,11 @@ fn a_window_signature_ignores_a_change_outside_the_window() {
     );
 
     assert_eq!(
-        signature(&home, Watermark::NONE, JULY_START, AUGUST_START),
+        signature(&home, Watermark::NONE, month_start(7), month_start(8)),
         july_before
     );
     assert_ne!(
-        signature(&home, Watermark::NONE, AUGUST_START, SEPTEMBER_START),
+        signature(&home, Watermark::NONE, month_start(8), month_start(9)),
         august_before
     );
     let _ = std::fs::remove_dir_all(home);
@@ -236,8 +195,8 @@ fn a_window_signature_ignores_a_change_outside_the_window() {
 fn the_signature_of_no_transcripts_still_depends_on_its_window() {
     let home = scratch_dir("usage-sources-bounds");
     let sources = open(&home, Watermark::NONE);
-    let july = sources.signature(JULY_START, AUGUST_START);
-    let august = sources.signature(AUGUST_START, SEPTEMBER_START);
+    let july = sources.signature(month_start(7), month_start(8));
+    let august = sources.signature(month_start(8), month_start(9));
     sources.finish(|| Watermark::NONE);
     assert_ne!(july, august);
     let _ = std::fs::remove_dir_all(home);
@@ -247,17 +206,17 @@ fn the_signature_of_no_transcripts_still_depends_on_its_window() {
 fn a_root_appearing_or_going_changes_the_signature_and_the_provider_it_shows() {
     let home = scratch_dir("usage-sources-root-presence");
     let missing = open(&home, Watermark::NONE);
-    let missing_signature = missing.signature(AUGUST_START, SEPTEMBER_START);
+    let missing_signature = missing.signature(month_start(8), month_start(9));
     let missing_seen = missing.finish(|| Watermark::NONE);
 
     std::fs::create_dir_all(home.join(".claude").join("projects")).unwrap();
     let present = open(&home, Watermark::NONE);
-    let present_signature = present.signature(AUGUST_START, SEPTEMBER_START);
+    let present_signature = present.signature(month_start(8), month_start(9));
     let present_seen = present.finish(|| Watermark::NONE);
 
     std::fs::remove_dir_all(home.join(".claude")).unwrap();
     let gone = open(&home, Watermark::NONE);
-    let gone_signature = gone.signature(AUGUST_START, SEPTEMBER_START);
+    let gone_signature = gone.signature(month_start(8), month_start(9));
     let gone_seen = gone.finish(|| Watermark::NONE);
 
     assert!(!claude_present(&missing_seen));

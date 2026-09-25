@@ -175,7 +175,7 @@ fn a_cached_parse_serves_only_while_both_size_and_mtime_match() {
 #[test]
 fn a_read_from_an_instant_reads_transcripts_written_up_to_36_hours_before_it() {
     let home = scratch_dir("usage-sources-read-slack");
-    let from_ms = AUGUST_START;
+    let from_ms = month_start(8);
     let edge = transcript_path(&home, "edge.jsonl");
     let earlier = transcript_path(&home, "earlier.jsonl");
     write_records(&edge, &[record("2026-08-01T01:00:00.000Z", "msg-edge", 20)]);

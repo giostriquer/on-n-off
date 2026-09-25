@@ -3,12 +3,6 @@
 
 use super::*;
 
-fn at(iso: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
-}
-
 fn watermark() -> Watermark {
     Watermark::at(at("2026-08-14T00:00:00Z"))
 }
@@ -48,10 +42,10 @@ fn a_transcript_last_written_well_before_the_watermark_signs_the_same_parsed_or_
     let index = source_index_path_for(&home);
     std::fs::remove_file(&index).unwrap();
 
-    let with_parse = signature(&home, watermark(), AUGUST_START, SEPTEMBER_START);
+    let with_parse = signature(&home, watermark(), month_start(8), month_start(9));
     std::fs::remove_file(&index).unwrap();
     let _ = std::fs::remove_file(scan_cache_path_for(&home));
-    let without_parse = signature(&home, watermark(), AUGUST_START, SEPTEMBER_START);
+    let without_parse = signature(&home, watermark(), month_start(8), month_start(9));
 
     assert_eq!(with_parse, without_parse);
     let _ = std::fs::remove_dir_all(home);

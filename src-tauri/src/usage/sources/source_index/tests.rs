@@ -2,6 +2,7 @@
 //! on every platform, and how one parse attempt reads a file that moves. Everything else about
 //! the index is tested through `Sources` (`sources/tests`).
 
+use super::super::test_support::{record, transcript_path, write_records};
 use super::*;
 use crate::paths::scratch_dir;
 use crate::usage::transcripts::parse_claude_line;
@@ -11,37 +12,6 @@ fn roots(home: &Path) -> Vec<SourceRoot> {
         provider: UsageProvider::Claude,
         path: home.join(".claude").join("projects"),
     }]
-}
-
-fn transcript_path(home: &Path, name: &str) -> PathBuf {
-    home.join(".claude")
-        .join("projects")
-        .join("fixture")
-        .join(name)
-}
-
-fn record(timestamp: &str, message_id: &str, output_tokens: u64) -> String {
-    serde_json::json!({
-        "type": "assistant",
-        "timestamp": timestamp,
-        "sessionId": "source-index-session",
-        "message": {
-            "id": message_id,
-            "model": "claude-fable-5",
-            "usage": {
-                "input_tokens": 1,
-                "cache_creation_input_tokens": 0,
-                "cache_read_input_tokens": 0,
-                "output_tokens": output_tokens
-            }
-        }
-    })
-    .to_string()
-}
-
-fn write_records(path: &Path, records: &[String]) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, format!("{}\n", records.join("\n"))).unwrap();
 }
 
 #[test]
