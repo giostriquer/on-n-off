@@ -31,7 +31,7 @@ fn claudes_ring_leads_with_its_weekly_over_its_session() {
 }
 
 #[test]
-fn codexs_ring_leads_with_its_session_when_it_reports_one() {
+fn codexs_ring_leads_with_its_weekly_over_its_session() {
     let windows = vec![
         window(
             "secondary",
@@ -46,8 +46,8 @@ fn codexs_ring_leads_with_its_session_when_it_reports_one() {
             20.0,
         ),
     ];
-    assert_eq!(ring_label(AgentId::Codex, windows.clone()), "20%");
-    assert_eq!(ring_label(AgentId::Codex, windows[..1].to_vec()), "10%");
+    assert_eq!(ring_label(AgentId::Codex, windows.clone()), "10%");
+    assert_eq!(ring_label(AgentId::Codex, windows[1..].to_vec()), "20%");
 }
 #[test]
 fn unreadable_providers_fall_back_to_the_dash_label() {

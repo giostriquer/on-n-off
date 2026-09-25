@@ -92,29 +92,36 @@ fn only_claudes_window_labelled_weekly_fable_fills_the_inner_ring() {
     );
 }
 
+/// Every ring leads with its headline window, the first of the card's windows: weekly, then
+/// session, then per model. Codex included, which used to lead with its session.
 #[test]
-fn claude_without_a_weekly_window_leads_with_nothing() {
-    let card = signed_in(
-        AgentId::Claude,
-        vec![session("session"), model("weekly_opus", "Weekly · Opus")],
-    );
-    assert_eq!(headline(card), None);
-}
-
-#[test]
-fn codex_leads_with_its_session_when_it_reports_one_else_its_weekly() {
-    let both = signed_in(
+fn every_ring_leads_with_its_headline_window_weekly_then_session_then_model() {
+    let codex_both = signed_in(
         AgentId::Codex,
         vec![weekly("secondary"), session("primary")],
     );
-    assert_eq!(headline(both).as_deref(), Some("primary"));
-    let weekly_only = signed_in(AgentId::Codex, vec![weekly("primary")]);
-    assert_eq!(headline(weekly_only).as_deref(), Some("primary"));
-    let models_only = signed_in(
+    assert_eq!(headline(codex_both).as_deref(), Some("secondary"));
+    let codex_weekly = signed_in(AgentId::Codex, vec![weekly("primary")]);
+    assert_eq!(headline(codex_weekly).as_deref(), Some("primary"));
+    let codex_session = signed_in(
+        AgentId::Codex,
+        vec![
+            session("primary"),
+            model("extra:luna", "Weekly · GPT-5.6-Luna"),
+        ],
+    );
+    assert_eq!(headline(codex_session).as_deref(), Some("primary"));
+    let codex_models = signed_in(
         AgentId::Codex,
         vec![model("extra:luna", "Weekly · GPT-5.6-Luna")],
     );
-    assert_eq!(headline(models_only), None);
+    assert_eq!(headline(codex_models).as_deref(), Some("extra:luna"));
+    let claude_without_weekly = signed_in(
+        AgentId::Claude,
+        vec![session("session"), model("weekly_opus", "Weekly · Opus")],
+    );
+    assert_eq!(headline(claude_without_weekly).as_deref(), Some("session"));
+    assert_eq!(headline(signed_in(AgentId::Claude, Vec::new())), None);
 }
 
 /// A business member's credit share takes the inner ring; the weekly window stays the headline, and

@@ -299,7 +299,8 @@ pub struct NotchProvider {
     pub plan: Option<String>,
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
-    /// The window the ring and the figure show, by id; none while the account cannot be read.
+    /// The window the ring and the figure show, by id: the headline window, the first of weekly,
+    /// session and model, which is the card's first window. None while the account cannot be read.
     pub headline_window_id: Option<String>,
     /// None while the account cannot be read, or when it has nothing to show there.
     pub inner_ring: Option<InnerRing>,
@@ -330,7 +331,7 @@ impl NotchProvider {
         let readable = card.status == LimitsStatus::Ok;
         let windows = card.reading.windows;
         let headline_window_id = readable
-            .then(|| headline_window(card.provider, &windows))
+            .then(|| windows.first())
             .flatten()
             .map(|window| window.id.clone());
         let inner_ring = readable
@@ -357,18 +358,6 @@ impl NotchProvider {
             inner_ring,
             workspace_credits: card.reading.workspace_credits,
         })
-    }
-}
-
-/// Claude's weekly limit (its 5-hour window is in the popover); otherwise the current session,
-/// falling back to weekly.
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-fn headline_window(provider: AgentId, windows: &[LimitWindowDto]) -> Option<&LimitWindowDto> {
-    let first = |kind: LimitWindowKind| windows.iter().find(|window| window.kind == kind);
-    if provider == AgentId::Claude {
-        first(LimitWindowKind::Weekly)
-    } else {
-        first(LimitWindowKind::Session).or_else(|| first(LimitWindowKind::Weekly))
     }
 }
 
