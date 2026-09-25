@@ -557,9 +557,12 @@ impl<'a> PendingWrite<'a> {
                     ));
                 }
                 // Created now, private and beside the file, so a directory that will not take it
-                // says so before anything is written, or redeemed.
-                let temporary =
-                    tempfile::NamedTempFile::new_in(&self.dir.path).map_err(|error| {
+                // says so before anything is written, or redeemed. Named for what it is, so one
+                // left behind by a kill between write and rename can be told apart.
+                let temporary = tempfile::Builder::new()
+                    .prefix(".credentials.json.on-n-off.")
+                    .tempfile_in(&self.dir.path)
+                    .map_err(|error| {
                         BeginError::Unavailable(format!("{}: {error}", self.dir.path.display()))
                     })?;
                 WriteTarget::File { path, temporary }

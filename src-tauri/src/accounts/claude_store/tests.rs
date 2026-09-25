@@ -220,6 +220,15 @@ fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
         2,
         "the temporary is created up front, before the grant"
     );
+    let temporary = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .find(|name| name != ".credentials.json" && !name.ends_with(".lock"))
+        .unwrap();
+    assert!(
+        temporary.starts_with(".credentials.json.on-n-off."),
+        "a stray left by a kill between write and rename says whose it is: {temporary}"
+    );
     assert!(
         storage_write.is_dir(),
         "Claude Code's credentials are locked from the read on"
