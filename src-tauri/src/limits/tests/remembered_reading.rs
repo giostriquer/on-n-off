@@ -56,7 +56,7 @@ fn an_answered_read_keeps_only_the_remembered_figures_it_could_not_tell() {
         "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
     }));
 
-    let listed = aggregate_accounts(&store, answered, None);
+    let listed = aggregate_accounts(&store, answered);
 
     assert_eq!(listed.len(), 1);
     assert_eq!(
@@ -115,7 +115,7 @@ fn a_failed_read_shows_the_remembered_reading() {
         "windows": []
     }));
 
-    let listed = aggregate_accounts(&store, failed, None);
+    let listed = aggregate_accounts(&store, failed);
 
     assert_eq!(listed.len(), 1);
     assert_eq!(
@@ -196,7 +196,7 @@ fn a_failed_read_merges_its_windows_with_the_remembered_ones_by_id() {
         ]
     }));
 
-    let listed = aggregate_accounts(&store, failed, None);
+    let listed = aggregate_accounts(&store, failed);
 
     assert_eq!(
         wire(&listed[0])["windows"],
@@ -243,7 +243,7 @@ fn a_failed_read_shows_nothing_of_a_remembered_reading_it_cannot_date() {
         "windows": []
     }));
 
-    let listed = aggregate_accounts(&store, failed, None);
+    let listed = aggregate_accounts(&store, failed);
 
     assert_eq!(
         wire(&listed[0]),

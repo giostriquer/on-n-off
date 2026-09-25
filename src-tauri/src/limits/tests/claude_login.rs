@@ -74,7 +74,6 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
             memo: &rig.memo,
             keychain: || Ok(None),
             claude: refused_endpoints(&refused),
-            claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,
         },
     );

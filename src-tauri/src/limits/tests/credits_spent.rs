@@ -73,14 +73,9 @@ fn a_business_card_keeps_what_it_spent_after_an_account_switch() {
     aggregate_accounts(
         &store,
         business_card("acct-a", LimitsStatus::Ok, spent(18303.4)),
-        None,
     );
 
-    let listed = aggregate_accounts(
-        &store,
-        business_card("acct-b", LimitsStatus::Ok, None),
-        None,
-    );
+    let listed = aggregate_accounts(&store, business_card("acct-b", LimitsStatus::Ok, None));
 
     let remembered = card(&listed, "acct-a");
     assert!(!remembered.current_account);
@@ -96,14 +91,9 @@ fn a_failed_signed_in_read_keeps_what_the_card_spent() {
     aggregate_accounts(
         &store,
         business_card("acct-a", LimitsStatus::Ok, spent(18303.4)),
-        None,
     );
 
-    let listed = aggregate_accounts(
-        &store,
-        business_card("acct-a", LimitsStatus::Failed, None),
-        None,
-    );
+    let listed = aggregate_accounts(&store, business_card("acct-a", LimitsStatus::Failed, None));
 
     let current = card(&listed, "acct-a");
     assert_eq!(current.status, LimitsStatus::Failed);
@@ -119,14 +109,9 @@ fn a_read_that_could_not_tell_what_was_spent_keeps_the_remembered_figure() {
     aggregate_accounts(
         &store,
         business_card("acct-a", LimitsStatus::Ok, spent(18303.4)),
-        None,
     );
 
-    let listed = aggregate_accounts(
-        &store,
-        business_card("acct-a", LimitsStatus::Ok, None),
-        None,
-    );
+    let listed = aggregate_accounts(&store, business_card("acct-a", LimitsStatus::Ok, None));
 
     assert_eq!(card(&listed, "acct-a").credits_spent, spent(18303.4));
     assert_eq!(store.load(AgentId::Codex)[0].credits_spent, spent(18303.4));
@@ -135,7 +120,6 @@ fn a_read_that_could_not_tell_what_was_spent_keeps_the_remembered_figure() {
     let listed = aggregate_accounts(
         &store,
         business_card("acct-a", LimitsStatus::Ok, spent(5.0)),
-        None,
     );
     assert_eq!(card(&listed, "acct-a").credits_spent, spent(5.0));
 }
@@ -149,12 +133,11 @@ fn a_personal_plan_read_drops_the_remembered_figure() {
     aggregate_accounts(
         &store,
         business_card("acct-a", LimitsStatus::Ok, spent(18303.4)),
-        None,
     );
     let mut personal = business_card("acct-a", LimitsStatus::Ok, None);
     personal.plan = Some("pro".to_string());
 
-    let listed = aggregate_accounts(&store, personal, None);
+    let listed = aggregate_accounts(&store, personal);
 
     assert_eq!(card(&listed, "acct-a").credits_spent, None);
     assert_eq!(store.load(AgentId::Codex)[0].credits_spent, None);

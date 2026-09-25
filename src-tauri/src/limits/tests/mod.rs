@@ -268,7 +268,6 @@ impl Rig {
                     profile,
                     usage,
                 },
-                claude_desktop_history: claude_desktop::history_path_for_home(&self.home),
                 now_ms: NOW_MS,
             },
         )
@@ -545,7 +544,6 @@ fn an_expired_access_token_with_a_live_refresh_token_asks_only_for_a_cli_run() {
             memo: &rig.memo,
             keychain: || Ok(None),
             claude: refused_endpoints(&refused),
-            claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,
         },
     );
@@ -579,7 +577,6 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
             memo: &rig.memo,
             keychain: || Ok(None),
             claude: refused_endpoints(&refused),
-            claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,
         },
     );

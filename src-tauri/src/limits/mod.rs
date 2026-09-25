@@ -10,7 +10,6 @@
 
 mod backend_memo;
 mod claude;
-mod claude_desktop;
 use crate::accounts::claude_renew;
 mod codex;
 mod codex_app_server;
@@ -25,7 +24,7 @@ mod renewal;
 pub(crate) mod saved;
 mod snapshots;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
@@ -121,7 +120,6 @@ struct Sources<'a, P: Fn() -> KeychainProbe> {
     memo: &'a ClaudeLoginMemo,
     keychain: P,
     claude: ClaudeEndpoints<'a>,
-    claude_desktop_history: PathBuf,
     now_ms: i64,
 }
 
@@ -143,7 +141,6 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             )]
         }
     };
-    let claude_desktop_history = claude_desktop::history_path(&home);
     read_limits_in(
         agent,
         force,
@@ -156,7 +153,6 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
                 profile: CLAUDE_PROFILE_URL,
                 usage: CLAUDE_USAGE_URL,
             },
-            claude_desktop_history,
             now_ms: Utc::now().timestamp_millis(),
         },
     )
@@ -199,9 +195,9 @@ fn read_limits_in<P: Fn() -> KeychainProbe>(
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
-    let (current, supplemental) = match agent {
+    let current = match agent {
         AgentId::Claude => claude_current(force, sources),
-        AgentId::Codex => (codex_limits(home, force), None),
+        AgentId::Codex => codex_limits(home, force),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
                 agent,
@@ -215,7 +211,7 @@ fn read_limits_in<P: Fn() -> KeychainProbe>(
         }
     };
     let store = SnapshotStore::for_home(home);
-    let mut accounts = aggregate_accounts(&store, current, supplemental);
+    let mut accounts = aggregate_accounts(&store, current);
     if agent == AgentId::Codex {
         let before = accounts.clone();
         if codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0 {
@@ -243,11 +239,7 @@ fn provider_read_guard(agent: AgentId) -> MutexGuard<'static, ()> {
 
 /// Merge every available observation for the current account, persist the canonical account view,
 /// then return it followed by the other remembered accounts, newest first.
-fn aggregate_accounts(
-    store: &SnapshotStore,
-    current: ProviderLimitsDto,
-    supplemental: Option<ObservedWindowSet>,
-) -> Vec<ProviderLimitsDto> {
+fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<ProviderLimitsDto> {
     let current_account = current.account.as_ref().map(|account| account.id.clone());
     let mut remembered = store.load(current.provider);
     let prior = current_account.as_deref().and_then(|id| {
@@ -268,11 +260,7 @@ fn aggregate_accounts(
         }
         current
     } else {
-        observations::merge_windows(
-            current,
-            supplemental,
-            prior.and_then(ObservedWindowSet::from_account),
-        )
+        observations::merge_windows(current, prior.and_then(ObservedWindowSet::from_account))
     };
     let _ = store.save(&current);
     snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
@@ -284,13 +272,12 @@ fn aggregate_accounts(
 fn claude_current<P: Fn() -> KeychainProbe>(
     force: bool,
     sources: Sources<'_, P>,
-) -> (ProviderLimitsDto, Option<ObservedWindowSet>) {
+) -> ProviderLimitsDto {
     let Sources {
         home,
         memo,
         keychain,
         claude,
-        claude_desktop_history,
         now_ms,
         ..
     } = sources;
@@ -299,9 +286,6 @@ fn claude_current<P: Fn() -> KeychainProbe>(
         .as_ref()
         .map(|identity| identity.account.clone())
         .unwrap_or_else(default_account);
-    let organization_id = selected_identity
-        .as_ref()
-        .and_then(|identity| identity.organization_id.clone());
     // Reading the Claude login includes renewing it: an access token lives eight hours and Claude
     // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
     // broken login. Keeping that inside the read means the memo stores the renewed login like any
@@ -331,17 +315,6 @@ fn claude_current<P: Fn() -> KeychainProbe>(
     {
         memo.clear();
     }
-    // Desktop history identifies an organization, never its user. Do not attach it to a user profile.
-    let local_observations = (selected_identity.is_none() && loaded.dto.status != LimitsStatus::Ok)
-        .then(|| {
-            organization_id
-                .as_deref()
-                .and_then(|organization_id| {
-                    claude_desktop::read_latest(&claude_desktop_history, organization_id)
-                })
-                .map(|usage| ObservedWindowSet::local(usage.observed_at, usage.windows))
-        })
-        .flatten();
     if let (Some(identity), Some(account)) = (&selected_identity, &mut loaded.dto.account) {
         if let Some(workspace) = &identity.organization_id {
             account.legacy_id = Some(identity.account.id.clone());
@@ -353,7 +326,7 @@ fn claude_current<P: Fn() -> KeychainProbe>(
             .observation_key();
         }
     }
-    (loaded.dto, local_observations)
+    loaded.dto
 }
 
 /// Claude: verify the stored token's profile, then read usage with the OAuth beta header. The plan

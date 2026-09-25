@@ -20,19 +20,6 @@ pub(super) struct ObservedWindowSet {
 }
 
 impl ObservedWindowSet {
-    pub(super) fn local(observed_at: DateTime<Utc>, windows: Vec<LimitWindowDto>) -> Self {
-        Self {
-            observed_at: Some(observed_at),
-            plan: None,
-            subscription_status: None,
-            windows,
-            credits: None,
-            workspace_credits: None,
-            credits_spent: None,
-            reset_credits: None,
-        }
-    }
-
     /// A remembered account's observations. Windows need a date to merge by; figures alone (a credit
     /// balance, banked resets) are kept without one.
     pub(super) fn from_account(dto: ProviderLimitsDto) -> Option<Self> {
@@ -58,11 +45,11 @@ impl ObservedWindowSet {
     }
 }
 
-/// Merge every observation per quota window. Remembered plan, subscription-status and credit
-/// metadata remains useful when a newer local observation contains percentage windows only.
+/// Merge the remembered observations into a failed read, per quota window: the newer observation
+/// of each window wins. Remembered plan, subscription-status and credit metadata fill what the read
+/// did not report.
 pub(super) fn merge_windows(
     mut current: ProviderLimitsDto,
-    local: Option<ObservedWindowSet>,
     remembered: Option<ObservedWindowSet>,
 ) -> ProviderLimitsDto {
     if let Some(remembered) = &remembered {
@@ -88,7 +75,7 @@ pub(super) fn merge_windows(
             .take()
             .or_else(|| remembered.reset_credits.clone());
     }
-    for mut snapshot in [remembered, local].into_iter().flatten() {
+    if let Some(mut snapshot) = remembered {
         let observed_at = snapshot
             .observed_at
             .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true));

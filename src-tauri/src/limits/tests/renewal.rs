@@ -55,13 +55,9 @@ fn card<'a>(listed: &'a [ProviderLimitsDto], id: &str) -> &'a ProviderLimitsDto 
 fn a_card_keeps_its_term_after_an_account_switch() {
     let home = scratch_dir("limits-term-switch");
     let store = SnapshotStore::for_home(&home);
-    aggregate_accounts(
-        &store,
-        codex_card("acct-a", LimitsStatus::Ok, term(false)),
-        None,
-    );
+    aggregate_accounts(&store, codex_card("acct-a", LimitsStatus::Ok, term(false)));
 
-    let listed = aggregate_accounts(&store, codex_card("acct-b", LimitsStatus::Ok, None), None);
+    let listed = aggregate_accounts(&store, codex_card("acct-b", LimitsStatus::Ok, None));
 
     let remembered = card(&listed, "acct-a");
     assert!(!remembered.current_account);
@@ -75,21 +71,13 @@ fn a_card_keeps_its_term_after_an_account_switch() {
 fn a_read_that_could_not_tell_the_term_keeps_the_remembered_one() {
     let home = scratch_dir("limits-term-kept");
     let store = SnapshotStore::for_home(&home);
-    aggregate_accounts(
-        &store,
-        codex_card("acct-a", LimitsStatus::Ok, term(false)),
-        None,
-    );
+    aggregate_accounts(&store, codex_card("acct-a", LimitsStatus::Ok, term(false)));
 
-    let listed = aggregate_accounts(&store, codex_card("acct-a", LimitsStatus::Ok, None), None);
+    let listed = aggregate_accounts(&store, codex_card("acct-a", LimitsStatus::Ok, None));
     assert_eq!(card(&listed, "acct-a").subscription, term(false));
     assert_eq!(store.load(AgentId::Codex)[0].subscription, term(false));
 
-    let listed = aggregate_accounts(
-        &store,
-        codex_card("acct-a", LimitsStatus::Ok, term(true)),
-        None,
-    );
+    let listed = aggregate_accounts(&store, codex_card("acct-a", LimitsStatus::Ok, term(true)));
     assert_eq!(card(&listed, "acct-a").subscription, term(true));
     let _ = std::fs::remove_dir_all(&home);
 }

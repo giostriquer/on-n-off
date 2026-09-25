@@ -30,7 +30,24 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         current_account: true,
         plan: None,
         subscription_status: None,
-        windows: Vec::new(),
+        windows: vec![
+            observed(
+                "weekly_all",
+                "Weekly · all models",
+                LimitWindowKind::Weekly,
+                63.0,
+                None,
+                "2026-08-18T03:07:53.000Z",
+            ),
+            observed(
+                "session",
+                "5 hour · all models",
+                LimitWindowKind::Session,
+                17.0,
+                None,
+                "2026-08-18T03:07:53.000Z",
+            ),
+        ],
         credits: None,
         workspace_credits: None,
         credits_spent: None,
@@ -71,29 +88,8 @@ fn newer_windows_merge_independently_and_do_not_inherit_an_old_reset() {
         reset_credits: None,
         reset_offer: None,
     });
-    let local = ObservedWindowSet::local(
-        DateTime::parse_from_rfc3339("2026-08-18T03:07:53Z")
-            .unwrap()
-            .with_timezone(&Utc),
-        vec![
-            window(
-                "weekly_all",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                63.0,
-                None,
-            ),
-            window(
-                "session",
-                "5 hour · all models",
-                LimitWindowKind::Session,
-                17.0,
-                None,
-            ),
-        ],
-    );
 
-    let merged = merge_windows(current, Some(local), remembered);
+    let merged = merge_windows(current, remembered);
     let summary: Vec<(&str, f64, Option<&str>, &str)> = merged
         .windows
         .iter()
@@ -180,7 +176,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
     });
 
     assert_eq!(
-        merge_windows(current, None, remembered).reset_credits,
+        merge_windows(current, remembered).reset_credits,
         reset_credits
     );
 }
@@ -229,7 +225,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         reset_offer: None,
     });
 
-    let merged = merge_windows(current, None, remembered);
+    let merged = merge_windows(current, remembered);
 
     assert_eq!(merged.reset_credits, reset_credits);
     // The banked count is remembered; a price the provider may already have withdrawn is not.
@@ -281,8 +277,8 @@ fn a_paused_refresh_keeps_the_remembered_workspace_credit_share() {
         })
     };
 
-    let paused = merge_windows(read(None), None, remembered());
-    let answered = merge_windows(read(share("9000")), None, remembered());
+    let paused = merge_windows(read(None), remembered());
+    let answered = merge_windows(read(share("9000")), remembered());
 
     assert_eq!(paused.workspace_credits, share("8000"));
     assert_eq!(answered.workspace_credits, share("9000"));
@@ -327,8 +323,8 @@ fn a_paused_refresh_keeps_the_remembered_credits_spent() {
         })
     };
 
-    let paused = merge_windows(read(None), None, remembered());
-    let answered = merge_windows(read(spent(250.0)), None, remembered());
+    let paused = merge_windows(read(None), remembered());
+    let answered = merge_windows(read(spent(250.0)), remembered());
 
     assert_eq!(paused.credits_spent, spent(100.0));
     assert_eq!(answered.credits_spent, spent(250.0));
@@ -375,8 +371,8 @@ fn a_paused_refresh_keeps_the_remembered_subscription_status() {
         })
     };
 
-    let paused = merge_windows(read(None), None, remembered());
-    let answered = merge_windows(read(Some("active")), None, remembered());
+    let paused = merge_windows(read(None), remembered());
+    let answered = merge_windows(read(Some("active")), remembered());
 
     assert_eq!(paused.subscription_status.as_deref(), Some("past_due"));
     assert_eq!(answered.subscription_status.as_deref(), Some("active"));
