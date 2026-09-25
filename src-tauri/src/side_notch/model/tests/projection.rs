@@ -96,10 +96,11 @@ fn only_claudes_window_labelled_weekly_fable_fills_the_inner_ring() {
     );
 }
 
-/// Every ring leads with its headline window, the first of the card's windows: weekly, then
-/// session, then per model. Codex included, which used to lead with its session.
+/// Every ring leads with its headline window, which is its weekly window. A card without one leads
+/// with nothing, never with its session or a per-model window. Codex included, which used to lead
+/// with its session.
 #[test]
-fn every_ring_leads_with_its_headline_window_weekly_then_session_then_model() {
+fn every_ring_leads_with_its_weekly_window_or_with_nothing() {
     let codex_both = signed_in(
         AgentId::Codex,
         vec![weekly("secondary"), session("primary")],
@@ -114,17 +115,17 @@ fn every_ring_leads_with_its_headline_window_weekly_then_session_then_model() {
             model("extra:luna", "Weekly · GPT-5.6-Luna"),
         ],
     );
-    assert_eq!(headline(codex_session).as_deref(), Some("primary"));
+    assert_eq!(headline(codex_session), None);
     let codex_models = signed_in(
         AgentId::Codex,
         vec![model("extra:luna", "Weekly · GPT-5.6-Luna")],
     );
-    assert_eq!(headline(codex_models).as_deref(), Some("extra:luna"));
+    assert_eq!(headline(codex_models), None);
     let claude_without_weekly = signed_in(
         AgentId::Claude,
         vec![session("session"), model("weekly_opus", "Weekly · Opus")],
     );
-    assert_eq!(headline(claude_without_weekly).as_deref(), Some("session"));
+    assert_eq!(headline(claude_without_weekly), None);
     assert_eq!(headline(signed_in(AgentId::Claude, Vec::new())), None);
 }
 

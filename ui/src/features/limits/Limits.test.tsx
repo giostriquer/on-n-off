@@ -178,6 +178,18 @@ describe("Limits", () => {
     expect(within(card("Claude limits · me@claude.example")).getByText("Max ×5")).toBeTruthy();
   });
 
+  it("leads a card with no weekly window with nothing: its session is an ordinary row", async () => {
+    const session = { id: "primary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
+    answer([okClaude()], [okCodex({ windows: [session] })]);
+    renderLimits();
+    const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+    expect(within(region).getByRole("meter", { name: "5 hour · all models" })).toBeTruthy();
+    expect(within(region).queryByText(/reported no rate-limit windows/)).toBeNull();
+    // No headline window, so the active account's dot sits in the header rather than beside it.
+    const indicator = within(region).getByRole("img", { name: "Active account" });
+    expect(region.querySelector("header")!.contains(indicator)).toBe(true);
+  });
+
   it("moves the active account's dot into the header when it has no headline window", async () => {
     answer([okClaude()], [okCodex({ windows: [] }), { ...staleCodex(), windows: [] }]);
     renderLimits();

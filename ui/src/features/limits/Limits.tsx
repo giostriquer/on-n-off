@@ -202,25 +202,22 @@ function AccountCard({
 
       {message ? (
         <p
-          className={`px-3.5 ${headline ? "pt-1.5" : "py-4"} text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
+          className={`px-3.5 ${entry.windows.length > 0 ? "pt-1.5" : "py-4"} text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
         >
           {message}
         </p>
       ) : null}
 
-      {headline ? (
-        <>
-          <HeadlineWindow active={active} window={headline} provider={entry.provider} now={now} />
-          {rest.map((window) => (
-            <WindowRow
-              key={window.id}
-              window={window}
-              provider={entry.provider}
-              now={now}
-            />
-          ))}
-        </>
-      ) : entry.status === "ok" && !message ? (
+      {headline ? <HeadlineWindow active={active} window={headline} provider={entry.provider} now={now} /> : null}
+      {rest.map((window) => (
+        <WindowRow
+          key={window.id}
+          window={window}
+          provider={entry.provider}
+          now={now}
+        />
+      ))}
+      {entry.windows.length === 0 && entry.status === "ok" && !message ? (
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{profile ? "Usage unavailable." : `${name} reported no rate-limit windows.`}</p>
       ) : null}
 

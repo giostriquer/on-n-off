@@ -63,12 +63,13 @@ describe("headlineWindow", () => {
   const session: LimitWindow = { ...window, id: "session", kind: "session" };
   const fable: LimitWindow = { ...window, id: "weekly_fable", label: "Weekly · Fable", kind: "model" };
 
-  it("leads with the weekly window and keeps the rest in the order the backend sent", () => {
+  it("leads with the weekly window, the headline window, and keeps the rest in the order the backend sent", () => {
     expect(headlineWindow(card([weekly, session, fable]))).toEqual({ headline: weekly, rest: [session, fable] });
   });
 
-  it("leads with the session when the card has no weekly window", () => {
-    expect(headlineWindow(card([session, fable]))).toEqual({ headline: session, rest: [fable] });
+  it("has no headline without a weekly window: the session and the rest are ordinary rows", () => {
+    expect(headlineWindow(card([session, fable]))).toEqual({ headline: undefined, rest: [session, fable] });
+    expect(headlineWindow(card([fable]))).toEqual({ headline: undefined, rest: [fable] });
   });
 
   it("has no headline without windows", () => {

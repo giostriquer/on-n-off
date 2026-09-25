@@ -10,7 +10,7 @@
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
-import { bankedResetsClaude, bankedResetsCodex, claudeSubscriptionStatusClaude, claudeWithoutReset, creditsSpentCodex, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex, subscriptionBadgesCodex, workspaceCreditsCodex } from "./limitsFixtures";
+import { bankedResetsClaude, bankedResetsCodex, claudeSubscriptionStatusClaude, claudeWithoutReset, claudeWithoutWeekly, creditsSpentCodex, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex, subscriptionBadgesCodex, workspaceCreditsCodex } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageHistoryStatus, UsageSummary } from "$lib/usageTypes";
 
@@ -33,7 +33,7 @@ const latency = Number(params.get("latency") ?? 80);
 // Scenarios this file answers for itself. `SCENARIOS` holds the pull-request ones.
 const LOCAL_SCENARIOS = [
   "subscriptionMissing", "subscriptionBadges", "accountLogin", "accountLocked",
-  "accountDuplicate", "accountClients", "claudeMissingReset", "catalog",
+  "accountDuplicate", "accountClients", "claudeMissingReset", "claudeNoWeekly", "catalog",
   "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "workspaceCredits", "creditsSpent", "claudeSubscriptionStatus", "hooks", "mcpSources",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
@@ -301,6 +301,7 @@ const handlers: Record<string, Handler> = {
     if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();
     if (scenario === "limitsOrder" && args.agentId === "claude") return limitsOrderClaude();
     if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
+    if (scenario === "claudeNoWeekly" && args.agentId === "claude") return claudeWithoutWeekly();
     if (scenario === "bankedResets" && args.agentId === "claude") return bankedResetsClaude();
     if (scenario === "bankedResets" && args.agentId === "codex") return bankedResetsCodex();
     if (scenario === "sameEmailWorkspaces" && args.agentId === "codex") return sameEmailWorkspacesCodex();

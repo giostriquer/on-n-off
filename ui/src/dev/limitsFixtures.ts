@@ -97,6 +97,16 @@ export function claudeWithoutReset(): ProviderLimits[] {
   }];
 }
 
+/** A saved Claude account whose read reported no weekly window: its card leads with nothing. */
+export function claudeWithoutWeekly(): ProviderLimits[] {
+  return [CLAUDE[0], {
+    ...CLAUDE[0],
+    account: { id: "claude-2", label: "other@example.com" },
+    currentAccount: false,
+    windows: CLAUDE[0].windows.filter(window => window.kind !== "weekly"),
+  }];
+}
+
 export function limitsFor(agentId: unknown): ProviderLimits[] {
   return (typeof agentId === "string" && LIMITS[agentId as AgentId]) || [];
 }

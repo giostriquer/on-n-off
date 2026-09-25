@@ -37,12 +37,12 @@ export type LimitAccountPresentation = {
 
 /**
  * A card's headline window, the one it leads with, and the windows that follow it as rows. The
- * headline window is the first of weekly, session, model; the backend sends a card's windows in
- * that order, so it is the first one, and the rest keep the order they came in.
+ * headline window is the weekly window; a card without one leads with nothing, never with its
+ * session. The rest keep the order the backend sent: session, then per model.
  */
 export function headlineWindow(entry: ProviderLimits): { headline: LimitWindow | undefined; rest: LimitWindow[] } {
-  const [headline, ...rest] = entry.windows;
-  return { headline, rest };
+  const headline = entry.windows.find((window) => window.kind === "weekly");
+  return { headline, rest: entry.windows.filter((window) => window !== headline) };
 }
 
 /**

@@ -298,8 +298,8 @@ pub struct NotchProvider {
     pub status: LimitsStatus,
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
-    /// The window the ring and the figure show, by id: the headline window, the first of weekly,
-    /// session and model, which is the card's first window. None while the account cannot be read.
+    /// The window the ring and the figure show, by id: the headline window, which is the weekly
+    /// window. None for a card without one, and while the account cannot be read.
     pub headline_window_id: Option<String>,
     /// None while the account cannot be read, or when it has nothing to show there.
     pub inner_ring: Option<InnerRing>,
@@ -331,7 +331,10 @@ impl NotchProvider {
         let workspace_credits = card.reading.workspace_credits;
         let (headline_window_id, inner_ring) = if card.status == LimitsStatus::Ok {
             (
-                windows.first().map(|window| window.id.clone()),
+                windows
+                    .iter()
+                    .find(|window| window.kind == LimitWindowKind::Weekly)
+                    .map(|window| window.id.clone()),
                 inner_ring(card.provider, &windows, workspace_credits.as_ref()),
             )
         } else {

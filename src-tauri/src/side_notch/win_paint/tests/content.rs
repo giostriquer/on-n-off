@@ -26,7 +26,11 @@ fn claudes_ring_leads_with_its_weekly_over_its_session() {
         ring_label(AgentId::Claude, vec![weekly, session.clone()]),
         "41%"
     );
-    assert_eq!(ring_label(AgentId::Claude, vec![session]), "73%");
+    assert_eq!(
+        ring_label(AgentId::Claude, vec![session]),
+        "—",
+        "without a weekly window the ring leads with nothing, never the session"
+    );
 }
 
 #[test]
@@ -46,7 +50,7 @@ fn codexs_ring_leads_with_its_weekly_over_its_session() {
         ),
     ];
     assert_eq!(ring_label(AgentId::Codex, windows.clone()), "10%");
-    assert_eq!(ring_label(AgentId::Codex, windows[1..].to_vec()), "20%");
+    assert_eq!(ring_label(AgentId::Codex, windows[1..].to_vec()), "—");
 }
 #[test]
 fn unreadable_providers_fall_back_to_the_dash_label() {

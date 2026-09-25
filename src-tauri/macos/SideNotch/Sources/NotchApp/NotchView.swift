@@ -221,16 +221,9 @@ private struct MeterCell: View {
       return nil
     }
   }
-  /// The headline window's period: weekly or 5 hour, or its own name for a per-model window, which
-  /// leads only a card with neither.
   private var period: String {
-    headline.map { quota in
-      switch quota.kind {
-      case "weekly": return "weekly"
-      case "session": return "5 hour"
-      default: return quota.label
-      }
-    } ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
+    headline.map { $0.kind == "weekly" ? "weekly" : "5 hour" }
+      ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
   }
   private var description: String {
     let name = providerName(id)
