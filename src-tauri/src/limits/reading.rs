@@ -188,6 +188,8 @@ fn merged(
 /// An answer's own windows, with the remembered weekly window, as it was observed, when the answer
 /// reports other windows but no weekly. An answer with no windows at all keeps none: a read of
 /// figures alone clears the windows it no longer reports. Weekly first, then session, then model.
+/// A carried weekly never lapses on its own: it stays until a read reports a weekly again or the
+/// user removes the account, and past its reset it reads as a window that has reset.
 fn with_remembered_weekly(
     mut windows: Vec<LimitWindowDto>,
     remembered: Vec<LimitWindowDto>,
