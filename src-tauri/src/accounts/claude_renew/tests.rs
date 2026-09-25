@@ -1,5 +1,5 @@
 use super::*;
-use crate::http::{refused_url, serve_once_capturing};
+use crate::http::{refused_url, serve_once_capturing, serve_once_observing};
 use crate::paths::scratch_dir;
 use serde_json::json;
 use std::fs;
@@ -526,11 +526,27 @@ fn a_renewal_under_a_secure_storage_dir_works_in_that_dir() {
 fn a_renewal_whose_lock_was_taken_away_sends_no_grant() {
     let home = home_with("renew-lock-lost", &stored());
     let dir = StorageDir::default_in(&home);
-    let lock = home.join(".claude").join(".oauth_refresh.lock");
-    // The probe runs under the lock: here another process breaks it, and a heartbeat passes.
+    let refresh = home.join(".claude").join(".oauth_refresh.lock");
+    let legacy = home.join(".claude.lock");
+    // The probe runs under the locks: here another process breaks the legacy one. The heartbeat
+    // touches the refresh lock and then fails on the legacy lock in the same pass, so a refresh
+    // lock that is fresh again means the loss has been seen.
     let broken_under_us = |_: &StorageDir| {
-        fs::remove_dir(&lock).unwrap();
-        std::thread::sleep(Duration::from_secs(3));
+        let then = SystemTime::now() - Duration::from_secs(3600);
+        filetime::set_file_mtime(&refresh, filetime::FileTime::from_system_time(then)).unwrap();
+        fs::remove_dir(&legacy).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while fs::metadata(&refresh)
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|at| at.elapsed().unwrap_or_default() > Duration::from_secs(60))
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no heartbeat passed while the renewal held its locks"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(200));
         Ok(None)
     };
 
@@ -547,39 +563,6 @@ fn a_renewal_whose_lock_was_taken_away_sends_no_grant() {
         "a refused endpoint would have reported the network, so no grant was sent"
     );
     assert_eq!(stored_token(&home), "old");
-}
-
-/// A credentials file that is a link belongs to whoever set the link up: replacing it would cut the
-/// link and leave the renewed login where Claude Code no longer looks. Nothing is redeemed.
-#[cfg(unix)]
-#[test]
-fn a_renewal_refuses_a_linked_credentials_file() {
-    let home = scratch_dir("renew-linked-file");
-    let elsewhere = home.join("elsewhere.json");
-    fs::write(&elsewhere, stored().to_string()).unwrap();
-    fs::create_dir_all(home.join(".claude")).unwrap();
-    let file = home.join(".claude").join(".credentials.json");
-    std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
-
-    let refused = renew(
-        &StorageDir::default_in(&home),
-        &|_: &StorageDir| Ok(None),
-        NOW_MS,
-        &refused_url(),
-        &RefusedLogin::new(),
-    );
-    let Err(RenewError::Unavailable(why)) = refused else {
-        panic!("expected the renewal to be refused, got {refused:?}");
-    };
-    assert!(why.contains("linked"), "refused before any grant: {why}");
-    assert!(fs::symlink_metadata(&file)
-        .unwrap()
-        .file_type()
-        .is_symlink());
-    assert_eq!(
-        serde_json::from_str::<Value>(&fs::read_to_string(&elsewhere).unwrap()).unwrap(),
-        stored()
-    );
 }
 
 /// The renewal reads the login it will write back while holding Claude Code's storage-write lock,
@@ -602,4 +585,73 @@ fn a_renewal_reads_the_store_under_the_storage_write_lock() {
         &RefusedLogin::new(),
     );
     assert_eq!(seen.get(), Some(true));
+}
+
+/// Hex, as `security -X` takes it, back to bytes.
+#[cfg(target_os = "macos")]
+fn unhex(hex: &str) -> Vec<u8> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+        .collect()
+}
+
+/// A login in a scoped Keychain entry is renewed back into that entry — the scoped service, under
+/// Claude Code's own account — and nowhere else.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_renewal_writes_back_to_the_scoped_keychain_entry_it_read() {
+    use crate::accounts::keychain::{fake_items, with_test_runner};
+    let home = scratch_dir("renew-scoped-keychain");
+    let work = home.join("work");
+    let dir = StorageDir::new(work.clone(), true);
+    let hash = crate::sha::sha256_hex(work.to_str().unwrap().as_bytes());
+    let service = format!("Claude Code-credentials-{}", &hash[..8]);
+    let keychain = |_: &StorageDir| Ok(Some(stored().to_string()));
+    let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
+
+    let (renewed, sent) = with_test_runner(fake_items(&[("claude-code-user", "{}")]), || {
+        renew(&dir, &keychain, NOW_MS, &token_url, &RefusedLogin::new())
+    });
+    request.join().unwrap();
+    assert_eq!(renewed.map(|credential| credential.token), Ok("new".into()));
+
+    let writes: Vec<&String> = sent
+        .iter()
+        .filter(|command| !command.starts_with("find-generic-password"))
+        .collect();
+    assert_eq!(writes.len(), 1, "one write: {sent:?}");
+    let prefix = format!("add-generic-password -U -a \"claude-code-user\" -s \"{service}\" -X \"");
+    let hex = writes[0]
+        .strip_prefix(&prefix)
+        .unwrap_or_else(|| panic!("{} is not a write to {service}", writes[0]))
+        .trim_end()
+        .trim_end_matches('"');
+    let written: Value = serde_json::from_slice(&unhex(hex)).unwrap();
+    assert_eq!(written["claudeAiOauth"]["accessToken"], "new");
+    assert!(
+        !work.join(".credentials.json").exists(),
+        "no credentials file is created"
+    );
+}
+
+/// The refresh lock and the storage-write lock are both still held when the grant reaches the
+/// issuer: nothing between the last check and the redemption lets either go.
+#[test]
+fn the_locks_are_held_while_the_grant_is_in_flight() {
+    let home = home_with("renew-held-at-grant", &stored());
+    let claude = home.join(".claude");
+    let (token_url, request) = serve_once_observing("200 OK", REPLY_JSON, move || {
+        (
+            claude.join(".oauth_refresh.lock").is_dir(),
+            claude.join(".storage-write.lock").is_dir(),
+        )
+    });
+
+    assert!(matches!(
+        login(&home, &token_url),
+        CredentialLookup::Found(_)
+    ));
+    let (_, held) = request.join().unwrap();
+    assert_eq!(held, (true, true), "(refresh lock, storage-write lock)");
 }

@@ -28,6 +28,7 @@ enum Cell {
     Read(Option<&'static str>, Target),
     KeychainError,
     FileMalformed,
+    FileUnreadable,
 }
 
 fn keychain_states() -> [(&'static str, KeychainProbe); 5] {
@@ -43,7 +44,11 @@ fn keychain_states() -> [(&'static str, KeychainProbe); 5] {
     ]
 }
 
-fn file_states() -> [(&'static str, Option<String>); 4] {
+/// Stands for a directory where the credentials file should be: a file no read can open, on every
+/// platform.
+const A_DIRECTORY: &str = "<a directory>";
+
+fn file_states() -> [(&'static str, Option<String>); 5] {
     [
         ("no file", None),
         (
@@ -52,6 +57,7 @@ fn file_states() -> [(&'static str, Option<String>); 4] {
         ),
         ("no token", Some(SIGNED_OUT.to_string())),
         ("broken", Some("{ not json".to_string())),
+        ("unreadable", Some(A_DIRECTORY.to_string())),
     ]
 }
 
@@ -66,7 +72,10 @@ fn cell_of(result: Result<Stored, StoreError>, path: &Path) -> Cell {
             assert!(why.contains(&path.display().to_string()), "{why}");
             return Cell::FileMalformed;
         }
-        Err(other) => panic!("unexpected {other:?}"),
+        Err(StoreError::FileUnreadable(why)) => {
+            assert!(why.contains(&path.display().to_string()), "{why}");
+            return Cell::FileUnreadable;
+        }
     };
     let token = stored.document.as_ref().map(|document| {
         match document["claudeAiOauth"]["accessToken"].as_str() {
@@ -92,27 +101,29 @@ fn cell_of(result: Result<Stored, StoreError>, path: &Path) -> Cell {
 
 /// What Claude Code's next read would find, and where a write would go, for every combination of
 /// what the Keychain entry and the credentials file hold. Rows are the Keychain, columns the file:
-/// no file, a login, no token, broken. The two `KeychainError` cells are the intended difference
-/// from Claude Code, which reads them as signed out.
+/// no file, a login, no token, broken, unreadable. The `KeychainError` cells are the intended
+/// difference from Claude Code, which reads them as signed out.
 #[test]
 fn the_store_truth_table() {
-    use Cell::{FileMalformed, KeychainError, Read};
+    use Cell::{FileMalformed, FileUnreadable, KeychainError, Read};
     use Target::{File, Keychain, Refused};
     let from_file = [
         Read(None, File),
         Read(Some("file-token"), File),
         Read(Some(""), File),
         FileMalformed,
+        FileUnreadable,
     ];
     let expected = [
         from_file,
-        [Read(Some("kc-token"), Keychain); 4],
-        [Read(Some(""), Keychain); 4],
+        [Read(Some("kc-token"), Keychain); 5],
+        [Read(Some(""), Keychain); 5],
         from_file,
         [
             KeychainError,
             Read(Some("file-token"), Refused),
             Read(Some(""), Refused),
+            KeychainError,
             KeychainError,
         ],
     ];
@@ -120,8 +131,10 @@ fn the_store_truth_table() {
         for ((file, contents), want) in file_states().into_iter().zip(row) {
             let home = scratch_dir("store-truth");
             let path = home.join(".claude").join(".credentials.json");
-            if let Some(contents) = contents {
-                write(&home, ".claude/.credentials.json", &contents);
+            match contents.as_deref() {
+                Some(A_DIRECTORY) => fs::create_dir_all(&path).unwrap(),
+                Some(contents) => write(&home, ".claude/.credentials.json", contents),
+                None => {}
             }
             let got = cell_of(read(&StorageDir::default_in(&home), probe.clone()), &path);
             assert_eq!(got, want, "Keychain: {keychain}; file: {file}");
@@ -735,4 +748,40 @@ fn a_credential_write_knows_when_any_lock_it_relies_on_is_lost() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Claude Code's locks, in the order it takes them and with the staleness it gives each: two
+/// processes that disagree about the order deadlock, and one that disagrees about the staleness
+/// breaks a lock the other still holds.
+#[test]
+fn claude_codes_locks_in_its_order_and_with_its_staleness() {
+    let home = scratch_dir("lock-paths");
+    let config_dir = home.join(".claude");
+    fs::create_dir_all(&config_dir).unwrap();
+    let dir = StorageDir::default_in(&home);
+    let mut legacy = fs::canonicalize(&config_dir).unwrap().into_os_string();
+    legacy.push(".lock");
+    let refresh = vec![
+        (
+            config_dir.join(".oauth_refresh.lock"),
+            Duration::from_secs(60),
+        ),
+        (PathBuf::from(legacy), Duration::from_secs(60)),
+    ];
+
+    assert_eq!(LockScope::Refresh.paths(&dir), refresh);
+    let config_file = home.join(".claude.json");
+    let mut with_config = refresh.clone();
+    with_config.push((home.join(".claude.json.lock"), Duration::from_secs(10)));
+    assert_eq!(
+        LockScope::RefreshAndConfig(&config_file).paths(&dir),
+        with_config
+    );
+    assert_eq!(
+        LockScope::StorageWrite.paths(&dir),
+        vec![(
+            config_dir.join(".storage-write.lock"),
+            Duration::from_secs(15)
+        )]
+    );
 }

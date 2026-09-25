@@ -311,6 +311,18 @@ fn an_item_filed_under_another_account_is_still_found() {
             "find-generic-password -a other -w -s Claude Code-credentials",
         ]
     );
+
+    // And the write goes back under that account, never a guessed one.
+    let (written, sent) = with_test_runner(
+        fake_items(&[("other", r#"{"claudeAiOauth":{"accessToken":"kc-token"}}"#)]),
+        || native.write(Some(&incoming())),
+    );
+    assert_eq!(written, Ok(()));
+    assert!(
+        sent.iter()
+            .any(|command| command.starts_with("add-generic-password -U -a \"other\" ")),
+        "{sent:?}"
+    );
 }
 
 /// `add-generic-password -U` replaces the item matching service and account, so the write names
@@ -395,4 +407,110 @@ fn a_switch_refuses_to_write_when_the_keychain_cannot_be_read() {
     assert!(sent
         .iter()
         .all(|command| command.starts_with("find-generic-password")));
+}
+
+/// A lookup that would name the item's account and fails leaves the Keychain unreadable, not
+/// empty: which store Claude Code reads next is unknown, so the switch writes neither.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_failed_account_lookup_is_not_read_as_no_entry() {
+    use crate::accounts::keychain::with_test_runner;
+    use crate::process::CommandOutcome;
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    native.use_keychain = true;
+    let file = native.config_home.join(".credentials.json");
+    fs::write(&file, r#"{"claudeAiOauth":{"accessToken":"file-token"}}"#).unwrap();
+
+    let (written, _) = with_test_runner(
+        |command| {
+            let own = command.contains(" -a claude-code-user ") && command.contains(" -w ");
+            CommandOutcome::Exited {
+                success: false,
+                stdout: String::new(),
+                stderr: if own {
+                    "The specified item could not be found in the keychain."
+                } else {
+                    "User interaction is not allowed."
+                }
+                .to_string(),
+            }
+        },
+        || native.write(Some(&incoming())),
+    );
+    assert!(written.is_err());
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        r#"{"claudeAiOauth":{"accessToken":"file-token"}}"#
+    );
+    assert!(!native.config_file.exists(), "the identity was not patched");
+}
+
+/// A Keychain holding one item under Claude Code's own account, whose secret the writes replace,
+/// recording for each read of the secret whether `lock` was held at that moment.
+#[cfg(target_os = "macos")]
+fn recording_keychain(
+    lock: PathBuf,
+    reads: std::rc::Rc<std::cell::RefCell<Vec<bool>>>,
+) -> impl Fn(&str) -> crate::process::CommandOutcome + 'static {
+    use crate::process::CommandOutcome;
+    let secret =
+        std::cell::RefCell::new(r#"{"claudeAiOauth":{"accessToken":"kc-token"}}"#.to_string());
+    move |command| {
+        let exited = |stdout: String| CommandOutcome::Exited {
+            success: true,
+            stdout,
+            stderr: String::new(),
+        };
+        if let Some((_, hex)) = command.rsplit_once("-X \"") {
+            let hex = hex.trim_end().trim_end_matches('"');
+            let bytes: Vec<u8> = (0..hex.len())
+                .step_by(2)
+                .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+                .collect();
+            *secret.borrow_mut() = String::from_utf8(bytes).unwrap();
+            return exited(String::new());
+        }
+        if command.contains(" -w ") {
+            reads.borrow_mut().push(lock.is_dir());
+            return exited(format!("{}\n", secret.borrow()));
+        }
+        exited("    \"acct\"<blob>=\"claude-code-user\"\n".to_string())
+    }
+}
+
+/// The switch reads the published login back before it lets Claude Code's locks go, so a client
+/// that writes in between is caught rather than verified.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_switch_reads_its_write_back_while_it_still_holds_the_locks() {
+    use crate::accounts::keychain::with_test_runner;
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    native.use_keychain = true;
+    let reads = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let runner = recording_keychain(
+        native.config_home.join(".oauth_refresh.lock"),
+        std::rc::Rc::clone(&reads),
+    );
+
+    let (read_back, sent) = with_test_runner(runner, || {
+        native.write_locked(Some(&incoming()), native.lock().unwrap())
+    });
+    let read_back = read_back.unwrap().unwrap().unwrap();
+    assert_eq!(read_back.auth["claudeAiOauth"]["accessToken"], "incoming");
+    let written_at = sent
+        .iter()
+        .position(|command| command.starts_with("add-generic-password"))
+        .expect("the login is written to the Keychain");
+    let reads_after = sent[written_at..]
+        .iter()
+        .filter(|command| command.contains(" -w "))
+        .count();
+    assert!(reads_after > 0, "the write is read back: {sent:?}");
+    let reads = reads.borrow();
+    assert!(
+        reads[reads.len() - reads_after..].iter().all(|held| *held),
+        "every read after the write saw the lock held: {reads:?}"
+    );
 }

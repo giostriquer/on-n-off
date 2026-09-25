@@ -539,6 +539,51 @@ fn a_switch_refuses_a_linked_credentials_file_before_writing_anything() {
     assert!(!native.config_file.exists(), "the identity was not patched");
 }
 
+/// A credentials file that cannot be read is an error, never a missing login, and the switch
+/// writes nothing over it.
+#[test]
+fn an_unreadable_credentials_file_is_an_error_and_nothing_is_written() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    fs::create_dir(native.config_home.join(".credentials.json")).unwrap();
+
+    assert_eq!(
+        native.read().err().as_deref(),
+        Some("Cannot read native credentials.")
+    );
+    assert_eq!(
+        native.write(Some(&incoming())).err().as_deref(),
+        Some("Cannot read native credentials.")
+    );
+    assert!(!native.config_file.exists(), "the identity was not patched");
+}
+
+/// A Claude login past its expiry that cannot renew itself fails verification before anything is
+/// asked of the network.
+#[test]
+fn verification_refuses_an_expired_login_that_cannot_renew() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    fs::write(
+        native.config_home.join(".credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"old","expiresAt":1}}"#,
+    )
+    .unwrap();
+    fs::write(
+        &native.config_file,
+        r#"{"oauthAccount":{"accountUuid":"a","organizationUuid":"org-a"}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        native
+            .verify_claude(&crate::http::refused_url())
+            .err()
+            .as_deref(),
+        Some("Could not renew the native Claude login. Sign in again if it has expired.")
+    );
+}
+
 #[cfg(target_os = "macos")]
 mod keychain;
 mod secure_storage;
