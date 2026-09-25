@@ -309,11 +309,13 @@ pub(crate) fn parse_keychain_account(attributes: &str) -> Option<String> {
 
 /// A store write resolved and proven before anything irreversible happens.
 ///
-/// `prepare` does the parts that can fail on their own account: reading the Keychain entry's
-/// account, or creating the private temporary the file store renames into. `commit` is then the
-/// single irreversible step, small enough to sit comfortably inside the refresh lock's minute.
+/// `prepare` does the parts that can fail on their own account: taking Claude Code's storage-write
+/// lock, reading the Keychain entry's account, or creating the private temporary the file store
+/// renames into. `commit` is then the single irreversible step. The storage-write lock is held
+/// from `prepare` until this value drops, so no other writer can slip in between.
 pub(crate) struct PreparedWrite {
     target: WriteTarget,
+    _storage: ClaudeLocks,
 }
 
 enum WriteTarget {
@@ -322,24 +324,30 @@ enum WriteTarget {
 }
 
 impl PreparedWrite {
-    pub(crate) fn prepare(store: &ClaudeStore) -> Result<Self, String> {
+    /// `Busy` while another process is writing Claude Code's credentials.
+    pub(crate) fn prepare(dir: &ConfigDir, store: &ClaudeStore) -> Result<Self, LockError> {
+        let storage = ClaudeLocks::acquire(dir, LockScope::StorageWrite)?;
         let target = match store {
             ClaudeStore::Keychain => WriteTarget::Keychain {
-                account: renewal_account()?,
+                account: renewal_account().map_err(LockError::Unavailable)?,
             },
             ClaudeStore::File(path) => {
                 let temporary = path.with_extension("json.on-n-off");
                 // Created empty and private now, so a directory that will not take it says so
                 // before the grant rather than after.
-                write_private(&temporary, "")
-                    .map_err(|error| format!("{}: {error}", temporary.display()))?;
+                write_private(&temporary, "").map_err(|error| {
+                    LockError::Unavailable(format!("{}: {error}", temporary.display()))
+                })?;
                 WriteTarget::File {
                     path: path.clone(),
                     temporary,
                 }
             }
         };
-        Ok(Self { target })
+        Ok(Self {
+            target,
+            _storage: storage,
+        })
     }
 
     pub(crate) fn commit(self, raw: &str) -> Result<(), String> {
@@ -398,6 +406,9 @@ pub(crate) const LOCK_STALE: Duration = Duration::from_secs(60);
 /// Claude Code abandons a config file's lock after ten seconds.
 const CONFIG_LOCK_STALE: Duration = Duration::from_secs(10);
 
+/// Claude Code abandons its credentials' write lock after fifteen seconds.
+const STORAGE_WRITE_STALE: Duration = Duration::from_secs(15);
+
 /// How often every held lock is touched. Far inside each staleness limit, and inside the seven and
 /// a half seconds after which Claude Code 2.1.282, finding a refresh lock whose time has not moved,
 /// starts asking whether its holder is still alive.
@@ -410,6 +421,9 @@ pub(crate) enum LockScope<'a> {
     Refresh,
     /// The refresh locks and this config file's lock, around an account change that writes both.
     RefreshAndConfig(&'a Path),
+    /// `.storage-write.lock`, which Claude Code takes around every change to its credentials, in
+    /// the Keychain or the file. Taken inside the refresh locks, as Claude Code takes it.
+    StorageWrite,
 }
 
 impl LockScope<'_> {
@@ -418,6 +432,9 @@ impl LockScope<'_> {
     /// lock sits beside the config dir's real path, as Claude Code resolves it, so a config dir
     /// reached through a link locks the directory Claude Code locks.
     fn paths(self, dir: &ConfigDir) -> Vec<(PathBuf, Duration)> {
+        if let Self::StorageWrite = self {
+            return vec![(dir.path.join(".storage-write.lock"), STORAGE_WRITE_STALE)];
+        }
         let mut legacy = fs::canonicalize(&dir.path)
             .unwrap_or_else(|_| dir.path.clone())
             .into_os_string();

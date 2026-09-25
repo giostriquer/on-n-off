@@ -21,6 +21,9 @@ use std::{
     time::Duration,
 };
 
+/// Claude Code holds one of the locks an account change needs.
+const BUSY: &str = "Claude is updating its login or configuration. Retry after it finishes.";
+
 pub struct NativeStore {
     pub provider: AgentId,
     pub config_home: PathBuf,
@@ -435,9 +438,7 @@ impl Native for NativeStore {
             LockScope::RefreshAndConfig(&self.config_file),
         )
         .map(|guard| Box::new(guard) as Box<dyn NativeGuard>)
-        .map_err(|_| {
-            "Claude is updating its login or configuration. Retry after it finishes.".into()
-        })
+        .map_err(|_| BUSY.into())
     }
     fn read(&self) -> Result<Option<Login>, String> {
         let auth = if self.provider == AgentId::Claude {
@@ -478,6 +479,10 @@ impl Native for NativeStore {
         if self.provider == AgentId::Codex {
             return self.codex_target()?.write(login.map(|l| &l.auth));
         }
+        // Claude Code changes its credentials only under this lock, so the read, the config patch
+        // and the write below cannot interleave with one of its own.
+        let _storage = ClaudeLocks::acquire(&self.claude_dir(), LockScope::StorageWrite)
+            .map_err(|_| BUSY.to_string())?;
         let stored = self.claude_read()?;
         // Written to the store Claude Code's next read uses; when the Keychain could not be read,
         // that store is unknown and nothing is written at all.

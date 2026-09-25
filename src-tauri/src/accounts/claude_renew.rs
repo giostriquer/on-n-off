@@ -52,8 +52,9 @@ const DEFAULT_SCOPES: [&str; 5] = [
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RenewError {
-    /// Another process holds Claude Code's refresh lock. Its renewal is the one that should win,
-    /// and the caller keeps the message it already had rather than redeeming the same token twice.
+    /// Another process holds Claude Code's refresh lock, or is writing its credentials. Its change
+    /// is the one that should win, and the caller keeps the message it already had rather than
+    /// redeeming the same token twice.
     Busy,
     /// The issuer refused the refresh token itself. Only a new sign-in helps.
     Rejected,
@@ -195,7 +196,10 @@ fn renew<P: Fn() -> KeychainProbe>(
 
     // Everything about the write that can fail for reasons unrelated to the reply fails here,
     // where failing costs nothing. What is left afterwards is one rename or one `security -U`.
-    let writer = PreparedWrite::prepare(&target).map_err(RenewError::Unavailable)?;
+    let writer = PreparedWrite::prepare(&dir, &target).map_err(|error| match error {
+        LockError::Busy => RenewError::Busy,
+        LockError::Unavailable(why) => RenewError::Unavailable(why),
+    })?;
 
     let reply = post_grant(token_url, &request_body(&refresh_token, &scopes)).map_err(|error| {
         match error {

@@ -4,6 +4,7 @@ use crate::paths::scratch_dir;
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 const NOW_MS: i64 = 1_787_000_000_000;
 
@@ -308,7 +309,9 @@ fn a_write_that_cannot_be_prepared_fails_before_anything_is_spent() {
     // A directory where the temporary has to go.
     fs::create_dir(path.with_extension("json.on-n-off")).unwrap();
 
-    assert!(PreparedWrite::prepare(&ClaudeStore::File(path)).is_err());
+    assert!(
+        PreparedWrite::prepare(&ConfigDir::default_in(&home), &ClaudeStore::File(path)).is_err()
+    );
     assert!(matches!(
         renew(
             &home,
@@ -348,4 +351,43 @@ fn a_renewal_that_cannot_read_the_keychain_redeems_nothing() {
         "refused over the Keychain before any grant, not by the issuer: {why}"
     );
     assert_eq!(stored_token(&home), "old");
+}
+
+/// Claude Code takes `.storage-write.lock` around every change to its credentials. While another
+/// process holds it, the renewal yields before redeeming anything, and breaks it only once it has
+/// gone fifteen seconds without a touch.
+#[test]
+fn a_renewal_yields_while_claude_code_writes_its_credentials() {
+    let home = home_with("renew-storage-write", &stored());
+    let lock = home.join(".claude").join(".storage-write.lock");
+    fs::create_dir(&lock).unwrap();
+    let attempt = || {
+        renew(
+            &home,
+            &|| Ok(None),
+            NOW_MS,
+            &refused_url(),
+            &RefusedLogin::new(),
+        )
+    };
+
+    filetime::set_file_mtime(
+        &lock,
+        filetime::FileTime::from_system_time(SystemTime::now() - Duration::from_secs(10)),
+    )
+    .unwrap();
+    assert_eq!(attempt().unwrap_err(), RenewError::Busy);
+    assert_eq!(stored_token(&home), "old");
+    assert!(lock.is_dir(), "the holder's lock is left alone");
+
+    filetime::set_file_mtime(
+        &lock,
+        filetime::FileTime::from_system_time(SystemTime::now() - Duration::from_secs(16)),
+    )
+    .unwrap();
+    assert!(
+        matches!(attempt(), Err(RenewError::Unavailable(why)) if why.contains("network")),
+        "past fifteen seconds the lock is abandoned, and the renewal goes on to the issuer"
+    );
+    assert!(!lock.exists(), "and released once the renewal is done");
 }

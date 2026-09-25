@@ -852,3 +852,27 @@ fn a_switch_refuses_to_write_when_the_keychain_cannot_be_read() {
         .iter()
         .all(|command| command.starts_with("find-generic-password")));
 }
+
+/// Claude Code takes `.storage-write.lock` around every change to its credentials. While another
+/// process holds it, the switch writes neither half.
+#[test]
+fn a_switch_yields_while_claude_code_writes_its_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let credentials = native.config_home.join(".credentials.json");
+    fs::write(&credentials, r#"{"claudeAiOauth":{"accessToken":"old"}}"#).unwrap();
+    let lock = native.config_home.join(".storage-write.lock");
+    fs::create_dir(&lock).unwrap();
+
+    assert_eq!(native.write(Some(&incoming())).err().as_deref(), Some(BUSY));
+    assert_eq!(
+        fs::read_to_string(&credentials).unwrap(),
+        r#"{"claudeAiOauth":{"accessToken":"old"}}"#
+    );
+    assert!(!native.config_file.exists());
+    assert!(lock.is_dir());
+
+    fs::remove_dir(&lock).unwrap();
+    native.write(Some(&incoming())).unwrap();
+    assert!(!lock.exists(), "released once the write is done");
+}

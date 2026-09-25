@@ -181,10 +181,18 @@ fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
     let path = home.join(".claude").join(".credentials.json");
     let temporary = path.with_extension("json.on-n-off");
 
-    let writer = PreparedWrite::prepare(&ClaudeStore::File(path)).unwrap();
+    let storage_write = home.join(".claude").join(".storage-write.lock");
+
+    let writer =
+        PreparedWrite::prepare(&ConfigDir::default_in(&home), &ClaudeStore::File(path)).unwrap();
     assert!(temporary.exists(), "prepared up front, before the grant");
+    assert!(
+        storage_write.is_dir(),
+        "Claude Code's credentials are locked from the preparation on"
+    );
     drop(writer);
     assert!(!temporary.exists());
+    assert!(!storage_write.exists());
 }
 
 /// The renewed login lands in a file only this user can read.
@@ -391,8 +399,9 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
     const TWO_ITEMS: &[(&str, &str)] = &[("claude-code-user", "{}"), ("other", "{}")];
 
     let (committed, sent) = with_test_runner(fake_items(TWO_ITEMS), || {
-        PreparedWrite::prepare(&ClaudeStore::Keychain)
-            .and_then(|write| write.commit(r#"{"claudeAiOauth":{}}"#))
+        let dir = ConfigDir::default_in(&scratch_dir("renew-keychain-account"));
+        let write = PreparedWrite::prepare(&dir, &ClaudeStore::Keychain).unwrap();
+        write.commit(r#"{"claudeAiOauth":{}}"#)
     });
     assert_eq!(committed, Ok(()));
     let add = sent
