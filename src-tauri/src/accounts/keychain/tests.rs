@@ -214,6 +214,11 @@ fn write_and_delete_send_their_commands_and_read_the_answers() {
 #[test]
 #[ignore = "writes a throwaway Keychain entry; not part of CI"]
 fn rehearse_the_keychain_write_and_delete_through_security() {
+    with_real_keychain(rehearse_the_keychain_write_and_delete);
+}
+
+#[cfg(target_os = "macos")]
+fn rehearse_the_keychain_write_and_delete() {
     use std::process::Command;
 
     let entry = ThrowawayEntry {

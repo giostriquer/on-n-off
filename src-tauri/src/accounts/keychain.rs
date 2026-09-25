@@ -261,15 +261,33 @@ type Answer = std::rc::Rc<dyn Fn(&str) -> CommandOutcome>;
 thread_local! {
     static TEST_RUNNER: std::cell::RefCell<Option<Answer>> = const { std::cell::RefCell::new(None) };
     static SENT: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    static REAL_KEYCHAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// What the installed test runner answers `command`, recording it; `None` outside
-/// `with_test_runner`.
+/// What the installed test runner answers `command`, recording it; `None` inside
+/// `with_real_keychain`, where the tool itself runs. Any other test that reaches the tool panics
+/// here rather than touch the login Keychain of whoever runs the suite.
 #[cfg(all(target_os = "macos", test))]
 fn test_answer(command: &str) -> Option<CommandOutcome> {
-    let runner = TEST_RUNNER.with(|slot| slot.borrow().clone())?;
+    let Some(runner) = TEST_RUNNER.with(|slot| slot.borrow().clone()) else {
+        assert!(
+            REAL_KEYCHAIN.with(std::cell::Cell::get),
+            "a test reached the real Keychain: security {command}"
+        );
+        return None;
+    };
     SENT.with(|sent| sent.borrow_mut().push(command.to_string()));
     Some(runner(command))
+}
+
+/// Run `run` with `security` really run, for the rehearsals that exist to drive the real tool and
+/// are ignored outside a deliberate run. Every other test goes through `with_test_runner`.
+#[cfg(all(target_os = "macos", test))]
+pub(crate) fn with_real_keychain<T>(run: impl FnOnce() -> T) -> T {
+    REAL_KEYCHAIN.with(|flag| flag.set(true));
+    let result = run();
+    REAL_KEYCHAIN.with(|flag| flag.set(false));
+    result
 }
 
 /// Run `run` with every `security` command answered by `runner` instead of the tool: a write or a

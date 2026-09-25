@@ -586,6 +586,13 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
 #[test]
 #[ignore = "real-home network probe; not part of CI"]
 fn probe_real_home_limits() {
+    #[cfg(target_os = "macos")]
+    crate::accounts::with_real_keychain(print_real_home_limits);
+    #[cfg(not(target_os = "macos"))]
+    print_real_home_limits();
+}
+
+fn print_real_home_limits() {
     for provider in [AgentId::Claude, AgentId::Codex] {
         for dto in read_limits(provider, false) {
             println!(
