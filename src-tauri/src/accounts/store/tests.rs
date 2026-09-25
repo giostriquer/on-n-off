@@ -416,3 +416,90 @@ fn old_vaults_do_not_assume_renewal_ownership() {
     let restored: Database = serde_json::from_value(encoded).unwrap();
     assert!(!restored.profiles[0].usage_renewal_owned);
 }
+
+/// The vault is JSON sealed in `vault.enc`, and every earlier vault must keep loading: the names
+/// the database writes are its on-disk format.
+#[test]
+fn a_sealed_database_keeps_the_vault_format() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store {
+        root: root.path().into(),
+        key: [5; 32],
+        _lease: held(root.path()),
+    };
+    let mut db = Database::default();
+    let id = db.save(identity("a"), login("fixture-a"), None).unwrap();
+    db.invalidate_logins().unwrap();
+    db.ignored_accounts.push(identity("removed"));
+    db.ignored_credentials.push("signed-out-fingerprint".into());
+    db.recovery = Some(super::super::transaction::Recovery {
+        target_id: id.clone(),
+        outgoing: Some(login("outgoing")),
+        outgoing_identity: Some(identity("b")),
+    });
+    store.persist(&db).unwrap();
+
+    let sealed = std::fs::read(root.path().join("vault.enc")).unwrap();
+    let plain = super::super::vault::unseal(&[5; 32], &sealed).unwrap();
+    let mut written: Value = serde_json::from_slice(&plain).unwrap();
+    written["profiles"][0]["saved_at"] = json!("<saved at>");
+    assert_eq!(
+        written,
+        json!({
+            "profiles": [{
+                "id": id,
+                "identity": {"provider": "codex", "userId": "a", "workspaceId": "team"},
+                "label": "Email unavailable",
+                "email": null,
+                "category": null,
+                "saved_at": "<saved at>",
+                "login": {"auth": {"refresh": "fixture-a"}, "account": null},
+                "pending_activation": false,
+                "usage_renewal_owned": false
+            }],
+            "login_epoch": 1,
+            "ignored_accounts": [{"provider": "codex", "userId": "removed", "workspaceId": "team"}],
+            "ignored_credentials": ["signed-out-fingerprint"],
+            "recovery": {
+                "target_id": id,
+                "outgoing": {"auth": {"refresh": "outgoing"}, "account": null},
+                "outgoing_identity": {"provider": "codex", "userId": "b", "workspaceId": "team"}
+            }
+        })
+    );
+}
+
+/// A vault written before epochs, exclusions, recovery and renewal ownership existed loads with
+/// none of them: no pending recovery, nothing excluded, nothing awaiting activation or renewing.
+#[test]
+fn a_vault_from_before_the_later_fields_loads_without_them() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store {
+        root: root.path().into(),
+        key: [4; 32],
+        _lease: held(root.path()),
+    };
+    let old = json!({"profiles": [{
+        "id": "old",
+        "identity": {"provider": "codex", "userId": "a", "workspaceId": "team"},
+        "label": "Codex account",
+        "saved_at": "2026-09-01T00:00:00Z",
+        "login": {"auth": {"refresh": "old-fixture"}, "account": null}
+    }]});
+    let sealed = super::super::vault::seal(&[4; 32], &serde_json::to_vec(&old).unwrap()).unwrap();
+    std::fs::write(root.path().join("vault.enc"), sealed).unwrap();
+
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.login_epoch, 0);
+    assert!(loaded.recovery.is_none());
+    assert!(loaded.ignored_accounts.is_empty() && loaded.ignored_credentials.is_empty());
+    let profile = &loaded.profiles[0];
+    assert_eq!(profile.identity, identity("a"));
+    assert!(!profile.pending_activation && !profile.usage_renewal_owned);
+    assert_eq!(
+        profile.login.as_ref().unwrap().auth["refresh"],
+        "old-fixture"
+    );
+    assert_eq!(profile.label, "Email unavailable");
+    assert_eq!(profile.category, None, "a default name is not a category");
+}

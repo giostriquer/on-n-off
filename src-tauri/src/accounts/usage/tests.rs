@@ -161,6 +161,46 @@ fn removal_or_reauthentication_during_http_discards_the_late_read() {
         assert!(!home.path().join(".on-n-off/limits").exists());
     }
 }
+/// Any account change while HTTP is in flight discards the reading, even one that left this
+/// profile's login alone: the epoch, not only the login, vouches for a usage publication.
+#[test]
+fn an_unrelated_account_change_during_http_discards_the_late_read() {
+    let home = tempfile::tempdir().unwrap();
+    let p = stored(home.path());
+    let result = poll_with(home.path(), &p, 0, false, &|| Ok(open(home.path())), &|p| {
+        let store = open(home.path());
+        let mut db = store.load().unwrap();
+        db.invalidate_logins().unwrap();
+        store.persist(&db).unwrap();
+        FetchResult {
+            login: p.login.clone(),
+            result: Ok(reading(p)),
+        }
+    });
+    assert!(result.is_none());
+    assert!(!home.path().join(".on-n-off/limits").exists());
+}
+#[test]
+fn a_pending_recovery_during_http_discards_the_late_read() {
+    let home = tempfile::tempdir().unwrap();
+    let p = stored(home.path());
+    let result = poll_with(home.path(), &p, 0, false, &|| Ok(open(home.path())), &|p| {
+        let store = open(home.path());
+        let mut db = store.load().unwrap();
+        db.recovery = Some(super::super::transaction::Recovery {
+            target_id: p.id.clone(),
+            outgoing: None,
+            outgoing_identity: None,
+        });
+        store.persist(&db).unwrap();
+        FetchResult {
+            login: p.login.clone(),
+            result: Ok(reading(p)),
+        }
+    });
+    assert!(result.is_none());
+    assert!(!home.path().join(".on-n-off/limits").exists());
+}
 #[test]
 fn forced_refresh_respects_rate_limit_backoff_per_account() {
     use std::cell::Cell;

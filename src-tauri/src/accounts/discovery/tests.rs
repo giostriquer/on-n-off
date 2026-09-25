@@ -149,3 +149,20 @@ fn metadata_changes_cannot_reenroll_a_signed_out_credential_generation() {
         json!("updated@example.com");
     assert!(candidate(&native, &db).unwrap().is_none());
 }
+#[test]
+fn a_pending_recovery_prevents_late_publication_even_at_the_same_epoch() {
+    let native = client();
+    let mut db = Database {
+        recovery: Some(super::super::transaction::Recovery {
+            target_id: "target".into(),
+            outgoing: None,
+            outgoing_identity: None,
+        }),
+        ..Database::default()
+    };
+    let result = publish(&mut db, &native, login("a"), 0, true, &mut |_| {
+        panic!("published during recovery")
+    });
+    assert!(result.is_err());
+    assert!(db.profiles.is_empty());
+}

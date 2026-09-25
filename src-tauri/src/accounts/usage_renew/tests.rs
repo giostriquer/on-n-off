@@ -142,6 +142,59 @@ fn removing_profile_during_renewal_does_not_resurrect_it() {
     assert!(open(home.path()).load().unwrap().profiles.is_empty());
 }
 
+/// The renewal has already spent the refresh token when it publishes, so an account change that
+/// left this profile alone (a sign-out of another account, say) must not reject the renewed login:
+/// losing it would strand the profile. The epoch deliberately does not guard this publication.
+#[test]
+fn an_unrelated_account_change_during_renewal_still_publishes_the_renewed_login() {
+    let home = tempfile::tempdir().unwrap();
+    let profile = setup(home.path(), true);
+    let login = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
+        let store = open(home.path());
+        let mut db = store.load().unwrap();
+        db.invalidate_logins().unwrap();
+        store.persist(&db).unwrap();
+        Ok(rotated(login))
+    })
+    .unwrap();
+    assert_eq!(login.auth["claudeAiOauth"]["refreshToken"], "new-refresh");
+    assert_eq!(
+        open(home.path()).load().unwrap().profiles[0]
+            .login
+            .as_ref()
+            .unwrap()
+            .auth["claudeAiOauth"]["refreshToken"],
+        "new-refresh"
+    );
+}
+#[test]
+fn a_pending_recovery_rejects_the_renewed_login_and_keeps_the_reply_for_later() {
+    let home = tempfile::tempdir().unwrap();
+    let profile = setup(home.path(), true);
+    let result = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
+        let store = open(home.path());
+        let mut db = store.load().unwrap();
+        db.recovery = Some(super::super::transaction::Recovery {
+            target_id: profile.id.clone(),
+            outgoing: None,
+            outgoing_identity: None,
+        });
+        store.persist(&db).unwrap();
+        Ok(rotated(login))
+    });
+    assert!(result.is_err());
+    let store = open(home.path());
+    let saved = store.load().unwrap().profiles.remove(0);
+    assert_eq!(
+        saved.login.as_ref().unwrap().auth["claudeAiOauth"]["refreshToken"],
+        "original"
+    );
+    assert!(
+        activation_ready(&store, &saved).is_err(),
+        "the completed reply stays journaled, so the spent source is never activated"
+    );
+}
+
 #[test]
 fn a_completed_reply_recovers_after_publication_failure_without_another_grant() {
     let home = tempfile::tempdir().unwrap();
