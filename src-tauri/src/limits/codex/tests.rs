@@ -120,9 +120,18 @@ fn orders_weekly_before_session_even_when_app_server_returns_primary_first() {
         }
     }))
     .unwrap();
-    let parsed = parse_codex(&payload);
+    let card = crate::limits::pipeline::finish(
+        crate::dto::AgentId::Codex,
+        crate::dto::LimitsStatus::Ok,
+        None,
+        crate::limits::Parsed {
+            account: None,
+            reading: parse_codex(&payload),
+        },
+    );
 
-    let summary: Vec<(&str, LimitWindowKind)> = parsed
+    let summary: Vec<(&str, LimitWindowKind)> = card
+        .reading
         .windows
         .iter()
         .map(|window| (window.id.as_str(), window.kind))

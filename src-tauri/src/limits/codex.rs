@@ -111,7 +111,6 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
             }
         }
     }
-    windows.sort_by_key(|window| super::pipeline::kind_rank(window.kind));
     Reading {
         plan: main.plan_type.clone(),
         subscription_status: None,
