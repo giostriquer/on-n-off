@@ -308,3 +308,20 @@ flowchart LR
 Snapshots under `~/.on-n-off/` exist so a signed-out account or an offline launch still shows the
 last trustworthy numbers rather than an empty screen. They are numbers and metadata — never
 credentials.
+
+## Glossary
+
+The words are defined in [`CONTEXT.md`](../../CONTEXT.md). This table says where each one lives in
+the code today; a change that moves one updates its row.
+
+| Term | Where it lives |
+| --- | --- |
+| Quota window | `LimitWindowDto` (`dto/limits.rs`) |
+| Reading | `ProviderLimitsDto` less its status, message and account (`dto/limits.rs`); built by `limits/pipeline.rs` |
+| Figure | the optional fields `ProviderLimitsDto::has_figures` lists, plus `subscription` and `reset_offer` |
+| Account details | `plan` and `subscription_status` on `ProviderLimitsDto` |
+| Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); merged into a fresh read by `limits/mod.rs` and `limits/observations.rs` |
+| Native store | `NativeStore` (`accounts/native.rs`); Claude's login is also read by `claude_login_document` (`limits/credentials.rs`) |
+| Transcript source | `SourceSnapshot` and its entries (`usage/source_index.rs`), walked by `inventory_sources` |
+| Watermark | `Watermark` (`usage/history.rs`) |
+| Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs` |
