@@ -215,6 +215,11 @@ fn the_keyring_target_writes_and_deletes_through_security() {
 #[test]
 #[ignore = "writes a throwaway Keychain entry; not part of CI"]
 fn rehearse_the_keyring_target_through_security() {
+    crate::accounts::with_real_keychain(rehearse_the_keyring_target);
+}
+
+#[cfg(target_os = "macos")]
+fn rehearse_the_keyring_target() {
     let entry = crate::accounts::keychain::ThrowawayEntry {
         service: "on-n-off native keychain rehearsal",
         account: "on-n-off-test",
@@ -907,3 +912,25 @@ fn a_switch_yields_while_claude_code_writes_its_credentials() {
 }
 
 mod secure_storage;
+
+/// A credentials file that is a link is refused before either half of the switch is written.
+#[cfg(unix)]
+#[test]
+fn a_switch_refuses_a_linked_credentials_file_before_writing_anything() {
+    let root = tempfile::tempdir().unwrap();
+    let native = claude(root.path());
+    let elsewhere = root.path().join("elsewhere.json");
+    fs::write(&elsewhere, r#"{"claudeAiOauth":{"accessToken":"old"}}"#).unwrap();
+    let file = native.config_home.join(".credentials.json");
+    std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
+
+    assert_eq!(
+        native.write(Some(&incoming())).err().as_deref(),
+        Some("Refusing to replace a linked credential file.")
+    );
+    assert!(fs::symlink_metadata(&file)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(!native.config_file.exists(), "the identity was not patched");
+}

@@ -315,37 +315,54 @@ fn an_unreadable_success_is_treated_as_a_spent_token_not_a_retry() {
 }
 
 /// Everything that can fail about the write for reasons unrelated to the reply has to fail before
-/// the grant is sent, because after it there is no un-renewed state to fall back to.
+/// the grant is sent, because after it there is no un-renewed state to fall back to. Here the
+/// login is in the Keychain and the entry's account cannot be found to write it back under.
+#[cfg(target_os = "macos")]
 #[test]
 fn a_write_that_cannot_be_prepared_fails_before_anything_is_spent() {
-    let home = home_with("renew-unwritable", &stored());
-    let path = home.join(".claude").join(".credentials.json");
-    // A directory where the temporary has to go.
-    fs::create_dir(path.with_extension("json.on-n-off")).unwrap();
+    use crate::accounts::keychain::with_test_runner;
+    use crate::process::CommandOutcome;
+    let home = scratch_dir("renew-unwritable");
+    let dir = StorageDir::default_in(&home);
+    let keychain = |_: &StorageDir| Ok(Some(stored().to_string()));
 
-    assert!(
-        PreparedWrite::prepare(&StorageDir::default_in(&home), &ClaudeStore::File(path)).is_err()
-    );
-    assert!(matches!(
+    let no_account = |_: &str| CommandOutcome::Exited {
+        success: false,
+        stdout: String::new(),
+        stderr: "The specified item could not be found in the keychain.".to_string(),
+    };
+
+    let (result, sent) = with_test_runner(no_account, || {
         renew(
-            &StorageDir::default_in(&home),
-            &|_: &StorageDir| Ok(None),
+            &dir,
+            &keychain,
             NOW_MS,
             &refused_url(),
-            &RefusedLogin::new()
-        ),
-        Err(RenewError::Unavailable(_))
-    ));
+            &RefusedLogin::new(),
+        )
+    });
+    let Err(RenewError::Unavailable(why)) = result else {
+        panic!("expected the renewal to be unavailable, got {result:?}");
+    };
+    assert!(
+        why.contains("Keychain entry"),
+        "refused before any grant: {why}"
+    );
+    assert!(
+        sent.iter()
+            .all(|command| command.starts_with("find-generic-password")),
+        "nothing was written: {sent:?}"
+    );
+    let (lookup, _) = with_test_runner(no_account, || {
+        current_login(&dir, &keychain, NOW_MS, &refused_url())
+    });
     assert_eq!(
-        login(&home, &refused_url()),
+        lookup,
         CredentialLookup::Expired { renewable: true },
         "the login is fine; the write is on-n-off's problem, and the user's remedy is unchanged"
     );
-    assert_eq!(stored_token(&home), "old");
 }
 
-/// When the Keychain cannot be read, the credentials file stands in for the read, but which store
-/// Claude Code will read next is unknown. Nothing is redeemed that could not then be stored.
 #[test]
 fn a_renewal_that_cannot_read_the_keychain_redeems_nothing() {
     let home = home_with("renew-keychain-unread", &stored());
@@ -530,4 +547,59 @@ fn a_renewal_whose_lock_was_taken_away_sends_no_grant() {
         "a refused endpoint would have reported the network, so no grant was sent"
     );
     assert_eq!(stored_token(&home), "old");
+}
+
+/// A credentials file that is a link belongs to whoever set the link up: replacing it would cut the
+/// link and leave the renewed login where Claude Code no longer looks. Nothing is redeemed.
+#[cfg(unix)]
+#[test]
+fn a_renewal_refuses_a_linked_credentials_file() {
+    let home = scratch_dir("renew-linked-file");
+    let elsewhere = home.join("elsewhere.json");
+    fs::write(&elsewhere, stored().to_string()).unwrap();
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    let file = home.join(".claude").join(".credentials.json");
+    std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
+
+    let refused = renew(
+        &StorageDir::default_in(&home),
+        &|_: &StorageDir| Ok(None),
+        NOW_MS,
+        &refused_url(),
+        &RefusedLogin::new(),
+    );
+    let Err(RenewError::Unavailable(why)) = refused else {
+        panic!("expected the renewal to be refused, got {refused:?}");
+    };
+    assert!(why.contains("linked"), "refused before any grant: {why}");
+    assert!(fs::symlink_metadata(&file)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        serde_json::from_str::<Value>(&fs::read_to_string(&elsewhere).unwrap()).unwrap(),
+        stored()
+    );
+}
+
+/// The renewal reads the login it will write back while holding Claude Code's storage-write lock,
+/// so no credential write of Claude Code's can land between that read and the write.
+#[test]
+fn a_renewal_reads_the_store_under_the_storage_write_lock() {
+    let home = home_with("renew-read-locked", &stored());
+    let lock = home.join(".claude").join(".storage-write.lock");
+    let seen = std::cell::Cell::new(None);
+    let probe = |_: &StorageDir| {
+        seen.set(Some(lock.is_dir()));
+        Ok(None)
+    };
+
+    let _ = renew(
+        &StorageDir::default_in(&home),
+        &probe,
+        NOW_MS,
+        &refused_url(),
+        &RefusedLogin::new(),
+    );
+    assert_eq!(seen.get(), Some(true));
 }

@@ -15,7 +15,7 @@
 //! **The redemption is the point of no return.** The issuer rotates the refresh token on most
 //! renewals, which kills the old one as soon as the reply is written; from then until the store
 //! is written, the only live credential the user has is a value on this stack. So the work is
-//! ordered around that instant rather than recovered from afterwards: [`PreparedWrite::prepare`]
+//! ordered around that instant rather than recovered from afterwards: [`claude_store::begin`]
 //! resolves and proves the write *before* the grant is sent, and everything left after it is one
 //! `rename` or one `security -U`. What cannot be moved earlier is reported as
 //! [`RenewError::Stranded`], which says on-n-off spent the login and could not store it, because
@@ -29,7 +29,7 @@ use std::sync::Mutex;
 use serde_json::{json, Value};
 
 use super::claude_store::{
-    self, ClaudeLocks, ClaudeStore, KeychainProbe, LockError, LockScope, PreparedWrite, StorageDir,
+    self, BeginError, ClaudeLocks, ClaudeStore, KeychainProbe, LockError, LockScope, StorageDir,
 };
 use crate::http::{post_grant, HttpError};
 use crate::limits::credentials::{self, ClaudeCredential, CredentialLookup};
@@ -66,6 +66,25 @@ pub(crate) enum RenewError {
     /// Redeemed, then not stored, carrying why. The user is signed out of Claude Code as a result
     /// and is the only one who can put it right, so the reason travels all the way to the screen.
     Stranded(String),
+}
+
+impl From<LockError> for RenewError {
+    fn from(error: LockError) -> Self {
+        match error {
+            LockError::Busy => Self::Busy,
+            LockError::Unavailable(why) => Self::Unavailable(why),
+        }
+    }
+}
+
+impl From<BeginError> for RenewError {
+    fn from(error: BeginError) -> Self {
+        match error {
+            BeginError::Busy => Self::Busy,
+            BeginError::Store(error) => Self::Unavailable(error.to_string()),
+            BeginError::Unavailable(why) => Self::Unavailable(why),
+        }
+    }
 }
 
 /// The stored login this process has already had refused, so a dead grant is sent once rather
@@ -160,14 +179,12 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
     token_url: &str,
     refused: &RefusedLogin,
 ) -> Result<ClaudeCredential, RenewError> {
-    let lock = ClaudeLocks::acquire(dir, LockScope::Refresh).map_err(|error| match error {
-        LockError::Busy => RenewError::Busy,
-        LockError::Unavailable(why) => RenewError::Unavailable(why),
-    })?;
-    let stored = claude_store::read(dir, keychain(dir))
-        .map_err(|error| RenewError::Unavailable(error.to_string()))?;
-    let mut document = stored
-        .document
+    let lock = ClaudeLocks::acquire(dir, LockScope::Refresh)?;
+    let held = || lock.lost();
+    // Read under Claude Code's storage-write lock too, and the write proven, before anything else:
+    // the document written back is a change to this one, and nothing can land in between.
+    let (document, write) = claude_store::begin(dir, keychain, &held)?;
+    let mut document = document
         .ok_or_else(|| RenewError::Unavailable("no stored Claude login to renew".to_string()))?;
 
     // Under the lock the store is authoritative. Another process having renewed while we waited is
@@ -178,13 +195,10 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
         refused.forget();
         return Ok(fresh);
     }
-    // A Keychain that could not be read leaves no store the write can be sure Claude Code reads
-    // next, so nothing is redeemed that could not then be stored.
-    let target = stored.target.map_err(RenewError::Unavailable)?;
     let oauth = document
         .get("claudeAiOauth")
         .ok_or_else(|| RenewError::Unavailable("stored login has no claudeAiOauth".to_string()))?;
-    let identity = identify(&target, oauth);
+    let identity = identify(write.store(), oauth);
     if refused.matches(&identity) {
         return Err(RenewError::Rejected);
     }
@@ -194,17 +208,11 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
     let scopes = scopes(oauth);
     let client_id = client_id(oauth).to_string();
 
-    // Everything about the write that can fail for reasons unrelated to the reply fails here,
-    // where failing costs nothing. What is left afterwards is one rename or one `security -U`.
-    let writer = PreparedWrite::prepare(dir, &target).map_err(|error| match error {
-        LockError::Busy => RenewError::Busy,
-        LockError::Unavailable(why) => RenewError::Unavailable(why),
-    })?;
-
-    // Last check before the point of no return. A refresh lock taken away while this held it was
-    // judged abandoned by another process, which may be renewing this same login right now: its
-    // renewal is the one that should win, and redeeming here could strand whichever loses.
-    if lock.lost() {
+    // Last check before the point of no return. A lock taken away while this held it was judged
+    // abandoned by another process, which may be renewing or rewriting this same login right
+    // now: its change is the one that should win, and redeeming here could strand whichever
+    // loses.
+    if write.lost() {
         return Err(RenewError::Busy);
     }
     let reply = post_grant(
@@ -227,9 +235,7 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
 
     // Past here the old refresh token is dead and `document` holds the only live one.
     apply(&mut document, &reply, now_ms).map_err(RenewError::Stranded)?;
-    let raw = serde_json::to_string(&document)
-        .map_err(|error| RenewError::Stranded(error.to_string()))?;
-    writer.commit(&raw).map_err(RenewError::Stranded)?;
+    write.commit(&document).map_err(RenewError::Stranded)?;
     refused.forget();
     // Parsed back out of what was written, so the credential returned is provably the stored one.
     credentials::parse_claude_credential(&document)

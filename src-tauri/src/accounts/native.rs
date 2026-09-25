@@ -1,7 +1,7 @@
 //! Narrow native-store access. No whole-home restores and no provider endpoint/config rewriting.
 use super::{
     claude_store::{
-        self, ClaudeLocks, ClaudeStore, KeychainProbe, LockScope, SecureStorage, StorageDir,
+        self, BeginError, ClaudeLocks, KeychainProbe, LockScope, SecureStorage, StorageDir,
         StoreError, Stored,
     },
     model::{self, Identity},
@@ -24,6 +24,20 @@ use std::{
 
 /// Claude Code holds one of the locks an account change needs.
 const BUSY: &str = "Claude is updating its login or configuration. Retry after it finishes.";
+
+/// A lock an account change relied on was taken away while it was held.
+const LOST: &str = "Native credential coordination was lost. Protected recovery has been retained.";
+
+/// How the account switch words a store it could not read.
+fn store_error(error: StoreError) -> String {
+    match error {
+        StoreError::Keychain(why) => why,
+        StoreError::FileUnreadable(_) => "Cannot read native credentials.".into(),
+        StoreError::FileMalformed(_) => {
+            "The native credential document is malformed. It has not been changed.".into()
+        }
+    }
+}
 
 pub struct NativeStore {
     pub provider: AgentId,
@@ -304,15 +318,7 @@ impl NativeStore {
     /// Claude's login, from the store Claude Code would read it from. A disposable ON_N_OFF_HOME
     /// uses file fixtures unless it is an explicit isolated login.
     fn claude_read(&self) -> Result<Stored, String> {
-        claude_store::read(&self.claude_dir(), self.claude_keychain()).map_err(
-            |error| match error {
-                StoreError::Keychain(why) => why,
-                StoreError::FileUnreadable(_) => "Cannot read native credentials.".into(),
-                StoreError::FileMalformed(_) => {
-                    "The native credential document is malformed. It has not been changed.".into()
-                }
-            },
-        )
+        claude_store::read(&self.claude_dir(), self.claude_keychain()).map_err(store_error)
     }
     /// The Keychain entry's secret, found the way Claude Code finds it.
     fn claude_keychain(&self) -> KeychainProbe {
@@ -321,21 +327,6 @@ impl NativeStore {
             return claude_store::keychain_secret(&self.claude_service());
         }
         Ok(None)
-    }
-    /// The write that reaches `store`, resolved before anything is written.
-    fn claude_target(&self, store: ClaudeStore) -> Result<Target, String> {
-        match store {
-            ClaudeStore::File(path) => Ok(Target::File(path)),
-            #[cfg(target_os = "macos")]
-            ClaudeStore::Keychain => {
-                let service = self.claude_service();
-                let account = claude_store::keychain_account(&service)?
-                    .ok_or("The native Keychain entry disappeared.")?;
-                Ok(Target::Keyring { service, account })
-            }
-            #[cfg(not(target_os = "macos"))]
-            ClaudeStore::Keychain => Err("This platform has no Keychain.".into()),
-        }
     }
     #[cfg(target_os = "macos")]
     fn claude_service(&self) -> String {
@@ -446,7 +437,7 @@ impl NativeStore {
         if self.provider == AgentId::Claude {
             let service = self.claude_service();
             if let Some(account) = claude_store::keychain_account(&service)? {
-                Target::Keyring { service, account }.write(None)?;
+                super::keychain::delete(&service, &account)?;
             }
         }
         Ok(())
@@ -546,15 +537,18 @@ impl NativeStore {
         if self.provider == AgentId::Codex {
             return self.codex_target()?.write(login.map(|l| &l.auth));
         }
-        // Claude Code changes its credentials only under this lock, so the read, the config patch
-        // and the write below cannot interleave with one of its own.
-        let _storage = ClaudeLocks::acquire(&self.claude_dir(), LockScope::StorageWrite)
-            .map_err(|_| BUSY.to_string())?;
-        let stored = self.claude_read()?;
-        // Written to the store Claude Code's next read uses; when the Keychain could not be read,
-        // that store is unknown and nothing is written at all.
-        let target = self.claude_target(stored.target?)?;
-        let mut auth = stored.document.unwrap_or_else(|| json!({}));
+        // The read, the config patch and the credential write are one change under Claude Code's
+        // storage-write lock, going to the store Claude Code's next read uses.
+        let held = || locks.ensure().is_err();
+        let keychain = |_: &StorageDir| self.claude_keychain();
+        let (document, write) = claude_store::begin(&self.claude_dir(), &keychain, &held).map_err(
+            |error| match error {
+                BeginError::Busy => BUSY.into(),
+                BeginError::Store(error) => store_error(error),
+                BeginError::Unavailable(why) => why,
+            },
+        )?;
+        let mut auth = document.unwrap_or_else(|| json!({}));
         let object = auth
             .as_object_mut()
             .ok_or("Malformed Claude credentials.")?;
@@ -572,13 +566,20 @@ impl NativeStore {
         }
         // The caller's encrypted journal already holds the outgoing OAuth identity and credential.
         // ConfigIo owns atomic config publication/validation/rollback; ordinary backups get no tokens.
-        locks.ensure()?;
+        let ensure = || {
+            if write.lost() {
+                Err(LOST.to_string())
+            } else {
+                Ok(())
+            }
+        };
+        ensure()?;
         crate::config_io::ConfigIo::patch_account_identity(
             &self.config_file,
             login.map(|l| &l.account),
         )?;
-        locks.ensure()?;
-        target.write(Some(&auth))
+        ensure()?;
+        write.commit(&auth)
     }
     fn verify_codex(&self, force: bool) -> Result<(), String> {
         let entries = crate::limits::read_limits(self.provider, force);
@@ -632,10 +633,7 @@ pub fn run(command: &mut Command, timeout: Duration) -> Result<String, String> {
 impl NativeGuard for ClaudeLocks {
     fn ensure(&self) -> Result<(), String> {
         if self.lost() {
-            Err(
-                "Native credential coordination was lost. Protected recovery has been retained."
-                    .into(),
-            )
+            Err(LOST.into())
         } else {
             Ok(())
         }

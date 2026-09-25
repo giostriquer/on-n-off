@@ -403,17 +403,16 @@ fn attributes_account(service: &str, account: Option<&str>) -> Result<Option<Str
     }
 }
 
-/// The account the renewal's write to `service` goes to.
+/// The account a write to the Keychain entry under `service` goes to.
 #[cfg(target_os = "macos")]
-fn renewal_account(service: &str) -> Result<String, String> {
-    keychain_account(service)?
-        .ok_or_else(|| "could not read the Claude Keychain entry's account".to_string())
+fn write_account(service: &str) -> Result<String, String> {
+    keychain_account(service)?.ok_or_else(|| "The Claude Code Keychain entry disappeared.".into())
 }
 
 /// Mirrors `keychain_probe`'s stub: these platforms have no such entry, and the file store is the
 /// one their read will have chosen.
 #[cfg(not(target_os = "macos"))]
-fn renewal_account(_service: &str) -> Result<String, String> {
+fn write_account(_service: &str) -> Result<String, String> {
     Err("this platform has no Claude Code Keychain entry".to_string())
 }
 
@@ -429,100 +428,145 @@ pub(crate) fn parse_keychain_account(attributes: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// A store write resolved and proven before anything irreversible happens.
+/// Why a change to Claude Code's credentials could not begin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BeginError {
+    /// Claude Code is writing its credentials: its change goes first.
+    Busy,
+    /// No store could be read.
+    Store(StoreError),
+    /// The write could not be set up: its lock, a Keychain that could not be read, the Keychain
+    /// entry's account, a linked credentials file, or a temporary the directory will not take.
+    Unavailable(String),
+}
+
+impl From<LockError> for BeginError {
+    fn from(error: LockError) -> Self {
+        match error {
+            LockError::Busy => Self::Busy,
+            LockError::Unavailable(why) => Self::Unavailable(why),
+        }
+    }
+}
+
+/// One change to Claude Code's credentials: the only way on-n-off writes them.
 ///
-/// `prepare` does the parts that can fail on their own account: taking Claude Code's storage-write
-/// lock, reading the Keychain entry's account, or creating the private temporary the file store
-/// renames into. `commit` is then the single irreversible step. The storage-write lock is held
-/// from `prepare` until this value drops, so no other writer can slip in between.
-pub(crate) struct PreparedWrite {
+/// [`begin`] takes Claude Code's `.storage-write.lock`, reads the store under it and proves the
+/// write: the Keychain entry's account, or a private temporary beside the credentials file. What
+/// is left for [`CredentialWrite::commit`] is one `security -U` or one rename, and the document
+/// it writes is a change to the one read under the lock, so no credential write of Claude Code's
+/// can land in between. The lock is held until this value drops.
+pub(crate) struct CredentialWrite<'a> {
+    store: ClaudeStore,
     target: WriteTarget,
-    _storage: ClaudeLocks,
+    storage: ClaudeLocks,
+    held: &'a dyn Fn() -> bool,
 }
 
 enum WriteTarget {
-    Keychain { service: String, account: String },
-    File { path: PathBuf, temporary: PathBuf },
+    Keychain {
+        service: String,
+        account: String,
+    },
+    File {
+        path: PathBuf,
+        temporary: tempfile::NamedTempFile,
+    },
 }
 
-impl PreparedWrite {
-    /// `Busy` while another process is writing Claude Code's credentials.
-    pub(crate) fn prepare(dir: &StorageDir, store: &ClaudeStore) -> Result<Self, LockError> {
-        let storage = ClaudeLocks::acquire(dir, LockScope::StorageWrite)?;
-        let target = match store {
-            ClaudeStore::Keychain => {
-                let service = dir.service();
-                WriteTarget::Keychain {
-                    account: renewal_account(&service).map_err(LockError::Unavailable)?,
-                    service,
-                }
+/// Begin a change to the credentials in `dir`, reading the store with `keychain` under Claude
+/// Code's storage-write lock. `held` says whether a lock the caller holds around the change was
+/// taken away. Returns what the store holds, `None` for nothing, and the write.
+///
+/// Refused when the Keychain could not be read, since which store Claude Code reads next is then
+/// unknown, and when the credentials file is a link: replacing it would cut the link and leave the
+/// login where Claude Code no longer looks.
+pub(crate) fn begin<'a>(
+    dir: &StorageDir,
+    keychain: &dyn Fn(&StorageDir) -> KeychainProbe,
+    held: &'a dyn Fn() -> bool,
+) -> Result<(Option<Value>, CredentialWrite<'a>), BeginError> {
+    let storage = ClaudeLocks::acquire(dir, LockScope::StorageWrite)?;
+    let stored = read(dir, keychain(dir)).map_err(BeginError::Store)?;
+    let store = stored.target.map_err(BeginError::Unavailable)?;
+    let target = match &store {
+        ClaudeStore::Keychain => {
+            let service = dir.service();
+            WriteTarget::Keychain {
+                account: write_account(&service).map_err(BeginError::Unavailable)?,
+                service,
             }
-            ClaudeStore::File(path) => {
-                let temporary = path.with_extension("json.on-n-off");
-                // Created empty and private now, so a directory that will not take it says so
-                // before the grant rather than after.
-                write_private(&temporary, "").map_err(|error| {
-                    LockError::Unavailable(format!("{}: {error}", temporary.display()))
-                })?;
-                WriteTarget::File {
-                    path: path.clone(),
-                    temporary,
-                }
+        }
+        ClaudeStore::File(path) => {
+            if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+                return Err(BeginError::Unavailable(
+                    "Refusing to replace a linked credential file.".into(),
+                ));
             }
-        };
-        Ok(Self {
+            // Created now, private and beside the file, so a directory that will not take it
+            // says so before anything is written, or redeemed.
+            let temporary = tempfile::NamedTempFile::new_in(&dir.path).map_err(|error| {
+                BeginError::Unavailable(format!("{}: {error}", dir.path.display()))
+            })?;
+            WriteTarget::File {
+                path: path.clone(),
+                temporary,
+            }
+        }
+    };
+    Ok((
+        stored.document,
+        CredentialWrite {
+            store,
             target,
-            _storage: storage,
-        })
+            storage,
+            held,
+        },
+    ))
+}
+
+impl CredentialWrite<'_> {
+    /// The store the write goes to: the one Claude Code's next read uses.
+    pub(crate) fn store(&self) -> &ClaudeStore {
+        &self.store
     }
 
-    pub(crate) fn commit(self, raw: &str) -> Result<(), String> {
-        match &self.target {
+    /// Whether a lock this change relies on was taken away while held: the caller's own, or the
+    /// storage-write lock. Whatever is written after that is uncoordinated.
+    pub(crate) fn lost(&self) -> bool {
+        (self.held)() || self.storage.lost()
+    }
+
+    /// Write `document`: one `security -U`, or the temporary synced and renamed over the
+    /// credentials file, and the directory synced.
+    pub(crate) fn commit(self, document: &Value) -> Result<(), String> {
+        let bytes = serde_json::to_vec(document).map_err(|error| error.to_string())?;
+        match self.target {
             WriteTarget::Keychain { service, account } => {
-                super::keychain::write(service, account, raw.as_bytes())
+                super::keychain::write(&service, &account, &bytes)
             }
-            WriteTarget::File { path, temporary } => {
-                write_private(temporary, raw)
-                    .map_err(|error| format!("{}: {error}", temporary.display()))?;
-                fs::rename(temporary, path).map_err(|error| format!("{}: {error}", path.display()))
+            WriteTarget::File {
+                path,
+                mut temporary,
+            } => {
+                use std::io::Write;
+                temporary
+                    .write_all(&bytes)
+                    .and_then(|()| temporary.as_file().sync_all())
+                    .map_err(|error| format!("{}: {error}", path.display()))?;
+                temporary
+                    .persist(&path)
+                    .map_err(|error| format!("{}: {}", path.display(), error.error))?;
+                #[cfg(unix)]
+                if let Some(parent) = path.parent() {
+                    fs::File::open(parent)
+                        .and_then(|directory| directory.sync_all())
+                        .map_err(|error| format!("{}: {error}", parent.display()))?;
+                }
+                Ok(())
             }
         }
     }
-}
-
-impl Drop for PreparedWrite {
-    /// The temporary never outlives the attempt. A successful commit renamed it away, and a failed
-    /// one leaves a live refresh token in a file Claude Code does not know about and will never
-    /// rotate — the same objection that keeps `ConfigIo` out of this module. The user has to sign
-    /// in again either way; an orphaned secret does not help them do it.
-    fn drop(&mut self) {
-        if let WriteTarget::File { temporary, .. } = &self.target {
-            let _ = fs::remove_file(temporary);
-        }
-    }
-}
-
-/// The credentials file holds a refresh token, so it is created 0600 and never handed to
-/// `ConfigIo`, whose backups would copy the secret somewhere Claude Code neither knows about nor
-/// rotates.
-#[cfg(unix)]
-fn write_private(path: &Path, raw: &str) -> io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(raw.as_bytes())?;
-    file.sync_all()
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, raw: &str) -> io::Result<()> {
-    fs::write(path, raw)
 }
 
 /// Claude Code treats a refresh lock older than a minute as abandoned. Matching that is what makes

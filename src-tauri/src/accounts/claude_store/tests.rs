@@ -179,20 +179,38 @@ fn disposable_home_does_not_read_or_renew_the_real_keychain_login() {
 fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
     let home = scratch_dir("renew-temp");
     write(&home, ".claude/.credentials.json", CLAUDE_JSON);
-    let path = home.join(".claude").join(".credentials.json");
-    let temporary = path.with_extension("json.on-n-off");
+    let dir = home.join(".claude");
+    let files = || {
+        fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_file())
+            .count()
+    };
+    let storage_write = dir.join(".storage-write.lock");
+    let never_lost = || false;
 
-    let storage_write = home.join(".claude").join(".storage-write.lock");
-
-    let writer =
-        PreparedWrite::prepare(&StorageDir::default_in(&home), &ClaudeStore::File(path)).unwrap();
-    assert!(temporary.exists(), "prepared up front, before the grant");
+    let (document, writer) = begin(
+        &StorageDir::default_in(&home),
+        &|_: &StorageDir| Ok(None),
+        &never_lost,
+    )
+    .unwrap();
+    assert_eq!(
+        document.unwrap()["claudeAiOauth"]["accessToken"],
+        "kc-token"
+    );
+    assert_eq!(
+        files(),
+        2,
+        "the temporary is created up front, before the grant"
+    );
     assert!(
         storage_write.is_dir(),
-        "Claude Code's credentials are locked from the preparation on"
+        "Claude Code's credentials are locked from the read on"
     );
     drop(writer);
-    assert!(!temporary.exists());
+    assert_eq!(files(), 1, "only the credentials file is left");
     assert!(!storage_write.exists());
 }
 
@@ -201,9 +219,18 @@ fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
 fn the_credentials_file_is_written_private() {
     let home = scratch_dir("renew-file");
     let path = home.join(".claude").join(".credentials.json");
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let never_lost = || false;
 
-    write_private(&path, r#"{"claudeAiOauth":{"accessToken":"new"}}"#).unwrap();
+    let (document, writer) = begin(
+        &StorageDir::default_in(&home),
+        &|_: &StorageDir| Ok(None),
+        &never_lost,
+    )
+    .unwrap();
+    assert_eq!(document, None);
+    writer
+        .commit(&serde_json::json!({"claudeAiOauth":{"accessToken":"new"}}))
+        .unwrap();
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         r#"{"claudeAiOauth":{"accessToken":"new"}}"#
@@ -399,8 +426,11 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
 
     let (committed, sent) = with_test_runner(fake_items(TWO_ITEMS), || {
         let dir = StorageDir::default_in(&scratch_dir("renew-keychain-account"));
-        let write = PreparedWrite::prepare(&dir, &ClaudeStore::Keychain).unwrap();
-        write.commit(r#"{"claudeAiOauth":{}}"#)
+        let never_lost = || false;
+        let keychain = |_: &StorageDir| Ok(Some("{}".to_string()));
+        let (_, write) = begin(&dir, &keychain, &never_lost).unwrap();
+        assert_eq!(write.store(), &ClaudeStore::Keychain);
+        write.commit(&serde_json::json!({"claudeAiOauth":{}}))
     });
     assert_eq!(committed, Ok(()));
     let add = sent
@@ -679,4 +709,30 @@ fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
     )
     .unwrap();
     assert_eq!(disposable.storage(), StorageDir::default_in(home));
+}
+
+/// A credential write is uncoordinated once any lock it relies on is taken away: the caller's own,
+/// or the storage-write lock, whose heartbeat notices it gone.
+#[test]
+fn a_credential_write_knows_when_any_lock_it_relies_on_is_lost() {
+    let home = scratch_dir("write-lost");
+    let dir = StorageDir::default_in(&home);
+    let caller_lost = std::cell::Cell::new(false);
+    let held = || caller_lost.get();
+    let (_, write) = begin(&dir, &|_: &StorageDir| Ok(None), &held).unwrap();
+    assert!(!write.lost());
+
+    caller_lost.set(true);
+    assert!(write.lost(), "the caller's lock");
+    caller_lost.set(false);
+
+    fs::remove_dir(home.join(".claude").join(".storage-write.lock")).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !write.lost() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the storage-write lock's heartbeat never noticed it gone"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
