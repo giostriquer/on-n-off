@@ -350,13 +350,7 @@ fn merge(
         }
     };
     if let Some(remembered) = remembered {
-        // Until the failed-read column carries the term, a failed poll keeps the card's own.
-        let term =
-            (dto.status != LimitsStatus::Ok).then(|| remembered.reading.subscription.clone());
         crate::limits::keep_remembered(&mut dto, remembered.reading);
-        if let Some(term) = term {
-            dto.reading.subscription = term;
-        }
     }
     if let Some(i) = existing {
         entries[i] = dto;

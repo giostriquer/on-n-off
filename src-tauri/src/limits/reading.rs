@@ -10,8 +10,8 @@
 //!   A failed read keeps its own, else the remembered ones.
 //! - **Credits spent, subscription term**: fetched beside the usage read, which may not have been
 //!   able to tell them, so an answer keeps the remembered one where it has none and the card is
-//!   asked for it (`asks_what_was_spent`, `asks_about_renewal`). A failed read keeps its own
-//!   spending, else the remembered one, and only its own term.
+//!   asked for it (`asks_what_was_spent`, `asks_about_renewal`). A failed read keeps its own,
+//!   else the remembered ones.
 //! - **Banked resets**: its own, else the remembered count; a count a read could not tell is
 //!   unknown, never 0.
 //! - **Reset offer**: its own, never the remembered one.
@@ -74,7 +74,7 @@ impl Reading {
                 asked_what_was_spent,
                 asked_about_renewal,
             } => (asked_what_was_spent, asked_about_renewal),
-            Outcome::Failed => (true, false),
+            Outcome::Failed => (true, true),
         };
         let Self {
             plan,

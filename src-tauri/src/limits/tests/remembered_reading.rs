@@ -139,7 +139,8 @@ fn a_failed_read_shows_the_remembered_reading() {
             "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0,
                                  "reached": false},
             "creditsSpent": {"last7Days": 18303.4, "last30Days": 20303.4},
-            // No `subscription`: the card drops the remembered term.
+            "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
+                             "note": "cancelled", "checkedAt": "2026-08-17T10:00:00Z"},
             "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00"}
         })
     );

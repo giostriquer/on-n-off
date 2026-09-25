@@ -237,6 +237,41 @@ fn a_paused_refresh_keeps_the_remembered_subscription_status() {
     );
 }
 
+/// The term is kept through a paused refresh like the figures beside it, and a read that answered
+/// wins.
+#[test]
+fn a_paused_refresh_keeps_the_remembered_term() {
+    let term = |will_renew| {
+        Some(LimitsSubscriptionDto {
+            active_until: "2026-09-28T16:22:34Z".to_string(),
+            will_renew,
+            note: None,
+            checked_at: "2026-09-25T12:00:00Z".to_string(),
+        })
+    };
+    let read = |subscription| Reading {
+        subscription,
+        ..Reading::default()
+    };
+    let remembered = || Reading {
+        windows: vec![observed(
+            "primary",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            40.0,
+            None,
+            "2026-08-17T10:00:00.000Z",
+        )],
+        ..read(term(false))
+    };
+
+    assert_eq!(paused(read(None), remembered()).subscription, term(false));
+    assert_eq!(
+        paused(read(term(true)), remembered()).subscription,
+        term(true)
+    );
+}
+
 /// A Codex card is asked about its term, so a successful read that could not tell it keeps the
 /// remembered one and one that answered replaces it; a Claude card is never asked and keeps none.
 #[test]
