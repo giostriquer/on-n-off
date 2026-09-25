@@ -239,6 +239,8 @@ fn read_summary_from(
     let source_signature = transcripts.signature(signature_start_ms, signature_end_ms);
     if transcripts.is_complete() && !input.force {
         if let Some(hit) = load_summary_hit(&paths.summary, &key, &source_signature) {
+            // What bringing the index up to date parsed is kept, though nothing else is read.
+            transcripts.finish(|| history.get_or_init(open_history).watermark());
             return Ok(hit);
         }
     }

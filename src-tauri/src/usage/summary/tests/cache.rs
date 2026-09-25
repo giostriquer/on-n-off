@@ -6,6 +6,7 @@ use super::super::test_support::*;
 use super::super::*;
 use crate::paths::scratch_dir;
 use crate::usage::pricing;
+use crate::usage::sources::{reset_transcript_parse_count, transcript_parse_count};
 use crate::usage::summary_cache::summary_cache_path_for;
 
 #[test]
@@ -95,5 +96,25 @@ fn a_read_whose_transcripts_changed_before_it_stored_is_not_stored() {
 
     assert_eq!(output_tokens(&read.join().unwrap()), 20);
     assert!(!summary_cache_path_for(&home).exists());
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A read served from the cache after bringing the source index up to date keeps what it parsed
+/// doing so. Here the transcript created after August was stored is July's, outside August, so
+/// August is served; the July read that follows counts it without parsing it again.
+#[test]
+fn a_read_served_after_indexing_a_new_transcript_keeps_its_parse() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-summary-served-keeps-parses");
+    write_single_claude_record(&home, "august.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    read_offline(&home, august_input(false));
+    write_single_claude_record(&home, "july.jsonl", "2026-07-07T04:05:13.944Z", 10);
+    assert!(read_offline(&home, august_input(false)).cache_hit);
+    reset_transcript_parse_count();
+
+    let july = read_offline(&home, day_input("2026-07-01", "2026-07-31", false));
+
+    assert_eq!(output_tokens(&july), 10);
+    assert_eq!(transcript_parse_count(), 0, "july.jsonl was parsed again");
     let _ = std::fs::remove_dir_all(&home);
 }

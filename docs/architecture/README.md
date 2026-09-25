@@ -194,7 +194,8 @@ under the one lock every read and write of the usage files takes. `Sources::open
 and brings the source index up to date, which is enough to answer the summary's cache check before
 any record is read. `Sources::read` then returns the records, from each transcript's cached parse
 where it still holds, and `Sources::finish` saves the scan cache, pruned with the watermark it is
-given, and releases the lock.
+given, and releases the lock. Every path out of a read runs it, a summary served from the cache
+included, so what bringing the index up to date parsed is never parsed again.
 
 Three reading rules carry the accuracy, each pinned by a test:
 
