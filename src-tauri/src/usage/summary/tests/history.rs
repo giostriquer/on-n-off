@@ -8,23 +8,15 @@ use crate::paths::scratch_dir;
 use crate::usage::folding::{clear_history_in, fold_history_in, history_status_in, FoldChecks};
 use crate::usage::history::{history_path_for, FoldedRow, HistoryStore, Watermark};
 use crate::usage::pricing;
-use crate::usage::source_index::normalize_path;
-use crate::usage::source_index::{
-    reset_transcript_parse_count, source_index_path_for, transcript_parse_count,
+use crate::usage::sources::{
+    cached_record_count, reset_transcript_parse_count, source_index_file, transcript_parse_count,
     with_live_transcript,
 };
-use crate::usage::sources::{load_scan_cache, scan_cache_path_for};
 use crate::usage::summary_cache::summary_cache_path_for;
 
 /// Two weeks after the fixtures' 2026-08-07: the fold cutoff is 2026-08-14, so August's first week
 /// is folded and a record from 2026-08-15 on stays in its transcript.
 const AFTER_AUGUST_FIRST_WEEK: &str = "2026-08-21T12:00:00Z";
-
-fn at(iso: &str) -> i64 {
-    DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
-}
 
 /// One background check, as the first after launch: no memory of earlier checks.
 fn fold(home: &Path) {
@@ -75,14 +67,7 @@ fn write_lines(home: &Path, name: &str, lines: &[String], written: &str) -> Path
 }
 
 fn scan_cache_holds(home: &Path, path: &Path) -> bool {
-    load_scan_cache(&scan_cache_path_for(home)).contains_key(&normalize_path(path))
-}
-
-fn set_mtime(path: &Path, iso: &str) {
-    let modified = std::time::SystemTime::from(DateTime::parse_from_rfc3339(iso).unwrap());
-    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
-    file.set_times(std::fs::FileTimes::new().set_modified(modified))
-        .unwrap();
+    cached_record_count(home, path).is_some()
 }
 
 #[test]
@@ -337,7 +322,7 @@ fn a_folded_transcript_is_never_parsed_again() {
     fold(&home);
 
     assert!(!scan_cache_holds(&home, &path));
-    std::fs::remove_file(source_index_path_for(&home)).unwrap();
+    std::fs::remove_file(source_index_file(&home)).unwrap();
     reset_transcript_parse_count();
     let again = read_offline(&home, full_time_input(false));
 
@@ -531,12 +516,12 @@ fn the_background_check_reads_nothing_else_until_a_fold_is_due() {
     let home = scratch_dir("usage-history-idle-check");
     write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     fold(&home);
-    std::fs::remove_file(source_index_path_for(&home)).unwrap();
+    std::fs::remove_file(source_index_file(&home)).unwrap();
     reset_transcript_parse_count();
 
     fold(&home);
 
-    assert!(!source_index_path_for(&home).exists());
+    assert!(!source_index_file(&home).exists());
     assert_eq!(transcript_parse_count(), 0);
     let _ = std::fs::remove_dir_all(&home);
 }

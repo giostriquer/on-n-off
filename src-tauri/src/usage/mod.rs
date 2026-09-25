@@ -6,8 +6,6 @@ mod folding;
 mod history;
 mod pricing;
 mod reader;
-mod scan_cache;
-mod source_index;
 mod sources;
 mod summary;
 mod summary_cache;
