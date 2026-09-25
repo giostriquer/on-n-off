@@ -81,7 +81,7 @@ impl SnapshotStore {
         // Every writer stores its own card, and one that could not tell a remembered figure must
         // not erase it.
         if let Some(existing) = existing {
-            let remembered = existing.reading.as_of(Utc::now());
+            let remembered = existing.reading.known_at(Utc::now());
             stored.reading = stored.reading.keeping(remembered, Outcome::for_stored(dto));
         }
         write_stored(&path, stored)
@@ -234,7 +234,7 @@ impl StoredSnapshot {
             message: None,
             account: Some(self.account),
             current_account: false,
-            reading: self.reading.as_of(now),
+            reading: self.reading.known_at(now),
         }
     }
 }

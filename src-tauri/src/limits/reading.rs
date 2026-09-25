@@ -14,7 +14,7 @@
 //!   else the remembered ones.
 //! - **Banked resets**: its own, else the remembered count; a count a read could not tell is
 //!   unknown, never 0. A remembered count is known only until its soonest expiry: the store
-//!   loads, and keeps from, a remembered reading as of now ([`Reading::as_of`]).
+//!   loads, and keeps from, what a remembered reading still knows now ([`Reading::known_at`]).
 //! - **Reset offer**: its own, never the remembered one.
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -131,7 +131,7 @@ impl Reading {
     /// no longer known, and a live offer belongs to the read that saw it. A share past its reset
     /// has renewed, which the card shows as it shows a window's passed reset; it is kept, since
     /// dropping it would bring back the own balance of 0.
-    pub(super) fn as_of(self, now: DateTime<Utc>) -> Self {
+    pub(super) fn known_at(self, now: DateTime<Utc>) -> Self {
         Self {
             reset_credits: self
                 .reset_credits
