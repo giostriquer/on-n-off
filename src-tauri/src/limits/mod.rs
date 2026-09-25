@@ -18,11 +18,13 @@ pub(crate) mod credentials;
 pub(crate) mod credits_spent;
 pub(crate) mod json;
 pub(crate) mod login;
-mod observations;
 mod pipeline;
+mod reading;
 mod renewal;
 pub(crate) mod saved;
 mod snapshots;
+
+pub(crate) use reading::keep_remembered;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -38,7 +40,6 @@ use credentials::{
     read_claude_identity, ClaudeCredential, ClaudeIdentity, ClaudeLoginMemo, CredentialLookup,
     KeychainProbe, LoginSource, CLAUDE_LOGIN,
 };
-use observations::ObservedWindowSet;
 #[cfg(test)]
 use pipeline::resolve;
 use pipeline::{finish, resolve_provider, LoadFailureKind, ProviderLoadError, ResolveOutcome};
@@ -79,14 +80,6 @@ impl Parsed {
             },
         }
     }
-}
-
-/// A successful read that could not tell a remembered figure keeps `previous`'s: the banked
-/// resets, what was spent and the subscription's term, each under its own rule.
-pub(crate) fn keep_remembered_from(card: &mut ProviderLimitsDto, previous: &ProviderLimitsDto) {
-    card.keep_reset_credits_from(previous);
-    credits_spent::keep_credits_spent_from(card, previous);
-    renewal::keep_subscription_from(card, previous);
 }
 
 /// The three services one Claude read talks to, together so adding a fourth costs one field and
@@ -223,9 +216,12 @@ fn provider_read_guard(agent: AgentId) -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Merge every available observation for the current account, persist the canonical account view,
-/// then return it followed by the other remembered accounts, newest first.
-fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<ProviderLimitsDto> {
+/// The current account's card, keeping what its read could not tell from the account's remembered
+/// reading, persisted; then the other remembered accounts, newest first.
+fn aggregate_accounts(
+    store: &SnapshotStore,
+    mut current: ProviderLimitsDto,
+) -> Vec<ProviderLimitsDto> {
     let current_account = current.account.as_ref().map(|account| account.id.clone());
     let mut remembered = store.load(current.provider);
     let prior = current_account.as_deref().and_then(|id| {
@@ -239,15 +235,10 @@ fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<
             })
             .map(|index| remembered.remove(index))
     });
-    let current = if current.status == LimitsStatus::Ok {
-        let mut current = current;
-        if let Some(prior) = &prior {
-            keep_remembered_from(&mut current, prior);
-        }
-        current
-    } else {
-        observations::merge_windows(current, prior.and_then(ObservedWindowSet::from_account))
-    };
+    keep_remembered(
+        &mut current,
+        prior.map(|prior| prior.reading).unwrap_or_default(),
+    );
     let _ = store.save(&current);
     snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
 }

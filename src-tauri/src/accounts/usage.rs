@@ -7,7 +7,7 @@ use super::{
     transaction::Native,
 };
 use crate::{
-    dto::{AgentId, LimitsStatus, ProviderLimitsDto},
+    dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     http::{HttpError, RateLimitReset},
 };
 use std::{
@@ -324,34 +324,40 @@ fn merge(
     if existing.is_some_and(|i| entries[i].current_account) {
         return;
     }
-    let dto = match result {
-        Ok(mut dto) => {
-            if let Some(i) = existing {
-                crate::limits::keep_remembered_from(&mut dto, &entries[i]);
-            }
-            dto
-        }
+    let remembered = existing.map(|i| entries[i].clone());
+    let mut dto = match result {
+        Ok(dto) => dto,
         Err(error) => {
-            let mut dto =
-                existing
-                    .map(|i| entries[i].clone())
-                    .unwrap_or_else(|| ProviderLimitsDto {
-                        provider: profile.identity.provider,
-                        status: LimitsStatus::Failed,
-                        message: None,
-                        account: Some(crate::dto::LimitsAccountDto {
-                            id: key,
-                            label: profile.email.clone(),
-                            legacy_id: None,
-                        }),
-                        current_account: false,
-                        reading: crate::dto::Reading::default(),
-                    });
-            dto.status = LimitsStatus::Failed;
-            dto.message = Some(error);
-            dto
+            let card = remembered.clone().unwrap_or_else(|| ProviderLimitsDto {
+                provider: profile.identity.provider,
+                status: LimitsStatus::Failed,
+                message: None,
+                account: Some(crate::dto::LimitsAccountDto {
+                    id: key,
+                    label: profile.email.clone(),
+                    legacy_id: None,
+                }),
+                current_account: false,
+                reading: Reading::default(),
+            });
+            // A failed poll read nothing: the card shows what it remembers, under the failure.
+            ProviderLimitsDto {
+                status: LimitsStatus::Failed,
+                message: Some(error),
+                reading: Reading::default(),
+                ..card
+            }
         }
     };
+    if let Some(remembered) = remembered {
+        // Until the failed-read column carries the term, a failed poll keeps the card's own.
+        let term =
+            (dto.status != LimitsStatus::Ok).then(|| remembered.reading.subscription.clone());
+        crate::limits::keep_remembered(&mut dto, remembered.reading);
+        if let Some(term) = term {
+            dto.reading.subscription = term;
+        }
+    }
     if let Some(i) = existing {
         entries[i] = dto;
     } else {

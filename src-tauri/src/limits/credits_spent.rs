@@ -38,7 +38,10 @@ pub(crate) fn is_codex_workspace_plan(plan: &str) -> bool {
     )
 }
 
-/// Whether `card` is one that is asked what it spent: a Codex workspace plan.
+/// Whether `card` is one that is asked what it spent: a Codex workspace plan. A successful read of
+/// one whose spending read failed or was backing off keeps the remembered figure
+/// (`limits/reading.rs`); a card on any other plan keeps nothing, so an account that moved to a
+/// personal plan loses the figure it had on its next read.
 pub(crate) fn asks_what_was_spent(card: &ProviderLimitsDto) -> bool {
     card.provider == AgentId::Codex
         && card
@@ -46,18 +49,6 @@ pub(crate) fn asks_what_was_spent(card: &ProviderLimitsDto) -> bool {
             .plan
             .as_deref()
             .is_some_and(is_codex_workspace_plan)
-}
-
-/// A successful read whose spending read failed or was backing off could not tell what was spent,
-/// and keeps the figure `previous` knew; one that answered replaces it. Only a Codex workspace plan
-/// is ever asked, so a card on any other plan keeps nothing: an account that moved to a personal
-/// plan loses the figure it had on its next read.
-pub(crate) fn keep_credits_spent_from(card: &mut ProviderLimitsDto, previous: &ProviderLimitsDto) {
-    if card.reading.credits_spent.is_none() && asks_what_was_spent(card) {
-        card.reading
-            .credits_spent
-            .clone_from(&previous.reading.credits_spent);
-    }
 }
 
 /// The breakdown for the 30 UTC days up to and including `today`, one row per day, the window the

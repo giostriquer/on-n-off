@@ -176,7 +176,8 @@ pub struct LimitsAccountDto {
 /// beside them: credit balance, workspace credits, credits spent, banked resets, subscription term,
 /// reset offer) and its account details (plan and subscription status). The card
 /// ([`ProviderLimitsDto`]) and the remembered reading on disk (`limits/snapshots.rs`) both flatten
-/// it into their JSON, so its fields are listed once.
+/// it into their JSON, so its fields are listed once. What a later read keeps of a remembered
+/// reading is decided field by field in `limits/reading.rs`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Reading {
@@ -246,18 +247,6 @@ pub struct ProviderLimitsDto {
     /// What the read reported, or what is remembered of the account where it could not say.
     #[serde(flatten)]
     pub reading: Reading,
-}
-
-impl ProviderLimitsDto {
-    /// A successful read that could not tell how many resets are banked keeps the count `previous`
-    /// knew; one that answered, 0 included, replaces it.
-    pub fn keep_reset_credits_from(&mut self, previous: &Self) {
-        if self.reading.reset_credits.is_none() {
-            self.reading
-                .reset_credits
-                .clone_from(&previous.reading.reset_credits);
-        }
-    }
 }
 
 /// Test cards, built up from an empty successful read of one signed-in account:

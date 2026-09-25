@@ -39,19 +39,10 @@ fn query_url(base: &str, workspace_id: &str) -> String {
     format!("{base}?account_id={workspace}")
 }
 
-/// Whether `card` is one that is asked about its term: any Codex account.
+/// Whether `card` is one that is asked about its term: any Codex account. A successful read of one
+/// whose term read failed or was backing off keeps the remembered term (`limits/reading.rs`).
 pub(super) fn asks_about_renewal(card: &ProviderLimitsDto) -> bool {
     card.provider == AgentId::Codex && card.account.is_some()
-}
-
-/// A successful read whose term read failed or was backing off keeps the term `previous` knew;
-/// one that answered replaces it.
-pub(super) fn keep_subscription_from(card: &mut ProviderLimitsDto, previous: &ProviderLimitsDto) {
-    if card.reading.subscription.is_none() && asks_about_renewal(card) {
-        card.reading
-            .subscription
-            .clone_from(&previous.reading.subscription);
-    }
 }
 
 fn instant(value: Option<&Value>) -> Option<DateTime<Utc>> {

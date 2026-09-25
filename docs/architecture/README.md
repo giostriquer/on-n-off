@@ -161,7 +161,9 @@ Each provider is read the way that provider intends, and active login renewal re
 
 Because each CLI stores one login at a time, successful reads are remembered per account (numbers
 only, under `~/.on-n-off/limits/`) so an account the user has switched away from stays visible
-with its last observation time rather than vanishing.
+with its last observation time rather than vanishing. What a later read keeps of that remembered
+reading, after it answers and after it fails, is one policy for every writer, in
+`limits/reading.rs`.
 
 ### Pull requests
 

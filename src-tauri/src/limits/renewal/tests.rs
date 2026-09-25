@@ -220,28 +220,3 @@ fn the_signed_in_read_asks_only_for_the_confirmed_card() {
     served.join().unwrap();
     MEMO.forget("renewal-signed-in");
 }
-
-#[test]
-fn a_card_keeps_the_term_it_remembers_when_a_read_could_not_tell() {
-    let previous = codex_card(parse(&term(false), now()));
-    let mut silent = codex_card(None);
-    keep_subscription_from(&mut silent, &previous);
-    assert_eq!(silent.reading.subscription, previous.reading.subscription);
-
-    let mut answered = codex_card(parse(&term(true), now()));
-    keep_subscription_from(&mut answered, &previous);
-    assert!(answered.reading.subscription.unwrap().will_renew);
-
-    let mut claude = codex_card(None);
-    claude.provider = AgentId::Claude;
-    keep_subscription_from(&mut claude, &previous);
-    assert!(claude.reading.subscription.is_none());
-}
-
-fn codex_card(subscription: Option<LimitsSubscriptionDto>) -> ProviderLimitsDto {
-    ProviderLimitsDto::for_test(AgentId::Codex, "acct-1").with_reading(crate::dto::Reading {
-        plan: Some("team".into()),
-        subscription,
-        ..Default::default()
-    })
-}

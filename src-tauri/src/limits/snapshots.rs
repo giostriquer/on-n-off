@@ -12,9 +12,8 @@ use std::sync::Mutex;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{
-    AgentId, LimitWindowDto, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading,
-};
+use super::reading::{newest, parse_observed_at, Outcome};
+use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::usage::cache_io::atomic_write;
 
 const SNAPSHOT_SCHEMA_VERSION: u8 = 2;
@@ -49,8 +48,9 @@ impl SnapshotStore {
 
     /// Persist canonical account observations. Dated local or remembered windows remain
     /// trustworthy while refresh is unavailable; a successful read with only credits or banked
-    /// resets is dated when it reaches this storage boundary. A read that could not tell the
-    /// banked-reset count keeps the one already stored for the account.
+    /// resets is dated when it reaches this storage boundary. What the card could not tell is kept
+    /// from the reading already stored for the account, by the remember policy's answered column
+    /// (`limits/reading.rs`): the card already carries what its own read kept.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
@@ -63,7 +63,7 @@ impl SnapshotStore {
             return Err("snapshot has no observations".to_string());
         }
         let path = self.dir.join(file_name(dto.provider, &account.id));
-        let incoming_latest = latest_observed_at(dto).or_else(|| {
+        let incoming_latest = newest(&dto.reading.windows).or_else(|| {
             // Figures have no observation time of their own; a successful read dates them here.
             (dto.status == LimitsStatus::Ok && dto.reading.has_figures()).then(Utc::now)
         });
@@ -78,19 +78,12 @@ impl SnapshotStore {
             return Ok(());
         }
         let mut stored = StoredSnapshot::from_dto(dto, incoming_latest);
-        // `limits::keep_remembered_from`, applied to what is on disk: every writer stores its own
-        // read, and one that could not tell a remembered figure must not erase it.
+        // Every writer stores its own card, and one that could not tell a remembered figure must
+        // not erase it.
         if let Some(existing) = existing {
-            let (stored, existing) = (&mut stored.reading, existing.reading);
-            if stored.reset_credits.is_none() {
-                stored.reset_credits = existing.reset_credits;
-            }
-            if stored.credits_spent.is_none() && super::credits_spent::asks_what_was_spent(dto) {
-                stored.credits_spent = existing.credits_spent;
-            }
-            if stored.subscription.is_none() && super::renewal::asks_about_renewal(dto) {
-                stored.subscription = existing.subscription;
-            }
+            stored.reading = stored
+                .reading
+                .keeping(existing.reading, Outcome::answered(dto));
         }
         write_stored(&path, stored)
     }
@@ -231,7 +224,7 @@ impl StoredSnapshot {
         self.observed_at
             .as_deref()
             .and_then(parse_observed_at)
-            .or_else(|| latest_window_observed_at(&self.reading.windows))
+            .or_else(|| newest(&self.reading.windows))
     }
 
     /// The card a remembered reading shows. A share past its reset has renewed, which the card
@@ -272,23 +265,6 @@ fn decode(raw: &str) -> Option<StoredSnapshot> {
 fn write_stored(path: &Path, stored: StoredSnapshot) -> Result<(), String> {
     let json = serde_json::to_string(&stored).map_err(|error| error.to_string())?;
     atomic_write(path, &json).map_err(|error| format!("{}: {error}", path.display()))
-}
-
-fn latest_observed_at(dto: &ProviderLimitsDto) -> Option<DateTime<Utc>> {
-    latest_window_observed_at(&dto.reading.windows)
-}
-
-fn latest_window_observed_at(windows: &[LimitWindowDto]) -> Option<DateTime<Utc>> {
-    windows
-        .iter()
-        .filter_map(|window| parse_observed_at(&window.observed_at))
-        .max()
-}
-
-fn parse_observed_at(value: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|observed_at| observed_at.with_timezone(&Utc))
 }
 
 /// `<provider>-<account>.json` with the account id reduced to a file-name-safe token; a short
