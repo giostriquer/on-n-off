@@ -23,10 +23,10 @@ use super::aggregate::{
     AggregateOptions as AggOpts, CostSource, Resolution as AggResolution, UsageAggregator,
     UsageBucket,
 };
-use super::history::{history_fingerprint, HistoryStore};
+use super::history::{history_fingerprint, history_path_for, HistoryStore};
 use super::pricing::{ensure_rates, LITELLM_RATES_URL};
-use super::sources::{lock_usage_files, Sources, UsagePaths};
-use super::summary_cache::{load_summary_hit, store_summary, summary_key};
+use super::sources::{lock_usage_files, Sources};
+use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_for, summary_key};
 use super::transcripts::UsageProvider as Provider;
 
 const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
@@ -212,7 +212,8 @@ fn read_summary_from(
     let started = Instant::now();
     let started_ms = now_ms();
     let home = home()?;
-    let paths = UsagePaths::for_home(&home);
+    let summary_path = summary_cache_path_for(&home);
+    let history_path = history_path_for(&home);
     // Rates first: the table's age is part of the summary key, so a re-fetched table (a model
     // released today, a price change) never serves a summary priced with the old one. The
     // parsed table is memoised on the file, so this costs one metadata read on the fast path.
@@ -220,7 +221,7 @@ fn read_summary_from(
     let key = summary_key(
         &input,
         rates.fetched_at_ms,
-        &history_fingerprint(&paths.history),
+        &history_fingerprint(&history_path),
     );
     let (signature_start_ms, signature_end_ms) = source_window_bounds(&input);
     let since_ms = since_time_ms.unwrap_or_else(|| {
@@ -232,21 +233,21 @@ fn read_summary_from(
     // Read, never folded here: the background fold owns that (`folding`). Opened under the lock,
     // once the sources need its watermark, so a summary served from an unchanged index never
     // reads it.
-    let open_history = || HistoryStore::open(paths.history.clone());
+    let open_history = || HistoryStore::open(history_path.clone());
     let history = OnceCell::new();
     let mut transcripts = Sources::open(lock_usage_files(), &home, || {
         history.get_or_init(open_history).watermark()
     });
     let source_signature = transcripts.signature(signature_start_ms, signature_end_ms);
     if transcripts.is_complete() && !input.force {
-        if let Some(hit) = load_summary_hit(&paths.summary, &key, &source_signature) {
+        if let Some(hit) = load_summary_hit(&summary_path, &key, &source_signature) {
             // What bringing the index up to date parsed is kept, though nothing else is read.
             transcripts.finish(|| history.get_or_init(open_history).watermark());
             return Ok(hit);
         }
     }
+    let source_read = transcripts.read(since_ms, || history.get_or_init(open_history).watermark());
     let history = history.into_inner().unwrap_or_else(open_history);
-    let source_read = transcripts.read(since_ms, history.watermark());
     let seen_sources = transcripts.finish(|| history.watermark());
 
     let rates_arc = rates.table.clone();
@@ -337,7 +338,7 @@ fn read_summary_from(
         let lock = lock_usage_files();
         // A summary counted around a history that did not read would undercount once it reads.
         if source_read.complete && history.history().is_some() && seen_sources.unchanged(&lock) {
-            store_summary(&paths.summary, &key, &source_signature, &dto);
+            store_summary(&summary_path, &key, &source_signature, &dto);
         }
     }
 

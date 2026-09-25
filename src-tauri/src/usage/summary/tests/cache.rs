@@ -64,16 +64,16 @@ fn a_read_that_could_not_read_a_transcript_is_not_stored() {
     let home = scratch_dir("usage-summary-unreadable");
     let path = write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     read_offline(&home, august_input(false));
-    let paths = crate::usage::sources::UsagePaths::for_home(&home);
-    std::fs::remove_file(&paths.summary).unwrap();
-    std::fs::remove_file(&paths.scan_cache).unwrap();
+    let summary_path = summary_cache_path_for(&home);
+    std::fs::remove_file(&summary_path).unwrap();
+    std::fs::remove_file(crate::usage::sources::scan_cache_file(&home)).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
 
     let unread = read_offline(&home, august_input(false));
 
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     assert_eq!(output_tokens(&unread), 0);
-    assert!(!paths.summary.exists());
+    assert!(!summary_path.exists());
     let _ = std::fs::remove_dir_all(&home);
 }
 

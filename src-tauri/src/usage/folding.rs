@@ -94,7 +94,7 @@ pub(crate) fn fold_history_in(
     let mut saved = Ok(());
     if sources.walked_every_root() {
         let cutoff_ms = fold_cutoff_ms(now_ms);
-        let read = sources.read(i64::MIN, store.watermark());
+        let read = sources.read(i64::MIN, || store.watermark());
         let waiting = read.unread_files.iter().any(|(path, mtime_ms)| {
             *mtime_ms >= cutoff_ms - UNREADABLE_GRACE_MS || !checks.unread_last_time.contains(path)
         });

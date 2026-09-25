@@ -68,7 +68,7 @@ fn a_transcript_whose_newest_record_is_folded_is_not_read_however_recently_writt
     reset_transcript_parse_count();
 
     let mut sources = open(&home, watermark());
-    let read = sources.read(i64::MIN, watermark());
+    let read = sources.read(i64::MIN, watermark);
     sources.finish(watermark);
 
     assert_eq!(transcript_parse_count(), 0);
@@ -90,7 +90,7 @@ fn finishing_with_a_later_watermark_drops_the_parses_it_folded() {
     open_and_finish(&home, Watermark::NONE);
 
     let mut sources = open(&home, Watermark::NONE);
-    sources.read(i64::MIN, Watermark::NONE);
+    sources.read(i64::MIN, || Watermark::NONE);
     sources.finish(watermark);
 
     assert_eq!(cached_record_count(&home, &folded), None);
@@ -122,7 +122,7 @@ fn a_read_counts_each_message_once_from_the_watermark_on() {
     );
 
     let mut sources = open(&home, watermark());
-    let read = sources.read(i64::MIN, watermark());
+    let read = sources.read(i64::MIN, watermark);
     sources.finish(watermark);
 
     let outputs: Vec<u64> = read
@@ -131,5 +131,29 @@ fn a_read_counts_each_message_once_from_the_watermark_on() {
         .map(|record| record.totals.output_tokens)
         .collect();
     assert_eq!(outputs, [9, 4]);
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// A read uses the watermark the index was brought up to date with, not a second one: the summary
+/// opens the history once.
+#[test]
+fn a_read_after_indexing_uses_the_watermark_the_index_was_brought_up_to_date_with() {
+    let home = scratch_dir("usage-sources-read-keeps-watermark");
+    write_long_folded(&home);
+    write_records(
+        &transcript_path(&home, "recent.jsonl"),
+        &[record("2026-08-20T04:05:13.944Z", "msg-2", 30)],
+    );
+
+    let mut sources = open(&home, watermark());
+    let read = sources.read(i64::MIN, || Watermark::NONE);
+    sources.finish(watermark);
+
+    let outputs: Vec<u64> = read
+        .records()
+        .iter()
+        .map(|record| record.totals.output_tokens)
+        .collect();
+    assert_eq!(outputs, [30]);
     let _ = std::fs::remove_dir_all(home);
 }

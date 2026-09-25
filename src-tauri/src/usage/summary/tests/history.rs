@@ -9,8 +9,8 @@ use crate::usage::folding::{clear_history_in, fold_history_in, history_status_in
 use crate::usage::history::{history_path_for, FoldedRow, HistoryStore, Watermark};
 use crate::usage::pricing;
 use crate::usage::sources::{
-    cached_record_count, reset_transcript_parse_count, transcript_parse_count,
-    with_live_transcript, UsagePaths,
+    cached_record_count, reset_transcript_parse_count, source_index_file, transcript_parse_count,
+    with_live_transcript,
 };
 use crate::usage::summary_cache::summary_cache_path_for;
 
@@ -68,10 +68,6 @@ fn write_lines(home: &Path, name: &str, lines: &[String], written: &str) -> Path
 
 fn scan_cache_holds(home: &Path, path: &Path) -> bool {
     cached_record_count(home, path).is_some()
-}
-
-fn source_index_path_for(home: &Path) -> PathBuf {
-    UsagePaths::for_home(home).source_index
 }
 
 #[test]
@@ -326,7 +322,7 @@ fn a_folded_transcript_is_never_parsed_again() {
     fold(&home);
 
     assert!(!scan_cache_holds(&home, &path));
-    std::fs::remove_file(source_index_path_for(&home)).unwrap();
+    std::fs::remove_file(source_index_file(&home)).unwrap();
     reset_transcript_parse_count();
     let again = read_offline(&home, full_time_input(false));
 
@@ -520,12 +516,12 @@ fn the_background_check_reads_nothing_else_until_a_fold_is_due() {
     let home = scratch_dir("usage-history-idle-check");
     write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     fold(&home);
-    std::fs::remove_file(source_index_path_for(&home)).unwrap();
+    std::fs::remove_file(source_index_file(&home)).unwrap();
     reset_transcript_parse_count();
 
     fold(&home);
 
-    assert!(!source_index_path_for(&home).exists());
+    assert!(!source_index_file(&home).exists());
     assert_eq!(transcript_parse_count(), 0);
     let _ = std::fs::remove_dir_all(&home);
 }

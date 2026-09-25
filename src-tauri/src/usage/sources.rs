@@ -21,9 +21,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use crate::paths::{claude_root_for, codex_root_for};
 
 use super::cache_io::atomic_write;
-use super::history::{history_path_for, Watermark};
+use super::history::Watermark;
 use super::reader::MTIME_SLACK_MS;
-use super::summary_cache::summary_cache_path_for;
 use super::transcripts::{richest_copies, UsageProvider, UsageRecord};
 use scan_cache::{decode_scan_cache, encode_scan_cache, prune_scan_cache, PruneOptions, ScanCache};
 use source_index::{
@@ -57,25 +56,6 @@ pub fn lock_usage_files() -> UsageFilesLock {
     }
 }
 
-/// The files Usage keeps under `~/.on-n-off/`.
-pub struct UsagePaths {
-    pub scan_cache: PathBuf,
-    pub summary: PathBuf,
-    pub source_index: PathBuf,
-    pub history: PathBuf,
-}
-
-impl UsagePaths {
-    pub fn for_home(home: &Path) -> Self {
-        Self {
-            scan_cache: scan_cache_path_for(home),
-            summary: summary_cache_path_for(home),
-            source_index: source_index_path_for(home),
-            history: history_path_for(home),
-        }
-    }
-}
-
 fn scan_cache_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-scan-cache.json")
 }
@@ -84,13 +64,13 @@ fn scan_cache_path_for(home: &Path) -> PathBuf {
 /// phases. Every path out of a read ends in [`Sources::finish`], or what it parsed is lost.
 pub struct Sources {
     lock: UsageFilesLock,
-    paths: UsagePaths,
-    source_roots: [(UsageProvider, Vec<SourceRoot>); 2],
-    roots: Vec<SourceRoot>,
-    snapshot: SourceSnapshot,
+    scan_cache_path: PathBuf,
     /// Loaded only once a transcript's parse is needed: an unchanged index answers without it.
     scan_cache: Option<ScanCache>,
     scan_cache_dirty: bool,
+    /// The watermark the sources were read with, once one was asked for.
+    watermark: Option<Watermark>,
+    seen: SeenSources,
 }
 
 impl Sources {
@@ -98,64 +78,66 @@ impl Sources {
     /// [`Sources::finish`]. `watermark` is asked for only when a transcript changed since the
     /// index was written: a transcript whose records the history holds is indexed unread.
     pub fn open(lock: UsageFilesLock, home: &Path, watermark: impl FnOnce() -> Watermark) -> Self {
-        let paths = UsagePaths::for_home(home);
+        let scan_cache_path = scan_cache_path_for(home);
+        let source_index = source_index_path_for(home);
         let source_roots = source_roots_for(home);
-        let roots = all_roots(&source_roots);
-        let inventory = inventory_sources(&roots);
-        let (snapshot, scan_cache, scan_cache_dirty) =
-            match unchanged_snapshot(&paths.source_index, &inventory) {
-                Some(snapshot) => (snapshot, None, false),
+        let inventory = inventory_sources(&all_roots(&source_roots));
+        let (snapshot, scan_cache, scan_cache_dirty, watermark) =
+            match unchanged_snapshot(&source_index, &inventory) {
+                Some(snapshot) => (snapshot, None, false, None),
                 None => {
-                    let mut scan_cache = load_scan_cache(&paths.scan_cache);
-                    let reconciled = reconcile_inventory(
-                        &paths.source_index,
-                        inventory,
-                        &mut scan_cache,
-                        watermark(),
-                    );
+                    let watermark = watermark();
+                    let mut scan_cache = load_scan_cache(&scan_cache_path);
+                    let reconciled =
+                        reconcile_inventory(&source_index, inventory, &mut scan_cache, watermark);
                     (
                         reconciled.snapshot,
                         Some(scan_cache),
                         reconciled.scan_cache_dirty,
+                        Some(watermark),
                     )
                 }
             };
         Self {
             lock,
-            paths,
-            source_roots,
-            roots,
-            snapshot,
+            scan_cache_path,
             scan_cache,
             scan_cache_dirty,
+            watermark,
+            seen: SeenSources {
+                source_index,
+                source_roots,
+                snapshot,
+            },
         }
     }
 
     /// Every root was walked and every transcript's record bounds are known: nothing can be
     /// missing from [`Sources::signature`].
     pub fn is_complete(&self) -> bool {
-        self.snapshot.is_complete()
+        self.seen.snapshot.is_complete()
     }
 
     /// Changes whenever a transcript that may hold a record in `[start_ms, end_ms)` does.
     pub fn signature(&self, start_ms: i64, end_ms: i64) -> String {
-        self.snapshot.signature(start_ms, end_ms)
+        self.seen.snapshot.signature(start_ms, end_ms)
     }
 
     /// Every root was walked to the end this time: no transcript can be missing from a read.
     pub fn walked_every_root(&self) -> bool {
-        self.snapshot.walked_every_root()
+        self.seen.snapshot.walked_every_root()
     }
 
     /// The records of every transcript that may hold one from `from_ms` on, except those holding
-    /// only records the history already has (`watermark` must be the one the sources were opened
-    /// with). A transcript last written [`MTIME_SLACK_MS`] before `from_ms` holds none.
-    pub fn read(&mut self, from_ms: i64, watermark: Watermark) -> SourceRead {
+    /// only records the history already has. A transcript last written [`MTIME_SLACK_MS`] before
+    /// `from_ms` holds none. `watermark` is asked for only when [`Sources::open`] did not ask.
+    pub fn read(&mut self, from_ms: i64, watermark: impl FnOnce() -> Watermark) -> SourceRead {
+        let watermark = *self.watermark.get_or_insert_with(watermark);
         let scan_cache = self
             .scan_cache
-            .get_or_insert_with(|| load_scan_cache(&self.paths.scan_cache));
+            .get_or_insert_with(|| load_scan_cache(&self.scan_cache_path));
         let prepared = prepare_sources(
-            &self.snapshot,
+            &self.seen.snapshot,
             scan_cache,
             from_ms.saturating_sub(MTIME_SLACK_MS),
             watermark,
@@ -173,32 +155,18 @@ impl Sources {
     /// transcripts deleted, outside every root, or whose records `watermark` says the history
     /// holds. Then releases the lock. `watermark` is asked for only when the scan cache was loaded.
     pub fn finish(self, watermark: impl FnOnce() -> Watermark) -> SeenSources {
-        let Self {
-            lock,
-            paths,
-            source_roots,
-            roots,
-            snapshot,
-            scan_cache,
-            scan_cache_dirty,
-        } = self;
-        if let Some(mut scan_cache) = scan_cache {
+        if let Some(mut scan_cache) = self.scan_cache {
             prune_and_persist_scan_cache(
-                &paths.scan_cache,
+                &self.scan_cache_path,
                 &mut scan_cache,
-                &snapshot,
-                &roots,
+                &self.seen.snapshot,
+                &all_roots(&self.seen.source_roots),
                 watermark(),
-                scan_cache_dirty,
+                self.scan_cache_dirty,
             );
         }
-        drop(lock);
-        SeenSources {
-            source_index: paths.source_index,
-            source_roots,
-            roots,
-            snapshot,
-        }
+        drop(self.lock);
+        self.seen
     }
 }
 
@@ -244,7 +212,6 @@ impl SourceRead {
 pub struct SeenSources {
     source_index: PathBuf,
     source_roots: [(UsageProvider, Vec<SourceRoot>); 2],
-    roots: Vec<SourceRoot>,
     snapshot: SourceSnapshot,
 }
 
@@ -273,7 +240,9 @@ impl SeenSources {
     pub fn unchanged(&self, _lock: &UsageFilesLock) -> bool {
         self.snapshot
             .persisted_generation_is_current(&self.source_index)
-            && self.snapshot.inventory_is_current(&self.roots)
+            && self
+                .snapshot
+                .inventory_is_current(&all_roots(&self.source_roots))
     }
 }
 
@@ -371,6 +340,18 @@ fn prune_and_persist_scan_cache(
             let _ = atomic_write(path, &raw);
         }
     }
+}
+
+/// Where the scan cache for `home` is kept, for tests that damage or restore it.
+#[cfg(test)]
+pub(crate) fn scan_cache_file(home: &Path) -> PathBuf {
+    scan_cache_path_for(home)
+}
+
+/// Where the source index for `home` is kept, for tests that remove it.
+#[cfg(test)]
+pub(crate) fn source_index_file(home: &Path) -> PathBuf {
+    source_index_path_for(home)
 }
 
 /// How many records the scan cache on disk holds for `transcript`: `None` when it holds no parse

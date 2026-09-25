@@ -63,9 +63,11 @@ fn a_transcript_changed_or_live_since_the_walk_counts_what_it_holds_uncached_and
         let mut sources = open(&home, Watermark::NONE);
         append_record(&path, &record("2026-08-07T04:05:30.000Z", "msg-2", 30));
         let read = if live {
-            with_live_transcript(&path, &growth, || sources.read(i64::MIN, Watermark::NONE))
+            with_live_transcript(&path, &growth, || {
+                sources.read(i64::MIN, || Watermark::NONE)
+            })
         } else {
-            sources.read(i64::MIN, Watermark::NONE)
+            sources.read(i64::MIN, || Watermark::NONE)
         };
         sources.finish(|| Watermark::NONE);
 
@@ -86,7 +88,7 @@ fn a_same_size_rewrite_since_the_walk_counts_uncached_and_not_final() {
 
     let mut sources = open(&home, Watermark::NONE);
     rewrite_same_size_later(&path, &record("2026-08-07T04:05:13.944Z", "msg-1", 21));
-    let read = sources.read(i64::MIN, Watermark::NONE);
+    let read = sources.read(i64::MIN, || Watermark::NONE);
     sources.finish(|| Watermark::NONE);
 
     assert_eq!(output_tokens(&read), [21]);
@@ -107,13 +109,13 @@ fn an_unreadable_transcript_counts_its_last_cached_parse_and_is_not_final() {
     let stale = std::fs::read(scan_cache_path_for(&home)).unwrap();
     append_record(&path, &record("2026-08-07T04:05:30.000Z", "msg-2", 30));
     let mut appended = open(&home, Watermark::NONE);
-    appended.read(i64::MIN, Watermark::NONE);
+    appended.read(i64::MIN, || Watermark::NONE);
     appended.finish(|| Watermark::NONE);
     std::fs::write(scan_cache_path_for(&home), stale).unwrap();
 
     let mut sources = open(&home, Watermark::NONE);
     std::fs::remove_file(&path).unwrap();
-    let read = sources.read(i64::MIN, Watermark::NONE);
+    let read = sources.read(i64::MIN, || Watermark::NONE);
     sources.finish(|| Watermark::NONE);
 
     assert_eq!(output_tokens(&read), [20]);
@@ -135,7 +137,7 @@ fn an_unchanged_transcript_missing_from_the_scan_cache_is_read_cached_and_final(
     reset_transcript_parse_count();
 
     let mut sources = open(&home, Watermark::NONE);
-    let read = sources.read(i64::MIN, Watermark::NONE);
+    let read = sources.read(i64::MIN, || Watermark::NONE);
     sources.finish(|| Watermark::NONE);
 
     assert_eq!(output_tokens(&read), [20]);
@@ -159,7 +161,7 @@ fn a_cached_parse_serves_only_while_both_size_and_mtime_match() {
     std::fs::write(scan_cache_path_for(&home), stale).unwrap();
 
     let mut sources = open(&home, Watermark::NONE);
-    let read = sources.read(i64::MIN, Watermark::NONE);
+    let read = sources.read(i64::MIN, || Watermark::NONE);
     sources.finish(|| Watermark::NONE);
 
     assert_eq!(output_tokens(&read), [21], "not the stale parse");
@@ -185,7 +187,7 @@ fn a_read_from_an_instant_reads_transcripts_written_up_to_36_hours_before_it() {
     set_mtime_ms(&earlier, from_ms - 36 * 60 * 60 * 1000 - 1);
 
     let mut sources = open(&home, Watermark::NONE);
-    let read = sources.read(from_ms, Watermark::NONE);
+    let read = sources.read(from_ms, || Watermark::NONE);
     sources.finish(|| Watermark::NONE);
 
     assert_eq!(output_tokens(&read), [20]);
