@@ -246,8 +246,10 @@ fn read_summary_from(
             return Ok(hit);
         }
     }
-    let source_read = transcripts.read(since_ms, || history.get_or_init(open_history).watermark());
-    let history = history.into_inner().unwrap_or_else(open_history);
+    // Past the cache, the history is needed whatever the sources asked: opened now, under the lock,
+    // unless the sources already did.
+    let history = history.get_or_init(open_history);
+    let source_read = transcripts.read(since_ms, || history.watermark());
     let seen_sources = transcripts.finish(|| history.watermark());
 
     let rates_arc = rates.table.clone();
