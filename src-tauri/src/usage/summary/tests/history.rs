@@ -20,12 +20,6 @@ use crate::usage::summary_cache::summary_cache_path_for;
 /// is folded and a record from 2026-08-15 on stays in its transcript.
 const AFTER_AUGUST_FIRST_WEEK: &str = "2026-08-21T12:00:00Z";
 
-fn at(iso: &str) -> i64 {
-    DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
-}
-
 /// One background check, as the first after launch: no memory of earlier checks.
 fn fold(home: &Path) {
     fold_with(home, &mut FoldChecks::default());
@@ -76,13 +70,6 @@ fn write_lines(home: &Path, name: &str, lines: &[String], written: &str) -> Path
 
 fn scan_cache_holds(home: &Path, path: &Path) -> bool {
     load_scan_cache(&scan_cache_path_for(home)).contains_key(&normalize_path(path))
-}
-
-fn set_mtime(path: &Path, iso: &str) {
-    let modified = std::time::SystemTime::from(DateTime::parse_from_rfc3339(iso).unwrap());
-    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
-    file.set_times(std::fs::FileTimes::new().set_modified(modified))
-        .unwrap();
 }
 
 #[test]

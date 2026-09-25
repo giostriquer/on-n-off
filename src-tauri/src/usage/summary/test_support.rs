@@ -223,3 +223,16 @@ pub(super) fn claude_scanned_files(summary: &UsageSummaryDto) -> u64 {
         .find(|source| source.provider == AgentId::Claude)
         .map_or(0, |source| source.scanned_files)
 }
+
+pub(super) fn at(iso: &str) -> i64 {
+    DateTime::parse_from_rfc3339(iso)
+        .unwrap()
+        .timestamp_millis()
+}
+
+pub(super) fn set_mtime(path: &Path, iso: &str) {
+    let modified = SystemTime::from(DateTime::parse_from_rfc3339(iso).unwrap());
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    file.set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+}

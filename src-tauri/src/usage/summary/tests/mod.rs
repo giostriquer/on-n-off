@@ -10,6 +10,8 @@ use crate::usage::source_index::{
 use crate::usage::sources::{load_scan_cache, scan_cache_path_for};
 use crate::usage::summary_cache::summary_cache_path_for;
 
+mod cache;
+mod dto;
 mod history;
 
 #[test]

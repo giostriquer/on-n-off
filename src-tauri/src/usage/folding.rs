@@ -181,3 +181,6 @@ pub(crate) fn clear_history_in(home: &Path) -> Result<(), AdapterError> {
         AdapterError::message(format!("Could not clear the usage history: {error}"))
     })
 }
+
+#[cfg(test)]
+mod tests;
