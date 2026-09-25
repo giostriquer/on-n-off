@@ -195,6 +195,57 @@ fn a_failed_read_shows_the_remembered_reading() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// A failed read has no windows of its own, so every remembered window comes back, each by its
+/// own id: two model windows are two meters, not one. Weekly first, then session, then model.
+#[test]
+fn a_failed_read_shows_every_remembered_window() {
+    let home = scratch_dir("limits-reading-failed-every-window");
+    let store = SnapshotStore::for_home(&home);
+    store
+        .save(&card(json!({
+            "provider": "claude",
+            "status": "ok",
+            "account": {"id": "uuid-1"},
+            "currentAccount": true,
+            "windows": [
+                {"id": "weekly_opus", "label": "Weekly · Opus", "kind": "model", "usedPercent": 91.0,
+                 "observedAt": "2026-08-17T10:00:00.000Z"},
+                {"id": "session", "label": "5 hour · all models", "kind": "session",
+                 "usedPercent": 17.0, "observedAt": "2026-08-17T10:00:00.000Z"},
+                {"id": "weekly_sonnet", "label": "Weekly · Sonnet", "kind": "model",
+                 "usedPercent": 5.0, "observedAt": "2026-08-17T10:00:00.000Z"},
+                {"id": "weekly_all", "label": "Weekly · all models", "kind": "weekly",
+                 "usedPercent": 39.0, "observedAt": "2026-08-17T10:00:00.000Z"}
+            ]
+        })))
+        .unwrap();
+    let failed = card(json!({
+        "provider": "claude",
+        "status": "unauthenticated",
+        "message": "Refresh paused",
+        "account": {"id": "uuid-1"},
+        "currentAccount": true,
+        "windows": []
+    }));
+
+    let listed = aggregate_accounts(&store, failed);
+
+    assert_eq!(
+        wire(&listed[0])["windows"],
+        json!([
+            {"id": "weekly_all", "label": "Weekly · all models", "kind": "weekly",
+             "usedPercent": 39.0, "observedAt": "2026-08-17T10:00:00.000Z"},
+            {"id": "session", "label": "5 hour · all models", "kind": "session",
+             "usedPercent": 17.0, "observedAt": "2026-08-17T10:00:00.000Z"},
+            {"id": "weekly_opus", "label": "Weekly · Opus", "kind": "model", "usedPercent": 91.0,
+             "observedAt": "2026-08-17T10:00:00.000Z"},
+            {"id": "weekly_sonnet", "label": "Weekly · Sonnet", "kind": "model", "usedPercent": 5.0,
+             "observedAt": "2026-08-17T10:00:00.000Z"}
+        ])
+    );
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// A failed read that still carries windows merges them with the remembered ones by id: the newer
 /// observation of each wins, one whose time cannot be read is never replaced, a remembered window
 /// the read lacks is added, and a remembered window without a time takes the reading's newest.
