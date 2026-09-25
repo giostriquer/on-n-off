@@ -31,13 +31,18 @@ fn claude_line(message_id: &str, session: &str, timestamp: &str, usage: Value) -
     })
 }
 
-/// A fold on 2026-08-21 (cutoff 2026-08-14) of one Claude transcript and one Codex rollout. On
-/// 2026-08-07 between 04:00 and 04:15, two priced messages from two sessions share a row, and one
-/// with a reported cost gets a row of its own; a request over 200k input tokens at 04:30 is flagged.
-/// The Codex turn on 2026-08-09 is folded too, and the Claude message on 2026-08-15 is not.
-#[test]
-fn a_fold_writes_the_rows_and_the_watermark_of_what_aged_past_the_cutoff() {
-    let home = scratch_dir("usage-folding-rows");
+fn fold_on(home: &Path, iso: &str) {
+    fold_history_in(home, at(iso), &mut FoldChecks::default()).unwrap();
+}
+
+fn history_file(home: &Path) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(history_path_for(home)).unwrap()).unwrap()
+}
+
+/// One Claude transcript and one Codex rollout. On 2026-08-07 between 04:00 and 04:15, two priced
+/// messages from two sessions and one with a reported cost; at 04:30 a request over 200k input
+/// tokens; on 2026-08-15 one more message. The Codex turn is on 2026-08-09.
+fn write_first_week(home: &Path) {
     write_transcript(
         &home.join(".claude/projects/proj/a.jsonl"),
         &[
@@ -114,16 +119,19 @@ fn a_fold_writes_the_rows_and_the_watermark_of_what_aged_past_the_cutoff() {
         ],
         "2026-08-09T10:00:01Z",
     );
+}
 
-    fold_history_in(
-        &home,
-        at("2026-08-21T12:00:00Z"),
-        &mut FoldChecks::default(),
-    )
-    .unwrap();
+/// A fold on 2026-08-21 (cutoff 2026-08-14): the two priced messages share a row, the one with a
+/// reported cost gets a row of its own, and the long request is flagged. The Codex turn is folded
+/// too, and the Claude message on 2026-08-15 is not.
+#[test]
+fn a_fold_writes_the_rows_and_the_watermark_of_what_aged_past_the_cutoff() {
+    let home = scratch_dir("usage-folding-rows");
+    write_first_week(&home);
 
-    let written: Value =
-        serde_json::from_str(&std::fs::read_to_string(history_path_for(&home)).unwrap()).unwrap();
+    fold_on(&home, "2026-08-21T12:00:00Z");
+
+    let written = history_file(&home);
     let cutoff = at("2026-08-14T00:00:00Z");
     // [slot, provider, model, flags (1 reported, 2 over 200k input), uncached input, cached input,
     //  cache writes, one-hour cache writes, output, reasoning, records, reported cost, sessions]
@@ -145,6 +153,63 @@ fn a_fold_writes_the_rows_and_the_watermark_of_what_aged_past_the_cutoff() {
                 [at("2026-08-07T04:00:00Z"), "claude", 0, 1, 1, 0, 0, 0, 2, 0, 1, 0.5, [0]],
                 [at("2026-08-07T04:30:00Z"), "claude", 0, 2, 150000, 60000, 0, 0, 5, 0, 1, 0.0, [0]],
                 [at("2026-08-09T09:45:00Z"), "codex", 1, 0, 60, 40, 0, 0, 10, 3, 1, 0.0, [2]]
+            ]
+        })
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A second fold on 2026-08-30 (cutoff 2026-08-23) appends the rows between the two cutoffs after
+/// the ones already kept and moves the watermark on, extending the one segment: the message on
+/// 2026-08-15 the first fold left, and a new session's message on 2026-08-20. The one on
+/// 2026-08-25 stays in its transcript.
+#[test]
+fn a_second_fold_appends_the_rows_between_the_cutoffs_and_moves_the_watermark() {
+    let home = scratch_dir("usage-folding-second");
+    write_first_week(&home);
+    fold_on(&home, "2026-08-21T12:00:00Z");
+    write_transcript(
+        &home.join(".claude/projects/proj/b.jsonl"),
+        &[
+            claude_line(
+                "msg_6",
+                "sess-d",
+                "2026-08-20T10:05:00.000Z",
+                json!({ "input_tokens": 3, "output_tokens": 4 }),
+            ),
+            claude_line(
+                "msg_7",
+                "sess-d",
+                "2026-08-25T00:00:00.000Z",
+                json!({ "input_tokens": 5, "output_tokens": 6 }),
+            ),
+        ],
+        "2026-08-25T00:00:01Z",
+    );
+
+    fold_on(&home, "2026-08-30T12:00:00Z");
+
+    let cutoff = at("2026-08-23T00:00:00Z");
+    assert_eq!(
+        history_file(&home),
+        json!({
+            "version": 1,
+            "foldedThroughMs": cutoff,
+            "segments": [{
+                "fromMs": null,
+                "toMs": cutoff,
+                "parserVersion": USAGE_TRANSCRIPT_PARSER_VERSION,
+                "foldedAtMs": at("2026-08-30T12:00:00Z")
+            }],
+            "models": ["claude-fable-5", "gpt-5.6-sol"],
+            "sessions": ["sess-a", "sess-b", "session-c", "sess-d"],
+            "rows": [
+                [at("2026-08-07T04:00:00Z"), "claude", 0, 0, 40, 0, 0, 0, 60, 0, 2, 0.0, [0, 1]],
+                [at("2026-08-07T04:00:00Z"), "claude", 0, 1, 1, 0, 0, 0, 2, 0, 1, 0.5, [0]],
+                [at("2026-08-07T04:30:00Z"), "claude", 0, 2, 150000, 60000, 0, 0, 5, 0, 1, 0.0, [0]],
+                [at("2026-08-09T09:45:00Z"), "codex", 1, 0, 60, 40, 0, 0, 10, 3, 1, 0.0, [2]],
+                [at("2026-08-15T00:00:00Z"), "claude", 0, 0, 7, 0, 0, 0, 8, 0, 1, 0.0, [0]],
+                [at("2026-08-20T10:00:00Z"), "claude", 0, 0, 3, 0, 0, 0, 4, 0, 1, 0.0, [3]]
             ]
         })
     );
