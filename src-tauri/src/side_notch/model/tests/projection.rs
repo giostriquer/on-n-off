@@ -245,3 +245,41 @@ fn a_codex_read_reaches_the_notch_weekly_first_without_its_hidden_windows() {
     assert_eq!(cell.headline_window_id.as_deref(), Some("secondary"));
     assert_eq!(cell.inner_ring, None);
 }
+
+/// The Windows painter draws what the projection named: the headline window, and the inner ring's
+/// window, which for a workspace share is the share drawn as a window.
+#[test]
+fn the_named_windows_resolve_for_the_painter() {
+    let claude = project(signed_in(
+        AgentId::Claude,
+        vec![
+            weekly("weekly_all"),
+            session("session"),
+            model("weekly_opus", "Weekly · Opus"),
+            model("weekly_fable", "Weekly · Fable"),
+        ],
+    ));
+    assert_eq!(
+        claude.headline().map(|window| window.id.as_str()),
+        Some("weekly_all")
+    );
+    let (ring, window) = claude.inner_window().expect("the Fable ring");
+    assert!(matches!(ring, InnerRing::Fable { .. }));
+    assert_eq!(window.id, "weekly_fable");
+
+    let mut member = signed_in(AgentId::Codex, vec![weekly("primary")]);
+    member.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
+    let member = project(member);
+    let (ring, window) = member.inner_window().expect("the share ring");
+    assert_eq!(ring, &InnerRing::WorkspaceShare);
+    assert_eq!(
+        (window.label.as_str(), window.used_percent),
+        ("Workspace credits", 32.0)
+    );
+
+    let mut paused = signed_in(AgentId::Codex, vec![weekly("primary")]);
+    paused.status = LimitsStatus::Failed;
+    let paused = project(paused);
+    assert!(paused.headline().is_none());
+    assert!(paused.inner_window().is_none());
+}

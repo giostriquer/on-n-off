@@ -1,7 +1,7 @@
 use super::*;
 use crate::dto::AgentId;
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus};
-use crate::side_notch::model::{Display, NotchSettings};
+use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
 use crate::side_notch::win_paint::R;
 use std::time::Duration;
 
@@ -33,21 +33,23 @@ fn data(show: ShowMode) -> RailData {
     RailData {
         settings: settings(show),
         cells: vec![win_paint::CellData::Provider(win_paint::ProviderData {
-            provider: AgentId::Claude,
-            status: LimitsStatus::Ok,
-            message: None,
-            windows: vec![LimitWindowDto {
-                id: "w".into(),
-                label: "Current session".into(),
-                kind: LimitWindowKind::Session,
-                used_percent: 10.0,
-                resets_at: None,
-                window_seconds: None,
-                observed_at: "2026-09-01T10:00:00Z".into(),
-            }],
-            headline_window_id: None,
-            inner_ring: None,
-            workspace_credits: None,
+            cell: NotchProvider {
+                provider: AgentId::Claude,
+                status: LimitsStatus::Ok,
+                message: None,
+                windows: vec![LimitWindowDto {
+                    id: "w".into(),
+                    label: "Current session".into(),
+                    kind: LimitWindowKind::Session,
+                    used_percent: 10.0,
+                    resets_at: None,
+                    window_seconds: None,
+                    observed_at: "2026-09-01T10:00:00Z".into(),
+                }],
+                headline_window_id: None,
+                inner_ring: None,
+                workspace_credits: None,
+            },
             sessions: Vec::new(),
         })],
         action_error: None,

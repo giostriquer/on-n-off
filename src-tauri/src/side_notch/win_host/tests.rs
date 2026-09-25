@@ -105,6 +105,7 @@ fn a_business_members_credit_share_reaches_the_codex_cell() {
     match cells.first() {
         Some(CellData::Provider(provider)) => assert_eq!(
             provider
+                .cell
                 .workspace_credits
                 .as_ref()
                 .map(|share| (share.limit.as_str(), share.used.as_str())),
@@ -130,7 +131,7 @@ fn rail_cells_list_selected_providers_in_rail_order_with_prs_last() {
         cells
             .iter()
             .map(|cell| match cell {
-                CellData::Provider(provider) => Some(provider.provider),
+                CellData::Provider(provider) => Some(provider.cell.provider),
                 _ => None,
             })
             .collect::<Vec<_>>(),

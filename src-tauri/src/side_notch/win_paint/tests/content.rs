@@ -449,9 +449,13 @@ fn popover_texts(provider: ProviderData) -> Vec<String> {
         .collect()
 }
 
-fn inner_ring(provider: ProviderData) -> Option<InnerRing> {
+/// The inner ring a cell draws: the host's choice, its figure, and the ink and track it is drawn in.
+fn inner_ring(provider: ProviderData) -> Option<(InnerRing, QuotaView, (Color, Color))> {
     match cell_content(&CellData::Provider(provider)) {
-        CellContent::Provider { inner, .. } => inner,
+        CellContent::Provider { inner, .. } => inner.map(|(ring, quota)| {
+            let colors = inner_ring_colors(&ring);
+            (ring, quota, colors)
+        }),
         _ => panic!("wrong content kind"),
     }
 }
@@ -470,14 +474,14 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
     }
     assert_eq!(
         inner_ring(member),
-        Some(InnerRing {
-            quota: QuotaView {
+        Some((
+            InnerRing::WorkspaceShare,
+            QuotaView {
                 percent: Some(32.0),
                 reached: false
             },
-            ink: CREDITS_INK,
-            track: CREDITS_TRACK,
-        })
+            (CREDITS_INK, CREDITS_TRACK),
+        ))
     );
     assert_eq!(
         inner_ring(codex_member(share(
@@ -486,7 +490,7 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
             true,
             "2020-01-01T12:00:00Z"
         )))
-        .map(|ring| ring.quota),
+        .map(|(_, quota, _)| quota),
         Some(QuotaView {
             percent: Some(0.0),
             reached: false
@@ -510,9 +514,15 @@ fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
         ),
         window("fable", "Weekly · Fable", LimitWindowKind::Model, 13.0),
     ]);
-    let ring = inner_ring(claude).expect("an inner ring");
-    assert_eq!(ring.quota.percent, Some(13.0));
-    assert_eq!((ring.ink, ring.track), (FABLE_ORANGE, FABLE_TRACK));
+    let (ring, quota, colors) = inner_ring(claude).expect("an inner ring");
+    assert_eq!(
+        ring,
+        InnerRing::Fable {
+            window_id: "fable".into()
+        }
+    );
+    assert_eq!(quota.percent, Some(13.0));
+    assert_eq!(colors, (FABLE_ORANGE, FABLE_TRACK));
 }
 
 #[test]

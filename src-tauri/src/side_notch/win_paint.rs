@@ -11,12 +11,12 @@ mod marks;
 mod text;
 
 use super::model::{
-    self, layout, workspace_share_note, workspace_share_renewed, workspace_share_window,
-    workspace_share_wording, Edge, GithubList, NotchProvider, NotchSettings, NotchSize, ShowMode,
+    layout, workspace_share_note, workspace_share_renewed, workspace_share_window,
+    workspace_share_wording, Edge, GithubList, InnerRing, NotchProvider, NotchSettings, NotchSize,
+    ShowMode,
 };
 use crate::dto::{
-    AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, LimitsWorkspaceCreditsDto,
-    MergeKind, ReviewDecision,
+    AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, MergeKind, ReviewDecision,
 };
 use crate::side_notch::sessions::LiveSession;
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
@@ -38,35 +38,11 @@ pub enum CellData {
     PullRequests(PrCellData),
 }
 
-/// One provider cell: the host's projection (`NotchProvider`) and the cell's live sessions.
+/// One provider cell: the host's projection, drawn as it is, and the cell's live sessions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProviderData {
-    pub provider: AgentId,
-    pub status: LimitsStatus,
-    pub message: Option<String>,
-    /// In the card's order, which the popover lists them in: weekly, session, model.
-    pub windows: Vec<LimitWindowDto>,
-    /// The window the ring and the figure show, by id.
-    pub headline_window_id: Option<String>,
-    pub inner_ring: Option<model::InnerRing>,
-    /// A business workspace member's credit share, drawn on the Codex cell's inner ring.
-    pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
+    pub cell: NotchProvider,
     pub sessions: Vec<LiveSession>,
-}
-
-impl ProviderData {
-    pub fn new(cell: NotchProvider, sessions: Vec<LiveSession>) -> Self {
-        Self {
-            provider: cell.provider,
-            status: cell.status,
-            message: cell.message,
-            windows: cell.windows,
-            headline_window_id: cell.headline_window_id,
-            inner_ring: cell.inner_ring,
-            workspace_credits: cell.workspace_credits,
-            sessions,
-        }
-    }
 }
 
 /// The pull-request cell's data: only the selected lists, each capped, with the row
@@ -325,7 +301,8 @@ pub enum CellContent {
     Provider {
         provider: AgentId,
         headline: Option<QuotaView>,
-        inner: Option<InnerRing>,
+        /// The inner ring the host chose, and its window's figure.
+        inner: Option<(InnerRing, QuotaView)>,
         label: String,
     },
     PullRequests {
@@ -340,16 +317,6 @@ pub enum CellContent {
 pub struct PrRingSegment {
     ci: CiState,
     passing_with_conflicts: bool,
-}
-
-/// A cell's second figure, inside its headline ring: Claude's Fable window or a Codex workspace
-/// member's credit share, each in a deeper shade of its provider's accent on its own dark track.
-/// Chosen once when the cell is planned, so drawing never asks which one it has.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct InnerRing {
-    pub quota: QuotaView,
-    pub ink: Color,
-    pub track: Color,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -490,36 +457,12 @@ fn quota_view(window: &LimitWindowDto) -> QuotaView {
     }
 }
 
-/// The ring's and the figure's window: the one the host named.
-fn headline_quota(provider: &ProviderData) -> Option<QuotaView> {
-    let id = provider.headline_window_id.as_deref()?;
-    provider
-        .windows
-        .iter()
-        .find(|window| window.id == id)
-        .map(quota_view)
-}
-
-/// The inner ring the host chose, in its own ink: Claude's Fable window in terracotta, or a business
-/// workspace member's credit share, while the outer ring and the label stay the headline window.
-fn inner_ring_of(provider: &ProviderData) -> Option<InnerRing> {
-    match provider.inner_ring.as_ref()? {
-        model::InnerRing::Fable { window_id } => provider
-            .windows
-            .iter()
-            .find(|window| &window.id == window_id)
-            .map(|window| InnerRing {
-                quota: quota_view(window),
-                ink: FABLE_ORANGE,
-                track: FABLE_TRACK,
-            }),
-        model::InnerRing::WorkspaceShare => {
-            provider.workspace_credits.as_ref().map(|share| InnerRing {
-                quota: quota_view(&workspace_share_window(share)),
-                ink: CREDITS_INK,
-                track: CREDITS_TRACK,
-            })
-        }
+/// The inner ring's ink and track: each a deeper shade of its provider's accent (Claude's
+/// terracotta for Fable, Codex's grey for the workspace share) on its own dark track.
+fn inner_ring_colors(ring: &InnerRing) -> (Color, Color) {
+    match ring {
+        InnerRing::Fable { .. } => (FABLE_ORANGE, FABLE_TRACK),
+        InnerRing::WorkspaceShare => (CREDITS_INK, CREDITS_TRACK),
     }
 }
 
@@ -561,15 +504,21 @@ fn row_badges(row: &PrRowData) -> Vec<(String, Badge)> {
 
 fn cell_content(data: &CellData) -> CellContent {
     match data {
-        CellData::Provider(provider) => CellContent::Provider {
-            provider: provider.provider,
-            headline: headline_quota(provider),
-            inner: inner_ring_of(provider),
-            label: headline_quota(provider)
-                .and_then(|quota| quota.percent)
-                .map(format_percent)
-                .unwrap_or_else(|| "—".into()),
-        },
+        CellData::Provider(provider) => {
+            let headline = provider.cell.headline().map(quota_view);
+            CellContent::Provider {
+                provider: provider.cell.provider,
+                headline,
+                inner: provider
+                    .cell
+                    .inner_window()
+                    .map(|(ring, window)| (ring.clone(), quota_view(&window))),
+                label: headline
+                    .and_then(|quota| quota.percent)
+                    .map(format_percent)
+                    .unwrap_or_else(|| "—".into()),
+            }
+        }
         CellData::PullRequests(pulls) => {
             let readable = pulls.status == GithubStatus::Ok || pulls.stale;
             let rows: Vec<&PrRowData> = pulls.lists.iter().flat_map(|list| &list.items).collect();
@@ -811,7 +760,7 @@ fn popover_entries(
         CellData::Provider(provider) => {
             entries.push((
                 PopItem::Mark {
-                    kind: MarkKind::Provider(provider.provider),
+                    kind: MarkKind::Provider(provider.cell.provider),
                     size: v(13.0),
                 },
                 // The mac header is an HStack, so the glyph centres on the title's
@@ -824,7 +773,7 @@ fn popover_entries(
                 y,
                 inner_w - v(13.0) - v(7.0),
                 line_h(13.0, TextWeight::Semibold),
-                format!("{} Usage", provider_name(provider.provider)),
+                format!("{} Usage", provider_name(provider.cell.provider)),
                 v(13.0),
                 TextWeight::Semibold,
                 [255, 255, 255, 255],
@@ -832,8 +781,9 @@ fn popover_entries(
             );
             y += line_h(13.0, TextWeight::Semibold) + spacing;
 
-            if provider.status != LimitsStatus::Ok {
+            if provider.cell.status != LimitsStatus::Ok {
                 let message = provider
+                    .cell
                     .message
                     .clone()
                     .unwrap_or_else(|| "Usage unavailable.".into());
@@ -860,7 +810,7 @@ fn popover_entries(
                     y += line_h(11.0, TextWeight::Regular);
                 }
                 // Remembered windows or a remembered share: either is a value shown below.
-                if !provider.windows.is_empty() || provider.workspace_credits.is_some() {
+                if !provider.cell.windows.is_empty() || provider.cell.workspace_credits.is_some() {
                     text_entry(
                         &mut entries,
                         x,
@@ -875,7 +825,7 @@ fn popover_entries(
                     );
                     y += line_h(10.0, TextWeight::Regular) + v(4.0);
                 }
-            } else if provider.windows.is_empty() && provider.message.is_none() {
+            } else if provider.cell.windows.is_empty() && provider.cell.message.is_none() {
                 text_entry(
                     &mut entries,
                     x,
@@ -901,6 +851,7 @@ fn popover_entries(
             }
             let now = chrono::Utc::now();
             let mut blocks: Vec<Block> = provider
+                .cell
                 .windows
                 .iter()
                 .map(|window| Block {
@@ -910,7 +861,7 @@ fn popover_entries(
                     detail: None,
                 })
                 .collect();
-            if let Some(share) = &provider.workspace_credits {
+            if let Some(share) = &provider.cell.workspace_credits {
                 let window = workspace_share_window(share);
                 let wording = workspace_share_wording(share);
                 blocks.push(Block {
@@ -973,7 +924,7 @@ fn popover_entries(
                 entries.push((
                     PopItem::Bar {
                         percent: block.percent,
-                        color: meter_color(block.percent, provider_color(provider.provider)),
+                        color: meter_color(block.percent, provider_color(provider.cell.provider)),
                     },
                     R::new(x, y, inner_w, v(4.0)),
                 ));
@@ -1042,7 +993,7 @@ fn popover_entries(
                         v(10.5),
                         TextWeight::Medium,
                         if working {
-                            provider_color(provider.provider)
+                            provider_color(provider.cell.provider)
                         } else {
                             MUTED_INK
                         },
@@ -1905,8 +1856,9 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     false,
                 );
             }
-            if let Some(inner) = inner {
-                let inner_percent = inner.quota.percent.unwrap_or(0.0);
+            if let Some((ring, quota)) = inner {
+                let (ink, track) = inner_ring_colors(ring);
+                let inner_percent = quota.percent.unwrap_or(0.0);
                 let inner_radius = radius - metrics.inner_ring_inset as f32 * scale;
                 stroke_ring(
                     pixmap,
@@ -1916,7 +1868,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     metrics.inner_ring_stroke as f32 * scale,
                     0.0,
                     360.0,
-                    inner.track,
+                    track,
                     false,
                     false,
                 );
@@ -1928,7 +1880,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     metrics.inner_ring_stroke as f32 * scale,
                     -90.0,
                     -90.0 + inner_percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(inner.quota.percent, inner.ink),
+                    meter_color(quota.percent, ink),
                     true,
                     false,
                 );

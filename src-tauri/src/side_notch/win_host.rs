@@ -176,10 +176,10 @@ fn rail_cells(
         .filter(|(_, agent)| selected.contains(agent))
         .filter_map(|(index, _)| {
             providers[index].value.as_ref().map(|entry| {
-                CellData::Provider(ProviderData::new(
-                    entry.clone(),
-                    session_rows[index].clone(),
-                ))
+                CellData::Provider(ProviderData {
+                    cell: entry.clone(),
+                    sessions: session_rows[index].clone(),
+                })
             })
         })
         .collect();

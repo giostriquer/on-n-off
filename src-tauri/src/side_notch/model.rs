@@ -327,26 +327,16 @@ impl NotchProvider {
     /// Remembered accounts never reach the notch.
     pub fn current(entries: Vec<ProviderLimitsDto>) -> Option<Self> {
         let card = entries.into_iter().find(|entry| entry.current_account)?;
-        let readable = card.status == LimitsStatus::Ok;
         let windows = card.reading.windows;
-        let headline_window_id = readable
-            .then(|| windows.first())
-            .flatten()
-            .map(|window| window.id.clone());
-        let inner_ring = readable
-            .then(|| {
-                fable_window(card.provider, &windows)
-                    .map(|window| InnerRing::Fable {
-                        window_id: window.id.clone(),
-                    })
-                    .or_else(|| {
-                        card.reading
-                            .workspace_credits
-                            .as_ref()
-                            .map(|_| InnerRing::WorkspaceShare)
-                    })
-            })
-            .flatten();
+        let workspace_credits = card.reading.workspace_credits;
+        let (headline_window_id, inner_ring) = if card.status == LimitsStatus::Ok {
+            (
+                windows.first().map(|window| window.id.clone()),
+                inner_ring(card.provider, &windows, workspace_credits.as_ref()),
+            )
+        } else {
+            (None, None)
+        };
         Some(Self {
             provider: card.provider,
             status: card.status,
@@ -354,9 +344,51 @@ impl NotchProvider {
             windows,
             headline_window_id,
             inner_ring,
-            workspace_credits: card.reading.workspace_credits,
+            workspace_credits,
         })
     }
+}
+
+/// What the Windows painter draws from the names the projection chose. The macOS helper resolves
+/// the same names on its side of the pipe (`Provider.headline`, `Provider.inner` in NotchCore).
+#[cfg(any(target_os = "windows", test))]
+impl NotchProvider {
+    /// The headline window, which the ring and the figure show.
+    pub fn headline(&self) -> Option<&LimitWindowDto> {
+        let id = self.headline_window_id.as_deref()?;
+        self.windows.iter().find(|window| window.id == id)
+    }
+
+    /// The inner ring's choice and the window it draws: the Fable window, or the workspace share
+    /// drawn as a window (`workspace_share_window`).
+    pub fn inner_window(&self) -> Option<(&InnerRing, LimitWindowDto)> {
+        let ring = self.inner_ring.as_ref()?;
+        let window = match ring {
+            InnerRing::Fable { window_id } => self
+                .windows
+                .iter()
+                .find(|window| &window.id == window_id)
+                .cloned(),
+            InnerRing::WorkspaceShare => {
+                self.workspace_credits.as_ref().map(workspace_share_window)
+            }
+        }?;
+        Some((ring, window))
+    }
+}
+
+/// The inner ring: Claude's Fable window, else a business member's workspace-credit share.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn inner_ring(
+    provider: AgentId,
+    windows: &[LimitWindowDto],
+    share: Option<&LimitsWorkspaceCreditsDto>,
+) -> Option<InnerRing> {
+    fable_window(provider, windows)
+        .map(|window| InnerRing::Fable {
+            window_id: window.id.clone(),
+        })
+        .or_else(|| share.map(|_| InnerRing::WorkspaceShare))
 }
 
 /// Claude's Fable weekly window, which the Claude reader labels "Weekly · Fable" whatever its id.

@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::{LimitWindowKind, ProviderLimitsDto, Reading};
+use crate::dto::{LimitWindowKind, LimitsWorkspaceCreditsDto, ProviderLimitsDto, Reading};
 use crate::side_notch::model::{Display, NotchSettings};
 
 mod content;
@@ -33,10 +33,10 @@ fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsD
 }
 /// What the painter is handed for `card`: the host's projection of it, without live sessions.
 fn projected(card: ProviderLimitsDto) -> ProviderData {
-    ProviderData::new(
-        NotchProvider::current(vec![card]).expect("a signed-in account"),
-        Vec::new(),
-    )
+    ProviderData {
+        cell: NotchProvider::current(vec![card]).expect("a signed-in account"),
+        sessions: Vec::new(),
+    }
 }
 fn session_window(percent: f64) -> LimitWindowDto {
     LimitWindowDto {
