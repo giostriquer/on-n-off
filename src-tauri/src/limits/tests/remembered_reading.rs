@@ -99,6 +99,46 @@ fn an_answered_read_keeps_only_the_remembered_figures_it_could_not_tell() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// A read that answered without a plan says the account has none now: the card and the file lose
+/// the remembered plan, and with it what was spent, which only a workspace plan is asked.
+#[test]
+fn an_answered_read_without_a_plan_drops_the_remembered_plan() {
+    let home = scratch_dir("limits-reading-answered-no-plan");
+    let store = SnapshotStore::for_home(&home);
+    store.save(&remembered("business")).unwrap();
+    let answered = card(json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": "acct-1", "label": "a@example.com"},
+        "currentAccount": true,
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 50.0,
+             "observedAt": "2026-08-17T11:00:00.000Z"}
+        ]
+    }));
+
+    let listed = aggregate_accounts(&store, answered);
+
+    let expected = json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": "acct-1", "label": "a@example.com"},
+        "currentAccount": true,
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
+             "usedPercent": 50.0, "observedAt": "2026-08-17T11:00:00.000Z"}
+        ],
+        "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
+                         "note": "cancelled", "checkedAt": "2026-08-17T10:00:00Z"},
+        "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00"}
+    });
+    assert_eq!(wire(&listed[0]), expected);
+    let mut loaded = wire(&store.load(AgentId::Codex)[0]);
+    loaded["currentAccount"] = json!(true);
+    assert_eq!(loaded, expected, "the file loses the plan too");
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// A failed read shows the remembered reading under its failure. What was spent is kept on any
 /// plan, since the failure could not say the plan changed.
 #[test]

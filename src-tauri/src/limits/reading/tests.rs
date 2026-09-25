@@ -237,6 +237,29 @@ fn a_paused_refresh_keeps_the_remembered_subscription_status() {
     );
 }
 
+/// A read that answered without a plan says the account has none now, so the remembered plan goes.
+#[test]
+fn an_answered_read_without_a_plan_drops_the_remembered_one() {
+    let remembered = Reading {
+        plan: Some("max".to_string()),
+        windows: vec![observed(
+            "weekly_all",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            40.0,
+            None,
+            "2026-08-17T10:00:00.000Z",
+        )],
+        ..Reading::default()
+    };
+    let answered = Outcome::Answered {
+        asked_what_was_spent: false,
+        asked_about_renewal: false,
+    };
+
+    assert_eq!(Reading::default().keeping(remembered, answered).plan, None);
+}
+
 /// The term is kept through a paused refresh like the figures beside it, and a read that answered
 /// wins.
 #[test]
