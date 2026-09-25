@@ -35,24 +35,6 @@ export type LimitAccountPresentation = {
   updatedAt: string | null;
 };
 
-const HIDDEN_CODEX_LIMIT_BUCKETS = ["base_model_inference", "codex_bengalfox"];
-const HIDDEN_CODEX_LIMIT_LABELS = ["gpt-reserve", "gpt-5.3-codex-spark"];
-
-/** Keep provider-owned internal and retired preview buckets out of both Limits surfaces. */
-export function visibleLimitWindows(entry: ProviderLimits): LimitWindow[] {
-  if (entry.provider !== "codex") return entry.windows;
-  return entry.windows.filter((window) => {
-    const label = window.label.split("·").at(-1)?.trim().toLowerCase();
-    return (
-      !HIDDEN_CODEX_LIMIT_LABELS.includes(label ?? "") &&
-      !HIDDEN_CODEX_LIMIT_BUCKETS.some((bucket) => {
-        const id = `extra:${bucket}`;
-        return window.id === id || window.id.startsWith(`${id}:`);
-      })
-    );
-  });
-}
-
 /**
  * Present one independently observed quota window. An observation describes only the cycle it was
  * taken in: once the window's own reset passes, the figure it carried belongs to a spent cycle and
@@ -171,15 +153,16 @@ export function presentCreditsSpent(spent: LimitsCreditsSpent): { value: string;
 
 /**
  * Whether a read observed anything about the account: quota windows, a credit balance, a
- * workspace-credit share, the credits spent lately or banked resets. `windows` lets a surface count only the windows it
- * shows. The backend's `ProviderLimitsDto::has_observations` is the same rule. A count that lapses while its card is on
- * screen still counts here until the next read, at most one poll later, drops it: only a card with
+ * workspace-credit share, the credits spent lately or banked resets. Every window a card carries
+ * counts: the Codex reader has already dropped the ones no surface shows. The backend's
+ * `Reading::has_observations` is the same rule. A count that lapses while its card is on screen
+ * still counts here until the next read, at most one poll later, drops it: only a card with
  * nothing else observed notices, and `unexpiredBankedResets` already keeps the count off it.
  */
-export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = entry.windows): boolean {
+export function hasObservations(entry: ProviderLimits): boolean {
   // Every current Codex read reports a reset count, usually 0; only a positive count was observed.
   return (
-    windows.length > 0 ||
+    entry.windows.length > 0 ||
     entry.credits != null ||
     entry.workspaceCredits != null ||
     entry.creditsSpent != null ||
@@ -188,9 +171,8 @@ export function hasObservations(entry: ProviderLimits, windows: LimitWindow[] = 
 }
 
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
-  const windows = visibleLimitWindows(entry);
-  const observed = hasObservations(entry, windows);
-  const latestObservedAt = windows.reduce<number | null>((latest, window) => {
+  const observed = hasObservations(entry);
+  const latestObservedAt = entry.windows.reduce<number | null>((latest, window) => {
     const observedAt = Date.parse(window.observedAt);
     if (Number.isNaN(observedAt)) return latest;
     return latest === null ? observedAt : Math.max(latest, observedAt);

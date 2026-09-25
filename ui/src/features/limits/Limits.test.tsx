@@ -65,9 +65,6 @@ function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
     plan: "pro",
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 74, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
-      { id: "extra:base_model_inference", label: "Weekly · GPT-RESERVE", kind: "model", usedPercent: 0, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
-      { id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
-      { id: "extra:codex_bengalfox:secondary", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
       { id: "extra:gpt-5.6-luna", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
     ],
     credits: { balance: "12.5", unlimited: false },
@@ -253,16 +250,6 @@ describe("Limits", () => {
     // The caption carries the poll interval the user configured, the way Pull requests does.
     expect(screen.getByText("every 5 minutes")).toBeTruthy();
 
-  });
-
-  it("hides internal reserve and Codex Spark windows while keeping other Codex model limits", async () => {
-    answer([okClaude()], [okCodex()]);
-    renderLimits();
-
-    const codex = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
-    expect(within(codex).queryByText(/GPT-RESERVE/i)).toBeNull();
-    expect(within(codex).queryByText(/GPT-5\.3-Codex-Spark/i)).toBeNull();
-    expect(within(codex).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" })).toBeTruthy();
   });
 
   // The fill used to step to `--warn` at 70 %, which is lighter than the accent it replaced. It now

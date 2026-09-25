@@ -11,7 +11,7 @@ import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
+import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { accountCards, orderAccountCards } from "./accountCards";
@@ -186,7 +186,7 @@ function AccountCard({
   const account = entry.account ?? null;
   const label = profile?.email ?? account?.label ?? null;
   const title = label ? `${name} limits · ${label}` : `${name} limits`;
-  const [hero, ...rest] = visibleLimitWindows(entry);
+  const [hero, ...rest] = entry.windows;
   const active = !!account && (profile?.active ?? entry.currentAccount);
   const presentation = presentLimitAccount(entry, `${name} limits are unavailable.`);
   const { message, refreshPaused, updatedAt, savedRefreshDetail } = presentation;

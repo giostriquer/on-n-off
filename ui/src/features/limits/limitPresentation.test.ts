@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows, presentWorkspaceShare } from "./limitPresentation";
+import { hasObservations, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, presentWorkspaceShare } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -54,54 +54,6 @@ describe("presentLimitWindow", () => {
     expect(presented.text).toBe("12%");
     expect(presented.note).toBe("");
     expect(presentLimitWindow({ ...window, resetsAt: "soon" }, NOW).text).toBe("93%");
-  });
-});
-
-describe("visibleLimitWindows", () => {
-  it("keeps a longer model name that only ends with a hidden Codex model name", () => {
-    const entry: ProviderLimits = {
-      provider: "codex",
-      status: "ok",
-      currentAccount: true,
-      windows: [
-        { ...window, id: "extra:reserve", label: "Weekly · GPT-Reserve" },
-        { ...window, id: "extra:team-reserve", label: "Weekly · Team GPT-Reserve" },
-      ],
-    };
-
-    expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:team-reserve"]);
-  });
-
-  const codex = (windows: LimitWindow[]): ProviderLimits => ({ provider: "codex", status: "ok", currentAccount: true, windows });
-
-  it("hides Codex's internal buckets by id, whatever their label says", () => {
-    const entry = codex([
-      { ...window, id: "extra:codex_bengalfox", label: "5 hour · Bengal preview" },
-      { ...window, id: "extra:base_model_inference:secondary", label: "Weekly · Inference" },
-      { ...window, id: "extra:codex_bengalfox_next", label: "Weekly · Next" },
-      { ...window, id: "codex_bengalfox", label: "Weekly · Unprefixed" },
-    ]);
-
-    expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:codex_bengalfox_next", "codex_bengalfox"]);
-  });
-
-  it("hides the reserve and Spark windows by the name after the last dot, whatever their id", () => {
-    const entry = codex([
-      { ...window, id: "extra:reserve", label: "Weekly · GPT-Reserve" },
-      { ...window, id: "extra:spark", label: "5 hour ·  gpt-5.3-codex-SPARK " },
-      { ...window, id: "extra:spark-first", label: "GPT-5.3-Codex-Spark · weekly" },
-    ]);
-
-    expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:spark-first"]);
-  });
-
-  it("leaves every other provider's windows alone", () => {
-    const entry: ProviderLimits = {
-      ...codex([{ ...window, id: "extra:codex_bengalfox", label: "Weekly · GPT-Reserve" }]),
-      provider: "claude",
-    };
-
-    expect(visibleLimitWindows(entry)).toEqual(entry.windows);
   });
 });
 
@@ -239,8 +191,22 @@ describe("hasObservations", () => {
     expect(hasObservations({ ...bare, resetCredits: { availableCount: 1, nextExpiresAt: null } })).toBe(true);
   });
 
-  it("lets a caller count only the windows it shows", () => {
-    expect(hasObservations({ ...bare, windows: [window] }, [])).toBe(false);
+  // The Codex reader drops the windows no surface shows before a card leaves the backend, so the
+  // card and the account list count the same windows: every one it carries.
+  it("counts a card's windows as the account list does", () => {
+    const remembered: ProviderLimits = {
+      ...bare,
+      currentAccount: false,
+      status: "failed",
+      message: "Saved usage refresh is paused.",
+      windows: [{ ...window, id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark" }],
+    };
+
+    expect(hasObservations(remembered)).toBe(true);
+    const presented = presentLimitAccount(remembered, "fallback");
+    expect(presented.remembered).toBe(true);
+    expect(presented.message).toBeNull();
+    expect(presented.savedRefreshDetail).toBe("Saved usage refresh is paused.");
   });
 
   it("keeps a card with only a workspace-credit share as a paused refresh rather than an empty one", () => {
