@@ -81,7 +81,7 @@ impl SnapshotStore {
         // Every writer stores its own card, and one that could not tell a remembered figure must
         // not erase it.
         if let Some(existing) = existing {
-            let remembered = still_known(existing.reading, Utc::now());
+            let remembered = existing.reading.as_of(Utc::now());
             stored.reading = stored.reading.keeping(remembered, Outcome::answered(dto));
         }
         write_stored(&path, stored)
@@ -234,31 +234,9 @@ impl StoredSnapshot {
             message: None,
             account: Some(self.account),
             current_account: false,
-            reading: still_known(self.reading, now),
+            reading: self.reading.as_of(now),
         }
     }
-}
-
-/// What a stored reading still says at `now`, for the card that shows it and for the save that
-/// keeps from it alike. A banked-reset count whose soonest known expiry has passed is no longer
-/// known, and a live offer belongs to the read that saw it. A share past its reset has renewed,
-/// which the card shows as it shows a window's passed reset; it is kept, since dropping it would
-/// bring back the own balance of 0.
-fn still_known(reading: Reading, now: DateTime<Utc>) -> Reading {
-    Reading {
-        reset_credits: reading
-            .reset_credits
-            .filter(|resets| !passed(resets.next_expires_at.as_deref(), now)),
-        reset_offer: None,
-        ..reading
-    }
-}
-
-/// Whether a remembered banked-reset count's soonest known expiry has come: by then at least one
-/// reset has lapsed and what is left is not known until a read answers again. The UI applies the same
-/// rule to a card already on screen (`unexpiredBankedResets`).
-fn passed(at: Option<&str>, now: DateTime<Utc>) -> bool {
-    at.and_then(parse_observed_at).is_some_and(|at| at <= now)
 }
 
 fn decode(raw: &str) -> Option<StoredSnapshot> {

@@ -659,20 +659,6 @@ fn forgetting_an_account_whose_count_lapsed_still_removes_the_history_it_replace
     assert!(ids(&store).is_empty());
 }
 
-#[test]
-fn a_count_lapses_at_its_expiry_itself() {
-    let expires_at = "2026-09-22T12:00:00+00:00";
-    let resets = crate::dto::LimitsResetCreditsDto {
-        available_count: 2,
-        next_expires_at: Some(expires_at.to_string()),
-    };
-    let at = parse_observed_at(expires_at).unwrap();
-    let expiry = resets.next_expires_at.as_deref();
-    assert!(passed(expiry, at));
-    assert!(!passed(expiry, at - chrono::Duration::seconds(1)));
-    assert!(!passed(None, at), "no known expiry never lapses");
-}
-
 /// A remembered workspace-credit share is kept whether or not its reset has passed.
 #[test]
 fn a_remembered_workspace_credit_share_outlives_its_reset() {

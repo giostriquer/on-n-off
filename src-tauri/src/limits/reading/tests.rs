@@ -238,6 +238,20 @@ fn a_paused_refresh_keeps_the_remembered_subscription_status() {
     );
 }
 
+#[test]
+fn a_count_lapses_at_its_expiry_itself() {
+    let expires_at = "2026-09-22T12:00:00+00:00";
+    let resets = crate::dto::LimitsResetCreditsDto {
+        available_count: 2,
+        next_expires_at: Some(expires_at.to_string()),
+    };
+    let at = parse_observed_at(expires_at).unwrap();
+    let expiry = resets.next_expires_at.as_deref();
+    assert!(passed(expiry, at));
+    assert!(!passed(expiry, at - chrono::Duration::seconds(1)));
+    assert!(!passed(None, at), "no known expiry never lapses");
+}
+
 /// A read that answered without a plan says the account has none now, so the remembered plan goes.
 #[test]
 fn an_answered_read_without_a_plan_drops_the_remembered_one() {
