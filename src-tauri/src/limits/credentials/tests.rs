@@ -279,65 +279,6 @@ fn debug_output_never_contains_the_token() {
     assert!(printed.contains("<redacted>"));
 }
 
-#[test]
-fn security_tool_outcomes_map_to_probe_results() {
-    assert_eq!(
-        interpret_security_outcome(true, "  {\"a\":1}\n", ""),
-        Ok(Some("{\"a\":1}".to_string()))
-    );
-    assert_eq!(interpret_security_outcome(true, "\n", ""), Ok(None));
-    assert_eq!(
-        interpret_security_outcome(
-            false,
-            "",
-            "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain."
-        ),
-        Ok(None)
-    );
-    let denied = interpret_security_outcome(
-        false,
-        "",
-        "security: SecKeychainItemCopyContent: User canceled the operation.",
-    )
-    .unwrap_err();
-    assert!(denied.contains("User canceled"), "{denied}");
-    assert!(denied.contains("click Allow"), "{denied}");
-}
-
-/// The renewal writes back to the store this reports, so which one it picks and when it falls
-/// through are the same question the read answers — and it has to stay one answer. A Keychain
-/// entry that holds no usable login must not shadow a file that does.
-#[test]
-fn the_login_document_names_the_store_it_came_from_and_falls_through_like_the_read() {
-    let home = scratch_dir("limits-store");
-    let file_json = CLAUDE_JSON.replace("kc-token", "file-token");
-    write(&home, ".claude/.credentials.json", &file_json);
-    let path = home.join(".claude").join(".credentials.json");
-
-    let (store, document) = claude_login_document(&home, Ok(Some(CLAUDE_JSON.to_string())))
-        .unwrap()
-        .unwrap();
-    assert_eq!(store, ClaudeStore::Keychain);
-    assert_eq!(document["claudeAiOauth"]["accessToken"], "kc-token");
-
-    let (store, document) = claude_login_document(&home, Ok(None)).unwrap().unwrap();
-    assert_eq!(store, ClaudeStore::File(path.clone()));
-    assert_eq!(document["claudeAiOauth"]["accessToken"], "file-token");
-
-    // JSON without a login, and JSON that will not parse: both let the file behind have its turn,
-    // exactly as `read_claude_credential` does.
-    for shadow in [r#"{"claudeAiOauth":{}}"#, "{ not json"] {
-        let (store, _) = claude_login_document(&home, Ok(Some(shadow.to_string())))
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            store,
-            ClaudeStore::File(path.clone()),
-            "a useless Keychain entry must not shadow a usable file: {shadow}"
-        );
-    }
-}
-
 /// The two agree by construction, and this is what says so: whatever store the document came from,
 /// the credential the read hands out is the one parsed from that same document.
 #[test]
@@ -349,129 +290,13 @@ fn the_read_and_the_document_lookup_never_disagree_about_the_login() {
         Ok(Some(CLAUDE_JSON.replace("kc-token", "other").to_string())),
         Ok(Some("{ not json".to_string())),
     ] {
-        let document = claude_login_document(&home, probe.clone())
+        let document = claude_store::login_document(&ConfigDir::default_in(&home), probe.clone())
             .unwrap()
             .map(|(_, document)| document);
         let expected = document.as_ref().and_then(parse_claude_credential);
         match read_claude_credential(&home, probe, NOW_MS) {
             CredentialLookup::Found(credential) => assert_eq!(Some(credential), expected),
             other => panic!("expected a login, got {other:?}"),
-        }
-    }
-}
-
-/// A guessed account name would file a second Keychain item under the same service, and the read
-/// matches on service alone, so it could then return either one.
-#[test]
-fn the_keychain_account_is_read_off_the_entry_rather_than_guessed() {
-    let dump = "keychain: \"/Users/me/Library/Keychains/login.keychain-db\"\n\
-        attributes:\n    \
-        \"acct\"<blob>=\"giovanne.striquer\"\n    \
-        \"svce\"<blob>=\"Claude Code-credentials\"\n";
-    assert_eq!(
-        parse_keychain_account(dump).as_deref(),
-        Some("giovanne.striquer")
-    );
-    assert_eq!(parse_keychain_account("attributes:\n"), None);
-    assert_eq!(parse_keychain_account("    \"acct\"<blob>=\"\"\n"), None);
-}
-
-#[test]
-fn disposable_home_does_not_read_or_renew_the_real_keychain_login() {
-    let calls = std::cell::Cell::new(0);
-    let result = isolated_keychain(true, || {
-        calls.set(calls.get() + 1);
-        Ok(Some("real-native-credential".into()))
-    });
-    assert_eq!(result, Ok(None));
-    assert_eq!(calls.get(), 0);
-}
-
-/// What one cell of the store truth table is expected to yield.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Cell {
-    /// The Keychain entry's login.
-    Keychain,
-    /// The credentials file's login.
-    File,
-    /// No login anywhere.
-    Nothing,
-    /// A failure that names the Keychain.
-    KeychainError,
-    /// A failure that names the credentials file.
-    FileError,
-}
-
-/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
-const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
-
-fn keychain_states() -> [(&'static str, KeychainProbe); 5] {
-    [
-        ("no item", Ok(None)),
-        ("a login", Ok(Some(CLAUDE_JSON.to_string()))),
-        ("no token", Ok(Some(SIGNED_OUT.to_string()))),
-        ("invalid JSON", Ok(Some("{ not json".to_string()))),
-        (
-            "unreadable",
-            Err("Keychain lookup failed (User canceled the operation.)".to_string()),
-        ),
-    ]
-}
-
-fn file_states() -> [(&'static str, Option<String>); 4] {
-    [
-        ("no file", None),
-        (
-            "a login",
-            Some(CLAUDE_JSON.replace("kc-token", "file-token")),
-        ),
-        ("no token", Some(SIGNED_OUT.to_string())),
-        ("broken", Some("{ not json".to_string())),
-    ]
-}
-
-fn cell_of(result: &Result<Option<(ClaudeStore, Value)>, String>, path: &Path) -> Cell {
-    match result {
-        Ok(Some((ClaudeStore::Keychain, document))) => {
-            assert_eq!(document["claudeAiOauth"]["accessToken"], "kc-token");
-            Cell::Keychain
-        }
-        Ok(Some((ClaudeStore::File(from), document))) => {
-            assert_eq!(from, path);
-            assert_eq!(document["claudeAiOauth"]["accessToken"], "file-token");
-            Cell::File
-        }
-        Ok(None) => Cell::Nothing,
-        Err(why) if why.contains(&path.display().to_string()) => Cell::FileError,
-        Err(why) => {
-            assert!(why.contains("Keychain"), "{why}");
-            Cell::KeychainError
-        }
-    }
-}
-
-/// Which store the Limits read and the renewal take the login from, for every combination of
-/// what the Keychain entry and the credentials file hold. Rows are the Keychain, columns the
-/// file: no file, a login, no token, broken.
-#[test]
-fn the_login_document_truth_table() {
-    use Cell::{File, FileError, Keychain, KeychainError, Nothing};
-    let expected = [
-        [Nothing, File, Nothing, FileError],
-        [Keychain, Keychain, Keychain, Keychain],
-        [Nothing, File, Nothing, FileError],
-        [KeychainError, File, KeychainError, KeychainError],
-        [KeychainError, File, KeychainError, KeychainError],
-    ];
-    for ((keychain, probe), row) in keychain_states().into_iter().zip(expected) {
-        for ((file, contents), want) in file_states().into_iter().zip(row) {
-            let home = scratch_dir("limits-truth");
-            let path = home.join(".claude").join(".credentials.json");
-            if let Some(contents) = contents {
-                write(&home, ".claude/.credentials.json", &contents);
-            }
-            let got = cell_of(&claude_login_document(&home, probe.clone()), &path);
-            assert_eq!(got, want, "Keychain: {keychain}; file: {file}");
         }
     }
 }

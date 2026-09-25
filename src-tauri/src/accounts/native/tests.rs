@@ -549,3 +549,162 @@ fn a_native_lock_broken_under_the_holder_stops_the_write() {
     );
     assert!(!native.config_file.exists());
 }
+
+/// Answers `security` as a Keychain holding at most one Claude Code item, filed under `me`: its
+/// attributes, and its secret or the reason the secret could not be read.
+#[cfg(target_os = "macos")]
+fn keychain_item(
+    secret: Option<Result<&'static str, &'static str>>,
+) -> impl Fn(&str) -> crate::process::CommandOutcome + 'static {
+    use crate::process::CommandOutcome;
+    move |command| {
+        let exited = |success: bool, stdout: &str, stderr: &str| CommandOutcome::Exited {
+            success,
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+        };
+        match (secret, command.contains(" -w ")) {
+            (None, _) => exited(
+                false,
+                "",
+                "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
+            ),
+            (Some(_), false) => exited(true, "    \"acct\"<blob>=\"me\"\n", ""),
+            (Some(Ok(secret)), true) => exited(true, &format!("{secret}\n"), ""),
+            (Some(Err(why)), true) => exited(false, "", why),
+        }
+    }
+}
+
+/// What the account switch's read found, told apart by the fixture each store holds.
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Found {
+    Keychain,
+    File,
+    /// A login whose token is empty, from either store.
+    Emptied,
+    Nothing,
+    Malformed,
+    Denied,
+}
+
+#[cfg(target_os = "macos")]
+fn found(read: Result<Option<Login>, String>) -> Found {
+    match read {
+        Ok(Some(login)) => match login.auth["claudeAiOauth"]["accessToken"].as_str() {
+            Some("kc-token") => Found::Keychain,
+            Some("file-token") => Found::File,
+            Some("") => Found::Emptied,
+            other => panic!("unexpected token {other:?}"),
+        },
+        Ok(None) => Found::Nothing,
+        Err(why)
+            if why == "The native credential document is malformed. It has not been changed." =>
+        {
+            Found::Malformed
+        }
+        Err(why) if why.contains("User canceled the operation") => Found::Denied,
+        Err(why) => panic!("unexpected error {why}"),
+    }
+}
+
+/// The account switch's read for every combination of what the Keychain entry and the
+/// credentials file hold. Rows are the Keychain, columns the file: no file, a login, no token,
+/// broken.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_native_claude_read_truth_table() {
+    use crate::accounts::keychain::with_test_runner;
+    use Found::{Denied, Emptied, File, Keychain, Malformed, Nothing};
+    let keychain = [
+        ("no item", None),
+        (
+            "a login",
+            Some(Ok(r#"{"claudeAiOauth":{"accessToken":"kc-token"}}"#)),
+        ),
+        ("no token", Some(Ok(SIGNED_OUT))),
+        ("invalid JSON", Some(Ok("{ not json"))),
+        (
+            "unreadable",
+            Some(Err(
+                "security: SecKeychainItemCopyContent: User canceled the operation.",
+            )),
+        ),
+    ];
+    let files = [
+        ("no file", None),
+        (
+            "a login",
+            Some(r#"{"claudeAiOauth":{"accessToken":"file-token"}}"#),
+        ),
+        ("no token", Some(SIGNED_OUT)),
+        ("broken", Some("{ not json")),
+    ];
+    let expected = [
+        [Nothing, File, Emptied, Malformed],
+        [Keychain, Keychain, Keychain, Keychain],
+        [Emptied, Emptied, Emptied, Emptied],
+        [Malformed, Malformed, Malformed, Malformed],
+        [Denied, Denied, Denied, Denied],
+    ];
+    for ((item, secret), row) in keychain.into_iter().zip(expected) {
+        for ((file, contents), want) in files.into_iter().zip(row) {
+            let root = tempfile::tempdir().unwrap();
+            let mut native = claude(root.path());
+            native.use_keychain = true;
+            if let Some(contents) = contents {
+                fs::write(native.config_home.join(".credentials.json"), contents).unwrap();
+            }
+            let (read, _) = with_test_runner(keychain_item(secret), || native.read());
+            assert_eq!(found(read), want, "Keychain: {item}; file: {file}");
+        }
+    }
+}
+
+/// An entry whose attributes cannot be read, or name no account, is never guessed at.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_keychain_entry_the_switch_cannot_identify_is_an_error() {
+    use crate::accounts::keychain::with_test_runner;
+    use crate::process::CommandOutcome;
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    native.use_keychain = true;
+    fs::write(
+        native.config_home.join(".credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"file-token"}}"#,
+    )
+    .unwrap();
+
+    let (read, sent) = with_test_runner(
+        |_| CommandOutcome::Exited {
+            success: false,
+            stdout: String::new(),
+            stderr: "User interaction is not allowed.".to_string(),
+        },
+        || native.read(),
+    );
+    assert_eq!(
+        read.err().as_deref(),
+        Some("Native Keychain access was denied or unavailable.")
+    );
+    assert_eq!(
+        sent,
+        ["find-generic-password -s Claude Code-credentials"],
+        "an attribute lookup, which never prints the secret"
+    );
+
+    let (read, _) = with_test_runner(
+        |_| CommandOutcome::Exited {
+            success: true,
+            stdout: "    \"svce\"<blob>=\"Claude Code-credentials\"\n".to_string(),
+            stderr: String::new(),
+        },
+        || native.read(),
+    );
+    assert_eq!(
+        read.err().as_deref(),
+        Some("Cannot identify the native Keychain entry.")
+    );
+}

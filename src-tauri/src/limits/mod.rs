@@ -30,6 +30,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 
+use crate::accounts::claude_store::{self, KeychainProbe};
 use crate::dto::{
     AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
     LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto, ResetCreditOutcome,
@@ -38,7 +39,7 @@ use crate::http::{get_json, HttpError};
 use crate::paths;
 use credentials::{
     read_claude_identity, ClaudeCredential, ClaudeIdentity, ClaudeLoginMemo, CredentialLookup,
-    KeychainProbe, LoginSource, CLAUDE_LOGIN,
+    LoginSource, CLAUDE_LOGIN,
 };
 use observations::ObservedWindowSet;
 #[cfg(test)]
@@ -150,7 +151,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
         Sources {
             home: &home,
             memo: &CLAUDE_LOGIN,
-            keychain: credentials::keychain_claude_json,
+            keychain: claude_store::keychain_probe,
             claude: ClaudeEndpoints {
                 token: claude_renew::TOKEN_URL,
                 profile: CLAUDE_PROFILE_URL,

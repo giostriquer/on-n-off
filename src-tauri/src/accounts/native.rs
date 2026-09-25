@@ -1,5 +1,6 @@
 //! Narrow native-store access. No whole-home restores and no provider endpoint/config rewriting.
 use super::{
+    claude_store::{self, ClaudeLocks, ConfigDir, LockScope},
     model::{self, Identity},
     store::Login,
     transaction::{Native, NativeGuard},
@@ -40,7 +41,7 @@ impl Target {
             Self::Keyring { service, account } => {
                 #[cfg(target_os = "macos")]
                 {
-                    match crate::limits::credentials::keychain_json(service, Some(account))? {
+                    match super::keychain::find_password(service, Some(account))? {
                         Some(value) => value.into_bytes(),
                         None => return Ok(None),
                     }
@@ -272,7 +273,7 @@ impl NativeStore {
                 {
                     // A disposable ON_N_OFF_HOME uses file fixtures unless it is an explicit isolated login.
                     let service = self.claude_service();
-                    if let Some(account) = keychain_account(&service)? {
+                    if let Some(account) = claude_store::native_account(&service)? {
                         return Ok(Target::Keyring { service, account });
                     }
                 }
@@ -280,21 +281,16 @@ impl NativeStore {
             Ok(Target::File(self.config_home.join(".credentials.json")))
         }
     }
+    /// Claude Code's config dir for this store.
+    fn claude_dir(&self) -> ConfigDir {
+        ConfigDir::new(self.config_home.clone())
+    }
     #[cfg(target_os = "macos")]
     fn claude_service(&self) -> String {
         if self.custom {
-            format!(
-                "Claude Code-credentials-{}",
-                &crate::sha::sha256_hex(
-                    unicode_normalization::UnicodeNormalization::nfc(
-                        self.config_home.to_string_lossy().as_ref()
-                    )
-                    .collect::<String>()
-                    .as_bytes()
-                )[..8]
-            )
+            self.claude_dir().scoped_service()
         } else {
-            "Claude Code-credentials".into()
+            claude_store::CLAUDE_KEYCHAIN_SERVICE.into()
         }
     }
     pub fn command(&self) -> Command {
@@ -335,7 +331,7 @@ impl NativeStore {
                 .ok_or("Cannot resolve native account home.")?;
             let probe = || {
                 if self.use_keychain {
-                    crate::limits::credentials::keychain_claude_json()
+                    claude_store::keychain_probe()
                 } else {
                     Ok(None)
                 }
@@ -397,7 +393,7 @@ impl NativeStore {
         #[cfg(target_os = "macos")]
         if self.provider == AgentId::Claude {
             let service = self.claude_service();
-            if let Some(account) = keychain_account(&service)? {
+            if let Some(account) = claude_store::native_account(&service)? {
                 Target::Keyring { service, account }.write(None)?;
             }
         }
@@ -406,7 +402,17 @@ impl NativeStore {
 }
 impl Native for NativeStore {
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
-        NativeLocks::acquire(self).map(|guard| Box::new(guard) as Box<dyn NativeGuard>)
+        if self.provider != AgentId::Claude {
+            return Ok(Box::new(()));
+        }
+        ClaudeLocks::acquire(
+            &self.claude_dir(),
+            LockScope::RefreshAndConfig(&self.config_file),
+        )
+        .map(|guard| Box::new(guard) as Box<dyn NativeGuard>)
+        .map_err(|_| {
+            "Claude is updating its login or configuration. Retry after it finishes.".into()
+        })
     }
     fn read(&self) -> Result<Option<Login>, String> {
         let Some(auth) = self.target()?.read()? else {
@@ -546,128 +552,15 @@ pub fn run(command: &mut Command, timeout: Duration) -> Result<String, String> {
         _ => Err("The official CLI did not complete the account operation.".into()),
     }
 }
-#[cfg(target_os = "macos")]
-fn keychain_account(service: &str) -> Result<Option<String>, String> {
-    let child = Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", service])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| "Cannot inspect native Keychain entry.")?;
-    match wait_with_deadline(child, Duration::from_secs(10)) {
-        Ok(CommandOutcome::Exited {
-            success: true,
-            stdout,
-            ..
-        }) => stdout
-            .lines()
-            .find_map(|line| {
-                line.trim()
-                    .strip_prefix("\"acct\"<blob>=\"")
-                    .and_then(|s| s.strip_suffix('"'))
-                    .map(str::to_owned)
-            })
-            .map(Some)
-            .ok_or_else(|| "Cannot identify the native Keychain entry.".into()),
-        Ok(CommandOutcome::Exited { stderr, .. }) if stderr.contains("could not be found") => {
-            Ok(None)
-        }
-        _ => Err("Native Keychain access was denied or unavailable.".into()),
-    }
-}
-struct NativeLocks {
-    paths: Vec<PathBuf>,
-    stop: Option<std::sync::mpsc::Sender<()>>,
-    worker: Option<std::thread::JoinHandle<()>>,
-    lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-impl NativeLocks {
-    fn acquire(store: &NativeStore) -> Result<Self, String> {
-        use std::sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        };
-        let mut lock = Self {
-            paths: Vec::new(),
-            stop: None,
-            worker: None,
-            lost: Arc::new(AtomicBool::new(false)),
-        };
-        if store.provider != AgentId::Claude {
-            return Ok(lock);
-        }
-        let mut legacy = store.config_home.as_os_str().to_owned();
-        legacy.push(".lock");
-        let mut config = store.config_file.as_os_str().to_owned();
-        config.push(".lock");
-        for (path, stale_seconds) in [
-            (store.config_home.join(".oauth_refresh.lock"), 60),
-            (PathBuf::from(legacy), 60),
-            (PathBuf::from(config), 10),
-        ] {
-            if fs::create_dir(&path).is_err() {
-                let stale = fs::symlink_metadata(&path)
-                    .ok()
-                    .filter(|m| m.is_dir() && !m.file_type().is_symlink())
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|at| at.elapsed().ok())
-                    .is_some_and(|age| age > Duration::from_secs(stale_seconds));
-                if !stale {
-                    return Err(
-                        "Claude is updating its login or configuration. Retry after it finishes."
-                            .into(),
-                    );
-                }
-                fs::remove_dir(&path)
-                    .and_then(|()| fs::create_dir(&path))
-                    .map_err(|_| {
-                        "Claude is updating its login or configuration. Retry after it finishes."
-                    })?;
-            }
-            lock.paths.push(path);
-        }
-        let (stop, receive) = std::sync::mpsc::channel();
-        let paths = lock.paths.clone();
-        let lost = lock.lost.clone();
-        lock.stop = Some(stop);
-        lock.worker = Some(std::thread::spawn(move || {
-            while receive.recv_timeout(Duration::from_secs(2))
-                == Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-            {
-                for path in &paths {
-                    if filetime::set_file_mtime(path, filetime::FileTime::now()).is_err() {
-                        lost.store(true, Ordering::Release);
-                        return;
-                    }
-                }
-            }
-        }));
-        Ok(lock)
-    }
-}
-impl NativeGuard for NativeLocks {
+impl NativeGuard for ClaudeLocks {
     fn ensure(&self) -> Result<(), String> {
-        if self.lost.load(std::sync::atomic::Ordering::Acquire) {
+        if self.lost() {
             Err(
                 "Native credential coordination was lost. Protected recovery has been retained."
                     .into(),
             )
         } else {
             Ok(())
-        }
-    }
-}
-impl Drop for NativeLocks {
-    fn drop(&mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-        for path in self.paths.iter().rev() {
-            let _ = fs::remove_dir(path);
         }
     }
 }

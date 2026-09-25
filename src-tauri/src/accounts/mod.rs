@@ -11,6 +11,7 @@ mod usage_renew;
 
 mod transaction;
 
+pub(crate) mod claude_store;
 mod keychain;
 pub(crate) mod native;
 

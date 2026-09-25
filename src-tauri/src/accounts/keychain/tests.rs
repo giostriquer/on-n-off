@@ -22,7 +22,7 @@ fn hex_argument(command: &str) -> &str {
 /// escape into the command.
 #[test]
 fn the_write_hex_encodes_the_secret_instead_of_quoting_it() {
-    let service = crate::limits::credentials::CLAUDE_KEYCHAIN_SERVICE;
+    let service = crate::accounts::claude_store::CLAUDE_KEYCHAIN_SERVICE;
     let secret = br#"{"a":"b\"c"}"#;
     let command = write_command(service, "me", secret).unwrap();
     assert!(
@@ -116,6 +116,33 @@ fn only_a_missing_item_counts_as_not_found() {
     assert!(not_found("returned -25300"));
     assert!(!not_found("User interaction is not allowed."));
     assert!(!not_found(""));
+}
+
+/// `find-generic-password -w`'s answers: the secret, trimmed; no item, in either form; or a failure
+/// that says how the user can unblock it.
+#[test]
+fn a_password_read_is_mapped_to_the_secret_no_item_or_why_not() {
+    assert_eq!(
+        interpret_password(true, "  {\"a\":1}\n", ""),
+        Ok(Some("{\"a\":1}".to_string()))
+    );
+    assert_eq!(interpret_password(true, "\n", ""), Ok(None));
+    assert_eq!(
+        interpret_password(
+            false,
+            "",
+            "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain."
+        ),
+        Ok(None)
+    );
+    let denied = interpret_password(
+        false,
+        "",
+        "security: SecKeychainItemCopyContent: User canceled the operation.",
+    )
+    .unwrap_err();
+    assert!(denied.contains("User canceled"), "{denied}");
+    assert!(denied.contains("click Allow"), "{denied}");
 }
 
 /// The production entry points, driven through the test runner: what they send is exactly the
@@ -250,7 +277,7 @@ fn rehearse_the_keychain_write_and_delete_through_security() {
     // The account lookup, against output `security` really produced rather than a fixture.
     let attributes = security(&["find-generic-password", "-s", service]);
     assert_eq!(
-        crate::limits::credentials::parse_keychain_account(&String::from_utf8_lossy(
+        crate::accounts::claude_store::parse_keychain_account(&String::from_utf8_lossy(
             &attributes.stdout
         ))
         .as_deref(),

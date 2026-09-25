@@ -3,6 +3,7 @@ use crate::http::{refused_url, serve_once_capturing};
 use crate::paths::scratch_dir;
 use serde_json::json;
 use std::fs;
+use std::path::PathBuf;
 
 const NOW_MS: i64 = 1_787_000_000_000;
 
@@ -183,7 +184,7 @@ fn a_login_another_process_renewed_while_we_waited_is_used_as_it_stands() {
 #[test]
 fn a_held_lock_leaves_the_renewal_to_whoever_holds_it() {
     let home = home_with("renew-busy", &stored());
-    let _held = RefreshLock::acquire(&home).unwrap();
+    let _held = ClaudeLocks::acquire(&ConfigDir::default_in(&home), LockScope::Refresh).unwrap();
 
     assert_eq!(
         renew(
@@ -307,7 +308,7 @@ fn a_write_that_cannot_be_prepared_fails_before_anything_is_spent() {
     // A directory where the temporary has to go.
     fs::create_dir(path.with_extension("json.on-n-off")).unwrap();
 
-    assert!(Writer::prepare(&ClaudeStore::File(path)).is_err());
+    assert!(PreparedWrite::prepare(&ClaudeStore::File(path)).is_err());
     assert!(matches!(
         renew(
             &home,
@@ -324,96 +325,4 @@ fn a_write_that_cannot_be_prepared_fails_before_anything_is_spent() {
         "the login is fine; the write is on-n-off's problem, and the user's remedy is unchanged"
     );
     assert_eq!(stored_token(&home), "old");
-}
-
-/// A prepared write that is never committed takes its temporary with it. Leaving one behind would
-/// park a live refresh token in a file Claude Code neither knows about nor rotates, which is the
-/// same objection that keeps `ConfigIo` out of this module.
-#[test]
-fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
-    let home = home_with("renew-temp", &stored());
-    let path = home.join(".claude").join(".credentials.json");
-    let temporary = path.with_extension("json.on-n-off");
-
-    let writer = Writer::prepare(&ClaudeStore::File(path)).unwrap();
-    assert!(temporary.exists(), "prepared up front, before the grant");
-    drop(writer);
-    assert!(!temporary.exists());
-}
-
-#[test]
-fn the_refresh_lock_admits_one_holder_and_frees_both_paths_on_drop() {
-    let home = scratch_dir("renew-lock");
-    let paths = [
-        home.join(".claude").join(".oauth_refresh.lock"),
-        home.join(".claude.lock"),
-    ];
-
-    let held = RefreshLock::acquire(&home).unwrap();
-    assert!(paths.iter().all(|path| path.is_dir()));
-    assert_eq!(RefreshLock::acquire(&home).unwrap_err(), RenewError::Busy);
-
-    drop(held);
-    assert!(
-        paths.iter().all(|path| !path.exists()),
-        "a released lock leaves nothing behind for the next renewal to break"
-    );
-    RefreshLock::acquire(&home).unwrap();
-}
-
-/// A process killed mid-renewal leaves its lock directory behind. Claude Code breaks one older
-/// than a minute rather than never refreshing again, and so must this.
-#[test]
-fn a_lock_left_behind_by_a_dead_process_is_broken_once_it_goes_stale() {
-    let home = scratch_dir("renew-stale");
-    let abandoned = home.join(".claude").join(".oauth_refresh.lock");
-    fs::create_dir_all(&abandoned).unwrap();
-    assert_eq!(RefreshLock::acquire(&home).unwrap_err(), RenewError::Busy);
-
-    let past_stale = SystemTime::now() + LOCK_STALE + Duration::from_secs(5);
-    assert!(RefreshLock::acquire_at(&home, past_stale).is_ok());
-}
-
-/// The one `security` call made under the lock has to finish well inside the minute after which
-/// Claude Code breaks it, or the write races whoever broke it.
-#[cfg(target_os = "macos")]
-#[test]
-fn the_keychain_write_deadline_fits_inside_the_lock_it_is_held_under() {
-    assert!(crate::accounts::keychain::DEADLINE < LOCK_STALE);
-}
-
-/// The renewed login lands in a file only this user can read.
-#[test]
-fn the_credentials_file_is_written_private() {
-    let home = scratch_dir("renew-file");
-    let path = home.join(".claude").join(".credentials.json");
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-
-    write_private(&path, r#"{"claudeAiOauth":{"accessToken":"new"}}"#).unwrap();
-    assert_eq!(
-        fs::read_to_string(&path).unwrap(),
-        r#"{"claudeAiOauth":{"accessToken":"new"}}"#
-    );
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "the file holds a refresh token");
-    }
-}
-
-/// The refresh lock is taken first. When the legacy lock beside the config home is held, the
-/// renewal yields and gives back the one it had already taken.
-#[test]
-fn a_held_legacy_lock_yields_and_releases_the_refresh_lock_already_taken() {
-    let home = scratch_dir("renew-legacy-held");
-    fs::create_dir_all(home.join(".claude.lock")).unwrap();
-
-    assert_eq!(RefreshLock::acquire(&home).unwrap_err(), RenewError::Busy);
-    assert!(!home.join(".claude").join(".oauth_refresh.lock").exists());
-    assert!(
-        home.join(".claude.lock").is_dir(),
-        "another holder's lock is theirs to release"
-    );
 }
