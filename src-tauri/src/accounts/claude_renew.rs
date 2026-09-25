@@ -52,9 +52,9 @@ const DEFAULT_SCOPES: [&str; 5] = [
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RenewError {
-    /// Another process holds Claude Code's refresh lock, or is writing its credentials. Its change
-    /// is the one that should win, and the caller keeps the message it already had rather than
-    /// redeeming the same token twice.
+    /// Another process holds Claude Code's refresh lock, took it away while this renewal held it,
+    /// or is writing its credentials. Its change is the one that should win, and the caller keeps
+    /// the message it already had rather than redeeming the same token twice.
     Busy,
     /// The issuer refused the refresh token itself. Only a new sign-in helps.
     Rejected,
@@ -160,7 +160,7 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
     token_url: &str,
     refused: &RefusedLogin,
 ) -> Result<ClaudeCredential, RenewError> {
-    let _lock = ClaudeLocks::acquire(dir, LockScope::Refresh).map_err(|error| match error {
+    let lock = ClaudeLocks::acquire(dir, LockScope::Refresh).map_err(|error| match error {
         LockError::Busy => RenewError::Busy,
         LockError::Unavailable(why) => RenewError::Unavailable(why),
     })?;
@@ -201,6 +201,12 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
         LockError::Unavailable(why) => RenewError::Unavailable(why),
     })?;
 
+    // Last check before the point of no return. A refresh lock taken away while this held it was
+    // judged abandoned by another process, which may be renewing this same login right now: its
+    // renewal is the one that should win, and redeeming here could strand whichever loses.
+    if lock.lost() {
+        return Err(RenewError::Busy);
+    }
     let reply = post_grant(
         token_url,
         &request_body(&refresh_token, &scopes, &client_id),

@@ -502,3 +502,32 @@ fn a_renewal_under_a_secure_storage_dir_works_in_that_dir() {
     assert_eq!(written["claudeAiOauth"]["accessToken"], "new");
     assert!(!home.join(".claude").join(".credentials.json").exists());
 }
+
+/// A refresh lock taken away while the renewal holds it means another process judged it abandoned
+/// and may be renewing the same login. The heartbeat notices, and the grant is then not sent.
+#[test]
+fn a_renewal_whose_lock_was_taken_away_sends_no_grant() {
+    let home = home_with("renew-lock-lost", &stored());
+    let dir = StorageDir::default_in(&home);
+    let lock = home.join(".claude").join(".oauth_refresh.lock");
+    // The probe runs under the lock: here another process breaks it, and a heartbeat passes.
+    let broken_under_us = |_: &StorageDir| {
+        fs::remove_dir(&lock).unwrap();
+        std::thread::sleep(Duration::from_secs(3));
+        Ok(None)
+    };
+
+    let result = renew(
+        &dir,
+        &broken_under_us,
+        NOW_MS,
+        &refused_url(),
+        &RefusedLogin::new(),
+    );
+    assert_eq!(
+        result,
+        Err(RenewError::Busy),
+        "a refused endpoint would have reported the network, so no grant was sent"
+    );
+    assert_eq!(stored_token(&home), "old");
+}
