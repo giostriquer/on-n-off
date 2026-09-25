@@ -453,10 +453,12 @@ pub(crate) fn parse_keychain_account(attributes: &str) -> Option<String> {
 pub(crate) enum BeginError {
     /// Claude Code is writing its credentials: its change goes first.
     Busy,
+    /// The storage-write lock could not be created, for a reason of its own.
+    Lock(String),
     /// No store could be read.
     Store(StoreError),
-    /// The write could not be set up: its lock, a Keychain that could not be read, the Keychain
-    /// entry's account, a linked credentials file, or a temporary the directory will not take.
+    /// The write could not be proven: a Keychain that could not be read, the Keychain entry's
+    /// account, a linked credentials file, or a temporary the directory will not take.
     Unavailable(String),
 }
 
@@ -464,7 +466,7 @@ impl From<LockError> for BeginError {
     fn from(error: LockError) -> Self {
         match error {
             LockError::Busy => Self::Busy,
-            LockError::Unavailable(why) => Self::Unavailable(why),
+            LockError::Unavailable(why) => Self::Lock(why),
         }
     }
 }

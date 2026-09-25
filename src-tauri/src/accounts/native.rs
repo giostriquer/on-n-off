@@ -518,6 +518,7 @@ impl NativeStore {
         let keychain = |_: &StorageDir| self.claude_keychain();
         let begin_error = |error| match error {
             BeginError::Busy => BUSY.to_string(),
+            BeginError::Lock(why) => format!("Cannot take Claude Code's storage lock: {why}"),
             BeginError::Store(error) => store_error(error),
             BeginError::Unavailable(why) => why,
         };

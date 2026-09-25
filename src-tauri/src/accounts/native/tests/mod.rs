@@ -602,6 +602,25 @@ fn a_native_lock_that_cannot_be_created_says_why_instead_of_busy() {
     assert!(!refused.is_empty());
 }
 
+/// A storage-write lock that cannot be created is reported as that lock, not as a bare I/O error.
+#[test]
+fn a_storage_lock_that_cannot_be_created_is_named_in_the_error() {
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    let blocker = root.path().join("not-a-directory");
+    fs::write(&blocker, "").unwrap();
+    native.config_home = blocker.join(".claude");
+
+    let refused = native
+        .write_locked(Some(&incoming()), Box::new(()))
+        .err()
+        .unwrap();
+    assert!(
+        refused.starts_with("Cannot take Claude Code's storage lock: "),
+        "{refused}"
+    );
+}
+
 #[cfg(target_os = "macos")]
 mod keychain;
 mod secure_storage;

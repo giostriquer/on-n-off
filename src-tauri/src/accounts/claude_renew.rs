@@ -81,6 +81,9 @@ impl From<BeginError> for RenewError {
     fn from(error: BeginError) -> Self {
         match error {
             BeginError::Busy => Self::Busy,
+            BeginError::Lock(why) => {
+                Self::Unavailable(format!("Cannot take Claude Code's storage lock: {why}"))
+            }
             BeginError::Store(error) => Self::Unavailable(error.to_string()),
             BeginError::Unavailable(why) => Self::Unavailable(why),
         }
