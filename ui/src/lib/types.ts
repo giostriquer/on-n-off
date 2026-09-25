@@ -262,7 +262,7 @@ export type UpdateItemMode = "overwrite" | "dismiss";
  * the announcement is how the rest find out. These strings are the contract with `Source::name`
  * in `src-tauri/src/read_revision.rs`; change the two together.
  */
-export type SharedReadSource = "accounts" | "limits:claude" | "limits:codex" | "subscription:codex" | "github:prs";
+export type SharedReadSource = "accounts" | "limits:claude" | "limits:codex" | "github:prs";
 
 /** Sent once per replacement of a shared read, never for a read that changed nothing. */
 export type SharedReadChanged = {

@@ -1,4 +1,3 @@
-import { subscriptionBadgeLimits, subscriptionBadgeProfiles, subscriptionBadgeReading } from "./subscriptionFixtures";
 /**
  * Dev-only stand-in for Tauri's IPC so the UI can run in a plain browser (and under the
  * screenshot harness, `bun run ui:shots`). Loaded by `main.tsx` only in dev builds and only when
@@ -33,8 +32,8 @@ const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
 // Scenarios this file answers for itself. `SCENARIOS` holds the pull-request ones.
 const LOCAL_SCENARIOS = [
-  "subscriptionRenewal", "subscriptionStale", "subscriptionMissing", "accountLogin", "accountLocked",
-  "accountDuplicate", "accountClients", "billingFailure", "claudeMissingReset", "subscriptionBadges", "catalog",
+  "subscriptionMissing", "accountLogin", "accountLocked",
+  "accountDuplicate", "accountClients", "claudeMissingReset", "catalog",
   "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "workspaceCredits", "creditsSpent", "claudeSubscriptionStatus", "hooks", "mcpSources",
 ];
 if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
@@ -44,7 +43,6 @@ if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) 
 }
 
 const vaultDenied = new Error("Could not unlock saved accounts.");
-const billingFailure = new Error("Could not read a matching browser session. Check browser cookie access, then retry.");
 let vaultLocked = scenario === "accountLocked";
 let duplicateReconnected = false;
 const pendingLogins = new Map<string, () => void>();
@@ -260,7 +258,6 @@ const handlers: Record<string, Handler> = {
   read_account_preferences: () => rememberingMock,
   read_accounts: (args) => {
     if (vaultLocked) throw vaultDenied;
-    if (scenario === "subscriptionBadges" && args.agent === "codex") return { profiles: subscriptionBadgeProfiles(), nativeObservationId: "badge:renewal", nativeAccount: null, recoveryRequired: false, notice: null };
     if (scenario === "sameEmailWorkspaces" && args.agent === "codex") return {
       profiles: [["personal", "0d6c1f3e-5b2a-4c8e-9f10-2a7b3c4d5e61"], ["business", "7e9a2b4c-1d3f-4a5b-8c6d-9e0f1a2b3c47"]].map(([id, workspaceId], index) => ({
         id, observationId: `profile:${id}`, identity: { provider: "codex", userId: "user-shared", workspaceId },
@@ -300,7 +297,6 @@ const handlers: Record<string, Handler> = {
       ...entry, currentAccount: false, status: "failed", account: {id: `${entry.provider}-saved`, label: "other@example.com"},
       message: "Saved usage access has expired. The last reading is retained.",
     }]);
-    if (scenario === "subscriptionBadges" && args.agentId === "codex") return subscriptionBadgeLimits();
     if (scenario === "limitsBand" && args.agentId === "claude") return limitsBandClaude();
     if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();
     if (scenario === "limitsOrder" && args.agentId === "claude") return limitsOrderClaude();
@@ -322,19 +318,12 @@ const handlers: Record<string, Handler> = {
       windows: entries[0].windows.map(window => ({ ...window, usedPercent: 42 })),
     }] : []), legacy];
   },
-  read_codex_subscription: (args) => scenario === "subscriptionBadges" ? subscriptionBadgeReading(args.accountId) : ({
-    metadata: scenario === "subscriptionMissing" ? null : {
-      date: "2026-09-24T20:00:00Z",
-      kind: args.accountId === "codex-2" ? "paidThrough" : scenario === "subscriptionRenewal" ? "renews" : "expires",
-      source: args.accountId === "codex-2" ? "localToken" : "billing",
-      checkedAt: "2026-08-24T20:00:00Z",
-      stale: args.accountId === "codex-2" || scenario === "subscriptionStale",
-    },
-    connected: false, browserSupported: true, canConnect: true, unavailable: scenario === "subscriptionStale",
-  }),
+  // Relative to the real clock: the badge hides a date that has passed, whatever the harness clock says.
+  read_codex_subscription: (args) => scenario === "subscriptionMissing" ? null : {
+    date: new Date(Date.now() + (args.accountId === "codex-2" ? 3 : 26) * 86_400_000).toISOString(),
+    checkedAt: new Date(Date.now() - 8 * 86_400_000).toISOString(),
+  },
   consume_codex_reset_credit: () => "reset",
-  connect_codex_billing: () => { if (scenario === "billingFailure") throw billingFailure; },
-  disconnect_codex_billing: () => undefined,
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),
   usage_history_status: () => usageHistory,
   clear_usage_history: () => {
@@ -374,7 +363,7 @@ window.__TAURI_INTERNALS__ = {
     try {
       return await handler(args);
     } catch (error) {
-      if (error !== vaultDenied && error !== billingFailure) console.error(`[mock] ${cmd} failed:`, error);
+      if (error !== vaultDenied) console.error(`[mock] ${cmd} failed:`, error);
       throw error;
     }
   },

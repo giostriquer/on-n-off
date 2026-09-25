@@ -94,7 +94,7 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
-      # The build scripts build two Swift packages, whose .build directories are cached. The action
+      # The build script builds one Swift package, whose .build directory is cached. The action
       # says what it restores, what the key holds, and why it stamps the sources (with bun, so after
       # Set up Bun). Both jobs restore the entry and this one saves it, as its last step and only on
       # main: it builds everything the test job's build script does, plus the native checks' Swift
@@ -108,15 +108,6 @@ jobs:
         uses: ./.github/actions/restore-swift-build
         with:
           configuration: debug
-
-      # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
-      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached. With the cache
-      # restored, it fetches nothing; its 10-20 s is SwiftPM's first start on the runner (launching
-      # the tools and compiling manifests), which the cache does not hold.
-      - &resolve-swift
-        name: Resolve Swift package dependencies
-        if: runner.os == 'macOS'
-        run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
 
       # Only pushes to main write the cache so pull requests cannot evict it; every ref can
       # restore the cache that main saved. `cache-on-failure` is deliberately off: the store is
@@ -185,9 +176,6 @@ jobs:
       - name: Test Rust toolchain pruner
         run: ./scripts/prune-rust-toolchains.test.ps1
 
-      - name: Test Swift package resolver
-        run: ./scripts/resolve-swift-packages.test.ps1
-
       # tauri-build needs ui/dist to exist before any cargo command compiles the crate.
       - &build-frontend
         name: Build frontend
@@ -233,10 +221,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native notch model checks failed." }
           bun scripts/check-native-notch.mjs src-tauri/target/debug/on-n-off-notch
           if ($LASTEXITCODE -ne 0) { throw "Native notch lifecycle checks failed." }
-          xcrun swift run --package-path src-tauri/macos/BrowserBilling -Xswiftc -warnings-as-errors BrowserBillingChecks
-          if ($LASTEXITCODE -ne 0) { throw "Browser billing checks failed." }
-          bun scripts/check-billing-resources.mjs
-          if ($LASTEXITCODE -ne 0) { throw "Billing resource signing checks failed." }
 
       # Last, so the entry holds what the native checks built as well. A job that failed saves
       # nothing, and an exact hit has nothing new to save.
@@ -244,14 +228,12 @@ jobs:
         if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            src-tauri/macos/SideNotch/.build
-            src-tauri/macos/BrowserBilling/.build
+          path: src-tauri/macos/SideNotch/.build
           key: ${{ steps.swift-cache.outputs.cache-primary-key }}
 
   # cargo test, with only the setup a compile needs. Every step but its rust-cache key and the test
   # itself is the lint job's, by YAML alias, so the two jobs' setup cannot drift apart; each one's
-  # comment is in the lint job. Its own build script run builds the Swift helpers from the restored
+  # comment is in the lint job. Its own build script run builds the Swift helper from the restored
   # cache, which this job never saves.
   test:
     name: test
@@ -265,7 +247,6 @@ jobs:
       - *setup-rust
       - *prune-toolchains
       - *restore-swift
-      - *resolve-swift
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

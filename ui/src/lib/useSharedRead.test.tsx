@@ -50,7 +50,6 @@ it.each([
   ["limits:claude", ["limits", "claude"]],
   ["limits:codex", ["limits", "codex"]],
   ["github:prs", ["github", "prs"]],
-  ["subscription:codex", ["subscription", "codex"]],
 ] as const)("refetches the query %s actually backs", async (source, queryKey) => {
   calls.listeners.clear();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -65,11 +64,11 @@ it.each([
   expect(invalidate).toHaveBeenCalledWith({ queryKey: [...queryKey] });
 });
 
-it("rechecks billing eligibility when an account is saved after its date was cached", async () => {
+it("rereads a cached Codex subscription date when the accounts change", async () => {
   calls.listeners.clear();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["accounts", "codex"], { profiles: [] });
-  client.setQueryData(["subscription", "codex", "profile:a"], { metadata: null });
+  client.setQueryData(["subscription", "codex", "profile:a"], null);
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   const hook = renderHook(() => useSharedRead("accounts"), { wrapper });
   await waitFor(() => expect(calls.listeners.size).toBe(1));

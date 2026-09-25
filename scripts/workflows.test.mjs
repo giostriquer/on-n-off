@@ -17,7 +17,7 @@ function step(job, name) {
   return { index, ...job.steps[index] };
 }
 
-/** The first step that compiles the Rust crate, and with it the Swift helpers its build script builds. */
+/** The first step that compiles the Rust crate, and with it the Swift helper its build script builds. */
 function firstBuild(job) {
   const index = job.steps.findIndex((candidate) =>
     /cargo (clippy|test|build)|tauri build|build-bundle\.ps1/.test(candidate.run ?? ""));
@@ -86,17 +86,6 @@ test("rustfmt fails the lint job before the cache restore and the slower setup",
   assert.ok(format.index < step(lint(), "Cache Rust dependencies").index);
 });
 
-test("macOS jobs resolve Swift packages before the build script needs them", { skip }, () => {
-  for (const job of [lint(), testJob(), load("bundle").jobs.bundle, load("release").jobs.build]) {
-    const resolve = step(job, "Resolve Swift package dependencies");
-    assert.equal(resolve.if, "runner.os == 'macOS'");
-    assert.equal(resolve.run.trim(), "./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling");
-    assert.ok(resolve.index < firstBuild(job), "resolution must come before the first build");
-  }
-  const tests = lint().steps.map((candidate) => candidate.run?.trim());
-  assert.ok(tests.includes("./scripts/resolve-swift-packages.test.ps1"), "the lint jobs run the resolver's tests");
-});
-
 test("only pull request runs cancel an in-progress run", { skip }, () => {
   assert.equal(load("ci").concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
   // A called workflow's concurrency group matching its caller's cancels the caller.
@@ -133,8 +122,8 @@ test("no workflow spends a step on Defender exclusions the runner image already 
   }
 });
 
-// The macOS jobs cache the Swift packages' .build directories: SwiftPM's resolved checkout and the
-// SDK modules and objects a cold build spends most of a minute on. All of them restore through one
+// The macOS jobs cache the Swift package's .build directory: the SDK modules and objects a cold
+// build spends most of a minute on. All of them restore through one
 // local action, so the toolchain step and the key exist once. One job per key family saves: the
 // lint job, whose native checks build a superset of what the test job's build script does, and
 // Bundle, whose entry Release restores.
@@ -146,19 +135,18 @@ const swiftJobs = () => [
   { name: "bundle", job: load("bundle").jobs.bundle, configuration: "release", saves: true },
   { name: "release", job: load("release").jobs.build, configuration: "release", saves: false },
 ];
-const swiftBuildDirectories = ["src-tauri/macos/SideNotch/.build", "src-tauri/macos/BrowserBilling/.build"];
+const swiftBuildDirectories = ["src-tauri/macos/SideNotch/.build"];
 const lines = (text) => String(text).trim().split("\n").map((line) => line.trim());
 /** The key's dash-separated fields, with each `${{ }}` expression standing in as one field. */
 const keyFields = (key) => key.replace(/\$\{\{.*?\}\}/g, "EXPR").split("-");
 
-test("macOS jobs restore the Swift build cache through one action, before resolving and building", { skip }, () => {
+test("macOS jobs restore the Swift build cache through one action, before building", { skip }, () => {
   for (const { name, job, configuration } of swiftJobs()) {
     const restore = step(job, "Restore Swift build cache");
     assert.equal(restore.if, "runner.os == 'macOS'", name);
     assert.equal(restore.uses, swiftCacheAction, name);
     assert.deepEqual(restore.with, { configuration }, name);
     assert.ok(restore.index > step(job, "Set up Bun").index, `${name}: the action stamps sources with bun`);
-    assert.ok(restore.index < step(job, "Resolve Swift package dependencies").index, `${name}: the resolver finds the restored checkout`);
     assert.ok(restore.index < firstBuild(job), `${name}: restored and stamped before the build script's first swift build`);
   }
 });
@@ -167,7 +155,7 @@ test("the Swift cache action keys on the toolchain and the inputs SwiftPM tracks
   const action = loadAction(swiftCacheAction);
   assert.equal(action.runs.using, "composite");
   const toolchain = step(action.runs, "Identify the Swift toolchain");
-  const restore = step(action.runs, "Restore the packages' build directories");
+  const restore = step(action.runs, "Restore the package's build directory");
   const stamp = step(action.runs, "Stamp Swift sources with their content");
   // The selected Xcode fixes both the compiler and the SDK, and its version file is read without
   // starting Swift, which took a step of its own 6 s on a fresh runner.
@@ -212,7 +200,7 @@ test("cache-prune groups a key on the fields before its two generation hashes", 
   for (const family of ["v0-rust-*", "v0-swiftpm-*"]) assert.ok(prune.run.includes(`'${family}'`), family);
   assert.match(prune.run, /Group-Object \{ \$fields = \$_\.key -split '-'; \$fields\[0\.\.\(\$fields\.Count - 3\)\] -join '-' \}/);
   // v0-swiftpm-<configuration>-<os>-<arch>, then <toolchain>-<package inputs>.
-  const fields = keyFields(step(loadAction(swiftCacheAction).runs, "Restore the packages' build directories").with.key);
+  const fields = keyFields(step(loadAction(swiftCacheAction).runs, "Restore the package's build directory").with.key);
   assert.deepEqual(fields, ["v0", "swiftpm", "EXPR", "EXPR", "EXPR", "EXPR", "EXPR"]);
 });
 
@@ -363,7 +351,6 @@ test("the test job's setup is the lint job's, step for step and in the same orde
     "Set up Rust",
     "Drop unpinned toolchains",
     "Restore Swift build cache",
-    "Resolve Swift package dependencies",
     "Cache Rust dependencies",
     "Start fetching Rust dependencies",
     "Install frontend dependencies",
@@ -388,7 +375,7 @@ test("the test job's setup is the lint job's, step for step and in the same orde
 
 test("the lint jobs run every PowerShell script test, and the test jobs none", { skip }, () => {
   const scripts = readdirSync(join(directory, "..", "..", "scripts")).filter((file) => file.endsWith(".test.ps1")).sort();
-  assert.ok(scripts.length >= 6, scripts.join(", "));
+  assert.ok(scripts.length >= 5, scripts.join(", "));
   const runsIn = (job) => job.steps.flatMap((candidate) => candidate.run?.match(/scripts\/[\w-]+\.test\.ps1/g) ?? []).map((path) => path.slice("scripts/".length));
   assert.deepEqual(runsIn(lint()).sort(), scripts);
   assert.deepEqual(runsIn(testJob()), []);

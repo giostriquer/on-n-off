@@ -78,7 +78,7 @@ jobs:
       - name: Drop unpinned toolchains
         run: ./scripts/prune-rust-toolchains.ps1 -Keep '${{ steps.toolchain.outputs.channel }}'
 
-      # The Swift packages' .build directories, cached as in verify.yml, but for the release
+      # The Swift package's .build directory, cached as in verify.yml, but for the release
       # configuration that `tauri build` asks for. The release workflow's build job restores this
       # entry; this job saves it (the job's last step).
       - name: Restore Swift build cache
@@ -87,12 +87,6 @@ jobs:
         uses: ./.github/actions/restore-swift-build
         with:
           configuration: release
-
-      # Pre-resolves SwiftPM with retries so the cargo build script never fetches. The script's
-      # header says why, and why ~/Library/Caches/org.swift.swiftpm is never cached.
-      - name: Resolve Swift package dependencies
-        if: runner.os == 'macOS'
-        run: ./scripts/resolve-swift-packages.ps1 -PackagePath src-tauri/macos/BrowserBilling
 
       # Shared with the release workflow's build job (same key, same release profile).
       # `cache-on-failure` is deliberately off: the store is capped at 10 GB for the whole
@@ -133,7 +127,5 @@ jobs:
         if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            src-tauri/macos/SideNotch/.build
-            src-tauri/macos/BrowserBilling/.build
+          path: src-tauri/macos/SideNotch/.build
           key: ${{ steps.swift-cache.outputs.cache-primary-key }}

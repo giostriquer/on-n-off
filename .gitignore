@@ -39,4 +39,3 @@ artifacts/
 src-tauri/macos/SideNotch/.build/
 src-tauri/binaries/
 
-src-tauri/macos/BrowserBilling/.build/

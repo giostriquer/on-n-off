@@ -4,7 +4,8 @@ import * as api from "$lib/api";
 import type { SharedReadSource } from "$lib/types";
 
 /**
- * The queries each shared read backs. Account changes also replace billing eligibility. Keeping the mapping here rather than at the call sites is
+ * The queries each shared read backs. Account changes also change whose login a Codex subscription
+ * date comes from. Keeping the mapping here rather than at the call sites is
  * what stops a source and a key drifting apart: a hook told to watch `limits:claude` while
  * refetching `["limits", "codex"]` would compile and then quietly never update either.
  */
@@ -12,7 +13,6 @@ const QUERY_KEYS: Record<SharedReadSource, readonly QueryKey[]> = {
   accounts: [["accounts"], ["subscription", "codex"]],
   "limits:claude": [["limits", "claude"]],
   "limits:codex": [["limits", "codex"]],
-  "subscription:codex": [["subscription", "codex"]],
   "github:prs": [["github", "prs"]],
 };
 

@@ -75,16 +75,17 @@ pub fn run() {
             // Lets a shared read announce itself wherever it was made from; see `read_revision`.
             read_revision::register(_app.handle());
             // Warm the CLI search path (login-shell PATH probe) off the UI thread so the
-            // first provider load does not pay for it.
+            // first provider load does not pay for it, and drop the cache older versions kept.
             std::thread::spawn(|| {
                 let _ = cli_locate::cli_search_path();
+                if let Ok(home) = paths::user_home() {
+                    subscription::discard_legacy_cache(&home);
+                }
             });
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             tray::setup(_app)?;
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             side_notch::setup(_app);
-            #[cfg(target_os = "macos")]
-            std::thread::spawn(subscription::recover_imports);
             #[cfg(target_os = "macos")]
             notifications::refresh_authorization(_app.handle().clone());
             limits_monitor::setup(_app);
@@ -129,8 +130,6 @@ pub fn run() {
             commands::add_account,
             commands::cancel_account_login,
             commands::read_codex_subscription,
-            commands::connect_codex_billing,
-            commands::disconnect_codex_billing,
             commands::forget_limits_snapshot,
             commands::consume_codex_reset_credit,
             commands::read_github_prs,
@@ -152,10 +151,6 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|_app, _event| {
-        #[cfg(target_os = "macos")]
-        if matches!(_event, tauri::RunEvent::Exit) {
-            subscription::shutdown();
-        }
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         if matches!(_event, tauri::RunEvent::Exit) {
             side_notch::shutdown(_app);

@@ -49,7 +49,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 /// Only the vault encryption key is retained for this app session, never native OAuth payloads.
-/// Concurrent account/billing reads join one unlock; a denied read waits for an explicit retry.
+/// Concurrent account and subscription reads join one unlock; a denied read waits for an explicit retry.
 type KeyResult = Result<[u8; 32], String>;
 #[derive(Default)]
 struct SessionKeys(Mutex<HashMap<String, Arc<OnceLock<KeyResult>>>>);

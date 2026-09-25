@@ -147,12 +147,8 @@ pub fn forget_snapshot(
 ) -> Result<(), String> {
     let home = paths::user_home().map_err(|error| error.message)?;
     if let Some(email) = expected_email {
-        // Legacy cleanup is conditional numeric history removal. The scoped account's separate
-        // Forget remains responsible for its billing lifecycle and import invalidation.
+        // Legacy cleanup is conditional numeric history removal.
         return SnapshotStore::for_home(&home).forget_matching_email(agent, account_id, email);
-    }
-    if agent == AgentId::Codex {
-        crate::subscription::forget(&home, account_id)?;
     }
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }

@@ -6,7 +6,7 @@ import * as api from "$lib/api";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
 import { AccountCardActions } from "./AccountCardActions";
 import { AccountPreferences } from "./AccountPreferences";
-vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn(), readCodexSubscription: vi.fn(), connectCodexBilling: vi.fn() }));
+vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn() }));
 vi.mock("$lib/useSharedRead", () => ({ useSharedRead: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "team" };
@@ -23,7 +23,6 @@ function setup({ preferences = false, onCommit }: { preferences?: boolean; onCom
   vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: false, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], nativeAccount: null, recoveryRequired: false, notice: null });
   vi.mocked(api.accountAction).mockResolvedValue();
   vi.mocked(api.readAccountActivationBlockers).mockResolvedValue([]);
-  vi.mocked(api.readCodexSubscription).mockResolvedValue({ metadata: null, connected: false, unavailable: false, browserSupported: true, canConnect: true });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const tree = <QueryClientProvider client={client}>{preferences ? <AccountPreferences /> : <AccountControllers><AccountManager provider="codex"><Cards /></AccountManager></AccountControllers>}</QueryClientProvider>;
   render(onCommit ? <Profiler id="accounts" onRender={onCommit}>{tree}</Profiler> : tree);
@@ -43,7 +42,6 @@ it("asks before switching beside running clients and switches only on confirmati
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
   const confirm = await within(card).findByRole("group", { name });
   expect(confirm).toHaveTextContent("Acme Studio (codex), ChatGPT");
-  expect(within(card).queryByRole("button", { name: "Connect billing" })).toBeNull();
   expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
   fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
   expect(within(card).queryByRole("group", { name })).toBeNull();
@@ -76,7 +74,7 @@ it("switches normally when running clients cannot be checked, and waits for the 
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
   await waitFor(() => expect(within(card).getByRole("button", { name: "Use account" })).toBeDisabled());
   fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
-  expect(await within(card).findByRole("button", { name: "Connect billing" })).toBeDisabled();
+  expect(await within(card).findByRole("group", { name: "Actions for person@example.com" })).toBeVisible();
   fireEvent.keyDown(within(card).getByRole("group", { name: "Actions for person@example.com" }), { key: "Escape" });
   expect(api.accountAction).not.toHaveBeenCalled();
   await act(async () => answer([]));
@@ -128,15 +126,6 @@ it("can disable automatic saving even when the profile vault cannot be read", as
   fireEvent.click(checkbox);
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "stopRemembering"));
 });
-it("checks billing for the card's saved identity without activating it", async () => {
-  setup(); vi.mocked(api.connectCodexBilling).mockResolvedValue();
-  const card = await screen.findByRole("region", { name: "person@example.com" });
-  fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
-  fireEvent.click(await within(card).findByRole("button", { name: "Connect billing" }));
-  await waitFor(() => expect(api.connectCodexBilling).toHaveBeenCalledWith("profile:billing-a"));
-  expect(api.accountAction).not.toHaveBeenCalled();
-});
-
 it("keeps cancellation on the initiating card and permits retry after cleanup", async () => {
   let finish!: () => void;
   vi.mocked(api.addAccount).mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
@@ -193,39 +182,16 @@ it("retries a denied vault unlock without starting sign-in or changing accounts"
   const client = setup();
   await screen.findByRole("region", {name: "person@example.com"});
   const restored = vi.mocked(api.readAccounts).getMockImplementation()!;
-  const restoredBilling = vi.mocked(api.readCodexSubscription).getMockImplementation()!;
   vi.mocked(api.readAccounts).mockRejectedValue(new Error("Keychain access denied"));
-  vi.mocked(api.readCodexSubscription).mockRejectedValue(new Error("Keychain access denied"));
-  await act(async () => { await Promise.all([
-    client.invalidateQueries({queryKey: ["accounts"]}),
-    client.invalidateQueries({queryKey: ["subscription", "codex"]}),
-  ]); });
-  expect(screen.getByText("Could not read subscription details.")).toBeTruthy();
+  await act(async () => { await client.invalidateQueries({queryKey: ["accounts"]}); });
   const retry = await screen.findByRole("button", {name: "Retry account access"});
   vi.mocked(api.accountAction).mockImplementation(async () => {
     vi.mocked(api.readAccounts).mockImplementation(restored);
-    vi.mocked(api.readCodexSubscription).mockImplementation(restoredBilling);
   });
   fireEvent.click(retry);
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "unlock", undefined, undefined));
   await waitFor(() => expect(screen.queryByRole("button", {name: "Retry account access"})).toBeNull());
-  await waitFor(() => expect(screen.queryByText("Could not read subscription details.")).toBeNull());
   expect(screen.getByRole("button", {name: "Use account"})).toBeEnabled();
   expect(api.addAccount).not.toHaveBeenCalled();
 });
 
-
-it("offers a retry after a billing failure and clears the error when it succeeds", async () => {
-  setup();
-  vi.mocked(api.connectCodexBilling).mockRejectedValueOnce(new Error("Could not read the browser session."));
-  fireEvent.click(await screen.findByRole("button", {name:"More actions for person@example.com"}));
-  fireEvent.click(await screen.findByRole("button", {name:"Connect billing"}));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Could not read the browser session.");
-  expect(screen.getByRole("button", {name:"Use account"})).toBeEnabled();
-  fireEvent.keyDown(screen.getByRole("group", {name:"Actions for person@example.com"}), {key:"Escape"});
-  fireEvent.click(screen.getByRole("button", {name:"More actions for person@example.com"}));
-  expect(screen.getByRole("alert")).toHaveTextContent("Could not read the browser session.");
-  vi.mocked(api.connectCodexBilling).mockResolvedValueOnce();
-  fireEvent.click(screen.getByRole("button", {name:"Retry billing"}));
-  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-});

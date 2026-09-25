@@ -176,8 +176,42 @@ fn older_profile_names_load_as_categories_without_becoming_the_email() {
     assert_eq!(loaded.profiles[0].category.as_deref(), Some("Client A"));
 }
 
+/// A login whose ID token carries these `https://api.openai.com/auth` claims.
+fn login_with_claims(claims: Value) -> Login {
+    Login {
+        auth: json!({"tokens": {
+            "id_token": crate::accounts::model::tests::id_token(&claims),
+            "refresh_token": "never-projected"
+        }}),
+        account: Value::Null,
+    }
+}
+
+/// Save one Codex profile with this login into `home`'s vault, which `vault::tests::unlock_fixture`
+/// has already unlocked, and give back its observation key.
+pub(crate) fn saved_codex_fixture(
+    home: &std::path::Path,
+    identity: Identity,
+    auth: Value,
+) -> String {
+    let store = Store::open(home, true).unwrap();
+    let mut db = store.load().unwrap();
+    let key = identity.observation_key();
+    db.save(
+        identity,
+        Login {
+            auth,
+            account: Value::Null,
+        },
+        None,
+    )
+    .unwrap();
+    store.persist(&db).unwrap();
+    key
+}
+
 #[test]
-fn billing_projects_only_the_exact_saved_codex_identity_after_vault_reload() {
+fn codex_claims_come_only_from_the_exact_saved_login_after_vault_reload() {
     let root = tempfile::tempdir().unwrap();
     let store = Store {
         root: root.path().into(),
@@ -187,63 +221,33 @@ fn billing_projects_only_the_exact_saved_codex_identity_after_vault_reload() {
     let mut db = Database::default();
     let saved = identity("inactive");
     let key = saved.observation_key();
-    db.save(saved.clone(), login("secret-never-projected"), None)
-        .unwrap();
+    db.save(
+        saved,
+        login_with_claims(json!({"chatgpt_plan_type": "pro"})),
+        None,
+    )
+    .unwrap();
     store.persist(&db).unwrap();
     let mut loaded = store.load().unwrap();
-    assert_eq!(loaded.billing_identity(&key), Some(saved));
+    let claims = loaded.codex_claims(&key).unwrap();
+    assert_eq!(claims["chatgpt_plan_type"], "pro");
+    assert!(claims.get("refresh_token").is_none() && claims.get("id_token").is_none());
     assert!(loaded
-        .billing_identity(&identity("other-user").observation_key())
+        .codex_claims(&identity("other-user").observation_key())
         .is_none());
     let mut other_workspace = identity("inactive");
     other_workspace.workspace_id = "other".into();
     assert!(loaded
-        .billing_identity(&other_workspace.observation_key())
+        .codex_claims(&other_workspace.observation_key())
         .is_none());
+    loaded.profiles[0].login = None;
+    assert!(
+        loaded.codex_claims(&key).is_none(),
+        "a profile awaiting sign-in has no token to read"
+    );
     loaded.profiles.clear();
     store.persist(&loaded).unwrap();
-    assert!(store.load().unwrap().billing_identity(&key).is_none());
-}
-
-#[test]
-fn billing_identity_lease_serializes_removal_with_publication() {
-    let home = tempfile::tempdir().unwrap();
-    let (root, lease) = Store::lease(home.path()).unwrap();
-    let store = Store {
-        root,
-        key: [9; 32],
-        _lease: lease,
-    };
-    let mut db = Database::default();
-    let saved = identity("inactive");
-    let key = saved.observation_key();
-    db.save(saved.clone(), login("fixture"), None).unwrap();
-    store.persist(&db).unwrap();
-    store.with_billing_identity(&key, |projected| {
-        assert_eq!(projected.unwrap(), Some(saved));
-        // A removal arriving after validation cannot acquire the operation lease until publication ends.
-        assert!(Store::lease_with_timeout(home.path(), std::time::Duration::ZERO).is_err());
-    });
-    let (root, lease) = Store::lease(home.path()).unwrap();
-    let store = Store {
-        root,
-        key: [9; 32],
-        _lease: lease,
-    };
-    let mut db = store.load().unwrap();
-    db.profiles.clear();
-    store.persist(&db).unwrap();
-    drop(store);
-    // A removal that finishes first is observed by the final publication lookup.
-    let (root, lease) = Store::lease(home.path()).unwrap();
-    Store {
-        root,
-        key: [9; 32],
-        _lease: lease,
-    }
-    .with_billing_identity(&key, |projected| {
-        assert_eq!(projected.unwrap(), None);
-    });
+    assert!(store.load().unwrap().codex_claims(&key).is_none());
 }
 
 #[test]

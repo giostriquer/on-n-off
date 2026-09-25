@@ -140,6 +140,6 @@ The `.dmg` step styles the Finder window through AppleScript, so a local build n
 - Intel (x86_64) macOS builds
 - Project-level write/disable
 - Antigravity usage transcripts
-- Subscription billing accuracy (Usage is API-equivalent estimate; Limits shows the vendors' own percentages)
+- Codex subscription dates come from the login token and carry no renewal status (Usage is an API-equivalent estimate; Limits shows the vendors' own percentages)
 
 The product is still taking shape. Open a GitHub issue with reproducible steps if anything breaks on your system. Do not include agent transcripts, credentials, or private configuration in an issue.

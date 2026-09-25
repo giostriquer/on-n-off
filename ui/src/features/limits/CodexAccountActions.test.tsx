@@ -6,7 +6,6 @@ import { CodexAccountActions } from "./CodexAccountActions";
 
 const api = vi.hoisted(() => ({
   consumeCodexResetCredit: vi.fn(),
-  connectCodexBilling: vi.fn(),
   readCodexSubscription: vi.fn(),
   onSharedReadChanged: vi.fn(() => Promise.resolve(() => undefined)),
 }));

@@ -65,9 +65,6 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   installer kind is its own `tauri build` pass); unsigned → SmartScreen warning; verify SHA-256 / attestation.
 - macOS: `.app` + `.dmg` (Apple Silicon), ad-hoc signed, not notarised → right-click → Open on first
   launch. The dmg step needs Automation permission for the terminal locally.
-- SwiftPM resource bundles belong in `Contents/Resources`, not `Contents/Helpers`. The native
-  Swift build engine can emit a flat `.bundle` without an Info.plist; codesign rejects it in the
-  helper code directory, but seals it correctly as app resources (2026-09, billing helper).
 - Icons: `icon.icns` carries macOS margins + drop shadow; Windows `icon.ico` / PNGs must be full-bleed
   with transparent corners (no shadow). Regenerate the Windows set from the icns master, not the
   other way round.
@@ -117,9 +114,9 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   and two macOS jobs at once instead of one. GitHub's free plan runs at most 5 macOS jobs at once
   for the whole account, so three pull request runs at once, or two beside a main push (its CI run
   and Bundle's dmg job hold 3), leave a macOS job queued, and the queue eats into that gain.
-- On macOS the Rust build script builds the two Swift helpers (`native_build.rs`,
-  `native_billing_build.rs`), and building them cold, SDK modules and SweetCookieKit included, was
-  most of the macOS `Lint Rust` step. The macOS jobs cache both packages' `.build` directories
+- On macOS the Rust build script builds the notch helper (`native_build.rs`), and building it
+  cold, SDK modules included, was most of the macOS `Lint Rust` step. The macOS jobs cache the
+  package's `.build` directory
   through one local action, `.github/actions/restore-swift-build`, keyed on the Swift toolchain and
   the package inputs SwiftPM tracks: `v0-swiftpm-debug-*` for CI, and `v0-swiftpm-release-*`, which
   Bundle saves and Release restores. Only main saves, and `cache-prune.yml` prunes both families.
@@ -134,8 +131,8 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   job's first cargo step (`Lint Rust` in one, `Test Rust` in the other); `Lint Rust` ran at about
   75 s cold and 40-50 s restored, depending on the runner. What it cannot remove is SwiftPM's first
   start on a fresh runner, 10-20 s of launching the tools and compiling manifests, which each macOS
-  job pays in its first Swift command. SwiftPM's own
-  `~/Library/Caches/org.swift.swiftpm` stays uncached (see `scripts/resolve-swift-packages.ps1`).
+  job pays in its first Swift command. SwiftPM's own `~/Library/Caches/org.swift.swiftpm` stays
+  uncached: the notch package has no remote dependencies, so there is nothing in it to keep.
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
   to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one image per OS that

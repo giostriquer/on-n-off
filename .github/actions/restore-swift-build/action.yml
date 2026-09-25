@@ -1,12 +1,12 @@
 name: Restore Swift build cache
 description: >-
-  Restores the macOS Swift packages' .build directories from the Actions cache, then dates the
+  Restores the macOS Swift package's .build directory from the Actions cache, then dates the
   tracked Swift sources by their content. The calling job saves the cache itself, with this
   action's outputs, because a composite action cannot run a step after the job's build.
 
-# The Rust build script builds two Swift packages (native_build.rs, native_billing_build.rs), and
-# a cold build spent most of a minute on SDK modules and SweetCookieKit before it reached
-# on-n-off's own Swift code. verify.yml, bundle.yml and release.yml all restore through this action, so
+# The Rust build script builds the notch's Swift package (native_build.rs), and a cold build spent
+# most of a minute on SDK modules before it reached on-n-off's own Swift code. verify.yml,
+# bundle.yml and release.yml all restore through this action, so
 # Release's key is Bundle's by construction. cache-prune.yml prunes the key families.
 
 inputs:
@@ -53,13 +53,11 @@ runs:
     # is rebuilt. Info.plist is left out: it reaches the notch helper only through a linker flag
     # SwiftPM does not track, so native_build.rs relinks the helper on every build instead, and a
     # release's version bump keeps the key that Bundle saved for the commit before it.
-    - name: Restore the packages' build directories
+    - name: Restore the package's build directory
       id: restore
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: |
-          src-tauri/macos/SideNotch/.build
-          src-tauri/macos/BrowserBilling/.build
+        path: src-tauri/macos/SideNotch/.build
         key: v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-${{ hashFiles('src-tauri/macos/*/Package.swift', 'src-tauri/macos/*/Package.resolved', 'src-tauri/macos/*/Sources/**', 'src-tauri/macos/*/Tests/**') }}
         restore-keys: v0-swiftpm-${{ inputs.configuration }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain }}-
 

@@ -84,7 +84,6 @@ pub enum Source {
     LimitsClaude,
     LimitsCodex,
     GithubPrs,
-    SubscriptionCodex,
 }
 
 impl Source {
@@ -95,7 +94,6 @@ impl Source {
             Self::Accounts => "accounts",
             Self::LimitsClaude => "limits:claude",
             Self::LimitsCodex => "limits:codex",
-            Self::SubscriptionCodex => "subscription:codex",
             Self::GithubPrs => "github:prs",
         }
     }

@@ -1,58 +1,29 @@
-//! Optional Codex subscription dates. Billing observations retain authority over cached ID-token
-//! claims, including an explicit empty billing response. No access or refresh token is read here.
+//! Codex subscription dates, read from the login's own ID token. Its `https://api.openai.com/auth`
+//! claims carry `chatgpt_subscription_active_until`, the day the paid period ends, and
+//! `chatgpt_subscription_last_checked`, when OpenAI last confirmed it. Codex refreshes the token
+//! as it runs and `accounts/usage_renew.rs` refreshes saved logins, so the date keeps up without a
+//! browser session, a network call or a Keychain item of its own. The claim says how long the
+//! plan is paid for, not whether it renews, and the UI says so. No access or refresh token is
+//! read here.
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
+use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionDate {
-    pub date: Option<String>,
-    pub kind: Option<DateKind>,
-    pub source: DateSource,
+    /// RFC 3339: the end of the paid period, still ahead whenever a reading is `Some`.
+    pub date: String,
+    /// RFC 3339: when OpenAI last confirmed the date, if the token says.
     pub checked_at: Option<String>,
-    pub stale: bool,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DateKind {
-    Renews,
-    Expires,
-    PaidThrough,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DateSource {
-    Billing,
-    LocalToken,
 }
 
-fn parse_billing(payload: &Value, now: DateTime<Utc>) -> Option<SubscriptionDate> {
-    let date = payload
-        .get("active_until")
-        .or_else(|| payload.get("activeUntil"))?;
-    let renew = payload
-        .get("will_renew")
-        .or_else(|| payload.get("willRenew"))?;
-    let (date, kind) = if date.is_null() && (renew.is_null() || renew.as_bool() == Some(false)) {
-        (None, None)
-    } else {
-        let date = date.as_str()?.parse::<DateTime<Utc>>().ok()?;
-        let kind = if renew.as_bool()? {
-            DateKind::Renews
-        } else {
-            DateKind::Expires
-        };
-        (Some(date.to_rfc3339()), Some(kind))
-    };
-    Some(SubscriptionDate {
-        date,
-        kind,
-        source: DateSource::Billing,
-        checked_at: Some(now.to_rfc3339()),
-        stale: false,
-    })
-}
+/// The paid-through date these claims give `account_id`: `None` when they belong to another
+/// account, carry no readable date, or the date has passed, because a lapsed period says nothing
+/// about the current one. The callers already chose the claims by account; the check here is
+/// the last line, so a vault profile whose token was issued to another identity, or a native
+/// login whose claims disagree with its key, can never put its date on someone else's card.
 fn parse_claims(claims: &Value, account_id: &str, now: DateTime<Utc>) -> Option<SubscriptionDate> {
     if crate::accounts::model::codex_observation_key(
         claims.get("chatgpt_account_id")?.as_str()?,
@@ -76,118 +47,42 @@ fn parse_claims(claims: &Value, account_id: &str, now: DateTime<Utc>) -> Option<
         .filter(|checked| *checked <= now)
         .map(|checked| checked.to_rfc3339());
     Some(SubscriptionDate {
-        date: Some(date.to_rfc3339()),
-        kind: Some(DateKind::PaidThrough),
-        source: DateSource::LocalToken,
+        date: date.to_rfc3339(),
         checked_at,
-        stale: true,
     })
 }
-fn choose(
-    billing: Option<SubscriptionDate>,
-    local: Option<SubscriptionDate>,
-) -> Option<SubscriptionDate> {
-    billing.or(local)
+
+/// The date for one Limits card. The signed-in login answers for its own account, since Codex
+/// refreshes it most often; any other account is looked up among the saved profiles. An unreadable
+/// native login is no date, because the card already shows that login's own failure; a vault that
+/// cannot be read right now is an error the UI retries, since nothing else would surface it.
+pub fn read(home: &Path, account: &str) -> Result<Option<SubscriptionDate>, String> {
+    read_at(home, account, Utc::now())
 }
 
-const REFRESH_SECONDS: i64 = 24 * 60 * 60;
+fn read_at(
+    home: &Path,
+    account: &str,
+    now: DateTime<Utc>,
+) -> Result<Option<SubscriptionDate>, String> {
+    let native = crate::accounts::native::codex_metadata(&home.join(".codex"))
+        .ok()
+        .flatten()
+        .filter(|(key, _)| key == account)
+        .map(|(_, claims)| claims);
+    let claims = match native {
+        Some(claims) => Some(claims),
+        None => crate::accounts::saved_codex_claims(home, account)?,
+    };
+    Ok(claims.and_then(|claims| parse_claims(&claims, account, now)))
+}
 
-pub(crate) mod browser;
-#[cfg(target_os = "macos")]
-mod import_owner;
-mod store;
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubscriptionReading {
-    pub metadata: Option<SubscriptionDate>,
-    pub connected: bool,
-    pub unavailable: bool,
-    pub browser_supported: bool,
-    pub can_connect: bool,
-}
-
-pub fn read(
-    _app: &tauri::AppHandle,
-    home: &std::path::Path,
-    account: &str,
-) -> Result<SubscriptionReading, String> {
-    let (reading, context) = browser::read_metadata(home, account, chrono::Utc::now())?;
-    browser::refresh_if_due(home, account, context.as_ref());
-    Ok(reading)
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct BillingContext {
-    workspace: String,
-    user: String,
-    saved: bool,
-}
-fn with_billing_context<T>(
-    home: &std::path::Path,
-    account: &str,
-    consume: impl FnOnce(Result<Option<BillingContext>, String>) -> T,
-) -> T {
-    crate::accounts::with_saved_billing_identity(home, account, |saved| {
-        consume(saved.map(|saved| resolve_context(home, account, saved)))
-    })
-}
-fn billing_context(
-    home: &std::path::Path,
-    account: &str,
-) -> Result<Option<BillingContext>, String> {
-    with_billing_context(home, account, |context| context)
-}
-fn validate_context(context: Result<Option<BillingContext>, String>) -> Result<(), String> {
-    context?
-        .map(|_| ())
-        .ok_or_else(|| "Save this account or sign in with Codex before connecting billing.".into())
-}
-fn resolve_context(
-    home: &std::path::Path,
-    account: &str,
-    saved: Option<crate::accounts::model::Identity>,
-) -> Option<BillingContext> {
-    if let Some(identity) = saved
-        .filter(|id| id.provider == crate::dto::AgentId::Codex && id.observation_key() == account)
-    {
-        return Some(BillingContext {
-            workspace: identity.workspace_id,
-            user: identity.user_id,
-            saved: true,
-        });
-    }
-    let (key, claims) = store::identity(home)?;
-    if key != account {
-        return None;
-    }
-    Some(BillingContext {
-        workspace: claims.get("chatgpt_account_id")?.as_str()?.into(),
-        user: claims
-            .get("chatgpt_user_id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .into(),
-        saved: false,
-    })
-}
-pub fn validate_account(home: &std::path::Path, account: &str) -> Result<(), String> {
-    validate_context(billing_context(home, account))
-}
-pub use browser::{connect, disconnect};
-pub fn forget(home: &std::path::Path, account: &str) -> Result<(), String> {
-    browser::forget(home, account)
+/// Versions up to 0.18.1 imported billing dates from the browser and kept them, with per-account
+/// identity and attempt times, under `~/.on-n-off/subscriptions`. Nothing reads that directory now,
+/// so startup removes it once; a home without it is left alone.
+pub fn discard_legacy_cache(home: &Path) {
+    let _ = std::fs::remove_dir_all(home.join(".on-n-off/subscriptions"));
 }
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(target_os = "macos")]
-pub fn recover_imports() {
-    if let Ok(root) = import_owner::root() {
-        import_owner::recover(&root);
-    }
-}
-#[cfg(target_os = "macos")]
-pub fn shutdown() {
-    import_owner::OWNER.shutdown();
-}

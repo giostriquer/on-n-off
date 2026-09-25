@@ -33,7 +33,7 @@ fn private_atomic_replacement_preserves_complete_document() {
 }
 
 #[test]
-fn account_and_billing_reads_share_one_vault_unlock_per_storage_root() {
+fn account_and_subscription_reads_share_one_vault_unlock_per_storage_root() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let memo = SessionKeys::default();
     let reads = AtomicUsize::new(0);

@@ -20,7 +20,7 @@ const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string
 });
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
 
-vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), connectCodexBilling:vi.fn(), forgetLimitsSnapshot, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue({metadata:null,connected:false,unavailable:false}), consumeCodexResetCredit }));
+vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit }));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -674,47 +674,33 @@ describe("Limits", () => {
   });
 });
 
-import { connectCodexBilling, readCodexSubscription } from "$lib/api";
+import { readCodexSubscription } from "$lib/api";
 
-it("connects billing only from the card's more-actions menu", async () => {
-  vi.mocked(readCodexSubscription).mockClear().mockResolvedValue({
-    metadata: null, connected: false, unavailable: false, browserSupported: true, canConnect: true,
-  });
+it("reads each Codex card's subscription date and offers no billing action", async () => {
+  vi.mocked(readCodexSubscription).mockClear().mockResolvedValue(null);
   answer([okClaude()], [okCodex({ currentAccount: false })]);
   renderLimits();
   const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
   await waitFor(() => expect(readCodexSubscription).toHaveBeenCalledWith("acct-work"));
-  expect(within(region).queryByRole("button", { name: "Connect billing" })).toBeNull();
   fireEvent.click(within(region).getByRole("button", { name: "More actions for work@codex.example" }));
   const menu = within(region).getByRole("group", { name: "Actions for work@codex.example" });
-  fireEvent.click(await within(menu).findByRole("button", { name: "Connect billing" }));
-  await waitFor(() => expect(connectCodexBilling).toHaveBeenCalledWith("acct-work"));
+  expect(within(menu).queryByRole("button", { name: /billing/i })).toBeNull();
   expect(accountAction).not.toHaveBeenCalled();
   fireEvent.keyDown(menu, { key: "Escape" });
-  expect(within(region).queryByRole("button", { name: "Connect billing" })).toBeNull();
   expect(within(region).getByRole("button", { name: "More actions for work@codex.example" })).toHaveFocus();
-  const claude = screen.getByRole("region", { name: "Claude limits · me@claude.example" });
-  fireEvent.click(within(claude).getByRole("button", { name: "More actions for me@claude.example" }));
-  expect(within(claude).getByRole("group", { name: "Actions for me@claude.example" })).toBeVisible();
-  expect(within(claude).queryByRole("button", { name: /billing/i })).toBeNull();
   expect(readCodexSubscription).not.toHaveBeenCalledWith("uuid-1");
-  vi.mocked(readCodexSubscription).mockResolvedValue({ metadata: null, connected: false, unavailable: false });
 });
 
-it.each([true, false])("shows subscription timing through a header badge (usage available: %s)", async (hasUsage) => {
-  vi.mocked(readCodexSubscription).mockClear().mockResolvedValueOnce({
-    metadata: {date:"2026-10-10T12:00:00Z",kind:"expires",source:"billing",checkedAt:NOW,stale:false},
-    connected:false,unavailable:false,
-  });
+it.each([true, false])("shows the paid-through date through a header badge (usage available: %s)", async (hasUsage) => {
+  vi.mocked(readCodexSubscription).mockClear().mockResolvedValueOnce({ date: "2026-10-10T12:00:00Z", checkedAt: NOW });
   const codex = okCodex();
   if (!hasUsage) codex.windows = [];
   answer([okClaude()], [codex]);
   renderLimits();
-  const badge = await screen.findByRole("button", {name: "Subscription status: No renewal"});
+  const badge = await screen.findByRole("button", {name: "Subscription paid through Oct 10"});
   expect(badge.closest("header")).toHaveTextContent("Pro ×20");
-  expect(screen.queryByText(/Expires in/)).toBeNull();
   fireEvent.focus(badge);
-  expect(screen.getByRole("tooltip")).toHaveTextContent(/Expires/);
+  expect(screen.getByRole("tooltip")).toHaveTextContent(/Paid through/);
   fireEvent.keyDown(document, {key:"Escape"});
   expect(screen.queryByRole("tooltip")).toBeNull();
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
@@ -922,19 +908,17 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
 });
 
 
-it("updates the expiry warning on the local minute clock without rereading billing", async () => {
+it("drops the badge on the local minute clock once the paid period ends, without rereading", async () => {
   vi.useFakeTimers({toFake:["Date", "setInterval", "clearInterval"]});
   vi.setSystemTime(new Date(NOW));
   vi.mocked(readCodexSubscription).mockClear().mockResolvedValueOnce({
-    metadata:{date:"2026-08-17T20:00:30Z",kind:"expires",source:"billing",checkedAt:NOW,stale:false},
-    connected:false,unavailable:false,
+    date: new Date(Date.parse(NOW) + 30_000).toISOString(), checkedAt: NOW,
   });
   answer([okClaude()], [okCodex()]);
   renderLimits();
-  const badge = await screen.findByRole("button", {name:"Subscription status: No renewal"});
-  expect(badge).toHaveClass("subscription-badge--warning");
+  expect(await screen.findByRole("button", {name: /Subscription paid through/})).toHaveClass("subscription-badge--neutral");
   await act(async () => { vi.advanceTimersByTime(60_000); });
-  expect(badge).toHaveClass("subscription-badge--expired");
+  expect(screen.queryByRole("button", {name: /Subscription paid through/})).toBeNull();
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
