@@ -176,7 +176,7 @@ pub(crate) fn read_json_file(path: &Path) -> Result<Option<Value>, String> {
 #[cfg(target_os = "macos")]
 pub(crate) fn keychain_probe() -> KeychainProbe {
     isolated_keychain(std::env::var_os("ON_N_OFF_HOME").is_some(), || {
-        super::keychain::find_password(CLAUDE_KEYCHAIN_SERVICE, None)
+        keychain_secret(CLAUDE_KEYCHAIN_SERVICE)
     })
 }
 
@@ -194,28 +194,98 @@ fn isolated_keychain(isolated: bool, probe: impl FnOnce() -> KeychainProbe) -> K
     }
 }
 
-/// Deadline for the renewal's attribute lookup, which raises no prompt.
-#[cfg(target_os = "macos")]
-const RENEWAL_ACCOUNT_DEADLINE: Duration = Duration::from_secs(30);
+/// The account name Claude Code (2.1.282) files its Keychain entry under: `$USER`, else the login
+/// name, and `claude-code-user` when that is not a plain name `security` takes as it is. Claude
+/// Code asks the OS for the login name; `$LOGNAME`, which a login session and launchd both set,
+/// stands in for it here.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn claude_code_account(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> String {
+    ["USER", "LOGNAME"]
+        .into_iter()
+        .filter_map(env)
+        .map(|name| name.to_string_lossy().into_owned())
+        .find(|name| !name.is_empty())
+        .filter(|name| {
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        })
+        .unwrap_or_else(|| "claude-code-user".into())
+}
 
-/// The account the renewal's Keychain entry is filed under, so a write updates *that* item.
-///
-/// `security add-generic-password -U` matches on service **and** account, and the Limits read
-/// matches on service alone. Guessing the account from `$USER` would therefore create a second
-/// item for the same service whenever the guess is wrong, and `find-generic-password` then
-/// returns one of the two in no defined order — on-n-off and Claude Code reading different
-/// logins, with nothing on screen to say so. Asking the entry itself removes the guess.
+/// This process's name for Claude Code's Keychain entry. A test binary sees no environment here,
+/// so every test resolves the fallback name and never a developer's own.
 #[cfg(target_os = "macos")]
-fn renewal_account() -> Result<String, String> {
-    match super::keychain::find_attributes(CLAUDE_KEYCHAIN_SERVICE, RENEWAL_ACCOUNT_DEADLINE) {
-        Ok(crate::process::CommandOutcome::Exited {
+fn own_account() -> String {
+    claude_code_account(&|name| {
+        if cfg!(test) {
+            None
+        } else {
+            std::env::var_os(name)
+        }
+    })
+}
+
+/// Deadline for an attribute lookup, which prints no secret and raises no prompt.
+#[cfg(target_os = "macos")]
+const ACCOUNT_DEADLINE: Duration = Duration::from_secs(30);
+
+/// The secret of Claude Code's item under `service`. First the item filed under Claude Code's own
+/// account name, which is the one Claude Code reads; failing that, whichever item the service
+/// holds, through the account its attributes name, so an item an older Claude Code filed under
+/// another account still resolves. A refused read of Claude Code's own item is not looked past.
+#[cfg(target_os = "macos")]
+pub(crate) fn keychain_secret(service: &str) -> KeychainProbe {
+    let own = own_account();
+    if let Some(secret) = super::keychain::find_password(service, Some(&own))? {
+        return Ok(Some(secret));
+    }
+    match attributes_account(service, None)? {
+        Some(filed) if filed != own => super::keychain::find_password(service, Some(&filed)),
+        _ => Ok(None),
+    }
+}
+
+/// The account of the item [`keychain_secret`] reads, found the same way but from attributes
+/// alone, so a write replaces that item.
+///
+/// `security add-generic-password -U` matches on service **and** account. Any other account would
+/// file a second item for the same service, and a service-only lookup then returns one of the two
+/// in no defined order — on-n-off and Claude Code reading different logins, with nothing on
+/// screen to say so.
+#[cfg(target_os = "macos")]
+pub(crate) fn keychain_account(service: &str) -> Result<Option<String>, String> {
+    let own = own_account();
+    if attributes_account(service, Some(&own))?.is_some() {
+        return Ok(Some(own));
+    }
+    attributes_account(service, None)
+}
+
+/// The account of the item under `service` (and `account`, when named), read from its attributes.
+#[cfg(target_os = "macos")]
+fn attributes_account(service: &str, account: Option<&str>) -> Result<Option<String>, String> {
+    use crate::process::CommandOutcome;
+    match super::keychain::find_attributes(service, account, ACCOUNT_DEADLINE)? {
+        CommandOutcome::Exited {
             success: true,
             stdout,
             ..
-        }) => parse_keychain_account(&stdout),
-        _ => None,
+        } => parse_keychain_account(&stdout)
+            .map(Some)
+            .ok_or_else(|| "Cannot identify the Claude Code Keychain entry.".to_string()),
+        CommandOutcome::Exited { stderr, .. } if stderr.contains("could not be found") => Ok(None),
+        CommandOutcome::Exited { stderr, .. } => {
+            Err(format!("Keychain lookup failed ({}).", stderr.trim()))
+        }
+        CommandOutcome::TimedOut => Err("Keychain lookup was not answered in time".to_string()),
     }
-    .ok_or_else(|| "could not read the Claude Keychain entry's account".to_string())
+}
+
+/// The account the renewal's write goes to.
+#[cfg(target_os = "macos")]
+fn renewal_account() -> Result<String, String> {
+    keychain_account(CLAUDE_KEYCHAIN_SERVICE)?
+        .ok_or_else(|| "could not read the Claude Keychain entry's account".to_string())
 }
 
 /// Mirrors `keychain_probe`'s stub: these platforms have no such entry, and the file store is the
@@ -223,31 +293,6 @@ fn renewal_account() -> Result<String, String> {
 #[cfg(not(target_os = "macos"))]
 fn renewal_account() -> Result<String, String> {
     Err("this platform has no Claude Code Keychain entry".to_string())
-}
-
-/// Deadline for the account switch's attribute lookup.
-#[cfg(target_os = "macos")]
-const NATIVE_ACCOUNT_DEADLINE: Duration = Duration::from_secs(10);
-
-/// The account of the account switch's Keychain entry: `Ok(None)` when there is no entry, an
-/// error when it could not be inspected or names no account.
-#[cfg(target_os = "macos")]
-pub(crate) fn native_account(service: &str) -> Result<Option<String>, String> {
-    use crate::process::CommandOutcome;
-    match super::keychain::find_attributes(service, NATIVE_ACCOUNT_DEADLINE) {
-        Ok(CommandOutcome::Exited {
-            success: true,
-            stdout,
-            ..
-        }) => parse_keychain_account(&stdout)
-            .map(Some)
-            .ok_or_else(|| "Cannot identify the native Keychain entry.".into()),
-        Ok(CommandOutcome::Exited { stderr, .. }) if stderr.contains("could not be found") => {
-            Ok(None)
-        }
-        Ok(_) => Err("Native Keychain access was denied or unavailable.".into()),
-        Err(_) => Err("Cannot inspect native Keychain entry.".into()),
-    }
 }
 
 /// Pull `acct` out of `security find-generic-password`'s attribute dump. Kept pure so the parsing

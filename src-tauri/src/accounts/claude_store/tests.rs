@@ -147,8 +147,8 @@ fn a_keychain_entry_of_null_leaves_the_read_to_the_file() {
     );
 }
 
-/// A guessed account name would file a second Keychain item under the same service, and the read
-/// matches on service alone, so it could then return either one.
+/// When Claude Code's own account name finds no item, the one the service holds is addressed by
+/// the account its attributes name, never by a guess that would file a second item beside it.
 #[test]
 fn the_keychain_account_is_read_off_the_entry_rather_than_guessed() {
     let dump = "keychain: \"/Users/me/Library/Keychains/login.keychain-db\"\n\
@@ -296,4 +296,62 @@ fn locks_are_released_innermost_first() {
 #[test]
 fn the_keychain_write_deadline_fits_inside_the_lock_it_is_held_under() {
     assert!(crate::accounts::keychain::DEADLINE < LOCK_STALE);
+}
+
+/// The account name Claude Code files its Keychain entry under: `$USER`, else the login name, and
+/// a fixed name when that is not one `security` can take as-is.
+#[test]
+fn claude_codes_own_account_name() {
+    let named = |vars: &[(&str, &str)]| {
+        let vars: Vec<(String, String)> = vars
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect();
+        claude_code_account(&move |name: &str| {
+            vars.iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| std::ffi::OsString::from(value))
+        })
+    };
+    assert_eq!(named(&[("USER", "me.example")]), "me.example");
+    assert_eq!(named(&[("USER", "me"), ("LOGNAME", "other")]), "me");
+    assert_eq!(named(&[("LOGNAME", "me")]), "me");
+    assert_eq!(
+        named(&[("USER", ""), ("LOGNAME", "me")]),
+        "me",
+        "an empty $USER is no name"
+    );
+    for unusable in ["me@example.com", "two words", "quo\"te"] {
+        assert_eq!(
+            named(&[("USER", unusable)]),
+            "claude-code-user",
+            "{unusable}"
+        );
+    }
+    assert_eq!(named(&[]), "claude-code-user");
+}
+
+/// The renewal writes back under the account of the item Claude Code reads: its own, when there
+/// is one, not whichever item `security` returns for the service.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
+    use crate::accounts::keychain::{fake_items, with_test_runner};
+    const TWO_ITEMS: &[(&str, &str)] = &[("claude-code-user", "{}"), ("other", "{}")];
+
+    let (committed, sent) = with_test_runner(fake_items(TWO_ITEMS), || {
+        PreparedWrite::prepare(&ClaudeStore::Keychain)
+            .and_then(|write| write.commit(r#"{"claudeAiOauth":{}}"#))
+    });
+    assert_eq!(committed, Ok(()));
+    let add = sent
+        .iter()
+        .find(|command| command.starts_with("add-generic-password"))
+        .expect("the renewal is written to the Keychain");
+    assert!(
+        add.starts_with(
+            "add-generic-password -U -a \"claude-code-user\" -s \"Claude Code-credentials\""
+        ),
+        "{add}"
+    );
 }

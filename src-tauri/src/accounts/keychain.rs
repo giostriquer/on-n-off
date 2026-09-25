@@ -168,14 +168,20 @@ pub(super) fn find_password(
     }
 }
 
-/// The attributes of the item filed under `service`, as `security` prints them. No `-w`, so this
-/// never prints the secret and raises no prompt.
+/// The attributes of the item filed under `service`, and under `account` when one is named, as
+/// `security` prints them. No `-w`, so this never prints the secret and raises no prompt.
 #[cfg(target_os = "macos")]
 pub(super) fn find_attributes(
     service: &str,
+    account: Option<&str>,
     deadline: std::time::Duration,
 ) -> Result<CommandOutcome, String> {
-    find(&["find-generic-password", "-s", service], deadline)
+    let mut args = vec!["find-generic-password"];
+    if let Some(account) = account {
+        args.extend(["-a", account]);
+    }
+    args.extend(["-s", service]);
+    find(&args, deadline)
 }
 
 /// Map `find-generic-password -w`'s answer to a read: the secret, no item, or why it could not be
@@ -280,6 +286,44 @@ pub(super) fn with_test_runner<T>(
     let result = run();
     TEST_RUNNER.with(|slot| *slot.borrow_mut() = None);
     (result, SENT.with(std::cell::RefCell::take))
+}
+
+/// A runner answering `find-generic-password` as a Keychain holding `items`, each an account and
+/// its secret under one service. A lookup naming an account finds that account's item; one that
+/// names none finds the last item, standing in for `security`'s undefined pick among several.
+/// Every other command succeeds.
+#[cfg(all(target_os = "macos", test))]
+pub(super) fn fake_items(
+    items: &'static [(&'static str, &'static str)],
+) -> impl Fn(&str) -> CommandOutcome + 'static {
+    move |command| {
+        let exited = |success: bool, stdout: String, stderr: &str| CommandOutcome::Exited {
+            success,
+            stdout,
+            stderr: stderr.to_string(),
+        };
+        if !command.starts_with("find-generic-password") {
+            return exited(true, String::new(), "");
+        }
+        let named = command
+            .split_once(" -a ")
+            .and_then(|(_, rest)| rest.split(' ').next());
+        let item = match named {
+            Some(account) => items.iter().find(|(filed, _)| *filed == account),
+            None => items.last(),
+        };
+        match (item, command.contains(" -w ")) {
+            (None, _) => exited(
+                false,
+                String::new(),
+                "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
+            ),
+            (Some((account, _)), false) => {
+                exited(true, format!("    \"acct\"<blob>=\"{account}\"\n"), "")
+            }
+            (Some((_, secret)), true) => exited(true, format!("{secret}\n"), ""),
+        }
+    }
 }
 
 /// A throwaway entry for the rehearsals that really drive `security`, removed on drop by the tool

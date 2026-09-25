@@ -690,19 +690,101 @@ fn a_keychain_entry_the_switch_cannot_identify_leaves_the_read_to_the_file() {
     assert_eq!(found(read), Found::File);
     assert_eq!(
         sent,
-        ["find-generic-password -s Claude Code-credentials"],
-        "an attribute lookup, which never prints the secret"
+        ["find-generic-password -a claude-code-user -w -s Claude Code-credentials"],
+        "a refused read of Claude Code's own item is not looked past"
     );
 
     let (read, _) = with_test_runner(
-        |_| CommandOutcome::Exited {
-            success: true,
+        |command| CommandOutcome::Exited {
+            success: !command.contains(" -w "),
             stdout: "    \"svce\"<blob>=\"Claude Code-credentials\"\n".to_string(),
-            stderr: String::new(),
+            stderr: "The specified item could not be found in the keychain.".to_string(),
         },
         || native.read(),
     );
     assert_eq!(found(read), Found::File);
+}
+
+/// Claude Code's own item, filed under the name it derives (in a test binary, which sees no
+/// `$USER`, the fallback `claude-code-user`), and an older item under another account.
+#[cfg(target_os = "macos")]
+const TWO_ITEMS: &[(&str, &str)] = &[
+    (
+        "claude-code-user",
+        r#"{"claudeAiOauth":{"accessToken":"kc-token"}}"#,
+    ),
+    (
+        "other",
+        r#"{"claudeAiOauth":{"accessToken":"other-token"}}"#,
+    ),
+];
+
+/// Claude Code reads the item filed under its own account name, so the switch does too, rather
+/// than whichever item `security` happens to return for the service.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_switch_reads_the_item_filed_under_claude_codes_own_account() {
+    use crate::accounts::keychain::{fake_items, with_test_runner};
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    native.use_keychain = true;
+
+    let (read, sent) = with_test_runner(fake_items(TWO_ITEMS), || native.read());
+    assert_eq!(found(read), Found::Keychain);
+    assert_eq!(
+        sent,
+        ["find-generic-password -a claude-code-user -w -s Claude Code-credentials"]
+    );
+}
+
+/// An item an older Claude Code filed under another account is still Claude Code's login when it is
+/// the only one: the service-only lookup names its account.
+#[cfg(target_os = "macos")]
+#[test]
+fn an_item_filed_under_another_account_is_still_found() {
+    use crate::accounts::keychain::{fake_items, with_test_runner};
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    native.use_keychain = true;
+
+    let (read, sent) = with_test_runner(
+        fake_items(&[("other", r#"{"claudeAiOauth":{"accessToken":"kc-token"}}"#)]),
+        || native.read(),
+    );
+    assert_eq!(found(read), Found::Keychain);
+    assert_eq!(
+        sent,
+        [
+            "find-generic-password -a claude-code-user -w -s Claude Code-credentials",
+            "find-generic-password -s Claude Code-credentials",
+            "find-generic-password -a other -w -s Claude Code-credentials",
+        ]
+    );
+}
+
+/// `add-generic-password -U` replaces the item matching service and account, so the write names
+/// the account of the item it read; any other would file a second item beside it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_switch_writes_back_under_the_account_of_the_item_it_read() {
+    use crate::accounts::keychain::{fake_items, with_test_runner};
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    native.use_keychain = true;
+
+    let (written, sent) =
+        with_test_runner(fake_items(TWO_ITEMS), || native.write(Some(&incoming())));
+    assert_eq!(written, Ok(()));
+    let add = sent
+        .iter()
+        .find(|command| command.starts_with("add-generic-password"))
+        .expect("the login is written to the Keychain");
+    assert!(
+        add.starts_with(
+            "add-generic-password -U -a \"claude-code-user\" -s \"Claude Code-credentials\""
+        ),
+        "{add}"
+    );
 }
 
 fn incoming() -> Login {

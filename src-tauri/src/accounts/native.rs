@@ -287,15 +287,11 @@ impl NativeStore {
             },
         )
     }
-    /// The Keychain entry's secret, found through the account its attributes name.
+    /// The Keychain entry's secret, found the way Claude Code finds it.
     fn claude_keychain(&self) -> KeychainProbe {
         #[cfg(target_os = "macos")]
         if self.use_keychain {
-            let service = self.claude_service();
-            return match claude_store::native_account(&service)? {
-                Some(account) => super::keychain::find_password(&service, Some(&account)),
-                None => Ok(None),
-            };
+            return claude_store::keychain_secret(&self.claude_service());
         }
         Ok(None)
     }
@@ -306,7 +302,7 @@ impl NativeStore {
             #[cfg(target_os = "macos")]
             ClaudeStore::Keychain => {
                 let service = self.claude_service();
-                let account = claude_store::native_account(&service)?
+                let account = claude_store::keychain_account(&service)?
                     .ok_or("The native Keychain entry disappeared.")?;
                 Ok(Target::Keyring { service, account })
             }
@@ -422,7 +418,7 @@ impl NativeStore {
         #[cfg(target_os = "macos")]
         if self.provider == AgentId::Claude {
             let service = self.claude_service();
-            if let Some(account) = claude_store::native_account(&service)? {
+            if let Some(account) = claude_store::keychain_account(&service)? {
                 Target::Keyring { service, account }.write(None)?;
             }
         }
