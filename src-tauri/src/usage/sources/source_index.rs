@@ -446,7 +446,7 @@ pub(super) fn prepare_sources(
             .get(&entry.path)
             .filter(|cached| cached.provider == entry.provider);
         let records = match cached {
-            Some(cached) if cached.is_parse_of(entry.provider, entry.size, entry.mtime_ms) => {
+            Some(cached) if cached.size == entry.size && cached.mtime_ms == entry.mtime_ms => {
                 Some(Arc::clone(&cached.records))
             }
             _ => {

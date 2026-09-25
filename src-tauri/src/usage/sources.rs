@@ -188,19 +188,30 @@ impl SourceRead {
             .collect()
     }
 
-    /// How many of `provider`'s transcripts were read: those holding records, and those holding
-    /// none.
-    pub fn files_read(&self, provider: UsageProvider) -> (u64, u64) {
-        let (mut scanned, mut skipped) = (0, 0);
+    /// How many of `provider`'s transcripts were read.
+    pub fn files_read(&self, provider: UsageProvider) -> FilesRead {
+        let mut read = FilesRead {
+            scanned: 0,
+            skipped: 0,
+        };
         for file in self.files.iter().filter(|file| file.provider == provider) {
             if file.records.is_empty() {
-                skipped += 1;
+                read.skipped += 1;
             } else {
-                scanned += 1;
+                read.scanned += 1;
             }
         }
-        (scanned, skipped)
+        read
     }
+}
+
+/// The transcripts one provider had read.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FilesRead {
+    /// Holding records.
+    pub scanned: u64,
+    /// Holding none.
+    pub skipped: u64,
 }
 
 /// The transcript sources as a read saw them, kept once the lock is released.

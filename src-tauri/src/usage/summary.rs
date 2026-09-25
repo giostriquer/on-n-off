@@ -295,12 +295,12 @@ fn read_summary_from(
             sources.push(missing_source(source.provider, source.dir));
             continue;
         }
-        let (scanned_files, skipped_files) = source_read.files_read(source.provider);
+        let files = source_read.files_read(source.provider);
         sources.push(UsageSourceDto {
             provider: provider_agent(source.provider),
             status: UsageSourceStatus::Ok,
-            scanned_files,
-            skipped_files,
+            scanned_files: files.scanned,
+            skipped_files: files.skipped,
             malformed_records: 0,
             distinct_sessions: session_ids.get(&source.provider).map_or(0, HashSet::len) as u64,
             message: None,

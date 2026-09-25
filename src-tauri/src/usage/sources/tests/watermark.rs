@@ -73,7 +73,13 @@ fn a_transcript_whose_newest_record_is_folded_is_not_read_however_recently_writt
 
     assert_eq!(transcript_parse_count(), 0);
     assert!(read.records().is_empty());
-    assert_eq!(read.files_read(UsageProvider::Claude), (0, 0));
+    assert_eq!(
+        read.files_read(UsageProvider::Claude),
+        FilesRead {
+            scanned: 0,
+            skipped: 0
+        }
+    );
     assert!(read.complete);
     let _ = std::fs::remove_dir_all(home);
 }
