@@ -328,6 +328,6 @@ the code today; a change that moves one updates its row.
 | Account details | `plan` and `subscription_status` on `ProviderLimitsDto` |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); merged into a fresh read by `limits/mod.rs` and `limits/observations.rs` |
 | Native store | `NativeStore` (`accounts/native.rs`); Claude's login is also read by `claude_login_document` (`limits/credentials.rs`) |
-| Transcript source | `SourceSnapshot` and its entries (`usage/source_index.rs`), walked by `inventory_sources` |
+| Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |
 | Watermark | `Watermark` (`usage/history.rs`) |
 | Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs` |
