@@ -119,7 +119,7 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
         }
     }
     // Dropped here, so no consumer ever sees them: not the cards, the monitor or the notches.
-    windows.retain(|window| !is_hidden(window));
+    drop_hidden(&mut windows);
     Reading {
         plan: main.plan_type.clone(),
         subscription_status: None,
@@ -139,7 +139,12 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
     }
 }
 
-/// Whether `window` is one no surface shows: a Codex internal bucket, or the reserve or Spark.
+/// `windows` without those no surface shows: Codex's internal buckets, the reserve and Spark. The
+/// reader applies it to every read, and the snapshot store to Codex files written before it did.
+pub(super) fn drop_hidden(windows: &mut Vec<LimitWindowDto>) {
+    windows.retain(|window| !is_hidden(window));
+}
+
 fn is_hidden(window: &LimitWindowDto) -> bool {
     let name = window
         .label
