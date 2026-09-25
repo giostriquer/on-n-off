@@ -31,6 +31,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 
+use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
 use crate::dto::{
     AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
@@ -38,7 +39,7 @@ use crate::http::{get_json, HttpError};
 use crate::paths;
 use credentials::{
     read_claude_identity, ClaudeCredential, ClaudeIdentity, ClaudeLoginMemo, CredentialLookup,
-    KeychainProbe, LoginSource, CLAUDE_LOGIN,
+    LoginSource, CLAUDE_LOGIN,
 };
 #[cfg(test)]
 use pipeline::resolve;
@@ -94,7 +95,7 @@ struct ClaudeEndpoints<'a> {
 
 /// Everything `read_limits` needs that tests replace: where the homes/snapshots live, the Claude
 /// Keychain probe and memo, and the Claude endpoints.
-struct Sources<'a, P: Fn() -> KeychainProbe> {
+struct Sources<'a, P: Fn(&StorageDir) -> KeychainProbe> {
     home: &'a Path,
     memo: &'a ClaudeLoginMemo,
     keychain: P,
@@ -126,7 +127,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
         Sources {
             home: &home,
             memo: &CLAUDE_LOGIN,
-            keychain: credentials::keychain_claude_json,
+            keychain: claude_store::keychain_probe,
             claude: ClaudeEndpoints {
                 token: claude_renew::TOKEN_URL,
                 profile: CLAUDE_PROFILE_URL,
@@ -162,7 +163,7 @@ pub fn forget_snapshot(
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
-fn read_limits_in<P: Fn() -> KeychainProbe>(
+fn read_limits_in<P: Fn(&StorageDir) -> KeychainProbe>(
     agent: AgentId,
     force: bool,
     sources: Sources<'_, P>,
@@ -246,7 +247,7 @@ fn aggregate_accounts(
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
 /// login may be reused; otherwise the Keychain (or the credentials file) is read. A rejected token
 /// evicts the memo so the next read goes back to the Keychain.
-fn claude_current<P: Fn() -> KeychainProbe>(
+fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
     force: bool,
     sources: Sources<'_, P>,
 ) -> ProviderLimitsDto {
@@ -258,7 +259,21 @@ fn claude_current<P: Fn() -> KeychainProbe>(
         now_ms,
         ..
     } = sources;
-    let selected_identity = read_claude_identity(home);
+    // Where Claude Code keeps its account and its login, under whatever `CLAUDE_CONFIG_DIR` and
+    // `CLAUDE_SECURESTORAGE_CONFIG_DIR` say: resolved once, for both reads below.
+    let dirs = match claude_store::native_dirs(home) {
+        Ok(dirs) => dirs,
+        Err(why) => {
+            let message = format!("Could not read the stored login: {why}");
+            return finish(
+                AgentId::Claude,
+                LimitsStatus::Failed,
+                Some(message),
+                Parsed::default(),
+            );
+        }
+    };
+    let selected_identity = read_claude_identity(&dirs.config_file(home));
     let account = selected_identity
         .as_ref()
         .map(|identity| identity.account.clone())
@@ -267,7 +282,8 @@ fn claude_current<P: Fn() -> KeychainProbe>(
     // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
     // broken login. Keeping that inside the read means the memo stores the renewed login like any
     // other, and the rejected-token retry below gets the renewal too.
-    let read_credential = || claude_renew::current_login(home, &keychain, now_ms, claude.token);
+    let storage = dirs.storage();
+    let read_credential = || claude_renew::current_login(&storage, &keychain, now_ms, claude.token);
     let attempt = |lookup| claude_limits(lookup, &selected_identity, claude.profile, claude.usage);
     let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);
     let mut loaded = attempt(lookup);

@@ -259,7 +259,7 @@ impl Rig {
             Sources {
                 home: &self.home,
                 memo: &self.memo,
-                keychain: || {
+                keychain: |_| {
                     self.probes.set(self.probes.get() + 1);
                     self.keychain.clone()
                 },
@@ -304,7 +304,7 @@ fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
     write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
     let profile_head = profile_request.join().unwrap();
     let usage_head = usage_request.join().unwrap();
@@ -344,7 +344,7 @@ fn claude_rejects_usage_when_the_authenticated_profile_is_a_different_account() 
         "200 OK",
         r#"{"account":{"uuid":"uuid-other","email":"other@example.com"},"organization":{"uuid":"org-other"}}"#,
     );
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
     let dto = claude_limits(
         lookup,
         &Some(ClaudeIdentity {
@@ -378,7 +378,7 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
         "200 OK",
         r#"{"account":{"uuid":"uuid-1","email":"me@example.com"},"organization":{"uuid":"org-other"}}"#,
     );
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
     let dto = claude_limits(
         lookup,
         &Some(ClaudeIdentity {
@@ -535,7 +535,7 @@ fn an_expired_access_token_with_a_live_refresh_token_asks_only_for_a_cli_run() {
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: refused_endpoints(&refused),
             now_ms: 1787022473402 + 1,
         },
@@ -568,7 +568,7 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: refused_endpoints(&refused),
             now_ms: 1787022473402 + 1,
         },
@@ -581,11 +581,26 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
         .contains("sign in again"));
 }
 
-/// Live probe against the real home: Keychain read + one GET per provider (read-only).
+/// Live probe against the real home, read-only: one read per provider, printed.
+///
+/// Claude reads only the real home's `~/.claude/.credentials.json`: a test build's sealed
+/// environment (`paths::process_env`) treats every home as disposable, so `CLAUDE_CONFIG_DIR`,
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR` and the Claude Code Keychain entry are out of its reach, and
+/// a login kept in the Keychain reads as signed out here. Codex runs its own `codex app-server`,
+/// and its native store reads a keyring login through the real `security` when its config selects
+/// one, which is what `with_real_keychain` allows.
+///
 /// `cargo test --manifest-path src-tauri/Cargo.toml probe_real_home_limits -- --ignored --nocapture`
 #[test]
 #[ignore = "real-home network probe; not part of CI"]
 fn probe_real_home_limits() {
+    #[cfg(target_os = "macos")]
+    crate::accounts::with_real_keychain(print_real_home_limits);
+    #[cfg(not(target_os = "macos"))]
+    print_real_home_limits();
+}
+
+fn print_real_home_limits() {
     for provider in [AgentId::Claude, AgentId::Codex] {
         for dto in read_limits(provider, false) {
             println!(

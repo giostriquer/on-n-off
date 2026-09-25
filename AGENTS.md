@@ -182,7 +182,7 @@ user data.
   directory a plain `mod tests;` resolves against, so it pins
   `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
-  `http::{serve_once, serve_once_capturing, refused_url, head_header}`, `plugin_meta::with_fetch_text`,
+  `http::{serve_once, serve_once_capturing, serve_once_observing, refused_url, head_header}`, `plugin_meta::with_fetch_text`,
   `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::sources` counters,
   `github/fixtures.rs`. Single-consumer helpers stay in that module's
   own tests file; adapter test constructors stay in the adapter files, because `item_install`

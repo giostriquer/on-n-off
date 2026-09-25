@@ -1,8 +1,12 @@
 //! Narrow native-store access. No whole-home restores and no provider endpoint/config rewriting.
 use super::{
+    claude_store::{
+        self, BeginError, ClaudeLocks, KeychainProbe, LockError, LockScope, SecureStorage,
+        StorageDir, StoreError, Stored,
+    },
     model::{self, Identity},
     store::Login,
-    transaction::{Native, NativeGuard},
+    transaction::{Native, NativeGuard, ReadBack},
     vault,
 };
 use crate::{
@@ -18,12 +22,32 @@ use std::{
     time::Duration,
 };
 
+/// Claude Code holds one of the locks an account change needs.
+const BUSY: &str = "Claude is updating its login or configuration. Retry after it finishes.";
+
+/// A lock an account change relied on was taken away while it was held.
+const LOST: &str = "Native credential coordination was lost. Protected recovery has been retained.";
+
+/// How the account switch words a store it could not read.
+fn store_error(error: StoreError) -> String {
+    match error {
+        StoreError::Keychain(why) => why,
+        StoreError::FileUnreadable(_) => "Cannot read native credentials.".into(),
+        StoreError::FileMalformed(_) => {
+            "The native credential document is malformed. It has not been changed.".into()
+        }
+    }
+}
+
 pub struct NativeStore {
     pub provider: AgentId,
     pub config_home: PathBuf,
     pub config_file: PathBuf,
     pub custom: bool,
     pub use_keychain: bool,
+    /// Where `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved Claude's login and locks; `None` keeps them
+    /// in the config home, and keeps the variable away from a `claude` this store starts.
+    pub secure_storage: Option<SecureStorage>,
 }
 enum Target {
     File(PathBuf),
@@ -40,7 +64,7 @@ impl Target {
             Self::Keyring { service, account } => {
                 #[cfg(target_os = "macos")]
                 {
-                    match crate::limits::credentials::keychain_json(service, Some(account))? {
+                    match super::keychain::find_password(service, Some(account))? {
                         Some(value) => value.into_bytes(),
                         None => return Ok(None),
                     }
@@ -113,61 +137,51 @@ impl Target {
         }
     }
 }
-/// The environment [`NativeStore::resolve`] reads: the process's own. A test binary sees only a
-/// disposable `ON_N_OFF_HOME` instead, so no test can follow a developer's `CLAUDE_CONFIG_DIR` or
-/// `CODEX_HOME` to a real home, or choose the login Keychain; a test that needs another
-/// environment hands it to `resolve_from`.
-#[cfg(not(test))]
-fn process_env(name: &str) -> Option<OsString> {
-    std::env::var_os(name)
-}
-#[cfg(test)]
-fn process_env(name: &str) -> Option<OsString> {
-    (name == "ON_N_OFF_HOME").then(|| OsString::from("disposable"))
-}
-
 impl NativeStore {
     pub fn resolve(provider: AgentId, home: &Path) -> Result<Self, String> {
-        Self::resolve_from(provider, home, &process_env)
+        Self::resolve_from(provider, home, &crate::paths::process_env)
     }
     fn resolve_from(
         provider: AgentId,
         home: &Path,
         lookup: &dyn Fn(&str) -> Option<OsString>,
     ) -> Result<Self, String> {
-        let (variable, folder) = match provider {
-            AgentId::Codex => ("CODEX_HOME", ".codex"),
-            AgentId::Claude => ("CLAUDE_CONFIG_DIR", ".claude"),
-            _ => return Err("Profiles are unsupported for this provider.".into()),
-        };
         // ON_N_OFF_HOME always isolates tests and development from real native homes.
         let disposable = lookup("ON_N_OFF_HOME").is_some();
-        let override_home = if disposable { None } else { lookup(variable) };
-        let custom = override_home.is_some();
-        let config_home = override_home
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(folder));
-        if !config_home.is_absolute() {
-            return Err("The provider home must be an absolute path.".into());
-        }
-        let config_file = if provider == AgentId::Claude {
-            let legacy = config_home.join(".config.json");
-            if legacy.exists() {
-                legacy
-            } else if custom {
-                config_home.join(".claude.json")
-            } else {
-                home.join(".claude.json")
+        let mut secure_storage = None;
+        let mut claude_config_file = None;
+        let (config_home, custom) = match provider {
+            AgentId::Codex => {
+                let override_home = if disposable {
+                    None
+                } else {
+                    lookup("CODEX_HOME")
+                };
+                let custom = override_home.is_some();
+                let config_home = override_home
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home.join(".codex"));
+                if !config_home.is_absolute() {
+                    return Err("The provider home must be an absolute path.".into());
+                }
+                (config_home, custom)
             }
-        } else {
-            config_home.join("config.toml")
+            AgentId::Claude => {
+                let dirs = claude_store::dirs(home, lookup)?;
+                claude_config_file = Some(dirs.config_file(home));
+                secure_storage = dirs.secure_storage;
+                (dirs.config, dirs.custom)
+            }
+            _ => return Err("Profiles are unsupported for this provider.".into()),
         };
+        let config_file = claude_config_file.unwrap_or_else(|| config_home.join("config.toml"));
         Ok(Self {
             provider,
             config_home,
             config_file,
             custom,
             use_keychain: !disposable,
+            secure_storage,
         })
     }
     pub fn isolated(provider: AgentId, home: &Path) -> Result<Self, String> {
@@ -179,6 +193,7 @@ impl NativeStore {
         });
         store.custom = true;
         store.use_keychain = true;
+        store.secure_storage = None;
         store.config_file = store.config_home.join(if provider == AgentId::Codex {
             "config.toml"
         } else {
@@ -188,7 +203,9 @@ impl NativeStore {
         Ok(store)
     }
     pub fn preflight(&self) -> Result<(), String> {
-        if self.custom {
+        // A store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved is as custom as a home the provider's
+        // own variable chose: account changes defer to the official client for both.
+        if self.custom || self.storage_moved() {
             return Err("Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.".into());
         }
 
@@ -246,18 +263,18 @@ impl NativeStore {
         }
         Ok(())
     }
-    fn target(&self) -> Result<Target, String> {
-        if self.provider == AgentId::Codex {
-            let config = read_toml(&self.config_file)?;
-            if config.get("profile").is_some() {
-                return Err("Codex configuration profiles must use the official account controls until their effective credential backend can be verified.".into());
-            }
-            let mode = config
-                .get("cli_auth_credentials_store")
-                .and_then(toml::Value::as_str)
-                .unwrap_or("file");
-            let file = Target::File(self.config_home.join("auth.json"));
-            match mode {
+    /// Codex's store, from the backend its config selects. Claude's is `claude_store`'s question.
+    fn codex_target(&self) -> Result<Target, String> {
+        let config = read_toml(&self.config_file)?;
+        if config.get("profile").is_some() {
+            return Err("Codex configuration profiles must use the official account controls until their effective credential backend can be verified.".into());
+        }
+        let mode = config
+            .get("cli_auth_credentials_store")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("file");
+        let file = Target::File(self.config_home.join("auth.json"));
+        match mode {
     "file"=>Ok(file),
     "keyring"|"auto"=>{
      let canonical=fs::canonicalize(&self.config_home).map_err(|_|"Cannot resolve native Codex home.")?;
@@ -266,36 +283,32 @@ impl NativeStore {
     },
     _=>Err("This Codex credential backend cannot be activated by on-n-off. Use official sign-in.".into())
    }
-        } else {
-            if self.use_keychain {
-                #[cfg(target_os = "macos")]
-                {
-                    // A disposable ON_N_OFF_HOME uses file fixtures unless it is an explicit isolated login.
-                    let service = self.claude_service();
-                    if let Some(account) = keychain_account(&service)? {
-                        return Ok(Target::Keyring { service, account });
-                    }
-                }
-            }
-            Ok(Target::File(self.config_home.join(".credentials.json")))
+    }
+    /// Claude Code's storage dir for this store.
+    pub(crate) fn claude_dir(&self) -> StorageDir {
+        StorageDir::of(&self.config_home, self.custom, self.secure_storage.as_ref())
+    }
+    /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` keeps Claude's login somewhere other than the config home
+    /// alone would: another dir, or the same one under a scoped Keychain entry.
+    fn storage_moved(&self) -> bool {
+        self.claude_dir() != StorageDir::new(self.config_home.clone(), self.custom)
+    }
+    /// Claude's login, from the store Claude Code would read it from. A disposable ON_N_OFF_HOME
+    /// uses file fixtures unless it is an explicit isolated login.
+    fn claude_read(&self) -> Result<Stored, String> {
+        claude_store::read(&self.claude_dir(), self.claude_keychain()).map_err(store_error)
+    }
+    /// The Keychain entry's secret, found the way Claude Code finds it.
+    fn claude_keychain(&self) -> KeychainProbe {
+        #[cfg(target_os = "macos")]
+        if self.use_keychain {
+            return claude_store::keychain_secret(&self.claude_service());
         }
+        Ok(None)
     }
     #[cfg(target_os = "macos")]
     fn claude_service(&self) -> String {
-        if self.custom {
-            format!(
-                "Claude Code-credentials-{}",
-                &crate::sha::sha256_hex(
-                    unicode_normalization::UnicodeNormalization::nfc(
-                        self.config_home.to_string_lossy().as_ref()
-                    )
-                    .collect::<String>()
-                    .as_bytes()
-                )[..8]
-            )
-        } else {
-            "Claude Code-credentials".into()
-        }
+        self.claude_dir().service()
     }
     pub fn command(&self) -> Command {
         let name = if self.provider == AgentId::Codex {
@@ -324,24 +337,22 @@ impl NativeStore {
         } else {
             command.env_remove("CLAUDE_CONFIG_DIR");
         }
+        if self.provider == AgentId::Claude {
+            // The child works in the store this one resolved, never one an inherited variable
+            // chose: an isolated sign-in would otherwise land in the user's own store.
+            match &self.secure_storage {
+                Some(secure) => command.env(claude_store::SECURE_STORAGE_VAR, &secure.var),
+                None => command.env_remove(claude_store::SECURE_STORAGE_VAR),
+            };
+        }
         command.current_dir(&self.config_home);
         command
     }
     fn verify_claude(&self, profile_url: &str) -> Result<(), String> {
         if !self.custom {
-            let home = self
-                .config_home
-                .parent()
-                .ok_or("Cannot resolve native account home.")?;
-            let probe = || {
-                if self.use_keychain {
-                    crate::limits::credentials::keychain_claude_json()
-                } else {
-                    Ok(None)
-                }
-            };
+            let probe = |_: &StorageDir| self.claude_keychain();
             let lookup = super::claude_renew::current_login(
-                home,
+                &self.claude_dir(),
                 &probe,
                 chrono::Utc::now().timestamp_millis(),
                 super::claude_renew::TOKEN_URL,
@@ -397,8 +408,8 @@ impl NativeStore {
         #[cfg(target_os = "macos")]
         if self.provider == AgentId::Claude {
             let service = self.claude_service();
-            if let Some(account) = keychain_account(&service)? {
-                Target::Keyring { service, account }.write(None)?;
+            if let Some(account) = claude_store::keychain_account(&service)? {
+                super::keychain::delete(&service, &account)?;
             }
         }
         Ok(())
@@ -406,10 +417,26 @@ impl NativeStore {
 }
 impl Native for NativeStore {
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
-        NativeLocks::acquire(self).map(|guard| Box::new(guard) as Box<dyn NativeGuard>)
+        if self.provider != AgentId::Claude {
+            return Ok(Box::new(()));
+        }
+        ClaudeLocks::acquire(
+            &self.claude_dir(),
+            LockScope::RefreshAndConfig(&self.config_file),
+        )
+        .map(|guard| Box::new(guard) as Box<dyn NativeGuard>)
+        .map_err(|error| match error {
+            LockError::Busy => BUSY.into(),
+            LockError::Unavailable(why) => format!("Cannot take Claude Code's locks: {why}"),
+        })
     }
     fn read(&self) -> Result<Option<Login>, String> {
-        let Some(auth) = self.target()?.read()? else {
+        let auth = if self.provider == AgentId::Claude {
+            self.claude_read()?.document
+        } else {
+            self.codex_target()?.read()?
+        };
+        let Some(auth) = auth else {
             return Ok(None);
         };
         let account = if self.provider == AgentId::Claude {
@@ -420,7 +447,11 @@ impl Native for NativeStore {
         } else {
             Value::Null
         };
-        if self.provider == AgentId::Claude && auth.get("claudeAiOauth").is_none() {
+        // Claude Code signs out by emptying `claudeAiOauth`, so a login needs an access token, by
+        // the same rule the Limits read applies.
+        if self.provider == AgentId::Claude
+            && crate::limits::credentials::parse_claude_credential(&auth).is_none()
+        {
             return Ok(None);
         }
         let auth = if self.provider == AgentId::Claude {
@@ -434,40 +465,17 @@ impl Native for NativeStore {
         model::identity(self.provider, &login.auth, &login.account)
     }
     fn write(&self, login: Option<&Login>) -> Result<(), String> {
-        let _locks = self.lock()?;
-        self.write_locked(login, _locks.as_ref())
+        self.write_locked(login, self.lock()?).map(drop)
     }
-    fn write_locked(&self, login: Option<&Login>, locks: &dyn NativeGuard) -> Result<(), String> {
-        locks.ensure()?;
-        let target = self.target()?;
-        if self.provider == AgentId::Codex {
-            return target.write(login.map(|l| &l.auth));
-        }
-        let mut auth = target.read()?.unwrap_or_else(|| json!({}));
-        let object = auth
-            .as_object_mut()
-            .ok_or("Malformed Claude credentials.")?;
-        if let Some(login) = login {
-            object.insert(
-                "claudeAiOauth".into(),
-                login
-                    .auth
-                    .get("claudeAiOauth")
-                    .cloned()
-                    .ok_or("Missing Claude login.")?,
-            );
-        } else {
-            object.remove("claudeAiOauth");
-        }
-        // The caller's encrypted journal already holds the outgoing OAuth identity and credential.
-        // ConfigIo owns atomic config publication/validation/rollback; ordinary backups get no tokens.
-        locks.ensure()?;
-        crate::config_io::ConfigIo::patch_account_identity(
-            &self.config_file,
-            login.map(|l| &l.account),
-        )?;
-        locks.ensure()?;
-        target.write(Some(&auth))
+    fn write_locked(
+        &self,
+        login: Option<&Login>,
+        locks: Box<dyn NativeGuard>,
+    ) -> Result<ReadBack, String> {
+        self.publish(login, locks.as_ref())?;
+        let back = self.read();
+        drop(locks);
+        Ok(back)
     }
     fn verify(&self) -> Result<(), String> {
         if self.provider == AgentId::Claude {
@@ -497,6 +505,59 @@ impl Native for NativeStore {
     }
 }
 impl NativeStore {
+    /// The write itself, under `locks`: Codex's store as its config selects, or Claude's merged
+    /// into the store Claude Code reads, beside the identity `ConfigIo` patches.
+    fn publish(&self, login: Option<&Login>, locks: &dyn NativeGuard) -> Result<(), String> {
+        locks.ensure()?;
+        if self.provider == AgentId::Codex {
+            return self.codex_target()?.write(login.map(|l| &l.auth));
+        }
+        // The read, the config patch and the credential write are one change under Claude Code's
+        // storage-write lock, going to the store Claude Code's next read uses.
+        let held = || locks.ensure().is_err();
+        let keychain = |_: &StorageDir| self.claude_keychain();
+        let begin_error = |error| match error {
+            BeginError::Busy => BUSY.to_string(),
+            BeginError::Lock(why) => format!("Cannot take Claude Code's storage lock: {why}"),
+            BeginError::Store(error) => store_error(error),
+            BeginError::Unavailable(why) => why,
+        };
+        let (document, pending) =
+            claude_store::begin(&self.claude_dir(), &keychain, &held).map_err(begin_error)?;
+        let write = pending.prove().map_err(begin_error)?;
+        let mut auth = document.unwrap_or_else(|| json!({}));
+        let object = auth
+            .as_object_mut()
+            .ok_or("Malformed Claude credentials.")?;
+        if let Some(login) = login {
+            object.insert(
+                "claudeAiOauth".into(),
+                login
+                    .auth
+                    .get("claudeAiOauth")
+                    .cloned()
+                    .ok_or("Missing Claude login.")?,
+            );
+        } else {
+            object.remove("claudeAiOauth");
+        }
+        // The caller's encrypted journal already holds the outgoing OAuth identity and credential.
+        // ConfigIo owns atomic config publication/validation/rollback; ordinary backups get no tokens.
+        let ensure = || {
+            if write.lost() {
+                Err(LOST.to_string())
+            } else {
+                Ok(())
+            }
+        };
+        ensure()?;
+        crate::config_io::ConfigIo::patch_account_identity(
+            &self.config_file,
+            login.map(|l| &l.account),
+        )?;
+        ensure()?;
+        write.commit(&auth)
+    }
     fn verify_codex(&self, force: bool) -> Result<(), String> {
         let entries = crate::limits::read_limits(self.provider, force);
         if entries
@@ -546,128 +607,12 @@ pub fn run(command: &mut Command, timeout: Duration) -> Result<String, String> {
         _ => Err("The official CLI did not complete the account operation.".into()),
     }
 }
-#[cfg(target_os = "macos")]
-fn keychain_account(service: &str) -> Result<Option<String>, String> {
-    let child = Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", service])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| "Cannot inspect native Keychain entry.")?;
-    match wait_with_deadline(child, Duration::from_secs(10)) {
-        Ok(CommandOutcome::Exited {
-            success: true,
-            stdout,
-            ..
-        }) => stdout
-            .lines()
-            .find_map(|line| {
-                line.trim()
-                    .strip_prefix("\"acct\"<blob>=\"")
-                    .and_then(|s| s.strip_suffix('"'))
-                    .map(str::to_owned)
-            })
-            .map(Some)
-            .ok_or_else(|| "Cannot identify the native Keychain entry.".into()),
-        Ok(CommandOutcome::Exited { stderr, .. }) if stderr.contains("could not be found") => {
-            Ok(None)
-        }
-        _ => Err("Native Keychain access was denied or unavailable.".into()),
-    }
-}
-struct NativeLocks {
-    paths: Vec<PathBuf>,
-    stop: Option<std::sync::mpsc::Sender<()>>,
-    worker: Option<std::thread::JoinHandle<()>>,
-    lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-impl NativeLocks {
-    fn acquire(store: &NativeStore) -> Result<Self, String> {
-        use std::sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        };
-        let mut lock = Self {
-            paths: Vec::new(),
-            stop: None,
-            worker: None,
-            lost: Arc::new(AtomicBool::new(false)),
-        };
-        if store.provider != AgentId::Claude {
-            return Ok(lock);
-        }
-        let mut legacy = store.config_home.as_os_str().to_owned();
-        legacy.push(".lock");
-        let mut config = store.config_file.as_os_str().to_owned();
-        config.push(".lock");
-        for (path, stale_seconds) in [
-            (store.config_home.join(".oauth_refresh.lock"), 60),
-            (PathBuf::from(legacy), 60),
-            (PathBuf::from(config), 10),
-        ] {
-            if fs::create_dir(&path).is_err() {
-                let stale = fs::symlink_metadata(&path)
-                    .ok()
-                    .filter(|m| m.is_dir() && !m.file_type().is_symlink())
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|at| at.elapsed().ok())
-                    .is_some_and(|age| age > Duration::from_secs(stale_seconds));
-                if !stale {
-                    return Err(
-                        "Claude is updating its login or configuration. Retry after it finishes."
-                            .into(),
-                    );
-                }
-                fs::remove_dir(&path)
-                    .and_then(|()| fs::create_dir(&path))
-                    .map_err(|_| {
-                        "Claude is updating its login or configuration. Retry after it finishes."
-                    })?;
-            }
-            lock.paths.push(path);
-        }
-        let (stop, receive) = std::sync::mpsc::channel();
-        let paths = lock.paths.clone();
-        let lost = lock.lost.clone();
-        lock.stop = Some(stop);
-        lock.worker = Some(std::thread::spawn(move || {
-            while receive.recv_timeout(Duration::from_secs(2))
-                == Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-            {
-                for path in &paths {
-                    if filetime::set_file_mtime(path, filetime::FileTime::now()).is_err() {
-                        lost.store(true, Ordering::Release);
-                        return;
-                    }
-                }
-            }
-        }));
-        Ok(lock)
-    }
-}
-impl NativeGuard for NativeLocks {
+impl NativeGuard for ClaudeLocks {
     fn ensure(&self) -> Result<(), String> {
-        if self.lost.load(std::sync::atomic::Ordering::Acquire) {
-            Err(
-                "Native credential coordination was lost. Protected recovery has been retained."
-                    .into(),
-            )
+        if self.lost() {
+            Err(LOST.into())
         } else {
             Ok(())
-        }
-    }
-}
-impl Drop for NativeLocks {
-    fn drop(&mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-        for path in self.paths.iter().rev() {
-            let _ = fs::remove_dir(path);
         }
     }
 }
@@ -689,6 +634,7 @@ fn codex_login(config_home: &Path) -> Result<Option<Login>, String> {
         config_file: config_home.join("config.toml"),
         custom: true,
         use_keychain: true,
+        secure_storage: None,
     }
     .read()
 }

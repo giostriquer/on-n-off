@@ -72,7 +72,7 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: refused_endpoints(&refused),
             now_ms: 1787022473402 + 1,
         },
