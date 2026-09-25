@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use serde_json::Value;
 
 use super::json::optional_string;
-use crate::accounts::claude_store::{self, ConfigDir, KeychainProbe};
+use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
 use crate::dto::LimitsAccountDto;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,11 +96,11 @@ pub enum CredentialLookup<T> {
 /// Callers outside this module want [`super::claude_renew::current_login`], which is this plus the
 /// renewal; reaching for the non-renewing one is how the expired-login message came back.
 pub(crate) fn read_claude_credential(
-    home: &Path,
+    dir: &StorageDir,
     keychain: KeychainProbe,
     now_ms: i64,
 ) -> CredentialLookup<ClaudeCredential> {
-    let document = match claude_store::read(&ConfigDir::default_in(home), keychain) {
+    let document = match claude_store::read(dir, keychain) {
         Ok(claude_store::Stored {
             document: Some(document),
             ..

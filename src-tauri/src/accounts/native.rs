@@ -1,7 +1,7 @@
 //! Narrow native-store access. No whole-home restores and no provider endpoint/config rewriting.
 use super::{
     claude_store::{
-        self, ClaudeLocks, ClaudeStore, ConfigDir, KeychainProbe, LockScope, StoreError, Stored,
+        self, ClaudeLocks, ClaudeStore, KeychainProbe, LockScope, StorageDir, StoreError, Stored,
     },
     model::{self, Identity},
     store::Login,
@@ -141,21 +141,31 @@ impl NativeStore {
         home: &Path,
         lookup: &dyn Fn(&str) -> Option<OsString>,
     ) -> Result<Self, String> {
-        let (variable, folder) = match provider {
-            AgentId::Codex => ("CODEX_HOME", ".codex"),
-            AgentId::Claude => ("CLAUDE_CONFIG_DIR", ".claude"),
-            _ => return Err("Profiles are unsupported for this provider.".into()),
-        };
         // ON_N_OFF_HOME always isolates tests and development from real native homes.
         let disposable = lookup("ON_N_OFF_HOME").is_some();
-        let override_home = if disposable { None } else { lookup(variable) };
-        let custom = override_home.is_some();
-        let config_home = override_home
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(folder));
-        if !config_home.is_absolute() {
-            return Err("The provider home must be an absolute path.".into());
-        }
+        let (config_home, custom) = match provider {
+            AgentId::Codex => {
+                let override_home = if disposable {
+                    None
+                } else {
+                    lookup("CODEX_HOME")
+                };
+                let custom = override_home.is_some();
+                let config_home = override_home
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home.join(".codex"));
+                if !config_home.is_absolute() {
+                    return Err("The provider home must be an absolute path.".into());
+                }
+                (config_home, custom)
+            }
+            // Where Claude Code keeps its configuration is `claude_store`'s question.
+            AgentId::Claude => {
+                let dirs = claude_store::dirs(home, lookup)?;
+                (dirs.config, dirs.custom)
+            }
+            _ => return Err("Profiles are unsupported for this provider.".into()),
+        };
         let config_file = if provider == AgentId::Claude {
             let legacy = config_home.join(".config.json");
             if legacy.exists() {
@@ -274,8 +284,8 @@ impl NativeStore {
    }
     }
     /// Claude Code's config dir for this store.
-    fn claude_dir(&self) -> ConfigDir {
-        ConfigDir::new(self.config_home.clone())
+    pub(crate) fn claude_dir(&self) -> StorageDir {
+        StorageDir::new(self.config_home.clone(), self.custom)
     }
     /// Claude's login, from the store Claude Code would read it from. A disposable ON_N_OFF_HOME
     /// uses file fixtures unless it is an explicit isolated login.
@@ -315,11 +325,7 @@ impl NativeStore {
     }
     #[cfg(target_os = "macos")]
     fn claude_service(&self) -> String {
-        if self.custom {
-            self.claude_dir().scoped_service()
-        } else {
-            claude_store::CLAUDE_KEYCHAIN_SERVICE.into()
-        }
+        self.claude_dir().service()
     }
     pub fn command(&self) -> Command {
         let name = if self.provider == AgentId::Codex {
@@ -353,19 +359,15 @@ impl NativeStore {
     }
     fn verify_claude(&self, profile_url: &str) -> Result<(), String> {
         if !self.custom {
-            let home = self
-                .config_home
-                .parent()
-                .ok_or("Cannot resolve native account home.")?;
-            let probe = || {
+            let probe = |dir: &StorageDir| {
                 if self.use_keychain {
-                    claude_store::keychain_probe()
+                    claude_store::keychain_probe(dir)
                 } else {
                     Ok(None)
                 }
             };
             let lookup = super::claude_renew::current_login(
-                home,
+                &self.claude_dir(),
                 &probe,
                 chrono::Utc::now().timestamp_millis(),
                 super::claude_renew::TOKEN_URL,

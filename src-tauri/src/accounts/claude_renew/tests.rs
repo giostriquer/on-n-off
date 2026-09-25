@@ -3,7 +3,7 @@ use crate::http::{refused_url, serve_once_capturing};
 use crate::paths::scratch_dir;
 use serde_json::json;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 const NOW_MS: i64 = 1_787_000_000_000;
@@ -44,7 +44,12 @@ fn home_with(prefix: &str, document: &Value) -> PathBuf {
 }
 
 fn login(home: &Path, token_url: &str) -> CredentialLookup<ClaudeCredential> {
-    current_login(home, &|| Ok(None), NOW_MS, token_url)
+    current_login(
+        &StorageDir::default_in(home),
+        &|_: &StorageDir| Ok(None),
+        NOW_MS,
+        token_url,
+    )
 }
 
 fn stored_token(home: &Path) -> String {
@@ -171,8 +176,8 @@ fn a_login_another_process_renewed_while_we_waited_is_used_as_it_stands() {
 
     // A refused endpoint: reaching the network at all would be the bug.
     let credential = renew(
-        &home,
-        &|| Ok(None),
+        &StorageDir::default_in(&home),
+        &|_: &StorageDir| Ok(None),
         NOW_MS,
         &refused_url(),
         &RefusedLogin::new(),
@@ -186,12 +191,12 @@ fn a_login_another_process_renewed_while_we_waited_is_used_as_it_stands() {
 #[test]
 fn a_held_lock_leaves_the_renewal_to_whoever_holds_it() {
     let home = home_with("renew-busy", &stored());
-    let _held = ClaudeLocks::acquire(&ConfigDir::default_in(&home), LockScope::Refresh).unwrap();
+    let _held = ClaudeLocks::acquire(&StorageDir::default_in(&home), LockScope::Refresh).unwrap();
 
     assert_eq!(
         renew(
-            &home,
-            &|| Ok(None),
+            &StorageDir::default_in(&home),
+            &|_: &StorageDir| Ok(None),
             NOW_MS,
             &refused_url(),
             &RefusedLogin::new()
@@ -214,8 +219,8 @@ fn an_unreachable_issuer_keeps_the_advice_the_user_already_had() {
 
     assert!(matches!(
         renew(
-            &home,
-            &|| Ok(None),
+            &StorageDir::default_in(&home),
+            &|_: &StorageDir| Ok(None),
             NOW_MS,
             &refused_url(),
             &RefusedLogin::new()
@@ -252,7 +257,15 @@ fn the_same_refused_login_is_not_sent_a_second_time() {
     let refused = RefusedLogin::new();
     let (token_url, request) = serve_once_capturing("400 Bad Request", &[], r#"{"error":"x"}"#);
 
-    let attempt = |url: &str| renew(&home, &|| Ok(None), NOW_MS, url, &refused);
+    let attempt = |url: &str| {
+        renew(
+            &StorageDir::default_in(&home),
+            &|_: &StorageDir| Ok(None),
+            NOW_MS,
+            url,
+            &refused,
+        )
+    };
     assert_eq!(attempt(&token_url).unwrap_err(), RenewError::Rejected);
     request.join().unwrap();
 
@@ -311,12 +324,12 @@ fn a_write_that_cannot_be_prepared_fails_before_anything_is_spent() {
     fs::create_dir(path.with_extension("json.on-n-off")).unwrap();
 
     assert!(
-        PreparedWrite::prepare(&ConfigDir::default_in(&home), &ClaudeStore::File(path)).is_err()
+        PreparedWrite::prepare(&StorageDir::default_in(&home), &ClaudeStore::File(path)).is_err()
     );
     assert!(matches!(
         renew(
-            &home,
-            &|| Ok(None),
+            &StorageDir::default_in(&home),
+            &|_: &StorageDir| Ok(None),
             NOW_MS,
             &refused_url(),
             &RefusedLogin::new()
@@ -338,8 +351,8 @@ fn a_renewal_that_cannot_read_the_keychain_redeems_nothing() {
     let home = home_with("renew-keychain-unread", &stored());
 
     let refused = renew(
-        &home,
-        &|| Err("Keychain lookup failed (User canceled the operation.)".to_string()),
+        &StorageDir::default_in(&home),
+        &|_: &StorageDir| Err("Keychain lookup failed (User canceled the operation.)".to_string()),
         NOW_MS,
         &refused_url(),
         &RefusedLogin::new(),
@@ -364,8 +377,8 @@ fn a_renewal_yields_while_claude_code_writes_its_credentials() {
     fs::create_dir(&lock).unwrap();
     let attempt = || {
         renew(
-            &home,
-            &|| Ok(None),
+            &StorageDir::default_in(&home),
+            &|_: &StorageDir| Ok(None),
             NOW_MS,
             &refused_url(),
             &RefusedLogin::new(),
@@ -418,4 +431,39 @@ fn the_grant_names_the_client_the_login_was_issued_to() {
     ));
     let grant: Value = serde_json::from_str(&request.join().unwrap().body).unwrap();
     assert_eq!(grant["client_id"], CLIENT_ID);
+}
+
+/// Under `CLAUDE_CONFIG_DIR` the renewal reads, locks and writes that config dir, not `~/.claude`.
+#[test]
+fn a_renewal_under_claude_config_dir_works_in_that_dir() {
+    let home = scratch_dir("renew-config-dir");
+    let work = home.join("work");
+    fs::create_dir_all(&work).unwrap();
+    fs::write(work.join(".credentials.json"), stored().to_string()).unwrap();
+    let work_var = work.clone().into_os_string();
+    let dir = claude_store::dirs(&home, &|name| {
+        (name == "CLAUDE_CONFIG_DIR").then(|| work_var.clone())
+    })
+    .unwrap()
+    .storage;
+    let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
+
+    let renewed = renew(
+        &dir,
+        &|_: &StorageDir| Ok(None),
+        NOW_MS,
+        &token_url,
+        &RefusedLogin::new(),
+    );
+    assert_eq!(
+        renewed.map(|credential| credential.token),
+        Ok("new".to_string()),
+        "the login in CLAUDE_CONFIG_DIR is the one renewed"
+    );
+    request.join().unwrap();
+    let written: Value =
+        serde_json::from_str(&fs::read_to_string(work.join(".credentials.json")).unwrap()).unwrap();
+    assert_eq!(written["claudeAiOauth"]["accessToken"], "new");
+    assert!(!home.join(".claude").exists(), "~/.claude is never touched");
+    assert!(!work.join(".oauth_refresh.lock").exists() && !home.join("work.lock").exists());
 }

@@ -292,6 +292,26 @@ fn outside_a_disposable_home_the_provider_override_and_the_keychain_apply() {
     assert!(store.use_keychain);
 }
 
+/// Claude's config home is `CLAUDE_CONFIG_DIR` as Claude Code reads it: NFC-normalized, never
+/// trimmed.
+#[test]
+fn the_claude_config_home_is_claude_config_dir_as_claude_code_reads_it() {
+    let root = tempfile::tempdir().unwrap();
+    for (value, config) in [
+        ("/Users/me/cafe\u{301}", "/Users/me/caf\u{e9}"),
+        ("/Users/me/claude ", "/Users/me/claude "),
+    ] {
+        let env = [("CLAUDE_CONFIG_DIR", PathBuf::from(value))];
+        let store =
+            NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
+        assert_eq!(store.config_home, PathBuf::from(config), "{value:?}");
+        assert_eq!(
+            store.config_file,
+            PathBuf::from(config).join(".claude.json")
+        );
+    }
+}
+
 #[test]
 fn a_disposable_home_ignores_provider_overrides_and_the_keychain() {
     let root = tempfile::tempdir().unwrap();

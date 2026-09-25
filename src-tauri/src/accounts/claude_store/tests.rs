@@ -122,7 +122,7 @@ fn the_store_truth_table() {
             if let Some(contents) = contents {
                 write(&home, ".claude/.credentials.json", &contents);
             }
-            let got = cell_of(read(&ConfigDir::default_in(&home), probe.clone()), &path);
+            let got = cell_of(read(&StorageDir::default_in(&home), probe.clone()), &path);
             assert_eq!(got, want, "Keychain: {keychain}; file: {file}");
         }
     }
@@ -140,7 +140,7 @@ fn a_keychain_entry_of_null_leaves_the_read_to_the_file() {
     let path = home.join(".claude").join(".credentials.json");
     assert_eq!(
         cell_of(
-            read(&ConfigDir::default_in(&home), Ok(Some("null".to_string()))),
+            read(&StorageDir::default_in(&home), Ok(Some("null".to_string()))),
             &path
         ),
         Cell::Read(Some("file-token"), Target::File)
@@ -184,7 +184,7 @@ fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
     let storage_write = home.join(".claude").join(".storage-write.lock");
 
     let writer =
-        PreparedWrite::prepare(&ConfigDir::default_in(&home), &ClaudeStore::File(path)).unwrap();
+        PreparedWrite::prepare(&StorageDir::default_in(&home), &ClaudeStore::File(path)).unwrap();
     assert!(temporary.exists(), "prepared up front, before the grant");
     assert!(
         storage_write.is_dir(),
@@ -217,7 +217,7 @@ fn the_credentials_file_is_written_private() {
 }
 
 fn refresh_lock(home: &Path, now: SystemTime) -> Result<ClaudeLocks, LockError> {
-    ClaudeLocks::acquire_at(&ConfigDir::default_in(home), LockScope::Refresh, now)
+    ClaudeLocks::acquire_at(&StorageDir::default_in(home), LockScope::Refresh, now)
 }
 
 #[test]
@@ -399,7 +399,7 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
     const TWO_ITEMS: &[(&str, &str)] = &[("claude-code-user", "{}"), ("other", "{}")];
 
     let (committed, sent) = with_test_runner(fake_items(TWO_ITEMS), || {
-        let dir = ConfigDir::default_in(&scratch_dir("renew-keychain-account"));
+        let dir = StorageDir::default_in(&scratch_dir("renew-keychain-account"));
         let write = PreparedWrite::prepare(&dir, &ClaudeStore::Keychain).unwrap();
         write.commit(r#"{"claudeAiOauth":{}}"#)
     });
@@ -414,4 +414,84 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
         ),
         "{add}"
     );
+}
+
+/// An environment holding exactly `vars`.
+fn env(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<std::ffi::OsString> {
+    let vars: Vec<(String, String)> = vars
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect();
+    move |name| {
+        vars.iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| std::ffi::OsString::from(value))
+    }
+}
+
+/// Claude Code 2.1.282's config dir is `CLAUDE_CONFIG_DIR` exactly as set, NFC-normalized, else
+/// `~/.claude`; set, it scopes the Keychain entry by a hash of that path. The hashes here were
+/// worked out by hand from the literal paths.
+#[test]
+fn the_config_dir_is_claude_config_dir_as_claude_code_reads_it() {
+    let home = Path::new("/Users/me");
+    for (value, config, service) in [
+        (
+            "/Users/me/.claude-work",
+            "/Users/me/.claude-work",
+            "Claude Code-credentials-1e91dd84",
+        ),
+        (
+            "/Users/me/claude ",
+            "/Users/me/claude ",
+            "Claude Code-credentials-355aaf04",
+        ),
+        (
+            "/Users/me/cafe\u{301}",
+            "/Users/me/caf\u{e9}",
+            "Claude Code-credentials-12e72a48",
+        ),
+    ] {
+        let dirs = dirs(home, &env(&[("CLAUDE_CONFIG_DIR", value)])).unwrap();
+        assert_eq!(dirs.config, PathBuf::from(config), "{value:?}");
+        assert!(dirs.custom, "{value:?}");
+        assert_eq!(dirs.storage, StorageDir::new(PathBuf::from(config), true));
+        assert_eq!(dirs.storage.service(), service, "{value:?}");
+    }
+
+    let default = dirs(home, &env(&[])).unwrap();
+    assert_eq!(default.config, PathBuf::from("/Users/me/.claude"));
+    assert!(!default.custom);
+    assert_eq!(default.storage.service(), "Claude Code-credentials");
+}
+
+/// Set but empty is still set: Claude Code would use the empty path, relative to wherever it runs,
+/// which on-n-off cannot know, so it refuses rather than read some other store.
+#[test]
+fn an_empty_or_relative_config_dir_is_refused() {
+    let home = Path::new("/Users/me");
+    for value in ["", "claude-work", " /Users/me/.claude"] {
+        assert_eq!(
+            dirs(home, &env(&[("CLAUDE_CONFIG_DIR", value)])).err(),
+            Some("The provider home must be an absolute path.".to_string()),
+            "{value:?}"
+        );
+    }
+}
+
+/// A disposable home never follows the environment to a real store.
+#[test]
+fn a_disposable_home_keeps_the_default_dirs_whatever_the_environment_says() {
+    let home = Path::new("/Users/me");
+    let dirs = dirs(
+        home,
+        &env(&[
+            ("ON_N_OFF_HOME", "/Users/me"),
+            ("CLAUDE_CONFIG_DIR", "/Users/me/.claude-work"),
+        ]),
+    )
+    .unwrap();
+    assert_eq!(dirs.config, PathBuf::from("/Users/me/.claude"));
+    assert!(!dirs.custom);
+    assert_eq!(dirs.storage, StorageDir::default_in(home));
 }

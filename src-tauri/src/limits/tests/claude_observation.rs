@@ -84,7 +84,7 @@ impl ClaudeObservationRig {
             Sources {
                 home: &self.home,
                 memo: &self.memo,
-                keychain: || Ok(None),
+                keychain: |_| Ok(None),
                 claude: refused_endpoints(&refused),
                 claude_desktop_history: claude_desktop::history_path_for_home(&self.home),
                 now_ms: DESKTOP_TIMESTAMP_MS + 1,
@@ -193,7 +193,7 @@ fn a_successful_endpoint_read_remains_authoritative_over_local_windows() {
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: ClaudeEndpoints {
                 token: &refused_url(),
                 profile: &profile_url,
@@ -256,7 +256,7 @@ fn verified_claude_read_supersedes_its_legacy_user_card() {
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: ClaudeEndpoints {
                 token: &refused_url(),
                 profile: &profile,

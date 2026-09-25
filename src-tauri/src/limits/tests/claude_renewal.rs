@@ -37,7 +37,7 @@ fn an_expired_claude_login_is_renewed_from_its_refresh_token_before_the_read() {
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: ClaudeEndpoints {
                 token: &token_url,
                 profile: &profile_url,

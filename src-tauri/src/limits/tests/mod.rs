@@ -257,7 +257,7 @@ impl Rig {
             Sources {
                 home: &self.home,
                 memo: &self.memo,
-                keychain: || {
+                keychain: |_| {
                     self.probes.set(self.probes.get() + 1);
                     self.keychain.clone()
                 },
@@ -303,7 +303,7 @@ fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
     write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", CLAUDE_PAYLOAD);
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
     let profile_head = profile_request.join().unwrap();
     let usage_head = usage_request.join().unwrap();
@@ -343,7 +343,7 @@ fn claude_rejects_usage_when_the_authenticated_profile_is_a_different_account() 
         "200 OK",
         r#"{"account":{"uuid":"uuid-other","email":"other@example.com"},"organization":{"uuid":"org-other"}}"#,
     );
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
     let dto = claude_limits(
         lookup,
         &Some(ClaudeIdentity {
@@ -377,7 +377,7 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
         "200 OK",
         r#"{"account":{"uuid":"uuid-1","email":"me@example.com"},"organization":{"uuid":"org-other"}}"#,
     );
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
     let dto = claude_limits(
         lookup,
         &Some(ClaudeIdentity {
@@ -464,7 +464,7 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: refused_endpoints(&refused),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,
@@ -942,7 +942,7 @@ fn an_expired_access_token_with_a_live_refresh_token_asks_only_for_a_cli_run() {
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: refused_endpoints(&refused),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,
@@ -976,7 +976,7 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
         Sources {
             home: &rig.home,
             memo: &rig.memo,
-            keychain: || Ok(None),
+            keychain: |_| Ok(None),
             claude: refused_endpoints(&refused),
             claude_desktop_history: claude_desktop::history_path_for_home(&rig.home),
             now_ms: 1787022473402 + 1,

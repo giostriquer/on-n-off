@@ -30,7 +30,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 
-use crate::accounts::claude_store::{self, KeychainProbe};
+use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
 use crate::dto::{
     AgentId, LimitWindowDto, LimitsAccountDto, LimitsCreditsDto, LimitsResetCreditsDto,
     LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto, ResetCreditOutcome,
@@ -117,7 +117,7 @@ struct ClaudeEndpoints<'a> {
 
 /// Everything `read_limits` needs that tests replace: where the homes/snapshots live, the Claude
 /// Keychain probe and memo, and the Claude endpoints.
-struct Sources<'a, P: Fn() -> KeychainProbe> {
+struct Sources<'a, P: Fn(&StorageDir) -> KeychainProbe> {
     home: &'a Path,
     memo: &'a ClaudeLoginMemo,
     keychain: P,
@@ -188,7 +188,7 @@ pub fn forget_snapshot(
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
-fn read_limits_in<P: Fn() -> KeychainProbe>(
+fn read_limits_in<P: Fn(&StorageDir) -> KeychainProbe>(
     agent: AgentId,
     force: bool,
     sources: Sources<'_, P>,
@@ -282,7 +282,7 @@ fn aggregate_accounts(
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
 /// login may be reused; otherwise the Keychain (or the credentials file) is read. A rejected token
 /// evicts the memo so the next read goes back to the Keychain.
-fn claude_current<P: Fn() -> KeychainProbe>(
+fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
     force: bool,
     sources: Sources<'_, P>,
 ) -> (ProviderLimitsDto, Option<ObservedWindowSet>) {
@@ -307,7 +307,23 @@ fn claude_current<P: Fn() -> KeychainProbe>(
     // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
     // broken login. Keeping that inside the read means the memo stores the renewed login like any
     // other, and the rejected-token retry below gets the renewal too.
-    let read_credential = || claude_renew::current_login(home, &keychain, now_ms, claude.token);
+    // The store Claude Code keeps its login in, under whatever `CLAUDE_CONFIG_DIR` says.
+    let storage = match crate::accounts::native::NativeStore::resolve(AgentId::Claude, home) {
+        Ok(native) => native.claude_dir(),
+        Err(why) => {
+            let message = format!("Could not read the stored login: {why}");
+            return (
+                finish(
+                    AgentId::Claude,
+                    LimitsStatus::Failed,
+                    Some(message),
+                    Parsed::default(),
+                ),
+                None,
+            );
+        }
+    };
+    let read_credential = || claude_renew::current_login(&storage, &keychain, now_ms, claude.token);
     let attempt = |lookup| claude_limits(lookup, &selected_identity, claude.profile, claude.usage);
     let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);
     let mut loaded = attempt(lookup);

@@ -24,13 +24,12 @@
 //! Nothing leaves this module holding a refresh token. Callers get a [`ClaudeCredential`], which
 //! carries only the access token and whether a refresh token exists.
 
-use std::path::Path;
 use std::sync::Mutex;
 
 use serde_json::{json, Value};
 
 use super::claude_store::{
-    self, ClaudeLocks, ClaudeStore, ConfigDir, KeychainProbe, LockError, LockScope, PreparedWrite,
+    self, ClaudeLocks, ClaudeStore, KeychainProbe, LockError, LockScope, PreparedWrite, StorageDir,
 };
 use crate::http::{post_grant, HttpError};
 use crate::limits::credentials::{self, ClaudeCredential, CredentialLookup};
@@ -122,17 +121,17 @@ fn identify(store: &ClaudeStore, oauth: &Value) -> LoginId {
 /// This is the whole answer to "what is the Claude login right now", so every caller gets the
 /// renewal — including the re-read that follows a rejected token, where the stored login may be a
 /// renewable expired one rather than a dead one.
-pub(crate) fn current_login<P: Fn() -> KeychainProbe>(
-    home: &Path,
+pub(crate) fn current_login<P: Fn(&StorageDir) -> KeychainProbe>(
+    dir: &StorageDir,
     keychain: &P,
     now_ms: i64,
     token_url: &str,
 ) -> CredentialLookup<ClaudeCredential> {
-    let lookup = credentials::read_claude_credential(home, keychain(), now_ms);
+    let lookup = credentials::read_claude_credential(dir, keychain(dir), now_ms);
     if !matches!(lookup, CredentialLookup::Expired { renewable: true }) {
         return lookup;
     }
-    match renew(home, keychain, now_ms, token_url, &REFUSED) {
+    match renew(dir, keychain, now_ms, token_url, &REFUSED) {
         Ok(credential) => CredentialLookup::Found(credential),
         // Only a new sign-in helps, so say that rather than offer a renewal that would fail again.
         Err(RenewError::Rejected) => CredentialLookup::Expired { renewable: false },
@@ -154,19 +153,18 @@ pub(crate) fn current_login<P: Fn() -> KeychainProbe>(
 /// holding the lock is the whole mechanism for not redeeming a token another process has already
 /// replaced. The lock is kept fresh while held, so Claude Code never breaks it under a probe
 /// waiting on its prompt, a slow grant or a Keychain write.
-fn renew<P: Fn() -> KeychainProbe>(
-    home: &Path,
+fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
+    dir: &StorageDir,
     keychain: &P,
     now_ms: i64,
     token_url: &str,
     refused: &RefusedLogin,
 ) -> Result<ClaudeCredential, RenewError> {
-    let dir = ConfigDir::default_in(home);
-    let _lock = ClaudeLocks::acquire(&dir, LockScope::Refresh).map_err(|error| match error {
+    let _lock = ClaudeLocks::acquire(dir, LockScope::Refresh).map_err(|error| match error {
         LockError::Busy => RenewError::Busy,
         LockError::Unavailable(why) => RenewError::Unavailable(why),
     })?;
-    let stored = claude_store::read(&dir, keychain())
+    let stored = claude_store::read(dir, keychain(dir))
         .map_err(|error| RenewError::Unavailable(error.to_string()))?;
     let mut document = stored
         .document
@@ -198,7 +196,7 @@ fn renew<P: Fn() -> KeychainProbe>(
 
     // Everything about the write that can fail for reasons unrelated to the reply fails here,
     // where failing costs nothing. What is left afterwards is one rename or one `security -U`.
-    let writer = PreparedWrite::prepare(&dir, &target).map_err(|error| match error {
+    let writer = PreparedWrite::prepare(dir, &target).map_err(|error| match error {
         LockError::Busy => RenewError::Busy,
         LockError::Unavailable(why) => RenewError::Unavailable(why),
     })?;

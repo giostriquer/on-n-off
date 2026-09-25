@@ -29,7 +29,7 @@ fn the_live_claude_read_asks_for_saved_resets_and_the_card_carries_their_count()
     write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
     let (profile_url, profile_request) = serve_once("200 OK", CLAUDE_PROFILE);
     let (usage_url, usage_request) = serve_once("200 OK", &one_saved_reset());
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
 
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
 
@@ -67,7 +67,7 @@ fn a_refused_reset_query_falls_back_to_the_plain_read_instead_of_failing_the_log
         ("403 Forbidden", &[], "{}"),
         ("200 OK", &[], CLAUDE_PAYLOAD),
     ]);
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
 
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
 
@@ -122,7 +122,7 @@ fn a_login_the_plain_read_also_rejects_is_still_reported_as_one() {
         ("401 Unauthorized", &[], "{}"),
         ("401 Unauthorized", &[], "{}"),
     ]);
-    let lookup = read_claude_credential(&home, Ok(None), NOW_MS);
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
 
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
 

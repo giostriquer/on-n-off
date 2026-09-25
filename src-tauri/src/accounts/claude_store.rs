@@ -10,6 +10,7 @@
 //!
 //! The grant that redeems a refresh token is not here: Claude grants live only in `claude_renew`.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -32,32 +33,40 @@ pub(crate) type KeychainProbe = Result<Option<String>, String>;
 /// `accounts::keychain::write`, not by making the name itself disappear.
 pub(crate) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
-/// One Claude Code config dir: the credentials file and the lock directories in and beside it.
+/// Claude Code's storage dir: where its credentials file and lock directories live, and whose path
+/// names its Keychain entry. It is the config dir unless `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves it
+/// (see [`dirs`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ConfigDir {
+pub(crate) struct StorageDir {
     path: PathBuf,
+    /// Whether the Keychain entry's name carries a hash of this path, as it does when the
+    /// environment chose the dir rather than the default.
+    scoped: bool,
 }
 
-impl ConfigDir {
-    /// `<home>/.claude`, the default config dir.
+impl StorageDir {
+    /// `<home>/.claude`, the default, whose Keychain entry is Claude Code's unscoped one.
     pub(crate) fn default_in(home: &Path) -> Self {
         Self {
             path: home.join(".claude"),
+            scoped: false,
         }
     }
 
-    pub(crate) fn new(path: PathBuf) -> Self {
-        Self { path }
+    pub(crate) fn new(path: PathBuf, scoped: bool) -> Self {
+        Self { path, scoped }
     }
 
     pub(crate) fn credentials_file(&self) -> PathBuf {
         self.path.join(".credentials.json")
     }
 
-    /// The Keychain entry Claude Code files this dir's login under when `CLAUDE_CONFIG_DIR` chose
-    /// it: its own name, suffixed with a hash of the NFC-normalized path.
-    #[cfg(target_os = "macos")]
-    pub(crate) fn scoped_service(&self) -> String {
+    /// The Keychain entry Claude Code files this dir's login under: its own name, suffixed with a
+    /// hash of the NFC-normalized path when the dir is scoped.
+    pub(crate) fn service(&self) -> String {
+        if !self.scoped {
+            return CLAUDE_KEYCHAIN_SERVICE.into();
+        }
         format!(
             "{CLAUDE_KEYCHAIN_SERVICE}-{}",
             &crate::sha::sha256_hex(
@@ -68,6 +77,57 @@ impl ConfigDir {
                 .as_bytes()
             )[..8]
         )
+    }
+}
+
+/// Claude Code's dirs for one environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Dirs {
+    /// The config dir: `CLAUDE_CONFIG_DIR`, else `<home>/.claude`.
+    pub(crate) config: PathBuf,
+    /// `CLAUDE_CONFIG_DIR` chose the config dir.
+    pub(crate) custom: bool,
+    pub(crate) storage: StorageDir,
+}
+
+/// Claude Code's dirs under `home` for the environment `env` reads, resolved as Claude Code
+/// 2.1.282 resolves them: the config dir is `CLAUDE_CONFIG_DIR` exactly as set — never trimmed,
+/// and set even when empty — else `<home>/.claude`, NFC-normalized either way. A set
+/// `CLAUDE_CONFIG_DIR` scopes the Keychain entry by a hash of that path.
+///
+/// A config dir that is not absolute is refused. Claude Code would resolve it against whatever
+/// directory it happens to run in, which on-n-off cannot know. A disposable `ON_N_OFF_HOME` keeps
+/// the default dirs whatever the environment says, so no test or development run follows it to a
+/// real store.
+pub(crate) fn dirs(home: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Result<Dirs, String> {
+    if env("ON_N_OFF_HOME").is_some() {
+        return Ok(Dirs {
+            config: home.join(".claude"),
+            custom: false,
+            storage: StorageDir::default_in(home),
+        });
+    }
+    let chosen = env("CLAUDE_CONFIG_DIR");
+    let config = nfc(chosen
+        .clone()
+        .unwrap_or_else(|| home.join(".claude").into_os_string()));
+    if !config.is_absolute() {
+        return Err("The provider home must be an absolute path.".into());
+    }
+    Ok(Dirs {
+        storage: StorageDir::new(config.clone(), chosen.is_some()),
+        config,
+        custom: chosen.is_some(),
+    })
+}
+
+/// `path` in Unicode normalization form C, as Claude Code normalizes its dirs. A path that is not
+/// Unicode is left as it is.
+fn nfc(path: OsString) -> PathBuf {
+    use unicode_normalization::UnicodeNormalization;
+    match path.into_string() {
+        Ok(text) => PathBuf::from(text.nfc().collect::<String>()),
+        Err(raw) => PathBuf::from(raw),
     }
 }
 
@@ -121,7 +181,7 @@ impl std::fmt::Display for StoreError {
 /// - A Keychain that cannot be read (denied, not answered, locked) leaves the read to the file
 ///   too, but only a file that holds a document can answer for it: with nothing there the
 ///   Keychain's failure is the answer, because a login may be behind it. And a write refuses.
-pub(crate) fn read(dir: &ConfigDir, keychain: KeychainProbe) -> Result<Stored, StoreError> {
+pub(crate) fn read(dir: &StorageDir, keychain: KeychainProbe) -> Result<Stored, StoreError> {
     let unread = match keychain {
         Ok(Some(secret)) => match serde_json::from_str::<Value>(&secret) {
             Ok(Value::Null) | Err(_) => None,
@@ -171,17 +231,17 @@ pub(crate) fn read_json_file(path: &Path) -> Result<Option<Value>, String> {
     read_document(path).map_err(|error| error.to_string())
 }
 
-/// Probe the macOS Keychain for Claude Code's login, the way Limits reads it. A disposable
-/// `ON_N_OFF_HOME` never reads the real login.
+/// Probe the macOS Keychain for the login Claude Code keeps for `dir`, the way Limits reads it. A
+/// disposable `ON_N_OFF_HOME` never reads the real login.
 #[cfg(target_os = "macos")]
-pub(crate) fn keychain_probe() -> KeychainProbe {
+pub(crate) fn keychain_probe(dir: &StorageDir) -> KeychainProbe {
     isolated_keychain(std::env::var_os("ON_N_OFF_HOME").is_some(), || {
-        keychain_secret(CLAUDE_KEYCHAIN_SERVICE)
+        keychain_secret(&dir.service())
     })
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn keychain_probe() -> KeychainProbe {
+pub(crate) fn keychain_probe(_dir: &StorageDir) -> KeychainProbe {
     Ok(None)
 }
 
@@ -281,17 +341,17 @@ fn attributes_account(service: &str, account: Option<&str>) -> Result<Option<Str
     }
 }
 
-/// The account the renewal's write goes to.
+/// The account the renewal's write to `service` goes to.
 #[cfg(target_os = "macos")]
-fn renewal_account() -> Result<String, String> {
-    keychain_account(CLAUDE_KEYCHAIN_SERVICE)?
+fn renewal_account(service: &str) -> Result<String, String> {
+    keychain_account(service)?
         .ok_or_else(|| "could not read the Claude Keychain entry's account".to_string())
 }
 
 /// Mirrors `keychain_probe`'s stub: these platforms have no such entry, and the file store is the
 /// one their read will have chosen.
 #[cfg(not(target_os = "macos"))]
-fn renewal_account() -> Result<String, String> {
+fn renewal_account(_service: &str) -> Result<String, String> {
     Err("this platform has no Claude Code Keychain entry".to_string())
 }
 
@@ -319,18 +379,22 @@ pub(crate) struct PreparedWrite {
 }
 
 enum WriteTarget {
-    Keychain { account: String },
+    Keychain { service: String, account: String },
     File { path: PathBuf, temporary: PathBuf },
 }
 
 impl PreparedWrite {
     /// `Busy` while another process is writing Claude Code's credentials.
-    pub(crate) fn prepare(dir: &ConfigDir, store: &ClaudeStore) -> Result<Self, LockError> {
+    pub(crate) fn prepare(dir: &StorageDir, store: &ClaudeStore) -> Result<Self, LockError> {
         let storage = ClaudeLocks::acquire(dir, LockScope::StorageWrite)?;
         let target = match store {
-            ClaudeStore::Keychain => WriteTarget::Keychain {
-                account: renewal_account().map_err(LockError::Unavailable)?,
-            },
+            ClaudeStore::Keychain => {
+                let service = dir.service();
+                WriteTarget::Keychain {
+                    account: renewal_account(&service).map_err(LockError::Unavailable)?,
+                    service,
+                }
+            }
             ClaudeStore::File(path) => {
                 let temporary = path.with_extension("json.on-n-off");
                 // Created empty and private now, so a directory that will not take it says so
@@ -352,8 +416,8 @@ impl PreparedWrite {
 
     pub(crate) fn commit(self, raw: &str) -> Result<(), String> {
         match &self.target {
-            WriteTarget::Keychain { account } => {
-                super::keychain::write(CLAUDE_KEYCHAIN_SERVICE, account, raw.as_bytes())
+            WriteTarget::Keychain { service, account } => {
+                super::keychain::write(service, account, raw.as_bytes())
             }
             WriteTarget::File { path, temporary } => {
                 write_private(temporary, raw)
@@ -414,7 +478,7 @@ const STORAGE_WRITE_STALE: Duration = Duration::from_secs(15);
 /// starts asking whether its holder is still alive.
 const HEARTBEAT: Duration = Duration::from_secs(2);
 
-/// Which of Claude Code's locks to take.
+/// Which of Claude Code's locks to take, in the storage dir.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LockScope<'a> {
     /// The two refresh locks, around one renewal.
@@ -431,7 +495,7 @@ impl LockScope<'_> {
     /// about the order deadlock — each with the age after which it counts as abandoned. The legacy
     /// lock sits beside the config dir's real path, as Claude Code resolves it, so a config dir
     /// reached through a link locks the directory Claude Code locks.
-    fn paths(self, dir: &ConfigDir) -> Vec<(PathBuf, Duration)> {
+    fn paths(self, dir: &StorageDir) -> Vec<(PathBuf, Duration)> {
         if let Self::StorageWrite = self {
             return vec![(dir.path.join(".storage-write.lock"), STORAGE_WRITE_STALE)];
         }
@@ -485,14 +549,14 @@ struct Heartbeat {
 }
 
 impl ClaudeLocks {
-    pub(crate) fn acquire(dir: &ConfigDir, scope: LockScope<'_>) -> Result<Self, LockError> {
+    pub(crate) fn acquire(dir: &StorageDir, scope: LockScope<'_>) -> Result<Self, LockError> {
         Self::acquire_at(dir, scope, SystemTime::now())
     }
 
     /// `now` is a parameter so the staleness branch is reachable from a test without waiting a
     /// minute or backdating a directory the filesystem may not let us touch.
     pub(crate) fn acquire_at(
-        dir: &ConfigDir,
+        dir: &StorageDir,
         scope: LockScope<'_>,
         now: SystemTime,
     ) -> Result<Self, LockError> {
