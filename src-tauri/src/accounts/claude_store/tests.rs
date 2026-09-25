@@ -495,3 +495,69 @@ fn a_disposable_home_keeps_the_default_dirs_whatever_the_environment_says() {
     assert!(!dirs.custom);
     assert_eq!(dirs.storage, StorageDir::default_in(home));
 }
+
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves Claude Code's storage — the credentials file, the lock
+/// directories and the path that names the Keychain entry — and leaves the config dir where it
+/// was. Set but empty, it puts the storage back in `~/.claude` under the unscoped entry.
+#[test]
+fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
+    let home = Path::new("/Users/me");
+    for (vars, config, storage, service) in [
+        (
+            vec![("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/Users/me/secure")],
+            "/Users/me/.claude",
+            "/Users/me/secure",
+            "Claude Code-credentials-8fb5187b",
+        ),
+        (
+            vec![
+                ("CLAUDE_CONFIG_DIR", "/Users/me/.claude-work"),
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/Users/me/secure"),
+            ],
+            "/Users/me/.claude-work",
+            "/Users/me/secure",
+            "Claude Code-credentials-8fb5187b",
+        ),
+        (
+            vec![
+                ("CLAUDE_CONFIG_DIR", "/Users/me/.claude-work"),
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", ""),
+            ],
+            "/Users/me/.claude-work",
+            "/Users/me/.claude",
+            "Claude Code-credentials",
+        ),
+        (
+            vec![(
+                "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+                "/Users/me/secure-cafe\u{301}",
+            )],
+            "/Users/me/.claude",
+            "/Users/me/secure-caf\u{e9}",
+            "Claude Code-credentials-d5d5ac9f",
+        ),
+    ] {
+        let dirs = dirs(home, &env(&vars)).unwrap();
+        assert_eq!(dirs.config, PathBuf::from(config), "{vars:?}");
+        assert_eq!(
+            dirs.storage.credentials_file(),
+            Path::new(storage).join(".credentials.json"),
+            "{vars:?}"
+        );
+        assert_eq!(dirs.storage.service(), service, "{vars:?}");
+    }
+
+    assert_eq!(
+        dirs(home, &env(&[("CLAUDE_SECURESTORAGE_CONFIG_DIR", "secure")])).err(),
+        Some("The provider home must be an absolute path.".to_string())
+    );
+    let disposable = dirs(
+        home,
+        &env(&[
+            ("ON_N_OFF_HOME", "/Users/me"),
+            ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/Users/me/secure"),
+        ]),
+    )
+    .unwrap();
+    assert_eq!(disposable.storage, StorageDir::default_in(home));
+}

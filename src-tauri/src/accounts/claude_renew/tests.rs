@@ -467,3 +467,38 @@ fn a_renewal_under_claude_config_dir_works_in_that_dir() {
     assert!(!home.join(".claude").exists(), "~/.claude is never touched");
     assert!(!work.join(".oauth_refresh.lock").exists() && !home.join("work.lock").exists());
 }
+
+/// Under `CLAUDE_SECURESTORAGE_CONFIG_DIR` the renewal reads, locks and writes that storage dir.
+#[test]
+fn a_renewal_under_a_secure_storage_dir_works_in_that_dir() {
+    let home = scratch_dir("renew-secure-storage");
+    let secure = home.join("secure");
+    fs::create_dir_all(&secure).unwrap();
+    fs::write(secure.join(".credentials.json"), stored().to_string()).unwrap();
+    let secure_var = secure.clone().into_os_string();
+    let dir = claude_store::dirs(&home, &|name| {
+        (name == "CLAUDE_SECURESTORAGE_CONFIG_DIR").then(|| secure_var.clone())
+    })
+    .unwrap()
+    .storage;
+    let (token_url, request) = serve_once_capturing("200 OK", &[], REPLY_JSON);
+
+    let renewed = renew(
+        &dir,
+        &|_: &StorageDir| Ok(None),
+        NOW_MS,
+        &token_url,
+        &RefusedLogin::new(),
+    );
+    assert_eq!(
+        renewed.map(|credential| credential.token),
+        Ok("new".to_string()),
+        "the login in the secure storage dir is the one renewed"
+    );
+    request.join().unwrap();
+    let written: Value =
+        serde_json::from_str(&fs::read_to_string(secure.join(".credentials.json")).unwrap())
+            .unwrap();
+    assert_eq!(written["claudeAiOauth"]["accessToken"], "new");
+    assert!(!home.join(".claude").join(".credentials.json").exists());
+}

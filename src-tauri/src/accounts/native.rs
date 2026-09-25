@@ -1,7 +1,8 @@
 //! Narrow native-store access. No whole-home restores and no provider endpoint/config rewriting.
 use super::{
     claude_store::{
-        self, ClaudeLocks, ClaudeStore, KeychainProbe, LockScope, StorageDir, StoreError, Stored,
+        self, ClaudeLocks, ClaudeStore, KeychainProbe, LockScope, SecureStorage, StorageDir,
+        StoreError, Stored,
     },
     model::{self, Identity},
     store::Login,
@@ -30,6 +31,9 @@ pub struct NativeStore {
     pub config_file: PathBuf,
     pub custom: bool,
     pub use_keychain: bool,
+    /// Where `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved Claude's login and locks; `None` keeps them
+    /// in the config home, and keeps the variable away from a `claude` this store starts.
+    pub secure_storage: Option<SecureStorage>,
 }
 enum Target {
     File(PathBuf),
@@ -143,6 +147,7 @@ impl NativeStore {
     ) -> Result<Self, String> {
         // ON_N_OFF_HOME always isolates tests and development from real native homes.
         let disposable = lookup("ON_N_OFF_HOME").is_some();
+        let mut secure_storage = None;
         let (config_home, custom) = match provider {
             AgentId::Codex => {
                 let override_home = if disposable {
@@ -162,6 +167,7 @@ impl NativeStore {
             // Where Claude Code keeps its configuration is `claude_store`'s question.
             AgentId::Claude => {
                 let dirs = claude_store::dirs(home, lookup)?;
+                secure_storage = dirs.secure_storage;
                 (dirs.config, dirs.custom)
             }
             _ => return Err("Profiles are unsupported for this provider.".into()),
@@ -184,6 +190,7 @@ impl NativeStore {
             config_file,
             custom,
             use_keychain: !disposable,
+            secure_storage,
         })
     }
     pub fn isolated(provider: AgentId, home: &Path) -> Result<Self, String> {
@@ -195,6 +202,7 @@ impl NativeStore {
         });
         store.custom = true;
         store.use_keychain = true;
+        store.secure_storage = None;
         store.config_file = store.config_home.join(if provider == AgentId::Codex {
             "config.toml"
         } else {
@@ -285,7 +293,10 @@ impl NativeStore {
     }
     /// Claude Code's config dir for this store.
     pub(crate) fn claude_dir(&self) -> StorageDir {
-        StorageDir::new(self.config_home.clone(), self.custom)
+        self.secure_storage.as_ref().map_or_else(
+            || StorageDir::new(self.config_home.clone(), self.custom),
+            |secure| secure.dir.clone(),
+        )
     }
     /// Claude's login, from the store Claude Code would read it from. A disposable ON_N_OFF_HOME
     /// uses file fixtures unless it is an explicit isolated login.
@@ -353,6 +364,14 @@ impl NativeStore {
             }
         } else {
             command.env_remove("CLAUDE_CONFIG_DIR");
+        }
+        if self.provider == AgentId::Claude {
+            // The child works in the store this one resolved, never one an inherited variable
+            // chose: an isolated sign-in would otherwise land in the user's own store.
+            match &self.secure_storage {
+                Some(secure) => command.env(claude_store::SECURE_STORAGE_VAR, &secure.var),
+                None => command.env_remove(claude_store::SECURE_STORAGE_VAR),
+            };
         }
         command.current_dir(&self.config_home);
         command
@@ -633,6 +652,7 @@ fn codex_login(config_home: &Path) -> Result<Option<Login>, String> {
         config_file: config_home.join("config.toml"),
         custom: true,
         use_keychain: true,
+        secure_storage: None,
     }
     .read()
 }

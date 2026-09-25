@@ -87,17 +87,38 @@ pub(crate) struct Dirs {
     pub(crate) config: PathBuf,
     /// `CLAUDE_CONFIG_DIR` chose the config dir.
     pub(crate) custom: bool,
+    /// The storage dir: the config dir, unless `secure_storage` moved it.
     pub(crate) storage: StorageDir,
+    pub(crate) secure_storage: Option<SecureStorage>,
+}
+
+/// The name of the variable that moves Claude Code's storage away from its config dir.
+pub(crate) const SECURE_STORAGE_VAR: &str = "CLAUDE_SECURESTORAGE_CONFIG_DIR";
+
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR` as it was set, and the storage dir it chose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SecureStorage {
+    /// The value exactly as set, empty included, for a `claude` started for this store to be
+    /// handed the same, as Claude Code hands it to the processes it starts.
+    pub(crate) var: OsString,
+    pub(crate) dir: StorageDir,
 }
 
 /// Claude Code's dirs under `home` for the environment `env` reads, resolved as Claude Code
-/// 2.1.282 resolves them: the config dir is `CLAUDE_CONFIG_DIR` exactly as set — never trimmed,
-/// and set even when empty — else `<home>/.claude`, NFC-normalized either way. A set
-/// `CLAUDE_CONFIG_DIR` scopes the Keychain entry by a hash of that path.
+/// 2.1.282 resolves them:
 ///
-/// A config dir that is not absolute is refused. Claude Code would resolve it against whatever
-/// directory it happens to run in, which on-n-off cannot know. A disposable `ON_N_OFF_HOME` keeps
-/// the default dirs whatever the environment says, so no test or development run follows it to a
+/// - The config dir is `CLAUDE_CONFIG_DIR` exactly as set — never trimmed, and set even when
+///   empty — else `<home>/.claude`, NFC-normalized either way.
+/// - The storage dir, which holds the credentials file and the lock directories, is the config
+///   dir; a set `CLAUDE_CONFIG_DIR` scopes its Keychain entry by a hash of that path.
+/// - `CLAUDE_SECURESTORAGE_CONFIG_DIR`, when set, moves the storage dir to it (NFC-normalized)
+///   and scopes the entry by its hash instead, leaving the config dir alone. Set but empty, it
+///   puts the storage back in `<home>/.claude` under the unscoped entry, whatever
+///   `CLAUDE_CONFIG_DIR` says.
+///
+/// A dir that is not absolute is refused. Claude Code would resolve it against whatever directory
+/// it happens to run in, which on-n-off cannot know. A disposable `ON_N_OFF_HOME` keeps the
+/// default dirs whatever the environment says, so no test or development run follows it to a
 /// real store.
 pub(crate) fn dirs(home: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Result<Dirs, String> {
     if env("ON_N_OFF_HOME").is_some() {
@@ -105,20 +126,39 @@ pub(crate) fn dirs(home: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Resul
             config: home.join(".claude"),
             custom: false,
             storage: StorageDir::default_in(home),
+            secure_storage: None,
         });
     }
+    let default = || home.join(".claude").into_os_string();
     let chosen = env("CLAUDE_CONFIG_DIR");
-    let config = nfc(chosen
-        .clone()
-        .unwrap_or_else(|| home.join(".claude").into_os_string()));
-    if !config.is_absolute() {
-        return Err("The provider home must be an absolute path.".into());
-    }
+    let config = absolute(nfc(chosen.clone().unwrap_or_else(default)))?;
+    let secure_storage = env(SECURE_STORAGE_VAR)
+        .map(|var| {
+            let scoped = !var.is_empty();
+            let path = if scoped { var.clone() } else { default() };
+            absolute(nfc(path)).map(|path| SecureStorage {
+                dir: StorageDir::new(path, scoped),
+                var,
+            })
+        })
+        .transpose()?;
     Ok(Dirs {
-        storage: StorageDir::new(config.clone(), chosen.is_some()),
+        storage: secure_storage.as_ref().map_or_else(
+            || StorageDir::new(config.clone(), chosen.is_some()),
+            |secure| secure.dir.clone(),
+        ),
         config,
         custom: chosen.is_some(),
+        secure_storage,
     })
+}
+
+fn absolute(path: PathBuf) -> Result<PathBuf, String> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err("The provider home must be an absolute path.".into())
+    }
 }
 
 /// `path` in Unicode normalization form C, as Claude Code normalizes its dirs. A path that is not
