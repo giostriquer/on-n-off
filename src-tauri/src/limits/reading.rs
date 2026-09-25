@@ -43,10 +43,10 @@ impl Outcome {
         }
     }
 
-    /// The column the snapshot store applies when it writes `card` over the account's file. Every
-    /// writer's card has already kept what its own read could not tell, failed reads included, so
-    /// whatever its status only the figures fetched beside a usage read can still be missing from
-    /// it: the answered column.
+    /// The column the snapshot store applies when it writes `card` over the account's file. A card
+    /// that answered gets the answered column on its own terms. A failed card reaches the store only
+    /// after its writer applied the failed column (`aggregate_accounts`, through `keep_remembered`),
+    /// so the answered column adds nothing it has not already kept.
     pub(super) fn for_stored(card: &ProviderLimitsDto) -> Self {
         Self::answered(card)
     }

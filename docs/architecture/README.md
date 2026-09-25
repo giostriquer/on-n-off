@@ -317,10 +317,10 @@ the code today; a change that moves one updates its row.
 | Term | Where it lives |
 | --- | --- |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`) |
-| Reading | `ProviderLimitsDto` less its status, message and account (`dto/limits.rs`); built by `limits/pipeline.rs` |
-| Figure | the optional fields `ProviderLimitsDto::has_figures` lists, plus `subscription` and `reset_offer` |
-| Account details | `plan` and `subscription_status` on `ProviderLimitsDto` |
-| Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); merged into a fresh read by `limits/mod.rs` and `limits/observations.rs` |
+| Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
+| Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
+| Account details | `plan` and `subscription_status` on `Reading` |
+| Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); what a fresh read keeps from it is the remember policy, `Reading::keeping` (`limits/reading.rs`) |
 | Native store | `NativeStore` (`accounts/native.rs`); Claude's login is also read by `claude_login_document` (`limits/credentials.rs`) |
 | Transcript source | `SourceSnapshot` and its entries (`usage/source_index.rs`), walked by `inventory_sources` |
 | Watermark | `Watermark` (`usage/history.rs`) |

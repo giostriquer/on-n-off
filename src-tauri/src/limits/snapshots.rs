@@ -50,7 +50,7 @@ impl SnapshotStore {
     /// trustworthy while refresh is unavailable; a successful read with only credits or banked
     /// resets is dated when it reaches this storage boundary. What the card could not tell is kept
     /// from what the account's stored reading still says, by the remember policy's column for a
-    /// stored card (`Outcome::for_stored`): the card already carries what its own read kept.
+    /// stored card (`Outcome::for_stored`): a failed card already carries what its own read kept.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
