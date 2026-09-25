@@ -81,7 +81,7 @@ final class NotchTests {
       ], headline: "weekly_all", inner: .fable(windowId: "weekly_scoped:Fable"))
     expectEqual(entry.headline?.usedPercent, 41)
     expectEqual(entry.inner, InnerQuota.fable(fable))
-    expectEqual(entry.visibleWindows.map(\.usedPercent), [73, 41, 58])
+    expectEqual(entry.windows.map(\.usedPercent), [73, 41, 58])
     // Nothing named, nothing on the rings.
     let unnamed = provider(windows: [quota("weekly", 41)])
     expectNil(unnamed.headline)
@@ -113,7 +113,7 @@ final class NotchTests {
     expectEqual(entry.inner?.quota.percent(at: now), 32)
     expectEqual(entry.inner?.quota.label, "Workspace credits")
     // The weekly stays the headline: the share never joins the windows the popover lists.
-    expectEqual(entry.visibleWindows.map(\.label), ["Weekly · all models"])
+    expectEqual(entry.windows.map(\.label), ["Weekly · all models"])
   }
 
   /// The host words the amounts; the helper only picks the renewed wording once the reset has
@@ -169,17 +169,6 @@ final class NotchTests {
     expectEqual(renewed.contains("last seen"), false)
     expectEqual(renewed.contains("97"), false)
     expectEqual(quota("weekly", 41).note(at: now), "")
-  }
-
-  func testCodexHidesInternalBuckets() {
-    let entry = provider(
-      .codex,
-      windows: [
-        quota("model", 99, label: "Weekly · GPT-Reserve"),
-        quota("model", 80, id: "extra:codex_bengalfox:weekly"), quota("weekly", 10),
-        quota("session", 20),
-      ])
-    expectEqual(entry.visibleWindows.count, 2)
   }
 
   func testSessionAgesReadLikeTheReferenceApp() {
@@ -509,7 +498,6 @@ checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
 checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
 checks.testAPausedAccountWithOnlyAShareStillHasObservedValues()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
-checks.testCodexHidesInternalBuckets()
 checks.testSessionAgesReadLikeTheReferenceApp()
 checks.testRailFramesFollowTheSelectedUUIDOnEveryEdge()
 checks.testTheRailShrinksWithFewerProvidersAndHidesWithoutAnyOrWithoutRoom()
@@ -524,5 +512,5 @@ try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("21 native check groups; \(failures) failures")
+print("20 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

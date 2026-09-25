@@ -216,18 +216,6 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     self.workspaceCredits = workspaceCredits
   }
 
-  public var visibleWindows: [Quota] {
-    guard provider == .codex else { return windows }
-    return windows.filter { window in
-      let label = window.label.split(separator: "·").last?.trimmingCharacters(in: .whitespaces)
-        .lowercased()
-      return !["gpt-reserve", "gpt-5.3-codex-spark"].contains(label ?? "")
-        && !["base_model_inference", "codex_bengalfox"].contains { bucket in
-          window.id == "extra:\(bucket)" || window.id.hasPrefix("extra:\(bucket):")
-        }
-    }
-  }
-
   /// The window the ring and the figure show: the one the host named, which it names only for an
   /// account it could read.
   public var headline: Quota? {
@@ -257,7 +245,7 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
 
   /// Whether the popover shows any remembered value: windows or a credit share. A paused account that
   /// has some says they are the last observed.
-  public var hasObservedValues: Bool { !visibleWindows.isEmpty || workspaceCredits != nil }
+  public var hasObservedValues: Bool { !windows.isEmpty || workspaceCredits != nil }
 }
 
 public enum Edge: String, Codable, Sendable {

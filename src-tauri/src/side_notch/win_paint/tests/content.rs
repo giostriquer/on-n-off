@@ -1,57 +1,5 @@
 use super::*;
 
-/// How many windows the popover of a Codex account with `windows` draws a bar for.
-fn codex_popover_bars(windows: Vec<LimitWindowDto>) -> usize {
-    let (planned, _) = popover_render(projected(signed_in(AgentId::Codex, windows)));
-    planned
-        .popover
-        .expect("the popover is open")
-        .entries
-        .iter()
-        .filter(|(item, _)| matches!(item, PopItem::Bar { .. }))
-        .count()
-}
-
-#[test]
-fn codex_hides_its_internal_buckets_by_id_whatever_their_label() {
-    let bars = codex_popover_bars(vec![
-        window("w-session", "Session", LimitWindowKind::Session, 10.0),
-        window(
-            "extra:base_model_inference",
-            "Weekly · Inference",
-            LimitWindowKind::Model,
-            90.0,
-        ),
-        window(
-            "extra:codex_bengalfox:secondary",
-            "Weekly · Bengal preview",
-            LimitWindowKind::Model,
-            90.0,
-        ),
-    ]);
-    assert_eq!(bars, 1, "only the session window reaches the popover");
-}
-
-#[test]
-fn codex_hides_the_reserve_and_spark_windows_by_label_whatever_their_id() {
-    let bars = codex_popover_bars(vec![
-        window("w-session", "Session", LimitWindowKind::Session, 10.0),
-        window(
-            "extra:spark",
-            "Weekly · gpt-5.3-codex-spark",
-            LimitWindowKind::Model,
-            90.0,
-        ),
-        window(
-            "extra:reserve",
-            "Weekly · GPT-Reserve",
-            LimitWindowKind::Model,
-            90.0,
-        ),
-    ]);
-    assert_eq!(bars, 1, "only the session window reaches the popover");
-}
-
 /// The label of a cell whose account reports `windows`.
 fn ring_label(provider: AgentId, windows: Vec<LimitWindowDto>) -> String {
     match cell_content(&CellData::Provider(projected(signed_in(provider, windows)))) {

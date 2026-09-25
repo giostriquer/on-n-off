@@ -490,34 +490,6 @@ fn quota_view(window: &LimitWindowDto) -> QuotaView {
     }
 }
 
-/// Codex's extra/internal windows never reach the rings (the `visibleWindows` port).
-fn visible_windows(provider: &ProviderData) -> Vec<LimitWindowDto> {
-    if provider.provider != AgentId::Codex {
-        return provider.windows.clone();
-    }
-    provider
-        .windows
-        .iter()
-        .filter(|w| {
-            let label = w
-                .label
-                .split('·')
-                .next_back()
-                .unwrap_or("")
-                .trim()
-                .to_lowercase();
-            !["gpt-reserve", "gpt-5.3-codex-spark"].contains(&label.as_str())
-                && !["base_model_inference", "codex_bengalfox"]
-                    .iter()
-                    .any(|bucket| {
-                        w.id == format!("extra:{bucket}")
-                            || w.id.starts_with(&format!("extra:{bucket}:"))
-                    })
-        })
-        .cloned()
-        .collect()
-}
-
 /// The ring's and the figure's window: the one the host named.
 fn headline_quota(provider: &ProviderData) -> Option<QuotaView> {
     let id = provider.headline_window_id.as_deref()?;
@@ -928,7 +900,8 @@ fn popover_entries(
                 detail: Option<String>,
             }
             let now = chrono::Utc::now();
-            let mut blocks: Vec<Block> = visible_windows(provider)
+            let mut blocks: Vec<Block> = provider
+                .windows
                 .iter()
                 .map(|window| Block {
                     label: window.label.clone(),
