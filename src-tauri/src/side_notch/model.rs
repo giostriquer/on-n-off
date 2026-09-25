@@ -288,9 +288,9 @@ fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
 
 /// One provider cell as both notches draw it, projected once from the current account's card: its
 /// windows in the card's order (weekly, session, model, as the Limits screen lists them), the window
-/// its ring and figure lead with, and what its inner ring shows. The macOS helper and the Windows painter draw it and decide none of it;
-/// what depends on the clock (a window's percent now, its reset note) stays with them, since they
-/// redraw between reads.
+/// its ring and figure lead with, and what its inner ring shows. The macOS helper and the Windows
+/// painter draw it and decide none of it; what depends on the clock (a window's percent now, its
+/// reset note) stays with them, since they redraw between reads.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotchProvider {
