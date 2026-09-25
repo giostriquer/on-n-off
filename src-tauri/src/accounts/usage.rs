@@ -324,33 +324,36 @@ fn merge(
     if existing.is_some_and(|i| entries[i].current_account) {
         return;
     }
-    let remembered = existing.map(|i| entries[i].clone());
+    let remembered = existing.map(|i| &entries[i]);
     let mut dto = match result {
         Ok(dto) => dto,
+        // A failed poll read nothing of its own: the card keeps its identity and shows what it
+        // remembers under the failure.
         Err(error) => {
-            let card = remembered.clone().unwrap_or_else(|| ProviderLimitsDto {
-                provider: profile.identity.provider,
-                status: LimitsStatus::Failed,
-                message: None,
-                account: Some(crate::dto::LimitsAccountDto {
-                    id: key,
-                    label: profile.email.clone(),
-                    legacy_id: None,
-                }),
-                current_account: false,
-                reading: Reading::default(),
-            });
-            // A failed poll read nothing: the card shows what it remembers, under the failure.
+            let (provider, account, current_account) = match remembered {
+                Some(card) => (card.provider, card.account.clone(), card.current_account),
+                None => (
+                    profile.identity.provider,
+                    Some(crate::dto::LimitsAccountDto {
+                        id: key,
+                        label: profile.email.clone(),
+                        legacy_id: None,
+                    }),
+                    false,
+                ),
+            };
             ProviderLimitsDto {
+                provider,
                 status: LimitsStatus::Failed,
                 message: Some(error),
+                account,
+                current_account,
                 reading: Reading::default(),
-                ..card
             }
         }
     };
-    if let Some(remembered) = remembered {
-        crate::limits::keep_remembered(&mut dto, remembered.reading);
+    if let Some(remembered) = remembered.map(|card| card.reading.clone()) {
+        crate::limits::keep_remembered(&mut dto, remembered);
     }
     if let Some(i) = existing {
         entries[i] = dto;
