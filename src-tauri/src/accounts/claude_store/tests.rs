@@ -350,8 +350,6 @@ fn locks_are_released_innermost_first() {
     );
 }
 
-/// The one `security` call made under the lock has to finish well inside the minute after which
-/// Claude Code breaks it, or the write races whoever broke it.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_keychain_write_deadline_fits_inside_the_lock_it_is_held_under() {

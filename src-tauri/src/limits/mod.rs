@@ -307,7 +307,6 @@ fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
     // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
     // broken login. Keeping that inside the read means the memo stores the renewed login like any
     // other, and the rejected-token retry below gets the renewal too.
-    // The store Claude Code keeps its login in, under whatever `CLAUDE_CONFIG_DIR` says.
     let storage = match crate::accounts::native::NativeStore::resolve(AgentId::Claude, home) {
         Ok(native) => native.claude_dir(),
         Err(why) => {

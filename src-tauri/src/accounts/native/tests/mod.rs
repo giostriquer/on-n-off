@@ -690,7 +690,7 @@ fn the_native_claude_read_truth_table() {
     }
 }
 
-/// An entry whose attributes cannot be read, or name no account, cannot be read either: the
+/// An entry whose secret is refused, or whose attributes name no account, cannot be read: the
 /// credentials file answers in its place, as it would for Claude Code.
 #[cfg(target_os = "macos")]
 #[test]

@@ -249,7 +249,7 @@ fn a_refused_refresh_token_asks_for_a_new_sign_in_rather_than_a_renewal() {
 }
 
 /// A refusal is permanent for that stored login, so posting it again would achieve nothing except
-/// taking both of Claude Code's lock directories every five minutes for as long as the user leaves
+/// taking Claude Code's refresh locks every five minutes for as long as the user leaves
 /// it alone. A login Claude Code has since rewritten is a different login, and worth trying.
 #[test]
 fn the_same_refused_login_is_not_sent_a_second_time() {

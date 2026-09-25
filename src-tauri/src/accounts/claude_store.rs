@@ -197,7 +197,7 @@ fn nfc(path: OsString) -> PathBuf {
 pub(crate) enum ClaudeStore {
     /// The `Claude Code-credentials` Keychain entry, which only macOS has.
     Keychain,
-    /// `<config dir>/.credentials.json`: the only store on Windows, and the macOS fallback.
+    /// `<storage dir>/.credentials.json`: the only store on Windows, and the macOS fallback.
     File(PathBuf),
 }
 
@@ -555,7 +555,7 @@ pub(crate) enum LockScope<'a> {
 impl LockScope<'_> {
     /// The lock directories in the order Claude Code takes them — two processes that disagree
     /// about the order deadlock — each with the age after which it counts as abandoned. The legacy
-    /// lock sits beside the config dir's real path, as Claude Code resolves it, so a config dir
+    /// lock sits beside the storage dir's real path, as Claude Code resolves it, so a storage dir
     /// reached through a link locks the directory Claude Code locks.
     fn paths(self, dir: &StorageDir) -> Vec<(PathBuf, Duration)> {
         if let Self::StorageWrite = self {

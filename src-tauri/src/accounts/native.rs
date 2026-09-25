@@ -164,7 +164,6 @@ impl NativeStore {
                 }
                 (config_home, custom)
             }
-            // Where Claude Code keeps its configuration is `claude_store`'s question.
             AgentId::Claude => {
                 let dirs = claude_store::dirs(home, lookup)?;
                 secure_storage = dirs.secure_storage;
@@ -293,7 +292,7 @@ impl NativeStore {
     _=>Err("This Codex credential backend cannot be activated by on-n-off. Use official sign-in.".into())
    }
     }
-    /// Claude Code's config dir for this store.
+    /// Claude Code's storage dir for this store.
     pub(crate) fn claude_dir(&self) -> StorageDir {
         StorageDir::of(&self.config_home, self.custom, self.secure_storage.as_ref())
     }
