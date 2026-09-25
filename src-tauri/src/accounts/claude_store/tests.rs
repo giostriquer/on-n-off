@@ -12,54 +12,22 @@ fn write(home: &Path, rel: &str, body: &str) {
     fs::write(path, body).unwrap();
 }
 
-/// The renewal writes back to the store this reports, so which one it picks and when it falls
-/// through are the same question the read answers — and it has to stay one answer. A Keychain
-/// entry that holds no usable login must not shadow a file that does.
-#[test]
-fn the_login_document_names_the_store_it_came_from_and_falls_through_like_the_read() {
-    let home = scratch_dir("limits-store");
-    let dir = ConfigDir::default_in(&home);
-    let file_json = CLAUDE_JSON.replace("kc-token", "file-token");
-    write(&home, ".claude/.credentials.json", &file_json);
-    let path = home.join(".claude").join(".credentials.json");
-
-    let (store, document) = login_document(&dir, Ok(Some(CLAUDE_JSON.to_string())))
-        .unwrap()
-        .unwrap();
-    assert_eq!(store, ClaudeStore::Keychain);
-    assert_eq!(document["claudeAiOauth"]["accessToken"], "kc-token");
-
-    let (store, document) = login_document(&dir, Ok(None)).unwrap().unwrap();
-    assert_eq!(store, ClaudeStore::File(path.clone()));
-    assert_eq!(document["claudeAiOauth"]["accessToken"], "file-token");
-
-    // JSON without a login, and JSON that will not parse: both let the file behind have its turn,
-    // exactly as `read_claude_credential` does.
-    for shadow in [r#"{"claudeAiOauth":{}}"#, "{ not json"] {
-        let (store, _) = login_document(&dir, Ok(Some(shadow.to_string())))
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            store,
-            ClaudeStore::File(path.clone()),
-            "a useless Keychain entry must not shadow a usable file: {shadow}"
-        );
-    }
+/// Where a write would go, as `Stored::target` says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    Keychain,
+    File,
+    /// The Keychain could not be read, so a write refuses.
+    Refused,
 }
 
-/// What one cell of the store truth table is expected to yield.
+/// One cell of the store truth table: the token read (`""` for a signed-out login, `None` for no
+/// document) and where a write would go, or which store failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Cell {
-    /// The Keychain entry's login.
-    Keychain,
-    /// The credentials file's login.
-    File,
-    /// No login anywhere.
-    Nothing,
-    /// A failure that names the Keychain.
+    Read(Option<&'static str>, Target),
     KeychainError,
-    /// A failure that names the credentials file.
-    FileError,
+    FileMalformed,
 }
 
 fn keychain_states() -> [(&'static str, KeychainProbe); 5] {
@@ -87,53 +55,96 @@ fn file_states() -> [(&'static str, Option<String>); 4] {
     ]
 }
 
-fn cell_of(result: &Result<Option<(ClaudeStore, Value)>, String>, path: &Path) -> Cell {
-    match result {
-        Ok(Some((ClaudeStore::Keychain, document))) => {
-            assert_eq!(document["claudeAiOauth"]["accessToken"], "kc-token");
-            Cell::Keychain
+fn cell_of(result: Result<Stored, StoreError>, path: &Path) -> Cell {
+    let stored = match result {
+        Ok(stored) => stored,
+        Err(StoreError::Keychain(why)) => {
+            assert!(why.contains("User canceled"), "{why}");
+            return Cell::KeychainError;
         }
-        Ok(Some((ClaudeStore::File(from), document))) => {
+        Err(StoreError::FileMalformed(why)) => {
+            assert!(why.contains(&path.display().to_string()), "{why}");
+            return Cell::FileMalformed;
+        }
+        Err(other) => panic!("unexpected {other:?}"),
+    };
+    let token = stored.document.as_ref().map(|document| {
+        match document["claudeAiOauth"]["accessToken"].as_str() {
+            Some("kc-token") => "kc-token",
+            Some("file-token") => "file-token",
+            Some("") => "",
+            other => panic!("unexpected token {other:?}"),
+        }
+    });
+    let target = match stored.target {
+        Ok(ClaudeStore::Keychain) => Target::Keychain,
+        Ok(ClaudeStore::File(from)) => {
             assert_eq!(from, path);
-            assert_eq!(document["claudeAiOauth"]["accessToken"], "file-token");
-            Cell::File
+            Target::File
         }
-        Ok(None) => Cell::Nothing,
-        Err(why) if why.contains(&path.display().to_string()) => Cell::FileError,
         Err(why) => {
-            assert!(why.contains("Keychain"), "{why}");
-            Cell::KeychainError
+            assert!(why.contains("User canceled"), "{why}");
+            Target::Refused
         }
-    }
+    };
+    Cell::Read(token, target)
 }
 
-/// Which store the Limits read and the renewal take the login from, for every combination of
-/// what the Keychain entry and the credentials file hold. Rows are the Keychain, columns the
-/// file: no file, a login, no token, broken.
+/// What Claude Code's next read would find, and where a write would go, for every combination of
+/// what the Keychain entry and the credentials file hold. Rows are the Keychain, columns the file:
+/// no file, a login, no token, broken.
 #[test]
-fn the_login_document_truth_table() {
-    use Cell::{File, FileError, Keychain, KeychainError, Nothing};
+fn the_store_truth_table() {
+    use Cell::{FileMalformed, KeychainError, Read};
+    use Target::{File, Keychain, Refused};
+    let from_file = [
+        Read(None, File),
+        Read(Some("file-token"), File),
+        Read(Some(""), File),
+        FileMalformed,
+    ];
     let expected = [
-        [Nothing, File, Nothing, FileError],
-        [Keychain, Keychain, Keychain, Keychain],
-        [Nothing, File, Nothing, FileError],
-        [KeychainError, File, KeychainError, KeychainError],
-        [KeychainError, File, KeychainError, KeychainError],
+        from_file,
+        [Read(Some("kc-token"), Keychain); 4],
+        [Read(Some(""), Keychain); 4],
+        from_file,
+        [
+            KeychainError,
+            Read(Some("file-token"), Refused),
+            Read(Some(""), Refused),
+            KeychainError,
+        ],
     ];
     for ((keychain, probe), row) in keychain_states().into_iter().zip(expected) {
         for ((file, contents), want) in file_states().into_iter().zip(row) {
-            let home = scratch_dir("limits-truth");
+            let home = scratch_dir("store-truth");
             let path = home.join(".claude").join(".credentials.json");
             if let Some(contents) = contents {
                 write(&home, ".claude/.credentials.json", &contents);
             }
-            let got = cell_of(
-                &login_document(&ConfigDir::default_in(&home), probe.clone()),
-                &path,
-            );
+            let got = cell_of(read(&ConfigDir::default_in(&home), probe.clone()), &path);
             assert_eq!(got, want, "Keychain: {keychain}; file: {file}");
         }
     }
+}
+
+/// A Keychain entry holding JSON `null` is one Claude Code reads past, as if there were none.
+#[test]
+fn a_keychain_entry_of_null_leaves_the_read_to_the_file() {
+    let home = scratch_dir("store-null");
+    write(
+        &home,
+        ".claude/.credentials.json",
+        &CLAUDE_JSON.replace("kc-token", "file-token"),
+    );
+    let path = home.join(".claude").join(".credentials.json");
+    assert_eq!(
+        cell_of(
+            read(&ConfigDir::default_in(&home), Ok(Some("null".to_string()))),
+            &path
+        ),
+        Cell::Read(Some("file-token"), Target::File)
+    );
 }
 
 /// A guessed account name would file a second Keychain item under the same service, and the read

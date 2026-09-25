@@ -326,3 +326,26 @@ fn a_write_that_cannot_be_prepared_fails_before_anything_is_spent() {
     );
     assert_eq!(stored_token(&home), "old");
 }
+
+/// When the Keychain cannot be read, the credentials file stands in for the read, but which store
+/// Claude Code will read next is unknown. Nothing is redeemed that could not then be stored.
+#[test]
+fn a_renewal_that_cannot_read_the_keychain_redeems_nothing() {
+    let home = home_with("renew-keychain-unread", &stored());
+
+    let refused = renew(
+        &home,
+        &|| Err("Keychain lookup failed (User canceled the operation.)".to_string()),
+        NOW_MS,
+        &refused_url(),
+        &RefusedLogin::new(),
+    );
+    let Err(RenewError::Unavailable(why)) = refused else {
+        panic!("expected the renewal to be unavailable, got {refused:?}");
+    };
+    assert!(
+        why.contains("User canceled"),
+        "refused over the Keychain before any grant, not by the issuer: {why}"
+    );
+    assert_eq!(stored_token(&home), "old");
+}

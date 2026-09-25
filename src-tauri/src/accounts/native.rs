@@ -1,6 +1,8 @@
 //! Narrow native-store access. No whole-home restores and no provider endpoint/config rewriting.
 use super::{
-    claude_store::{self, ClaudeLocks, ConfigDir, LockScope},
+    claude_store::{
+        self, ClaudeLocks, ClaudeStore, ConfigDir, KeychainProbe, LockScope, StoreError, Stored,
+    },
     model::{self, Identity},
     store::Login,
     transaction::{Native, NativeGuard},
@@ -247,18 +249,18 @@ impl NativeStore {
         }
         Ok(())
     }
-    fn target(&self) -> Result<Target, String> {
-        if self.provider == AgentId::Codex {
-            let config = read_toml(&self.config_file)?;
-            if config.get("profile").is_some() {
-                return Err("Codex configuration profiles must use the official account controls until their effective credential backend can be verified.".into());
-            }
-            let mode = config
-                .get("cli_auth_credentials_store")
-                .and_then(toml::Value::as_str)
-                .unwrap_or("file");
-            let file = Target::File(self.config_home.join("auth.json"));
-            match mode {
+    /// Codex's store, from the backend its config selects. Claude's is `claude_store`'s question.
+    fn codex_target(&self) -> Result<Target, String> {
+        let config = read_toml(&self.config_file)?;
+        if config.get("profile").is_some() {
+            return Err("Codex configuration profiles must use the official account controls until their effective credential backend can be verified.".into());
+        }
+        let mode = config
+            .get("cli_auth_credentials_store")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("file");
+        let file = Target::File(self.config_home.join("auth.json"));
+        match mode {
     "file"=>Ok(file),
     "keyring"|"auto"=>{
      let canonical=fs::canonicalize(&self.config_home).map_err(|_|"Cannot resolve native Codex home.")?;
@@ -267,23 +269,50 @@ impl NativeStore {
     },
     _=>Err("This Codex credential backend cannot be activated by on-n-off. Use official sign-in.".into())
    }
-        } else {
-            if self.use_keychain {
-                #[cfg(target_os = "macos")]
-                {
-                    // A disposable ON_N_OFF_HOME uses file fixtures unless it is an explicit isolated login.
-                    let service = self.claude_service();
-                    if let Some(account) = claude_store::native_account(&service)? {
-                        return Ok(Target::Keyring { service, account });
-                    }
-                }
-            }
-            Ok(Target::File(self.config_home.join(".credentials.json")))
-        }
     }
     /// Claude Code's config dir for this store.
     fn claude_dir(&self) -> ConfigDir {
         ConfigDir::new(self.config_home.clone())
+    }
+    /// Claude's login, from the store Claude Code would read it from. A disposable ON_N_OFF_HOME
+    /// uses file fixtures unless it is an explicit isolated login.
+    fn claude_read(&self) -> Result<Stored, String> {
+        claude_store::read(&self.claude_dir(), self.claude_keychain()).map_err(
+            |error| match error {
+                StoreError::Keychain(why) => why,
+                StoreError::FileUnreadable(_) => "Cannot read native credentials.".into(),
+                StoreError::FileMalformed(_) => {
+                    "The native credential document is malformed. It has not been changed.".into()
+                }
+            },
+        )
+    }
+    /// The Keychain entry's secret, found through the account its attributes name.
+    fn claude_keychain(&self) -> KeychainProbe {
+        #[cfg(target_os = "macos")]
+        if self.use_keychain {
+            let service = self.claude_service();
+            return match claude_store::native_account(&service)? {
+                Some(account) => super::keychain::find_password(&service, Some(&account)),
+                None => Ok(None),
+            };
+        }
+        Ok(None)
+    }
+    /// The write that reaches `store`, resolved before anything is written.
+    fn claude_target(&self, store: ClaudeStore) -> Result<Target, String> {
+        match store {
+            ClaudeStore::File(path) => Ok(Target::File(path)),
+            #[cfg(target_os = "macos")]
+            ClaudeStore::Keychain => {
+                let service = self.claude_service();
+                let account = claude_store::native_account(&service)?
+                    .ok_or("The native Keychain entry disappeared.")?;
+                Ok(Target::Keyring { service, account })
+            }
+            #[cfg(not(target_os = "macos"))]
+            ClaudeStore::Keychain => Err("This platform has no Keychain.".into()),
+        }
     }
     #[cfg(target_os = "macos")]
     fn claude_service(&self) -> String {
@@ -415,7 +444,12 @@ impl Native for NativeStore {
         })
     }
     fn read(&self) -> Result<Option<Login>, String> {
-        let Some(auth) = self.target()?.read()? else {
+        let auth = if self.provider == AgentId::Claude {
+            self.claude_read()?.document
+        } else {
+            self.codex_target()?.read()?
+        };
+        let Some(auth) = auth else {
             return Ok(None);
         };
         let account = if self.provider == AgentId::Claude {
@@ -445,11 +479,14 @@ impl Native for NativeStore {
     }
     fn write_locked(&self, login: Option<&Login>, locks: &dyn NativeGuard) -> Result<(), String> {
         locks.ensure()?;
-        let target = self.target()?;
         if self.provider == AgentId::Codex {
-            return target.write(login.map(|l| &l.auth));
+            return self.codex_target()?.write(login.map(|l| &l.auth));
         }
-        let mut auth = target.read()?.unwrap_or_else(|| json!({}));
+        let stored = self.claude_read()?;
+        // Written to the store Claude Code's next read uses; when the Keychain could not be read,
+        // that store is unknown and nothing is written at all.
+        let target = self.claude_target(stored.target?)?;
+        let mut auth = stored.document.unwrap_or_else(|| json!({}));
         let object = auth
             .as_object_mut()
             .ok_or("Malformed Claude credentials.")?;

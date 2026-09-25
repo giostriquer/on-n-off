@@ -1,6 +1,6 @@
 //! Claude Code's native store: which Keychain item or credentials file holds its signed-in login,
-//! how that item is found, the lock directories Claude Code takes around changing it, and the
-//! writes of the `claudeAiOauth` document itself.
+//! read with Claude Code's own precedence; how that item is found; the lock directories Claude
+//! Code takes around changing it; and the writes of the `claudeAiOauth` document itself.
 //!
 //! Every on-n-off path that reads or writes Claude's login comes through here — the Limits read,
 //! the renewal in [`super::claude_renew`] and the account switch in [`super::native`] — so the
@@ -80,78 +80,95 @@ pub(crate) enum ClaudeStore {
     File(PathBuf),
 }
 
-/// What one credential source (Keychain entry or file) yielded.
-enum Source {
-    Found(ClaudeStore, Value),
-    /// Nothing stored (or JSON without an access token).
-    Absent,
-    /// Something is stored but could not be read or parsed.
-    Broken(String),
+/// What Claude Code's next read of its login would find, and where a write has to go.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Stored {
+    /// The store that read uses. `Err` when the Keychain could not be read: the credentials file
+    /// stood in for it, but whether Claude Code will read the Keychain or the file next is
+    /// unknown, so a write refuses rather than guess.
+    pub(crate) target: Result<ClaudeStore, String>,
+    /// What that store holds, token or not; `None` when nothing is stored there.
+    pub(crate) document: Option<Value>,
 }
 
-/// The stored login document and the store holding it: Keychain entry first (macOS), then
-/// `<config dir>/.credentials.json` (all platforms). `Ok(None)` when no source holds a login,
-/// `Err` when one is there but could not be read.
-///
-/// The Limits read and the renewal both go through this, so the two can never disagree about
-/// which entry they are talking about.
-pub(crate) fn login_document(
-    dir: &ConfigDir,
-    keychain: KeychainProbe,
-) -> Result<Option<(ClaudeStore, Value)>, String> {
-    let path = dir.credentials_file();
-    let sources = [claude_from_keychain(keychain), claude_from_file(&path)];
-    let mut first_break = None;
-    for source in sources {
-        match source {
-            Source::Found(store, document) => return Ok(Some((store, document))),
-            Source::Absent => {}
-            Source::Broken(why) => {
-                first_break.get_or_insert(why);
+/// Why no store could be read. Each caller words these its own way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StoreError {
+    /// The Keychain could not be read, and the credentials file held nothing to stand in for it.
+    Keychain(String),
+    /// The credentials file could not be read.
+    FileUnreadable(String),
+    /// The credentials file is not JSON.
+    FileMalformed(String),
+}
+
+impl std::fmt::Display for StoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Keychain(why) | Self::FileUnreadable(why) | Self::FileMalformed(why) => {
+                f.write_str(why)
             }
         }
     }
-    first_break.map_or(Ok(None), Err)
 }
 
-/// A source counts as `Found` only when it parses into a login. A Keychain entry holding JSON
-/// without an access token is `Absent`, so the file behind it still gets its turn.
-fn claude_from_keychain(probe: KeychainProbe) -> Source {
-    match probe {
-        Ok(Some(json)) => match serde_json::from_str::<Value>(&json) {
-            Ok(value) => found(ClaudeStore::Keychain, value),
-            Err(error) => Source::Broken(format!("Keychain entry is not valid JSON: {error}")),
+/// Claude Code's login, from the store Claude Code itself would read it from (2.1.282):
+///
+/// - A Keychain entry that parses as JSON is the login, token or not. Claude Code signs out by
+///   emptying it, so an entry without a token is a signed-out user, never a reason to look past
+///   it to an older login in the file.
+/// - An entry that is not JSON, or no entry, leaves it to `<config dir>/.credentials.json`.
+/// - A Keychain that cannot be read (denied, not answered, locked) leaves the read to the file
+///   too, but only a file that holds a document can answer for it: with nothing there the
+///   Keychain's failure is the answer, because a login may be behind it. And a write refuses.
+pub(crate) fn read(dir: &ConfigDir, keychain: KeychainProbe) -> Result<Stored, StoreError> {
+    let unread = match keychain {
+        Ok(Some(secret)) => match serde_json::from_str::<Value>(&secret) {
+            Ok(Value::Null) | Err(_) => None,
+            Ok(document) => {
+                return Ok(Stored {
+                    target: Ok(ClaudeStore::Keychain),
+                    document: Some(document),
+                })
+            }
         },
-        Ok(None) => Source::Absent,
-        Err(why) => Source::Broken(why),
+        Ok(None) => None,
+        Err(why) => Some(why),
+    };
+    let path = dir.credentials_file();
+    match (unread, read_document(&path)) {
+        (None, document) => Ok(Stored {
+            target: Ok(ClaudeStore::File(path)),
+            document: document?,
+        }),
+        (Some(why), Ok(Some(document))) => Ok(Stored {
+            target: Err(why),
+            document: Some(document),
+        }),
+        (Some(why), _) => Err(StoreError::Keychain(why)),
     }
 }
 
-fn claude_from_file(path: &Path) -> Source {
-    match read_json_file(path) {
-        Ok(Some(value)) => found(ClaudeStore::File(path.to_path_buf()), value),
-        Ok(None) => Source::Absent,
-        Err(why) => Source::Broken(why),
-    }
-}
-
-fn found(store: ClaudeStore, document: Value) -> Source {
-    if crate::limits::credentials::parse_claude_credential(&document).is_some() {
-        Source::Found(store, document)
-    } else {
-        Source::Absent
-    }
+/// `Ok(None)` when the file does not exist.
+fn read_document(path: &Path) -> Result<Option<Value>, StoreError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(StoreError::FileUnreadable(format!(
+                "{}: {error}",
+                path.display()
+            )))
+        }
+    };
+    serde_json::from_str(&raw)
+        .map(Some)
+        .map_err(|error| StoreError::FileMalformed(format!("{}: {error}", path.display())))
 }
 
 /// `Ok(None)` when the file does not exist; `Err` for any other I/O or JSON failure.
 pub(crate) fn read_json_file(path: &Path) -> Result<Option<Value>, String> {
-    match fs::read_to_string(path) {
-        Ok(raw) => serde_json::from_str::<Value>(&raw)
-            .map(Some)
-            .map_err(|error| format!("{}: {error}", path.display())),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("{}: {error}", path.display())),
-    }
+    read_document(path).map_err(|error| error.to_string())
 }
 
 /// Probe the macOS Keychain for Claude Code's login, the way Limits reads it. A disposable

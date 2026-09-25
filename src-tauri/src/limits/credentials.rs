@@ -100,10 +100,13 @@ pub(crate) fn read_claude_credential(
     keychain: KeychainProbe,
     now_ms: i64,
 ) -> CredentialLookup<ClaudeCredential> {
-    let document = match claude_store::login_document(&ConfigDir::default_in(home), keychain) {
-        Ok(Some((_, document))) => document,
-        Ok(None) => return CredentialLookup::Missing,
-        Err(why) => return CredentialLookup::Unreadable(why),
+    let document = match claude_store::read(&ConfigDir::default_in(home), keychain) {
+        Ok(claude_store::Stored {
+            document: Some(document),
+            ..
+        }) => document,
+        Ok(_) => return CredentialLookup::Missing,
+        Err(why) => return CredentialLookup::Unreadable(why.to_string()),
     };
     let Some(credential) = parse_claude_credential(&document) else {
         return CredentialLookup::Missing;

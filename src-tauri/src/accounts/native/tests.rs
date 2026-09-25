@@ -610,8 +610,9 @@ fn found(read: Result<Option<Login>, String>) -> Found {
 }
 
 /// The account switch's read for every combination of what the Keychain entry and the
-/// credentials file hold. Rows are the Keychain, columns the file: no file, a login, no token,
-/// broken.
+/// credentials file hold, taken from the store Claude Code would read: a Keychain entry that
+/// parses, token or not; otherwise the file. Rows are the Keychain, columns the file: no file, a
+/// login, no token, broken.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_native_claude_read_truth_table() {
@@ -645,8 +646,8 @@ fn the_native_claude_read_truth_table() {
         [Nothing, File, Emptied, Malformed],
         [Keychain, Keychain, Keychain, Keychain],
         [Emptied, Emptied, Emptied, Emptied],
-        [Malformed, Malformed, Malformed, Malformed],
-        [Denied, Denied, Denied, Denied],
+        [Nothing, File, Emptied, Malformed],
+        [Denied, File, Emptied, Denied],
     ];
     for ((item, secret), row) in keychain.into_iter().zip(expected) {
         for ((file, contents), want) in files.into_iter().zip(row) {
@@ -662,10 +663,11 @@ fn the_native_claude_read_truth_table() {
     }
 }
 
-/// An entry whose attributes cannot be read, or name no account, is never guessed at.
+/// An entry whose attributes cannot be read, or name no account, cannot be read either: the
+/// credentials file answers in its place, as it would for Claude Code.
 #[cfg(target_os = "macos")]
 #[test]
-fn a_keychain_entry_the_switch_cannot_identify_is_an_error() {
+fn a_keychain_entry_the_switch_cannot_identify_leaves_the_read_to_the_file() {
     use crate::accounts::keychain::with_test_runner;
     use crate::process::CommandOutcome;
     let root = tempfile::tempdir().unwrap();
@@ -685,10 +687,7 @@ fn a_keychain_entry_the_switch_cannot_identify_is_an_error() {
         },
         || native.read(),
     );
-    assert_eq!(
-        read.err().as_deref(),
-        Some("Native Keychain access was denied or unavailable.")
-    );
+    assert_eq!(found(read), Found::File);
     assert_eq!(
         sent,
         ["find-generic-password -s Claude Code-credentials"],
@@ -703,8 +702,71 @@ fn a_keychain_entry_the_switch_cannot_identify_is_an_error() {
         },
         || native.read(),
     );
+    assert_eq!(found(read), Found::File);
+}
+
+fn incoming() -> Login {
+    Login {
+        auth: json!({"claudeAiOauth":{"accessToken":"incoming"}}),
+        account: json!({"accountUuid":"b","organizationUuid":"org-b"}),
+    }
+}
+
+/// A write goes to the store Claude Code's next read uses. A Keychain entry that is not JSON is one
+/// that read skips, so the login goes to the credentials file and the entry is left alone.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_switch_past_a_malformed_keychain_entry_writes_the_credentials_file() {
+    use crate::accounts::keychain::with_test_runner;
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    native.use_keychain = true;
+    let file = native.config_home.join(".credentials.json");
+    fs::write(&file, r#"{"claudeAiOauth":{"accessToken":"file-token"}}"#).unwrap();
+
+    let (written, sent) = with_test_runner(keychain_item(Some(Ok("{ not json"))), || {
+        native.write(Some(&incoming()))
+    });
+    assert_eq!(written, Ok(()));
     assert_eq!(
-        read.err().as_deref(),
-        Some("Cannot identify the native Keychain entry.")
+        read_json(&file).unwrap()["claudeAiOauth"]["accessToken"],
+        "incoming"
     );
+    assert!(
+        sent.iter()
+            .all(|command| command.starts_with("find-generic-password")),
+        "the Keychain is only read: {sent:?}"
+    );
+}
+
+/// When the Keychain cannot be read, which store Claude Code reads next is unknown, so the switch
+/// writes neither.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_switch_refuses_to_write_when_the_keychain_cannot_be_read() {
+    use crate::accounts::keychain::with_test_runner;
+    let root = tempfile::tempdir().unwrap();
+    let mut native = claude(root.path());
+    native.use_keychain = true;
+    let file = native.config_home.join(".credentials.json");
+    fs::write(&file, r#"{"claudeAiOauth":{"accessToken":"file-token"}}"#).unwrap();
+
+    let (written, sent) = with_test_runner(
+        keychain_item(Some(Err(
+            "security: SecKeychainItemCopyContent: User canceled the operation.",
+        ))),
+        || native.write(Some(&incoming())),
+    );
+    assert!(written.is_err());
+    assert_eq!(
+        read_json(&file).unwrap()["claudeAiOauth"]["accessToken"],
+        "file-token"
+    );
+    assert!(
+        !native.config_file.exists(),
+        "no half of the switch is written"
+    );
+    assert!(sent
+        .iter()
+        .all(|command| command.starts_with("find-generic-password")));
 }

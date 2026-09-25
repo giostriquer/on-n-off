@@ -131,13 +131,15 @@ fn claude_credentials_without_an_access_token_count_as_signed_out_from_either_so
     );
 }
 
+/// A credentials file that is not JSON cannot be read. A Keychain entry that is not JSON is one
+/// Claude Code reads past, as if it were not there.
 #[test]
-fn claude_malformed_json_is_unreadable_from_either_source() {
+fn a_malformed_credentials_file_is_unreadable_and_a_malformed_keychain_entry_is_skipped() {
     let home = scratch_dir("limits-cred");
-    assert!(matches!(
+    assert_eq!(
         read_claude_credential(&home, Ok(Some("{not json".to_string())), NOW_MS),
-        CredentialLookup::Unreadable(_)
-    ));
+        CredentialLookup::Missing
+    );
     write(&home, ".claude/.credentials.json", "{not json");
     assert!(matches!(
         read_claude_credential(&home, Ok(None), NOW_MS),
@@ -290,13 +292,88 @@ fn the_read_and_the_document_lookup_never_disagree_about_the_login() {
         Ok(Some(CLAUDE_JSON.replace("kc-token", "other").to_string())),
         Ok(Some("{ not json".to_string())),
     ] {
-        let document = claude_store::login_document(&ConfigDir::default_in(&home), probe.clone())
+        let document = claude_store::read(&ConfigDir::default_in(&home), probe.clone())
             .unwrap()
-            .map(|(_, document)| document);
+            .document;
         let expected = document.as_ref().and_then(parse_claude_credential);
         match read_claude_credential(&home, probe, NOW_MS) {
             CredentialLookup::Found(credential) => assert_eq!(Some(credential), expected),
             other => panic!("expected a login, got {other:?}"),
+        }
+    }
+}
+
+/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
+const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
+
+/// What the Limits read reports, told apart by the fixture each store holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reported {
+    KeychainLogin,
+    FileLogin,
+    SignedOut,
+    KeychainUnreadable,
+    FileUnreadable,
+}
+
+fn reported(lookup: CredentialLookup<ClaudeCredential>, file: &Path) -> Reported {
+    match lookup {
+        CredentialLookup::Found(login) if login.token == "kc-token" => Reported::KeychainLogin,
+        CredentialLookup::Found(login) if login.token == "file-token" => Reported::FileLogin,
+        CredentialLookup::Missing => Reported::SignedOut,
+        CredentialLookup::Unreadable(why) if why.contains(&file.display().to_string()) => {
+            Reported::FileUnreadable
+        }
+        CredentialLookup::Unreadable(why) if why.contains("User canceled") => {
+            Reported::KeychainUnreadable
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// The Limits read takes the login from the store Claude Code would read it from: a Keychain entry
+/// that parses wins even without a token, which is how Claude Code signs out; one that is not JSON
+/// or cannot be read leaves it to the credentials file. When the Keychain cannot be read and the
+/// file holds nothing, the Keychain's failure is reported, because a login may be behind it. Rows
+/// are the Keychain, columns the file: no file, a login, no token, broken.
+#[test]
+fn the_limits_read_takes_the_login_from_the_store_claude_code_reads() {
+    use Reported::{FileLogin, FileUnreadable, KeychainLogin, KeychainUnreadable, SignedOut};
+    let keychain: [(&str, KeychainProbe); 5] = [
+        ("no item", Ok(None)),
+        ("a login", Ok(Some(CLAUDE_JSON.to_string()))),
+        ("no token", Ok(Some(SIGNED_OUT.to_string()))),
+        ("invalid JSON", Ok(Some("{ not json".to_string()))),
+        (
+            "unreadable",
+            Err("Keychain lookup failed (User canceled the operation.)".to_string()),
+        ),
+    ];
+    let files = [
+        ("no file", None),
+        (
+            "a login",
+            Some(CLAUDE_JSON.replace("kc-token", "file-token")),
+        ),
+        ("no token", Some(SIGNED_OUT.to_string())),
+        ("broken", Some("{ not json".to_string())),
+    ];
+    let expected = [
+        [SignedOut, FileLogin, SignedOut, FileUnreadable],
+        [KeychainLogin, KeychainLogin, KeychainLogin, KeychainLogin],
+        [SignedOut, SignedOut, SignedOut, SignedOut],
+        [SignedOut, FileLogin, SignedOut, FileUnreadable],
+        [KeychainUnreadable, FileLogin, SignedOut, KeychainUnreadable],
+    ];
+    for ((item, probe), row) in keychain.into_iter().zip(expected) {
+        for ((file, contents), want) in files.clone().into_iter().zip(row) {
+            let home = scratch_dir("limits-precedence");
+            let path = home.join(".claude").join(".credentials.json");
+            if let Some(contents) = contents {
+                write(&home, ".claude/.credentials.json", &contents);
+            }
+            let got = reported(read_claude_credential(&home, probe.clone(), NOW_MS), &path);
+            assert_eq!(got, want, "Keychain: {item}; file: {file}");
         }
     }
 }

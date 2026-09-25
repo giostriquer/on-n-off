@@ -165,8 +165,10 @@ fn renew<P: Fn() -> KeychainProbe>(
         LockError::Busy => RenewError::Busy,
         LockError::Unavailable(why) => RenewError::Unavailable(why),
     })?;
-    let (target, mut document) = claude_store::login_document(&dir, keychain())
-        .map_err(RenewError::Unavailable)?
+    let stored = claude_store::read(&dir, keychain())
+        .map_err(|error| RenewError::Unavailable(error.to_string()))?;
+    let mut document = stored
+        .document
         .ok_or_else(|| RenewError::Unavailable("no stored Claude login to renew".to_string()))?;
 
     // Under the lock the store is authoritative. Another process having renewed while we waited is
@@ -177,6 +179,9 @@ fn renew<P: Fn() -> KeychainProbe>(
         refused.forget();
         return Ok(fresh);
     }
+    // A Keychain that could not be read leaves no store the write can be sure Claude Code reads
+    // next, so nothing is redeemed that could not then be stored.
+    let target = stored.target.map_err(RenewError::Unavailable)?;
     let oauth = document
         .get("claudeAiOauth")
         .ok_or_else(|| RenewError::Unavailable("stored login has no claudeAiOauth".to_string()))?;
