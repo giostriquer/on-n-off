@@ -230,7 +230,8 @@ fn read_summary_from(
     });
 
     // Read, never folded here: the background fold owns that (`folding`). Opened under the lock,
-    // once the sources need its watermark, so a summary served from the cache never reads it.
+    // once the sources need its watermark, so a summary served from an unchanged index never
+    // reads it.
     let open_history = || HistoryStore::open(paths.history.clone());
     let history = OnceCell::new();
     let mut transcripts = Sources::open(lock_usage_files(), &home, || {

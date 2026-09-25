@@ -76,7 +76,6 @@ fn open(home: &Path, watermark: Watermark) -> Sources {
     Sources::open(lock_usage_files(), home, || watermark)
 }
 
-/// Opens the sources, then finishes them at once with the same watermark.
 fn open_and_finish(home: &Path, watermark: Watermark) -> SeenSources {
     open(home, watermark).finish(|| watermark)
 }
