@@ -125,8 +125,9 @@ refresh in the background. Config, plugins, MCP settings and sessions are preser
 
 Each provider is read the way that provider intends, and active login renewal remains native-store-owned:
 
-- **Claude** — read the stored access token (macOS Keychain via `/usr/bin/security`, else
-  `~/.claude/.credentials.json`), verify it against `/api/oauth/profile`, then read
+- **Claude** — read the stored access token from the store Claude Code itself reads
+  (`accounts/claude_store.rs`: its macOS Keychain item via `/usr/bin/security` when that parses,
+  else `~/.claude/.credentials.json`), verify it against `/api/oauth/profile`, then read
   `/api/oauth/usage?cedar_ember=1&skip_spend=1`. The query adds the saved rate-limit resets
   (`cedar_ember`) to the same answer. It is optional: a refused query falls back to the plain read
   rather than failing it, and a read that cannot tell keeps the remembered count. The resets are
@@ -134,11 +135,13 @@ Each provider is read the way that provider intends, and active login renewal re
 
   That token lives eight hours and Claude Code renews it only while Claude Code is running, so
   on-n-off — which runs continuously — renews it too rather than reporting an expired login at a
-  signed-in user. `accounts/claude_renew.rs` is the only place that reads the refresh token or
-  writes Claude's store, and it does the same thing Claude Code does: the same two lock
-  directories in the same order, the same grant against the same client id, the same stored shape,
-  and a re-read under the lock so a login another process just renewed is used rather than
-  redeemed again.
+  signed-in user. `accounts/claude_renew.rs` is the only place that redeems the refresh token,
+  and it does the same thing Claude Code does, through `accounts/claude_store.rs` for everything
+  about the store: the same refresh lock directories in the same order (`.oauth_refresh.lock`,
+  then the legacy lock beside the config dir's real path), kept fresh while held; the same
+  `.storage-write.lock` around the write; the same grant against the login's own client id; the
+  same stored shape; and a re-read under the lock so a login another process just renewed is used
+  rather than redeemed again.
 
   The work is ordered around the redemption, because that is the point of no return: the issuer
   rotates the refresh token, so from the reply until the store is written the only live credential

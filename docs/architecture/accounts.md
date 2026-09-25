@@ -47,7 +47,11 @@ backup store for tokens.
 
 `accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
 existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
-store under its locks. The same grant/parser implementation also serves private vault renewal
+store under its locks. Where Claude's login lives and how it is locked belongs to
+`accounts/claude_store.rs`, which the renewal, Limits and the account switch share: the store
+Claude Code's own read would use (a Keychain item that parses, token or not, else the credentials
+file; an unreadable Keychain refuses every write), the Keychain item under Claude Code's own
+account name first, and one lock protocol. The same grant/parser implementation also serves private vault renewal
 under the saved-account journal. Limits consumes access-only projections. The one projection that
 carries a credential is `native::codex_metadata_and_access`: the signed-in Codex login's identity
 and its access token alone (never its refresh or id token, never the login JSON), wrapped in
@@ -94,10 +98,13 @@ without starting a CLI or writing auth.json.
 An in-process reservation and a cross-process shared/exclusive activity lease exclude provider
 reads from account activation. A separate lease serializes vault access. Existing vault keys are unlocked before acquiring the shared storage lease, so an OS prompt does
 not block another provider's file transaction. Initial key/vault creation remains serialized.
-Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Completed saves release their leases before announcing account changes. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks cover
-the outgoing reread, durable journal and publication. They are released for verification/renewal,
-while the exclusive activity lease remains held through completion or recovery. The native locks
-have a heartbeat while Keychain access is pending. Claude verification compares the authenticated
+Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Completed saves release their leases before announcing account changes. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks
+(Claude Code's refresh lock, its legacy lock beside the config dir's real path, and the config
+file's lock) cover the outgoing reread, durable journal and publication; the credential write also
+takes Claude Code's `.storage-write.lock`. They are released for verification/renewal, while the
+exclusive activity lease remains held through completion or recovery: the locked write consumes
+the lock guard and returns the store as read back under it, so verification, which may renew and
+take the same locks, cannot run while they are held. Every held lock has a heartbeat. Claude verification compares the authenticated
 user and organization with the exact resolved native identity file, including legacy configuration. All network
 and filesystem work happens on blocking workers, outside UI/state mutexes. Cancellation is scoped
 to an operation UUID, including cancel-before-start. A persisted generation rejects late sign-in
@@ -127,8 +134,9 @@ The guaranteed target is the default native CLI home. Custom native homes, selec
 profiles, ephemeral/alternate Codex backends, environment credentials and detected forced-login
 policies currently defer to the official client. Existing model/endpoints/API-key configuration is
 never rewritten to simulate a switch. Native Codex file/keyring/auto backends are selected from
-config; unreadable protected storage is not treated as a missing login. macOS native account reads use the same system `security` reader as Limits, with the exact
-resolved service and account and a bounded subprocess deadline, and native account writes and
+config; unreadable protected storage is not treated as a missing login. macOS native account reads use the same system `security` reader as Limits, finding
+Claude Code's item under its own account name before the account a service-only lookup names,
+with a bounded subprocess deadline, and native account writes and
 removals go through the same tool (`accounts/keychain.rs`), never the process's own ad-hoc-signed
 Keychain identity, so one "Always Allow" survives updates and Claude Code's own refreshes. Claude uses scoped Keychain
 entries only for isolated sign-in, deriving their names from the raw NFC-normalized home path.
