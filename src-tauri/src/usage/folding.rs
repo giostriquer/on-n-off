@@ -16,14 +16,7 @@ use super::history::{
     clear_history, fold_cutoff_ms, fold_due, history_bytes, history_path_for, HistoryStore, DAY_MS,
     FOLD_AFTER_DAYS,
 };
-use super::source_index::{
-    inventory_sources, prepare_sources, reconcile_inventory, unchanged_snapshot,
-};
-use super::sources::{
-    all_roots, load_scan_cache, lock_usage_files, prune_and_persist_scan_cache, source_roots_for,
-    UsagePaths,
-};
-use super::transcripts::richest_copies;
+use super::sources::{lock_usage_files, Sources};
 
 /// Out of the way of startup's own reads.
 const FIRST_FOLD_DELAY: Duration = Duration::from_secs(90);
@@ -89,54 +82,33 @@ pub(crate) fn fold_history_in(
     now_ms: i64,
     checks: &mut FoldChecks,
 ) -> Result<(), AdapterError> {
-    let paths = UsagePaths::for_home(home);
-    let roots = all_roots(&source_roots_for(home));
-    let _files = lock_usage_files();
-    let mut store = HistoryStore::open(paths.history.clone());
+    // The history is opened under the lock, so a clear cannot land between this read of it and
+    // the fold written over it.
+    let lock = lock_usage_files();
+    let mut store = HistoryStore::open(history_path_for(home));
     if store.history().is_none() || !fold_due(store.watermark(), now_ms) {
         return Ok(());
     }
-    let inventory = inventory_sources(&roots);
-    let mut file_cache = load_scan_cache(&paths.scan_cache);
-    let (snapshot, mut dirty) = match unchanged_snapshot(&paths.source_index, &inventory) {
-        Some(snapshot) => (snapshot, false),
-        None => {
-            let reconciled = reconcile_inventory(
-                &paths.source_index,
-                inventory,
-                &mut file_cache,
-                store.watermark(),
-            );
-            (reconciled.snapshot, reconciled.scan_cache_dirty)
-        }
-    };
+    let mut sources = Sources::open(lock, home, || store.watermark());
 
     let mut saved = Ok(());
-    if snapshot.walked_every_root() {
+    if sources.walked_every_root() {
         let cutoff_ms = fold_cutoff_ms(now_ms);
-        let prepared = prepare_sources(&snapshot, &mut file_cache, i64::MIN, store.watermark());
-        dirty |= prepared.scan_cache_dirty;
-        let waiting = prepared.unread_files.iter().any(|(path, mtime_ms)| {
+        let read = sources.read(i64::MIN, || store.watermark());
+        let waiting = read.unread_files.iter().any(|(path, mtime_ms)| {
             *mtime_ms >= cutoff_ms - UNREADABLE_GRACE_MS || !checks.unread_last_time.contains(path)
         });
-        checks.unread_last_time = prepared
+        checks.unread_last_time = read
             .unread_files
             .iter()
             .map(|(path, _)| path.clone())
             .collect();
         if !waiting {
-            let records = richest_copies(prepared.files.iter().map(|file| file.records.as_slice()));
-            saved = store.fold(records, cutoff_ms, now_ms);
+            saved = store.fold(read.records(), cutoff_ms, now_ms);
         }
     }
-    prune_and_persist_scan_cache(
-        &paths.scan_cache,
-        &mut file_cache,
-        &snapshot,
-        &roots,
-        store.watermark(),
-        dirty,
-    );
+    // With the watermark after the fold, so what it folded leaves the scan cache now.
+    sources.finish(|| store.watermark());
     saved.map_err(|error| AdapterError::message(format!("Could not save a fold: {error}")))
 }
 
@@ -176,8 +148,11 @@ pub(crate) fn history_status_in(home: &Path) -> UsageHistoryStatusDto {
 /// Forgets every folded row. Usage whose transcript is still on disk is counted from it again and
 /// folded again once due; usage only the history held is gone.
 pub(crate) fn clear_history_in(home: &Path) -> Result<(), AdapterError> {
-    let _files = lock_usage_files();
+    let _lock = lock_usage_files();
     clear_history(&history_path_for(home)).map_err(|error| {
         AdapterError::message(format!("Could not clear the usage history: {error}"))
     })
 }
+
+#[cfg(test)]
+mod tests;
