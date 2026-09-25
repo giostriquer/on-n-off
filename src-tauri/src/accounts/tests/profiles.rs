@@ -158,3 +158,27 @@ fn removing_refuses_during_a_pending_recovery_without_writing() {
     assert_eq!(harness.sealed(), sealed);
     assert!(harness.heard().is_empty());
 }
+
+/// A saved card changes Limits, which serves a cached reading until its next poll unless the
+/// change asks it to read again.
+#[test]
+fn saving_the_current_login_refreshes_limits_after_release() {
+    let harness = Harness::new();
+    harness.signed_in(Some(claude("a", "a1")));
+
+    harness.accounts().save_current(AgentId::Claude).unwrap();
+
+    assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
+}
+
+/// A removed card would linger in Limits until the next poll: the removal refreshes the removed
+/// profile's provider.
+#[test]
+fn removing_a_profile_refreshes_its_providers_limits_after_release() {
+    let harness = Harness::new();
+    let codex = harness.saved(identity(AgentId::Codex, "c", "team"), claude("c", "c1"));
+
+    harness.accounts().remove(&codex).unwrap();
+
+    assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Codex), true)]);
+}

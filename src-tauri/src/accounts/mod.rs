@@ -269,7 +269,7 @@ impl Accounts {
                 Ok(())
             },
         )??;
-        self.notify.accounts();
+        self.notify.changed(provider);
         Ok(())
     }
 
@@ -283,16 +283,22 @@ impl Accounts {
 
     fn remove(&self, id: &str) -> Result<(), String> {
         login::cancel_expected(id);
-        store::Store::open(&self.home, false)?.change(store::ChangeKind::Account, |db| {
-            if let Some(profile) = db.profiles.iter().find(|p| p.id == id) {
-                if !db.ignored_accounts.contains(&profile.identity) {
-                    db.ignored_accounts.push(profile.identity.clone());
-                }
-            }
-            db.profiles.retain(|p| p.id != id);
-            Ok(())
-        })?;
-        self.notify.accounts();
+        let removed =
+            store::Store::open(&self.home, false)?.change(store::ChangeKind::Account, |db| {
+                let removed = db.profiles.iter().find(|p| p.id == id).map(|profile| {
+                    if !db.ignored_accounts.contains(&profile.identity) {
+                        db.ignored_accounts.push(profile.identity.clone());
+                    }
+                    profile.identity.provider
+                });
+                db.profiles.retain(|p| p.id != id);
+                Ok(removed)
+            })?;
+        // Its card leaves that provider's Limits now, not at the next poll.
+        match removed {
+            Some(provider) => self.notify.changed(provider),
+            None => self.notify.accounts(),
+        }
         Ok(())
     }
 
