@@ -118,7 +118,7 @@ The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, and `~/.on-n-of
 
 ### Side notch
 
-**Settings → Side notch**: choose a display, pick **Always show** or **Show on hover**, and an edge. Expect the notch silhouette with one ring per provider (Claude weekly with Fable's inner ring, Codex 5-hour) and a pull-request cell whose ring is split per pull request by CI colour. Hover a cell for its popover (quota windows, live sessions; pull requests with a copy button that puts a linked "review please: <title>" on the clipboard, paste it into Slack to check the link survives). Click pins the popover, Escape releases it. Top and bottom lay the cells side by side. On macOS the helper is bundled under `Contents/Helpers/on-n-off-notch.app`; nothing here writes to GitHub or provider homes.
+**Settings → Side notch**: choose a display, pick **Always show** or **Show on hover**, and an edge. Expect the notch silhouette with one ring per provider, Claude's and Codex's leading with their weekly window (Claude's with Fable's inner ring, Codex's with a business member's workspace-credit share), and a pull-request cell whose ring is split per pull request by CI colour. Hover a cell for its popover (quota windows weekly first, as the Limits screen lists them, and live sessions; pull requests with a copy button that puts a linked "review please: <title>" on the clipboard, paste it into Slack to check the link survives). Click pins the popover, Escape releases it. Top and bottom lay the cells side by side. On macOS the helper is bundled under `Contents/Helpers/on-n-off-notch.app`; nothing here writes to GitHub or provider homes.
 
 ### From source on macOS
 

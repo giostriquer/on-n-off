@@ -16,7 +16,7 @@ flowchart LR
         cfg["config.rs<br/>~/.on-n-off/side-notch.json"]
         win["window.rs<br/><i>supervisor loop</i>"]
         sess["sessions.rs<br/><i>~/.claude/sessions/*.json +<br/>recent Codex rollouts, read-only</i>"]
-        model["model.rs<br/><i>layout, mirrored</i>"]
+        model["model.rs<br/><i>layout, mirrored ·<br/>each cell's rings</i>"]
     end
 
     subgraph helper["on-n-off-notch — owns the pixels"]
@@ -35,17 +35,30 @@ flowchart LR
     model -.->|"same pure layout,<br/>checked by NotchCoreChecks"| core
 ```
 
-A provider cell's outer ring and figure are its headline window. An inner ring carries a second
-figure: Claude's Fable weekly window, or a Codex business member's workspace-credit share. The
-share's meter is the limits reader's `used_percent`; its amounts are worded once in `model.rs`
-(`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
-reset.
+What each provider cell shows is decided once, in `model.rs` (`NotchProvider::current`), from the
+current account's card, and both notches only draw it:
+
+- **The windows**, in the card's order: weekly, then session, then per model. The popover lists
+  them so, as the Limits screen does. Codex's hidden buckets never arrive: the limits reader drops
+  them (see the Codex row of `PROVIDERS.md`).
+- **The headline window**, by id: the first of those. The cell's outer ring and figure show it,
+  and only for an account that could be read; otherwise the figure is a dash.
+- **The inner ring**: Claude's Fable weekly window, by id, or a Codex business member's
+  workspace-credit share, again only for an account that could be read. The share's meter is the
+  limits reader's `used_percent`; its amounts are worded once in `model.rs`
+  (`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
+  reset.
+
+The macOS helper receives these over the pipe (`headlineWindowId`, `innerRing`; protocol version 4)
+and refuses a message naming a window it did not send; the Windows painter gets them in memory.
+What depends on the clock stays with each, since they redraw between reads: a window's percent now
+and its reset note.
 
 Things that are easy to get wrong:
 
 - **Rust owns settings and data; the helper owns drawing.** The settings card stays in
   `ui/src/features/notch/`. The helper reports typed actions and never edits configuration
-  directly.
+  directly, and never picks a window: the host names the headline and inner-ring windows.
 - **The display is chosen explicitly, by UUID.** A disconnected or mirrored selection hides the
   notch rather than falling back to another screen — silently moving it is worse than not showing.
 - **The layout maths exists twice on purpose**, in `NotchCore` (Swift) and `side_notch/model.rs`
