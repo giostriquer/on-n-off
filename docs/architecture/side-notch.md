@@ -41,8 +41,9 @@ current account's card, and both notches only draw it:
 - **The windows**, in the card's order: weekly, then session, then per model. The popover lists
   them so, as the Limits screen does. Codex's hidden buckets never arrive: the limits reader drops
   them (see the Codex row of `PROVIDERS.md`).
-- **The headline window**, by id: the first of those. The cell's outer ring and figure show it,
-  and only for an account that could be read; otherwise the figure is a dash.
+- **The headline window**, by id: the weekly window. The cell's outer ring and figure show it, and
+  only for an account that could be read; an account without a weekly window, or one that could
+  not be read, shows a dash, never its session.
 - **The inner ring**: Claude's Fable weekly window, by id, or a Codex business member's
   workspace-credit share, again only for an account that could be read. The share's meter is the
   limits reader's `used_percent`; its amounts are worded once in `model.rs`

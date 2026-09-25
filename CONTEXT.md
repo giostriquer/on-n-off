@@ -21,7 +21,8 @@ account details.
 _Avoid_: snapshot, observation set
 
 **Headline window**:
-The quota window a card or the notch leads with: the first of weekly, session, model.
+The quota window a card or the notch leads with: its weekly window. A card that has none leads with
+nothing.
 _Avoid_: hero, primary
 
 **Figure**:
