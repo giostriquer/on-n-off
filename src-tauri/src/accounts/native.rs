@@ -5,7 +5,7 @@ use super::{
     },
     model::{self, Identity},
     store::Login,
-    transaction::{Native, NativeGuard},
+    transaction::{Native, NativeGuard, ReadBack},
     vault,
 };
 use crate::{
@@ -471,10 +471,49 @@ impl Native for NativeStore {
         model::identity(self.provider, &login.auth, &login.account)
     }
     fn write(&self, login: Option<&Login>) -> Result<(), String> {
-        let _locks = self.lock()?;
-        self.write_locked(login, _locks.as_ref())
+        self.write_locked(login, self.lock()?).map(drop)
     }
-    fn write_locked(&self, login: Option<&Login>, locks: &dyn NativeGuard) -> Result<(), String> {
+    fn write_locked(
+        &self,
+        login: Option<&Login>,
+        locks: Box<dyn NativeGuard>,
+    ) -> Result<ReadBack, String> {
+        self.publish(login, locks.as_ref())?;
+        let back = self.read();
+        drop(locks);
+        Ok(back)
+    }
+    fn verify(&self) -> Result<(), String> {
+        if self.provider == AgentId::Claude {
+            return self.verify_claude("https://api.anthropic.com/api/oauth/profile");
+        }
+        if self.custom {
+            return run(
+                self.command().args(["login", "status"]),
+                Duration::from_secs(30),
+            )
+            .map(|_| ());
+        }
+        self.verify_codex(true)
+    }
+    fn renews_soon(&self, login: &Login) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |v| i64::try_from(v.as_secs()).unwrap_or(i64::MAX));
+        self.provider == AgentId::Codex && model::codex_renews_soon(&login.auth, now)
+    }
+    fn verify_observed(&self) -> Result<(), String> {
+        if self.provider == AgentId::Codex && !self.custom {
+            self.verify_codex(false)
+        } else {
+            self.verify()
+        }
+    }
+}
+impl NativeStore {
+    /// The write itself, under `locks`: Codex's store as its config selects, or Claude's merged
+    /// into the store Claude Code reads, beside the identity `ConfigIo` patches.
+    fn publish(&self, login: Option<&Login>, locks: &dyn NativeGuard) -> Result<(), String> {
         locks.ensure()?;
         if self.provider == AgentId::Codex {
             return self.codex_target()?.write(login.map(|l| &l.auth));
@@ -513,34 +552,6 @@ impl Native for NativeStore {
         locks.ensure()?;
         target.write(Some(&auth))
     }
-    fn verify(&self) -> Result<(), String> {
-        if self.provider == AgentId::Claude {
-            return self.verify_claude("https://api.anthropic.com/api/oauth/profile");
-        }
-        if self.custom {
-            return run(
-                self.command().args(["login", "status"]),
-                Duration::from_secs(30),
-            )
-            .map(|_| ());
-        }
-        self.verify_codex(true)
-    }
-    fn renews_soon(&self, login: &Login) -> bool {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |v| i64::try_from(v.as_secs()).unwrap_or(i64::MAX));
-        self.provider == AgentId::Codex && model::codex_renews_soon(&login.auth, now)
-    }
-    fn verify_observed(&self) -> Result<(), String> {
-        if self.provider == AgentId::Codex && !self.custom {
-            self.verify_codex(false)
-        } else {
-            self.verify()
-        }
-    }
-}
-impl NativeStore {
     fn verify_codex(&self, force: bool) -> Result<(), String> {
         let entries = crate::limits::read_limits(self.provider, force);
         if entries

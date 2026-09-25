@@ -537,10 +537,7 @@ fn a_native_lock_broken_under_the_holder_stops_the_write() {
         account: json!({"accountUuid":"b","organizationUuid":"org-b"}),
     };
     assert_eq!(
-        native
-            .write_locked(Some(&incoming), guard.as_ref())
-            .err()
-            .as_deref(),
+        native.write_locked(Some(&incoming), guard).err().as_deref(),
         Some("Native credential coordination was lost. Protected recovery has been retained.")
     );
     assert_eq!(
