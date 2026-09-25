@@ -27,7 +27,8 @@ fn a_forced_read_is_never_served_from_the_cache_but_stores_what_it_counted() {
 }
 
 /// A walk that could not list a directory may have missed transcripts, so its count is neither
-/// served from the cache nor stored.
+/// served from the cache nor stored: a summary stored while the directory could be listed is not
+/// served once it cannot be, and the count made then does not replace it.
 #[cfg(unix)]
 #[test]
 fn a_read_that_could_not_walk_every_directory_is_neither_served_nor_stored() {
@@ -37,16 +38,19 @@ fn a_read_that_could_not_walk_every_directory_is_neither_served_nor_stored() {
     write_single_claude_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
     let locked = home.join(".claude/projects/locked");
     std::fs::create_dir_all(&locked).unwrap();
+    read_offline(&home, august_input(false));
+    let served_while_listable = read_offline(&home, august_input(false)).cache_hit;
+    let stored = std::fs::read(summary_cache_path_for(&home)).unwrap();
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-    let first = read_offline(&home, august_input(false));
-    let stored = summary_cache_path_for(&home).exists();
-    let second = read_offline(&home, august_input(false));
+    let unlisted = read_offline(&home, august_input(false));
+    let stored_after = std::fs::read(summary_cache_path_for(&home)).unwrap();
 
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(output_tokens(&first), 20);
-    assert!(!stored);
-    assert!(!second.cache_hit);
+    assert!(served_while_listable);
+    assert!(!unlisted.cache_hit);
+    assert_eq!(output_tokens(&unlisted), 20);
+    assert!(stored_after == stored, "the summary cache was written");
     let _ = std::fs::remove_dir_all(&home);
 }
 
