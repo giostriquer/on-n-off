@@ -20,11 +20,21 @@ export type LimitWindowPresentation = {
   note: string;
 };
 
+/**
+ * What a card says about how current its numbers are, one thing at a time and in this precedence:
+ * a saved account whose read failed shows its last known usage (`detail` says why); any other
+ * reading that is not the signed-in account's is remembered; the signed-in account's own refresh
+ * can be paused, its numbers the last it read.
+ */
+export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "remembered" } | { kind: "paused" };
+
 export type LimitAccountPresentation = {
+  status: CardStatus | null;
+  /**
+   * The read's message: set for every read that is not ok, a paused signed-in read that kept its
+   * windows included, unless the saved-refresh status already carries it.
+   */
   message: string | null;
-  refreshPaused: boolean;
-  savedRefreshDetail: string | null;
-  remembered: boolean;
   /**
    * The card's read did not answer, so the account metadata it shows (a subscription status, a plan)
    * is what an earlier read left: the backend fills it from memory exactly then. A saved account read
@@ -180,6 +190,7 @@ export function hasObservations(entry: ProviderLimits): boolean {
   );
 }
 
+/** A card's one status and how fresh its reading is. */
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
   const observed = hasObservations(entry);
   const latestObservedAt = entry.windows.reduce<number | null>((latest, window) => {
@@ -190,10 +201,11 @@ export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: stri
   const savedRefreshPaused = !entry.currentAccount && observed && (entry.status === "failed" || entry.status === "unauthenticated");
   const detail = entry.message ?? fallbackMessage;
   return {
+    status: savedRefreshPaused ? { kind: "savedRefresh", detail }
+      : !entry.currentAccount && observed ? { kind: "remembered" }
+      : entry.status !== "ok" && observed ? { kind: "paused" }
+      : null,
     message: entry.status === "ok" || savedRefreshPaused ? null : detail,
-    savedRefreshDetail: savedRefreshPaused ? detail : null,
-    refreshPaused: entry.currentAccount && entry.status !== "ok" && observed,
-    remembered: !entry.currentAccount && observed,
     lastKnown: entry.status !== "ok",
     updatedAt: latestObservedAt === null ? null : formatObservedAt(new Date(latestObservedAt).toISOString()),
   };

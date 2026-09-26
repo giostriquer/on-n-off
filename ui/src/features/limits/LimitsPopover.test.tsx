@@ -135,27 +135,21 @@ describe("LimitsPopover", () => {
       "Codex limits · kept@codex.example",
     ]);
     expect(screen.getAllByText("Remembered account")).toHaveLength(2);
+    expect(screen.queryByText("Refresh paused")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
   });
 
-  it("orders remembered accounts by usage left, then by when their usage returns", async () => {
-    const weekly = (entry: ProviderLimits, usedPercent: number, resetsAt: string): ProviderLimits =>
-      ({ ...entry, windows: [{ ...entry.windows[0], usedPercent, resetsAt }] });
-    readLimits.mockImplementation((provider: AgentId) =>
-      Promise.resolve(provider === "claude" ? [
-        limits("claude", "claude-current", "current@claude.example", true),
-        weekly(limits("claude", "claude-out", "out@claude.example", false), 100, "2026-08-25T12:00:00Z"),
-        weekly(limits("claude", "claude-soon", "soon@claude.example", false), 100, "2026-08-18T15:00:00Z"),
-        weekly(limits("claude", "claude-spare", "spare@claude.example", false), 90, "2026-08-18T14:00:00Z"),
-      ] : []),
-    );
+  it("lists accounts in the card model's order, not the order the read gave them", async () => {
+    const out = limits("claude", "claude-out", "out@claude.example", false);
+    out.windows = [{ ...out.windows[0], usedPercent: 100 }];
+    readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+      ? [out, limits("claude", "claude-kept", "kept@claude.example", false), limits("claude", "claude-current", "current@claude.example", true)] : []));
     renderPopover();
 
     const claude = await screen.findByRole("region", { name: "Claude accounts" });
     expect((await within(claude).findAllByRole("article")).map((entry) => entry.getAttribute("aria-label"))).toEqual([
       "Claude limits · current@claude.example",
-      "Claude limits · spare@claude.example",
-      "Claude limits · soon@claude.example",
+      "Claude limits · kept@claude.example",
       "Claude limits · out@claude.example",
     ]);
   });
@@ -195,47 +189,6 @@ describe("LimitsPopover", () => {
     expect(within(account).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("24");
     expect(within(account).getByText("Refresh paused")).toBeTruthy();
     expect(within(account).getAllByText(/Latest observation/)).toHaveLength(1);
-  });
-
-  it("shows source-neutral observation times for paused and remembered numbers", async () => {
-    const paused = {
-      ...limits("claude", "claude-current", "current@claude.example", true),
-      status: "unauthenticated" as const,
-      message: "Access token expired.",
-      windows: [
-        {
-          id: "weekly_all",
-          label: "Weekly · all models",
-          kind: "weekly" as const,
-          usedPercent: 63,
-          observedAt: "2026-08-18T12:15:00Z",
-        },
-      ],
-    };
-    const remembered = {
-      ...limits("codex", "codex-current", "current@codex.example", true),
-      status: "unauthenticated" as const,
-      message: "Login expired.",
-      windows: [
-        {
-          id: "primary",
-          label: "Weekly · all models",
-          kind: "weekly" as const,
-          usedPercent: 86,
-          observedAt: "2026-08-17T09:30:00Z",
-        },
-      ],
-    };
-    readLimits.mockImplementation((provider: AgentId) =>
-      Promise.resolve(provider === "claude" ? [paused] : [remembered]),
-    );
-    renderPopover();
-
-    const claude = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
-    const codex = await screen.findByRole("article", { name: "Codex limits · current@codex.example" });
-    expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
-    expect(within(codex).getAllByText(/Latest observation/)).toHaveLength(1);
-    expect(within(claude).queryByText(/Claude Desktop/)).toBeNull();
   });
 
   it("forces both provider reads when Refresh is selected", async () => {
@@ -341,8 +294,66 @@ it("marks saved usage quietly in the popover and exposes its failure on focus", 
   const account = await screen.findByRole("article", {name:"Claude limits · you@example.com"});
   const badge = within(account).getByRole("button", {name:"Usage status: Last known usage"});
   expect(within(account).queryByText(reason)).toBeNull();
+  // One status per card: the last-known badge, not the "Remembered account" pill as well.
+  expect(within(account).queryByText("Remembered account")).toBeNull();
   expect(within(account).getByRole("meter")).toBeInTheDocument();
   expect(within(account).getByText(/Latest observation/)).toBeInTheDocument();
   fireEvent.focus(badge);
   expect(screen.getByRole("tooltip")).toHaveTextContent(reason);
+});
+
+it("says under a row why it shows no reset, as the Limits screen does", async () => {
+  const kept = limits("claude", "claude-kept", "kept@claude.example", false);
+  kept.windows = [kept.windows[0], { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 0, resetsAt: null, observedAt: "2026-08-17T12:00:00Z" }];
+  const codex = limits("codex", "codex-current", "current@codex.example", true);
+  codex.windows = [codex.windows[0], { id: "extra", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: null, observedAt: "2026-08-18T12:00:00Z" }];
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [limits("claude", "claude-current", "current@claude.example", true), kept] : [codex]));
+  renderPopover();
+  const row = (article: HTMLElement, meter: string) => within(article).getByRole("meter", { name: meter }).parentElement!;
+  const claude = await screen.findByRole("article", { name: "Claude limits · kept@claude.example" });
+  expect(within(row(claude, "5 hour · all models")).getByText("Starts with your first message")).toBeInTheDocument();
+  const current = screen.getByRole("article", { name: "Codex limits · current@codex.example" });
+  expect(within(row(current, "Weekly · GPT-5.6-Luna")).getByText("Reset time unavailable")).toBeInTheDocument();
+});
+
+it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [{ provider: "claude", status: "failed", message: "Could not reach the Claude usage service (HTTP 503).", currentAccount: true, windows: [] }]
+    : [{ provider: "codex", status: "signedOut", message: "Sign in with `codex` to see subscription limits.", currentAccount: true, windows: [] }]));
+  renderPopover();
+  const failed = await screen.findByText("Could not reach the Claude usage service (HTTP 503).");
+  expect(failed).toHaveClass("text-[var(--trip)]");
+  const prompt = await screen.findByText("Sign in with `codex` to see subscription limits.");
+  expect(prompt).toHaveClass("text-[var(--mute)]");
+  expect(prompt).not.toHaveClass("text-[var(--trip)]");
+});
+
+it("says an answered read with no windows has none, as the Limits screen words it", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [{ ...limits("claude", "claude-current", "current@claude.example", true), windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
+  renderPopover();
+  const account = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
+  expect(within(account).getByText("Claude reported no rate-limit windows.")).toBeInTheDocument();
+  expect(within(account).queryByText("No rate-limit windows.")).toBeNull();
+});
+
+it.each([
+  ["by its account's label", { id: "claude-1", label: "you@example.com" }, "Claude limits · you@example.com", "you@example.com"],
+  ["by its provider when its account has no label", { id: "claude-1", label: null }, "Claude limits", "Claude"],
+  ["by its provider when it has no account", null, "Claude limits", "Claude"],
+] as const)("names a card %s, as the Limits screen does", async (_case, account, name, label) => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [{ provider: "claude", status: "signedOut", message: "Sign in with `claude`.", account, currentAccount: true, windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
+  renderPopover();
+  const article = await screen.findByRole("article", { name });
+  expect(within(article).getByText(label)).toBeInTheDocument();
+  expect(within(article).getByText("Sign in with `claude`.")).toBeInTheDocument();
+});
+
+it("says a provider with no accounts has none saved", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude" ? [] : [limits("codex", "codex-current", "current@codex.example", true)]));
+  renderPopover();
+  const claude = await screen.findByRole("region", { name: "Claude accounts" });
+  await waitFor(() => expect(within(claude).getByText("No saved accounts.")).toBeInTheDocument());
 });

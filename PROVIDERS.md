@@ -216,9 +216,10 @@ every account with usage left, the most usable capacity first, where the plan's 
 the percentage its fuller main window has left (a Max ×20 at 30% outranks an untouched Max ×5);
 then the accounts that are out of usage, the one whose last full window resets soonest first;
 accounts with no usage known last. Usage left always outranks waiting for a reset, and equal
-ranks keep the backend's order, newest observation first. The rule lives in
-`ui/src/features/limits/accountCards.ts` on the shared `usageLeft` / `usableAgainAt` /
-`planMultiplier` helpers; the backend itself still hands accounts over newest first.
+ranks keep the backend's order, newest observation first. The rule lives in the card model both
+surfaces render, `ui/src/features/limits/limitCards.ts`, on the shared `usageLeft` /
+`usableAgainAt` / `planMultiplier` helpers; the backend itself still hands accounts over newest
+first.
 
 Native Codex file, keyring, and auto storage are handled explicitly. Ephemeral or alternate
 credential backends, selected Codex configuration profiles, custom native homes (a Claude home

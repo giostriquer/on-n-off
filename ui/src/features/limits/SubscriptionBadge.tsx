@@ -1,10 +1,10 @@
 import { TooltipButton } from "$lib/TooltipButton";
 import { useCodexSubscription } from "$lib/useCodexSubscription";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
-import type { LimitsSubscription, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsSubscription } from "$lib/limitsTypes";
 import { claudeSubscriptionStatus } from "./claudeSubscriptionStatus";
 import { codexSubscriptionTerm } from "./codexSubscriptionTerm";
-import type { LimitAccountPresentation } from "./limitPresentation";
+import type { CardSubscription } from "./limitCards";
 import "./SubscriptionBadge.css";
 
 /** The Codex badge: `codexSubscriptionTerm` decides what it says; this only draws it. */
@@ -51,19 +51,15 @@ export function ClaudeSubscriptionStatusBadge({ status, lastKnown, checkedAt }: 
 
 /**
  * The subscription badge a card's header shows, whichever provider it is: Codex's paid-through
- * date, or Claude's status. `freshness` is the card's own presentation, so the badge says what the
- * card says about how current it is.
+ * date, or Claude's status, from what the card model gathered for it (`CardSubscription`). Claude's
+ * says what the card says about how current it is.
  */
-export function AccountSubscriptionBadge({ entry, now, freshness }: {
-  entry: ProviderLimits; now: number; freshness: Pick<LimitAccountPresentation, "lastKnown" | "updatedAt">;
-}) {
-  if (entry.provider === "codex") {
-    return entry.account
-      ? <CodexSubscriptionBadge accountId={entry.account.id} current={entry.currentAccount} term={entry.subscription} now={now} />
-      : null;
+export function AccountSubscriptionBadge({ subscription, now }: { subscription: CardSubscription | null; now: number }) {
+  if (subscription?.provider === "codex") {
+    return <CodexSubscriptionBadge accountId={subscription.accountId} current={subscription.current} term={subscription.term} now={now} />;
   }
-  if (entry.provider === "claude") {
-    return <ClaudeSubscriptionStatusBadge status={entry.subscriptionStatus} lastKnown={freshness.lastKnown} checkedAt={freshness.updatedAt} />;
+  if (subscription?.provider === "claude") {
+    return <ClaudeSubscriptionStatusBadge status={subscription.status} lastKnown={subscription.lastKnown} checkedAt={subscription.checkedAt} />;
   }
   return null;
 }
