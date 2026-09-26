@@ -83,6 +83,47 @@ impl Parsed {
     }
 }
 
+/// The signed-in Codex card an app-server `account/rateLimits/read` result becomes, each window
+/// observed at `observed_at`: the reader's own parse and card, for tests elsewhere that need what
+/// the reader keeps of a read.
+#[cfg(test)]
+pub(crate) fn codex_card(
+    rate_limits: serde_json::Value,
+    account_id: &str,
+    observed_at: &str,
+) -> ProviderLimitsDto {
+    let payload = serde_json::from_value(rate_limits).expect("an app-server rate-limits result");
+    let mut reading = codex::parse_codex(&payload);
+    for window in &mut reading.windows {
+        window.observed_at = observed_at.to_string();
+    }
+    signed_in_card(AgentId::Codex, account_id, reading)
+}
+
+/// The card a read of the signed-in account `account_id` reporting `reading` becomes: the pipeline's
+/// own card, so its windows come in the order every card lists them whatever order they are given
+/// in. For tests elsewhere that must not hand a consumer an order no read produces.
+#[cfg(test)]
+pub(crate) fn signed_in_card(
+    provider: AgentId,
+    account_id: &str,
+    reading: Reading,
+) -> ProviderLimitsDto {
+    finish(
+        provider,
+        LimitsStatus::Ok,
+        None,
+        Parsed {
+            account: Some(LimitsAccountDto {
+                legacy_id: None,
+                id: account_id.to_string(),
+                label: None,
+            }),
+            reading,
+        },
+    )
+}
+
 /// The three services one Claude read talks to, together so adding a fourth costs one field and
 /// not an edit at every call site.
 #[derive(Debug, Clone, Copy)]

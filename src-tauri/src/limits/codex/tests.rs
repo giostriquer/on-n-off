@@ -53,33 +53,111 @@ fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
             )
         })
         .collect();
+    // The Spark bucket is one of Codex's hidden ones: no surface shows it (see below).
     assert_eq!(
         windows,
-        [
-            (
-                "primary",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                14.0,
-                Some(604_800),
-            ),
-            (
-                "extra:codex_bengalfox",
-                "5 hour · GPT-5.3-Codex-Spark",
-                LimitWindowKind::Model,
-                0.0,
-                Some(18_000),
-            ),
-            (
-                "extra:codex_bengalfox:secondary",
-                "Weekly · GPT-5.3-Codex-Spark",
-                LimitWindowKind::Model,
-                6.0,
-                Some(604_800),
-            ),
-        ]
+        [(
+            "primary",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            14.0,
+            Some(604_800),
+        )]
     );
     assert_eq!(parsed.credits, None);
+}
+
+/// A reading of the main weekly window beside one extra bucket per `(id, name)`, each with a
+/// primary and a secondary window.
+fn with_extra_buckets(buckets: &[(&str, &str)]) -> Reading {
+    let mut by_id = serde_json::Map::new();
+    by_id.insert(
+        "codex".into(),
+        json!({"limitId": "codex", "primary": {"usedPercent": 14, "windowDurationMins": 10080}}),
+    );
+    for (id, name) in buckets {
+        by_id.insert(
+            (*id).into(),
+            json!({"limitId": id, "limitName": name,
+                "primary": {"usedPercent": 1, "windowDurationMins": 300},
+                "secondary": {"usedPercent": 2, "windowDurationMins": 10080}}),
+        );
+    }
+    let payload: RateLimitsResponse = serde_json::from_value(json!({
+        "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 14, "windowDurationMins": 10080}},
+        "rateLimitsByLimitId": by_id
+    }))
+    .unwrap();
+    parse_codex(&payload)
+}
+
+fn ids(reading: &Reading) -> Vec<&str> {
+    reading
+        .windows
+        .iter()
+        .map(|window| window.id.as_str())
+        .collect()
+}
+
+/// Codex's internal buckets are dropped by id, whatever they are named: both windows of each.
+/// Only those exact buckets: one whose id merely starts with the same letters stays.
+#[test]
+fn the_reader_drops_codexs_internal_buckets_by_id_whatever_their_name() {
+    let reading = with_extra_buckets(&[
+        ("base_model_inference", "Inference"),
+        ("codex_bengalfox", "Bengal preview"),
+        ("codex_bengalfox_next", "Next"),
+    ]);
+    assert_eq!(
+        ids(&reading),
+        [
+            "primary",
+            "extra:codex_bengalfox_next",
+            "extra:codex_bengalfox_next:secondary"
+        ]
+    );
+}
+
+/// The reserve and Spark buckets are dropped by the model name their label ends with, whatever
+/// their id, in any case and spacing. A longer name that only ends with a hidden one stays, and so
+/// does a hidden name that is not the last part of the label.
+#[test]
+fn the_reader_drops_the_reserve_and_spark_buckets_by_name_whatever_their_id() {
+    let reading = with_extra_buckets(&[
+        ("reserve", "GPT-Reserve"),
+        ("spark", "  gpt-5.3-codex-SPARK "),
+        ("team_reserve", "Team GPT-Reserve"),
+        ("reserve_team", "GPT-Reserve · Team"),
+    ]);
+    assert_eq!(
+        ids(&reading),
+        [
+            "primary",
+            "extra:reserve_team",
+            "extra:reserve_team:secondary",
+            "extra:team_reserve",
+            "extra:team_reserve:secondary"
+        ]
+    );
+}
+
+/// Every other extra limit stays, with its own name.
+#[test]
+fn the_reader_keeps_every_other_codex_model_limit() {
+    let reading = with_extra_buckets(&[("gpt_luna", "GPT-5.6-Luna")]);
+    let labels: Vec<&str> = reading
+        .windows
+        .iter()
+        .map(|window| window.label.as_str())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "Weekly · all models",
+            "5 hour · GPT-5.6-Luna",
+            "Weekly · GPT-5.6-Luna"
+        ]
+    );
 }
 
 #[test]
@@ -120,9 +198,18 @@ fn orders_weekly_before_session_even_when_app_server_returns_primary_first() {
         }
     }))
     .unwrap();
-    let parsed = parse_codex(&payload);
+    let card = crate::limits::pipeline::finish(
+        crate::dto::AgentId::Codex,
+        crate::dto::LimitsStatus::Ok,
+        None,
+        crate::limits::Parsed {
+            account: None,
+            reading: parse_codex(&payload),
+        },
+    );
 
-    let summary: Vec<(&str, LimitWindowKind)> = parsed
+    let summary: Vec<(&str, LimitWindowKind)> = card
+        .reading
         .windows
         .iter()
         .map(|window| (window.id.as_str(), window.kind))

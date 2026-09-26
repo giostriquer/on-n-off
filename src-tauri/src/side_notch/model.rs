@@ -1,8 +1,8 @@
 use crate::dto::AgentId;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-use crate::dto::LimitsWorkspaceCreditsDto;
-#[cfg(any(target_os = "windows", test))]
-use crate::dto::{LimitWindowDto, LimitWindowKind};
+use crate::dto::{
+    LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
+};
 use serde::{Deserialize, Serialize};
 
 /// A cell's width on screen (points at the standard size); a vertical rail is this thick.
@@ -284,6 +284,139 @@ fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
         1.0
     };
     (value * scale).round() / scale
+}
+
+/// One provider cell as both notches draw it, projected once from the current account's card: its
+/// windows in the card's order (weekly, session, model, as the Limits screen lists them), the window
+/// its ring and figure lead with, and what its inner ring shows. The macOS helper and the Windows
+/// painter draw it and decide none of it; what depends on the clock (a window's percent now, its
+/// reset note) stays with them, since they redraw between reads.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotchProvider {
+    pub provider: AgentId,
+    pub status: LimitsStatus,
+    pub message: Option<String>,
+    pub windows: Vec<LimitWindowDto>,
+    /// The window the ring and the figure show, by id: the headline window, which is the weekly
+    /// window. None for a card without one, and while the account cannot be read. Private, like
+    /// `inner_ring`, so only `current` decides them and they always name what `windows` holds.
+    headline_window_id: Option<String>,
+    /// None while the account cannot be read, or when it has nothing to show there.
+    inner_ring: Option<InnerRing>,
+    pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
+}
+
+/// What a provider cell's inner ring shows: Claude's Fable weekly window, or a business member's
+/// share of the workspace credits. On the macOS wire, `{"kind":"fable","windowId":…}` or
+/// `{"kind":"workspaceShare"}`.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum InnerRing {
+    /// The Fable window, by id among the provider's windows.
+    #[serde(rename_all = "camelCase")]
+    Fable {
+        window_id: String,
+    },
+    WorkspaceShare,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+impl NotchProvider {
+    /// The current account's card among one provider's cards, projected; `None` without one.
+    /// Remembered accounts never reach the notch.
+    pub fn current(entries: Vec<ProviderLimitsDto>) -> Option<Self> {
+        let card = entries.into_iter().find(|entry| entry.current_account)?;
+        let windows = card.reading.windows;
+        let workspace_credits = card.reading.workspace_credits;
+        let (headline_window_id, inner_ring) = if card.status == LimitsStatus::Ok {
+            (
+                windows
+                    .iter()
+                    .find(|window| window.kind == LimitWindowKind::Weekly)
+                    .map(|window| window.id.clone()),
+                inner_ring(card.provider, &windows, workspace_credits.as_ref()),
+            )
+        } else {
+            (None, None)
+        };
+        Some(Self {
+            provider: card.provider,
+            status: card.status,
+            message: card.message,
+            windows,
+            headline_window_id,
+            inner_ring,
+            workspace_credits,
+        })
+    }
+}
+
+/// The names the projection chose, as the macOS helper receives them over the pipe.
+#[cfg(target_os = "macos")]
+impl NotchProvider {
+    pub fn headline_window_id(&self) -> Option<&str> {
+        self.headline_window_id.as_deref()
+    }
+
+    pub fn inner_ring(&self) -> Option<&InnerRing> {
+        self.inner_ring.as_ref()
+    }
+}
+
+/// What the Windows painter draws from the names the projection chose. The macOS helper resolves
+/// the same names on its side of the pipe (`Provider.headline`, `Provider.inner` in NotchCore).
+#[cfg(any(target_os = "windows", test))]
+impl NotchProvider {
+    /// The headline window, which the ring and the figure show.
+    pub fn headline(&self) -> Option<&LimitWindowDto> {
+        let id = self.headline_window_id.as_deref()?;
+        self.windows.iter().find(|window| window.id == id)
+    }
+
+    /// The inner ring's choice and the window it draws: the Fable window, or the workspace share
+    /// drawn as a window (`workspace_share_window`).
+    pub fn inner_window(&self) -> Option<(&InnerRing, LimitWindowDto)> {
+        let ring = self.inner_ring.as_ref()?;
+        let window = match ring {
+            InnerRing::Fable { window_id } => self
+                .windows
+                .iter()
+                .find(|window| &window.id == window_id)
+                .cloned(),
+            InnerRing::WorkspaceShare => {
+                self.workspace_credits.as_ref().map(workspace_share_window)
+            }
+        }?;
+        Some((ring, window))
+    }
+}
+
+/// The inner ring: Claude's Fable window, else a business member's workspace-credit share.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn inner_ring(
+    provider: AgentId,
+    windows: &[LimitWindowDto],
+    share: Option<&LimitsWorkspaceCreditsDto>,
+) -> Option<InnerRing> {
+    fable_window(provider, windows)
+        .map(|window| InnerRing::Fable {
+            window_id: window.id.clone(),
+        })
+        .or_else(|| share.map(|_| InnerRing::WorkspaceShare))
+}
+
+/// Claude's Fable weekly window, which the Claude reader labels "Weekly · Fable" whatever its id.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn fable_window(provider: AgentId, windows: &[LimitWindowDto]) -> Option<&LimitWindowDto> {
+    if provider != AgentId::Claude {
+        return None;
+    }
+    windows.iter().find(|window| {
+        window.kind == LimitWindowKind::Model
+            && window.label.trim().to_lowercase() == "weekly · fable"
+    })
 }
 
 /// The side notch meter ramp, twin of `NotchCore/Meter.swift`.

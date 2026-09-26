@@ -65,9 +65,6 @@ function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
     plan: "pro",
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 74, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
-      { id: "extra:base_model_inference", label: "Weekly · GPT-RESERVE", kind: "model", usedPercent: 0, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
-      { id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
-      { id: "extra:codex_bengalfox:secondary", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
       { id: "extra:gpt-5.6-luna", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
     ],
     credits: { balance: "12.5", unlimited: false },
@@ -181,6 +178,32 @@ describe("Limits", () => {
     expect(within(card("Claude limits · me@claude.example")).getByText("Max ×5")).toBeTruthy();
   });
 
+  it("leads a card with no weekly window with nothing: its session is an ordinary row", async () => {
+    const session = { id: "primary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
+    answer([okClaude()], [okCodex({ windows: [session] })]);
+    renderLimits();
+    const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+    expect(within(region).getByRole("meter", { name: "5 hour · all models" })).toBeTruthy();
+    expect(within(region).queryByText(/reported no rate-limit windows/)).toBeNull();
+    // No headline window, so the active account's dot sits in the header rather than beside it.
+    const indicator = within(region).getByRole("img", { name: "Active account" });
+    expect(region.querySelector("header")!.contains(indicator)).toBe(true);
+  });
+
+  it("moves the active account's dot into the header when it has no headline window", async () => {
+    answer([okClaude()], [okCodex({ windows: [] }), { ...staleCodex(), windows: [] }]);
+    renderLimits();
+    const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+    const indicators = within(region).getAllByRole("img", { name: "Active account" });
+    expect(indicators).toHaveLength(1);
+    expect(region.querySelector("header")!.contains(indicators[0])).toBe(true);
+    const headerDot = (name: string) => card(name).querySelector("header")!.querySelector("[aria-label='Active account']");
+    // With a headline window the dot sits beside it instead, and an inactive account has none.
+    expect(headerDot("Claude limits · me@claude.example")).toBeNull();
+    await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    expect(headerDot("Codex limits · personal@codex.example")).toBeNull();
+  });
+
   it("opens account actions from the header and dismisses them with Escape or an outside click", async () => {
     answer([okClaude()], [okCodex(), staleCodex()]);
     renderLimits();
@@ -253,16 +276,6 @@ describe("Limits", () => {
     // The caption carries the poll interval the user configured, the way Pull requests does.
     expect(screen.getByText("every 5 minutes")).toBeTruthy();
 
-  });
-
-  it("hides internal reserve and Codex Spark windows while keeping other Codex model limits", async () => {
-    answer([okClaude()], [okCodex()]);
-    renderLimits();
-
-    const codex = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
-    expect(within(codex).queryByText(/GPT-RESERVE/i)).toBeNull();
-    expect(within(codex).queryByText(/GPT-5\.3-Codex-Spark/i)).toBeNull();
-    expect(within(codex).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" })).toBeTruthy();
   });
 
   // The fill used to step to `--warn` at 70 %, which is lighter than the accent it replaced. It now

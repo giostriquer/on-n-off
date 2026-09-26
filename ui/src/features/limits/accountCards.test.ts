@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { accountCards, orderAccountCards } from "./accountCards";
+import { presentLimitAccount } from "./limitPresentation";
 
 const profile: SavedProfile = {
   id: "saved", observationId: "profile:user-team", identity: { provider: "codex", userId: "user", workspaceId: "team" },
@@ -37,6 +38,18 @@ it.each([
 it("counts a scoped read that carries only banked resets as an observation", () => {
   const resetsOnly = { ...scoped, windows: [], resetCredits: { availableCount: 1, nextExpiresAt: null } };
   expect(accountCards([resetsOnly, legacy], [profile]).entries).toEqual([resetsOnly]);
+});
+// The Codex reader drops the windows no surface shows before a card leaves the backend, so a card
+// and the account list count the same windows: every one it carries. A window a surface once hid
+// replaces the account's history in the list, and the card shows it as remembered usage.
+it("counts every window a card carries, as the card itself does", () => {
+  const onlyAWindowOnceHidden = {
+    ...scoped,
+    windows: [{ ...scoped.windows[0], id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model" as const }],
+  };
+
+  expect(accountCards([onlyAWindowOnceHidden, legacy], [profile]).entries).toEqual([onlyAWindowOnceHidden]);
+  expect(presentLimitAccount(onlyAWindowOnceHidden, "fallback").remembered).toBe(true);
 });
 it("does not infer identity from email without a saved profile", () => {
   expect(accountCards([scoped, legacy], []).entries).toEqual([scoped, legacy]);

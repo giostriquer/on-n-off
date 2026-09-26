@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, visibleLimitWindows, presentWorkspaceShare } from "./limitPresentation";
+import { hasObservations, headlineWindow, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, presentWorkspaceShare } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -57,19 +57,23 @@ describe("presentLimitWindow", () => {
   });
 });
 
-describe("visibleLimitWindows", () => {
-  it("keeps a longer model name that only ends with a hidden Codex model name", () => {
-    const entry: ProviderLimits = {
-      provider: "codex",
-      status: "ok",
-      currentAccount: true,
-      windows: [
-        { ...window, id: "extra:reserve", label: "Weekly · GPT-Reserve" },
-        { ...window, id: "extra:team-reserve", label: "Weekly · Team GPT-Reserve" },
-      ],
-    };
+describe("headlineWindow", () => {
+  const card = (windows: LimitWindow[]): ProviderLimits => ({ provider: "claude", status: "ok", currentAccount: true, windows });
+  const weekly: LimitWindow = { ...window, id: "weekly_all", label: "Weekly · all models", kind: "weekly" };
+  const session: LimitWindow = { ...window, id: "session", kind: "session" };
+  const fable: LimitWindow = { ...window, id: "weekly_fable", label: "Weekly · Fable", kind: "model" };
 
-    expect(visibleLimitWindows(entry).map(({ id }) => id)).toEqual(["extra:team-reserve"]);
+  it("leads with the weekly window, the headline window, and keeps the rest in the order the backend sent", () => {
+    expect(headlineWindow(card([weekly, session, fable]))).toEqual({ headline: weekly, rest: [session, fable] });
+  });
+
+  it("has no headline without a weekly window: the session and the rest are ordinary rows", () => {
+    expect(headlineWindow(card([session, fable]))).toEqual({ headline: undefined, rest: [session, fable] });
+    expect(headlineWindow(card([fable]))).toEqual({ headline: undefined, rest: [fable] });
+  });
+
+  it("has no headline without windows", () => {
+    expect(headlineWindow(card([]))).toEqual({ headline: undefined, rest: [] });
   });
 });
 
@@ -205,10 +209,6 @@ describe("hasObservations", () => {
     // Every current Codex read reports a count, usually 0; on its own that observed nothing.
     expect(hasObservations({ ...bare, resetCredits: { availableCount: 0, nextExpiresAt: null } })).toBe(false);
     expect(hasObservations({ ...bare, resetCredits: { availableCount: 1, nextExpiresAt: null } })).toBe(true);
-  });
-
-  it("lets a caller count only the windows it shows", () => {
-    expect(hasObservations({ ...bare, windows: [window] }, [])).toBe(false);
   });
 
   it("keeps a card with only a workspace-credit share as a paused refresh rather than an empty one", () => {

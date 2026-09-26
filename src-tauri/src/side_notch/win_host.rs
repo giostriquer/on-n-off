@@ -4,15 +4,12 @@
 
 #![allow(unsafe_code)]
 
-use super::model::{layout, GithubList, NotchSnapshot, RAIL_ORDER};
+use super::model::{layout, GithubList, NotchProvider, NotchSnapshot, RAIL_ORDER};
 use super::win_paint::{
     CellData, PrCellData, PrListData, PrRowData, ProviderData, RailData, MAX_PULL_REQUESTS,
 };
 use super::win_window::{WinAction, WindowMsg};
-use crate::dto::{
-    AgentId, GithubPrDto, GithubPrsDto, LimitWindowDto, LimitsStatus, LimitsWorkspaceCreditsDto,
-    ProviderLimitsDto,
-};
+use crate::dto::{AgentId, GithubPrDto, GithubPrsDto};
 use crate::side_notch::sessions::{self, LiveSession};
 use serde::Serialize;
 use std::{
@@ -117,30 +114,6 @@ impl Delivery {
     }
 }
 
-/// One provider on the in-memory wire: its quota snapshot.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NativeProvider {
-    pub provider: AgentId,
-    pub status: LimitsStatus,
-    pub message: Option<String>,
-    pub windows: Vec<LimitWindowDto>,
-    /// A business workspace member's credit share, which the Codex cell draws on its inner ring.
-    pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
-}
-
-fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
-    entries
-        .into_iter()
-        .find(|entry| entry.current_account)
-        .map(|entry| NativeProvider {
-            provider: entry.provider,
-            status: entry.status,
-            message: entry.message,
-            windows: entry.reading.windows,
-            workspace_credits: entry.reading.workspace_credits,
-        })
-}
-
 /// The pull-request cell's data: only the selected lists, each capped, with the row
 /// fields the popover shows. No account identifiers beyond the author logins GitHub
 /// already displays.
@@ -192,7 +165,7 @@ fn pr_cell(dto: &GithubPrsDto, selected: &[GithubList]) -> PrCellData {
 /// The selected providers' current-account entries in rail order.
 fn rail_cells(
     snapshot: &NotchSnapshot,
-    providers: &[Poll<Option<NativeProvider>>],
+    providers: &[Poll<Option<NotchProvider>>],
     session_rows: &[Vec<LiveSession>],
     pulls: &Poll<Option<GithubPrsDto>>,
 ) -> Vec<CellData> {
@@ -204,11 +177,7 @@ fn rail_cells(
         .filter_map(|(index, _)| {
             providers[index].value.as_ref().map(|entry| {
                 CellData::Provider(ProviderData {
-                    provider: entry.provider,
-                    status: entry.status,
-                    message: entry.message.clone(),
-                    windows: entry.windows.clone(),
-                    workspace_credits: entry.workspace_credits.clone(),
+                    cell: entry.clone(),
                     sessions: session_rows[index].clone(),
                 })
             })
@@ -244,7 +213,7 @@ fn read_sessions(selected: &[AgentId]) -> Vec<Vec<LiveSession>> {
 }
 
 enum Read {
-    Limits(usize, Option<NativeProvider>),
+    Limits(usize, Option<NotchProvider>),
     Sessions(Vec<Vec<LiveSession>>),
     /// The screen's whole answer; the selected lists are projected when a frame is
     /// built, so a settings change shows at once instead of after the next poll. Boxed: it
@@ -368,7 +337,7 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
     let mut window_tx: Option<mpsc::Sender<WindowMsg>> = None;
     // Actions only arrive while a window exists; until one does, this end is disconnected.
     let (_no_window_yet, mut action_rx) = mpsc::channel::<WinAction>();
-    let mut providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] =
+    let mut providers: [Poll<Option<NotchProvider>>; PROVIDER_COUNT] =
         [(); PROVIDER_COUNT].map(|_| Poll::new(None));
     let mut session_poll: Poll<Vec<Vec<LiveSession>>> = Poll::new(vec![Vec::new(); PROVIDER_COUNT]);
     let mut pulls: Poll<Option<GithubPrsDto>> = Poll::new(None);
@@ -486,7 +455,7 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                 thread::spawn(move || {
                     let _ = sender.send(Read::Limits(
                         index,
-                        current_provider(crate::limits_refresh::read_limits(agent, force)),
+                        NotchProvider::current(crate::limits_refresh::read_limits(agent, force)),
                     ));
                 });
             }
@@ -541,7 +510,7 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
 
 fn rail_data(
     snapshot: &NotchSnapshot,
-    providers: &[Poll<Option<NativeProvider>>],
+    providers: &[Poll<Option<NotchProvider>>],
     sessions: &Poll<Vec<Vec<LiveSession>>>,
     pulls: &Poll<Option<GithubPrsDto>>,
     action_error: Option<&str>,
@@ -556,7 +525,7 @@ fn rail_data(
 fn handle_action(
     app: &AppHandle,
     snapshot: &mut NotchSnapshot,
-    providers: &mut [Poll<Option<NativeProvider>>],
+    providers: &mut [Poll<Option<NotchProvider>>],
     session_poll: &mut Poll<Vec<Vec<LiveSession>>>,
     pulls: &mut Poll<Option<GithubPrsDto>>,
     action: WinAction,
