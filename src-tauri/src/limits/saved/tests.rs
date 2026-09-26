@@ -1,6 +1,6 @@
 use super::*;
 use crate::dto::LimitsResetCreditsDto;
-use crate::http::{serve_once, serve_once_capturing};
+use crate::http::{head_header, serve_once, serve_once_capturing};
 use serde_json::json;
 
 fn identity(provider: AgentId) -> Identity {
@@ -42,6 +42,45 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
         dto.account.unwrap().id,
         identity(AgentId::Claude).observation_key()
     );
+}
+
+/// The headers a saved Claude read sends: the token and the OAuth beta header on both requests,
+/// and nothing else of its own.
+#[test]
+fn saved_claude_sends_the_token_and_the_oauth_beta_header_on_both_requests() {
+    let (profile, p) = serve_once_capturing(
+        "200 OK",
+        &[],
+        r#"{"account":{"uuid":"user"},"organization":{"uuid":"team"}}"#,
+    );
+    let (usage, u) = serve_once_capturing("200 OK", &[], r#"{"seven_day":{"utilization":61}}"#);
+    read_at(
+        &identity(AgentId::Claude),
+        &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
+        &profile,
+        &usage,
+        CodexEndpoints {
+            usage: "unused",
+            reset_credits: "unused",
+            credit_usage: "unused",
+            subscriptions: "unused",
+        },
+    )
+    .unwrap();
+    for head in [p.join().unwrap().head, u.join().unwrap().head] {
+        assert_eq!(
+            head_header(&head, "authorization"),
+            Some("Bearer fixture-access"),
+            "{head}"
+        );
+        assert_eq!(
+            head_header(&head, "anthropic-beta"),
+            Some("oauth-2025-04-20"),
+            "{head}"
+        );
+        assert_eq!(head_header(&head, "cache-control"), None, "{head}");
+        assert_eq!(head_header(&head, "content-type"), None, "{head}");
+    }
 }
 
 /// A saved Claude account carries the subscription status its profile reports, like the native one.

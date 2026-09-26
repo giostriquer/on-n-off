@@ -328,6 +328,28 @@ fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
         Some("oauth-2025-04-20"),
         "{usage_head}"
     );
+    // The profile request states a JSON body it does not send and no OAuth beta; the usage request
+    // asks for no cached answer too.
+    assert_eq!(
+        head_header(&profile_head, "content-type"),
+        Some("application/json"),
+        "{profile_head}"
+    );
+    assert_eq!(
+        head_header(&profile_head, "anthropic-beta"),
+        None,
+        "{profile_head}"
+    );
+    assert_eq!(
+        head_header(&usage_head, "cache-control"),
+        Some("no-cache"),
+        "{usage_head}"
+    );
+    assert_eq!(
+        head_header(&usage_head, "content-type"),
+        None,
+        "{usage_head}"
+    );
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
     assert_eq!(dto.reading.plan.as_deref(), Some("max"));
     assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
