@@ -483,19 +483,13 @@ impl SavedReadUrls<'static> {
     };
 }
 
-/// A saved profile's Claude card, read at `now_ms` with its login's `credential`, which must sign
-/// in as the profile's user in its workspace. No CLI is started and nothing is renewed here.
+/// A saved profile's Claude card, read with its login's `credential`, which must sign in as the
+/// profile's user in its workspace. No CLI is started and nothing is renewed here.
 pub(crate) fn read_saved_claude(
     identity: &Identity,
     credential: ClaudeCredential,
-    now_ms: i64,
     urls: &SavedReadUrls<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    // As the signed-in read reports an expired login without asking (`read_claude_credential`).
-    // A login on-n-off renews was renewed before this read (`accounts/usage.rs`).
-    if credential.expires_at_ms.is_some_and(|at| at <= now_ms) {
-        return Err(SavedReadError::Expired);
-    }
     let parsed = claude_read(
         &credential,
         Some(&expected_claude_identity(identity)),

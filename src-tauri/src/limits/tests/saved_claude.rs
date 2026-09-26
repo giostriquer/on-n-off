@@ -34,7 +34,7 @@ fn read_at(
     usage: &str,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     let credential = credentials::parse_claude_credential(auth).expect("the fixture's credential");
-    read_saved_claude(identity, credential, NOW_MS, &urls(profile, usage))
+    read_saved_claude(identity, credential, &urls(profile, usage))
 }
 
 #[test]
@@ -235,33 +235,6 @@ fn matching_claude_user_in_another_workspace_is_rejected_before_usage() {
     assert_eq!(result.err(), Some(SavedReadError::OtherAccount));
 }
 
-/// A saved Claude login whose access token has reached its `expiresAt` is not sent: the read
-/// says it expired. One short of it is read.
-#[test]
-fn an_expired_saved_claude_login_sends_nothing() {
-    let refused = crate::http::refused_url();
-    for expires_at in [1, NOW_MS] {
-        let auth = json!({"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"r","expiresAt":expires_at}});
-        let result = read_at(&identity(AgentId::Claude), &auth, &refused, &refused);
-        assert_eq!(result.err(), Some(SavedReadError::Expired), "{expires_at}");
-    }
-
-    let (profile, p) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user"},"organization":{"uuid":"team"}}"#,
-    );
-    let (usage, u) = serve_once("200 OK", r#"{"seven_day":{"utilization":61}}"#);
-    let dto = read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"r","expiresAt":NOW_MS + 1}}),
-        &profile,
-        &usage,
-    );
-    assert!(p.join().unwrap().contains("Bearer fixture-access"));
-    u.join().unwrap();
-    assert_eq!(dto.unwrap().reading.windows[0].used_percent, 61.0);
-}
-
 /// "team" and "enterprise" are Claude plans too. The spending read belongs to Codex's usage read, so
 /// a saved Claude account on either plan has no spending figure.
 #[test]
@@ -353,7 +326,6 @@ fn a_first_claude_reading_is_remembered_as_a_scoped_dated_snapshot() {
     let dto = read_saved_claude(
         &identity(AgentId::Claude),
         max_credential(),
-        NOW_MS,
         &urls(&profile, &usage),
     )
     .unwrap();
@@ -390,7 +362,6 @@ fn saved_claude_session_keeps_the_reported_percentage_and_optional_reset() {
         let dto = read_saved_claude(
             &identity(AgentId::Claude),
             max_credential(),
-            NOW_MS,
             &urls(&profile, &usage),
         )
         .unwrap();
@@ -420,7 +391,6 @@ fn wrong_claude_user_or_workspace_never_contributes_usage() {
         assert!(read_saved_claude(
             &identity(AgentId::Claude),
             max_credential(),
-            NOW_MS,
             &urls(&profile, &crate::http::refused_url()),
         )
         .is_err());

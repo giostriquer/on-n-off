@@ -60,10 +60,16 @@ impl super::Adapter for Claude {
         now_ms: i64,
         urls: &crate::limits::SavedReadUrls<'_>,
     ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
-        let credential = ClaudeLogin::of(login)
+        let login = ClaudeLogin::of(login);
+        let credential = login
             .credential()
             .ok_or(crate::http::HttpError::Unauthorized)?;
-        crate::limits::read_saved_claude(identity, credential, now_ms, urls)
+        // Not sent, as the signed-in read does not send an expired login. One on-n-off owns has
+        // renewed before its read (`accounts/usage.rs`), so this is one on-n-off does not renew.
+        if login.renewal_due(now_ms) {
+            return Err(crate::limits::SavedReadError::Expired);
+        }
+        crate::limits::read_saved_claude(identity, credential, urls)
     }
 
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.
@@ -434,13 +440,8 @@ impl IsolatedSignIn for ClaudeNative {
         identity: &Identity,
     ) -> Option<ProviderLimitsDto> {
         let credential = ClaudeLogin::of(login).credential()?;
-        crate::limits::read_saved_claude(
-            identity,
-            credential,
-            chrono::Utc::now().timestamp_millis(),
-            &crate::limits::SavedReadUrls::LIVE,
-        )
-        .ok()
+        crate::limits::read_saved_claude(identity, credential, &crate::limits::SavedReadUrls::LIVE)
+            .ok()
     }
 
     /// Deletes the sign-in's own scoped Keychain entry, never Claude Code's unscoped one.
