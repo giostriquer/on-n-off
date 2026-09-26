@@ -119,11 +119,13 @@ fn native_changes_before_publication_do_not_save_the_old_candidate() {
     *native.live.borrow_mut() = Some(login("b"));
     let home = vault();
     let ticket = sign_in_ticket(home.path());
+    let before = sealed(home.path());
     assert!(publish(open(home.path()), &ticket, &native, login("a"), true).is_err());
     assert!(
         loaded(home.path()).profiles.is_empty(),
         "wrong account saved"
     );
+    assert_eq!(sealed(home.path()), before, "nothing persisted");
 }
 #[test]
 fn natural_accounts_are_saved_once_and_pending_reauthentication_is_preserved() {

@@ -43,6 +43,31 @@ fn saving_reenrolls_an_account_that_remove_excluded() {
     );
 }
 
+/// Only the current account's own pending sign-in refuses a save; another account's is kept.
+#[test]
+fn saving_beside_another_accounts_pending_sign_in_updates_only_the_current_profile() {
+    let harness = Harness::new();
+    let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    let b = harness.saved(
+        identity(AgentId::Claude, "b", "team"),
+        claude("b", "isolated"),
+    );
+    harness.seed(|db| db.profiles[1].pending_activation = true);
+    harness.signed_in(Some(claude("a", "a2")));
+
+    harness.accounts().save_current(AgentId::Claude).unwrap();
+
+    let vault = harness.vault();
+    assert_eq!(vault.profiles.len(), 2);
+    let profile = |id: &str| vault.profiles.iter().find(|p| p.id == id).unwrap();
+    assert_eq!(generation(profile(&a).login.as_ref()), Some("a2".into()));
+    assert!(profile(&b).pending_activation);
+    assert_eq!(
+        generation(profile(&b).login.as_ref()),
+        Some("isolated".into())
+    );
+}
+
 #[test]
 fn saving_refuses_to_overwrite_a_sign_in_awaiting_activation() {
     let harness = Harness::new();

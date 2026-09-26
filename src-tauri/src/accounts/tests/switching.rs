@@ -39,6 +39,7 @@ fn using_a_profile_publishes_its_login_and_keeps_the_latest_outgoing_one() {
     assert!(vault.recovery().is_none());
     assert!(!harness.vouches(&sign_in));
     assert_eq!(*harness.clients.asked.borrow(), ["activation safe"]);
+    assert_eq!(*harness.native.resolved.borrow(), [AgentId::Claude]);
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
@@ -178,6 +179,30 @@ fn recovery_restores_the_outgoing_login_with_clients_closed() {
 }
 
 #[test]
+fn a_recovery_pending_for_the_other_provider_is_refused() {
+    let harness = Harness::new();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    let codex = harness.saved(identity(AgentId::Codex, "c", "team"), claude("c", "c1"));
+    harness.interrupted(&codex, Some(claude("c", "c0")));
+    harness.signed_in(Some(claude("a", "a2")));
+    let sealed = harness.sealed();
+
+    let error = harness
+        .accounts()
+        .activate(AgentId::Claude, "", Activation::Recover)
+        .unwrap_err();
+
+    assert_eq!(error, "Recovery belongs to the other provider.");
+    assert_eq!(harness.sealed(), sealed);
+    assert_eq!(harness.live(), Some("a2".into()));
+    assert_eq!(
+        harness.vault().recovery().map(|j| j.target_id.clone()),
+        Some(codex)
+    );
+    assert!(harness.heard().is_empty());
+}
+
+#[test]
 fn recovery_without_a_pending_journal_is_refused() {
     let harness = Harness::new();
     two_profiles(&harness);
@@ -223,6 +248,31 @@ fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
     assert!(!harness.vouches(&sign_in));
     assert_eq!(*harness.clients.asked.borrow(), ["closed"]);
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
+}
+
+/// Signing Codex out resolves Codex's native store, and forgets only the user's Codex logins.
+#[test]
+fn signing_out_one_provider_leaves_the_other_providers_logins() {
+    let harness = Harness::new();
+    let claude_a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    let codex_a = harness.saved(identity(AgentId::Codex, "a", "team"), claude("a", "c1"));
+    harness.signed_in(Some(claude("a", "c2")));
+
+    harness.accounts().sign_out(AgentId::Codex).unwrap();
+
+    assert_eq!(*harness.native.resolved.borrow(), [AgentId::Codex]);
+    let vault = harness.vault();
+    let kept = |id: &str| {
+        vault
+            .profiles
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .login
+            .is_some()
+    };
+    assert!(kept(&claude_a) && !kept(&codex_a));
+    assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Codex), true)]);
 }
 
 #[test]

@@ -64,9 +64,13 @@ pub(super) struct NativeState {
     /// How often the native locks were taken and the native login read: the Keychain on macOS.
     pub locks: Cell<usize>,
     pub reads: Cell<usize>,
+    /// Which provider's native store each operation resolved.
+    pub resolved: RefCell<Vec<AgentId>>,
 }
+/// The native store of the provider it was resolved for. Its logins are Claude-shaped whatever
+/// the provider, so an identity is theirs under that provider.
 #[derive(Clone)]
-struct FakeNative(Rc<NativeState>);
+struct FakeNative(Rc<NativeState>, AgentId);
 impl Native for FakeNative {
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
         self.0.locks.set(self.0.locks.get() + 1);
@@ -77,7 +81,11 @@ impl Native for FakeNative {
         Ok(self.0.live.borrow().clone())
     }
     fn identify(&self, login: &Login) -> Result<Identity, String> {
-        super::super::model::identity(AgentId::Claude, &login.auth, &login.account)
+        let claude = super::super::model::identity(AgentId::Claude, &login.auth, &login.account)?;
+        Ok(Identity {
+            provider: self.1,
+            ..claude
+        })
     }
     fn write(&self, login: Option<&Login>) -> Result<(), String> {
         *self.0.live.borrow_mut() = login.cloned();
@@ -184,10 +192,13 @@ impl Harness {
         self.home.path()
     }
     pub fn accounts(&self) -> Accounts {
-        let native = FakeNative(self.native.clone());
+        let native = self.native.clone();
         Accounts {
             home: self.path().into(),
-            native: Box::new(move |_, _| Ok(Box::new(native.clone()))),
+            native: Box::new(move |provider, _| {
+                native.resolved.borrow_mut().push(provider);
+                Ok(Box::new(FakeNative(native.clone(), provider)))
+            }),
             clients: Box::new(FakeClients(self.clients.clone())),
             notify: Box::new(Listener(self.recorder.clone())),
         }
@@ -216,9 +227,11 @@ impl Harness {
     }
     /// Leave an interrupted switch to `target`, from `outgoing`, awaiting recovery.
     pub fn interrupted(&self, target: &str, outgoing: Option<Login>) {
-        let outgoing_identity = outgoing
-            .as_ref()
-            .map(|login| FakeNative(self.native.clone()).identify(login).unwrap());
+        let outgoing_identity = outgoing.as_ref().map(|login| {
+            FakeNative(self.native.clone(), AgentId::Claude)
+                .identify(login)
+                .unwrap()
+        });
         self.seed(|db| {
             db.begin_recovery(Recovery {
                 target_id: target.into(),

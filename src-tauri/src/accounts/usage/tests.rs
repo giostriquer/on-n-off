@@ -191,6 +191,32 @@ fn removal_or_reauthentication_during_http_discards_the_late_read() {
         assert!(!home.path().join(".on-n-off/limits").exists());
     }
 }
+/// A remembered login or a private renewal can replace a saved login without an account change:
+/// the login the reading was made with, not only the epoch, vouches for its publication.
+#[test]
+fn a_login_replaced_without_an_account_change_during_http_discards_the_late_read() {
+    let home = tempfile::tempdir().unwrap();
+    let p = stored(home.path());
+    let result = poll_with(
+        home.path(),
+        &p,
+        &ticket(home.path()),
+        false,
+        &|| Ok(open(home.path())),
+        &|p| {
+            rewrite(home.path(), |db| {
+                db.profiles[0].login.as_mut().unwrap().auth["claudeAiOauth"]["accessToken"] =
+                    json!("replacement");
+            });
+            FetchResult {
+                login: p.login.clone(),
+                result: Ok(reading(p)),
+            }
+        },
+    );
+    assert!(result.is_none());
+    assert!(!home.path().join(".on-n-off/limits").exists());
+}
 /// Any account change while HTTP is in flight discards the reading, even one that left this
 /// profile's login alone: the epoch, not only the login, vouches for a usage publication.
 #[test]
