@@ -248,10 +248,11 @@ fn poll_with(
                     account.label.clone_from(&profile.email);
                 }
             }
-            if crate::limits::login::remember(home, &dto).is_err() {
+            let remembered = crate::limits::remember(home, dto);
+            if remembered.saved.is_err() {
                 return Some(Err("Could not save the latest usage reading.".into()));
             }
-            Some(Ok(dto))
+            Some(Ok(remembered.card))
         }
         Err(_) => Some(Err(error?)),
     }
@@ -333,7 +334,8 @@ fn merge(
         return;
     }
     let remembered = existing.map(|i| &entries[i]);
-    let mut dto = match result {
+    let dto = match result {
+        // The poll kept from the account's file as it wrote over it (`limits::remember`).
         Ok(dto) => dto,
         // A failed poll read nothing of its own: the card keeps its identity and shows what it
         // remembers under the failure.
@@ -350,19 +352,20 @@ fn merge(
                     false,
                 ),
             };
-            ProviderLimitsDto {
+            let mut dto = ProviderLimitsDto {
                 provider,
                 status: LimitsStatus::Failed,
                 message: Some(error),
                 account,
                 current_account,
                 reading: Reading::default(),
+            };
+            if let Some(remembered) = remembered.map(|card| card.reading.clone()) {
+                crate::limits::keep_remembered(&mut dto, remembered);
             }
+            dto
         }
     };
-    if let Some(remembered) = remembered.map(|card| card.reading.clone()) {
-        crate::limits::keep_remembered(&mut dto, remembered);
-    }
     if let Some(i) = existing {
         entries[i] = dto;
     } else {

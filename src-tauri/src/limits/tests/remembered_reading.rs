@@ -363,11 +363,11 @@ fn file_of(store: &SnapshotStore, id: &str) -> Value {
 }
 
 /// A signed-in card keyed the older way, by the user alone (Claude Code's `.claude.json` names no
-/// account), whose own snapshot a saved profile's scoped snapshot hides. The card keeps nothing of
-/// that snapshot, which the list never shows; the file it writes keeps the snapshot's weekly window
-/// and banked resets.
+/// account), whose own snapshot a saved profile's scoped snapshot hides from the list. The read
+/// keeps what it could not tell from that account's own file all the same, and the card shows what
+/// the file holds: its weekly window and banked resets.
 #[test]
-fn a_legacy_keyed_card_keeps_nothing_of_its_hidden_snapshot_but_its_file_does() {
+fn a_legacy_keyed_card_keeps_from_its_own_file_even_when_the_list_hides_it() {
     let home = scratch_dir("limits-reading-legacy-keyed");
     let store = SnapshotStore::for_home(&home);
     store
@@ -407,6 +407,9 @@ fn a_legacy_keyed_card_keeps_nothing_of_its_hidden_snapshot_but_its_file_does() 
 
     let listed = aggregate_accounts(&store, answered);
 
+    let weekly = json!({"id": "weekly_all", "label": "Weekly · all models", "kind": "weekly",
+                        "usedPercent": 40.0, "observedAt": "2026-08-17T09:00:00.000Z"});
+    let resets = json!({"availableCount": 2, "nextExpiresAt": "2100-09-01T12:00:00+00:00"});
     assert_eq!(
         wire(&listed[0]),
         json!({
@@ -414,20 +417,14 @@ fn a_legacy_keyed_card_keeps_nothing_of_its_hidden_snapshot_but_its_file_does() 
             "status": "ok",
             "account": {"id": "user-a", "label": "a@example.com"},
             "currentAccount": true,
-            "windows": [session]
+            "windows": [weekly, session],
+            "resetCredits": resets
         })
     );
     let file = file_of(&store, "user-a");
     assert_eq!(
         (&file["windows"], &file["resetCredits"]),
-        (
-            &json!([
-                {"id": "weekly_all", "label": "Weekly · all models", "kind": "weekly",
-                 "usedPercent": 40.0, "observedAt": "2026-08-17T09:00:00.000Z"},
-                session
-            ]),
-            &json!({"availableCount": 2, "nextExpiresAt": "2100-09-01T12:00:00+00:00"})
-        )
+        (&json!([weekly, session]), &resets)
     );
     let _ = fs::remove_dir_all(&home);
 }

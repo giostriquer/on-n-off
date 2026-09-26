@@ -334,7 +334,7 @@ fn publish(
             if let Some(usage) = usage {
                 // Only a successfully published login may add observations. Quota storage
                 // failure must not discard a valid login; its previous history remains untouched.
-                let _ = crate::limits::login::remember(home, &usage);
+                let _ = crate::limits::remember(home, usage);
             }
             drop(operation);
             Ok(())

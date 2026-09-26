@@ -43,7 +43,7 @@ fn isolated_claude_sign_in_keeps_a_scoped_dated_snapshot_without_reading_the_act
     assert!(account.id.starts_with("profile:"));
     assert_eq!(account.legacy_id.as_deref(), Some("user"));
     assert_eq!(account.label.as_deref(), Some("me@example.com"));
-    remember(home.path(), &dto).unwrap();
+    remember(home.path(), dto.clone()).saved.unwrap();
     let reloaded = SnapshotStore::for_home(home.path()).load(AgentId::Claude);
     assert_eq!(reloaded.len(), 1);
     assert_eq!(reloaded[0].reading.windows, dto.reading.windows);
@@ -112,7 +112,7 @@ fn saved_claude_session_keeps_the_reported_percentage_and_optional_reset() {
         .unwrap();
         profile_request.join().unwrap();
         usage_request.join().unwrap();
-        remember(home.path(), &dto).unwrap();
+        remember(home.path(), dto.clone()).saved.unwrap();
         let saved = SnapshotStore::for_home(home.path()).load(AgentId::Claude);
         let session = saved[0]
             .reading
@@ -167,16 +167,16 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
             })
     };
     legacy.reading.windows[0].observed_at = "2026-09-11T12:00:00Z".into();
-    remember(home.path(), &legacy).unwrap();
+    remember(home.path(), legacy.clone()).saved.unwrap();
     let mut unrelated = legacy.clone();
     unrelated.account.as_mut().unwrap().id = "other-team".into();
-    remember(home.path(), &unrelated).unwrap();
+    remember(home.path(), unrelated.clone()).saved.unwrap();
     let mut fresh = legacy.clone();
     fresh.account.as_mut().unwrap().id = "profile:verified-user-team".into();
     fresh.account.as_mut().unwrap().legacy_id = Some("team".into());
     fresh.reading.windows[0].used_percent = 42.0;
     fresh.reading.windows[0].observed_at = "2026-09-13T12:00:00Z".into();
-    remember(home.path(), &fresh).unwrap();
+    remember(home.path(), fresh.clone()).saved.unwrap();
     let cards = SnapshotStore::for_home(home.path()).load(AgentId::Codex);
     assert_eq!(cards.len(), 2);
     assert_eq!(

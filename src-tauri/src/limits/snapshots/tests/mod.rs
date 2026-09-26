@@ -496,10 +496,10 @@ fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_an
     };
     let mut remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
     remembered.reading.reset_credits = banked(1);
-    store.save(&remembered).unwrap();
+    store.remember(remembered.clone()).saved.unwrap();
 
     let unknown = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T11:00:00.000Z");
-    store.save(&unknown).unwrap();
+    store.remember(unknown.clone()).saved.unwrap();
     let loaded = store.load(AgentId::Codex);
     assert_eq!(loaded[0].reading.windows, unknown.reading.windows);
     assert_eq!(loaded[0].reading.reset_credits, banked(1));
@@ -507,7 +507,7 @@ fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_an
     // An answer replaces the stored count, even one observed at the same moment.
     let mut answered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T11:00:00.000Z");
     answered.reading.reset_credits = banked(0);
-    store.save(&answered).unwrap();
+    store.remember(answered.clone()).saved.unwrap();
     assert_eq!(
         store.load(AgentId::Codex)[0].reading.reset_credits,
         banked(0)
@@ -658,9 +658,12 @@ fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_stored_figure() {
     };
     let mut dto = business("2026-08-17T10:00:00.000Z");
     dto.reading.credits_spent = credits_spent(18303.4);
-    store.save(&dto).unwrap();
+    store.remember(dto.clone()).saved.unwrap();
 
-    store.save(&business("2026-08-17T11:00:00.000Z")).unwrap();
+    store
+        .remember(business("2026-08-17T11:00:00.000Z"))
+        .saved
+        .unwrap();
     assert_eq!(
         store.load(AgentId::Codex)[0].reading.credits_spent,
         credits_spent(18303.4)
@@ -668,7 +671,7 @@ fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_stored_figure() {
 
     let mut answered = business("2026-08-17T12:00:00.000Z");
     answered.reading.credits_spent = credits_spent(5.0);
-    store.save(&answered).unwrap();
+    store.remember(answered.clone()).saved.unwrap();
     assert_eq!(
         store.load(AgentId::Codex)[0].reading.credits_spent,
         credits_spent(5.0)
@@ -693,15 +696,16 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
     let store = SnapshotStore::for_home(&home);
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
     dto.reading.subscription = term(false);
-    store.save(&dto).unwrap();
+    store.remember(dto.clone()).saved.unwrap();
 
     store
-        .save(&snapshot(
+        .remember(snapshot(
             AgentId::Codex,
             "acct-1",
             "a@x",
             "2026-08-17T11:00:00.000Z",
         ))
+        .saved
         .unwrap();
     assert_eq!(
         store.load(AgentId::Codex)[0].reading.subscription,
@@ -710,7 +714,7 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
 
     let mut answered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T12:00:00.000Z");
     answered.reading.subscription = term(true);
-    store.save(&answered).unwrap();
+    store.remember(answered.clone()).saved.unwrap();
     assert_eq!(
         store.load(AgentId::Codex)[0].reading.subscription,
         term(true)
@@ -718,14 +722,15 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
 
     let mut claude = snapshot(AgentId::Claude, "acct-c", "c@x", "2026-08-17T10:00:00.000Z");
     claude.reading.subscription = term(true);
-    store.save(&claude).unwrap();
+    store.remember(claude.clone()).saved.unwrap();
     store
-        .save(&snapshot(
+        .remember(snapshot(
             AgentId::Claude,
             "acct-c",
             "c@x",
             "2026-08-17T11:00:00.000Z",
         ))
+        .saved
         .unwrap();
     assert_eq!(store.load(AgentId::Claude)[0].reading.subscription, None);
     let _ = std::fs::remove_dir_all(&home);
@@ -740,15 +745,16 @@ fn a_personal_plan_read_drops_the_stored_figure() {
     let mut business = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
     business.reading.plan = Some("business".to_string());
     business.reading.credits_spent = credits_spent(18303.4);
-    store.save(&business).unwrap();
+    store.remember(business.clone()).saved.unwrap();
 
     store
-        .save(&snapshot(
+        .remember(snapshot(
             AgentId::Codex,
             "acct-1",
             "a@x",
             "2026-08-17T11:00:00.000Z",
         ))
+        .saved
         .unwrap();
 
     assert_eq!(store.load(AgentId::Codex)[0].reading.credits_spent, None);

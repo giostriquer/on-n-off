@@ -24,6 +24,7 @@ mod renewal;
 mod snapshots;
 
 pub(crate) use reading::keep_remembered;
+pub(crate) use snapshots::Remembered;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -260,29 +261,28 @@ fn provider_read_guard(agent: AgentId) -> MutexGuard<'static, ()> {
 
 /// The current account's card, keeping what its read could not tell from the account's remembered
 /// reading, persisted; then the other remembered accounts, newest first.
-fn aggregate_accounts(
-    store: &SnapshotStore,
-    mut current: ProviderLimitsDto,
-) -> Vec<ProviderLimitsDto> {
+fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<ProviderLimitsDto> {
     let current_account = current.account.as_ref().map(|account| account.id.clone());
     let mut remembered = store.load(current.provider);
-    let prior = current_account.as_deref().and_then(|id| {
-        remembered
-            .iter()
-            .position(|snapshot| {
-                snapshot
-                    .account
-                    .as_ref()
-                    .is_some_and(|account| account.id == id)
-            })
-            .map(|index| remembered.remove(index))
+    remembered.retain(|snapshot| {
+        snapshot.account.as_ref().map(|account| &account.id) != current_account.as_ref()
     });
-    keep_remembered(
-        &mut current,
-        prior.map(|prior| prior.reading).unwrap_or_default(),
-    );
-    let _ = store.save(&current);
+    let current = store.remember(current).card;
     snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
+}
+
+/// `card`, keeping what its read could not tell from what `home` remembers of its account, written
+/// over that account's file when it observed something datable ([`SnapshotStore::remember`]).
+/// Called for a saved profile's poll and the first usage after a sign-in, only once the account
+/// registry accepted the login it was read with.
+pub(crate) fn remember(home: &Path, card: ProviderLimitsDto) -> Remembered {
+    SnapshotStore::for_home(home).remember(card)
+}
+
+/// What `home` remembers for `provider`, as the next read loads it.
+#[cfg(test)]
+pub(crate) fn remembered(home: &Path, provider: AgentId) -> Vec<ProviderLimitsDto> {
+    SnapshotStore::for_home(home).load(provider)
 }
 
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
