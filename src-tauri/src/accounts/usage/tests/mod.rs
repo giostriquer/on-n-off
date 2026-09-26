@@ -231,13 +231,19 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
                 calls.set(calls.get() + 1);
                 FetchResult {
                     login: p.login.clone(),
-                    result: Err(HttpError::RateLimited(RateLimitReset::RetryAfter(1800)).into()),
+                    result: Err(HttpError::RateLimited(RateLimitReset::RetryAfter(7200)).into()),
                 }
             },
         );
         assert!(result.unwrap().is_err());
     }
     assert_eq!(calls.get(), 1);
+    // The service's Retry-After outlasts the longest backoff of its own (an hour), so only it can
+    // hold the account back two hours.
+    assert!(
+        attempt(home.path(), &p).next >= Instant::now() + Duration::from_secs(7200 - 60),
+        "the next poll waits out the Retry-After"
+    );
     // A different saved account is not held behind this account's backoff.
     let mut other = p.clone();
     other.id = "other-profile".into();
