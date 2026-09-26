@@ -175,8 +175,6 @@ fn search_path_keeps_tier_order_and_dedupes() {
     );
 }
 
-/// The well-known tier (not just the process PATH) reaches the search path, and through it every
-/// spawned CLI. It is built from the home the search path is for: a test build has none of its own.
 #[test]
 fn the_search_path_carries_the_well_known_tier_of_its_home() {
     let home = scratch_dir("on-n-off-search-home");
