@@ -3,11 +3,11 @@ use crate::dto::AgentId;
 use serde_json::json;
 use std::cell::RefCell;
 
-/// A scratch home with an empty vault under a fixture key.
+/// A scratch home with an empty vault under a fixture key, one account change old.
 fn vault() -> tempfile::TempDir {
     let home = tempfile::tempdir().unwrap();
     open(home.path())
-        .change(ChangeKind::Metadata, |_| Ok(()))
+        .change(ChangeKind::Account, |_| Ok(()))
         .unwrap();
     home
 }
@@ -17,8 +17,9 @@ fn open(home: &Path) -> Store {
 fn loaded(home: &Path) -> Database {
     open(home).load().unwrap()
 }
-fn sealed(home: &Path) -> Vec<u8> {
-    std::fs::read(home.join(".on-n-off/accounts/vault.enc")).unwrap()
+/// A digest of the sealed vault: every write changes it, since every seal takes a new nonce.
+fn sealed(home: &Path) -> String {
+    crate::sha::sha256_hex(&std::fs::read(home.join(".on-n-off/accounts/vault.enc")).unwrap())
 }
 fn sign_in_ticket(home: &Path) -> Ticket {
     loaded(home).ticket(Guard::SignIn).unwrap()
@@ -126,6 +127,27 @@ fn native_changes_before_publication_do_not_save_the_old_candidate() {
         "wrong account saved"
     );
     assert_eq!(sealed(home.path()), before, "nothing persisted");
+}
+/// A candidate no longer eligible once the lease is held, because another app instance saved it
+/// first, publishes nothing and leaves the vault as it was.
+#[test]
+fn an_ineligible_candidate_at_publication_writes_nothing() {
+    let native = client();
+    let home = vault();
+    let ticket = sign_in_ticket(home.path());
+    open(home.path())
+        .change(ChangeKind::Metadata, |db| {
+            db.save(native.identify(&login("a"))?, login("a"), None)
+        })
+        .unwrap();
+    let before = sealed(home.path());
+
+    assert_eq!(
+        publish(open(home.path()), &ticket, &native, login("a"), true),
+        Ok(false)
+    );
+
+    assert_eq!(sealed(home.path()), before, "rewrote an unchanged vault");
 }
 #[test]
 fn natural_accounts_are_saved_once_and_pending_reauthentication_is_preserved() {

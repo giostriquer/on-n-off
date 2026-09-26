@@ -139,6 +139,27 @@ fn an_edit_that_fails_writes_nothing() {
 }
 
 #[test]
+fn a_change_or_publication_that_changes_nothing_writes_nothing() {
+    let home = seeded("a1");
+    let before = sealed(home.path());
+    let ticket = loaded(home.path()).ticket(Guard::SignIn).unwrap();
+
+    open(home.path())
+        .change(ChangeKind::Metadata, |_| Ok(()))
+        .unwrap();
+    open(home.path()).publish(&ticket, |_| Ok(())).unwrap();
+    assert!(
+        sealed(home.path()) == before,
+        "an unchanged vault was rewritten"
+    );
+
+    open(home.path())
+        .change(ChangeKind::Account, |_| Ok(()))
+        .unwrap();
+    assert!(sealed(home.path()) != before, "a bump is a change");
+}
+
+#[test]
 fn a_change_is_durable_before_its_follow_up_and_released_before_it_returns() {
     let home = seeded("a1");
 

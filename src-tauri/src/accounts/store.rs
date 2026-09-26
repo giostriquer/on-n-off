@@ -532,8 +532,10 @@ impl Store {
         }
     }
     fn persist(&self, db: &Database) -> Result<(), String> {
-        let plain = serde_json::to_vec(db).map_err(|_| "Cannot encode saved profiles.")?;
-        let sealed = super::vault::seal(&self.key, &plain)?;
+        self.write(&encode(db)?)
+    }
+    fn write(&self, plain: &[u8]) -> Result<(), String> {
+        let sealed = super::vault::seal(&self.key, plain)?;
         super::vault::atomic_write(&self.root.join("vault.enc"), &sealed)
     }
     pub fn sealer(&self) -> Sealer {
@@ -552,8 +554,9 @@ impl Store {
     }
 
     /// Makes one change under this store's lease: refuses it by `kind`'s rule, bumps the
-    /// sign-in epoch unless it is a metadata edit, lets `edit` change the database, persists it and
-    /// releases the lease before returning, so the caller announces the change after release.
+    /// sign-in epoch unless it is a metadata edit, lets `edit` change the database, persists it if
+    /// anything changed and releases the lease before returning, so the caller announces the
+    /// change after release.
     pub fn change<T>(
         self,
         kind: ChangeKind<'_>,
@@ -573,8 +576,9 @@ impl Store {
         self.commit(|db| db.admit(&kind), edit, then)
     }
     /// Publishes after slow work that ran without the lease: loads the vault under this lease,
-    /// refuses unless it still vouches for `ticket`, lets `edit` change it, persists it and
-    /// releases the lease. A publication is not an account change, so it bumps nothing.
+    /// refuses unless it still vouches for `ticket`, lets `edit` change it, persists it if `edit`
+    /// changed anything and releases the lease. A publication is not an account change, so it
+    /// bumps nothing, and one that finds nothing left to publish writes nothing.
     pub fn publish<T>(
         self,
         ticket: &Ticket,
@@ -605,13 +609,21 @@ impl Store {
         then: impl FnOnce(E, &mut Database, &mut Persist<'_>) -> Result<T, String>,
     ) -> Result<Result<T, String>, String> {
         let mut db = self.load()?;
+        let loaded = encode(&db)?;
         admit(&mut db)?;
         let value = edit(&mut db)?;
-        self.persist(&db)?;
+        let edited = encode(&db)?;
+        if edited != loaded {
+            self.write(&edited)?;
+        }
         let result = then(value, &mut db, &mut |db| self.persist(db));
         drop(self);
         Ok(result)
     }
+}
+
+fn encode(db: &Database) -> Result<Vec<u8>, String> {
+    serde_json::to_vec(db).map_err(|_| "Cannot encode saved profiles.".into())
 }
 
 #[cfg(test)]
