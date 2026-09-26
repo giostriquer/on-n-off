@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use super::backend_memo::PerAccount;
 use super::Parsed;
+use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::AccessToken;
-use crate::accounts::native::CodexAccess;
 use crate::dto::{AgentId, LimitsCreditsSpentDto, ProviderLimitsDto};
 
 /// The per-member daily breakdown the Codex app reads for a business member's usage history.

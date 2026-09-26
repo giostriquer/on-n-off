@@ -11,7 +11,7 @@ fn normalizes_the_chatgpt_account_and_rate_limits_without_reading_a_token() {
         r#"{"tokens":{"account_id":"acct-1"}}"#,
     )
     .unwrap();
-    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let parsed = normalize_app_server(
         AppServerResult {
             codex_home,
@@ -58,7 +58,7 @@ fn normalizes_the_chatgpt_account_and_rate_limits_without_reading_a_token() {
 #[test]
 fn falls_back_to_a_normalized_email_identity_when_codex_has_no_account_id() {
     let codex_home = crate::paths::scratch_dir("codex-app-server-email");
-    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let parsed = normalize_app_server(
         AppServerResult {
             codex_home,
@@ -123,7 +123,7 @@ fn scoped_codex_observation_carries_its_previous_workspace_key() {
         json!({"tokens":{"account_id":"workspace-1", "id_token": token}}).to_string(),
     )
     .unwrap();
-    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let parsed = normalize_app_server(AppServerResult {
         codex_home,
         account: typed(json!({"account":{"type":"chatgpt", "email":"me@example.com", "planType":"pro"}, "requiresOpenaiAuth":true})),
@@ -156,7 +156,7 @@ fn rejects_native_identity_changes_during_an_app_server_read() {
                 .unwrap();
             };
             write_identity("user-1", "workspace-1");
-            let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+            let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
             let mut transport = FakeTransport {
                 received: VecDeque::from([
                     json!({"id":1,"result":{"codexHome":codex_home}}),
@@ -178,7 +178,7 @@ fn rejects_native_identity_changes_during_an_app_server_read() {
 /// A session for `plan` whose native login holds an access token.
 fn signed_in_on(plan: &str, name: &str) -> (AppServerResult, Option<(String, Value)>) {
     let codex_home = business_home(name).join(".codex");
-    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let session = AppServerResult {
         codex_home,
         account: typed(json!({
@@ -224,7 +224,7 @@ fn a_personal_plan_takes_the_access_projection_too_for_the_term_read() {
 #[test]
 fn the_accounts_plan_decides_the_card() {
     let codex_home = business_home("codex-app-server-plan-precedence").join(".codex");
-    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let session = AppServerResult {
         codex_home,
         account: typed(json!({

@@ -12,6 +12,7 @@ mod usage_renew;
 mod transaction;
 
 pub(crate) mod claude_store;
+pub(crate) mod codex_store;
 mod keychain;
 #[cfg(all(target_os = "macos", test))]
 pub(crate) use keychain::with_real_keychain;

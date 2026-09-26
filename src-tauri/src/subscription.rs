@@ -26,7 +26,7 @@ pub struct SubscriptionDate {
 /// the last line, so a vault profile whose token was issued to another identity, or a native
 /// login whose claims disagree with its key, can never put its date on someone else's card.
 fn parse_claims(claims: &Value, account_id: &str, now: DateTime<Utc>) -> Option<SubscriptionDate> {
-    if crate::accounts::model::codex_observation_key(
+    if crate::accounts::codex_store::observation_key(
         claims.get("chatgpt_account_id")?.as_str()?,
         claims,
     ) != account_id
@@ -66,7 +66,7 @@ fn read_at(
     account: &str,
     now: DateTime<Utc>,
 ) -> Result<Option<SubscriptionDate>, String> {
-    let native = crate::accounts::native::codex_metadata(&home.join(".codex"))
+    let native = crate::accounts::codex_store::metadata(&home.join(".codex"))
         .ok()
         .flatten()
         .filter(|(key, _)| key == account)

@@ -102,21 +102,5 @@ impl Identity {
     }
 }
 const PROFILE_KEY_PREFIX: &str = "profile:";
-pub fn codex_observation_key(workspace: &str, claims: &Value) -> String {
-    claims
-        .get("chatgpt_user_id")
-        .and_then(Value::as_str)
-        .filter(|v| !v.trim().is_empty())
-        .map(|user| {
-            Identity {
-                provider: AgentId::Codex,
-                user_id: user.into(),
-                workspace_id: workspace.into(),
-            }
-            .observation_key()
-        })
-        .unwrap_or_else(|| workspace.into())
-}
-
 #[cfg(test)]
 pub(crate) mod tests;

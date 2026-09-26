@@ -4,10 +4,10 @@ use super::{
         self, BeginError, ClaudeLocks, KeychainProbe, LockError, LockScope, SecureStorage,
         StorageDir, StoreError, Stored,
     },
+    codex_store,
     model::{self, Identity},
     store::Login,
     transaction::{Native, NativeGuard, ReadBack},
-    vault,
 };
 use crate::{
     dto::AgentId,
@@ -48,94 +48,6 @@ pub struct NativeStore {
     /// Where `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved Claude's login and locks; `None` keeps them
     /// in the config home, and keeps the variable away from a `claude` this store starts.
     pub secure_storage: Option<SecureStorage>,
-}
-enum Target {
-    File(PathBuf),
-    Keyring { service: String, account: String },
-}
-impl Target {
-    fn read(&self) -> Result<Option<Value>, String> {
-        let bytes = match self {
-            Self::File(path) => match fs::read(path) {
-                Ok(v) => v,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                Err(_) => return Err("Cannot read native credentials.".into()),
-            },
-            Self::Keyring { service, account } => {
-                #[cfg(target_os = "macos")]
-                {
-                    match super::keychain::find_password(service, Some(account))? {
-                        Some(value) => value.into_bytes(),
-                        None => return Ok(None),
-                    }
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    match keyring::Entry::new(service, account)
-                        .map_err(|_| "Cannot open native credential store.")?
-                        .get_secret()
-                    {
-                        Ok(v) => v,
-                        Err(keyring::Error::NoEntry) => return Ok(None),
-                        Err(_) => {
-                            return Err("Native credential access was denied or unavailable.".into())
-                        }
-                    }
-                }
-            }
-        };
-        serde_json::from_slice(&bytes).map(Some).map_err(|_| {
-            "The native credential document is malformed. It has not been changed.".into()
-        })
-    }
-    fn write(&self, value: Option<&Value>) -> Result<(), String> {
-        let bytes = value
-            .map(serde_json::to_vec)
-            .transpose()
-            .map_err(|_| "Cannot encode native credentials.")?;
-        match self {
-            Self::File(path) => {
-                if let Some(bytes) = bytes {
-                    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-                        return Err("Refusing to replace a linked credential file.".into());
-                    }
-                    vault::atomic_write(path, &bytes)
-                } else {
-                    match fs::remove_file(path) {
-                        Ok(()) => Ok(()),
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                        Err(_) => Err("Cannot remove native credentials.".into()),
-                    }
-                }
-            }
-            Self::Keyring { service, account } => {
-                // Through `security`, the identity the item already trusts for reads, never this
-                // ad-hoc-signed process: `keychain.rs` says what the latter cost.
-                #[cfg(target_os = "macos")]
-                {
-                    match bytes {
-                        Some(bytes) => super::keychain::write(service, account, &bytes),
-                        None => super::keychain::delete(service, account),
-                    }
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    let entry = keyring::Entry::new(service, account)
-                        .map_err(|_| "Cannot open native credential store.")?;
-                    if let Some(bytes) = bytes {
-                        entry
-                            .set_secret(&bytes)
-                            .map_err(|_| "Cannot update native credential store.".into())
-                    } else {
-                        match entry.delete_credential() {
-                            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                            Err(_) => Err("Cannot remove native credentials.".into()),
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 impl NativeStore {
     pub fn resolve(provider: AgentId, home: &Path) -> Result<Self, String> {
@@ -229,7 +141,7 @@ impl NativeStore {
             }
         }
         if self.provider == AgentId::Codex {
-            let config = read_toml(&self.config_file)?;
+            let config = codex_store::config(&self.config_home)?;
             for key in [
                 "forced_login_method",
                 "forced_chatgpt_workspace_id",
@@ -262,27 +174,6 @@ impl NativeStore {
             }
         }
         Ok(())
-    }
-    /// Codex's store, from the backend its config selects. Claude's is `claude_store`'s question.
-    fn codex_target(&self) -> Result<Target, String> {
-        let config = read_toml(&self.config_file)?;
-        if config.get("profile").is_some() {
-            return Err("Codex configuration profiles must use the official account controls until their effective credential backend can be verified.".into());
-        }
-        let mode = config
-            .get("cli_auth_credentials_store")
-            .and_then(toml::Value::as_str)
-            .unwrap_or("file");
-        let file = Target::File(self.config_home.join("auth.json"));
-        match mode {
-    "file"=>Ok(file),
-    "keyring"|"auto"=>{
-     let canonical=fs::canonicalize(&self.config_home).map_err(|_|"Cannot resolve native Codex home.")?;
-     let hash=hash_path(&canonical);let keyring=Target::Keyring{service:"Codex Auth".into(),account:format!("cli|{}",&hash[..16])};
-     if mode=="auto"&&keyring.read()?.is_none(){Ok(file)}else{Ok(keyring)}
-    },
-    _=>Err("This Codex credential backend cannot be activated by on-n-off. Use official sign-in.".into())
-   }
     }
     /// Claude Code's storage dir for this store.
     pub(crate) fn claude_dir(&self) -> StorageDir {
@@ -434,7 +325,7 @@ impl Native for NativeStore {
         let auth = if self.provider == AgentId::Claude {
             self.claude_read()?.document
         } else {
-            self.codex_target()?.read()?
+            codex_store::target(&self.config_home)?.read()?
         };
         let Some(auth) = auth else {
             return Ok(None);
@@ -518,7 +409,7 @@ impl NativeStore {
     fn publish(&self, login: Option<&Login>, locks: &dyn NativeGuard) -> Result<(), String> {
         locks.ensure()?;
         if self.provider == AgentId::Codex {
-            return self.codex_target()?.write(login.map(|l| &l.auth));
+            return codex_store::target(&self.config_home)?.write(login.map(|l| &l.auth));
         }
         // The read, the config patch and the credential write are one change under Claude Code's
         // storage-write lock, going to the store Claude Code's next read uses.
@@ -587,18 +478,6 @@ pub fn read_json(path: &Path) -> Result<Value, String> {
         Err(_) => Err("Cannot read native configuration.".into()),
     }
 }
-fn read_toml(path: &Path) -> Result<toml::Value, String> {
-    match fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).map_err(|_| "Native configuration is malformed.".into()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Ok(toml::Value::Table(Default::default()))
-        }
-        Err(_) => Err("Cannot read native configuration.".into()),
-    }
-}
-fn hash_path(path: &Path) -> String {
-    crate::sha::sha256_hex(path.to_string_lossy().as_bytes())
-}
 pub fn run(command: &mut Command, timeout: Duration) -> Result<String, String> {
     let child = command
         .stdin(Stdio::null())
@@ -623,100 +502,6 @@ impl NativeGuard for ClaudeLocks {
             Ok(())
         }
     }
-}
-
-/// Metadata projection from the backend selected by native Codex config. No credential leaves
-/// accounts here; `codex_metadata_and_access` is the one projection that carries the access token.
-pub(crate) fn codex_metadata(config_home: &Path) -> Result<Option<(String, Value)>, String> {
-    match codex_login(config_home)? {
-        Some(login) => codex_identity(&login),
-        None => Ok(None),
-    }
-}
-
-/// The native Codex login from the backend its config selects.
-fn codex_login(config_home: &Path) -> Result<Option<Login>, String> {
-    NativeStore {
-        provider: AgentId::Codex,
-        config_home: config_home.into(),
-        config_file: config_home.join("config.toml"),
-        custom: true,
-        use_keychain: true,
-        secure_storage: None,
-    }
-    .read()
-}
-
-/// A Codex login's observation key and workspace claims, refusing claims for another workspace.
-fn codex_identity(login: &Login) -> Result<Option<(String, Value)>, String> {
-    let Some(workspace) = login
-        .auth
-        .pointer("/tokens/account_id")
-        .and_then(Value::as_str)
-        .filter(|v| !v.trim().is_empty())
-    else {
-        return Ok(None);
-    };
-    let claims = if login.auth.pointer("/tokens/id_token").is_some() {
-        let payload = model::claims(&login.auth)?;
-        let claims = payload
-            .get("https://api.openai.com/auth")
-            .cloned()
-            .ok_or("Missing native account claims.")?;
-        if claims.get("chatgpt_account_id").and_then(Value::as_str) != Some(workspace) {
-            return Err("Native workspace claims disagree.".into());
-        }
-        claims
-    } else {
-        json!({"chatgpt_account_id":workspace})
-    };
-    Ok(Some((
-        model::codex_observation_key(workspace, &claims),
-        claims,
-    )))
-}
-
-/// The signed-in Codex login's access token, beside the identity it belongs to, for the two requests
-/// on-n-off makes with that login itself: a workspace member's spending (`limits/credits_spent.rs`)
-/// and the subscription's term (`limits/renewal.rs`), read-only GETs the user chose to allow on
-/// 2026-09-24 and 2026-09-25. Only the access token leaves accounts.
-pub(crate) struct CodexAccess {
-    /// The same key `codex_metadata` gives, so the caller can match the token to a card.
-    pub observation_key: String,
-    /// The `ChatGPT-Account-Id` the request is made for.
-    pub workspace_id: String,
-    pub token: model::AccessToken,
-}
-
-/// A metadata projection: the observation key and the workspace claims (`codex_metadata`).
-pub(crate) type CodexMetadata = (String, Value);
-
-/// `codex_metadata`, and the login's access projection when it holds an access token, from one
-/// read of the native store: the signed-in read's identity check after the app-server handshake
-/// takes it, so the backend reads cost no read of their own. `None` for no
-/// login; the access is `None` for a login without an access token.
-pub(crate) fn codex_metadata_and_access(
-    config_home: &Path,
-) -> Result<Option<(CodexMetadata, Option<CodexAccess>)>, String> {
-    let Some(login) = codex_login(config_home)? else {
-        return Ok(None);
-    };
-    let Some((observation_key, claims)) = codex_identity(&login)? else {
-        return Ok(None);
-    };
-    let access = match model::string(&login.auth, "/tokens/access_token") {
-        Ok(token) => Some(CodexAccess {
-            observation_key: observation_key.clone(),
-            workspace_id: claims
-                .get("chatgpt_account_id")
-                .and_then(Value::as_str)
-                .ok_or("Missing native account claims.")?
-                .to_string(),
-            token: model::AccessToken::new(token),
-        }),
-        Err(_) => None,
-    };
-    Ok(Some(((observation_key, claims), access)))
 }
 
 #[cfg(test)]

@@ -101,7 +101,7 @@ fn read_at(
             let mut reading = parse_codex_usage(&payload, details.as_ref())?;
             // The backend reads never decide the read: an account the endpoint refuses just has
             // no figure. Only a workspace pools credits, so only one is asked what it spent.
-            let access = crate::accounts::native::CodexAccess {
+            let access = crate::accounts::codex_store::CodexAccess {
                 observation_key: identity.observation_key(),
                 workspace_id: identity.workspace_id.clone(),
                 token: crate::accounts::model::AccessToken::new(token),

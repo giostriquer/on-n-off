@@ -11,7 +11,7 @@ use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 
 use super::Parsed;
-use crate::accounts::native::CodexAccess;
+use crate::accounts::codex_store::CodexAccess;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
 use crate::dto::{AgentId, ResetCreditOutcome};
@@ -124,7 +124,7 @@ pub(super) fn consume_reset_credit(
         &home.join(".codex"),
         account_id,
         idempotency_key,
-        crate::accounts::native::codex_metadata,
+        crate::accounts::codex_store::metadata,
         ProcessTransport::spawn,
     )
 }
@@ -244,7 +244,7 @@ fn read_with<T: JsonLineTransport>(
     after_identity: impl FnOnce(&mut Parsed, Option<&CodexAccess>),
 ) -> Result<Parsed, AppServerFailure> {
     let expected_codex_home = home.join(".codex");
-    let before = crate::accounts::native::codex_metadata(&expected_codex_home)
+    let before = crate::accounts::codex_store::metadata(&expected_codex_home)
         .map_err(AppServerFailure::Failed)?;
     let mut transport = spawn(&expected_codex_home).map_err(AppServerFailure::Failed)?;
     let session = query_app_server(&expected_codex_home, force, &mut transport);
@@ -644,7 +644,7 @@ fn normalize_app_server(
     // One read of the native store confirms the account and takes the access projection the term
     // read needs for every card, and the spending read for a workspace plan (`renewal::signed_in`,
     // `credits_spent::signed_in`).
-    let (after, access) = crate::accounts::native::codex_metadata_and_access(&session.codex_home)
+    let (after, access) = crate::accounts::codex_store::metadata_and_access(&session.codex_home)
         .map_err(AppServerFailure::Failed)?
         .map_or((None, None), |(metadata, access)| (Some(metadata), access));
     if before.as_ref().map(|(id, _)| id) != after.as_ref().map(|(id, _)| id) {
