@@ -1,6 +1,5 @@
 //! Stable native identity, and what account code asks of a login without knowing its shape
 //! ([`LoginView`]). Email and plan are display metadata, never profile keys.
-use super::store::Login;
 use crate::dto::AgentId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -42,9 +41,6 @@ pub(crate) trait LoginView {
     fn fingerprint(&self) -> String;
     /// Whether a saved login is due to renew before it is read, at `now_ms`.
     fn renewal_due(&self, now_ms: i64) -> bool;
-    /// Renews a never-activated private login with its provider's grant: the reply folded into
-    /// the login, every field it does not name left as it was.
-    fn renew_private(&self, now_ms: i64) -> Result<Login, String>;
 }
 
 /// A generation's fingerprint over the four slots every version has hashed: Claude's access and

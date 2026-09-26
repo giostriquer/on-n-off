@@ -3,12 +3,12 @@
 //! next poll cannot replay a possibly consumed refresh token. A completed reply is encrypted
 //! before vault publication and can be adopted after a failed save.
 use super::{
-    codex::CodexLogin,
     store::{Guard, Login, Profile, Sealer, Store},
     vault,
 };
 use crate::{dto::AgentId, file_lease::FileLease};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize)]
@@ -144,24 +144,17 @@ pub(super) fn renew_owned(
     Ok(renewed)
 }
 
-/// Renews a private `login` of `provider` with that provider's grant.
+/// Renews a private `login` of `provider` with that provider's grant, at its token endpoint.
 pub(super) fn request(provider: AgentId, login: &Login, now_ms: i64) -> Result<Login, String> {
-    super::view(provider, login)?.renew_private(now_ms)
+    let adapter = super::adapter(provider)?;
+    adapter.renew_private(login, now_ms, adapter.token_url())
 }
 
-pub(super) const CODEX_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-
-/// Codex's private grant: `login`'s request sent to `token_url`, the reply folded back into it.
-/// Native credentials still renew exclusively through the official app-server path.
-pub(super) fn renew_codex(
-    login: &CodexLogin<'_>,
-    now_ms: i64,
-    token_url: &str,
-) -> Result<Login, String> {
-    let request = login.renewal_request()?;
-    let reply = crate::http::post_grant(token_url, &request)
-        .map_err(|_| "Could not renew the private Codex login. Sign in again if needed.")?;
-    login.renewed(&reply, now_ms)
+/// Sends a private Codex login's refresh `request` to `token_url`, giving back the reply. Native
+/// credentials still renew exclusively through the official app-server path; Claude's grants are
+/// sent only from `claude_renew`.
+pub(super) fn grant(token_url: &str, request: &Value) -> Result<Value, crate::http::HttpError> {
+    crate::http::post_grant(token_url, request)
 }
 
 #[cfg(test)]

@@ -35,6 +35,18 @@ impl super::Adapter for Codex {
         Box::new(CodexLogin::of(login))
     }
 
+    fn token_url(&self) -> &'static str {
+        "https://auth.openai.com/oauth/token"
+    }
+
+    /// Codex's own JSON refresh grant, built and folded by the login and sent by `usage_renew`.
+    fn renew_private(&self, login: &Login, now_ms: i64, token_url: &str) -> Result<Login, String> {
+        let login = CodexLogin::of(login);
+        let reply = usage_renew::grant(token_url, &login.renewal_request()?)
+            .map_err(|_| "Could not renew the private Codex login. Sign in again if needed.")?;
+        login.renewed(&reply, now_ms)
+    }
+
     /// Running Codex clients never pick up a replaced login, so they refuse an ordinary switch.
     fn client(&self) -> &'static Client {
         &Client {
@@ -341,7 +353,7 @@ impl<'a> CodexLogin<'a> {
     }
 
     /// The grant a private renewal sends: Codex's own JSON refresh grant, as its
-    /// `login/src/oauth/client.rs` sends it (`usage_renew` sends it).
+    /// `login/src/oauth/client.rs` sends it.
     pub(super) fn renewal_request(&self) -> Result<Value, String> {
         let token = model::string(self.auth, "/tokens/refresh_token")?;
         Ok(serde_json::json!({
@@ -436,10 +448,6 @@ impl LoginView for CodexLogin<'_> {
 
     fn renewal_due(&self, now_ms: i64) -> bool {
         self.renews_soon(now_ms / 1000)
-    }
-
-    fn renew_private(&self, now_ms: i64) -> Result<Login, String> {
-        usage_renew::renew_codex(self, now_ms, usage_renew::CODEX_TOKEN_URL)
     }
 }
 

@@ -1,10 +1,6 @@
 use super::*;
 use crate::{
-    accounts::{
-        claude::ClaudeLogin,
-        codex::CodexLogin,
-        store::{ChangeKind, Database},
-    },
+    accounts::store::{ChangeKind, Database},
     dto::AgentId,
 };
 use serde_json::{json, Value};
@@ -27,6 +23,10 @@ fn saved(home: &Path, provider: AgentId, login: Login, owned: bool) -> Profile {
             Ok(db.profiles[0].clone())
         })
         .unwrap()
+}
+/// `provider`'s private renewal of `login` at 1,000 ms, its grant sent to `token_url`.
+fn renew_at(provider: AgentId, login: &Login, token_url: &str) -> Result<Login, String> {
+    super::super::adapter(provider)?.renew_private(login, 1000, token_url)
 }
 fn open(home: &Path) -> Store {
     Store::open_with_key(home, true, |_, _| Ok([7; 32])).unwrap()
@@ -265,7 +265,7 @@ fn private_claude_grant_preserves_scope_and_saves_rotated_credentials() {
         r#"{"access_token":"fresh","refresh_token":"rotated","expires_in":28800,"scope":"user:profile user:inference"}"#,
     );
     let result = renew_owned(&p, &|| Ok(open(home.path())), &|l| {
-        super::super::claude_renew::renew_private(&ClaudeLogin::of(l), 1000, &url)
+        renew_at(AgentId::Claude, l, &url)
     })
     .unwrap();
     let request = server.join().unwrap();
@@ -300,7 +300,7 @@ fn private_codex_grant_retains_identity_when_reply_omits_id_token() {
         r#"{"access_token":"fresh","refresh_token":"rotated"}"#,
     );
     let result = renew_owned(&p, &|| Ok(open(home.path())), &|l| {
-        renew_codex(&CodexLogin::of(l), 1000, &url)
+        renew_at(AgentId::Codex, l, &url)
     })
     .unwrap();
     let request = server.join().unwrap();
@@ -336,7 +336,7 @@ fn a_private_codex_renewal_sends_codexs_grant_and_keeps_every_field_it_does_not_
         r#"{"access_token":"fresh","refresh_token":"rotated","id_token":"id-new","expires_in":3600}"#,
     );
 
-    let renewed = renew_codex(&CodexLogin::of(&login), 1000, &url).unwrap();
+    let renewed = renew_at(AgentId::Codex, &login, &url).unwrap();
 
     let body: Value = serde_json::from_str(&server.join().unwrap().body).unwrap();
     assert_eq!(
@@ -370,7 +370,7 @@ fn a_private_codex_renewal_keeps_the_tokens_a_reply_leaves_blank_and_refuses_one
         &[],
         r#"{"access_token":"fresh","refresh_token":" ","id_token":""}"#,
     );
-    let renewed = renew_codex(&CodexLogin::of(&login), 1000, &url).unwrap();
+    let renewed = renew_at(AgentId::Codex, &login, &url).unwrap();
     server.join().unwrap();
     assert_eq!(renewed.auth["tokens"]["access_token"], "fresh");
     assert_eq!(renewed.auth["tokens"]["refresh_token"], "original");
@@ -378,7 +378,7 @@ fn a_private_codex_renewal_keeps_the_tokens_a_reply_leaves_blank_and_refuses_one
 
     let (url, server) =
         crate::http::serve_once_capturing("200 OK", &[], r#"{"refresh_token":"rotated"}"#);
-    assert!(renew_codex(&CodexLogin::of(&login), 1000, &url).is_err());
+    assert!(renew_at(AgentId::Codex, &login, &url).is_err());
     server.join().unwrap();
 }
 
@@ -399,8 +399,7 @@ fn a_private_claude_renewal_redeems_for_the_logins_own_client_and_keeps_what_it_
         r#"{"access_token":"fresh","expires_in":100,"refresh_token":"rotated","refresh_token_expires_in":200,"scope":"user:profile"}"#,
     );
 
-    let renewed =
-        super::super::claude_renew::renew_private(&ClaudeLogin::of(&login), 1000, &url).unwrap();
+    let renewed = renew_at(AgentId::Claude, &login, &url).unwrap();
 
     let body: Value = serde_json::from_str(&server.join().unwrap().body).unwrap();
     assert_eq!(
@@ -458,4 +457,16 @@ fn a_completed_renewal_journal_an_earlier_version_wrote_is_adopted_without_a_gra
             .auth["claudeAiOauth"]["refreshToken"],
         "journaled-refresh"
     );
+}
+
+/// Each provider's private renewal redeems at the token endpoint its own client redeems at: a
+/// refresh token is issued to one client and refused anywhere else.
+#[test]
+fn each_providers_private_renewal_goes_to_its_own_token_endpoint() {
+    let url = |provider| super::super::adapter(provider).unwrap().token_url();
+    assert_eq!(
+        url(AgentId::Claude),
+        "https://platform.claude.com/v1/oauth/token"
+    );
+    assert_eq!(url(AgentId::Codex), "https://auth.openai.com/oauth/token");
 }

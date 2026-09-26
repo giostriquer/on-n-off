@@ -28,7 +28,6 @@ use std::sync::Mutex;
 
 use serde_json::{json, Value};
 
-use super::claude::ClaudeLogin;
 use super::claude_store::{
     self, BeginError, ClaudeLocks, ClaudeStore, KeychainProbe, LockError, LockScope, StorageDir,
 };
@@ -254,22 +253,33 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
 
 /// The saved-account owner has already persisted an encrypted renewal intent and proved
 /// exclusive ownership of this never-activated login. Native renewal remains under its locks.
-/// The login builds the grant and folds the reply; the grant is sent here, as every Claude grant is.
-pub(super) fn renew_private(
-    login: &ClaudeLogin<'_>,
-    now_ms: i64,
-    token_url: &str,
-) -> Result<Login, String> {
-    let request = login.renewal_request()?;
-    let reply = post_grant(token_url, &request)
-        .map_err(|_| "Could not renew the private Claude login. Sign in again if needed.")?;
-    login.renewed(&reply, now_ms)
+/// The grant goes to `token_url`, and the reply is folded in as Claude Code folds it; the account
+/// record is unchanged.
+pub(super) fn renew_private(login: &Login, now_ms: i64, token_url: &str) -> Result<Login, String> {
+    let oauth = login
+        .auth
+        .get("claudeAiOauth")
+        .ok_or("Missing private Claude login.")?;
+    let token =
+        optional_string(oauth.get("refreshToken")).ok_or("Missing private renewal token.")?;
+    let reply = post_grant(
+        token_url,
+        &request_body(&token, &scopes(oauth), client_id(oauth)),
+    )
+    .map_err(|_| "Could not renew the private Claude login. Sign in again if needed.")?;
+    let mut auth = login.auth.clone();
+    apply(&mut auth, &reply, now_ms)
+        .map_err(|_| "The private renewal reply was incomplete. Sign in again.")?;
+    Ok(Login {
+        auth,
+        account: login.account.clone(),
+    })
 }
 
 /// The grant Claude Code sends, field for field. `scope` is required: the issuer narrows a refresh
 /// to the scopes asked for, and a login that came back without them is one the usage endpoint
 /// would refuse.
-pub(super) fn request_body(refresh_token: &str, scopes: &[String], client_id: &str) -> Value {
+fn request_body(refresh_token: &str, scopes: &[String], client_id: &str) -> Value {
     json!({
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
@@ -280,14 +290,14 @@ pub(super) fn request_body(refresh_token: &str, scopes: &[String], client_id: &s
 
 /// The OAuth client the login was issued to: its stored `clientId` when it names one, as Claude
 /// Code 2.1.282 sends it (`clientId ?? CLIENT_ID`), otherwise Claude Code's own.
-pub(super) fn client_id(oauth: &Value) -> &str {
+fn client_id(oauth: &Value) -> &str {
     oauth
         .get("clientId")
         .and_then(Value::as_str)
         .unwrap_or(CLIENT_ID)
 }
 
-pub(super) fn scopes(oauth: &Value) -> Vec<String> {
+fn scopes(oauth: &Value) -> Vec<String> {
     let stored: Vec<String> = oauth
         .get("scopes")
         .and_then(Value::as_array)
@@ -313,7 +323,7 @@ pub(super) fn scopes(oauth: &Value) -> Vec<String> {
 /// Only the fields the reply carries are replaced. Everything else the login knows —
 /// `subscriptionType`, `rateLimitTier`, anything a newer Claude Code has added — is left alone,
 /// because this write has to leave a document Claude Code still recognises as its own.
-pub(super) fn apply(document: &mut Value, reply: &Value, now_ms: i64) -> Result<(), String> {
+fn apply(document: &mut Value, reply: &Value, now_ms: i64) -> Result<(), String> {
     let access_token =
         optional_string(reply.get("access_token")).ok_or("token reply carried no access_token")?;
     let expires_at_ms = seconds(reply.get("expires_in"))

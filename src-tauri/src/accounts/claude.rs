@@ -20,7 +20,6 @@ use super::{
 };
 use crate::dto::{AgentId, ProviderLimitsDto};
 use crate::limits::credentials::{parse_claude_credential, ClaudeCredential, CredentialLookup};
-use crate::limits::json::optional_string;
 use serde_json::{json, Value};
 use std::{
     ffi::OsString,
@@ -39,6 +38,15 @@ impl super::Adapter for Claude {
 
     fn login<'a>(&self, login: &'a Login) -> Box<dyn LoginView + 'a> {
         Box::new(ClaudeLogin::of(login))
+    }
+
+    fn token_url(&self) -> &'static str {
+        claude_renew::TOKEN_URL
+    }
+
+    /// The grant is sent from `claude_renew`, where every Claude grant is.
+    fn renew_private(&self, login: &Login, now_ms: i64, token_url: &str) -> Result<Login, String> {
+        claude_renew::renew_private(login, now_ms, token_url)
     }
 
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.
@@ -474,34 +482,6 @@ impl<'a> ClaudeLogin<'a> {
     fn access_token(&self) -> Result<AccessToken, String> {
         model::string(self.auth, "/claudeAiOauth/accessToken").map(AccessToken::new)
     }
-
-    /// The grant a private renewal sends: the refresh token, for the client and scopes the login
-    /// was issued (`claude_renew` sends it).
-    pub(super) fn renewal_request(&self) -> Result<Value, String> {
-        let oauth = self
-            .auth
-            .get("claudeAiOauth")
-            .ok_or("Missing private Claude login.")?;
-        let token =
-            optional_string(oauth.get("refreshToken")).ok_or("Missing private renewal token.")?;
-        Ok(claude_renew::request_body(
-            &token,
-            &claude_renew::scopes(oauth),
-            claude_renew::client_id(oauth),
-        ))
-    }
-
-    /// This login with the grant's `reply` folded in, as Claude Code folds it; the account record
-    /// is unchanged.
-    pub(super) fn renewed(&self, reply: &Value, now_ms: i64) -> Result<Login, String> {
-        let mut auth = self.auth.clone();
-        claude_renew::apply(&mut auth, reply, now_ms)
-            .map_err(|_| "The private renewal reply was incomplete. Sign in again.")?;
-        Ok(Login {
-            auth,
-            account: self.account.clone(),
-        })
-    }
 }
 
 impl LoginView for ClaudeLogin<'_> {
@@ -539,10 +519,6 @@ impl LoginView for ClaudeLogin<'_> {
             .pointer("/claudeAiOauth/expiresAt")
             .and_then(Value::as_i64)
             .is_some_and(|expires_at| expires_at <= now_ms)
-    }
-
-    fn renew_private(&self, now_ms: i64) -> Result<Login, String> {
-        claude_renew::renew_private(self, now_ms, claude_renew::TOKEN_URL)
     }
 }
 

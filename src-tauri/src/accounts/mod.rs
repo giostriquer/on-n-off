@@ -73,6 +73,16 @@ trait Adapter: Sync {
     fn login<'a>(&self, login: &'a store::Login) -> Box<dyn model::LoginView + 'a>;
     /// How this provider's client processes are told apart, and whether they refuse a switch.
     fn client(&self) -> &'static clients::Client;
+    /// Where the provider's private renewal grant goes.
+    fn token_url(&self) -> &'static str;
+    /// Renews a never-activated private `login` with the provider's grant, sent to `token_url`:
+    /// the reply folded in, every field it does not name left as it was.
+    fn renew_private(
+        &self,
+        login: &store::Login,
+        now_ms: i64,
+        token_url: &str,
+    ) -> Result<store::Login, String>;
 }
 
 /// `provider`'s adapter: the one place account code tells the providers apart.
