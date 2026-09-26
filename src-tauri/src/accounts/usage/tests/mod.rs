@@ -257,6 +257,17 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
     .unwrap()
     .is_ok());
 }
+/// The attempt the last poll of `p` in `home` recorded.
+fn attempt(home: &Path, p: &Profile) -> Attempt {
+    ATTEMPTS
+        .get()
+        .and_then(|attempts| {
+            let key = format!("{}:{}", home.display(), p.id);
+            attempts.lock().unwrap().get(&key).cloned()
+        })
+        .expect("the attempt is recorded")
+}
+
 /// What a poll that read nothing says, and whether it waits for a new login before it reads again.
 #[test]
 fn a_poll_that_read_nothing_says_why() {
@@ -313,14 +324,7 @@ fn a_poll_that_read_nothing_says_why() {
             )
         };
         assert_eq!(poll(), Some(Err(message.to_string())), "{error:?}");
-        let state = ATTEMPTS
-            .get()
-            .and_then(|attempts| {
-                let key = format!("{}:{}", home.path().display(), p.id);
-                attempts.lock().unwrap().get(&key).cloned()
-            })
-            .expect("the attempt is recorded");
-        assert_eq!(state.rejected, sticky, "{error:?}");
+        assert_eq!(attempt(home.path(), &p).rejected, sticky, "{error:?}");
         assert_eq!(poll(), Some(Err(message.to_string())), "{error:?}");
         assert_eq!(fetches.get(), 1, "{error:?}");
     }
@@ -352,6 +356,13 @@ fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
     assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(card.message.as_deref(), Some(message));
     assert_eq!(card.reading.windows, reading(&p).reading.windows);
+    let recorded = attempt(home.path(), &p);
+    assert_eq!(recorded.error.as_deref(), Some(message));
+    assert!(
+        !recorded.rejected,
+        "a new login is not needed to read again"
+    );
+    assert_eq!(recorded.failures, 1);
     assert_eq!(
         poll(),
         Some(Err(message.to_string())),
