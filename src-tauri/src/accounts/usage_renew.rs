@@ -129,10 +129,16 @@ pub(super) fn renew_owned(
     }
     // Only this profile's login and ownership vouch for the renewed login, never the epoch.
     open()?.publish(&ticket, |db| {
-        // The ticket holds only while this profile is saved.
-        if let Some(target) = db.profiles.iter_mut().find(|p| p.id == profile.id) {
-            target.login = Some(renewed.clone());
-        }
+        // `publish` checked the ticket against this same database under this lease, so the profile
+        // is saved and this cannot fail today. It fails closed all the same: a publication that
+        // wrote nothing but succeeded would delete the journal below, the only copy of a login
+        // whose refresh token is already spent.
+        let target = db
+            .profiles
+            .iter_mut()
+            .find(|p| p.id == profile.id)
+            .ok_or("The saved login changed during renewal.")?;
+        target.login = Some(renewed.clone());
         Ok(())
     })?;
     // A leftover completed journal is harmless: its source fingerprint no longer matches.
