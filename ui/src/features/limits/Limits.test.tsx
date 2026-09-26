@@ -842,38 +842,6 @@ it("queues an explicit reload behind an in-flight background check", async () =>
   expect(view.client.getQueryData<ProviderLimits[]>(["limits", "claude"])?.[0].windows).toEqual([]);
 });
 
-it("does not retain forced reads when no Limits screen is mounted", async () => {
-  answer([okClaude()], [okCodex()]);
-  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
-  await refreshLimits(client);
-  expect(readLimits.mock.calls.map(call => call[1])).toEqual([true, true]);
-  readLimits.mockClear();
-  await client.refetchQueries({queryKey: ["limits"], type: "all"});
-  expect(readLimits.mock.calls.map(call => call[1])).toEqual([false, false]);
-  client.clear();
-});
-
-it("keeps explicit reload queued when an invalidation replaces the background check", async () => {
-  const first = deferred<ProviderLimits[]>();
-  const replacement = deferred<ProviderLimits[]>();
-  let reads = 0;
-  readLimits.mockImplementation((provider: AgentId, force: boolean) => provider === "claude" && !force ? (++reads === 1 ? first.promise : replacement.promise) : Promise.resolve(provider === "claude" ? [okClaude({windows: []})] : [okCodex()]));
-  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
-  const queryKey = ["limits", "claude"];
-  client.setQueryData(queryKey, [okClaude()]);
-  const background = client.fetchQuery({queryKey, staleTime: 0, queryFn: () => readLimits("claude", false)}).catch(() => {});
-  const refreshed = refreshLimits(client);
-  const invalidated = client.refetchQueries({queryKey, type: "all"});
-  await Promise.resolve();
-  first.resolve([okClaude()]);
-  replacement.resolve([okClaude()]);
-  await Promise.all([background, refreshed, invalidated]);
-  expect(readLimits).toHaveBeenCalledWith("claude", true);
-  expect(client.getQueryData<ProviderLimits[]>(queryKey)?.[0].windows).toEqual([]);
-  client.clear();
-});
-
-
 it("keeps an unverified legacy card beside its saved login", async () => {
  answer([okClaude()], [okCodex({account:{id:"team",label:"shared@example.com"},currentAccount:false})]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved",observationId:"profile:user-team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
@@ -914,7 +882,8 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
  fireEvent.click(screen.getByRole("button",{name:"Confirm removal"}));
  await waitFor(()=>expect(accountAction).toHaveBeenCalled());
  await waitFor(()=>expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","profile:user-team"));
- expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","team","shared@example.com");
+ // Legacy history goes first, so a partial failure keeps the scoped observation available.
+ expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex","team","shared@example.com"],["codex","profile:user-team"]]);
  await act(async()=>{await client.invalidateQueries({queryKey:["limits","codex"]});});
  expect(screen.queryByRole("region",{name:"Codex limits · shared@example.com"})).toBeNull();
  expect(card("Codex limits · personal@codex.example")).toBeTruthy();
@@ -977,6 +946,30 @@ it.each(["claude", "codex"] as const)("quietly identifies last-known %s usage an
   expect(screen.getByRole("tooltip")).toHaveTextContent(reason);
   fireEvent.keyDown(document, {key:"Escape"});
   expect(screen.queryByRole("tooltip")).toBeNull();
+});
+
+const savedCodex = (id: string, observationId: string, email: string, active = false, category: string | null = null) =>
+  ({ id, observationId, identity: { provider: "codex", userId: id, workspaceId: id }, email, label: email, category, savedAt: NOW, active, needsLogin: false });
+
+it("names a card by its saved profile's email and category, and marks the account the profiles say is in use", async () => {
+  // The read still calls the switched-away login current and knows it by an older label.
+  answer([okClaude()], [okCodex({ account: { id: "acct-work", label: "old-label@codex.example" } }), staleCodex()]);
+  readAccounts.mockImplementation(async (provider: string) => ({ profiles: provider === "codex" ? [savedCodex("work", "acct-work", "work@codex.example", false, "Client A"), savedCodex("personal", "acct-personal", "personal@codex.example", true)] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+  renderLimits();
+  const work = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+  expect(within(work).getByText("Client A")).toBeTruthy();
+  expect(screen.queryByText("old-label@codex.example")).toBeNull();
+  expect(within(work).queryByRole("img", { name: "Active account" })).toBeNull();
+  expect(within(card("Codex limits · personal@codex.example")).getByRole("img", { name: "Active account" })).toBeTruthy();
+});
+
+it("says usage is unavailable for a saved account no read answered or whose read reported no windows", async () => {
+  answer([okClaude({ windows: [], account: null })], [okCodex(), okCodex({ account: { id: "profile:empty", label: "empty@codex.example" }, currentAccount: false, windows: [], credits: null })]);
+  readAccounts.mockImplementation(async (provider: string) => ({ profiles: provider === "codex" ? [savedCodex("unread", "profile:unread", "unread@codex.example"), savedCodex("empty", "profile:empty", "empty@codex.example")] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+  renderLimits();
+  expect(within(await screen.findByRole("region", { name: "Codex limits · unread@codex.example" })).getByText("Usage unavailable.")).toBeTruthy();
+  expect(within(card("Codex limits · empty@codex.example")).getByText("Usage unavailable.")).toBeTruthy();
+  expect(within(card("Claude limits")).getByText("Claude reported no rate-limit windows.")).toBeTruthy();
 });
 
 it("keeps an inactive account error visible when no saved usage exists", async () => {

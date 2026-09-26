@@ -341,8 +341,34 @@ it("marks saved usage quietly in the popover and exposes its failure on focus", 
   const account = await screen.findByRole("article", {name:"Claude limits · you@example.com"});
   const badge = within(account).getByRole("button", {name:"Usage status: Last known usage"});
   expect(within(account).queryByText(reason)).toBeNull();
+  // One status per card: the last-known badge, not the "Remembered account" pill as well.
+  expect(within(account).queryByText("Remembered account")).toBeNull();
   expect(within(account).getByRole("meter")).toBeInTheDocument();
   expect(within(account).getByText(/Latest observation/)).toBeInTheDocument();
   fireEvent.focus(badge);
   expect(screen.getByRole("tooltip")).toHaveTextContent(reason);
+});
+
+it("says an answered read with no windows has none", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [{ ...limits("claude", "claude-current", "current@claude.example", true), windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
+  renderPopover();
+  const account = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
+  expect(within(account).getByText("No rate-limit windows.")).toBeInTheDocument();
+});
+
+it("names a card without an account by its provider", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [{ provider: "claude", status: "signedOut", message: "Sign in with `claude`.", currentAccount: true, windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
+  renderPopover();
+  const account = await screen.findByRole("article", { name: "Claude limits" });
+  expect(within(account).getByText("Claude")).toBeInTheDocument();
+  expect(within(account).getByText("Sign in with `claude`.")).toBeInTheDocument();
+});
+
+it("says a provider with no accounts has none saved", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude" ? [] : [limits("codex", "codex-current", "current@codex.example", true)]));
+  renderPopover();
+  const claude = await screen.findByRole("region", { name: "Claude accounts" });
+  await waitFor(() => expect(within(claude).getByText("No saved accounts.")).toBeInTheDocument());
 });
