@@ -2,7 +2,6 @@
 //! HTTP with the access token its login holds, starting no CLI.
 use super::*;
 use crate::http::serve_once_capturing;
-use codex::CodexEndpoints;
 use serde_json::Value;
 
 fn identity(provider: AgentId) -> Identity {
@@ -13,7 +12,7 @@ fn identity(provider: AgentId) -> Identity {
     }
 }
 
-/// `read_saved_codex_at` with the access token in `auth`, a Codex credentials document.
+/// `read_saved_codex` with the access token in `auth`, a Codex credentials document.
 fn read_at(
     identity: &Identity,
     auth: &Value,
@@ -22,7 +21,12 @@ fn read_at(
     let token = crate::accounts::model::string(auth, "/tokens/access_token")
         .map(AccessToken::new)
         .expect("the fixture's access token");
-    read_saved_codex_at(identity, token, codex)
+    let urls = SavedReadUrls {
+        claude_profile: "unused",
+        claude_usage: "unused",
+        codex,
+    };
+    read_saved_codex(identity, token, &urls)
 }
 
 #[test]

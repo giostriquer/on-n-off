@@ -58,11 +58,12 @@ impl super::Adapter for Claude {
         identity: &Identity,
         login: &Login,
         now_ms: i64,
+        urls: &crate::limits::SavedReadUrls<'_>,
     ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
         let credential = ClaudeLogin::of(login)
             .credential()
             .ok_or(crate::http::HttpError::Unauthorized)?;
-        crate::limits::read_saved_claude(identity, credential, now_ms)
+        crate::limits::read_saved_claude(identity, credential, now_ms, urls)
     }
 
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.
@@ -437,6 +438,7 @@ impl IsolatedSignIn for ClaudeNative {
             identity,
             credential,
             chrono::Utc::now().timestamp_millis(),
+            &crate::limits::SavedReadUrls::LIVE,
         )
         .ok()
     }

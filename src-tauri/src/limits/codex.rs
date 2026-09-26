@@ -372,13 +372,13 @@ const CODEX_RESET_CREDITS_URL: &str =
 /// The services one saved Codex read talks to, together as `ClaudeEndpoints` keeps Claude's, so a
 /// fourth costs one field and not an edit at every call site.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct CodexEndpoints<'a> {
-    pub(super) usage: &'a str,
-    pub(super) reset_credits: &'a str,
+pub(crate) struct CodexEndpoints<'a> {
+    pub(crate) usage: &'a str,
+    pub(crate) reset_credits: &'a str,
     /// What a workspace member spent (`credits_spent.rs`); asked only for a workspace plan.
-    pub(super) credit_usage: &'a str,
+    pub(crate) credit_usage: &'a str,
     /// The subscription's term (`renewal.rs`); asked for every account.
-    pub(super) subscriptions: &'a str,
+    pub(crate) subscriptions: &'a str,
 }
 
 pub(super) const CODEX: CodexEndpoints<'static> = CodexEndpoints {

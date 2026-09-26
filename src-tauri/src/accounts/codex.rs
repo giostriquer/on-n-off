@@ -57,11 +57,12 @@ impl super::Adapter for Codex {
         identity: &Identity,
         login: &Login,
         _now_ms: i64,
+        urls: &crate::limits::SavedReadUrls<'_>,
     ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
         let token = CodexLogin::of(login)
             .access_token()
             .ok_or(crate::http::HttpError::Unauthorized)?;
-        crate::limits::read_saved_codex(identity, token)
+        crate::limits::read_saved_codex(identity, token, urls)
     }
 
     /// Running Codex clients never pick up a replaced login, so they refuse an ordinary switch.

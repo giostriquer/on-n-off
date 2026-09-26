@@ -7,7 +7,7 @@ use super::{
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     http::{HttpError, RateLimitReset},
-    limits::SavedReadError,
+    limits::{SavedReadError, SavedReadUrls},
 };
 use std::{
     collections::HashMap,
@@ -271,14 +271,28 @@ fn poll_with(
 }
 
 fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) -> FetchResult {
-    let now = chrono::Utc::now().timestamp_millis();
+    fetch_profile_at(
+        profile,
+        open,
+        chrono::Utc::now().timestamp_millis(),
+        &SavedReadUrls::LIVE,
+    )
+}
+
+/// `profile`'s fetch at `now` through its provider's adapter, which asks `urls`.
+fn fetch_profile_at(
+    profile: &Profile,
+    open: &dyn Fn() -> Result<Store, String>,
+    now: i64,
+    urls: &SavedReadUrls<'_>,
+) -> FetchResult {
     fetch_with(
         profile,
         now,
         &|login| {
             super::adapter(profile.identity.provider)
                 .map_err(|_| HttpError::Unauthorized)?
-                .read_usage(&profile.identity, login, now)
+                .read_usage(&profile.identity, login, now, urls)
         },
         &|| {
             super::usage_renew::renew_owned(profile, open, &|login| {

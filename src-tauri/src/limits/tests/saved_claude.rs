@@ -12,7 +12,21 @@ fn identity(provider: AgentId) -> Identity {
     }
 }
 
-/// `read_saved_claude_at` with the credential in `auth`, a Claude credentials document.
+/// Where a read of these tests asks: `profile` and `usage` for Claude, nowhere for Codex.
+fn urls<'a>(profile: &'a str, usage: &'a str) -> SavedReadUrls<'a> {
+    SavedReadUrls {
+        claude_profile: profile,
+        claude_usage: usage,
+        codex: CodexEndpoints {
+            usage: "unused",
+            reset_credits: "unused",
+            credit_usage: "unused",
+            subscriptions: "unused",
+        },
+    }
+}
+
+/// `read_saved_claude` with the credential in `auth`, a Claude credentials document.
 fn read_at(
     identity: &Identity,
     auth: &Value,
@@ -20,7 +34,7 @@ fn read_at(
     usage: &str,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     let credential = credentials::parse_claude_credential(auth).expect("the fixture's credential");
-    read_saved_claude_at(identity, credential, NOW_MS, profile, usage)
+    read_saved_claude(identity, credential, NOW_MS, &urls(profile, usage))
 }
 
 #[test]
@@ -336,12 +350,11 @@ fn a_first_claude_reading_is_remembered_as_a_scoped_dated_snapshot() {
         "200 OK",
         r#"{"seven_day":{"utilization":61,"resets_at":"2026-09-20T12:00:00Z"}}"#,
     );
-    let dto = read_saved_claude_at(
+    let dto = read_saved_claude(
         &identity(AgentId::Claude),
         max_credential(),
         NOW_MS,
-        &profile,
-        &usage,
+        &urls(&profile, &usage),
     )
     .unwrap();
     profile_request.join().unwrap();
@@ -374,12 +387,11 @@ fn saved_claude_session_keeps_the_reported_percentage_and_optional_reset() {
             {"kind":"weekly_all", "group":"weekly", "percent":90, "resets_at":"2026-09-21T12:00:00Z"}
         ]}).to_string();
         let (usage, usage_request) = serve_once("200 OK", &body);
-        let dto = read_saved_claude_at(
+        let dto = read_saved_claude(
             &identity(AgentId::Claude),
             max_credential(),
             NOW_MS,
-            &profile,
-            &usage,
+            &urls(&profile, &usage),
         )
         .unwrap();
         profile_request.join().unwrap();
@@ -405,12 +417,11 @@ fn wrong_claude_user_or_workspace_never_contributes_usage() {
     ] {
         let home = tempfile::tempdir().unwrap();
         let (profile, request) = serve_once("200 OK", body);
-        assert!(read_saved_claude_at(
+        assert!(read_saved_claude(
             &identity(AgentId::Claude),
             max_credential(),
             NOW_MS,
-            &profile,
-            &crate::http::refused_url()
+            &urls(&profile, &crate::http::refused_url()),
         )
         .is_err());
         request.join().unwrap();

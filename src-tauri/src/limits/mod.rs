@@ -23,6 +23,7 @@ mod reading;
 mod renewal;
 mod snapshots;
 
+pub(crate) use codex::CodexEndpoints;
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::Remembered;
 
@@ -464,28 +465,31 @@ impl From<HttpError> for SavedReadError {
     }
 }
 
+/// Where a saved profile's read asks, for either provider: [`SavedReadUrls::LIVE`] in the app,
+/// loopback servers in tests.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SavedReadUrls<'a> {
+    pub(crate) claude_profile: &'a str,
+    pub(crate) claude_usage: &'a str,
+    pub(crate) codex: CodexEndpoints<'a>,
+}
+
+impl SavedReadUrls<'static> {
+    /// The services a saved read asks in the app.
+    pub(crate) const LIVE: Self = Self {
+        claude_profile: CLAUDE_PROFILE_URL,
+        claude_usage: CLAUDE_USAGE_URL,
+        codex: codex::CODEX,
+    };
+}
+
 /// A saved profile's Claude card, read at `now_ms` with its login's `credential`, which must sign
 /// in as the profile's user in its workspace. No CLI is started and nothing is renewed here.
 pub(crate) fn read_saved_claude(
     identity: &Identity,
     credential: ClaudeCredential,
     now_ms: i64,
-) -> Result<ProviderLimitsDto, SavedReadError> {
-    read_saved_claude_at(
-        identity,
-        credential,
-        now_ms,
-        CLAUDE_PROFILE_URL,
-        CLAUDE_USAGE_URL,
-    )
-}
-
-fn read_saved_claude_at(
-    identity: &Identity,
-    credential: ClaudeCredential,
-    now_ms: i64,
-    profile_url: &str,
-    usage_url: &str,
+    urls: &SavedReadUrls<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     // As the signed-in read reports an expired login without asking (`read_claude_credential`).
     // A login on-n-off renews was renewed before this read (`accounts/usage.rs`).
@@ -495,8 +499,8 @@ fn read_saved_claude_at(
     let parsed = claude_read(
         &credential,
         Some(&expected_claude_identity(identity)),
-        profile_url,
-        usage_url,
+        urls.claude_profile,
+        urls.claude_usage,
     )
     .map_err(|error| match error {
         ProviderLoadError::Http(error) => SavedReadError::Http(error),
@@ -510,16 +514,9 @@ fn read_saved_claude_at(
 pub(crate) fn read_saved_codex(
     identity: &Identity,
     token: AccessToken,
+    urls: &SavedReadUrls<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    read_saved_codex_at(identity, token, codex::CODEX)
-}
-
-fn read_saved_codex_at(
-    identity: &Identity,
-    token: AccessToken,
-    urls: codex::CodexEndpoints<'_>,
-) -> Result<ProviderLimitsDto, SavedReadError> {
-    let reading = codex::read_wham(identity, token, urls)?;
+    let reading = codex::read_wham(identity, token, urls.codex)?;
     saved_card(
         identity,
         Parsed {
