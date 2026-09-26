@@ -1,12 +1,9 @@
 use super::*;
 use crate::{
-    accounts::{
-        model,
-        store::{ChangeKind, Database},
-    },
+    accounts::store::{ChangeKind, Database},
     dto::AgentId,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use std::cell::Cell;
 
 fn setup(home: &Path, owned: bool) -> Profile {
@@ -20,12 +17,16 @@ fn setup(home: &Path, owned: bool) -> Profile {
 fn saved(home: &Path, provider: AgentId, login: Login, owned: bool) -> Profile {
     open(home)
         .change(ChangeKind::Metadata, |db| {
-            let identity = model::identity(provider, &login.auth, &login.account)?;
+            let identity = super::super::view(provider, &login)?.identity()?;
             db.save(identity, login, None)?;
             db.profiles[0].usage_renewal_owned = owned;
             Ok(db.profiles[0].clone())
         })
         .unwrap()
+}
+/// `provider`'s private renewal of `login` at 1,000 ms, its grant sent to `token_url`.
+fn renew_at(provider: AgentId, login: &Login, token_url: &str) -> Result<Login, String> {
+    super::super::adapter(provider)?.renew_private(login, 1000, token_url)
 }
 fn open(home: &Path) -> Store {
     Store::open_with_key(home, true, |_, _| Ok([7; 32])).unwrap()
@@ -264,7 +265,7 @@ fn private_claude_grant_preserves_scope_and_saves_rotated_credentials() {
         r#"{"access_token":"fresh","refresh_token":"rotated","expires_in":28800,"scope":"user:profile user:inference"}"#,
     );
     let result = renew_owned(&p, &|| Ok(open(home.path())), &|l| {
-        request_at(AgentId::Claude, l, 1000, &url, "unused")
+        renew_at(AgentId::Claude, l, &url)
     })
     .unwrap();
     let request = server.join().unwrap();
@@ -299,7 +300,7 @@ fn private_codex_grant_retains_identity_when_reply_omits_id_token() {
         r#"{"access_token":"fresh","refresh_token":"rotated"}"#,
     );
     let result = renew_owned(&p, &|| Ok(open(home.path())), &|l| {
-        request_at(AgentId::Codex, l, 1000, "unused", &url)
+        renew_at(AgentId::Codex, l, &url)
     })
     .unwrap();
     let request = server.join().unwrap();
@@ -312,4 +313,160 @@ fn private_codex_grant_retains_identity_when_reply_omits_id_token() {
         p.login.unwrap().auth["tokens"]["id_token"]
     );
     assert!(!home.path().join(".codex").exists());
+}
+
+/// A private Codex renewal sends Codex's own refresh grant and folds the reply into the login it
+/// came from: the tokens the reply carries replace their stored ones, the refresh time is stamped,
+/// and every field the reply does not name is left as it was.
+#[test]
+fn a_private_codex_renewal_sends_codexs_grant_and_keeps_every_field_it_does_not_replace() {
+    let login = Login {
+        auth: json!({
+            "OPENAI_API_KEY": null,
+            "tokens": {"access_token": "old", "refresh_token": "original", "id_token": "id-old",
+                "account_id": "team", "extra": "kept"},
+            "last_refresh": "2026-09-01T00:00:00Z",
+            "custom": {"kept": true}
+        }),
+        account: json!({"note": "kept"}),
+    };
+    let (url, server) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        r#"{"access_token":"fresh","refresh_token":"rotated","id_token":"id-new","expires_in":3600}"#,
+    );
+
+    let renewed = renew_at(AgentId::Codex, &login, &url).unwrap();
+
+    let body: Value = serde_json::from_str(&server.join().unwrap().body).unwrap();
+    assert_eq!(
+        body,
+        json!({"grant_type": "refresh_token", "refresh_token": "original",
+            "client_id": "app_EMoamEEZ73f0CkXaXp7hrann"})
+    );
+    assert_eq!(
+        renewed.auth,
+        json!({
+            "OPENAI_API_KEY": null,
+            "tokens": {"access_token": "fresh", "refresh_token": "rotated", "id_token": "id-new",
+                "account_id": "team", "extra": "kept"},
+            "last_refresh": "1970-01-01T00:00:01+00:00",
+            "custom": {"kept": true}
+        })
+    );
+    assert_eq!(renewed.account, login.account);
+}
+
+/// A reply that leaves the refresh or ID token blank keeps the stored one; one without an access
+/// token renews nothing.
+#[test]
+fn a_private_codex_renewal_keeps_the_tokens_a_reply_leaves_blank_and_refuses_one_without_access() {
+    let login = Login {
+        auth: json!({"tokens": {"access_token": "old", "refresh_token": "original", "id_token": "id-old"}}),
+        account: Value::Null,
+    };
+    let (url, server) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        r#"{"access_token":"fresh","refresh_token":" ","id_token":""}"#,
+    );
+    let renewed = renew_at(AgentId::Codex, &login, &url).unwrap();
+    server.join().unwrap();
+    assert_eq!(renewed.auth["tokens"]["access_token"], "fresh");
+    assert_eq!(renewed.auth["tokens"]["refresh_token"], "original");
+    assert_eq!(renewed.auth["tokens"]["id_token"], "id-old");
+
+    let (url, server) =
+        crate::http::serve_once_capturing("200 OK", &[], r#"{"refresh_token":"rotated"}"#);
+    assert!(renew_at(AgentId::Codex, &login, &url).is_err());
+    server.join().unwrap();
+}
+
+/// A private Claude renewal redeems for the client and scopes the login was issued, and keeps
+/// every field of the stored login the reply does not replace, and the account beside it.
+#[test]
+fn a_private_claude_renewal_redeems_for_the_logins_own_client_and_keeps_what_it_does_not_replace() {
+    let login = Login {
+        auth: json!({"claudeAiOauth": {"accessToken": "old", "refreshToken": "original",
+            "expiresAt": 1, "scopes": ["user:profile", "user:inference"],
+            "clientId": "fixture-client", "subscriptionType": "max",
+            "rateLimitTier": "default_claude_max_20x", "extra": "kept"}}),
+        account: json!({"accountUuid": "user", "organizationUuid": "team"}),
+    };
+    let (url, server) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        r#"{"access_token":"fresh","expires_in":100,"refresh_token":"rotated","refresh_token_expires_in":200,"scope":"user:profile"}"#,
+    );
+
+    let renewed = renew_at(AgentId::Claude, &login, &url).unwrap();
+
+    let body: Value = serde_json::from_str(&server.join().unwrap().body).unwrap();
+    assert_eq!(
+        body,
+        json!({"grant_type": "refresh_token", "refresh_token": "original",
+            "client_id": "fixture-client", "scope": "user:profile user:inference"})
+    );
+    assert_eq!(
+        renewed.auth,
+        json!({"claudeAiOauth": {"accessToken": "fresh", "refreshToken": "rotated",
+            "expiresAt": 101_000, "refreshTokenExpiresAt": 201_000, "scopes": ["user:profile"],
+            "clientId": "fixture-client", "subscriptionType": "max",
+            "rateLimitTier": "default_claude_max_20x", "extra": "kept"}})
+    );
+    assert_eq!(renewed.account, login.account);
+}
+
+/// A renewal journal an earlier version left, its reply complete, is adopted without another
+/// grant: the journal's names are its on-disk format, and the login in it keeps the vault's shape.
+#[test]
+fn a_completed_renewal_journal_an_earlier_version_wrote_is_adopted_without_a_grant() {
+    let home = tempfile::tempdir().unwrap();
+    let profile = setup(home.path(), true);
+    let renewals = Renewals::of(&open(home.path()));
+    std::fs::create_dir_all(&renewals.root).unwrap();
+    let journal = json!({
+        "fingerprint": super::super::view(AgentId::Claude, profile.login.as_ref().unwrap())
+            .unwrap()
+            .fingerprint(),
+        "login": {
+            "auth": {"claudeAiOauth": {"accessToken": "journaled", "refreshToken": "journaled-refresh"}},
+            "account": {"accountUuid": "user", "organizationUuid": "team"}
+        }
+    });
+    std::fs::write(
+        renewals.journal(&profile),
+        renewals
+            .sealer
+            .seal(&serde_json::to_vec(&journal).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+
+    let renewed = renew_owned(&profile, &|| Ok(open(home.path())), &|_| {
+        panic!("a completed journal is adopted, not redeemed again")
+    })
+    .unwrap();
+
+    assert_eq!(renewed.auth, journal["login"]["auth"]);
+    assert_eq!(
+        open(home.path()).load().unwrap().profiles[0]
+            .login
+            .as_ref()
+            .unwrap()
+            .auth["claudeAiOauth"]["refreshToken"],
+        "journaled-refresh"
+    );
+}
+
+/// Each provider's private renewal redeems at the token endpoint its own client redeems at: a
+/// refresh token is issued to one client and refused anywhere else.
+#[test]
+fn each_providers_private_renewal_goes_to_its_own_token_endpoint() {
+    let url = |provider| super::super::adapter(provider).unwrap().token_url();
+    assert_eq!(
+        url(AgentId::Claude),
+        "https://platform.claude.com/v1/oauth/token"
+    );
+    assert_eq!(url(AgentId::Codex), "https://auth.openai.com/oauth/token");
 }

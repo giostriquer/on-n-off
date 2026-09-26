@@ -1,5 +1,8 @@
 //! Opt-in saved logins. Native stores own shared generations; only never-activated private
 //! sign-ins can renew in the vault. Saved usage reads never activate an account.
+//!
+//! Every operation runs on the [`Accounts`] context. What differs between Claude and Codex lives
+//! in the provider's [`Adapter`] (`claude.rs`, `codex.rs`), which [`adapter`] alone chooses.
 pub(crate) mod model;
 pub(crate) mod vault;
 
@@ -11,7 +14,10 @@ mod usage_renew;
 
 mod transaction;
 
+pub(crate) mod claude;
 pub(crate) mod claude_store;
+pub(crate) mod codex;
+pub(crate) mod codex_store;
 mod keychain;
 #[cfg(all(target_os = "macos", test))]
 pub(crate) use keychain::with_real_keychain;
@@ -53,6 +59,48 @@ fn home() -> Result<PathBuf, String> {
     crate::paths::user_home().map_err(|_| "Cannot resolve account storage home.".into())
 }
 
+/// The providers with saved profiles, each with an adapter.
+const PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
+
+/// One provider's half of the accounts seam: `claude::Claude` or `codex::Codex`, each owning
+/// everything account code does differently for its provider. Generic account code asks
+/// [`adapter`] for it rather than asking which provider it has. The catalog's `AgentAdapter`
+/// (`crate::adapter`) is a different seam; accounts touch it only through `supports_accounts`.
+trait Adapter: Sync {
+    /// The provider's native store under `home`, where this process's environment puts it.
+    fn native(&self, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
+    /// The provider's store in `dir`, private to one isolated sign-in, created there.
+    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
+    /// `login` read by this provider's rules.
+    fn login<'a>(&self, login: &'a store::Login) -> Box<dyn model::LoginView + 'a>;
+    /// How this provider's client processes are told apart, and whether they refuse a switch.
+    fn client(&self) -> &'static clients::Client;
+    /// Where the provider's private renewal grant goes.
+    fn token_url(&self) -> &'static str;
+    /// Renews a never-activated private `login` with the provider's grant, sent to `token_url`:
+    /// the reply folded in, every field it does not name left as it was.
+    fn renew_private(
+        &self,
+        login: &store::Login,
+        now_ms: i64,
+        token_url: &str,
+    ) -> Result<store::Login, String>;
+}
+
+/// `provider`'s adapter: the one place account code tells the providers apart.
+fn adapter(provider: AgentId) -> Result<&'static dyn Adapter, String> {
+    match provider {
+        AgentId::Claude => Ok(&claude::Claude),
+        AgentId::Codex => Ok(&codex::Codex),
+        _ => Err("Saved subscription profiles are not supported for this provider.".into()),
+    }
+}
+
+/// `login` read by `provider`'s rules.
+fn view(provider: AgentId, login: &store::Login) -> Result<Box<dyn model::LoginView + '_>, String> {
+    adapter(provider).map(|adapter| adapter.login(login))
+}
+
 /// A provider's native store as the account operations use it: the activation transaction's
 /// `Native`, plus the check an operation makes before touching it and the official sign-out.
 trait NativeAccount: Native {
@@ -61,6 +109,29 @@ trait NativeAccount: Native {
     fn preflight(&self) -> Result<(), String>;
     /// Signs the CLI out through its own command.
     fn logout(&self) -> Result<(), String>;
+    /// Who the CLI is signed in as with a subscription, whose saved accounts' usage is read
+    /// beside it: `None` when it is signed out, or signed in some way that has no subscription.
+    fn subscription(&self) -> Result<Option<model::Identity>, String> {
+        self.read()?.map(|login| self.identify(&login)).transpose()
+    }
+}
+
+/// A provider's native store in a private directory, where an isolated sign-in runs the official
+/// client and reads back the login it left.
+trait IsolatedSignIn: Native {
+    /// The official sign-in, ready to spawn in this store.
+    fn sign_in(&self) -> std::process::Command;
+    /// The first usage reading of `login`, signed in as `identity` in `dir`, before the directory
+    /// is removed.
+    fn first_usage(
+        &self,
+        dir: &Path,
+        login: &store::Login,
+        identity: &model::Identity,
+    ) -> Option<crate::dto::ProviderLimitsDto>;
+    /// Removes anything the sign-in left outside `dir`, such as the scoped Keychain entry a Claude
+    /// sign-in files on macOS.
+    fn clean(&self) -> Result<(), String>;
 }
 
 /// Running provider clients, which an account change checks for before it touches a native login.
@@ -80,14 +151,32 @@ trait Notify {
     fn accounts(&self);
 }
 
-type ResolveNative = Box<dyn Fn(AgentId, &Path) -> Result<Box<dyn NativeAccount>, String>>;
+/// Where the account operations find a provider's native stores: the user's own, and the private
+/// one an isolated sign-in runs in.
+trait NativeStores {
+    /// `provider`'s native store under `home`.
+    fn native(&self, provider: AgentId, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
+    /// `provider`'s store in `dir`, private to one isolated sign-in, created there.
+    fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
+}
+
+/// The native stores each provider's adapter resolves.
+struct AdapterStores;
+impl NativeStores for AdapterStores {
+    fn native(&self, provider: AgentId, home: &Path) -> Result<Box<dyn NativeAccount>, String> {
+        adapter(provider)?.native(home)
+    }
+    fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        adapter(provider)?.isolated(dir)
+    }
+}
 
 /// The account operations over one home, with what they reach outside the vault: the provider's
-/// native store, its running clients, and whoever hears about a change. `live` builds it from the
+/// native stores, its running clients, and whoever hears about a change. `live` builds it from the
 /// real ones; tests build it from a scratch home and fakes.
 struct Accounts {
     home: PathBuf,
-    native: ResolveNative,
+    stores: Box<dyn NativeStores>,
     clients: Box<dyn Clients>,
     notify: Box<dyn Notify>,
 }
@@ -105,7 +194,8 @@ impl Clients for RunningClients {
 struct Announce;
 impl Notify for Announce {
     fn changed(&self, provider: AgentId) {
-        changed(provider);
+        crate::limits_refresh::account_changed(provider);
+        crate::read_revision::announce(crate::read_revision::Source::Accounts);
     }
     fn accounts(&self) {
         crate::read_revision::announce(crate::read_revision::Source::Accounts);
@@ -116,15 +206,16 @@ impl Accounts {
     fn live() -> Result<Self, String> {
         Ok(Self {
             home: home()?,
-            native: Box::new(|provider, home| {
-                Ok(Box::new(native::NativeStore::resolve(provider, home)?))
-            }),
+            stores: Box::new(AdapterStores),
             clients: Box::new(RunningClients),
             notify: Box::new(Announce),
         })
     }
     fn native(&self, provider: AgentId) -> Result<Box<dyn NativeAccount>, String> {
-        (self.native)(provider, &self.home)
+        self.stores.native(provider, &self.home)
+    }
+    fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        self.stores.isolated(provider, dir)
     }
 }
 
@@ -154,6 +245,11 @@ pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Resul
 pub fn sign_out(provider: AgentId) -> Result<(), String> {
     Accounts::live()?.sign_out(provider)
 }
+/// Signs in to `provider` with its official client in an isolated home and saves the login as a
+/// profile awaiting activation. `expected` is the profile a sign-in again is for.
+pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<(), String> {
+    Accounts::live()?.add(provider, id, expected)
+}
 
 /// How an account change treats provider clients that are still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,7 +278,7 @@ impl Accounts {
         let _read = activity::read(provider)
             .ok_or("An account change is running. Retry when it finishes.")?;
         let home = &self.home;
-        login::recover_abandoned(home);
+        self.recover_abandoned();
         let native = self.native(provider)?;
         let current = native
             .read()
@@ -378,7 +474,7 @@ impl Accounts {
         let result = store::Store::open(&self.home, true)?.change_then(
             store::ChangeKind::Account,
             |db| {
-                let fingerprint = current.fingerprint();
+                let fingerprint = view(provider, &current)?.fingerprint();
                 if !db.ignored_credentials.contains(&fingerprint) {
                     db.ignored_credentials.push(fingerprint);
                 }
@@ -408,15 +504,11 @@ impl Accounts {
         result
     }
 }
-fn changed(provider: AgentId) {
-    crate::limits_refresh::account_changed(provider);
-    crate::read_revision::announce(crate::read_revision::Source::Accounts);
-}
 
 pub(crate) mod claude_renew;
 
 mod login;
-pub use login::{add, cancel};
+pub use login::cancel;
 
 pub(crate) mod discovery;
 
@@ -424,13 +516,17 @@ pub(crate) mod discovery;
 /// metadata, never its tokens. `None` for an unknown key, a profile without a login, or a device
 /// with no vault; an error when the vault exists and cannot be read right now.
 pub(crate) fn saved_codex_claims(
-    home: &std::path::Path,
+    home: &Path,
     key: &str,
 ) -> Result<Option<serde_json::Value>, String> {
     if !model::Identity::is_profile_key(key) || !store::Store::vault_exists(home) {
         return Ok(None);
     }
-    Ok(store::Store::open_existing(home)?.load()?.codex_claims(key))
+    let db = store::Store::open_existing(home)?.load()?;
+    Ok(db
+        .observed(AgentId::Codex, key)
+        .and_then(|profile| profile.login.as_ref())
+        .and_then(|login| codex::CodexLogin::of(login).auth_claims().ok().flatten()))
 }
 
 #[cfg(test)]

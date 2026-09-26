@@ -1,5 +1,5 @@
 //! Saving the current login, editing a category and removing a profile.
-use super::fixture::{claude, generation, identity, Harness, Heard};
+use super::fixture::{claude, codex, generation, identity, Harness, Heard};
 use crate::dto::AgentId;
 
 #[test]
@@ -216,7 +216,7 @@ fn saving_the_current_login_refreshes_limits_after_release() {
 #[test]
 fn removing_a_profile_refreshes_its_providers_limits_after_release() {
     let harness = Harness::new();
-    let codex = harness.saved(identity(AgentId::Codex, "c", "team"), claude("c", "c1"));
+    let codex = harness.saved(identity(AgentId::Codex, "c", "team"), codex("c", "c1"));
 
     harness.accounts().remove(&codex).unwrap();
 

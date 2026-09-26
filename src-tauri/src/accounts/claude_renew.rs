@@ -31,6 +31,7 @@ use serde_json::{json, Value};
 use super::claude_store::{
     self, BeginError, ClaudeLocks, ClaudeStore, KeychainProbe, LockError, LockScope, StorageDir,
 };
+use super::store::Login;
 use crate::http::{post_grant, HttpError};
 use crate::limits::credentials::{self, ClaudeCredential, CredentialLookup};
 use crate::limits::json::optional_string;
@@ -252,8 +253,11 @@ fn renew<P: Fn(&StorageDir) -> KeychainProbe>(
 
 /// The saved-account owner has already persisted an encrypted renewal intent and proved
 /// exclusive ownership of this never-activated login. Native renewal remains under its locks.
-pub(super) fn renew_private(auth: &Value, now_ms: i64, token_url: &str) -> Result<Value, String> {
-    let oauth = auth
+/// The grant goes to `token_url`, and the reply is folded in as Claude Code folds it; the account
+/// record is unchanged.
+pub(super) fn renew_private(login: &Login, now_ms: i64, token_url: &str) -> Result<Login, String> {
+    let oauth = login
+        .auth
         .get("claudeAiOauth")
         .ok_or("Missing private Claude login.")?;
     let token =
@@ -263,10 +267,13 @@ pub(super) fn renew_private(auth: &Value, now_ms: i64, token_url: &str) -> Resul
         &request_body(&token, &scopes(oauth), client_id(oauth)),
     )
     .map_err(|_| "Could not renew the private Claude login. Sign in again if needed.")?;
-    let mut auth = auth.clone();
+    let mut auth = login.auth.clone();
     apply(&mut auth, &reply, now_ms)
         .map_err(|_| "The private renewal reply was incomplete. Sign in again.")?;
-    Ok(auth)
+    Ok(Login {
+        auth,
+        account: login.account.clone(),
+    })
 }
 
 /// The grant Claude Code sends, field for field. `scope` is required: the issuer narrows a refresh

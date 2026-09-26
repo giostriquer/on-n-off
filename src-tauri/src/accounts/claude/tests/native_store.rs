@@ -1,16 +1,8 @@
+//! The account switch's view of Claude Code's native store: where it resolves, what it reads and
+//! writes, its locks, its verification, its preflight and the `claude` it starts.
+
 use super::*;
-fn claude(root: &Path) -> NativeStore {
-    let home = root.join(".claude");
-    fs::create_dir_all(&home).unwrap();
-    NativeStore {
-        provider: AgentId::Claude,
-        config_home: home,
-        config_file: root.join(".claude.json"),
-        custom: false,
-        use_keychain: false,
-        secure_storage: None,
-    }
-}
+
 #[test]
 fn switching_claude_preserves_current_mcp_oauth_and_unrelated_configuration() {
     let root = tempfile::tempdir().unwrap();
@@ -25,12 +17,13 @@ fn switching_claude_preserves_current_mcp_oauth_and_unrelated_configuration() {
     let current = native.read().unwrap().unwrap();
     assert_eq!(current.auth["claudeAiOauth"]["refreshToken"], "b");
     assert_eq!(
-        read_json(&native.config_home.join(".credentials.json")).unwrap()["mcpOAuth"]["server"],
+        native::read_json(&native.config_home.join(".credentials.json")).unwrap()["mcpOAuth"]
+            ["server"],
         "current-server-token"
     );
     assert!(current.auth.get("mcpOAuth").is_none());
     assert_eq!(current.account["organizationUuid"], "org-b");
-    let config = read_json(&native.config_file).unwrap();
+    let config = native::read_json(&native.config_file).unwrap();
     assert_eq!(config["theme"], "dark");
     assert_eq!(config["mcpServers"]["custom"]["command"], "existing");
     assert!(!native.config_home.join(".oauth_refresh.lock").exists());
@@ -48,28 +41,6 @@ fn native_refresh_lock_prevents_either_half_of_claude_activation() {
     assert!(!native.config_file.exists());
     assert!(!native.config_home.join(".credentials.json").exists());
 }
-#[test]
-fn scoped_codex_metadata_keeps_same_workspace_users_separate() {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    let root = tempfile::tempdir().unwrap();
-    let save = |user: &str| {
-        let claims = json!({"https://api.openai.com/auth":{"chatgpt_account_id":"team","chatgpt_user_id":user}});
-        fs::write(root.path().join("auth.json"),json!({"tokens":{"account_id":"team","id_token":format!("e30.{}.s",URL_SAFE_NO_PAD.encode(claims.to_string()))}}).to_string()).unwrap();
-    };
-    save("a");
-    let a = codex_metadata(root.path()).unwrap().unwrap().0;
-    save("b");
-    let b = codex_metadata(root.path()).unwrap().unwrap().0;
-    assert_ne!(a, b);
-    assert!(a.starts_with("profile:"));
-    fs::write(
-        root.path().join("config.toml"),
-        "cli_auth_credentials_store = 'ephemeral'",
-    )
-    .unwrap();
-    assert!(codex_metadata(root.path()).is_err());
-}
-
 #[test]
 fn disposable_claude_commands_never_use_the_default_native_home() {
     let root = tempfile::tempdir().unwrap();
@@ -90,7 +61,7 @@ fn disposable_claude_commands_never_use_the_default_native_home() {
 #[test]
 fn isolated_claude_sign_in_keeps_the_os_home_for_keychain_lookup() {
     let root = tempfile::tempdir().unwrap();
-    let native = NativeStore::isolated(AgentId::Claude, root.path()).unwrap();
+    let native = ClaudeNative::isolated(root.path()).unwrap();
     let command = native.command();
     let env: std::collections::HashMap<_, _> = command.get_envs().collect();
     assert_eq!(
@@ -103,7 +74,7 @@ fn isolated_claude_sign_in_keeps_the_os_home_for_keychain_lookup() {
     );
     assert!(!env.contains_key(std::ffi::OsStr::new("USERPROFILE")));
     assert_eq!(native.config_file, native.config_home.join(".claude.json"));
-    assert_ne!(native.claude_service(), "Claude Code-credentials");
+    assert_ne!(native.service(), "Claude Code-credentials");
 }
 
 #[test]
@@ -137,71 +108,15 @@ fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
             "200 OK",
             r#"{"account":{"uuid":"legacy-user"},"organization":{"uuid":"team"}}"#,
         );
-        native.verify_claude(&url).unwrap();
+        native.verify_at(&url).unwrap();
         request.join().unwrap();
         let (url, request) = crate::http::serve_once(
             "200 OK",
             r#"{"account":{"uuid":"wrong-user"},"organization":{"uuid":"team"}}"#,
         );
-        assert!(native.verify_claude(&url).is_err());
+        assert!(native.verify_at(&url).is_err());
         request.join().unwrap();
     }
-}
-
-/// An environment holding exactly `vars`, for `resolve_from`.
-fn environment<'a>(
-    vars: &'a [(&'a str, PathBuf)],
-) -> impl Fn(&str) -> Option<std::ffi::OsString> + 'a {
-    move |name| {
-        vars.iter()
-            .find(|(key, _)| *key == name)
-            .map(|(_, value)| value.clone().into_os_string())
-    }
-}
-
-/// Whatever the developer running the suite has exported, a store resolved in a test lives in
-/// the test's own home and never chooses the login Keychain: `resolve` reads the test
-/// environment, not `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or whatever a sibling test did to
-/// `ON_N_OFF_HOME`.
-#[test]
-fn a_test_resolves_native_stores_inside_its_own_home_whatever_the_machine_exports() {
-    let root = tempfile::tempdir().unwrap();
-    for (provider, folder) in [(AgentId::Claude, ".claude"), (AgentId::Codex, ".codex")] {
-        let store = NativeStore::resolve(provider, root.path()).unwrap();
-        assert_eq!(store.config_home, root.path().join(folder), "{provider:?}");
-        assert!(!store.custom, "{provider:?}");
-        assert!(
-            !store.use_keychain,
-            "{provider:?} would reach the login Keychain"
-        );
-    }
-}
-
-#[test]
-fn outside_a_disposable_home_the_provider_override_and_the_keychain_apply() {
-    let root = tempfile::tempdir().unwrap();
-    let claude_home = root.path().join("elsewhere").join("claude");
-    let env = [("CLAUDE_CONFIG_DIR", claude_home.clone())];
-    let store =
-        NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
-    assert_eq!(store.config_home, claude_home);
-    assert_eq!(store.config_file, claude_home.join(".claude.json"));
-    assert!(store.custom);
-    assert!(store.use_keychain);
-
-    let codex_home = root.path().join("elsewhere").join("codex");
-    let env = [("CODEX_HOME", codex_home.clone())];
-    let store = NativeStore::resolve_from(AgentId::Codex, root.path(), &environment(&env)).unwrap();
-    assert_eq!(store.config_home, codex_home);
-    assert_eq!(store.config_file, codex_home.join("config.toml"));
-    assert!(store.custom);
-    assert!(store.use_keychain);
-
-    let store = NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&[])).unwrap();
-    assert_eq!(store.config_home, root.path().join(".claude"));
-    assert_eq!(store.config_file, root.path().join(".claude.json"));
-    assert!(!store.custom);
-    assert!(store.use_keychain);
 }
 
 /// Claude's config home is `CLAUDE_CONFIG_DIR` as Claude Code reads it: NFC-normalized, never
@@ -219,112 +134,69 @@ fn the_claude_config_home_is_claude_config_dir_as_claude_code_reads_it() {
         (PathBuf::from(&padded), PathBuf::from(&padded)),
     ] {
         let env = [("CLAUDE_CONFIG_DIR", value.clone())];
-        let store =
-            NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
+        let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
         assert_eq!(store.config_home, config, "{value:?}");
         assert_eq!(store.config_file, config.join(".claude.json"));
     }
 }
 
+/// Whatever the developer running the suite has exported, a store resolved in a test lives in
+/// the test's own home and never chooses the login Keychain: `resolve` reads the test
+/// environment, not `CLAUDE_CONFIG_DIR` or whatever a sibling test did to `ON_N_OFF_HOME`.
 #[test]
-fn a_disposable_home_ignores_provider_overrides_and_the_keychain() {
+fn a_test_resolves_the_claude_store_inside_its_own_home_whatever_the_machine_exports() {
     let root = tempfile::tempdir().unwrap();
-    let elsewhere = root.path().join("elsewhere");
+    let store = ClaudeNative::resolve(root.path()).unwrap();
+    assert_eq!(store.config_home, root.path().join(".claude"));
+    assert!(!store.custom);
+    assert!(!store.use_keychain, "it would reach the login Keychain");
+}
+
+#[test]
+fn outside_a_disposable_home_claude_config_dir_and_the_keychain_apply() {
+    let root = tempfile::tempdir().unwrap();
+    let claude_home = root.path().join("elsewhere").join("claude");
+    let env = [("CLAUDE_CONFIG_DIR", claude_home.clone())];
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
+    assert_eq!(store.config_home, claude_home);
+    assert_eq!(store.config_file, claude_home.join(".claude.json"));
+    assert!(store.custom);
+    assert!(store.use_keychain);
+
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&[])).unwrap();
+    assert_eq!(store.config_home, root.path().join(".claude"));
+    assert_eq!(store.config_file, root.path().join(".claude.json"));
+    assert!(!store.custom);
+    assert!(store.use_keychain);
+}
+
+#[test]
+fn a_disposable_home_ignores_claude_config_dir_and_the_keychain() {
+    let root = tempfile::tempdir().unwrap();
     let env = [
         ("ON_N_OFF_HOME", root.path().to_path_buf()),
-        ("CLAUDE_CONFIG_DIR", elsewhere.clone()),
-        ("CODEX_HOME", elsewhere),
+        ("CLAUDE_CONFIG_DIR", root.path().join("elsewhere")),
     ];
-    for (provider, folder) in [(AgentId::Claude, ".claude"), (AgentId::Codex, ".codex")] {
-        let store = NativeStore::resolve_from(provider, root.path(), &environment(&env)).unwrap();
-        assert_eq!(store.config_home, root.path().join(folder), "{provider:?}");
-        assert!(!store.custom, "{provider:?}");
-        assert!(!store.use_keychain, "{provider:?}");
-    }
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
+    assert_eq!(store.config_home, root.path().join(".claude"));
+    assert!(!store.custom);
+    assert!(!store.use_keychain);
 }
 
+/// A linked configuration file is the official client's to change.
+#[cfg(unix)]
 #[test]
-fn a_relative_provider_override_is_refused() {
+fn account_changes_refuse_a_linked_claude_configuration_file() {
     let root = tempfile::tempdir().unwrap();
-    let env = [("CODEX_HOME", Path::new("relative").join("codex"))];
+    let store = ClaudeNative::resolve(root.path()).unwrap();
+    let elsewhere = root.path().join("elsewhere");
+    fs::write(&elsewhere, "").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &store.config_file).unwrap();
     assert_eq!(
-        NativeStore::resolve_from(AgentId::Codex, root.path(), &environment(&env)).err(),
-        Some("The provider home must be an absolute path.".to_string())
+        store.preflight().err().as_deref(),
+        Some("Linked account configuration must be changed through the official CLI.")
     );
 }
-
-/// A Codex login on disk, as the CLI writes it: its tokens under `tokens`, the workspace's claims in
-/// the id token.
-fn codex_login(root: &Path, access_token: Option<&str>) {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    let claims = json!({"https://api.openai.com/auth":{"chatgpt_account_id":"team","chatgpt_user_id":"user"}});
-    let mut tokens = json!({
-        "account_id": "team",
-        "refresh_token": "fixture-refresh",
-        "id_token": format!("e30.{}.s", URL_SAFE_NO_PAD.encode(claims.to_string())),
-    });
-    if let Some(token) = access_token {
-        tokens["access_token"] = json!(token);
-    }
-    fs::write(
-        root.join("auth.json"),
-        json!({"tokens": tokens}).to_string(),
-    )
-    .unwrap();
-}
-
-/// Only the access token leaves accounts, beside the key the card is known by and its workspace.
-#[test]
-fn the_access_projection_carries_only_the_access_token_with_the_cards_identity() {
-    let root = tempfile::tempdir().unwrap();
-    codex_login(root.path(), Some("fixture-access"));
-
-    let (metadata, access) = codex_metadata_and_access(root.path()).unwrap().unwrap();
-    let access = access.unwrap();
-
-    assert_eq!(
-        Some(&metadata),
-        codex_metadata(root.path()).unwrap().as_ref()
-    );
-    assert_eq!(access.observation_key, metadata.0);
-    assert_eq!(access.workspace_id, "team");
-    assert_eq!(access.token.authorization(), "Bearer fixture-access");
-}
-
-#[test]
-fn a_codex_login_without_an_access_token_gives_its_identity_and_no_access() {
-    let root = tempfile::tempdir().unwrap();
-    codex_login(root.path(), None);
-
-    let (metadata, access) = codex_metadata_and_access(root.path()).unwrap().unwrap();
-    assert_eq!(Some(metadata), codex_metadata(root.path()).unwrap());
-    assert!(access.is_none());
-    assert!(
-        codex_metadata_and_access(tempfile::tempdir().unwrap().path())
-            .unwrap()
-            .is_none()
-    );
-}
-
-/// Reading the token must not loosen the identity rules `codex_metadata` enforces.
-#[test]
-fn the_access_projection_refuses_a_login_whose_claims_name_another_workspace() {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    let root = tempfile::tempdir().unwrap();
-    let claims = json!({"https://api.openai.com/auth":{"chatgpt_account_id":"other","chatgpt_user_id":"user"}});
-    fs::write(
-        root.path().join("auth.json"),
-        json!({"tokens":{"account_id":"team","access_token":"fixture-access",
-            "id_token":format!("e30.{}.s",URL_SAFE_NO_PAD.encode(claims.to_string()))}})
-        .to_string(),
-    )
-    .unwrap();
-
-    assert!(codex_metadata_and_access(root.path()).is_err());
-}
-
-/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
-const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
 
 /// The account switch's read of a store that has no Keychain to consult, for each thing the
 /// credentials file can hold. A login needs an access token: Claude Code signs out by emptying
@@ -372,7 +244,7 @@ fn the_native_claude_read_of_the_credentials_file() {
 
 /// Claude Code's refresh lock, its legacy lock beside the config home, and the config file's lock,
 /// in the order they are taken.
-fn native_lock_paths(native: &NativeStore) -> [PathBuf; 3] {
+fn native_lock_paths(native: &ClaudeNative) -> [PathBuf; 3] {
     let mut legacy = native.config_home.as_os_str().to_owned();
     legacy.push(".lock");
     let mut config = native.config_file.as_os_str().to_owned();
@@ -489,13 +361,6 @@ fn a_native_lock_broken_under_the_holder_stops_the_write() {
     assert!(!native.config_file.exists());
 }
 
-fn incoming() -> Login {
-    Login {
-        auth: json!({"claudeAiOauth":{"accessToken":"incoming"}}),
-        account: json!({"accountUuid":"b","organizationUuid":"org-b"}),
-    }
-}
-
 /// Claude Code takes `.storage-write.lock` around every change to its credentials. While another
 /// process holds it, the switch writes neither half.
 #[test]
@@ -580,7 +445,7 @@ fn verification_refuses_an_expired_login_that_cannot_renew() {
 
     assert_eq!(
         native
-            .verify_claude(&crate::http::refused_url())
+            .verify_at(&crate::http::refused_url())
             .err()
             .as_deref(),
         Some("Could not renew the native Claude login. Sign in again if it has expired.")
@@ -624,6 +489,153 @@ fn a_storage_lock_that_cannot_be_created_is_named_in_the_error() {
     );
 }
 
-#[cfg(target_os = "macos")]
-mod keychain;
-mod secure_storage;
+/// Claude settings that force a login method or organization are managed authentication.
+#[test]
+fn account_changes_refuse_claude_settings_that_force_how_it_signs_in() {
+    const MANAGED: &str =
+        "Managed Claude authentication must be changed through the official client.";
+    let root = tempfile::tempdir().unwrap();
+    let store = ClaudeNative::resolve(root.path()).unwrap();
+    fs::create_dir_all(&store.config_home).unwrap();
+    let settings = store.config_home.join("settings.json");
+    for (content, refusal) in [
+        (r#"{"forceLoginMethod":"claudeai"}"#, Some(MANAGED)),
+        (r#"{"forceLoginOrgUUID":"org-a"}"#, Some(MANAGED)),
+        (r#"{"theme":"dark"}"#, None),
+        ("{ not json", Some("Native configuration is malformed.")),
+    ] {
+        fs::write(&settings, content).unwrap();
+        assert_eq!(store.preflight().err().as_deref(), refusal, "{content}");
+    }
+}
+
+/// A `claude` started for the user's own default store inherits no config dir and no secure
+/// storage dir, and keeps the OS home, so it works where Claude Code itself would.
+#[test]
+fn a_claude_command_for_the_default_store_inherits_no_store_of_its_own() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&[])).unwrap();
+    let command = store.command();
+    let env = command_env(&command);
+    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&None));
+    assert_eq!(env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR"), Some(&None));
+    assert!(!env.contains_key("HOME") && !env.contains_key("USERPROFILE"));
+    assert_eq!(
+        command.get_current_dir(),
+        Some(root.path().join(".claude").as_path())
+    );
+}
+
+/// A file-backed store gets a disposable OS home beside its config dir, `USERPROFILE` included.
+#[test]
+fn a_file_backed_claude_command_gets_a_disposable_os_home() {
+    let root = tempfile::tempdir().unwrap();
+    let env = command_env(&claude(root.path()).command());
+    assert_eq!(
+        env.get("HOME"),
+        Some(&Some(root.path().as_os_str().to_owned()))
+    );
+    assert_eq!(
+        env.get("USERPROFILE"),
+        Some(&Some(root.path().as_os_str().to_owned()))
+    );
+    assert_eq!(env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR"), Some(&None));
+}
+
+/// A store `CLAUDE_CONFIG_DIR` chose hands that dir to the `claude` it starts. Only on macOS does it
+/// keep the OS home, where the login Keychain is found through it.
+#[test]
+fn a_claude_command_for_a_chosen_config_dir_is_handed_that_dir() {
+    let root = tempfile::tempdir().unwrap();
+    let chosen = root.path().join("work").join(".claude");
+    let env = [("CLAUDE_CONFIG_DIR", chosen.clone())];
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
+    let env = command_env(&store.command());
+    assert_eq!(
+        env.get("CLAUDE_CONFIG_DIR"),
+        Some(&Some(chosen.clone().into_os_string()))
+    );
+    let home =
+        (!cfg!(target_os = "macos")).then(|| Some(chosen.parent().unwrap().as_os_str().to_owned()));
+    assert_eq!(env.get("HOME").cloned(), home);
+}
+
+/// A credential in Claude Code's environment overrides its own login, so account changes defer to
+/// the official client while one is set.
+#[test]
+fn account_changes_refuse_a_claude_credential_in_the_environment() {
+    const OVERRIDDEN: &str = "An environment credential overrides native login. Remove the override before using saved profiles.";
+    let root = tempfile::tempdir().unwrap();
+    let store = ClaudeNative::resolve(root.path()).unwrap();
+    let managed = root.path().join("managed-settings.json");
+    for name in [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+    ] {
+        let env = [(name, PathBuf::from("fixture-credential"))];
+        assert_eq!(
+            store
+                .preflight_in(&environment(&env), &managed)
+                .err()
+                .as_deref(),
+            Some(OVERRIDDEN),
+            "{name}"
+        );
+    }
+    let env = [("OPENAI_API_KEY", PathBuf::from("fixture-credential"))];
+    assert_eq!(
+        store.preflight_in(&environment(&env), &managed),
+        Ok(()),
+        "another provider's credential is not Claude's"
+    );
+}
+
+/// An administrator's managed settings that force how Claude signs in are managed authentication
+/// too, and unreadable ones are not taken as permission.
+#[test]
+fn account_changes_refuse_managed_claude_settings_that_force_how_it_signs_in() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ClaudeNative::resolve(root.path()).unwrap();
+    let managed = root.path().join("managed-settings.json");
+    let preflight = || store.preflight_in(&environment(&[]), &managed);
+    assert_eq!(preflight(), Ok(()), "no managed settings");
+    for (content, refusal) in [
+        (
+            r#"{"forceLoginOrgUUID":"org-a"}"#,
+            Some("Managed Claude authentication must be changed through the official client."),
+        ),
+        (r#"{"model":"fixture-model"}"#, None),
+        ("{ not json", Some("Native configuration is malformed.")),
+    ] {
+        fs::write(&managed, content).unwrap();
+        assert_eq!(preflight().err().as_deref(), refusal, "{content}");
+    }
+}
+
+/// What a command runs its program with.
+fn args(command: &Command) -> Vec<String> {
+    command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// The official client signs in with its claude.ai login and signs out with its own command, both
+/// in the store they are started for.
+#[test]
+fn claude_signs_in_and_out_through_its_own_auth_commands() {
+    let root = tempfile::tempdir().unwrap();
+    let isolated = ClaudeNative::isolated(root.path()).unwrap();
+    let sign_in = isolated.sign_in();
+    assert_eq!(args(&sign_in), ["auth", "login", "--claudeai"]);
+    assert_eq!(
+        command_env(&sign_in).get("CLAUDE_CONFIG_DIR"),
+        Some(&Some(root.path().join(".claude").into_os_string()))
+    );
+
+    let store = claude(root.path());
+    let logout = store.logout_command();
+    assert_eq!(args(&logout), ["auth", "logout"]);
+    assert_eq!(logout.get_current_dir(), Some(store.config_home.as_path()));
+}

@@ -1,5 +1,8 @@
 use super::*;
-use crate::accounts::store::{ChangeKind, Database};
+use crate::accounts::{
+    model,
+    store::{ChangeKind, Database},
+};
 use serde_json::json;
 fn profile() -> Profile {
     let mut db = super::super::store::Database::default();
@@ -387,8 +390,10 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
     }
 }
 
+/// A CLI signed in with no subscription login, an API key among them
+/// (`codex::CodexNative::subscription`), excludes no saved account from polling.
 #[test]
-fn native_api_key_login_does_not_block_saved_subscription_polling() {
+fn a_cli_without_a_subscription_login_excludes_no_saved_account_from_polling() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let home = tempfile::tempdir().unwrap();
     let mut p = stored(home.path());
@@ -401,10 +406,7 @@ fn native_api_key_login_does_not_block_saved_subscription_polling() {
         AgentId::Codex,
         false,
         &mut entries,
-        Ok(Some(Login {
-            auth: json!({"OPENAI_API_KEY":"fixture-api-key"}),
-            account: json!({}),
-        })),
+        Ok(None),
         &|| Ok(open(home.path())),
         &|p| {
             calls.fetch_add(1, Ordering::SeqCst);
@@ -487,6 +489,68 @@ fn automatic_renewal_policy_covers_both_providers_and_never_renews_shadows() {
     }
 }
 
+/// A private login this owns, for `user` in `team`, whose access token expires as `expiry` says.
+fn owned_with(provider: AgentId, expiry: Option<i64>) -> Profile {
+    use base64::Engine;
+    let jwt = |value: serde_json::Value| {
+        format!(
+            "header.{}.signature",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(&value).unwrap())
+        )
+    };
+    let mut p = profile();
+    p.identity.provider = provider;
+    p.usage_renewal_owned = true;
+    p.login = Some(if provider == AgentId::Claude {
+        let mut auth = json!({"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}});
+        if let Some(at) = expiry {
+            auth["claudeAiOauth"]["expiresAt"] = json!(at);
+        }
+        Login {
+            auth,
+            account: json!({"accountUuid":"user","organizationUuid":"team"}),
+        }
+    } else {
+        let access = expiry.map_or_else(|| "not-a-jwt".to_string(), |exp| jwt(json!({"exp": exp})));
+        Login {
+            auth: json!({"tokens":{"access_token":access,"refresh_token":"refresh","account_id":"team",
+                "id_token":jwt(json!({"https://api.openai.com/auth":{"chatgpt_user_id":"user","chatgpt_account_id":"team"}}))}}),
+            account: serde_json::Value::Null,
+        }
+    });
+    p
+}
+
+/// When a saved login is due to renew before it is read, at 1,000,000 ms: a Claude one once its
+/// access token's `expiresAt` (ms) is reached, never without one; a Codex one within ten minutes
+/// of its access token's `exp` (s), or when that cannot be read.
+#[test]
+fn a_saved_login_renews_before_its_read_once_its_provider_says_it_is_due() {
+    use std::cell::Cell;
+    for (provider, expiry, due) in [
+        (AgentId::Claude, Some(1_000_000), true),
+        (AgentId::Claude, Some(1_000_001), false),
+        (AgentId::Claude, None, false),
+        (AgentId::Codex, Some(1_599), true),
+        (AgentId::Codex, Some(1_600), false),
+        (AgentId::Codex, None, true),
+    ] {
+        let p = owned_with(provider, expiry);
+        let renewals = Cell::new(0);
+        let result = fetch_with(&p, 1_000_000, &|_| Ok(reading(&p)), &|| {
+            renewals.set(renewals.get() + 1);
+            Ok(p.login.clone().unwrap())
+        });
+        assert!(result.result.is_ok(), "{provider:?} {expiry:?}");
+        assert_eq!(
+            renewals.get(),
+            usize::from(due),
+            "{provider:?} expiring at {expiry:?}"
+        );
+    }
+}
+
 #[test]
 fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_results() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -510,7 +574,7 @@ fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_result
                 AgentId::Claude,
                 force,
                 entries,
-                Ok(active.login.clone()),
+                Ok(Some(active.identity.clone())),
                 &|| Ok(open(home.path())),
                 &|p| {
                     assert_eq!(p.id, inactive.id);
@@ -566,7 +630,9 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
     for provider in [AgentId::Claude, AgentId::Codex] {
         for expired in [false, true] {
             let p = policy_profile(provider, true, expired);
-            let old = p.login.as_ref().unwrap().fingerprint();
+            let fingerprint =
+                |login: &Login| super::super::view(provider, login).unwrap().fingerprint();
+            let old = fingerprint(p.login.as_ref().unwrap());
             let mut rotated = p.login.clone().unwrap();
             if provider == AgentId::Claude {
                 rotated.auth["claudeAiOauth"]["accessToken"] = json!("rotated-access");
@@ -579,17 +645,17 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
                 1_000_000,
                 &|login| {
                     reads.set(reads.get() + 1);
-                    if login.fingerprint() == old {
+                    if fingerprint(login) == old {
                         Err(HttpError::Unauthorized)
                     } else {
-                        assert_eq!(login.fingerprint(), rotated.fingerprint());
+                        assert_eq!(fingerprint(login), fingerprint(&rotated));
                         Ok(reading(&p))
                     }
                 },
                 &|| Ok(rotated.clone()),
             );
             assert!(result.result.is_ok());
-            assert_eq!(result.login.unwrap().fingerprint(), rotated.fingerprint());
+            assert_eq!(fingerprint(&result.login.unwrap()), fingerprint(&rotated));
             assert_eq!(reads.get(), if expired { 1 } else { 2 });
         }
     }

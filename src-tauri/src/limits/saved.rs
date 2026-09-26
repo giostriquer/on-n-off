@@ -40,8 +40,8 @@ fn read_at(
 ) -> Result<ProviderLimitsDto, HttpError> {
     let mut parsed = match identity.provider {
         AgentId::Claude => {
-            let credential =
-                credentials::parse_claude_credential(auth).ok_or(HttpError::Unauthorized)?;
+            let credential = crate::accounts::claude::ClaudeLogin::credential_in(auth)
+                .ok_or(HttpError::Unauthorized)?;
             let bearer = format!("Bearer {}", credential.token);
             let claude::ClaudeProfile {
                 identity: profile,
@@ -76,9 +76,9 @@ fn read_at(
             }
         }
         AgentId::Codex => {
-            let token = crate::accounts::model::string(auth, "/tokens/access_token")
-                .map_err(|_| HttpError::Unauthorized)?;
-            let bearer = format!("Bearer {token}");
+            let token = crate::accounts::codex::CodexLogin::access_token_in(auth)
+                .ok_or(HttpError::Unauthorized)?;
+            let bearer = token.authorization();
             let headers = [
                 ("Authorization", bearer.as_str()),
                 ("ChatGPT-Account-Id", identity.workspace_id.as_str()),
@@ -101,10 +101,10 @@ fn read_at(
             let mut reading = parse_codex_usage(&payload, details.as_ref())?;
             // The backend reads never decide the read: an account the endpoint refuses just has
             // no figure. Only a workspace pools credits, so only one is asked what it spent.
-            let access = crate::accounts::native::CodexAccess {
+            let access = crate::accounts::codex_store::CodexAccess {
                 observation_key: identity.observation_key(),
                 workspace_id: identity.workspace_id.clone(),
-                token: crate::accounts::model::AccessToken::new(token),
+                token,
             };
             if reading
                 .plan

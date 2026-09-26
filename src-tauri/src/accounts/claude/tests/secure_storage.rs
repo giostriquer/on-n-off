@@ -25,8 +25,7 @@ fn the_switch_works_in_the_secure_storage_dir() {
     )
     .unwrap();
     let env = [(SECURE_STORAGE, secure.clone())];
-    let mut native =
-        NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
+    let mut native = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
     native.use_keychain = false;
 
     assert_eq!(native.config_home, root.path().join(".claude"));
@@ -57,7 +56,7 @@ fn the_switch_works_in_the_secure_storage_dir() {
 #[test]
 fn an_isolated_claude_sign_in_never_inherits_a_secure_storage_dir() {
     let root = tempfile::tempdir().unwrap();
-    let native = NativeStore::isolated(AgentId::Claude, root.path()).unwrap();
+    let native = ClaudeNative::isolated(root.path()).unwrap();
     let command = native.command();
     let envs: std::collections::HashMap<_, _> = command.get_envs().collect();
     assert_eq!(
@@ -66,9 +65,6 @@ fn an_isolated_claude_sign_in_never_inherits_a_secure_storage_dir() {
         "removed from the child's environment"
     );
 }
-
-/// What account changes say about a native home the environment chose.
-const CUSTOM_HOME: &str = "Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.";
 
 /// A store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved is a custom native home like one
 /// `CLAUDE_CONFIG_DIR` chose, so account changes defer to the official client for it. Named
@@ -79,8 +75,7 @@ fn account_changes_defer_to_the_official_client_for_a_moved_store() {
     let root = tempfile::tempdir().unwrap();
     let preflight = |variable: &str, value: PathBuf| {
         let env = [(variable, value)];
-        let store =
-            NativeStore::resolve_from(AgentId::Claude, root.path(), &environment(&env)).unwrap();
+        let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
         store.preflight()
     };
 

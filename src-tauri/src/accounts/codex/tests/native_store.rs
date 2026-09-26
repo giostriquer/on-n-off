@@ -1,0 +1,320 @@
+//! The account switch's view of Codex's native store: where it resolves, what it reads and writes,
+//! its preflight and the `codex` it starts.
+
+use super::*;
+
+/// Whatever the developer running the suite has exported, a store resolved in a test lives in
+/// the test's own home: `resolve` reads the test environment, not `CODEX_HOME` or whatever a
+/// sibling test did to `ON_N_OFF_HOME`.
+#[test]
+fn a_test_resolves_the_codex_store_inside_its_own_home_whatever_the_machine_exports() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    assert_eq!(store.config_home, root.path().join(".codex"));
+    assert!(!store.custom);
+}
+
+#[test]
+fn outside_a_disposable_home_codex_home_applies() {
+    let root = tempfile::tempdir().unwrap();
+    let codex_home = root.path().join("elsewhere").join("codex");
+    let env = [("CODEX_HOME", codex_home.clone())];
+    let store = CodexNative::resolve_from(root.path(), &environment(&env)).unwrap();
+    assert_eq!(store.config_home, codex_home);
+    assert_eq!(store.config_file, codex_home.join("config.toml"));
+    assert!(store.custom);
+}
+
+#[test]
+fn a_disposable_home_ignores_codex_home() {
+    let root = tempfile::tempdir().unwrap();
+    let env = [
+        ("ON_N_OFF_HOME", root.path().to_path_buf()),
+        ("CODEX_HOME", root.path().join("elsewhere")),
+    ];
+    let store = CodexNative::resolve_from(root.path(), &environment(&env)).unwrap();
+    assert_eq!(store.config_home, root.path().join(".codex"));
+    assert!(!store.custom);
+}
+
+#[test]
+fn a_relative_provider_override_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let env = [("CODEX_HOME", Path::new("relative").join("codex"))];
+    assert_eq!(
+        CodexNative::resolve_from(root.path(), &environment(&env)).err(),
+        Some("The provider home must be an absolute path.".to_string())
+    );
+}
+
+/// A linked configuration file is the official client's to change.
+#[cfg(unix)]
+#[test]
+fn account_changes_refuse_a_linked_codex_configuration_file() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    fs::create_dir_all(&store.config_home).unwrap();
+    let elsewhere = root.path().join("elsewhere");
+    fs::write(&elsewhere, "").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &store.config_file).unwrap();
+    assert_eq!(
+        store.preflight().err().as_deref(),
+        Some("Linked account configuration must be changed through the official CLI.")
+    );
+}
+
+/// A Codex home `CODEX_HOME` chose is custom, and account changes defer to the official client for
+/// it, as they do for a Claude home `CLAUDE_CONFIG_DIR` chose.
+#[test]
+fn account_changes_defer_to_the_official_client_for_a_codex_home_the_environment_chose() {
+    let root = tempfile::tempdir().unwrap();
+    let env = [("CODEX_HOME", root.path().join("work"))];
+    let store = CodexNative::resolve_from(root.path(), &environment(&env)).unwrap();
+    assert_eq!(store.preflight().err().as_deref(), Some(CUSTOM_HOME));
+}
+
+/// Codex settings that choose how it signs in, or which profile it runs, are a policy only its
+/// official controls may change; any other setting is not.
+#[test]
+fn account_changes_refuse_a_codex_configuration_that_enforces_how_it_signs_in() {
+    const POLICY: &str =
+        "This Codex installation enforces an authentication policy. Use its official sign-in controls.";
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    fs::create_dir_all(&store.config_home).unwrap();
+    for (config, refusal) in [
+        ("forced_login_method = 'chatgpt'", Some(POLICY)),
+        ("forced_chatgpt_workspace_id = 'team'", Some(POLICY)),
+        ("auth_keyring_backend = 'secret-service'", Some(POLICY)),
+        ("profile = 'work'", Some(POLICY)),
+        ("model = 'fixture-model'", None),
+        ("not = [toml", Some("Native configuration is malformed.")),
+    ] {
+        fs::write(&store.config_file, config).unwrap();
+        assert_eq!(store.preflight().err().as_deref(), refusal, "{config}");
+    }
+}
+
+/// A `codex` started for a store works in that store's home, from inside it.
+#[test]
+fn a_codex_command_works_in_its_stores_home() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    let command = store.command();
+    assert_eq!(
+        command_env(&command).get("CODEX_HOME"),
+        Some(&Some(root.path().join(".codex").into_os_string()))
+    );
+    assert_eq!(
+        command.get_current_dir(),
+        Some(root.path().join(".codex").as_path())
+    );
+}
+
+/// A Codex login is whatever document its store holds, read verbatim; there is no account record
+/// beside it.
+#[test]
+fn a_codex_read_is_the_stored_document_verbatim() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    assert!(store.read().unwrap().is_none(), "no auth.json");
+    fs::create_dir_all(&store.config_home).unwrap();
+    let document =
+        json!({"OPENAI_API_KEY": null, "tokens": {"access_token": "access"}, "extra": 1});
+    fs::write(store.config_home.join("auth.json"), document.to_string()).unwrap();
+    let login = store.read().unwrap().unwrap();
+    assert_eq!(login.auth, document);
+    assert_eq!(login.account, Value::Null);
+}
+
+/// Codex's config chooses its credential store: the file by default or when named, and nothing
+/// on-n-off cannot follow, nor a config profile whose store it cannot verify.
+#[test]
+fn codex_config_selects_the_file_store_and_refuses_what_it_cannot_follow() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    fs::create_dir_all(&store.config_home).unwrap();
+    let auth = store.config_home.join("auth.json");
+    fs::write(&auth, r#"{"tokens":{"access_token":"file"}}"#).unwrap();
+    for config in ["", "cli_auth_credentials_store = 'file'"] {
+        fs::write(&store.config_file, config).unwrap();
+        assert_eq!(
+            store.read().unwrap().unwrap().auth["tokens"]["access_token"],
+            "file",
+            "{config:?}"
+        );
+    }
+    for (config, refusal) in [
+        (
+            "cli_auth_credentials_store = 'ephemeral'",
+            "This Codex credential backend cannot be activated by on-n-off. Use official sign-in.",
+        ),
+        (
+            "profile = 'work'",
+            "Codex configuration profiles must use the official account controls until their effective credential backend can be verified.",
+        ),
+    ] {
+        fs::write(&store.config_file, config).unwrap();
+        assert_eq!(store.read().err().as_deref(), Some(refusal), "{config}");
+        assert_eq!(store.write(None).err().as_deref(), Some(refusal), "{config}");
+    }
+    assert!(auth.exists(), "a refused store is not written");
+}
+
+/// Publishing a Codex login writes its document to the file store verbatim; signing out removes
+/// it; a linked file is never replaced.
+#[test]
+fn a_codex_publication_writes_the_file_store_verbatim() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    fs::create_dir_all(&store.config_home).unwrap();
+    let auth = store.config_home.join("auth.json");
+    let login = Login {
+        auth: json!({"tokens": {"access_token": "incoming"}, "extra": {"kept": true}}),
+        account: Value::Null,
+    };
+    store.write(Some(&login)).unwrap();
+    assert_eq!(native::read_json(&auth).unwrap(), login.auth);
+    store.write(None).unwrap();
+    assert!(!auth.exists());
+    store.write(None).unwrap();
+
+    #[cfg(unix)]
+    {
+        let elsewhere = root.path().join("elsewhere.json");
+        fs::write(&elsewhere, "{}").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &auth).unwrap();
+        assert_eq!(
+            store.write(Some(&login)).err().as_deref(),
+            Some("Refusing to replace a linked credential file.")
+        );
+        assert_eq!(fs::read_to_string(&elsewhere).unwrap(), "{}");
+    }
+}
+
+/// A credential in Codex's environment overrides its own login, so account changes defer to the
+/// official client while one is set.
+#[test]
+fn account_changes_refuse_a_codex_credential_in_the_environment() {
+    const OVERRIDDEN: &str = "An environment credential overrides native login. Remove the override before using saved profiles.";
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    for name in ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_AUTH_TOKEN"] {
+        let env = [(name, PathBuf::from("fixture-credential"))];
+        assert_eq!(
+            store.preflight_in(&environment(&env), &[]).err().as_deref(),
+            Some(OVERRIDDEN),
+            "{name}"
+        );
+    }
+    let env = [("ANTHROPIC_API_KEY", PathBuf::from("fixture-credential"))];
+    assert_eq!(
+        store.preflight_in(&environment(&env), &[]),
+        Ok(()),
+        "another provider's credential is not Codex's"
+    );
+}
+
+/// An administrator's managed Codex configuration, whatever it holds, leaves authentication to
+/// the official client.
+#[test]
+fn account_changes_refuse_a_managed_codex_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    let requirements = root.path().join("requirements.toml");
+    let managed = root.path().join("managed_config.toml");
+    let preflight = || store.preflight_in(&environment(&[]), &[&requirements, &managed]);
+    assert_eq!(preflight(), Ok(()), "no managed configuration");
+    for path in [&requirements, &managed] {
+        fs::write(path, "").unwrap();
+        assert_eq!(
+            preflight().err().as_deref(),
+            Some("Managed Codex authentication must be changed through the official client."),
+            "{path:?}"
+        );
+        fs::remove_file(path).unwrap();
+    }
+}
+
+/// An API-key login has no subscription, so the signed-in subscription is no one's and every saved
+/// account's usage is read. A blank key makes no API-key login, but still no profile.
+#[test]
+fn a_codex_api_key_login_is_signed_in_with_no_subscription() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    fs::create_dir_all(&store.config_home).unwrap();
+    assert_eq!(store.subscription(), Ok(None), "signed out");
+    let signed_in = |key: Value| {
+        let mut auth = json!({"tokens": {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "account_id": "team",
+            "id_token": id_token(&json!({"chatgpt_user_id": "user", "chatgpt_account_id": "team"})),
+        }});
+        if !key.is_null() {
+            auth["OPENAI_API_KEY"] = key;
+        }
+        fs::write(store.config_home.join("auth.json"), auth.to_string()).unwrap();
+        store.subscription()
+    };
+    let user = Identity {
+        provider: AgentId::Codex,
+        user_id: "user".into(),
+        workspace_id: "team".into(),
+    };
+    assert_eq!(signed_in(Value::Null), Ok(Some(user)));
+    assert_eq!(signed_in(json!("fixture-api-key")), Ok(None));
+    assert_eq!(
+        signed_in(json!(" ")).err().as_deref(),
+        Some("API key logins cannot be saved as subscription profiles."),
+        "a blank key is not an API-key login, but no subscription profile either"
+    );
+}
+
+/// What a command runs its program with.
+fn args(command: &Command) -> Vec<String> {
+    command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// The official client signs in, reports its login and signs out with its own commands, each in
+/// the home it is started for.
+#[test]
+fn codex_signs_in_reports_and_signs_out_through_its_own_commands() {
+    let root = tempfile::tempdir().unwrap();
+    let isolated = CodexNative::isolated(root.path()).unwrap();
+    let sign_in = isolated.sign_in();
+    assert_eq!(args(&sign_in), ["login"]);
+    assert_eq!(
+        command_env(&sign_in).get("CODEX_HOME"),
+        Some(&Some(root.path().join(".codex").into_os_string()))
+    );
+
+    let store = CodexNative::resolve(root.path()).unwrap();
+    assert_eq!(args(&store.logout_command()), ["logout"]);
+    assert_eq!(args(&store.status_command()), ["login", "status"]);
+    assert_eq!(
+        command_env(&store.status_command()).get("CODEX_HOME"),
+        Some(&Some(root.path().join(".codex").into_os_string()))
+    );
+}
+
+/// A running Codex client renews its login within ten minutes of its access token's expiry, so
+/// the switch beside it treats such a login as about to be rewritten; one good for an hour is not.
+#[test]
+fn a_codex_login_close_to_its_access_tokens_expiry_renews_soon() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    let now = chrono::Utc::now().timestamp();
+    let expiring = |exp: i64| Login {
+        auth: json!({"tokens": {
+            "access_token": format!("header.{}.signature", URL_SAFE_NO_PAD.encode(json!({"exp": exp}).to_string())),
+            "refresh_token": "refresh",
+        }}),
+        account: Value::Null,
+    };
+    assert!(!store.renews_soon(&expiring(now + 3600)), "an hour ahead");
+    assert!(store.renews_soon(&expiring(now + 60)), "within a minute");
+}

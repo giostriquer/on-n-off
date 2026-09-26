@@ -130,7 +130,12 @@ user data.
 
 **Route through these rather than reinventing them.**
 
-- Provider differences: `AgentAdapter`. Update `PROVIDERS.md` in the same change.
+- Provider differences: `AgentAdapter`. Update `PROVIDERS.md` in the same change. Saved accounts
+  are the exception: everything an account change does differently per provider — the native
+  store, a login's shape, sign-in, preflight, clients — goes through the accounts seam
+  (`accounts::Adapter`, implemented in `accounts/claude.rs` and `accounts/codex.rs` over
+  `accounts/{claude,codex}_store.rs`), never through `AgentAdapter`, which accounts reach only
+  through `supports_accounts`.
 - UI → Rust: `$lib/api`. Feature components never invoke Tauri directly.
 - CLI lookup and spawning: `cli_locate.rs` and `AgentCli` — a GUI app does not inherit a
   terminal's `PATH`.

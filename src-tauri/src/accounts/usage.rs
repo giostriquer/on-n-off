@@ -1,10 +1,8 @@
 //! Poll every saved subscription without publishing credentials to a native client. Shared
 //! native shadows are access-only. Only a never-activated isolated sign-in owns renewal.
 use super::{
-    model,
-    native::NativeStore,
+    model::Identity,
     store::{Guard, Login, Profile, Store, Ticket},
-    transaction::Native,
 };
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
@@ -25,9 +23,11 @@ struct Attempt {
     error: Option<String>,
     rejected: bool,
 }
-struct FetchResult {
-    login: Option<Login>,
-    result: Result<ProviderLimitsDto, HttpError>,
+/// One saved profile's fetch: the login it was made with, which a renewal may have replaced, and
+/// the reading.
+pub(super) struct FetchResult {
+    pub(super) login: Option<Login>,
+    pub(super) result: Result<ProviderLimitsDto, HttpError>,
 }
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
@@ -39,42 +39,50 @@ pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<Provider
     if tests::refresh_fixture(force, entries) {
         return;
     }
-    let Ok(home) = super::home() else {
+    let Ok(accounts) = super::Accounts::live() else {
         return;
     };
-    if !Store::vault_exists(&home) {
-        return;
-    }
-    let open = || Store::open_existing(&home);
-    let native = NativeStore::resolve(provider, &home).and_then(|n| n.read());
-    refresh_with(&home, provider, force, entries, native, &open, &|profile| {
-        fetch_profile(profile, &open)
-    });
+    accounts.refresh_usage(provider, force, entries, &fetch_profile);
 }
 
+/// How one saved profile's usage is fetched, given how to open the vault.
+type Fetch<'a> = dyn Fn(&Profile, &dyn Fn() -> Result<Store, String>) -> FetchResult + Sync + 'a;
+
+impl super::Accounts {
+    /// Merges a fresh reading of every saved `provider` account but the one its CLI is signed in
+    /// with into `entries`, each fetched by `fetch`. Nothing is read on a device with no vault.
+    pub(super) fn refresh_usage(
+        &self,
+        provider: AgentId,
+        force: bool,
+        entries: &mut Vec<ProviderLimitsDto>,
+        fetch: &Fetch<'_>,
+    ) {
+        let home = &self.home;
+        if !Store::vault_exists(home) {
+            return;
+        }
+        let open = || Store::open_existing(home);
+        let native = self
+            .native(provider)
+            .and_then(|native| native.subscription());
+        refresh_with(home, provider, force, entries, native, &open, &|profile| {
+            fetch(profile, &open)
+        });
+    }
+}
+
+/// `native` is who the CLI is signed in as with a subscription; a native store that could not be
+/// read reads no saved account either.
 fn refresh_with(
     home: &Path,
     provider: AgentId,
     force: bool,
     entries: &mut Vec<ProviderLimitsDto>,
-    native: Result<Option<Login>, String>,
+    native: Result<Option<Identity>, String>,
     open: &(dyn Fn() -> Result<Store, String> + Sync),
     fetch: &(dyn Fn(&Profile) -> FetchResult + Sync),
 ) {
-    let native = native.and_then(|login| match login {
-        Some(login)
-            if provider == AgentId::Codex
-                && login
-                    .auth
-                    .get("OPENAI_API_KEY")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|key| !key.trim().is_empty()) =>
-        {
-            Ok(None)
-        }
-        Some(login) => model::identity(provider, &login.auth, &login.account).map(Some),
-        None => Ok(None),
-    });
     let Ok(native) = native else {
         return;
     };
@@ -123,7 +131,9 @@ fn poll_with(
     fetch: &dyn Fn(&Profile) -> FetchResult,
 ) -> Option<Result<ProviderLimitsDto, String>> {
     let login = profile.login.as_ref()?;
-    let fingerprint = login.fingerprint();
+    let fingerprint = super::view(profile.identity.provider, login)
+        .ok()?
+        .fingerprint();
     let key = format!("{}:{}", home.display(), profile.id);
     let attempts = ATTEMPTS.get_or_init(Mutex::default);
     let previous = attempts
@@ -136,13 +146,18 @@ fn poll_with(
         if previous.rejected
             || (Instant::now() < previous.next && (!force || previous.error.is_some()))
         {
-            open().ok()?.recheck(&ticket.holding(profile, login)).ok()?;
+            open()
+                .ok()?
+                .recheck(&ticket.holding(profile, fingerprint))
+                .ok()?;
             return previous.error.clone().map(Err);
         }
     }
     let fetched = fetch(profile);
     let fetched_login = fetched.login?;
-    let fingerprint = fetched_login.fingerprint();
+    let fingerprint = super::view(profile.identity.provider, &fetched_login)
+        .ok()?
+        .fingerprint();
     let result = fetched.result;
     let (error, rejected, retry) = match &result {
         Ok(_) => (None, false, Duration::ZERO),
@@ -201,9 +216,7 @@ fn poll_with(
     // Removal, reauthentication and logout can proceed while HTTP is in flight. Recheck under
     // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
     let store = open().ok()?;
-    store
-        .recheck(&ticket.holding(profile, &fetched_login))
-        .ok()?;
+    store.recheck(&ticket.holding(profile, fingerprint)).ok()?;
     match result {
         Ok(mut dto) => {
             if dto
@@ -256,22 +269,13 @@ fn fetch_with(
     let mut login = profile.login.clone();
     let result = (|| {
         let current = login.as_mut().ok_or(HttpError::Unauthorized)?;
-        if model::identity(profile.identity.provider, &current.auth, &current.account)
-            .ok()
-            .as_ref()
-            != Some(&profile.identity)
-        {
+        let view =
+            super::view(profile.identity.provider, current).map_err(|_| HttpError::Unauthorized)?;
+        if view.identity().ok().as_ref() != Some(&profile.identity) {
             return Err(HttpError::Unauthorized);
         }
-        let expired = match profile.identity.provider {
-            AgentId::Claude => current
-                .auth
-                .pointer("/claudeAiOauth/expiresAt")
-                .and_then(serde_json::Value::as_i64)
-                .is_some_and(|v| v <= now),
-            AgentId::Codex => model::codex_renews_soon(&current.auth, now / 1000),
-            _ => false,
-        };
+        let expired = view.renewal_due(now);
+        drop(view);
         let mut renewed = false;
         if expired && profile.usage_renewal_owned {
             *current = renew()?;

@@ -181,17 +181,6 @@ fn older_profile_names_load_as_categories_without_becoming_the_email() {
     assert_eq!(loaded.profiles[0].category.as_deref(), Some("Client A"));
 }
 
-/// A login whose ID token carries these `https://api.openai.com/auth` claims.
-fn login_with_claims(claims: Value) -> Login {
-    Login {
-        auth: json!({"tokens": {
-            "id_token": crate::accounts::model::tests::id_token(&claims),
-            "refresh_token": "never-projected"
-        }}),
-        account: Value::Null,
-    }
-}
-
 /// Save one Codex profile with this login into `home`'s vault, which `vault::tests::unlock_fixture`
 /// has already unlocked, and give back its observation key.
 pub(crate) fn saved_codex_fixture(
@@ -213,46 +202,6 @@ pub(crate) fn saved_codex_fixture(
     .unwrap();
     store.persist(&db).unwrap();
     key
-}
-
-#[test]
-fn codex_claims_come_only_from_the_exact_saved_login_after_vault_reload() {
-    let root = tempfile::tempdir().unwrap();
-    let store = Store {
-        root: root.path().into(),
-        key: [9; 32],
-        _lease: held(root.path()),
-    };
-    let mut db = Database::default();
-    let saved = identity("inactive");
-    let key = saved.observation_key();
-    db.save(
-        saved,
-        login_with_claims(json!({"chatgpt_plan_type": "pro"})),
-        None,
-    )
-    .unwrap();
-    store.persist(&db).unwrap();
-    let mut loaded = store.load().unwrap();
-    let claims = loaded.codex_claims(&key).unwrap();
-    assert_eq!(claims["chatgpt_plan_type"], "pro");
-    assert!(claims.get("refresh_token").is_none() && claims.get("id_token").is_none());
-    assert!(loaded
-        .codex_claims(&identity("other-user").observation_key())
-        .is_none());
-    let mut other_workspace = identity("inactive");
-    other_workspace.workspace_id = "other".into();
-    assert!(loaded
-        .codex_claims(&other_workspace.observation_key())
-        .is_none());
-    loaded.profiles[0].login = None;
-    assert!(
-        loaded.codex_claims(&key).is_none(),
-        "a profile awaiting sign-in has no token to read"
-    );
-    loaded.profiles.clear();
-    store.persist(&loaded).unwrap();
-    assert!(store.load().unwrap().codex_claims(&key).is_none());
 }
 
 #[test]

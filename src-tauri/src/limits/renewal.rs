@@ -14,8 +14,8 @@ use serde_json::Value;
 
 use super::backend_memo::PerAccount;
 use super::Parsed;
+use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::AccessToken;
-use crate::accounts::native::CodexAccess;
 use crate::dto::{AgentId, LimitsSubscriptionDto, ProviderLimitsDto, SubscriptionNote};
 
 /// The account's subscription term, the endpoint ChatGPT's own billing settings read.

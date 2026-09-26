@@ -3,103 +3,6 @@
 
 use super::*;
 
-/// Activation's Keychain path on macOS sends `security` exactly the commands the shared writer
-/// builds, and nothing else: the login as one `add-generic-password -U` with the secret
-/// hex-encoded, a removal as one `delete-generic-password` naming account and service. A write
-/// back through the `keyring` crate — this process's own identity, which is what prompted on
-/// every switch — would send nothing here and fail this test.
-#[cfg(target_os = "macos")]
-#[test]
-fn the_keyring_target_writes_and_deletes_through_security() {
-    use crate::accounts::keychain::{with_test_runner, Runner};
-    use crate::process::CommandOutcome;
-
-    let ok: Runner = |_| CommandOutcome::Exited {
-        success: true,
-        stdout: String::new(),
-        stderr: String::new(),
-    };
-    // Synthetic names on purpose: anyone re-checking this guard by putting the `keyring` crate
-    // back would otherwise file a second item under Claude Code's own service, which the
-    // service-only read could then return instead of the real login.
-    let target = Target::Keyring {
-        service: "on-n-off seam rehearsal".into(),
-        account: "on-n-off-test".into(),
-    };
-    let login = json!({"claudeAiOauth": {"accessToken": "one", "note": "a \"quoted\" word"}});
-    let hex: String = serde_json::to_vec(&login)
-        .unwrap()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-
-    let (result, sent) = with_test_runner(ok, || target.write(Some(&login)));
-    assert_eq!(result, Ok(()));
-    assert_eq!(
-        sent,
-        vec![format!(
-            "add-generic-password -U -a \"on-n-off-test\" -s \"on-n-off seam rehearsal\" -X \"{hex}\"\n"
-        )]
-    );
-
-    let (result, sent) = with_test_runner(ok, || target.write(None));
-    assert_eq!(result, Ok(()));
-    assert_eq!(
-        sent,
-        vec![
-            "delete-generic-password -a \"on-n-off-test\" -s \"on-n-off seam rehearsal\"\n"
-                .to_string()
-        ]
-    );
-
-    let refused: Runner = |_| CommandOutcome::Exited {
-        success: false,
-        stdout: String::new(),
-        stderr: "User interaction is not allowed.".to_string(),
-    };
-    let (result, _) = with_test_runner(refused, || target.write(Some(&login)));
-    assert_eq!(
-        result,
-        Err("Keychain write failed (User interaction is not allowed).".to_string()),
-        "the refusal reads as a sentence, for the transaction to prefix its own"
-    );
-}
-
-/// The same path against the real tool, on a throwaway entry: publish, read back, remove, remove
-/// again. What it proves beyond the test above is the wiring to `security` itself.
-///
-/// `cargo test --manifest-path src-tauri/Cargo.toml rehearse_the_keyring_target -- --ignored`
-#[cfg(target_os = "macos")]
-#[test]
-#[ignore = "writes a throwaway Keychain entry; not part of CI"]
-fn rehearse_the_keyring_target_through_security() {
-    crate::accounts::with_real_keychain(rehearse_the_keyring_target);
-}
-
-#[cfg(target_os = "macos")]
-fn rehearse_the_keyring_target() {
-    let entry = crate::accounts::keychain::ThrowawayEntry {
-        service: "on-n-off native keychain rehearsal",
-        account: "on-n-off-test",
-    };
-    let target = Target::Keyring {
-        service: entry.service.into(),
-        account: entry.account.into(),
-    };
-    let login = json!({"claudeAiOauth": {"accessToken": "one", "note": "a \"quoted\" word"}});
-    target.write(Some(&login)).unwrap();
-    assert_eq!(target.read().unwrap(), Some(login));
-    target.write(None).unwrap();
-    assert_eq!(target.read().unwrap(), None);
-    target.write(None).unwrap();
-    assert_eq!(
-        target.read().unwrap(),
-        None,
-        "removing an entry already gone is not an error"
-    );
-    drop(entry);
-}
-
 /// Answers `security` as a Keychain holding at most one Claude Code item, filed under `me`: its
 /// attributes, and its secret or the reason the secret could not be read.
 #[cfg(target_os = "macos")]
@@ -367,7 +270,7 @@ fn a_switch_past_a_malformed_keychain_entry_writes_the_credentials_file() {
     });
     assert_eq!(written, Ok(()));
     assert_eq!(
-        read_json(&file).unwrap()["claudeAiOauth"]["accessToken"],
+        native::read_json(&file).unwrap()["claudeAiOauth"]["accessToken"],
         "incoming"
     );
     assert!(
@@ -397,7 +300,7 @@ fn a_switch_refuses_to_write_when_the_keychain_cannot_be_read() {
     );
     assert!(written.is_err());
     assert_eq!(
-        read_json(&file).unwrap()["claudeAiOauth"]["accessToken"],
+        native::read_json(&file).unwrap()["claudeAiOauth"]["accessToken"],
         "file-token"
     );
     assert!(
@@ -522,12 +425,12 @@ fn the_switch_reads_its_write_back_while_it_still_holds_the_locks() {
 fn cleaning_an_isolated_sign_in_deletes_only_its_scoped_entry() {
     use crate::accounts::keychain::{fake_items, with_test_runner};
     let root = tempfile::tempdir().unwrap();
-    let isolated = NativeStore::isolated(AgentId::Claude, root.path()).unwrap();
+    let isolated = ClaudeNative::isolated(root.path()).unwrap();
     let hash = crate::sha::sha256_hex(root.path().join(".claude").to_str().unwrap().as_bytes());
     let scoped = format!("Claude Code-credentials-{}", &hash[..8]);
 
     let (cleaned, sent) = with_test_runner(fake_items(&[("claude-code-user", "{}")]), || {
-        isolated.clean_isolated()
+        isolated.clean()
     });
     assert_eq!(cleaned, Ok(()));
     let deletes: Vec<&String> = sent

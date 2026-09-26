@@ -573,7 +573,7 @@ fn the_card_account_id_from_a_read_is_the_id_a_spend_accepts() {
         json!({"tokens": {"account_id": "workspace-1", "id_token": token}}).to_string(),
     )
     .unwrap();
-    let before = crate::accounts::native::codex_metadata(&codex_home).unwrap();
+    let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let card = normalize_app_server(
         AppServerResult {
             codex_home: codex_home.clone(),
@@ -590,7 +590,7 @@ fn the_card_account_id_from_a_read_is_the_id_a_spend_accepts() {
 
     assert_eq!(
         reset_target_matches(
-            crate::accounts::native::codex_metadata(&codex_home).unwrap(),
+            crate::accounts::codex_store::metadata(&codex_home).unwrap(),
             &card
         ),
         Ok(())

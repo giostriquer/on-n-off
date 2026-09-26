@@ -111,7 +111,11 @@ fn removed_accounts_and_signed_out_credential_generations_stay_excluded() {
         .push(native.identify(&login("a")).unwrap());
     assert!(candidate(&native, &db).unwrap().is_none());
     db.ignored_accounts.clear();
-    db.ignored_credentials.push(login("a").fingerprint());
+    db.ignored_credentials.push(
+        super::super::view(AgentId::Claude, &login("a"))
+            .unwrap()
+            .fingerprint(),
+    );
     assert!(candidate(&native, &db).unwrap().is_none());
 }
 #[test]
@@ -165,12 +169,56 @@ fn natural_accounts_are_saved_once_and_pending_reauthentication_is_preserved() {
     assert!(candidate(&native, &loaded).unwrap().is_none());
 }
 
+/// Account operations over `home` that must never reach a native store, a client or a listener.
+fn untouched(home: &Path) -> super::super::Accounts {
+    struct Untouched;
+    impl super::super::Clients for Untouched {
+        fn activation_safe(&self, _: AgentId) -> Result<(), String> {
+            panic!("checked running clients")
+        }
+        fn closed(&self, _: AgentId) -> Result<(), String> {
+            panic!("checked running clients")
+        }
+    }
+    impl super::super::Notify for Untouched {
+        fn changed(&self, _: AgentId) {
+            panic!("announced a change")
+        }
+        fn accounts(&self) {
+            panic!("announced a change")
+        }
+    }
+    impl super::super::NativeStores for Untouched {
+        fn native(
+            &self,
+            _: AgentId,
+            _: &Path,
+        ) -> Result<Box<dyn super::super::NativeAccount>, String> {
+            panic!("resolved a native store")
+        }
+        fn isolated(
+            &self,
+            _: AgentId,
+            _: &Path,
+        ) -> Result<Box<dyn super::super::IsolatedSignIn>, String> {
+            panic!("resolved a native store")
+        }
+    }
+    super::super::Accounts {
+        home: home.into(),
+        stores: Box::new(Untouched),
+        clients: Box::new(Untouched),
+        notify: Box::new(Untouched),
+    }
+}
+
 #[test]
 fn remembering_is_off_by_default_and_does_not_create_a_vault() {
     let root = tempfile::tempdir().unwrap();
     assert!(!enabled(root.path()).unwrap());
-    assert!(!poll_home(root.path(), AgentId::Claude).unwrap());
-    assert!(!poll_home(root.path(), AgentId::Codex).unwrap());
+    let accounts = untouched(root.path());
+    assert!(!accounts.remember(AgentId::Claude).unwrap());
+    assert!(!accounts.remember(AgentId::Codex).unwrap());
     assert!(!root.path().join(".on-n-off").exists());
 }
 
@@ -195,7 +243,11 @@ fn opting_out_never_needs_to_decrypt_a_damaged_vault() {
 fn metadata_changes_cannot_reenroll_a_signed_out_credential_generation() {
     let native = client();
     let mut db = Database::default();
-    db.ignored_credentials.push(login("a").fingerprint());
+    db.ignored_credentials.push(
+        super::super::view(AgentId::Claude, &login("a"))
+            .unwrap()
+            .fingerprint(),
+    );
     native.live.borrow_mut().as_mut().unwrap().account["emailAddress"] =
         json!("updated@example.com");
     assert!(candidate(&native, &db).unwrap().is_none());

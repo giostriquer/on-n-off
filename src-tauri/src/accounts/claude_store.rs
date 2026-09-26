@@ -10,7 +10,7 @@
 //! "sign in again" would be the wrong advice.
 //!
 //! Every on-n-off path that reads or writes Claude's login comes through here — the Limits read,
-//! the renewal in [`super::claude_renew`] and the account switch in [`super::native`] — so the
+//! the renewal in [`super::claude_renew`] and the account switch in [`super::claude`] — so the
 //! three cannot disagree about which store they are talking about or about the locks around it.
 //! A second copy of either is how a renewal redeems the file's refresh token and writes it over a
 //! Keychain entry the next read prefers, or takes a lock another path does not know to wait for.

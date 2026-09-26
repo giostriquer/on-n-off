@@ -17,7 +17,7 @@ fn claims() -> Value {
 fn auth(claims: &Value) -> Value {
     json!({"tokens": {
         "account_id": claims["chatgpt_account_id"],
-        "id_token": crate::accounts::model::tests::id_token(claims),
+        "id_token": crate::accounts::codex::tests::id_token(claims),
         "access_token": "SECRET-ACCESS",
         "refresh_token": "SECRET-REFRESH"
     }})
