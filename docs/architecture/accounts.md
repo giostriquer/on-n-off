@@ -10,9 +10,13 @@ A profile has a random local UUID and a stable provider/user/workspace identity.
 Neither field is an identity key. Active native storage is authoritative. A saved active credential is a
 non-refreshing shadow; switching away captures the latest native generation. Inactive access-token
 expiry does not discard a renewable login. Limits polls saved Claude and Codex accounts with
-access-only HTTP requests without changing the active native login. At most two saved reads per provider run
-at once, with per-account backoff and provider retry-after handling. Rejected shared credentials
-wait for a changed generation; the previous numeric reading and its observation time remain visible.
+access-only HTTP requests without changing the active native login, each through its provider's
+Limits reader, which the adapter dispatches (`read_usage`). At most two saved reads per provider run
+at once, with per-account backoff and provider retry-after handling. Rejected shared credentials,
+and logins that now sign in as a different account, wait for a changed generation and renew
+nothing; an expired Claude shadow sends no request and is read again once a capture replaces it.
+The previous numeric reading and its observation time remain visible, and every card a poll
+produces is marked as a saved profile's (`saved_profile`), so it never reads as a remembered one.
 
 Only a login created by Add / sign in again in an isolated home has private renewal ownership.
 The flag defaults to false in older vaults. Capturing a native login clears it; activation clears
@@ -90,13 +94,20 @@ code asks that rather than which provider it has. An adapter:
   directory;
 - reads a login through its typed view, `ClaudeLogin` or `CodexLogin` (`accounts::view`), so
   nothing else reads a login's JSON: identity and email, the credential generation's fingerprint
-  and whether a saved login is due to renew. A view only reads; a bare credentials document, as
-  the saved usage reader holds it, gives its credential or access token through associated
-  functions instead. A `Login` keeps its stored shape, `{auth, account}`, so the vault, the
+  and whether a saved login is due to renew. A view only reads; the bare credentials document
+  Claude's store holds, without its account record, gives its credential through
+  `ClaudeLogin::credential_in` instead. A `Login` keeps its stored shape, `{auth, account}`, so the vault, the
   recovery journal and the renewal journal written by earlier versions still load, and
   `model.rs` keeps the one fingerprint layout every version has hashed. Whole documents are still
   written raw: Codex's `auth.json` verbatim, Claude's `claudeAiOauth` merged into its credentials
   document beside the `oauthAccount` record `ConfigIo` patches;
+- reads a saved profile's usage with its login (`read_usage`), through the provider's Limits
+  reader, asking the services it is given (`limits::SavedReadUrls`): Claude's credential to
+  `limits::read_saved_claude`, the signed-in Claude read expecting the profile's identity, unless
+  the login's renewal is due, which reads as expired without a request; Codex's access token to
+  `limits::read_saved_codex`, the `wham/usage` body app-server itself reads, without starting a
+  CLI. A login without an access token is refused before either. Claude's first usage after a
+  sign-in is the same read; Codex's runs app-server in the isolated home;
 - renews a never-activated private login at its token endpoint: Claude's grant sent from
   `claude_renew.rs`, Codex's built and folded by its login and sent from `usage_renew.rs`;
 - says how its client processes are recognized and whether they refuse an ordinary switch.

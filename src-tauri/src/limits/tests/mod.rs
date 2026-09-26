@@ -7,6 +7,8 @@ mod credits_spent;
 mod memory;
 mod remembered_reading;
 mod renewal;
+mod saved_claude;
+mod saved_codex;
 
 use super::*;
 use crate::dto::{
@@ -298,6 +300,27 @@ fn account_of(dto: &ProviderLimitsDto) -> LimitsAccountDto {
     dto.account.clone().expect("account")
 }
 
+/// The one header set every Claude request sends: the token, the OAuth beta header, and no cached
+/// answer. A GET states no content type.
+fn assert_claude_headers(head: &str, authorization: &str) {
+    assert_eq!(
+        head_header(head, "authorization"),
+        Some(authorization),
+        "{head}"
+    );
+    assert_eq!(
+        head_header(head, "anthropic-beta"),
+        Some("oauth-2025-04-20"),
+        "{head}"
+    );
+    assert_eq!(
+        head_header(head, "cache-control"),
+        Some("no-cache"),
+        "{head}"
+    );
+    assert_eq!(head_header(head, "content-type"), None, "{head}");
+}
+
 #[test]
 fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
     let home = scratch_dir("limits-claude");
@@ -308,26 +331,9 @@ fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
     let profile_head = profile_request.join().unwrap();
     let usage_head = usage_request.join().unwrap();
-    assert_eq!(
-        head_header(&profile_head, "authorization"),
-        Some("Bearer kc-token"),
-        "{profile_head}"
-    );
-    assert_eq!(
-        head_header(&profile_head, "cache-control"),
-        Some("no-cache"),
-        "{profile_head}"
-    );
-    assert_eq!(
-        head_header(&usage_head, "authorization"),
-        Some("Bearer kc-token"),
-        "{usage_head}"
-    );
-    assert_eq!(
-        head_header(&usage_head, "anthropic-beta"),
-        Some("oauth-2025-04-20"),
-        "{usage_head}"
-    );
+    for head in [&profile_head, &usage_head] {
+        assert_claude_headers(head, "Bearer kc-token");
+    }
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
     assert_eq!(dto.reading.plan.as_deref(), Some("max"));
     assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
@@ -394,6 +400,23 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
     assert_eq!(dto.status, LimitsStatus::Failed);
     assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
     assert!(dto.reading.windows.is_empty());
+}
+
+#[test]
+fn a_throttled_claude_read_says_it_is_rate_limited() {
+    let home = scratch_dir("limits-claude-throttled");
+    write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
+    let (profile_url, profile_request) =
+        crate::http::serve_once_capturing("429 Too Many Requests", &["Retry-After: 30"], "{}");
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
+    let dto = claude_limits(lookup, &None, &profile_url, &refused_url()).dto;
+    profile_request.join().unwrap();
+
+    assert_eq!(dto.status, LimitsStatus::Failed);
+    assert_eq!(
+        dto.message.as_deref(),
+        Some("Could not reach the Claude usage service (rate limited).")
+    );
 }
 
 #[test]
@@ -493,6 +516,34 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
     assert!(value.get("resetOffer").is_none());
     assert!(value.get("account").is_none());
     assert_eq!(value["currentAccount"], true);
+}
+
+/// A saved profile's card says so over IPC as `savedProfile`; no other card carries the key, and a
+/// card without it reads as not one.
+#[test]
+fn only_a_saved_profiles_card_carries_the_saved_profile_key() {
+    let remembered = ProviderLimitsDto {
+        current_account: false,
+        ..ProviderLimitsDto::for_test(AgentId::Codex, "profile:acct-1")
+    };
+    let saved = ProviderLimitsDto {
+        saved_profile: true,
+        ..remembered.clone()
+    };
+
+    let value = serde_json::to_value(&saved).unwrap();
+    assert_eq!(value["savedProfile"], json!(true));
+    assert_eq!(
+        serde_json::from_value::<ProviderLimitsDto>(value).unwrap(),
+        saved
+    );
+    let value = serde_json::to_value(&remembered).unwrap();
+    assert!(value.get("savedProfile").is_none(), "{value}");
+    assert!(
+        !serde_json::from_value::<ProviderLimitsDto>(value)
+            .unwrap()
+            .saved_profile
+    );
 }
 
 /// Every note crosses under the name the UI matches on, and comes back from a snapshot the same way.

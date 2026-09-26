@@ -85,10 +85,29 @@ fn a_snapshot_file_holds_the_whole_reading_under_its_wire_names() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// Whether a card is a saved profile's describes the read that showed it, so its file never says,
+/// and the card it loads back is a remembered reading.
+#[test]
+fn a_saved_profiles_card_is_filed_without_saying_so() {
+    let home = scratch_dir("limits-snap-file-shape-saved-profile");
+    let store = SnapshotStore::for_home(&home);
+    let saved = ProviderLimitsDto {
+        current_account: false,
+        saved_profile: true,
+        ..every_figure()
+    };
+
+    store.save(&saved).unwrap();
+
+    assert!(the_file(&store).get("savedProfile").is_none());
+    assert!(!store.load(AgentId::Codex)[0].saved_profile);
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// A newer read that told only its plan and one window: the account details and balances it did
 /// not report are gone, its windows replace the old ones, and the figures it could not tell stay.
 #[test]
-fn a_newer_save_that_could_not_tell_keeps_only_the_remembered_figures_in_the_file() {
+fn a_newer_read_that_could_not_tell_keeps_only_the_remembered_figures_in_the_file() {
     let home = scratch_dir("limits-snap-file-shape-kept");
     let store = SnapshotStore::for_home(&home);
     store.save(&every_figure()).unwrap();
@@ -104,7 +123,7 @@ fn a_newer_save_that_could_not_tell_keeps_only_the_remembered_figures_in_the_fil
         ]
     }));
 
-    store.save(&newer).unwrap();
+    store.remember(newer).saved.unwrap();
 
     assert_eq!(
         the_file(&store),
@@ -131,7 +150,7 @@ fn a_newer_save_that_could_not_tell_keeps_only_the_remembered_figures_in_the_fil
 /// A remembered count whose soonest expiry has passed is not known any more, so a newer read that
 /// could not tell the count leaves none in the file, as none is loaded from it.
 #[test]
-fn a_newer_save_that_could_not_tell_leaves_no_lapsed_count_in_the_file() {
+fn a_newer_read_that_could_not_tell_leaves_no_lapsed_count_in_the_file() {
     let home = scratch_dir("limits-snap-file-shape-lapsed");
     let store = SnapshotStore::for_home(&home);
     let read = |observed_at: &str, reset_credits: Value| {
@@ -155,7 +174,8 @@ fn a_newer_save_that_could_not_tell_leaves_no_lapsed_count_in_the_file() {
         .unwrap();
 
     store
-        .save(&read("2026-08-17T11:00:00.000Z", Value::Null))
+        .remember(read("2026-08-17T11:00:00.000Z", Value::Null))
+        .saved
         .unwrap();
 
     assert_eq!(the_file(&store).get("resetCredits"), None);

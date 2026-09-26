@@ -53,6 +53,25 @@ impl super::Adapter for Claude {
         claude_renew::renew_private(login, now_ms, token_url)
     }
 
+    fn read_usage(
+        &self,
+        identity: &Identity,
+        login: &Login,
+        now_ms: i64,
+        urls: &crate::limits::SavedReadUrls<'_>,
+    ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
+        let login = ClaudeLogin::of(login);
+        let credential = login
+            .credential()
+            .ok_or(crate::http::HttpError::Unauthorized)?;
+        // Not sent, as the signed-in read does not send an expired login. One on-n-off owns has
+        // renewed before its read (`accounts/usage.rs`), so this is one on-n-off does not renew.
+        if login.renewal_due(now_ms) {
+            return Err(crate::limits::SavedReadError::Expired);
+        }
+        crate::limits::read_saved_claude(identity, credential, urls)
+    }
+
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.
     fn client(&self) -> &'static Client {
         &Client {
@@ -261,15 +280,12 @@ impl ClaudeNative {
         }
         let login = self.read()?.ok_or("No native login was found.")?;
         let identity = self.identify(&login)?;
-        let token = ClaudeLogin::of(&login).access_token()?;
-        let profile = crate::http::get_json(
-            profile_url,
-            &[
-                ("Authorization", &token.authorization()),
-                ("anthropic-beta", "oauth-2025-04-20"),
-            ],
-        )
-        .map_err(|_| "Could not verify the Claude login. Check connectivity or sign in again.")?;
+        let authorization = ClaudeLogin::of(&login).access_token()?.authorization();
+        let profile =
+            crate::http::get_json(profile_url, &crate::limits::claude_headers(&authorization))
+                .map_err(|_| {
+                    "Could not verify the Claude login. Check connectivity or sign in again."
+                })?;
         if profile.pointer("/account/uuid").and_then(Value::as_str) != Some(&identity.user_id)
             || profile
                 .pointer("/organization/uuid")
@@ -415,13 +431,17 @@ impl IsolatedSignIn for ClaudeNative {
         command
     }
 
+    /// A saved profile's read with the login's own credential, which needs nothing from the
+    /// directory.
     fn first_usage(
         &self,
-        dir: &Path,
+        _dir: &Path,
         login: &Login,
         identity: &Identity,
     ) -> Option<ProviderLimitsDto> {
-        crate::limits::login::read(dir, identity, ClaudeLogin::of(login).credential())
+        let credential = ClaudeLogin::of(login).credential()?;
+        crate::limits::read_saved_claude(identity, credential, &crate::limits::SavedReadUrls::LIVE)
+            .ok()
     }
 
     /// Deletes the sign-in's own scoped Keychain entry, never Claude Code's unscoped one.
@@ -461,14 +481,14 @@ impl<'a> ClaudeLogin<'a> {
         }
     }
 
-    /// What Limits reads with: the access token, its expiry and the plan.
+    /// What Limits reads with: the access token, its expiry and the plan. `None` for a login Claude
+    /// Code has signed out of, which empties `claudeAiOauth` of its access token.
     pub(crate) fn credential(&self) -> Option<ClaudeCredential> {
         Self::credential_in(self.auth)
     }
 
-    /// The credential in a Claude credentials document, `auth`, which holds no account record:
-    /// what the store holds, or a saved account's credential as its usage read holds it. `None`
-    /// for a login Claude Code has signed out of, which empties `claudeAiOauth` of its access token.
+    /// The credential in a Claude credentials document, `auth`, which holds no account record, as
+    /// the store holds it.
     pub(crate) fn credential_in(auth: &Value) -> Option<ClaudeCredential> {
         parse_claude_credential(auth)
     }

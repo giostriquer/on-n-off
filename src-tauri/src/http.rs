@@ -22,8 +22,8 @@ pub enum RateLimitReset {
 pub enum HttpError {
     /// The stored token was rejected (401; also 403 for the Limits GET, whose services use it).
     Unauthorized,
-    /// The service's rate limit is exhausted (403/429 carrying `x-ratelimit-remaining: 0` or
-    /// `retry-after`).
+    /// The service's rate limit is exhausted: a 429 from the Limits GET, or a GitHub 403/429
+    /// carrying `x-ratelimit-remaining: 0` or `retry-after`.
     RateLimited(RateLimitReset),
     /// Any other non-success status.
     Status(u16),
@@ -101,7 +101,7 @@ pub fn get_json(url: &str, headers: &[(&str, &str)]) -> Result<Value, HttpError>
     let response = request
         .call()
         .map_err(|error| HttpError::Network(error.to_string()))?;
-    finish(response, Forbidden::Unauthorized)
+    finish(response, Forbidden::RejectedToken)
 }
 
 /// POST `body` as JSON to `url` with a bearer token and parse the JSON reply. Unlike `get_json`,
@@ -117,7 +117,7 @@ pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpErr
         .header("Authorization", &format!("Bearer {bearer}"))
         .send(&payload)
         .map_err(|error| HttpError::Network(error.to_string()))?;
-    finish(response, Forbidden::RateLimit)
+    finish(response, Forbidden::RateLimitWhenSaid)
 }
 
 /// POST an OAuth grant as JSON and parse the reply.
@@ -136,32 +136,36 @@ pub fn post_grant(url: &str, body: &Value) -> Result<Value, HttpError> {
         .header("Content-Type", "application/json")
         .send(&payload)
         .map_err(|error| HttpError::Network(error.to_string()))?;
-    finish(response, Forbidden::Status)
+    finish(response, Forbidden::PlainStatus)
 }
 
-/// How an endpoint reads a 403 — the only place the three callers' status taxonomies differ.
+/// What a 403 means to an endpoint — the only place the three callers' status taxonomies differ.
+/// A 429 is a rate limit to every endpoint but a token issuer's.
 enum Forbidden {
     /// The Limits services answer 403 for a rejected token.
-    Unauthorized,
-    /// GitHub answers 403 or 429 for an exhausted limit and 401 for a bad token.
-    RateLimit,
-    /// A token endpoint refuses the grant itself; 403 carries no extra meaning.
-    Status,
+    RejectedToken,
+    /// GitHub answers 403 for an exhausted limit when its rate-limit headers say so, and 401 for a
+    /// bad token.
+    RateLimitWhenSaid,
+    /// A token endpoint refuses the grant itself; neither 403 nor 429 carries extra meaning.
+    PlainStatus,
 }
 
-/// The one status ladder this module owns: 2xx parses, 401 is always a rejected token, and a 403
-/// means whatever the endpoint says it means.
+/// The one status ladder this module owns: 2xx parses, 401 is always a rejected token, a 429 is a
+/// rate limit until its `retry-after` wherever that is read, and a 403 means whatever the endpoint
+/// says it means.
 fn finish(response: Reply, forbidden: Forbidden) -> Result<Value, HttpError> {
     let code = response.status().as_u16();
     match (code, &forbidden) {
         (200..=299, _) => parse_body(response),
         (401, _) => Err(HttpError::Unauthorized),
-        (403, Forbidden::Unauthorized) => Err(HttpError::Unauthorized),
-        (403 | 429, Forbidden::RateLimit) => Err(match rate_limit_reset(&response) {
-            Some(reset) => HttpError::RateLimited(reset),
-            None if code == 429 => HttpError::RateLimited(RateLimitReset::Unknown),
-            None => HttpError::Status(code),
-        }),
+        (403, Forbidden::RejectedToken) => Err(HttpError::Unauthorized),
+        (403, Forbidden::RateLimitWhenSaid) => {
+            Err(rate_limit_reset(&response).map_or(HttpError::Status(403), HttpError::RateLimited))
+        }
+        (429, Forbidden::RejectedToken | Forbidden::RateLimitWhenSaid) => Err(
+            HttpError::RateLimited(rate_limit_reset(&response).unwrap_or(RateLimitReset::Unknown)),
+        ),
         _ => Err(HttpError::Status(code)),
     }
 }

@@ -21,10 +21,11 @@ pub(crate) mod login;
 mod pipeline;
 mod reading;
 mod renewal;
-pub(crate) mod saved;
 mod snapshots;
 
+pub(crate) use codex::CodexEndpoints;
 pub(crate) use reading::keep_remembered;
+pub(crate) use snapshots::Remembered;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -32,6 +33,7 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::Utc;
 
 use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
+use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
     AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
@@ -260,29 +262,28 @@ fn provider_read_guard(agent: AgentId) -> MutexGuard<'static, ()> {
 
 /// The current account's card, keeping what its read could not tell from the account's remembered
 /// reading, persisted; then the other remembered accounts, newest first.
-fn aggregate_accounts(
-    store: &SnapshotStore,
-    mut current: ProviderLimitsDto,
-) -> Vec<ProviderLimitsDto> {
+fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<ProviderLimitsDto> {
     let current_account = current.account.as_ref().map(|account| account.id.clone());
     let mut remembered = store.load(current.provider);
-    let prior = current_account.as_deref().and_then(|id| {
-        remembered
-            .iter()
-            .position(|snapshot| {
-                snapshot
-                    .account
-                    .as_ref()
-                    .is_some_and(|account| account.id == id)
-            })
-            .map(|index| remembered.remove(index))
+    remembered.retain(|snapshot| {
+        snapshot.account.as_ref().map(|account| &account.id) != current_account.as_ref()
     });
-    keep_remembered(
-        &mut current,
-        prior.map(|prior| prior.reading).unwrap_or_default(),
-    );
-    let _ = store.save(&current);
+    let current = store.remember(current).card;
     snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
+}
+
+/// `card`, keeping what its read could not tell from what `home` remembers of its account, written
+/// over that account's file when it observed something datable ([`SnapshotStore::remember`]).
+/// Called for a saved profile's poll and the first usage after a sign-in, only once the account
+/// registry accepted the login it was read with.
+pub(crate) fn remember(home: &Path, card: ProviderLimitsDto) -> Remembered {
+    SnapshotStore::for_home(home).remember(card)
+}
+
+/// What `home` remembers for `provider`, as the next read loads it.
+#[cfg(test)]
+pub(crate) fn remembered(home: &Path, provider: AgentId) -> Vec<ProviderLimitsDto> {
+    SnapshotStore::for_home(home).load(provider)
 }
 
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
@@ -351,13 +352,12 @@ fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
     }
     if let (Some(identity), Some(account)) = (&selected_identity, &mut loaded.dto.account) {
         if let Some(workspace) = &identity.organization_id {
-            account.legacy_id = Some(identity.account.id.clone());
-            account.id = crate::accounts::model::Identity {
+            let identity = Identity {
                 provider: AgentId::Claude,
                 user_id: identity.account.id.clone(),
                 workspace_id: workspace.clone(),
-            }
-            .observation_key();
+            };
+            *account = scoped_account(&identity, account.label.take());
         }
     }
     loaded.dto
@@ -380,43 +380,177 @@ fn claude_limits(
         Some(selected_account),
         lookup,
         |credential| {
-            let bearer = format!("Bearer {}", credential.token);
-            let profile_payload = get_json(
+            claude_read(
+                credential,
+                selected_identity.as_ref(),
                 profile_url,
-                &[
-                    ("Authorization", &bearer),
-                    ("Content-Type", "application/json"),
-                    ("Cache-Control", "no-cache"),
-                ],
-            )?;
-            let claude::ClaudeProfile {
-                identity: profile,
-                subscription_status,
-            } = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
-            if selected_identity.as_ref().is_some_and(|selected| {
-                selected.account.id != profile.account.id
-                    || selected.organization_id != profile.organization_id
-            }) {
-                return Err(ProviderLoadError::AccountMismatch);
-            }
-            let usage = claude_usage(
                 usage_url,
-                &[
-                    ("Authorization", &bearer),
-                    ("anthropic-beta", "oauth-2025-04-20"),
-                    ("Cache-Control", "no-cache"),
-                ],
-            )?;
-            Ok(Parsed {
-                account: Some(profile.account),
-                reading: Reading {
-                    plan: credential.plan(),
-                    subscription_status,
-                    ..usage
-                },
-            })
+            )
         },
     )
+}
+
+/// The headers every Claude request on-n-off sends with a login, given its `Authorization` value:
+/// the OAuth beta header Anthropic's OAuth endpoints expect, and no cached answer. The Limits reads
+/// and the account switch's verification (`accounts/claude.rs`) all send these.
+pub(crate) fn claude_headers(authorization: &str) -> [(&'static str, &str); 3] {
+    [
+        ("Authorization", authorization),
+        ("anthropic-beta", "oauth-2025-04-20"),
+        ("Cache-Control", "no-cache"),
+    ]
+}
+
+/// One Claude read with `credential`: its profile, which must be `expected` when an account is
+/// expected, then its usage. The signed-in read expects the account `.claude.json` names, if any;
+/// a saved profile's read and the first usage after a sign-in expect the profile's.
+fn claude_read(
+    credential: &ClaudeCredential,
+    expected: Option<&ClaudeIdentity>,
+    profile_url: &str,
+    usage_url: &str,
+) -> Result<Parsed, ProviderLoadError> {
+    let bearer = format!("Bearer {}", credential.token);
+    let headers = claude_headers(&bearer);
+    let profile_payload = get_json(profile_url, &headers)?;
+    let claude::ClaudeProfile {
+        identity: profile,
+        subscription_status,
+    } = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
+    if expected.is_some_and(|expected| {
+        expected.account.id != profile.account.id
+            || expected.organization_id != profile.organization_id
+    }) {
+        return Err(ProviderLoadError::AccountMismatch);
+    }
+    let usage = claude_usage(usage_url, &headers)?;
+    Ok(Parsed {
+        account: Some(profile.account),
+        reading: Reading {
+            plan: credential.plan(),
+            subscription_status,
+            ..usage
+        },
+    })
+}
+
+/// The account a saved profile's Claude read expects: the profile's user in its workspace.
+fn expected_claude_identity(identity: &Identity) -> ClaudeIdentity {
+    ClaudeIdentity {
+        account: LimitsAccountDto {
+            id: identity.user_id.clone(),
+            label: None,
+            legacy_id: None,
+        },
+        organization_id: Some(identity.workspace_id.clone()),
+    }
+}
+
+/// Why a saved profile's read gave no card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SavedReadError {
+    /// The request failed. `HttpError::Unauthorized` is a login the service refused, or one that
+    /// holds no access token.
+    Http(HttpError),
+    /// The login now signs in as a different account than the profile's.
+    OtherAccount,
+    /// The login's access token has expired, and on-n-off does not renew this login: the client
+    /// it was saved from does, and the next time that login is captured its renewal comes along.
+    Expired,
+}
+
+impl From<HttpError> for SavedReadError {
+    fn from(error: HttpError) -> Self {
+        Self::Http(error)
+    }
+}
+
+/// Where a saved profile's read asks, for either provider: [`SavedReadUrls::LIVE`] in the app,
+/// loopback servers in tests.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SavedReadUrls<'a> {
+    pub(crate) claude_profile: &'a str,
+    pub(crate) claude_usage: &'a str,
+    pub(crate) codex: CodexEndpoints<'a>,
+}
+
+impl SavedReadUrls<'static> {
+    /// The services a saved read asks in the app.
+    pub(crate) const LIVE: Self = Self {
+        claude_profile: CLAUDE_PROFILE_URL,
+        claude_usage: CLAUDE_USAGE_URL,
+        codex: codex::CODEX,
+    };
+}
+
+/// A saved profile's Claude card, read with its login's `credential`, which must sign in as the
+/// profile's user in its workspace. No CLI is started and nothing is renewed here.
+pub(crate) fn read_saved_claude(
+    identity: &Identity,
+    credential: ClaudeCredential,
+    urls: &SavedReadUrls<'_>,
+) -> Result<ProviderLimitsDto, SavedReadError> {
+    let parsed = claude_read(
+        &credential,
+        Some(&expected_claude_identity(identity)),
+        urls.claude_profile,
+        urls.claude_usage,
+    )
+    .map_err(|error| match error {
+        ProviderLoadError::Http(error) => SavedReadError::Http(error),
+        ProviderLoadError::AccountMismatch => SavedReadError::OtherAccount,
+    })?;
+    saved_card(identity, parsed)
+}
+
+/// A saved profile's Codex card, read over HTTP with its login's access `token` (`codex::read_wham`).
+/// No CLI is started and nothing is renewed here.
+pub(crate) fn read_saved_codex(
+    identity: &Identity,
+    token: AccessToken,
+    urls: &SavedReadUrls<'_>,
+) -> Result<ProviderLimitsDto, SavedReadError> {
+    let reading = codex::read_wham(identity, token, urls.codex)?;
+    saved_card(
+        identity,
+        Parsed {
+            account: None,
+            reading,
+        },
+    )
+}
+
+/// A saved profile's read as its card: known by the profile's observation key, never the signed-in
+/// account's. A read that observed nothing is an error, so the card keeps what it remembers.
+fn saved_card(
+    identity: &Identity,
+    mut parsed: Parsed,
+) -> Result<ProviderLimitsDto, SavedReadError> {
+    let label = parsed.account.and_then(|account| account.label);
+    parsed.account = Some(scoped_account(identity, label));
+    let mut dto = finish(identity.provider, LimitsStatus::Ok, None, parsed);
+    dto.current_account = false;
+    if !dto.reading.has_observations() {
+        return Err(
+            HttpError::Parse("Usage response contained no quota observations.".into()).into(),
+        );
+    }
+    Ok(dto)
+}
+
+/// The account a card of `identity` is known by, labelled `label`: its observation key, with the
+/// key its cards had before scoped identities as its legacy id (Claude's user, Codex's workspace),
+/// through which it supersedes them (`snapshots::without_superseded`).
+fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDto {
+    LimitsAccountDto {
+        id: identity.observation_key(),
+        label,
+        legacy_id: Some(if identity.provider == AgentId::Codex {
+            identity.workspace_id.clone()
+        } else {
+            identity.user_id.clone()
+        }),
+    }
 }
 
 /// Claude's usage read with its saved resets. The resets are optional, so a refusal of the reset

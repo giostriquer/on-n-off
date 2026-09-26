@@ -1,14 +1,22 @@
-//! Codex subscription limits: normalize `account/rateLimits/read` from Codex app-server.
+//! Codex subscription limits: normalize `account/rateLimits/read` from Codex app-server, and read a
+//! saved profile's usage from the backend body app-server itself reads (`wham/usage`) with the
+//! profile's access token, which starts no CLI and renews nothing.
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
+use serde_json::Value;
+
 use super::json::window;
+use super::{credits_spent, renewal};
+use crate::accounts::codex_store::CodexAccess;
+use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
     LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
     LimitsResetOfferDto, LimitsWorkspaceCreditsDto, Reading,
 };
+use crate::http::{get_json, HttpError};
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
@@ -353,6 +361,170 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
         available_count: u32::try_from(summary.available_count).unwrap_or(u32::MAX),
         next_expires_at,
     })
+}
+
+/// Where a saved profile's Codex usage is read: the body app-server reads for the signed-in one.
+const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+/// Each banked reset's status and expiry; the usage body carries only the count.
+const CODEX_RESET_CREDITS_URL: &str =
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
+
+/// The services one saved Codex read talks to, together as `ClaudeEndpoints` keeps Claude's, so a
+/// fourth costs one field and not an edit at every call site.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CodexEndpoints<'a> {
+    pub(crate) usage: &'a str,
+    pub(crate) reset_credits: &'a str,
+    /// What a workspace member spent (`credits_spent.rs`); asked only for a workspace plan.
+    pub(crate) credit_usage: &'a str,
+    /// The subscription's term (`renewal.rs`); asked for every account.
+    pub(crate) subscriptions: &'a str,
+}
+
+pub(super) const CODEX: CodexEndpoints<'static> = CodexEndpoints {
+    usage: CODEX_USAGE_URL,
+    reset_credits: CODEX_RESET_CREDITS_URL,
+    credit_usage: credits_spent::CODEX_CREDIT_USAGE_URL,
+    subscriptions: renewal::CODEX_SUBSCRIPTIONS_URL,
+};
+
+/// A saved profile's Codex reading, read with its access token `token` for its workspace. A body
+/// that names another workspace is refused; one that names none is accepted.
+pub(super) fn read_wham(
+    identity: &Identity,
+    token: AccessToken,
+    urls: CodexEndpoints<'_>,
+) -> Result<Reading, super::SavedReadError> {
+    let bearer = token.authorization();
+    let headers = [
+        ("Authorization", bearer.as_str()),
+        ("ChatGPT-Account-Id", identity.workspace_id.as_str()),
+    ];
+    let payload = get_json(urls.usage, &headers)?;
+    if payload
+        .get("account_id")
+        .or_else(|| payload.get("accountId"))
+        .and_then(Value::as_str)
+        .is_some_and(|id| id != identity.workspace_id)
+    {
+        return Err(super::SavedReadError::OtherAccount);
+    }
+    // As in Codex's own app-server, the detail read never decides the read: without it the
+    // count still stands, only without an expiry.
+    let details = (banked_reset_count(&payload["rate_limit_reset_credits"])
+        .is_some_and(|count| count > 0))
+    .then(|| get_json(urls.reset_credits, &headers).ok())
+    .flatten();
+    let mut reading = parse_codex_usage(&payload, details.as_ref())?;
+    // The backend reads never decide the read: an account the endpoint refuses just has
+    // no figure. Only a workspace pools credits, so only one is asked what it spent.
+    let access = CodexAccess {
+        observation_key: identity.observation_key(),
+        workspace_id: identity.workspace_id.clone(),
+        token,
+    };
+    if reading
+        .plan
+        .as_deref()
+        .is_some_and(credits_spent::is_codex_workspace_plan)
+    {
+        reading.credits_spent =
+            credits_spent::read_backed_off(&access, urls.credit_usage, Utc::now());
+    }
+    reading.subscription = renewal::read_backed_off(&access, urls.subscriptions, Utc::now());
+    Ok(reading)
+}
+
+/// The HTTP response uses seconds and snake_case; the existing app-server parser uses minutes
+/// and camelCase. Map only the documented quota buckets, the credits, a business member's
+/// workspace-credit share and the banked resets. Missing reset inventory is unknown.
+fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Reading, HttpError> {
+    use serde_json::json;
+    fn window(value: &Value) -> Value {
+        if value.is_null() {
+            return Value::Null;
+        }
+        json!({"usedPercent": value.get("used_percent"),
+            "windowDurationMins": value.get("limit_window_seconds").and_then(Value::as_u64).map(|v| v / 60),
+            "resetsAt": value.get("reset_at")})
+    }
+    fn bucket(value: &Value) -> Value {
+        json!({"primary":window(&value["primary_window"]), "secondary":window(&value["secondary_window"])})
+    }
+    let mut main = bucket(&payload["rate_limit"]);
+    main["planType"] = payload["plan_type"].clone();
+    if let Some(credits) = payload.get("credits").filter(|v| v.is_object()) {
+        main["credits"] = json!({"hasCredits":credits["has_credits"].as_bool().unwrap_or(false),
+            "unlimited":credits["unlimited"].as_bool().unwrap_or(false),
+            "balance":credits.get("balance").and_then(|v| v.as_str().map(str::to_owned).or_else(|| v.as_f64().map(|n| n.to_string()))) });
+    }
+    // A business member's share of the workspace's credits, in app-server's names.
+    if let Some(spend_control) = payload.get("spend_control").filter(|v| v.is_object()) {
+        main["spendControlReached"] = json!(spend_control["reached"].as_bool());
+        if let Some(share) = spend_control
+            .get("individual_limit")
+            .filter(|v| v.is_object())
+        {
+            main["individualLimit"] = json!({"limit": share["limit"], "used": share["used"],
+                "remainingPercent": share["remaining_percent"], "resetsAt": share["reset_at"]});
+        }
+    }
+    let mut buckets = serde_json::Map::new();
+    buckets.insert("codex".into(), main.clone());
+    for extra in payload
+        .get("additional_rate_limits")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(id) = extra
+            .get("metered_feature")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty() && *id != "codex")
+        else {
+            continue;
+        };
+        let mut entry = bucket(&extra["rate_limit"]);
+        entry["limitName"] = extra["limit_name"].clone();
+        buckets.insert(id.to_owned(), entry);
+    }
+    let response = serde_json::from_value(json!({"rateLimits":main,"rateLimitsByLimitId":buckets,
+        "rateLimitResetCredits":wham_reset_credits(&payload["rate_limit_reset_credits"], reset_details)}))
+    .map_err(|_| HttpError::Parse("Unrecognized Codex quota response.".into()))?;
+    Ok(parse_codex(&response))
+}
+
+/// `available_count` as Codex's own client reads it: a whole number, and here at least zero.
+fn banked_reset_count(summary: &Value) -> Option<u64> {
+    summary.get("available_count").and_then(Value::as_u64)
+}
+
+/// Banked resets in app-server shape. The usage body's `rate_limit_reset_credits` holds only the
+/// count; the detail read, when it answered in full, holds each reset's status and expiry and wins,
+/// as it does in Codex's app-server. A count that cannot be read is unknown, never zero.
+fn wham_reset_credits(summary: &Value, details: Option<&Value>) -> Option<Value> {
+    use serde_json::json;
+    let detailed = details.and_then(|details| {
+        let credits = details
+            .get("credits")?
+            .as_array()?
+            .iter()
+            .map(|credit| {
+                let expires_at = match credit.get("expires_at") {
+                    None | Some(Value::Null) => None,
+                    Some(at) => Some(
+                        chrono::DateTime::parse_from_rfc3339(at.as_str()?)
+                            .ok()?
+                            .timestamp(),
+                    ),
+                };
+                Some(json!({"status": credit.get("status")?.as_str()?, "expiresAt": expires_at}))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(json!({"availableCount": banked_reset_count(details)?, "credits": credits}))
+    });
+    detailed
+        .or_else(|| Some(json!({"availableCount": banked_reset_count(summary)?, "credits": null})))
 }
 
 #[cfg(test)]

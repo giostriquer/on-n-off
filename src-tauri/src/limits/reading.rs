@@ -1,8 +1,10 @@
 //! The remember policy: what a read of an account keeps of the account's remembered reading.
 //!
-//! Every writer goes through it: the signed-in read (`aggregate_accounts`), the snapshot store
-//! writing a card over its file (`SnapshotStore::save`), and a saved account's poll
-//! (`accounts/usage.rs`). Each field's rule is chosen once, in [`Reading::keeping`]:
+//! A read applies it once, keeping from its account's file as it writes over it
+//! (`SnapshotStore::remember`): the signed-in read (`aggregate_accounts`), a saved profile's poll
+//! and the first usage after a sign-in. A saved profile's poll that failed writes nothing, so it
+//! keeps from the card it replaces (`accounts/usage.rs`). Each field's rule is chosen once, in
+//! [`Reading::keeping`]:
 //!
 //! - **Windows**: an answer's own. An answer that reports other windows but no weekly also keeps
 //!   the remembered weekly, dated when it was read: a card's headline window is its weekly, and a
@@ -44,14 +46,6 @@ impl Outcome {
             asked_what_was_spent: super::credits_spent::asks_what_was_spent(card),
             asked_about_renewal: super::renewal::asks_about_renewal(card),
         }
-    }
-
-    /// The column the snapshot store applies when it writes `card` over the account's file. A card
-    /// that answered gets the answered column on its own terms. A failed card reaches the store only
-    /// after its writer applied the failed column (`aggregate_accounts`, through `keep_remembered`),
-    /// so the answered column adds nothing it has not already kept.
-    pub(super) fn for_stored(card: &ProviderLimitsDto) -> Self {
-        Self::answered(card)
     }
 
     /// How `card`'s read went, as its status records it.

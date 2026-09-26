@@ -36,6 +36,23 @@ fn unauthorized_and_forbidden_are_unauthorized() {
     }
 }
 
+/// The Limits services answer a 429 when their rate limit is exhausted, saying when to retry.
+#[test]
+fn a_throttled_get_is_rate_limited_until_its_retry_after() {
+    for (headers, reset) in [
+        (&["Retry-After: 30"][..], RateLimitReset::RetryAfter(30)),
+        (&[][..], RateLimitReset::Unknown),
+    ] {
+        let (url, request) = serve_once_capturing("429 Too Many Requests", headers, "{}");
+        assert_eq!(
+            get_json(&url, &[]),
+            Err(HttpError::RateLimited(reset)),
+            "{headers:?}"
+        );
+        request.join().unwrap();
+    }
+}
+
 #[test]
 fn other_error_statuses_keep_their_code() {
     let (url, request) = serve_once("503 Service Unavailable", "");
@@ -342,6 +359,14 @@ fn post_grant_keeps_a_refused_grant_apart_from_a_transport_failure() {
     assert_eq!(
         post_grant(&url, &serde_json::json!({})),
         Err(HttpError::Status(503))
+    );
+    request.join().unwrap();
+
+    // A token issuer's 429 is no rate limit the renewal reads as one, whatever it says.
+    let (url, request) = serve_once_capturing("429 Too Many Requests", &["Retry-After: 30"], "{}");
+    assert_eq!(
+        post_grant(&url, &serde_json::json!({})),
+        Err(HttpError::Status(429))
     );
     request.join().unwrap();
 

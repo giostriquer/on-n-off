@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::reading::{newest, parse_observed_at, Outcome};
+use super::reading::{keep_remembered, newest, parse_observed_at};
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::usage::cache_io::atomic_write;
 
@@ -46,45 +46,49 @@ impl SnapshotStore {
         }
     }
 
-    /// Persist canonical account observations. Dated local or remembered windows remain
-    /// trustworthy while refresh is unavailable; a successful read with only credits or banked
-    /// resets is dated when it reaches this storage boundary. What the card could not tell is kept
-    /// from what the account's stored reading still says, by the remember policy's column for a
-    /// stored card (`Outcome::for_stored`): a failed card already carries what its own read kept.
+    /// `card`, keeping what its read could not tell from what its account's file remembers now, by
+    /// the remember policy's column for how the read went ([`keep_remembered`]); then written over
+    /// that file when it observed something datable and is not older than it. The card comes back
+    /// kept either way, beside whether the file was written.
+    ///
+    /// Every read goes through this once: the signed-in read (`aggregate_accounts`), a saved
+    /// profile's poll and the first usage after a sign-in (`accounts/`).
+    pub fn remember(&self, mut card: ProviderLimitsDto) -> Remembered {
+        let _write = SNAPSHOT_WRITES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(path) = self.path_of(&card) else {
+            return Remembered {
+                card,
+                saved: Err("snapshot has no account".to_string()),
+            };
+        };
+        let existing = read_stored(&path);
+        if let Some(existing) = &existing {
+            keep_remembered(&mut card, existing.clone().into_dto(Utc::now()).reading);
+        }
+        let saved = write_over(&path, &card, existing.as_ref());
+        Remembered { card, saved }
+    }
+
+    /// Persist `dto` as it is: canonical account observations. Dated local or remembered windows
+    /// remain trustworthy while refresh is unavailable; a successful read with only credits or banked
+    /// resets is dated when it reaches this storage boundary. A file with newer observations is
+    /// left alone.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let account = dto
-            .account
-            .as_ref()
+        let path = self
+            .path_of(dto)
             .ok_or_else(|| "snapshot has no account".to_string())?;
-        if !dto.reading.has_observations() {
-            return Err("snapshot has no observations".to_string());
-        }
-        let path = self.dir.join(file_name(dto.provider, &account.id));
-        let incoming_latest = newest(&dto.reading.windows).or_else(|| {
-            // Figures have no observation time of their own; a successful read dates them here.
-            (dto.status == LimitsStatus::Ok && dto.reading.has_figures()).then(Utc::now)
-        });
-        let incoming_latest =
-            incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
-        let existing = fs::read_to_string(&path).ok().and_then(|raw| decode(&raw));
-        if existing
-            .as_ref()
-            .and_then(StoredSnapshot::latest_observed_at)
-            .is_some_and(|existing| existing > incoming_latest)
-        {
-            return Ok(());
-        }
-        let mut stored = StoredSnapshot::from_dto(dto, incoming_latest);
-        // Every writer stores its own card, and one that could not tell a remembered figure must
-        // not erase it.
-        if let Some(existing) = existing {
-            let remembered = existing.reading.known_at(Utc::now());
-            stored.reading = stored.reading.keeping(remembered, Outcome::for_stored(dto));
-        }
-        write_stored(&path, stored)
+        write_over(&path, dto, read_stored(&path).as_ref())
+    }
+
+    /// Where the file of `dto`'s account is; `None` for a card that names no account.
+    fn path_of(&self, dto: &ProviderLimitsDto) -> Option<PathBuf> {
+        let account = dto.account.as_ref()?;
+        Some(self.dir.join(file_name(dto.provider, &account.id)))
     }
 
     /// Persist the accounts a merge changed, leaving the others' files and dates alone: re-saving an
@@ -239,9 +243,49 @@ impl StoredSnapshot {
             message: None,
             account: Some(self.account),
             current_account: false,
+            saved_profile: false,
             reading,
         }
     }
+}
+
+/// What [`SnapshotStore::remember`] made of a card.
+pub struct Remembered {
+    /// The card to show: the read, with what it could not tell kept from the account's file.
+    pub card: ProviderLimitsDto,
+    /// Whether the file holds it: `Ok` also when the file already held newer observations, `Err`
+    /// when the card observed nothing datable or the write failed.
+    pub saved: Result<(), String>,
+}
+
+/// The snapshot at `path`, when there is a readable one of this schema.
+fn read_stored(path: &Path) -> Option<StoredSnapshot> {
+    fs::read_to_string(path).ok().and_then(|raw| decode(&raw))
+}
+
+/// Write `dto` over `existing`, the file at `path`, unless it observed nothing datable or the file
+/// is newer.
+fn write_over(
+    path: &Path,
+    dto: &ProviderLimitsDto,
+    existing: Option<&StoredSnapshot>,
+) -> Result<(), String> {
+    if !dto.reading.has_observations() {
+        return Err("snapshot has no observations".to_string());
+    }
+    let incoming_latest = newest(&dto.reading.windows).or_else(|| {
+        // Figures have no observation time of their own; a successful read dates them here.
+        (dto.status == LimitsStatus::Ok && dto.reading.has_figures()).then(Utc::now)
+    });
+    let incoming_latest =
+        incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
+    if existing
+        .and_then(StoredSnapshot::latest_observed_at)
+        .is_some_and(|existing| existing > incoming_latest)
+    {
+        return Ok(());
+    }
+    write_stored(path, StoredSnapshot::from_dto(dto, incoming_latest))
 }
 
 fn decode(raw: &str) -> Option<StoredSnapshot> {

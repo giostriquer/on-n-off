@@ -51,6 +51,20 @@ impl super::Adapter for Codex {
         login.renewed(&reply, now_ms)
     }
 
+    /// Read whatever the access token's expiry: Codex's backend says whether it still takes it.
+    fn read_usage(
+        &self,
+        identity: &Identity,
+        login: &Login,
+        _now_ms: i64,
+        urls: &crate::limits::SavedReadUrls<'_>,
+    ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
+        let token = CodexLogin::of(login)
+            .access_token()
+            .ok_or(crate::http::HttpError::Unauthorized)?;
+        crate::limits::read_saved_codex(identity, token, urls)
+    }
+
     /// Running Codex clients never pick up a replaced login, so they refuse an ordinary switch.
     fn client(&self) -> &'static Client {
         &Client {
@@ -273,7 +287,7 @@ impl IsolatedSignIn for CodexNative {
         _login: &Login,
         identity: &Identity,
     ) -> Option<ProviderLimitsDto> {
-        crate::limits::login::read(dir, identity, None)
+        crate::limits::login::read_codex(dir, identity)
     }
 
     /// Codex keeps an isolated login inside its home, so nothing is left outside it.
@@ -298,13 +312,7 @@ impl<'a> CodexLogin<'a> {
 
     /// The access token, for one request header; `None` for a login without one.
     pub(crate) fn access_token(&self) -> Option<AccessToken> {
-        Self::access_token_in(self.auth)
-    }
-
-    /// The access token in a Codex credentials document, `auth`: a saved account's, as its usage
-    /// read holds it. `None` for a document without one.
-    pub(crate) fn access_token_in(auth: &Value) -> Option<AccessToken> {
-        model::string(auth, "/tokens/access_token")
+        model::string(self.auth, "/tokens/access_token")
             .ok()
             .map(AccessToken::new)
     }

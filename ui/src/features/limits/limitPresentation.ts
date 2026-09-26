@@ -22,9 +22,10 @@ export type LimitWindowPresentation = {
 
 /**
  * What a card says about how current its numbers are, one thing at a time and in this precedence:
- * a saved account whose read failed shows its last known usage (`detail` says why); any other
- * reading that is not the signed-in account's is remembered; the signed-in account's own refresh
- * can be paused, its numbers the last it read.
+ * a saved profile Limits polls whose read failed shows its last known usage (`detail` says why); a
+ * reading that is neither the signed-in account's nor a polled saved profile's is remembered; the
+ * signed-in account's own refresh can be paused, its numbers the last it read. A saved profile
+ * read this poll, or held back by its last poll, says nothing.
  */
 export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "remembered" } | { kind: "paused" };
 
@@ -198,11 +199,12 @@ export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: stri
     if (Number.isNaN(observedAt)) return latest;
     return latest === null ? observedAt : Math.max(latest, observedAt);
   }, null);
-  const savedRefreshPaused = !entry.currentAccount && observed && (entry.status === "failed" || entry.status === "unauthenticated");
+  const savedProfile = entry.savedProfile === true;
+  const savedRefreshPaused = savedProfile && observed && (entry.status === "failed" || entry.status === "unauthenticated");
   const detail = entry.message ?? fallbackMessage;
   return {
     status: savedRefreshPaused ? { kind: "savedRefresh", detail }
-      : !entry.currentAccount && observed ? { kind: "remembered" }
+      : !entry.currentAccount && !savedProfile && observed ? { kind: "remembered" }
       : entry.status !== "ok" && observed ? { kind: "paused" }
       : null,
     message: entry.status === "ok" || savedRefreshPaused ? null : detail,

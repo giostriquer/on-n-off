@@ -274,11 +274,12 @@ describe("a card's status and message", () => {
   it.each([
     ["a live read", [okCodex()], [], null, null],
     ["a remembered reading", [staleCodex()], [], { kind: "remembered" }, null],
+    ["a saved profile's reading, polled live", [staleCodex({ savedProfile: true })], [], null, null],
     ["a signed-in read whose login expired, keeping its numbers", [okClaude({ status: "unauthenticated", message: "Access token expired." })], [], { kind: "paused" }, { text: "Access token expired.", tone: "muted" }],
     ["a signed-in read that failed, keeping its numbers", [okClaude({ status: "failed", message: "Usage service unavailable." })], [], { kind: "paused" }, { text: "Usage service unavailable.", tone: "error" }],
-    ["a saved Claude read that failed, keeping its numbers", [okClaude({ currentAccount: false, status: "failed", message: reason })], [], { kind: "savedRefresh", detail: reason }, null],
-    ["a saved Codex read whose login expired, keeping its numbers", [okCodex({ currentAccount: false, status: "unauthenticated", message: reason })], [], { kind: "savedRefresh", detail: reason }, null],
-    ["a saved read that failed with nothing kept", [okClaude({ currentAccount: false, status: "failed", windows: [], message: "Usage request failed." })], [], null, { text: "Usage request failed.", tone: "error" }],
+    ["a saved Claude read that failed, keeping its numbers", [okClaude({ currentAccount: false, savedProfile: true, status: "failed", message: reason })], [], { kind: "savedRefresh", detail: reason }, null],
+    ["a saved Codex read whose login expired, keeping its numbers", [okCodex({ currentAccount: false, savedProfile: true, status: "unauthenticated", message: reason })], [], { kind: "savedRefresh", detail: reason }, null],
+    ["a saved read that failed with nothing kept", [okClaude({ currentAccount: false, savedProfile: true, status: "failed", windows: [], message: "Usage request failed." })], [], null, { text: "Usage request failed.", tone: "error" }],
     ["a saved profile no read answered for", [], [unread], null, null],
   ] as const)("gives %s one status, and a message only with its tone", (_case, readings, profiles, status, message) => {
     const [card] = cards([...readings], [...profiles], AT_NOW, "claude");
@@ -345,7 +346,7 @@ describe("a card's empty copy", () => {
 
   it("gives a saved read that failed but kept only figures its status, not an empty copy", () => {
     const reason = "Saved usage credential is no longer accepted.";
-    const [card] = cards([okCodex({ currentAccount: false, status: "failed", message: reason, windows: [] })]);
+    const [card] = cards([okCodex({ currentAccount: false, savedProfile: true, status: "failed", message: reason, windows: [] })]);
     expect(card.status).toEqual({ kind: "savedRefresh", detail: reason });
     expect(card.empty).toBeNull();
   });

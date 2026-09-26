@@ -5,9 +5,10 @@ import type { AgentId } from "$lib/types";
 
 /**
  * Synthetic subscription limits for the UI harness, dated against the harness clock
- * (`FIXTURE_CLOCK` in scripts/ui-shots.mjs): one live account per provider, plus a remembered
- * Codex account whose windows have both reset since it was last observed. `LIMITS_SCENARIOS` holds
- * every `?mock=<scenario>` that changes what the Limits commands answer.
+ * (`FIXTURE_CLOCK` in scripts/ui-shots.mjs): one live account per provider, plus a saved Codex
+ * profile whose windows have both reset since it was last observed. A card of a saved profile
+ * Limits polls says so (`savedProfile`); one that does not is a remembered reading.
+ * `LIMITS_SCENARIOS` holds every `?mock=<scenario>` that changes what the Limits commands answer.
  */
 
 const NOW = Date.parse("2026-08-24T20:00:00Z");
@@ -52,6 +53,7 @@ const CODEX: ProviderLimits[] = [
     status: "ok",
     account: { id: "codex-2", label: "other@example.com" },
     currentAccount: false,
+    savedProfile: true,
     plan: "pro",
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 97, resetsAt: at(-85), windowSeconds: 604_800, observedAt: REMEMBERED_OBSERVED },
@@ -92,6 +94,7 @@ function claudeWithoutReset(): ProviderLimits[] {
     ...CLAUDE[0],
     account: { id: "claude-2", label: "other@example.com" },
     currentAccount: false,
+    savedProfile: true,
     windows: CLAUDE[0].windows.map(window => window.kind === "session"
       ? { ...window, usedPercent: 0, resetsAt: null }
       : window),
@@ -104,6 +107,7 @@ function claudeWithoutWeekly(): ProviderLimits[] {
     ...CLAUDE[0],
     account: { id: "claude-2", label: "other@example.com" },
     currentAccount: false,
+    savedProfile: true,
     windows: CLAUDE[0].windows.filter(window => window.kind !== "weekly"),
   }];
 }
@@ -170,7 +174,7 @@ function limitsBandCodex(): ProviderLimits[] {
 
 /**
  * `?mock=bankedResets`: the signed-in Codex account has two banked resets and plenty of usage left,
- * so spending one asks first; the remembered account reports the one it had when last seen.
+ * so spending one asks first; the saved account reports the one it had when last read.
  */
 function bankedResetsCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
@@ -186,8 +190,8 @@ function bankedResetsCodex(): ProviderLimits[] {
 
 /**
  * `?mock=workspaceCredits` on Codex: two business workspace members. The live one has used part of
- * its share of the workspace's credits; the remembered one has used all of it. Both own balances
- * read 0, as they do in a workspace.
+ * its share of the workspace's credits; the saved one has used all of it. Both own balances read 0,
+ * as they do in a workspace.
  */
 function workspaceCreditsCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
@@ -216,13 +220,13 @@ function creditsSpentCodex(): ProviderLimits[] {
 }
 
 /**
- * `?mock=claudeSubscriptionStatus`: the signed-in Claude account behind on payment and a remembered
- * one whose subscription was canceled, as the profile's `organization.subscription_status` says.
+ * `?mock=claudeSubscriptionStatus`: the signed-in Claude account behind on payment and a saved one
+ * whose subscription was canceled, as the profile's `organization.subscription_status` says.
  */
 function claudeSubscriptionStatusClaude(): ProviderLimits[] {
   return [
     { ...CLAUDE[0], subscriptionStatus: "past_due" },
-    { ...CLAUDE[0], account: { id: "claude-2", label: "team@example.com" }, currentAccount: false, subscriptionStatus: "canceled" },
+    { ...CLAUDE[0], account: { id: "claude-2", label: "team@example.com" }, currentAccount: false, savedProfile: true, subscriptionStatus: "canceled" },
   ];
 }
 
@@ -240,6 +244,7 @@ function sameEmailWorkspacesCodex(): ProviderLimits[] {
     ...CODEX[0],
     account: { id: `profile:${id}`, label: "shared@example.com" },
     currentAccount: index === 0,
+    savedProfile: index !== 0,
     plan,
   }));
 }
@@ -261,7 +266,7 @@ function sameEmailWorkspacesAccounts(): AccountsReading {
  */
 function savedRefreshPaused([live]: ProviderLimits[]): ProviderLimits[] {
   return [live, {
-    ...live, currentAccount: false, status: "failed", account: { id: `${live.provider}-saved`, label: "other@example.com" },
+    ...live, currentAccount: false, savedProfile: true, status: "failed", account: { id: `${live.provider}-saved`, label: "other@example.com" },
     message: "Saved usage access has expired. The last reading is retained.",
   }];
 }
@@ -283,10 +288,11 @@ function accountDuplicate(): LimitsScenario {
 }
 
 function accountDuplicateCodex(reconnected: boolean): ProviderLimits[] {
-  const legacy = { ...CODEX[1], currentAccount: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
+  const legacy = { ...CODEX[1], currentAccount: false, savedProfile: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
   // Older app versions can rewrite the scoped snapshot without its optional legacyId.
   return [CODEX[0], ...(reconnected ? [{ ...legacy,
     account: { id: "profile:shared", label: "shared@example.com" },
+    savedProfile: true,
     windows: CODEX[0].windows.map(window => ({ ...window, usedPercent: 42 })),
   }] : []), legacy];
 }

@@ -128,6 +128,7 @@ pub(super) fn finish(
         message,
         account: parsed.account,
         current_account: true,
+        saved_profile: false,
         reading: parsed.reading,
     }
 }
