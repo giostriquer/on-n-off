@@ -10,7 +10,7 @@
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
-import { bankedResetsClaude, bankedResetsCodex, claudeSubscriptionStatusClaude, claudeWithoutReset, claudeWithoutWeekly, creditsSpentCodex, limitsBandClaude, limitsBandCodex, limitsFor, limitsOrderClaude, sameEmailWorkspacesCodex, subscriptionBadgesCodex, workspaceCreditsCodex } from "./limitsFixtures";
+import { LIMITS_SCENARIOS, limitsScenario, reconnectDuplicate } from "./limitsFixtures";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageHistoryStatus, UsageSummary } from "$lib/usageTypes";
 
@@ -30,21 +30,17 @@ declare global {
 const params = new URLSearchParams(window.location.search);
 const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
-// Scenarios this file answers for itself. `SCENARIOS` holds the pull-request ones.
-const LOCAL_SCENARIOS = [
-  "subscriptionMissing", "subscriptionBadges", "accountLogin", "accountLocked",
-  "accountDuplicate", "accountClients", "claudeMissingReset", "claudeNoWeekly", "catalog",
-  "savedRefreshPaused", "limitsBand", "limitsOrder", "bankedResets", "sameEmailWorkspaces", "workspaceCredits", "creditsSpent", "claudeSubscriptionStatus", "hooks", "mcpSources",
-];
-if (!Object.hasOwn(SCENARIOS, scenario) && !LOCAL_SCENARIOS.includes(scenario)) {
-  console.error(
-    `[mock] unknown scenario "${scenario}"; known: ${[...Object.keys(SCENARIOS), ...LOCAL_SCENARIOS].join(", ")}`,
-  );
+// Scenarios this file answers for itself. `SCENARIOS` holds the pull-request ones and
+// `LIMITS_SCENARIOS` the ones that change what the Limits commands answer.
+const LOCAL_SCENARIOS = ["accountLogin", "accountLocked", "accountClients", "catalog", "hooks", "mcpSources"];
+const KNOWN_SCENARIOS = [...Object.keys(SCENARIOS), ...Object.keys(LIMITS_SCENARIOS), ...LOCAL_SCENARIOS];
+if (!KNOWN_SCENARIOS.includes(scenario)) {
+  console.error(`[mock] unknown scenario "${scenario}"; known: ${KNOWN_SCENARIOS.join(", ")}`);
 }
+const limits = limitsScenario(scenario);
 
 const vaultDenied = new Error("Could not unlock saved accounts.");
 let vaultLocked = scenario === "accountLocked";
-let duplicateReconnected = false;
 const pendingLogins = new Map<string, () => void>();
 
 const AGENTS: AgentInfo[] = [
@@ -258,24 +254,8 @@ const handlers: Record<string, Handler> = {
   read_account_preferences: () => rememberingMock,
   read_accounts: (args) => {
     if (vaultLocked) throw vaultDenied;
-    if (scenario === "sameEmailWorkspaces" && args.agent === "codex") return {
-      profiles: [["personal", "0d6c1f3e-5b2a-4c8e-9f10-2a7b3c4d5e61"], ["business", "7e9a2b4c-1d3f-4a5b-8c6d-9e0f1a2b3c47"]].map(([id, workspaceId], index) => ({
-        id, observationId: `profile:${id}`, identity: { provider: "codex", userId: "user-shared", workspaceId },
-        label: "shared@example.com", email: "shared@example.com", category: null, savedAt: "2026-09-17T12:00:00Z", active: index === 0, needsLogin: false,
-      })),
-      nativeObservationId: "profile:personal", nativeAccount: null, recoveryRequired: false, notice: null,
-    };
-    if (scenario === "limitsOrder" && args.agent === "claude") return { profiles: [], nativeObservationId: "order-current", nativeAccount: null, recoveryRequired: false, notice: null };
-    if (scenario === "accountDuplicate" && args.agent === "codex") return {
-      profiles: [{ id: "saved", observationId: "profile:shared", identity: { provider: "codex", userId: "shared-user", workspaceId: "ca292064-c3f4-453c-b15a-43ef63c46478" }, label: "shared@example.com", email: "shared@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, needsLogin: false }],
-      nativeObservationId: "codex-1", nativeAccount: null, recoveryRequired: false, notice: null,
-    };
-    return ({
-    profiles: [
-      { id: "personal", observationId: args.agent === "codex" ? "codex-1" : "claude-1", identity: { provider: args.agent, userId: "user-personal", workspaceId: "Personal workspace" }, label: "personal@example.com", email: "personal@example.com", category: null, savedAt: "2026-08-24T18:30:00Z", active: true, needsLogin: false },
-      { id: "work", observationId: args.agent === "codex" ? "codex-2" : "claude-2", identity: { provider: args.agent, userId: "user-work", workspaceId: "Acme workspace" }, label: "person@acme.example", email: "person@acme.example", category: "Client A / research", savedAt: "2026-08-23T14:20:00Z", active: false, needsLogin: false },
-    ], nativeObservationId: args.agent === "codex" ? "codex-1" : "claude-1", nativeAccount: { provider: args.agent, userId: "user-personal", workspaceId: "Personal workspace" }, recoveryRequired: false, notice: null,
-  }); },
+    return limits.readAccounts(args.agent);
+  },
   read_account_activation_blockers: (args) => scenario === "accountClients" && args.agent === "codex" ? ["Acme Studio (codex)", "ChatGPT"] : [],
   account_action: (args) => {
     if (args.action === "unlock") vaultLocked = false;
@@ -283,7 +263,7 @@ const handlers: Record<string, Handler> = {
     if (args.action === "stopRemembering") rememberingMock = false;
   },
   add_account: (args) => scenario === "accountDuplicate"
-    ? (duplicateReconnected = true, undefined)
+    ? (reconnectDuplicate(), undefined)
     : scenario === "accountLogin"
     ? new Promise<void>(resolve => pendingLogins.set(String(args.operationId), resolve))
     : undefined,
@@ -292,39 +272,8 @@ const handlers: Record<string, Handler> = {
     pendingLogins.get(id)?.();
     pendingLogins.delete(id);
   },
-  read_limits: (args) => {
-    if (scenario === "savedRefreshPaused") return limitsFor(args.agentId).slice(0, 1).flatMap(entry => [entry, {
-      ...entry, currentAccount: false, status: "failed", account: {id: `${entry.provider}-saved`, label: "other@example.com"},
-      message: "Saved usage access has expired. The last reading is retained.",
-    }]);
-    if (scenario === "limitsBand" && args.agentId === "claude") return limitsBandClaude();
-    if (scenario === "limitsBand" && args.agentId === "codex") return limitsBandCodex();
-    if (scenario === "limitsOrder" && args.agentId === "claude") return limitsOrderClaude();
-    if (scenario === "claudeMissingReset" && args.agentId === "claude") return claudeWithoutReset();
-    if (scenario === "claudeNoWeekly" && args.agentId === "claude") return claudeWithoutWeekly();
-    if (scenario === "bankedResets" && args.agentId === "claude") return bankedResetsClaude();
-    if (scenario === "bankedResets" && args.agentId === "codex") return bankedResetsCodex();
-    if (scenario === "sameEmailWorkspaces" && args.agentId === "codex") return sameEmailWorkspacesCodex();
-    if (scenario === "workspaceCredits" && args.agentId === "codex") return workspaceCreditsCodex();
-    if (scenario === "creditsSpent" && args.agentId === "codex") return creditsSpentCodex();
-    if (scenario === "subscriptionBadges" && args.agentId === "codex") return subscriptionBadgesCodex();
-    if (scenario === "claudeSubscriptionStatus" && args.agentId === "claude") return claudeSubscriptionStatusClaude();
-    const entries = limitsFor(args.agentId);
-    if (scenario !== "accountDuplicate" || args.agentId !== "codex") return entries;
-    const legacy = { ...entries[1], currentAccount: false, account: {
-      id: "ca292064-c3f4-453c-b15a-43ef63c46478", label: "shared@example.com",
-    } };
-    // Older app versions can rewrite the scoped snapshot without its optional legacyId.
-    return [entries[0], ...(duplicateReconnected ? [{ ...legacy,
-      account: { id: "profile:shared", label: "shared@example.com" },
-      windows: entries[0].windows.map(window => ({ ...window, usedPercent: 42 })),
-    }] : []), legacy];
-  },
-  // Relative to the real clock: the badge hides a date that has passed, whatever the harness clock says.
-  read_codex_subscription: (args) => scenario === "subscriptionMissing" ? null : {
-    date: new Date(Date.now() + (args.accountId === "codex-2" ? 3 : 26) * 86_400_000).toISOString(),
-    checkedAt: new Date(Date.now() - 8 * 86_400_000).toISOString(),
-  },
+  read_limits: (args) => limits.readLimits(args.agentId),
+  read_codex_subscription: (args) => limits.readCodexSubscription(args.accountId),
   consume_codex_reset_credit: () => "reset",
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),
   usage_history_status: () => usageHistory,

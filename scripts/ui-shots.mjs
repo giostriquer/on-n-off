@@ -64,6 +64,8 @@ const SCENES = [
   { name: "limits-band-light", url: "/limits?mock=limitsBand", theme: "light", steps: [{ wait: "role=region[name='Codex limits · 50% of the week']" }] },
   { name: "limits-ok", url: "/limits?mock=ok", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
   { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
+  // The menu-bar popover renders the same cards at the window size tray.rs gives it.
+  { name: "limits-popover", url: "/?surface=limits-popover&mock=ok", viewport: { width: 350, height: 480 }, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
 ];
 
 function connects(port, host) {
