@@ -4,18 +4,14 @@ import { UsageStatusBadge } from "./UsageStatusBadge";
 import { RefreshCw } from "lucide-react";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
-import {
-  planLabel,
-  usageFillStyle,
-} from "$lib/limitsFormat";
-import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import { usageFillStyle } from "$lib/limitsFormat";
+import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { orderAccountCards } from "./accountCards";
-import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
+import { limitCards, type CardWindow, type LimitCard } from "./limitCards";
 import { limitsRefreshMs, useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
@@ -142,11 +138,12 @@ function PopoverProviderSection({
   now: number;
 }) {
   const name = providerLabel(provider);
-  const entries = query.data ? orderAccountCards(query.data, now) : null;
+  // No saved profiles: reading them opens the vault and the native store, which the popover never does.
+  const cards = limitCards({ provider, entries: query.data, profiles: [], now });
   const error = query.error ? displayError(parseInvokeError(query.error), name) : null;
   const errorBanner = error ? (
     <p
-      className={`m-0 px-3 py-2 text-[12px] text-[var(--trip)] ${entries ? "border-b border-[var(--popover-hair)]" : ""}`}
+      className={`m-0 px-3 py-2 text-[12px] text-[var(--trip)] ${cards ? "border-b border-[var(--popover-hair)]" : ""}`}
       role="alert"
       aria-label={`${name} refresh error`}
     >
@@ -159,29 +156,24 @@ function PopoverProviderSection({
       <div className="flex items-center gap-1.5 px-1">
         <ProviderIcon provider={provider} className="size-3.5 shrink-0" title="" />
         <h2 className="m-0 text-[12px] font-semibold tracking-[0.045em] uppercase">{name}</h2>
-        {entries ? (
+        {cards ? (
           <span className="ml-auto text-[11px] text-[var(--mute)]">
-            {entries.length} {entries.length === 1 ? "account" : "accounts"}
+            {cards.length} {cards.length === 1 ? "account" : "accounts"}
           </span>
         ) : null}
       </div>
 
       <div className="overflow-hidden rounded-[11px] border border-[var(--popover-hair)] bg-[var(--popover-card)]">
         {errorBanner}
-        {!entries ? (
+        {!cards ? (
           <p className="m-0 px-3 py-3 text-[12px] text-[var(--mute)]">
             {query.isFetching ? "Checking limits…" : "No data yet."}
           </p>
-        ) : entries.length === 0 ? (
+        ) : cards.length === 0 ? (
           <p className="m-0 px-3 py-3 text-[12px] text-[var(--mute)]">No saved accounts.</p>
         ) : (
-          entries.map((entry, index) => (
-            <PopoverAccount
-              key={`${entry.currentAccount ? "current" : "remembered"}-${entry.account?.id ?? index}`}
-              entry={entry}
-              now={now}
-              divided={index > 0}
-            />
+          cards.map((card, index) => (
+            <PopoverAccount key={card.key} card={card} divided={index > 0} />
           ))
         )}
       </div>
@@ -189,77 +181,60 @@ function PopoverProviderSection({
   );
 }
 
-function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: number; divided: boolean }) {
-  const name = providerLabel(entry.provider);
-  const label = entry.account?.label ?? name;
-  const plan = planLabel(entry.plan, entry.provider);
-  const windows = entry.windows;
-  const { message, refreshPaused, remembered, updatedAt, savedRefreshDetail } = presentLimitAccount(entry, `${name} limits are unavailable.`);
+function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }) {
+  const { provider, identity, status, freshness } = card;
+  const windows = card.headline ? [card.headline, ...card.rows] : card.rows;
 
   return (
     <article
-      aria-label={`${name} limits${entry.account?.label ? ` · ${entry.account.label}` : ""}`}
+      aria-label={identity.ariaLabel}
       className={`${divided ? "border-t border-[var(--popover-hair)]" : ""} px-2.5 py-2`}
-      data-current-account={entry.currentAccount ? "true" : "false"}
-      data-status={entry.status}
+      data-status={freshness.readStatus}
     >
       <header className="mb-1.5 min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
-          {savedRefreshDetail ? <UsageStatusBadge detail={savedRefreshDetail} /> : remembered ? (
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{identity.label}</span>
+          {status?.kind === "savedRefresh" ? <UsageStatusBadge detail={status.detail} /> : status?.kind === "remembered" ? (
             <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">
               Remembered account
             </span>
-          ) : refreshPaused ? (
+          ) : status?.kind === "paused" ? (
             <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">
               Refresh paused
             </span>
           ) : null}
-          {plan ? <span className="shrink-0 type-badge text-[var(--mute)] uppercase">{plan}</span> : null}
+          {card.plan ? <span className="shrink-0 type-badge text-[var(--mute)] uppercase">{card.plan}</span> : null}
         </div>
-        {updatedAt ? <p className="mt-0.5 mb-0 text-[10px] text-[var(--mute)] tabular-nums">Latest observation {updatedAt}</p> : null}
+        {freshness.updatedAt ? <p className="mt-0.5 mb-0 text-[10px] text-[var(--mute)] tabular-nums">Latest observation {freshness.updatedAt}</p> : null}
       </header>
 
-      {message ? (
-        <p className={`m-0 text-[12px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
-          {message}
+      {freshness.message ? (
+        <p className={`m-0 text-[12px] ${freshness.message.tone === "error" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
+          {freshness.message.text}
         </p>
       ) : null}
 
       {windows.length > 0 ? (
-        <div className={`flex flex-col gap-1.5 ${message ? "mt-1.5" : ""}`}>
+        <div className={`flex flex-col gap-1.5 ${freshness.message ? "mt-1.5" : ""}`}>
           {windows.map((window) => (
-            <PopoverWindow
-              key={window.id}
-              window={window}
-              provider={entry.provider}
-              now={now}
-            />
+            <PopoverWindow key={window.id} window={window} provider={provider} />
           ))}
         </div>
-      ) : entry.status === "ok" ? (
-        <p className="m-0 text-[12px] text-[var(--mute)]">No rate-limit windows.</p>
+      ) : card.empty ? (
+        <p className="m-0 text-[12px] text-[var(--mute)]">{card.empty.copy}</p>
       ) : null}
     </article>
   );
 }
 
-function PopoverWindow({
-  window,
-  provider,
-  now,
-}: {
-  window: LimitWindow;
-  provider: AgentId;
-  now: number;
-}) {
-  const { percent, note, text, color } = presentLimitWindow(window, now);
+function PopoverWindow({ window, provider }: { window: CardWindow; provider: AgentId }) {
+  const { label, percent, note, text, color } = window;
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
       <div className="min-w-0">
         <span className="block truncate text-[11px] font-semibold tracking-[0.025em] text-[var(--mute)] uppercase">
-          {window.label}
+          {label}
         </span>
         {note ? <span className="mt-0.5 block text-[10px] leading-tight text-[var(--mute)] tabular-nums">{note}</span> : null}
       </div>
@@ -269,7 +244,7 @@ function PopoverWindow({
       <div
         className="col-span-2 h-1 overflow-hidden rounded-full bg-[var(--popover-track)]"
         role="meter"
-        aria-label={window.label}
+        aria-label={label}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(percent)}

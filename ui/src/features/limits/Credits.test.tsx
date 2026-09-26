@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { LimitsCredits, LimitsCreditsSpent, LimitsWorkspaceCredits } from "$lib/limitsTypes";
 import { CreditsRows } from "./Credits";
+import type { CardFigures } from "./limitCards";
 
 const NOW = Date.parse("2026-09-24T12:00:00Z");
 const ZERO: LimitsCredits = { balance: "0", unlimited: false };
@@ -10,8 +11,9 @@ function share(overrides: Partial<LimitsWorkspaceCredits> = {}): LimitsWorkspace
   return { limit: "25000", used: "8000", usedPercent: 32, resetsAt: "2026-10-01T12:00:00Z", reached: false, ...overrides };
 }
 
-function rows(credits: LimitsCredits | null, workspaceCredits: LimitsWorkspaceCredits | null) {
-  render(<CreditsRows entry={{ provider: "codex", credits, workspaceCredits }} now={NOW} />);
+/** Which figures to show is the card model's call (`limitCards.test.ts`); these are how they read. */
+function rows(figures: Partial<Pick<CardFigures, "ownBalance" | "workspaceShare" | "creditsSpent">>) {
+  render(<CreditsRows figures={{ ownBalance: null, workspaceShare: null, creditsSpent: null, ...figures }} provider="codex" now={NOW} />);
   const meter = screen.queryByRole("meter", { name: "Workspace credits" });
   const noteId = meter?.getAttribute("aria-describedby");
   return {
@@ -28,7 +30,7 @@ function rows(credits: LimitsCredits | null, workspaceCredits: LimitsWorkspaceCr
 
 describe("CreditsRows", () => {
   it("fills a bar with the reader's figure and says what is left and when it resets", () => {
-    const shown = rows(ZERO, share({ usedPercent: 40 }));
+    const shown = rows({ workspaceShare: share({ usedPercent: 40 }) });
 
     expect(shown.filled).toBe("40");
     expect(shown.figure?.textContent).toBe("40%");
@@ -36,7 +38,7 @@ describe("CreditsRows", () => {
   });
 
   it("fills the bar and turns the figure red when the share is used up", () => {
-    const shown = rows(ZERO, share({ used: "25000", usedPercent: 100, reached: true }));
+    const shown = rows({ workspaceShare: share({ used: "25000", usedPercent: 100, reached: true }) });
 
     expect(shown.filled).toBe("100");
     expect(shown.figure).toHaveStyle({ color: "var(--trip)" });
@@ -44,90 +46,70 @@ describe("CreditsRows", () => {
   });
 
   it("says only that the limit is reached when a reached share's amounts show some left", () => {
-    const shown = rows(ZERO, share({ used: "24000", usedPercent: 100, reached: true }));
+    const shown = rows({ workspaceShare: share({ used: "24000", usedPercent: 100, reached: true }) });
 
     expect(shown.filled).toBe("100");
     expect(shown.note).toBe("limit reached · resets Oct 1");
   });
 
   it("fills the bar in Codex's accent while there is room", () => {
-    const fill = rows(ZERO, share()).meter?.firstElementChild as HTMLElement | null;
+    const fill = rows({ workspaceShare: share() }).meter?.firstElementChild as HTMLElement | null;
 
     expect(fill?.style.width).toBe("32%");
     expect(fill?.style.backgroundColor).toBe("var(--silkscreen)");
   });
 
   it("says only what is left of a share with no reset date", () => {
-    expect(rows(null, share({ resetsAt: null })).note).toBe("17,000 of 25,000 left");
+    expect(rows({ workspaceShare: share({ resetsAt: null }) }).note).toBe("17,000 of 25,000 left");
   });
 
   it("keeps the decimals an amount carries", () => {
-    expect(rows(null, share({ limit: "25000.5", used: "8000.25" })).note).toBe("17,000.25 of 25,000.5 left · resets Oct 1");
+    expect(rows({ workspaceShare: share({ limit: "25000.5", used: "8000.25" }) }).note).toBe("17,000.25 of 25,000.5 left · resets Oct 1");
   });
 
   it("rounds an amount to two decimals", () => {
-    expect(rows(null, share({ limit: "10.125", used: "0" })).note).toBe("10.13 of 10.13 left · resets Oct 1");
+    expect(rows({ workspaceShare: share({ limit: "10.125", used: "0" }) }).note).toBe("10.13 of 10.13 left · resets Oct 1");
   });
 
   it("shows nothing left rather than a negative amount when more than the share is used", () => {
-    const shown = rows(null, share({ limit: "100", used: "120", usedPercent: 100 }));
+    const shown = rows({ workspaceShare: share({ limit: "100", used: "120", usedPercent: 100 }) });
 
     expect(shown.note).toBe("0 of 100 left · resets Oct 1");
     expect(shown.filled).toBe("100");
   });
 
-  it("leaves out an own balance of 0 beside a share, which says what the member can use", () => {
-    expect(rows(ZERO, share()).own).toBeNull();
-  });
-
-  it("keeps an own balance that says something", () => {
-    expect(rows({ balance: "3", unlimited: false }, share()).own).toBe("3");
-  });
-
-  it("keeps an unlimited balance beside a share", () => {
-    expect(rows({ balance: "0", unlimited: true }, share()).own).toBe("Unlimited");
-  });
-
-  it("keeps an own balance of 0 when there is no share", () => {
-    const shown = rows(ZERO, null);
+  it("shows the own balance it is given, with no meter", () => {
+    const shown = rows({ ownBalance: ZERO });
 
     expect(shown.own).toBe("0");
     expect(shown.meter).toBeNull();
   });
 
-  it("shows a share whose reset has passed as renewed, as a window is, and still leaves out the own 0", () => {
-    const shown = rows(ZERO, share({ used: "25000", usedPercent: 100, reached: true, resetsAt: "2026-09-23T10:00:00Z" }));
+  it("shows an unlimited balance as unlimited", () => {
+    expect(rows({ ownBalance: { balance: "0", unlimited: true }, workspaceShare: share() }).own).toBe("Unlimited");
+  });
+
+  it("shows a share whose reset has passed as renewed, as a window is", () => {
+    const shown = rows({ workspaceShare: share({ used: "25000", usedPercent: 100, reached: true, resetsAt: "2026-09-23T10:00:00Z" }) });
 
     expect(shown.filled).toBe("0");
     expect(shown.figure?.textContent).toBe("0%");
     expect(shown.note).toBe("25,000 of 25,000 left · reset 1d ago · Sep 23");
-    expect(shown.own).toBeNull();
   });
 
   it("shows nothing with neither a balance nor a share", () => {
-    const { container } = render(<CreditsRows entry={{ provider: "codex", credits: null, workspaceCredits: null }} now={NOW} />);
+    const { container } = render(<CreditsRows figures={{ ownBalance: null, workspaceShare: null, creditsSpent: null }} provider="codex" now={NOW} />);
 
     expect(container.textContent).toBe("");
   });
 
-  it("shows what a business member spent, and leaves out the own 0 beside it", () => {
+  it("shows what a business member spent, and beside it the own balance it is given", () => {
     const spent: LimitsCreditsSpent = { last7Days: 18303.4, last30Days: 20299.7, updatedAt: null };
-    render(<CreditsRows entry={{ provider: "codex", credits: ZERO, workspaceCredits: null, creditsSpent: spent }} now={NOW} />);
+    const shown = rows({ ownBalance: { balance: "3", unlimited: false }, creditsSpent: spent });
 
     const value = screen.getByRole("definition", { name: "Credits spent" });
     expect(value.textContent).toBe("18,303.4");
     expect(value.closest("dl")?.textContent).toContain("last 7 days · 20,299.7 in 30 days");
-    expect(screen.queryByRole("definition", { name: "Credits" })).toBeNull();
-  });
-
-  it("keeps an own balance that says something beside what was spent", () => {
-    render(
-      <CreditsRows
-        entry={{ provider: "codex", credits: { balance: "3", unlimited: false }, workspaceCredits: null, creditsSpent: { last7Days: 1, last30Days: 1 } }}
-        now={NOW}
-      />,
-    );
-
-    expect(screen.getByRole("definition", { name: "Credits" }).textContent).toBe("3");
+    expect(shown.own).toBe("3");
   });
 });

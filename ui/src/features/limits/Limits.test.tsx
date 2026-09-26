@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
+import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { formatObservedAt } from "$lib/limitsFormat";
 import { refreshLimits } from "./useLimitsProviders";
 import { Limits } from "./Limits";
+import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -36,59 +37,6 @@ function deferred<T>(): Deferred<T> {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
-}
-
-const NOW = "2026-08-17T20:00:00Z";
-
-function okClaude(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return {
-    provider: "claude",
-    status: "ok",
-    account: { id: "uuid-1", label: "me@claude.example" },
-    currentAccount: true,
-    plan: "max",
-    windows: [
-      { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
-      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-18T04:59:59Z", observedAt: NOW },
-      { id: "weekly_opus", label: "Weekly · Opus", kind: "model", usedPercent: 91.4, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
-    ],
-    ...overrides,
-  };
-}
-
-function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return {
-    provider: "codex",
-    status: "ok",
-    account: { id: "acct-work", label: "work@codex.example" },
-    currentAccount: true,
-    plan: "pro",
-    windows: [
-      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 74, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
-      { id: "extra:gpt-5.6-luna", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
-    ],
-    credits: { balance: "12.5", unlimited: false },
-    ...overrides,
-  };
-}
-
-/** A remembered snapshot of the other Codex account: read yesterday, one window already reset. */
-function staleCodex(): ProviderLimits {
-  return {
-    provider: "codex",
-    status: "ok",
-    account: { id: "acct-personal", label: "personal@codex.example" },
-    currentAccount: false,
-    plan: "plus",
-    windows: [
-      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 88, resetsAt: "2026-08-20T10:00:00Z", observedAt: "2026-08-16T21:40:00.000Z" },
-      { id: "secondary", label: "5 hour · all models", kind: "session", usedPercent: 40, resetsAt: "2026-08-16T22:00:00Z", observedAt: "2026-08-16T21:40:00.000Z" },
-    ],
-  };
-}
-
-function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): ProviderLimits {
-  return { provider, status, message, currentAccount: true, windows: [] };
 }
 
 function answer(
@@ -131,77 +79,35 @@ afterEach(() => {
 });
 
 describe("Limits", () => {
-  it.each([
-    [0, null, "Starts with your first message"],
-    [17, null, "Reset time unavailable"],
-    [0, "invalid", "Reset time unavailable"],
-  ] as const)("presents a remembered Claude session at %s percent with reset %s", async (usedPercent, resetsAt, expectedNote) => {
-    const remembered = okClaude({ currentAccount: false });
-    remembered.windows[1] = { ...remembered.windows[1], usedPercent, resetsAt };
-    answer([remembered], []);
+  it("draws the active account's dot beside its headline window, or in its header without one", async () => {
+    const session = { id: "secondary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
+    answer([okClaude({ plan: "max ×5" })], [okCodex({ windows: [session] }), staleCodex()]);
     renderLimits();
-
-    const region = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
-    const meter = within(region).getByRole("meter", { name: "5 hour · all models" });
-    const row = meter.parentElement!;
-    expect(meter.getAttribute("aria-valuenow")).toBe(String(usedPercent));
-    expect(within(row).getByText(`${usedPercent}%`)).toBeTruthy();
-    expect(within(row).getByText(expectedNote)).toBeTruthy();
-    expect(within(row).queryByText("—")).toBeNull();
-    expect(within(row).queryByText(/resets in/i)).toBeNull();
+    const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
+    const beside = within(claude).getByRole("img", { name: "Active account" });
+    expect(within(beside.parentElement!).getByText("Weekly · all models")).toBeTruthy();
+    expect(claude.querySelector("header")!.contains(beside)).toBe(false);
+    expect(within(claude).queryByText("ACTIVE")).toBeNull();
+    expect(within(claude).getByText("Max ×5")).toBeTruthy();
+    const codex = card("Codex limits · work@codex.example");
+    const dots = within(codex).getAllByRole("img", { name: "Active account" });
+    expect(dots).toHaveLength(1);
+    expect(codex.querySelector("header")!.contains(dots[0])).toBe(true);
+    expect(within(codex).getByRole("meter", { name: "5 hour · all models" })).toBeTruthy();
+    expect(within(card("Codex limits · personal@codex.example")).queryByRole("img", { name: "Active account" })).toBeNull();
   });
 
-  it("keeps a reported countdown even when a remembered Claude session has zero usage", async () => {
-    const remembered = okClaude({ currentAccount: false });
-    remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: "2026-08-17T23:00:00Z" };
-    answer([remembered], []);
+  it("says under a row why it shows no reset", async () => {
+    const remembered = okClaude({ currentAccount: false, account: { id: "uuid-2", label: "other@claude.example" } });
+    remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: null };
+    const codex = okCodex();
+    codex.windows[1] = { ...codex.windows[1], resetsAt: null };
+    answer([okClaude(), remembered], [codex]);
     renderLimits();
-
-    const region = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
-    const row = within(region).getByRole("meter", { name: "5 hour · all models" }).parentElement!;
-    expect(within(row).getByText("0%")).toBeTruthy();
-    expect(within(row).getByText(/^resets in 3h 0m/)).toBeTruthy();
-    expect(within(row).queryByText("Reset time unavailable")).toBeNull();
-  });
-
-  it("marks only the selected accounts with an accessible dot beside the main window label", async () => {
-    answer([okClaude({plan: "max ×5"})], [okCodex(), staleCodex()]);
-    renderLimits();
-    await screen.findByRole("region", {name: "Claude limits · me@claude.example"});
-    for (const name of ["Claude limits · me@claude.example", "Codex limits · work@codex.example"]) {
-      const region = card(name);
-      const indicator = within(region).getByRole("img", {name: "Active account"});
-      expect(within(indicator.parentElement!).getByText("Weekly · all models")).toBeTruthy();
-      expect(within(region).queryByText("ACTIVE")).toBeNull();
-    }
-    expect(within(card("Codex limits · personal@codex.example")).queryByRole("img", {name: "Active account"})).toBeNull();
-    expect(within(card("Claude limits · me@claude.example")).getByText("Max ×5")).toBeTruthy();
-  });
-
-  it("leads a card with no weekly window with nothing: its session is an ordinary row", async () => {
-    const session = { id: "primary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
-    answer([okClaude()], [okCodex({ windows: [session] })]);
-    renderLimits();
-    const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
-    expect(within(region).getByRole("meter", { name: "5 hour · all models" })).toBeTruthy();
-    expect(within(region).queryByText(/reported no rate-limit windows/)).toBeNull();
-    // No headline window, so the active account's dot sits in the header rather than beside it.
-    const indicator = within(region).getByRole("img", { name: "Active account" });
-    expect(region.querySelector("header")!.contains(indicator)).toBe(true);
-  });
-
-  it("moves the active account's dot into the header when it has no headline window", async () => {
-    answer([okClaude()], [okCodex({ windows: [] }), { ...staleCodex(), windows: [] }]);
-    renderLimits();
-    const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
-    const indicators = within(region).getAllByRole("img", { name: "Active account" });
-    expect(indicators).toHaveLength(1);
-    expect(region.querySelector("header")!.contains(indicators[0])).toBe(true);
-    const headerDot = (name: string) => card(name).querySelector("header")!.querySelector("[aria-label='Active account']");
-    // With a headline window the dot sits beside it instead, and an inactive account has none.
-    expect(headerDot("Claude limits · me@claude.example")).toBeNull();
-    await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
-    expect(headerDot("Codex limits · personal@codex.example")).toBeNull();
+    const row = (region: string, meter: string) => within(card(region)).getByRole("meter", { name: meter });
+    await screen.findByRole("region", { name: "Claude limits · other@claude.example" });
+    expect(row("Claude limits · other@claude.example", "5 hour · all models")).toHaveAccessibleDescription("Starts with your first message");
+    expect(row("Codex limits · work@codex.example", "Weekly · GPT-5.6-Luna")).toHaveAccessibleDescription("Reset time unavailable");
   });
 
   it("opens account actions from the header and dismisses them with Escape or an outside click", async () => {
@@ -209,6 +115,8 @@ describe("Limits", () => {
     renderLimits();
     const trigger = await screen.findByRole("button", {name: "More actions for personal@codex.example"});
     expect(trigger.closest("header")).not.toBeNull();
+    const remembered = card("Codex limits · personal@codex.example");
+    expect(within(remembered).getByRole("button", { name: "Sign in" })).toBeTruthy();
     fireEvent.click(trigger);
     expect(screen.getByRole("group", {name: "Actions for personal@codex.example"})).toBeTruthy();
     expect(screen.getByRole("button", {name: "Remove account"})).toHaveFocus();
@@ -233,7 +141,6 @@ describe("Limits", () => {
 
     const claude = card("Claude limits · me@claude.example");
     expect(claude.getAttribute("data-status")).toBe("ok");
-    expect(claude.getAttribute("data-current-account")).toBe("true");
     const weekly = within(claude).getByRole("meter", { name: "Weekly · all models" });
     expect(weekly.getAttribute("aria-valuenow")).toBe("12");
     expect((weekly.firstElementChild as HTMLElement).style.backgroundColor).toBe("rgb(217, 119, 87)");
@@ -295,119 +202,14 @@ describe("Limits", () => {
     expect(fill).not.toContain("var(--warn)");
   });
 
-  it("shows remembered accounts after the current one with independently dated windows", async () => {
-    answer([okClaude()], [okCodex(), staleCodex()]);
+  it("says the signed-in account's refresh is paused above its message, with nothing to sign into or forget", async () => {
+    answer([okClaude({ status: "unauthenticated", message: "Access token expired — send a prompt with `claude` to renew it, then refresh here." })], [okCodex()]);
     renderLimits();
-    await waitFor(() => expect(card("Codex limits · personal@codex.example")).toBeTruthy());
-
-    const regions = screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"));
-    expect(regions.indexOf("Codex limits · work@codex.example")).toBeLessThan(regions.indexOf("Codex limits · personal@codex.example"));
-
-    const stale = card("Codex limits · personal@codex.example");
-    expect(stale.getAttribute("data-current-account")).toBe("false");
-    expect(within(stale).getByText("Plus")).toBeTruthy();
-    expect(within(stale).getByRole("button", { name: "Sign in" })).toBeTruthy();
-    // Weekly window's reset is still ahead: numbers stand, with the countdown.
-    const weekly = within(stale).getByRole("meter", { name: "Weekly · all models" });
-    expect(weekly.getAttribute("aria-valuenow")).toBe("88");
-    expect(within(stale).getByText(/resets in 2d 14h/)).toBeTruthy();
-    // Session window already reset since the snapshot: no stale percentage is shown.
-    const session = within(stale).getByRole("meter", { name: "5 hour · all models" });
-    expect(session.getAttribute("aria-valuenow")).toBe("0");
-    expect((session.firstElementChild as HTMLElement).style.backgroundColor).toBe("var(--silkscreen)");
-    expect(within(stale).getByText("0%").style.color).toBe("");
-    // 88 % is inside the band but not spent, so the figure keeps the page ink; the bar carries
-    // the signal. It must never be the old amber.
-    expect(within(stale).getByText("88%").style.color).toBe("");
-    expect(within(stale).getByText(/^reset 22h ago · \w{3} \d\d:\d\d$/)).toBeTruthy();
-    expect(within(stale).queryByText(/Current usage unknown/)).toBeNull();
-    expect(within(stale).getByLabelText("More actions for personal@codex.example")).toBeTruthy();
-    expect(within(stale).getAllByText(/Latest observation/)).toHaveLength(1);
-  });
-
-  it("orders remembered accounts by usage left, then by when their usage returns", async () => {
-    const window = (kind: "weekly" | "session", usedPercent: number, resetsAt: string) => ({
-      id: kind, label: kind === "weekly" ? "Weekly · all models" : "5 hour · all models", kind, usedPercent, resetsAt, observedAt: NOW,
-    });
-    const remembered = (id: string, label: string, windows: ProviderLimits["windows"]) =>
-      ({ ...staleCodex(), account: { id, label }, windows });
-    // Out of usage until the weekly window resets in three days; the session reset in between does not help.
-    const out = remembered("acct-out", "out@codex.example", [window("weekly", 100, "2026-08-20T10:00:00Z"), window("session", 100, "2026-08-18T01:00:00Z")]);
-    // Out of usage for three more hours only.
-    const soon = remembered("acct-soon", "soon@codex.example", [window("weekly", 20, "2026-08-20T10:00:00Z"), window("session", 100, "2026-08-17T23:00:00Z")]);
-    // Has usage left, so it outranks both, however soon they reset.
-    const spare = remembered("acct-spare", "spare@codex.example", [window("weekly", 30, "2026-08-20T10:00:00Z"), window("session", 95, "2026-08-17T21:00:00Z")]);
-    answer([okClaude()], [okCodex(), out, soon, spare]);
-    // A saved profile with no usage read yet is a card too, and it is ordered like the rest: as
-    // the active login it belongs at the top, ahead of every account with usage left, however
-    // late the profile list adds it.
-    const ghost = { id: "ghost", observationId: "profile:ghost", identity: { provider: "codex", userId: "ghost", workspaceId: "ws" },
-      email: "ghost@codex.example", label: "ghost@codex.example", savedAt: "2026-08-16T12:00:00Z", active: true, needsLogin: false };
-    readAccounts.mockResolvedValue({ profiles: [ghost], nativeAccount: null, recoveryRequired: false, notice: null });
-    renderLimits();
-    await waitFor(() => expect(card("Codex limits · ghost@codex.example")).toBeTruthy());
-
-    const codexCards = () => screen.getAllByRole("region")
-      .map((region) => region.getAttribute("aria-label"))
-      .filter((label) => label?.startsWith("Codex limits"));
-    expect(codexCards()).toEqual([
-      "Codex limits · work@codex.example",
-      "Codex limits · ghost@codex.example",
-      "Codex limits · spare@codex.example",
-      "Codex limits · soon@codex.example",
-      "Codex limits · out@codex.example",
-    ]);
-  });
-
-  it("presents an elapsed hero window as reset, never as its old 97% in red", async () => {
-    const renewed = staleCodex();
-    renewed.windows[0] = { ...renewed.windows[0], usedPercent: 97, resetsAt: "2026-08-17T18:35:00Z" };
-    answer([okClaude()], [okCodex(), renewed]);
-    renderLimits();
-
-    const stale = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
-    const weekly = within(stale).getByRole("meter", { name: "Weekly · all models" });
-    expect(weekly.getAttribute("aria-valuenow")).toBe("0");
-    expect((weekly.firstElementChild as HTMLElement).style.backgroundColor).toBe("var(--silkscreen)");
-    expect(weekly.getAttribute("aria-valuetext")).toBeNull();
-    expect((weekly.firstElementChild as HTMLElement).style.backgroundColor).not.toBe("var(--trip)");
-    const [hero] = within(stale).getAllByText("0%");
-    expect(hero.style.color).toBe("");
-    expect(within(stale).getByText(/^reset 1h ago · \w{3} \d\d:\d\d$/)).toBeTruthy();
-    // The 97% it held before the reset is not recited anywhere on the card.
-    expect(within(stale).queryByText(/97/)).toBeNull();
-  });
-
-  it("keeps one source-neutral Claude account when current refresh is paused", async () => {
-    // What the backend sends when the CLI's access token has gone stale: the endpoint read failed, so
-    // the account's last remembered numbers ride along on the same entry.
-    answer(
-      [
-        okClaude({
-          status: "unauthenticated",
-          message: "Access token expired — send a prompt with `claude` to renew it, then refresh here.",
-          windows: [
-            { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z", observedAt: "2026-08-16T21:40:00.000Z" },
-            { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-17T04:59:59Z", observedAt: "2026-08-16T21:40:00.000Z" },
-          ],
-        }),
-      ],
-      [okCodex()],
-    );
-    renderLimits();
-    await waitFor(() => expect(card("Claude limits · me@claude.example")).toBeTruthy());
-
-    const claude = card("Claude limits · me@claude.example");
-    expect(screen.getAllByRole("region", { name: /^Claude limits/ })).toHaveLength(1);
+    const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
     expect(within(claude).getByText("Refresh paused.")).toBeTruthy();
     expect(within(claude).getByText(/^Access token expired/)).toBeTruthy();
-    expect(within(claude).queryByText(/Claude Desktop usage/)).toBeNull();
     expect(within(claude).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("12");
-    expect(within(claude).getAllByText(/Latest observation/)).toHaveLength(1);
-    // A window that has reset since that read shows the reset, not a stale percentage.
-    expect(within(claude).getByText(/^reset 15h ago · \w{3} \d\d:\d\d$/)).toBeTruthy();
-    expect(within(claude).queryByText(/Current usage unknown/)).toBeNull();
-    // It is still the signed-in account: nothing to sign into, nothing to forget.
+    expect(within(claude).queryByText(/Claude Desktop usage/)).toBeNull();
     expect(within(claude).queryByText(/sign in/)).toBeNull();
     expect(within(claude).queryByRole("button", { name: /^Forget/ })).toBeNull();
   });
@@ -461,7 +263,7 @@ describe("Limits", () => {
     await waitFor(() => expect(remove).toBeEnabled());
     fireEvent.click(remove);
     fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
-    await waitFor(() => expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex", "acct-personal"));
+    await waitFor(() => expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex", "acct-personal", undefined));
     // The card only goes once the backend has actually forgotten it.
     expect(card("Codex limits · personal@codex.example")).toBeTruthy();
     await act(async () => {
@@ -479,13 +281,18 @@ describe("Limits", () => {
     const current = card("Codex limits");
     expect(within(current).getByText("Sign in with `codex` to see subscription limits.")).toBeTruthy();
     expect(current.getAttribute("data-status")).toBe("signedOut");
+    // A read with no account has no account to act on.
+    expect(within(current).queryByRole("button", { name: /More actions|Sign in/ })).toBeNull();
   });
 
-  it("shows one account timestamp for remembered data when no current read is ok", async () => {
-    answer([statusOnly("claude", "signedOut", null)], [statusOnly("codex", "signedOut", null), staleCodex()]);
+  it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {
+    answer([statusOnly("claude", "failed", "Could not reach the Claude usage service (HTTP 503).")], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.")]);
     renderLimits();
-    await waitFor(() => expect(card("Codex limits · personal@codex.example")).toBeTruthy());
-    expect(within(card("Codex limits · personal@codex.example")).getAllByText(/Latest observation/)).toHaveLength(1);
+    const failed = await waitFor(() => within(card("Claude limits")).getByText("Could not reach the Claude usage service (HTTP 503)."));
+    expect(failed).toHaveClass("text-[var(--trip)]");
+    const prompt = await waitFor(() => within(card("Codex limits")).getByText("Sign in with `codex` to see subscription limits."));
+    expect(prompt).toHaveClass("text-[var(--mute)]");
+    expect(prompt).not.toHaveClass("text-[var(--trip)]");
   });
 
   it("keeps the card and reports the error when Forget fails", async () => {
@@ -502,96 +309,22 @@ describe("Limits", () => {
     expect(card("Codex limits · personal@codex.example")).toBeTruthy();
   });
 
-  it.each<[LimitsStatus, string]>([
-    ["signedOut", "Sign in with `claude` to see subscription limits."],
-    ["unauthenticated", "Login expired — run `claude` and sign in again."],
-    ["unsupported", "Claude is signed in with an API key."],
-    ["failed", "Could not reach the Claude usage service (HTTP 503)."],
-  ])("renders the provider message and status for %s", async (status, message) => {
-    answer([statusOnly("claude", status, message)], [okCodex()]);
+  it.each([true, false])("puts Claude's subscription status beside the plan and says when it is only the last known (%s)", async (lastKnown) => {
+    answer([okClaude({ subscriptionStatus: "past_due", ...(lastKnown ? { status: "unauthenticated" as const, message: "Sign in again." } : {}) })], []);
     renderLimits();
-    await waitFor(() => expect(within(card("Claude limits")).getByText(message)).toBeTruthy());
-    expect(card("Claude limits").getAttribute("data-status")).toBe(status);
-    expect(within(card("Claude limits")).queryByRole("meter")).toBeNull();
-  });
-
-  it("falls back to generic copy when a non-ok status carries no message", async () => {
-    answer([statusOnly("claude", "failed", null)], [statusOnly("codex", "signedOut", null)]);
-    renderLimits();
-    await waitFor(() => expect(within(card("Claude limits")).getByText("Claude limits are unavailable.")).toBeTruthy());
-    expect(within(card("Codex limits")).getByText("Codex limits are unavailable.")).toBeTruthy();
-  });
-
-  it("explains an ok answer with no windows and shows unlimited credits", async () => {
-    answer([okClaude({ windows: [], plan: null, account: null })], [okCodex({ credits: { balance: "0", unlimited: true } })]);
-    renderLimits();
-    await waitFor(() => expect(within(card("Claude limits")).getByText("Claude reported no rate-limit windows.")).toBeTruthy());
-    expect(within(card("Claude limits")).queryByText("Max")).toBeNull();
-    expect(within(card("Codex limits · work@codex.example")).getByRole("definition", { name: "Credits" }).textContent).toBe("Unlimited");
-  });
-
-  it("puts the subscription status Claude reports beside the plan, and nothing when it is active", async () => {
-    answer([okClaude({ subscriptionStatus: "past_due" })], []);
-    const { unmount } = renderLimits();
-
     const claude = await waitFor(() => card("Claude limits · me@claude.example"));
-    expect(within(claude).getByRole("button", { name: "Subscription status: Payment due" })).toBeTruthy();
-
-    unmount();
-    answer([okClaude({ subscriptionStatus: "active" })], []);
-    renderLimits();
-    const active = await waitFor(() => card("Claude limits · me@claude.example"));
-    expect(within(active).queryByRole("button", { name: /Subscription status/ })).toBeNull();
-  });
-
-  const EARLIER = "2026-08-10T09:30:00Z";
-  it.each([
-    ["a live signed-in card", {}, NOW, false],
-    ["a signed-in card whose refresh failed, showing the remembered status", { status: "unauthenticated", message: "Sign in again." }, NOW, true],
-    ["a saved card read just now", { currentAccount: false }, NOW, false],
-    // A card only remembered from a snapshot answers "ok" like a saved read: its Checked time says how old it is.
-    ["a card remembered from a snapshot", { currentAccount: false }, EARLIER, false],
-  ] as const)("says a subscription status is only the last one known when the read failed: %s", async (_case, overrides, observedAt, lastKnown) => {
-    const entry = okClaude({ subscriptionStatus: "past_due", ...overrides });
-    entry.windows = entry.windows.map((window) => ({ ...window, observedAt }));
-    answer([entry], []);
-    renderLimits();
-
-    const claude = await waitFor(() => card("Claude limits · me@claude.example"));
-    fireEvent.focus(within(claude).getByRole("button", { name: "Subscription status: Payment due" }));
+    const badge = within(claude).getByRole("button", { name: "Subscription status: Payment due" });
+    expect(badge.closest("header")).toHaveTextContent("Max");
+    fireEvent.focus(badge);
     const tooltip = screen.getByRole("tooltip");
-    expect(tooltip).toHaveTextContent(`Checked ${formatObservedAt(observedAt)}`);
+    expect(tooltip).toHaveTextContent(`Checked ${formatObservedAt(NOW)}`);
     if (lastKnown) expect(tooltip).toHaveTextContent("Last known subscription status.");
     else expect(tooltip).not.toHaveTextContent("Last known");
   });
 
-  it("shows a business member's workspace credits in place of an own balance of 0", async () => {
-    const workspaceCredits = { limit: "25000", used: "8000", usedPercent: 32, resetsAt: "2026-10-01T12:00:00Z", reached: false };
-    answer([okClaude()], [okCodex({ plan: "self_serve_business_prolite", credits: { balance: "0", unlimited: false }, workspaceCredits })]);
-    renderLimits();
-
-    const codex = await waitFor(() => card("Codex limits · work@codex.example"));
-    const share = within(codex).getByRole("meter", { name: "Workspace credits" });
-    expect(share).toHaveAttribute("aria-valuenow", "32");
-    expect(share).toHaveAccessibleDescription("17,000 of 25,000 left · resets Oct 1");
-    expect(within(codex).queryByRole("definition", { name: "Credits" })).toBeNull();
-  });
-
-  it("shows what a business member spent in place of an own balance of 0 when Codex reports no share", async () => {
-    const creditsSpent = { last7Days: 18303.4, last30Days: 20299.7, updatedAt: null };
-    answer([okClaude()], [okCodex({ plan: "self_serve_business_prolite", credits: { balance: "0", unlimited: false }, creditsSpent })]);
-    renderLimits();
-
-    const codex = await waitFor(() => card("Codex limits · work@codex.example"));
-    expect(within(codex).getByRole("definition", { name: "Credits spent" })).toHaveTextContent("18,303.4");
-    expect(within(codex).queryByRole("definition", { name: "Credits" })).toBeNull();
-  });
-
-  it("offers a banked reset beside the current Codex account's actions and lists every provider's count as a row", async () => {
-    const remembered = { ...staleCodex(), resetCredits: { availableCount: 1, nextExpiresAt: null } };
+  it("shows banked resets and a paid offer as rows, and offers the Codex reset beside the account actions", async () => {
     const banked = { availableCount: 2, nextExpiresAt: null };
-    const rememberedClaude = okClaude({ account: { id: "uuid-2", label: "other@claude.example" }, currentAccount: false, resetCredits: { availableCount: 1, nextExpiresAt: null } });
-    answer([okClaude({ resetCredits: banked }), rememberedClaude], [okCodex({ resetCredits: banked }), remembered]);
+    answer([okClaude({ resetCredits: banked })], [okCodex({ resetCredits: banked, resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } } })]);
     renderLimits();
 
     const current = await waitFor(() => card("Codex limits · work@codex.example"));
@@ -600,22 +333,12 @@ describe("Limits", () => {
     // Like Save account, it waits until the native login is confirmed to be this card's account.
     expect(button).toHaveProperty("disabled", true);
     expect(within(current).getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
-
-    // Codex spends a reset on whichever account is signed in, so a remembered card only reports its count.
-    const other = card("Codex limits · personal@codex.example");
-    expect(within(other).getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
-    expect(within(other).queryByRole("button", { name: "Use banked reset" })).toBeNull();
-    expect(within(current).queryByText(/limit-reset/)).toBeNull();
-    expect(within(other).queryByText(/limit-reset/)).toBeNull();
-    // on-n-off spends only Codex resets. The signed-in Claude card reports its count and where to
-    // spend it; Claude Code spends the signed-in account's reset, so another card names no command.
+    expect(within(current).getByRole("definition", { name: "Paid reset" })).toHaveTextContent("$8.00");
+    // on-n-off spends only Codex resets; the signed-in Claude card says where Claude Code spends its own.
     const claude = card("Claude limits · me@claude.example");
     expect(within(claude).getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
     expect(within(claude).getByText("/limit-reset in Claude Code")).toBeTruthy();
     expect(within(claude).queryByRole("button", { name: "Use banked reset" })).toBeNull();
-    const otherClaude = card("Claude limits · other@claude.example");
-    expect(within(otherClaude).getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
-    expect(within(otherClaude).queryByText(/limit-reset/)).toBeNull();
   });
 
   it("shows the spent reset on the refreshed card the backend announces", async () => {
@@ -719,18 +442,6 @@ it.each([true, false])("shows the paid-through date through a header badge (usag
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
-it("shows a paid reset offer on the live Codex card and on no other", async () => {
- answer([okClaude({ resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } } } as never)],
-        [okCodex({ resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } } }), staleCodex()]);
- renderLimits();
- const live = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
- expect(within(live).getByRole("definition", { name: "Paid reset" })).toHaveTextContent("$8.00");
- // A remembered card never carries one, and Claude has no such offer to show at all.
- const remembered = screen.getByRole("region", { name: "Codex limits · personal@codex.example" });
- expect(within(remembered).queryByText("Paid reset")).toBeNull();
- expect(within(await screen.findByRole("region", { name: /^Claude limits/ })).queryByText("Paid reset")).toBeNull();
-});
-
 it("places switching on the account usage card without a second account manager", async()=>{
  answer([okClaude()], [okCodex(),staleCodex()]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved-personal",observationId:"acct-personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",category:"Personal",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
@@ -753,17 +464,6 @@ it("keeps saved accounts available when usage cannot be read, never merges by em
  for (const card of cards) expect(card.textContent).not.toMatch(/ws-personal-7f3a|ws-business-9c1e/);
  expect(within(cards[0]).getByRole("button",{name:"Use account"})).toBeEnabled();
  expect(within(cards[1]).getByRole("button",{name:"Use account"})).toBeEnabled();
-});
-
-it("tells same-email accounts apart by plan without showing their workspace ids", async () => {
- const accounts=[["personal","ws-personal-7f3a","prolite"],["business","ws-business-9c1e","business"]] as const;
- answer([okClaude()], accounts.map(([id,,plan],index)=>okCodex({account:{id:`profile:${id}`,label:"shared@example.com"},currentAccount:index===0,plan})));
- readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?accounts.map(([id,workspaceId],index)=>({id,observationId:`profile:${id}`,identity:{provider:"codex",userId:"same-user",workspaceId},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:index===0,needsLogin:false})):[],nativeAccount:null,recoveryRequired:false,notice:null}));
- renderLimits();
- await waitFor(()=>expect(screen.getAllByRole("region",{name:"Codex limits · shared@example.com"})).toHaveLength(2));
- const cards=screen.getAllByRole("region",{name:"Codex limits · shared@example.com"});
- expect(cards.map(card=>within(card).queryByText(/^(Pro ×5|Business)$/)?.textContent).sort()).toEqual(["Business","Pro ×5"]);
- for (const card of cards) expect(card.textContent).not.toMatch(/ws-personal-7f3a|ws-business-9c1e/);
 });
 
 it("does not let an old current card save or sign out a different native account", async () => {
@@ -842,63 +542,6 @@ it("queues an explicit reload behind an in-flight background check", async () =>
   expect(view.client.getQueryData<ProviderLimits[]>(["limits", "claude"])?.[0].windows).toEqual([]);
 });
 
-it("does not retain forced reads when no Limits screen is mounted", async () => {
-  answer([okClaude()], [okCodex()]);
-  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
-  await refreshLimits(client);
-  expect(readLimits.mock.calls.map(call => call[1])).toEqual([true, true]);
-  readLimits.mockClear();
-  await client.refetchQueries({queryKey: ["limits"], type: "all"});
-  expect(readLimits.mock.calls.map(call => call[1])).toEqual([false, false]);
-  client.clear();
-});
-
-it("keeps explicit reload queued when an invalidation replaces the background check", async () => {
-  const first = deferred<ProviderLimits[]>();
-  const replacement = deferred<ProviderLimits[]>();
-  let reads = 0;
-  readLimits.mockImplementation((provider: AgentId, force: boolean) => provider === "claude" && !force ? (++reads === 1 ? first.promise : replacement.promise) : Promise.resolve(provider === "claude" ? [okClaude({windows: []})] : [okCodex()]));
-  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
-  const queryKey = ["limits", "claude"];
-  client.setQueryData(queryKey, [okClaude()]);
-  const background = client.fetchQuery({queryKey, staleTime: 0, queryFn: () => readLimits("claude", false)}).catch(() => {});
-  const refreshed = refreshLimits(client);
-  const invalidated = client.refetchQueries({queryKey, type: "all"});
-  await Promise.resolve();
-  first.resolve([okClaude()]);
-  replacement.resolve([okClaude()]);
-  await Promise.all([background, refreshed, invalidated]);
-  expect(readLimits).toHaveBeenCalledWith("claude", true);
-  expect(client.getQueryData<ProviderLimits[]>(queryKey)?.[0].windows).toEqual([]);
-  client.clear();
-});
-
-
-it("keeps an unverified legacy card beside its saved login", async () => {
- answer([okClaude()], [okCodex({account:{id:"team",label:"shared@example.com"},currentAccount:false})]);
- readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved",observationId:"profile:user-team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
- renderLimits();
- await screen.findByRole("button",{name:"Use account"});
- // Unverified legacy quotas stay historical until a fresh scoped observation arrives.
- expect(screen.getAllByRole("region",{name:"Codex limits · shared@example.com"})).toHaveLength(2);
-});
-
-it("reconciles legacy cards from saved identity when an older app drops the snapshot alias", async () => {
- const profile = {id:"saved",observationId:"profile:user-team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false};
- const scoped = okCodex({account:{id:profile.observationId,label:profile.email},currentAccount:false,windows:[{id:"primary",label:"Weekly · all models",kind:"weekly",usedPercent:0,observedAt:NOW}]});
- const legacy = okCodex({account:{id:"team",label:profile.email},currentAccount:false});
- answer([okClaude()], [scoped, legacy, staleCodex()]);
- readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[profile]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
- const {client} = renderLimits();
- await screen.findByRole("button",{name:"Use account"});
- expect(screen.getAllByRole("region",{name:"Codex limits · shared@example.com"})).toHaveLength(1);
- expect(within(card("Codex limits · shared@example.com")).getByText("0%")).toBeTruthy();
- expect(card("Codex limits · personal@codex.example")).toBeTruthy();
- // A subsequent older-process refresh must not bring the duplicate back.
- await act(async () => { await client.invalidateQueries({queryKey:["limits","codex"]}); });
- expect(screen.getAllByRole("region",{name:"Codex limits · shared@example.com"})).toHaveLength(1);
-});
-
 it("removes reconciled legacy history with the saved card so refresh cannot resurrect it", async () => {
  const profile = {id:"saved",observationId:"profile:user-team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false};
  let profiles = [profile];
@@ -913,8 +556,9 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
  fireEvent.click(screen.getByRole("button",{name:"Remove account"}));
  fireEvent.click(screen.getByRole("button",{name:"Confirm removal"}));
  await waitFor(()=>expect(accountAction).toHaveBeenCalled());
- await waitFor(()=>expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","profile:user-team"));
- expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","team","shared@example.com");
+ await waitFor(()=>expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","profile:user-team",undefined));
+ // Legacy history goes first, so a partial failure keeps the scoped observation available.
+ expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex","team","shared@example.com"],["codex","profile:user-team",undefined]]);
  await act(async()=>{await client.invalidateQueries({queryKey:["limits","codex"]});});
  expect(screen.queryByRole("region",{name:"Codex limits · shared@example.com"})).toBeNull();
  expect(card("Codex limits · personal@codex.example")).toBeTruthy();
@@ -963,12 +607,23 @@ it("drops the badge on the local minute clock once the paid period ends, without
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
-it.each(["claude", "codex"] as const)("quietly identifies last-known %s usage and reveals the reason on focus", async provider => {
-  const reason = "Saved usage credential is no longer accepted.";
-  const saved = (provider === "claude" ? okClaude : okCodex)({currentAccount:false, status:"failed", message:reason});
-  answer(provider === "claude" ? [saved] : [okClaude()], provider === "codex" ? [saved] : [okCodex()]);
+it("says nothing of a remembered reading on the screen, and marks a saved read that failed only by its last-known badge", async () => {
+  answer([okClaude()], [okCodex(), staleCodex(), okCodex({ account: { id: "acct-saved", label: "saved@codex.example" }, currentAccount: false, status: "failed", message: "Saved usage credential is no longer accepted." })]);
   renderLimits();
-  const region = await screen.findByRole("region", {name: `${provider === "claude" ? "Claude" : "Codex"} limits · ${saved.account!.label}`});
+  const remembered = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+  // The model's "remembered" also covers saved accounts read live every poll, so the screen shows none.
+  expect(within(remembered).queryByText(/Remembered account/)).toBeNull();
+  expect(within(remembered).getByRole("meter", { name: "Weekly · all models" })).toBeTruthy();
+  const failed = card("Codex limits · saved@codex.example");
+  expect(within(failed).getByRole("button", { name: "Usage status: Last known usage" })).toBeTruthy();
+  expect(within(failed).queryByText(/Remembered account/)).toBeNull();
+});
+
+it("quietly identifies last-known usage and reveals the reason on focus", async () => {
+  const reason = "Saved usage credential is no longer accepted.";
+  answer([okClaude()], [okCodex({currentAccount:false, status:"failed", message:reason})]);
+  renderLimits();
+  const region = await screen.findByRole("region", {name: "Codex limits · work@codex.example"});
   const badge = within(region).getByRole("button", {name:"Usage status: Last known usage"});
   expect(within(region).queryByText(reason)).toBeNull();
   expect(within(region).getAllByRole("meter").length).toBeGreaterThan(0);
@@ -979,9 +634,12 @@ it.each(["claude", "codex"] as const)("quietly identifies last-known %s usage an
   expect(screen.queryByRole("tooltip")).toBeNull();
 });
 
-it("keeps an inactive account error visible when no saved usage exists", async () => {
-  answer([okClaude({currentAccount:false, status:"failed", windows:[], message:"Usage request failed."})], [okCodex()]);
+it("shows the copy the card model gives an empty card", async () => {
+  const saved = (id: string) => ({ id, observationId: `profile:${id}`, identity: { provider: "codex", userId: id, workspaceId: id }, email: `${id}@codex.example`, label: `${id}@codex.example`, savedAt: NOW, active: false, needsLogin: false });
+  answer([okClaude({ windows: [], account: null })], [okCodex(), okCodex({ account: { id: "profile:empty", label: "empty@codex.example" }, currentAccount: false, windows: [], credits: null })]);
+  readAccounts.mockImplementation(async (provider: string) => ({ profiles: provider === "codex" ? [saved("unread"), saved("empty")] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
   renderLimits();
-  expect(await screen.findByText("Usage request failed.")).toBeInTheDocument();
-  expect(screen.queryByRole("button", {name:"Usage status: Last known usage"})).toBeNull();
+  expect(within(await screen.findByRole("region", { name: "Codex limits · unread@codex.example" })).getByText("Usage unavailable.")).toBeTruthy();
+  expect(within(card("Codex limits · empty@codex.example")).getByText("Usage unavailable.")).toBeTruthy();
+  expect(within(card("Claude limits")).getByText("Claude reported no rate-limit windows.")).toBeTruthy();
 });

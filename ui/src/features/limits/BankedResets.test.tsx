@@ -52,55 +52,45 @@ beforeEach(() => {
 });
 
 describe("BankedResetsRow", () => {
+  const banked = (availableCount: number, nextExpiresAt: string | null, hint: string | null = null) => ({ resetCredits: { availableCount, nextExpiresAt }, hint });
+
   it("reads as one more row: the count, and when the next banked reset expires", () => {
-    render(<BankedResetsRow resetCredits={{ availableCount: 2, nextExpiresAt: "2026-08-29T15:00:00Z" }} now={NOW} />);
+    render(<BankedResetsRow banked={banked(2, "2026-08-29T15:00:00Z")} now={NOW} />);
 
     expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
     expect(screen.getByText(`next expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
   });
 
   it("says a lone reset expires, not the next one", () => {
-    render(<BankedResetsRow resetCredits={{ availableCount: 1, nextExpiresAt: "2026-08-29T15:00:00Z" }} now={NOW} />);
+    render(<BankedResetsRow banked={banked(1, "2026-08-29T15:00:00Z")} now={NOW} />);
 
     expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
   });
 
   it("drops the note when the expiry is unknown", () => {
-    render(<BankedResetsRow resetCredits={{ availableCount: 1, nextExpiresAt: null }} now={NOW} />);
+    render(<BankedResetsRow banked={banked(1, null)} now={NOW} />);
 
     expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
     expect(screen.queryByText(/expires/)).toBeNull();
   });
 
-  it("leaves the card once the soonest reset has expired, since what is left is no longer known", () => {
-    for (const nextExpiresAt of ["2026-08-17T19:00:00Z", "2026-08-17T20:00:00Z"]) {
-      const { container, unmount } = render(
-        <BankedResetsRow resetCredits={{ availableCount: 2, nextExpiresAt }} hint="/limit-reset in Claude Code" now={NOW} />,
-      );
-      expect(container.innerHTML).toBe("");
-      unmount();
-    }
-  });
-
   it("adds where the reset is spent after its expiry when the card is given one", () => {
-    render(<BankedResetsRow resetCredits={{ availableCount: 1, nextExpiresAt: "2026-08-29T15:00:00Z" }} hint="/limit-reset in Claude Code" now={NOW} />);
+    render(<BankedResetsRow banked={banked(1, "2026-08-29T15:00:00Z", "/limit-reset in Claude Code")} now={NOW} />);
 
     expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
     expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")} · /limit-reset in Claude Code`)).toBeTruthy();
   });
 
   it("keeps the hint as the whole note when the expiry is unknown", () => {
-    render(<BankedResetsRow resetCredits={{ availableCount: 1, nextExpiresAt: null }} hint="/limit-reset in Claude Code" now={NOW} />);
+    render(<BankedResetsRow banked={banked(1, null, "/limit-reset in Claude Code")} now={NOW} />);
 
     expect(screen.getByText("/limit-reset in Claude Code")).toBeTruthy();
   });
 
-  it("stays out of the card when nothing is banked", () => {
-    for (const resetCredits of [null, undefined, { availableCount: 0, nextExpiresAt: null }]) {
-      const { container, unmount } = render(<BankedResetsRow resetCredits={resetCredits} hint="/limit-reset in Claude Code" now={NOW} />);
-      expect(container.innerHTML).toBe("");
-      unmount();
-    }
+  // Which counts are worth a row (none, or one past its soonest expiry) is `limitCards.test.ts`'s.
+  it("stays out of the card when the card has no banked resets to show", () => {
+    const { container } = render(<BankedResetsRow banked={null} now={NOW} />);
+    expect(container.innerHTML).toBe("");
   });
 });
 
