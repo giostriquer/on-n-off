@@ -144,6 +144,20 @@ impl CodexNative {
         command
     }
 
+    /// `codex logout`.
+    fn logout_command(&self) -> Command {
+        let mut command = self.command();
+        command.arg("logout");
+        command
+    }
+
+    /// `codex login status`, which succeeds only while a login is signed in.
+    fn status_command(&self) -> Command {
+        let mut command = self.command();
+        command.args(["login", "status"]);
+        command
+    }
+
     /// Whether Codex's own signed-in usage read succeeds: its app-server renews and reads the
     /// login, so on-n-off never renews a native Codex login itself. `force` skips the shared cache.
     fn verify_signed_in(&self, force: bool) -> Result<(), String> {
@@ -188,11 +202,7 @@ impl Native for CodexNative {
 
     fn verify(&self) -> Result<(), String> {
         if self.custom {
-            return native::run(
-                self.command().args(["login", "status"]),
-                Duration::from_secs(30),
-            )
-            .map(|_| ());
+            return native::run(&mut self.status_command(), Duration::from_secs(30)).map(|_| ());
         }
         self.verify_signed_in(true)
     }
@@ -220,7 +230,7 @@ impl NativeAccount for CodexNative {
     }
 
     fn logout(&self) -> Result<(), String> {
-        native::run(self.command().arg("logout"), Duration::from_secs(45)).map(|_| ())
+        native::run(&mut self.logout_command(), Duration::from_secs(45)).map(|_| ())
     }
 
     fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {

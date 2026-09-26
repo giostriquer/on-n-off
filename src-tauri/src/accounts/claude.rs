@@ -223,6 +223,13 @@ impl ClaudeNative {
         command
     }
 
+    /// `claude auth logout`.
+    fn logout_command(&self) -> Command {
+        let mut command = self.command();
+        command.args(["auth", "logout"]);
+        command
+    }
+
     /// `verify` against the profile endpoint at `profile_url`.
     fn verify_at(&self, profile_url: &str) -> Result<(), String> {
         if !self.custom {
@@ -385,11 +392,7 @@ impl NativeAccount for ClaudeNative {
     }
 
     fn logout(&self) -> Result<(), String> {
-        native::run(
-            self.command().args(["auth", "logout"]),
-            Duration::from_secs(45),
-        )
-        .map(|_| ())
+        native::run(&mut self.logout_command(), Duration::from_secs(45)).map(|_| ())
     }
 
     fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
