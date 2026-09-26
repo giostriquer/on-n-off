@@ -36,8 +36,9 @@ nothing else has observed nothing.
 _Avoid_: metadata
 
 **Remembered reading**:
-The last reading kept for an account, shown for an account that cannot be read now, such as one
-the user has switched away from.
+The last reading kept for an account, shown when the account is neither the signed-in one nor a
+saved profile Limits is polling: one the user switched away from without saving it, or a saved
+profile Limits cannot poll now.
 _Avoid_: cache, snapshot (the file that stores it)
 
 ### Accounts
