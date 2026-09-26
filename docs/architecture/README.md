@@ -166,8 +166,8 @@ Each provider is read the way that provider intends, and active login renewal re
 
 Saved profiles are read beside the signed-in account (`accounts/usage.rs`), each by its provider's
 reader, which the accounts adapter dispatches (`Adapter::read_usage`): Claude's is the signed-in
-read above with the profile's credential and expected identity; Codex's is the backend body
-app-server itself reads, `wham/usage`, asked over HTTP with the profile's access token
+read above (`limits/claude.rs`) with the profile's credential and expected identity; Codex's is the
+backend body app-server itself reads, `wham/usage`, asked over HTTP with the profile's access token
 (`limits/codex.rs`), since running app-server for a saved profile would write its credential to
 disk. Neither renews a login itself: a login on-n-off owns renews before its read, and one it does
 not own is never renewed. A saved read tells a refused login, one that now signs in as another
@@ -347,7 +347,7 @@ the code today; a change that moves one updates its row.
 | Account details | `plan` and `subscription_status` on `Reading` |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when it is neither `currentAccount` nor `savedProfile` (`presentLimitAccount`, `ui/src/features/limits/limitPresentation.ts`) |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects) |
-| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs` through its provider's Limits reader (`Adapter::read_usage`: `read_saved_claude`, `read_saved_codex` in `limits/mod.rs`), and its card carries `saved_profile` |
+| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs` through its provider's Limits reader (`Adapter::read_usage`: `read_saved_claude` in `limits/claude.rs`, `read_saved_codex` in `limits/mod.rs`), and its card carries `saved_profile` |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |
 | Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |
 | Watermark | `Watermark` (`usage/history.rs`) |

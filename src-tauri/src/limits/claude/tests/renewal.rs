@@ -1,6 +1,6 @@
 //! The renewal that keeps the Limits screen alive between `claude` runs, from the outside: an
 //! expired stored login goes in, a live read comes out, and the store is left holding what the
-//! caller was handed. The mechanism's own edges live in `limits/claude_renew/tests.rs`.
+//! caller was handed. The mechanism's own edges live in `accounts/claude_renew/tests.rs`.
 
 use super::*;
 use crate::http::{head_header, serve_once_capturing};
