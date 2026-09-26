@@ -168,7 +168,6 @@ describe("Limits", () => {
     const trigger = await screen.findByRole("button", {name: "More actions for personal@codex.example"});
     expect(trigger.closest("header")).not.toBeNull();
     const remembered = card("Codex limits · personal@codex.example");
-    expect(remembered.getAttribute("data-current-account")).toBe("false");
     expect(within(remembered).getByRole("button", { name: "Sign in" })).toBeTruthy();
     fireEvent.click(trigger);
     expect(screen.getByRole("group", {name: "Actions for personal@codex.example"})).toBeTruthy();
@@ -194,7 +193,6 @@ describe("Limits", () => {
 
     const claude = card("Claude limits · me@claude.example");
     expect(claude.getAttribute("data-status")).toBe("ok");
-    expect(claude.getAttribute("data-current-account")).toBe("true");
     const weekly = within(claude).getByRole("meter", { name: "Weekly · all models" });
     expect(weekly.getAttribute("aria-valuenow")).toBe("12");
     expect((weekly.firstElementChild as HTMLElement).style.backgroundColor).toBe("rgb(217, 119, 87)");

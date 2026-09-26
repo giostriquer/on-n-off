@@ -202,7 +202,6 @@ function AccountCard({
       className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
       aria-label={identity.ariaLabel}
       data-status={freshness.readStatus}
-      data-current-account={card.active ? "true" : "false"}
     >
       {card.accountId !== null && accountName !== null ? <AccountCardActions accountId={card.accountId} label={accountName} current={card.active} profile={card.profile ?? undefined} onForget={onForget} header={header}
         footer={card.resetAction && reading ? state => <CodexAccountActions entry={reading} label={accountName} now={now} state={state} /> : undefined}>

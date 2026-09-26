@@ -189,7 +189,6 @@ function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }
     <article
       aria-label={identity.ariaLabel}
       className={`${divided ? "border-t border-[var(--popover-hair)]" : ""} px-2.5 py-2`}
-      data-current-account={card.active ? "true" : "false"}
       data-status={freshness.readStatus}
     >
       <header className="mb-1.5 min-w-0">
