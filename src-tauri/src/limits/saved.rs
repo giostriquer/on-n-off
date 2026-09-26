@@ -42,38 +42,17 @@ fn read_at(
         AgentId::Claude => {
             let credential = crate::accounts::claude::ClaudeLogin::credential_in(auth)
                 .ok_or(HttpError::Unauthorized)?;
-            let bearer = format!("Bearer {}", credential.token);
-            let claude::ClaudeProfile {
-                identity: profile,
-                subscription_status,
-            } = claude::parse_profile(&get_json(
+            claude_read(
+                &credential,
+                Some(&expected_claude_identity(identity)),
                 profile,
-                &[
-                    ("Authorization", &bearer),
-                    ("anthropic-beta", "oauth-2025-04-20"),
-                ],
-            )?)
-            .map_err(HttpError::Parse)?;
-            if profile.account.id != identity.user_id
-                || profile.organization_id.as_deref() != Some(&identity.workspace_id)
-            {
-                return Err(HttpError::Unauthorized);
-            }
-            let usage = claude_usage(
                 claude_url,
-                &[
-                    ("Authorization", &bearer),
-                    ("anthropic-beta", "oauth-2025-04-20"),
-                ],
-            )?;
-            Parsed {
-                account: Some(profile.account),
-                reading: Reading {
-                    plan: credential.plan(),
-                    subscription_status,
-                    ..usage
-                },
-            }
+                ClaudeHeaders::Saved,
+            )
+            .map_err(|error| match error {
+                ProviderLoadError::Http(error) => error,
+                ProviderLoadError::AccountMismatch => HttpError::Unauthorized,
+            })?
         }
         AgentId::Codex => {
             let token = crate::accounts::codex::CodexLogin::access_token_in(auth)

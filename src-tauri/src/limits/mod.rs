@@ -380,43 +380,101 @@ fn claude_limits(
         Some(selected_account),
         lookup,
         |credential| {
-            let bearer = format!("Bearer {}", credential.token);
-            let profile_payload = get_json(
+            claude_read(
+                credential,
+                selected_identity.as_ref(),
                 profile_url,
-                &[
-                    ("Authorization", &bearer),
-                    ("Content-Type", "application/json"),
-                    ("Cache-Control", "no-cache"),
-                ],
-            )?;
-            let claude::ClaudeProfile {
-                identity: profile,
-                subscription_status,
-            } = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
-            if selected_identity.as_ref().is_some_and(|selected| {
-                selected.account.id != profile.account.id
-                    || selected.organization_id != profile.organization_id
-            }) {
-                return Err(ProviderLoadError::AccountMismatch);
-            }
-            let usage = claude_usage(
                 usage_url,
-                &[
-                    ("Authorization", &bearer),
-                    ("anthropic-beta", "oauth-2025-04-20"),
-                    ("Cache-Control", "no-cache"),
-                ],
-            )?;
-            Ok(Parsed {
-                account: Some(profile.account),
-                reading: Reading {
-                    plan: credential.plan(),
-                    subscription_status,
-                    ..usage
-                },
-            })
+                ClaudeHeaders::SignedIn,
+            )
         },
     )
+}
+
+/// The headers a Claude read sends beside its token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClaudeHeaders {
+    /// The signed-in read's, which the first usage after a sign-in shares: a JSON content type and
+    /// no cached answer on the profile request, the OAuth beta header and no cached answer on the
+    /// usage request.
+    SignedIn,
+    /// A saved profile's: the OAuth beta header on both requests.
+    Saved,
+}
+
+impl ClaudeHeaders {
+    fn profile(self, bearer: &str) -> Vec<(&str, &str)> {
+        match self {
+            Self::SignedIn => vec![
+                ("Authorization", bearer),
+                ("Content-Type", "application/json"),
+                ("Cache-Control", "no-cache"),
+            ],
+            Self::Saved => vec![
+                ("Authorization", bearer),
+                ("anthropic-beta", "oauth-2025-04-20"),
+            ],
+        }
+    }
+
+    fn usage(self, bearer: &str) -> Vec<(&str, &str)> {
+        match self {
+            Self::SignedIn => vec![
+                ("Authorization", bearer),
+                ("anthropic-beta", "oauth-2025-04-20"),
+                ("Cache-Control", "no-cache"),
+            ],
+            Self::Saved => vec![
+                ("Authorization", bearer),
+                ("anthropic-beta", "oauth-2025-04-20"),
+            ],
+        }
+    }
+}
+
+/// One Claude read with `credential`: its profile, which must be `expected` when an account is
+/// expected, then its usage. The signed-in read expects the account `.claude.json` names, if any;
+/// a saved profile's read and the first usage after a sign-in expect the profile's.
+fn claude_read(
+    credential: &ClaudeCredential,
+    expected: Option<&ClaudeIdentity>,
+    profile_url: &str,
+    usage_url: &str,
+    headers: ClaudeHeaders,
+) -> Result<Parsed, ProviderLoadError> {
+    let bearer = format!("Bearer {}", credential.token);
+    let profile_payload = get_json(profile_url, &headers.profile(&bearer))?;
+    let claude::ClaudeProfile {
+        identity: profile,
+        subscription_status,
+    } = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
+    if expected.is_some_and(|expected| {
+        expected.account.id != profile.account.id
+            || expected.organization_id != profile.organization_id
+    }) {
+        return Err(ProviderLoadError::AccountMismatch);
+    }
+    let usage = claude_usage(usage_url, &headers.usage(&bearer))?;
+    Ok(Parsed {
+        account: Some(profile.account),
+        reading: Reading {
+            plan: credential.plan(),
+            subscription_status,
+            ..usage
+        },
+    })
+}
+
+/// The account a saved profile's Claude read expects: the profile's user in its workspace.
+fn expected_claude_identity(identity: &crate::accounts::model::Identity) -> ClaudeIdentity {
+    ClaudeIdentity {
+        account: LimitsAccountDto {
+            id: identity.user_id.clone(),
+            label: None,
+            legacy_id: None,
+        },
+        organization_id: Some(identity.workspace_id.clone()),
+    }
 }
 
 /// Claude's usage read with its saved resets. The resets are optional, so a refusal of the reset

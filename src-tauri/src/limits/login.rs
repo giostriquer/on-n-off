@@ -27,14 +27,7 @@ fn read_with(
     let mut dto = match identity.provider {
         AgentId::Codex => codex_limits(isolated_home, false),
         AgentId::Claude => {
-            let selected = Some(ClaudeIdentity {
-                account: LimitsAccountDto {
-                    id: identity.user_id.clone(),
-                    label: None,
-                    legacy_id: None,
-                },
-                organization_id: Some(identity.workspace_id.clone()),
-            });
+            let selected = Some(expected_claude_identity(identity));
             let mut dto = claude_limits(
                 CredentialLookup::Found(claude?),
                 &selected,
