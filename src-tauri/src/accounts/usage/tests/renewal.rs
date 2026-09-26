@@ -172,24 +172,35 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
     }
 }
 
-/// Renewal cannot make a login sign in as another account, so a read that found one spends no
-/// refresh token, whoever owns the login and whether or not it has expired.
+/// Renewal cannot make a login sign in as another account, so a read that found one is not renewed
+/// and read again, as a refused one is: an unexpired login is read once and never renewed, whoever
+/// owns it.
 #[test]
 fn a_login_that_signs_in_as_another_account_is_never_renewed_for_it() {
     use std::cell::Cell;
     for provider in [AgentId::Claude, AgentId::Codex] {
-        let p = policy_profile(provider, true, false);
-        let renewals = Cell::new(0);
-        let result = fetch_with(
-            &p,
-            1_000_000,
-            &|_| Err(SavedReadError::OtherAccount),
-            &|| {
-                renewals.set(renewals.get() + 1);
-                Ok(p.login.clone().unwrap())
-            },
-        );
-        assert_eq!(result.result.err(), Some(SavedReadError::OtherAccount));
-        assert_eq!(renewals.get(), 0, "{provider:?}");
+        for owned in [false, true] {
+            let p = policy_profile(provider, owned, false);
+            let reads = Cell::new(0);
+            let renewals = Cell::new(0);
+            let result = fetch_with(
+                &p,
+                1_000_000,
+                &|_| {
+                    reads.set(reads.get() + 1);
+                    Err(SavedReadError::OtherAccount)
+                },
+                &|| {
+                    renewals.set(renewals.get() + 1);
+                    Ok(p.login.clone().unwrap())
+                },
+            );
+            assert_eq!(result.result.err(), Some(SavedReadError::OtherAccount));
+            assert_eq!(
+                (reads.get(), renewals.get()),
+                (1, 0),
+                "{provider:?} owned: {owned}"
+            );
+        }
     }
 }
