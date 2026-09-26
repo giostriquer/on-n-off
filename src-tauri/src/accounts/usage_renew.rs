@@ -149,7 +149,6 @@ pub(super) fn request(provider: AgentId, login: &Login, now_ms: i64) -> Result<L
     super::view(provider, login)?.renew_private(now_ms)
 }
 
-/// Codex's token endpoint.
 pub(super) const CODEX_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 
 /// Codex's private grant: `login`'s request sent to `token_url`, the reply folded back into it.

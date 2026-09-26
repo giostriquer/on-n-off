@@ -51,7 +51,6 @@ fn incoming() -> Login {
     }
 }
 
-/// A Claude login with these credentials and this account record.
 fn login(auth: Value, account: Value) -> Login {
     Login { auth, account }
 }

@@ -24,7 +24,6 @@ use std::{
     time::Duration,
 };
 
-/// Codex's adapter.
 pub(super) struct Codex;
 
 impl super::Adapter for Codex {
@@ -369,7 +368,6 @@ impl<'a> CodexLogin<'a> {
         })
     }
 
-    /// The ID token's claims.
     fn claims(&self) -> Result<Value, String> {
         token_claims(self.auth, "/tokens/id_token")
     }

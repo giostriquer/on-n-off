@@ -30,7 +30,6 @@ use std::{
     time::Duration,
 };
 
-/// Claude's adapter.
 pub(super) struct Claude;
 
 impl super::Adapter for Claude {

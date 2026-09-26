@@ -114,7 +114,6 @@ impl Target {
     }
 }
 
-/// Codex's configuration file for the home `config_home`.
 pub(super) fn config_file(config_home: &Path) -> PathBuf {
     config_home.join("config.toml")
 }
