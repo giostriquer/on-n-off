@@ -270,17 +270,20 @@ describe("a card's windows", () => {
 
 describe("a card's status and message", () => {
   const reason = "Saved usage credential is no longer accepted.";
+  const unread = saved("claude", "unread", "profile:unread", "unread@claude.example");
   it.each([
-    ["a live read", okCodex(), null, null],
-    ["a remembered reading", staleCodex(), { kind: "remembered" }, null],
-    ["a signed-in read whose refresh failed, keeping its numbers", okClaude({ status: "unauthenticated", message: "Access token expired." }), { kind: "paused" }, "Access token expired."],
-    ["a saved Claude read that failed, keeping its numbers", okClaude({ currentAccount: false, status: "failed", message: reason }), { kind: "savedRefresh", detail: reason }, null],
-    ["a saved Codex read whose login expired, keeping its numbers", okCodex({ currentAccount: false, status: "unauthenticated", message: reason }), { kind: "savedRefresh", detail: reason }, null],
-    ["a saved read that failed with nothing kept", okClaude({ currentAccount: false, status: "failed", windows: [], message: "Usage request failed." }), null, "Usage request failed."],
-  ] as const)("gives %s one status", (_case, reading, status, message) => {
-    const [card] = cards([reading]);
+    ["a live read", [okCodex()], [], null, null],
+    ["a remembered reading", [staleCodex()], [], { kind: "remembered" }, null],
+    ["a signed-in read whose login expired, keeping its numbers", [okClaude({ status: "unauthenticated", message: "Access token expired." })], [], { kind: "paused" }, { text: "Access token expired.", tone: "muted" }],
+    ["a signed-in read that failed, keeping its numbers", [okClaude({ status: "failed", message: "Usage service unavailable." })], [], { kind: "paused" }, { text: "Usage service unavailable.", tone: "error" }],
+    ["a saved Claude read that failed, keeping its numbers", [okClaude({ currentAccount: false, status: "failed", message: reason })], [], { kind: "savedRefresh", detail: reason }, null],
+    ["a saved Codex read whose login expired, keeping its numbers", [okCodex({ currentAccount: false, status: "unauthenticated", message: reason })], [], { kind: "savedRefresh", detail: reason }, null],
+    ["a saved read that failed with nothing kept", [okClaude({ currentAccount: false, status: "failed", windows: [], message: "Usage request failed." })], [], null, { text: "Usage request failed.", tone: "error" }],
+    ["a saved profile no read answered for", [], [unread], null, null],
+  ] as const)("gives %s one status, and a message only with its tone", (_case, readings, profiles, status, message) => {
+    const [card] = cards([...readings], [...profiles], AT_NOW, "claude");
     expect(card.status).toEqual(status);
-    expect(card.freshness.message).toBe(message);
+    expect(card.freshness.message).toEqual(message);
   });
 
   it("keeps one source-neutral card for the signed-in Claude account when its refresh is paused", () => {
@@ -298,30 +301,33 @@ describe("a card's status and message", () => {
       status: { kind: "paused" },
       headline: { percent: 12 },
       rows: [{ id: "session", percent: 0, note: expect.stringMatching(/^reset 15h ago · \w{3} \d\d:\d\d$/) }],
-      freshness: { message: expect.stringMatching(/^Access token expired/), lastKnown: true, updatedAt: formatObservedAt(observedAt), readStatus: "unauthenticated" },
+      freshness: { message: { text: expect.stringMatching(/^Access token expired/), tone: "muted" }, lastKnown: true, updatedAt: formatObservedAt(observedAt), readStatus: "unauthenticated" },
       empty: null,
     });
   });
 
-  it.each<[LimitsStatus, string]>([
-    ["signedOut", "Sign in with `claude` to see subscription limits."],
-    ["unauthenticated", "Login expired — run `claude` and sign in again."],
-    ["unsupported", "Claude is signed in with an API key."],
-    ["failed", "Could not reach the Claude usage service (HTTP 503)."],
-  ])("carries the provider's message for %s, with no windows and no empty copy", (status, message) => {
-    expect(cards([statusOnly("claude", status, message)])[0]).toMatchObject({
-      headline: null, rows: [], empty: null, freshness: { message, readStatus: status },
+  it.each<[LimitsStatus, string, "error" | "muted"]>([
+    ["signedOut", "Sign in with `claude` to see subscription limits.", "muted"],
+    ["unauthenticated", "Login expired — run `claude` and sign in again.", "muted"],
+    ["unsupported", "Claude is signed in with an API key.", "muted"],
+    ["failed", "Could not reach the Claude usage service (HTTP 503).", "error"],
+  ])("carries the provider's message for %s in its tone, with no windows and no empty copy", (status, text, tone) => {
+    expect(cards([statusOnly("claude", status, text)])[0]).toMatchObject({
+      headline: null, rows: [], empty: null, freshness: { message: { text, tone }, readStatus: status },
     });
   });
 
   it("falls back to generic copy when a non-ok status carries no message", () => {
-    expect(cards([statusOnly("claude", "failed", null)])[0].freshness.message).toBe("Claude limits are unavailable.");
-    expect(cards([statusOnly("codex", "signedOut", null)])[0].freshness.message).toBe("Codex limits are unavailable.");
+    expect(cards([statusOnly("claude", "failed", null)])[0].freshness.message).toEqual({ text: "Claude limits are unavailable.", tone: "error" });
+    expect(cards([statusOnly("codex", "signedOut", null)])[0].freshness.message).toEqual({ text: "Codex limits are unavailable.", tone: "muted" });
   });
 
   it("keeps remembered accounts, each dated once, when the current login is signed out", () => {
     const [current, remembered] = cards([statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits."), staleCodex()]);
-    expect(current).toMatchObject({ identity: { label: "Codex" }, freshness: { message: "Sign in with `codex` to see subscription limits.", readStatus: "signedOut", updatedAt: null } });
+    expect(current).toMatchObject({
+      identity: { label: "Codex" },
+      freshness: { message: { text: "Sign in with `codex` to see subscription limits.", tone: "muted" }, readStatus: "signedOut", updatedAt: null },
+    });
     expect(remembered.freshness.updatedAt).toBe(formatObservedAt("2026-08-16T21:40:00.000Z"));
   });
 });

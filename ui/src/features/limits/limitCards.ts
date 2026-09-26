@@ -102,7 +102,8 @@ export type LimitCard = {
   freshness: {
     updatedAt: string | null;
     lastKnown: boolean;
-    message: string | null;
+    /** The read's message, when the card shows one: an error for a read that failed, muted for a prompt. */
+    message: { text: string; tone: "error" | "muted" } | null;
     readStatus: LimitsStatus;
   };
   subscription: CardSubscription | null;
@@ -225,7 +226,7 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
     freshness: {
       updatedAt: presentation.updatedAt,
       lastKnown: presentation.lastKnown,
-      message: presentation.message,
+      message: presentation.message === null ? null : { text: presentation.message, tone: readStatus === "failed" ? "error" : "muted" },
       readStatus,
     },
     subscription: subscription(provider, account?.id ?? null, current, reading, presentation),

@@ -317,6 +317,18 @@ it("says under a row why it shows no reset, as the Limits screen does", async ()
   expect(within(row(current, "Weekly · GPT-5.6-Luna")).getByText("Reset time unavailable")).toBeInTheDocument();
 });
 
+it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [{ provider: "claude", status: "failed", message: "Could not reach the Claude usage service (HTTP 503).", currentAccount: true, windows: [] }]
+    : [{ provider: "codex", status: "signedOut", message: "Sign in with `codex` to see subscription limits.", currentAccount: true, windows: [] }]));
+  renderPopover();
+  const failed = await screen.findByText("Could not reach the Claude usage service (HTTP 503).");
+  expect(failed).toHaveClass("text-[var(--trip)]");
+  const prompt = await screen.findByText("Sign in with `codex` to see subscription limits.");
+  expect(prompt).toHaveClass("text-[var(--mute)]");
+  expect(prompt).not.toHaveClass("text-[var(--trip)]");
+});
+
 it("says an answered read with no windows has none, as the Limits screen words it", async () => {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
     ? [{ ...limits("claude", "claude-current", "current@claude.example", true), windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));

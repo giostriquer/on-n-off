@@ -285,6 +285,16 @@ describe("Limits", () => {
     expect(within(current).queryByRole("button", { name: /More actions|Sign in/ })).toBeNull();
   });
 
+  it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {
+    answer([statusOnly("claude", "failed", "Could not reach the Claude usage service (HTTP 503).")], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.")]);
+    renderLimits();
+    const failed = await waitFor(() => within(card("Claude limits")).getByText("Could not reach the Claude usage service (HTTP 503)."));
+    expect(failed).toHaveClass("text-[var(--trip)]");
+    const prompt = await waitFor(() => within(card("Codex limits")).getByText("Sign in with `codex` to see subscription limits."));
+    expect(prompt).toHaveClass("text-[var(--mute)]");
+    expect(prompt).not.toHaveClass("text-[var(--trip)]");
+  });
+
   it("keeps the card and reports the error when Forget fails", async () => {
     forgetLimitsSnapshot.mockRejectedValue(new Error("locked"));
     answer([okClaude()], [okCodex(), staleCodex()]);

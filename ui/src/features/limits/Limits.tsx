@@ -176,9 +176,9 @@ function AccountCard({
 
       {freshness.message ? (
         <p
-          className={`px-3.5 ${card.headline || card.rows.length > 0 ? "pt-1.5" : "py-4"} text-[13px] ${freshness.readStatus === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
+          className={`px-3.5 ${card.headline || card.rows.length > 0 ? "pt-1.5" : "py-4"} text-[13px] ${freshness.message.tone === "error" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
         >
-          {freshness.message}
+          {freshness.message.text}
         </p>
       ) : null}
 
