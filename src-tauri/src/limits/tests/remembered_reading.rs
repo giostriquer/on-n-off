@@ -350,3 +350,84 @@ fn a_failed_read_shows_nothing_of_a_remembered_reading_it_cannot_date() {
     );
     let _ = fs::remove_dir_all(&home);
 }
+
+/// The one file of `store` whose account is `id`, as JSON.
+fn file_of(store: &SnapshotStore, id: &str) -> Value {
+    fs::read_dir(store.dir())
+        .unwrap()
+        .flatten()
+        .map(|entry| serde_json::from_str::<Value>(&fs::read_to_string(entry.path()).unwrap()))
+        .map(Result::unwrap)
+        .find(|file| file["account"]["id"] == id)
+        .expect("the account's file")
+}
+
+/// A signed-in card keyed the older way, by the user alone (Claude Code's `.claude.json` names no
+/// account), whose own snapshot a saved profile's scoped snapshot hides. The card keeps nothing of
+/// that snapshot, which the list never shows; the file it writes keeps the snapshot's weekly window
+/// and banked resets.
+#[test]
+fn a_legacy_keyed_card_keeps_nothing_of_its_hidden_snapshot_but_its_file_does() {
+    let home = scratch_dir("limits-reading-legacy-keyed");
+    let store = SnapshotStore::for_home(&home);
+    store
+        .save(&card(json!({
+            "provider": "claude",
+            "status": "ok",
+            "account": {"id": "profile:x", "legacyId": "user-a", "label": "a@example.com"},
+            "currentAccount": false,
+            "windows": [
+                {"id": "weekly_all", "label": "Weekly · all models", "kind": "weekly",
+                 "usedPercent": 10.0, "observedAt": "2026-08-17T08:00:00.000Z"}
+            ]
+        })))
+        .unwrap();
+    store
+        .save(&card(json!({
+            "provider": "claude",
+            "status": "ok",
+            "account": {"id": "user-a", "label": "a@example.com"},
+            "currentAccount": true,
+            "windows": [
+                {"id": "weekly_all", "label": "Weekly · all models", "kind": "weekly",
+                 "usedPercent": 40.0, "observedAt": "2026-08-17T09:00:00.000Z"}
+            ],
+            "resetCredits": {"availableCount": 2, "nextExpiresAt": "2100-09-01T12:00:00+00:00"}
+        })))
+        .unwrap();
+    let session = json!({"id": "session", "label": "5 hour · all models", "kind": "session",
+                         "usedPercent": 7.0, "observedAt": "2026-08-17T10:00:00.000Z"});
+    let answered = card(json!({
+        "provider": "claude",
+        "status": "ok",
+        "account": {"id": "user-a", "label": "a@example.com"},
+        "currentAccount": true,
+        "windows": [session]
+    }));
+
+    let listed = aggregate_accounts(&store, answered);
+
+    assert_eq!(
+        wire(&listed[0]),
+        json!({
+            "provider": "claude",
+            "status": "ok",
+            "account": {"id": "user-a", "label": "a@example.com"},
+            "currentAccount": true,
+            "windows": [session]
+        })
+    );
+    let file = file_of(&store, "user-a");
+    assert_eq!(
+        (&file["windows"], &file["resetCredits"]),
+        (
+            &json!([
+                {"id": "weekly_all", "label": "Weekly · all models", "kind": "weekly",
+                 "usedPercent": 40.0, "observedAt": "2026-08-17T09:00:00.000Z"},
+                session
+            ]),
+            &json!({"availableCount": 2, "nextExpiresAt": "2100-09-01T12:00:00+00:00"})
+        )
+    );
+    let _ = fs::remove_dir_all(&home);
+}

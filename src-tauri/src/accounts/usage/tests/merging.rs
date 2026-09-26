@@ -265,3 +265,61 @@ fn an_answered_saved_read_keeps_only_the_figures_it_could_not_tell() {
         })
     );
 }
+
+/// A poll that answered with its plan and one window, over a snapshot holding every figure: its
+/// card and the snapshot it leaves keep the same figures, the ones it could not tell.
+#[test]
+fn an_answered_poll_keeps_the_same_figures_on_its_card_and_on_disk() {
+    use crate::limits::login::{remember, remembered};
+    let home = tempfile::tempdir().unwrap();
+    let mut p = stored(home.path());
+    remember(home.path(), &remembered_codex_card(&mut p)).unwrap();
+    rewrite(home.path(), |db| db.profiles[0] = p.clone());
+    let mut entries = remembered(home.path(), AgentId::Codex);
+    let answered: ProviderLimitsDto = serde_json::from_value(json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": p.identity.observation_key(), "label": "a@example.com"},
+        "currentAccount": false,
+        "plan": "business",
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 50.0,
+             "observedAt": "2026-09-20T00:00:00Z"}
+        ]
+    }))
+    .unwrap();
+
+    let result = poll_with(
+        home.path(),
+        &p,
+        &ticket(home.path()),
+        false,
+        &|| Ok(open(home.path())),
+        &|p| FetchResult {
+            login: p.login.clone(),
+            result: Ok(answered.clone()),
+        },
+    );
+    merge(&mut entries, &p, result);
+
+    let expected = json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": p.identity.observation_key(), "label": "a@example.com"},
+        "currentAccount": false,
+        "plan": "business",
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
+             "usedPercent": 50.0, "observedAt": "2026-09-20T00:00:00Z"}
+        ],
+        "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7},
+        "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
+                         "checkedAt": "2026-09-19T00:00:00Z"},
+        "resetCredits": {"availableCount": 1}
+    });
+    assert_eq!(serde_json::to_value(&entries[0]).unwrap(), expected);
+    assert_eq!(
+        serde_json::to_value(&remembered(home.path(), AgentId::Codex)[0]).unwrap(),
+        expected
+    );
+}
