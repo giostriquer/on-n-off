@@ -160,29 +160,117 @@ fn poll_with(
         .ok()?
         .fingerprint();
     let result = fetched.result;
-    let (error, rejected, retry) = match &result {
-        Ok(_) => (None, false, Duration::ZERO),
-        Err(SavedReadError::Http(HttpError::Unauthorized)) => (
-            Some(
-                "Usage refresh needs sign-in again or renewal by the client that owns this login."
-                    .into(),
-            ),
+    let mut outcome = attempt_outcome(&result);
+    // Removal, reauthentication and logout can proceed while HTTP is in flight. Recheck under
+    // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
+    let published = (|| {
+        let store = open().ok()?;
+        store
+            .recheck(&ticket.holding(profile, fingerprint.clone()))
+            .ok()?;
+        match result {
+            Ok(mut dto) => {
+                if dto
+                    .account
+                    .as_ref()
+                    .is_none_or(|a| a.id != profile.identity.observation_key())
+                {
+                    return None;
+                }
+                if let Some(account) = &mut dto.account {
+                    if account.label.is_none() {
+                        account.label.clone_from(&profile.email);
+                    }
+                }
+                let mut remembered = crate::limits::remember(home, dto);
+                if remembered.saved.is_err() {
+                    // The reading stands, under the failure; only the snapshot is missing, so the
+                    // poll counts as failed and reads again once its backoff passes.
+                    outcome = AttemptOutcome::failed(UNSAVED, false, Duration::ZERO);
+                    remembered.card.status = LimitsStatus::Failed;
+                    remembered.card.message.clone_from(&outcome.error);
+                }
+                Some(Ok(remembered.card))
+            }
+            Err(_) => outcome.error.clone().map(Err),
+        }
+    })();
+    // The next poll of this login is held back until a new login when this one was rejected, else
+    // for the poll interval, doubled for each failure in a row, and at least as long as the
+    // service asked. A poll that could not publish is held back too.
+    let failures = if outcome.error.is_some() {
+        previous
+            .as_ref()
+            .map_or(1, |a| a.failures.saturating_add(1))
+    } else {
+        0
+    };
+    let delay = crate::limits_refresh::poll_interval()
+        .saturating_mul(1_u32 << failures.min(4))
+        .min(Duration::from_secs(3600))
+        .max(outcome.retry);
+    if let Ok(mut attempts) = attempts.lock() {
+        attempts.insert(
+            key,
+            Attempt {
+                fingerprint,
+                next: Instant::now() + delay,
+                failures,
+                error: outcome.error,
+                rejected: outcome.rejected,
+            },
+        );
+    }
+    published
+}
+
+/// What a card says of a reading the snapshot store could not keep.
+const UNSAVED: &str = "Could not save the latest usage reading.";
+
+/// How one saved poll went, as the next poll of the same login is held back by it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AttemptOutcome {
+    /// What the card says of the poll; `None` for one that answered.
+    error: Option<String>,
+    /// Only a new login is worth another read.
+    rejected: bool,
+    /// The least the service asked to wait before the next read.
+    retry: Duration,
+}
+
+impl AttemptOutcome {
+    fn failed(error: &str, rejected: bool, retry: Duration) -> Self {
+        Self {
+            error: Some(error.to_string()),
+            rejected,
+            retry,
+        }
+    }
+}
+
+/// What a fetch that came to `result` says, and how it holds the next poll back.
+fn attempt_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOutcome {
+    match result {
+        Ok(_) => AttemptOutcome {
+            error: None,
+            rejected: false,
+            retry: Duration::ZERO,
+        },
+        Err(SavedReadError::Http(HttpError::Unauthorized)) => AttemptOutcome::failed(
+            "Usage refresh needs sign-in again or renewal by the client that owns this login.",
             true,
             Duration::ZERO,
         ),
         // Renewal cannot change whose login it is, so only a new login is worth another read.
-        Err(SavedReadError::OtherAccount) => (
-            Some("This saved login now signs in as a different account. Sign in again.".into()),
+        Err(SavedReadError::OtherAccount) => AttemptOutcome::failed(
+            "This saved login now signs in as a different account. Sign in again.",
             true,
             Duration::ZERO,
         ),
         // Not held back like a refusal: the next capture of the login this one was saved from
         // brings its renewal, and a new login is read at once.
-        Err(SavedReadError::Expired) => (
-            Some(
-                "This saved login has expired. Use this account once, or sign in again, to renew it."
-                    .into(),
-            ),
+        Err(SavedReadError::Expired) => AttemptOutcome::failed(
+            "This saved login has expired. Use this account once, or sign in again, to renew it.",
             false,
             Duration::ZERO,
         ),
@@ -194,79 +282,17 @@ fn poll_with(
                 }
                 RateLimitReset::Unknown => 0,
             };
-            (
-                Some("Usage refresh is rate limited. The last reading is retained.".into()),
+            AttemptOutcome::failed(
+                "Usage refresh is rate limited. The last reading is retained.",
                 false,
                 Duration::from_secs(seconds.min(86400)),
             )
         }
-        Err(_) => (
-            Some("Usage refresh is unavailable. The last reading is retained.".into()),
+        Err(_) => AttemptOutcome::failed(
+            "Usage refresh is unavailable. The last reading is retained.",
             false,
             Duration::ZERO,
         ),
-    };
-    // This attempt, as the next poll of the same login is held back by: until a new login when it
-    // was rejected, else for the poll interval, doubled for each failure in a row.
-    let record = |error: &Option<String>, rejected: bool, retry: Duration| {
-        let failures = if error.is_some() {
-            previous
-                .as_ref()
-                .map_or(1, |a| a.failures.saturating_add(1))
-        } else {
-            0
-        };
-        let interval = crate::limits_refresh::poll_interval();
-        let delay = interval
-            .saturating_mul(1_u32 << failures.min(4))
-            .min(Duration::from_secs(3600))
-            .max(retry);
-        if let Ok(mut attempts) = attempts.lock() {
-            attempts.insert(
-                key.clone(),
-                Attempt {
-                    fingerprint: fingerprint.clone(),
-                    next: Instant::now() + delay,
-                    failures,
-                    error: error.clone(),
-                    rejected,
-                },
-            );
-        }
-    };
-    record(&error, rejected, retry);
-    // Removal, reauthentication and logout can proceed while HTTP is in flight. Recheck under
-    // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
-    let store = open().ok()?;
-    store
-        .recheck(&ticket.holding(profile, fingerprint.clone()))
-        .ok()?;
-    match result {
-        Ok(mut dto) => {
-            if dto
-                .account
-                .as_ref()
-                .is_none_or(|a| a.id != profile.identity.observation_key())
-            {
-                return None;
-            }
-            if let Some(account) = &mut dto.account {
-                if account.label.is_none() {
-                    account.label.clone_from(&profile.email);
-                }
-            }
-            let mut remembered = crate::limits::remember(home, dto);
-            if remembered.saved.is_err() {
-                // The reading stands, under the failure; only the snapshot is missing, so the poll
-                // counts as failed and reads again once its backoff passes.
-                let error = Some("Could not save the latest usage reading.".to_string());
-                record(&error, false, Duration::ZERO);
-                remembered.card.status = LimitsStatus::Failed;
-                remembered.card.message = error;
-            }
-            Some(Ok(remembered.card))
-        }
-        Err(_) => Some(Err(error?)),
     }
 }
 

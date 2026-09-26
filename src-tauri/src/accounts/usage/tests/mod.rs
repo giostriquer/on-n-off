@@ -187,6 +187,8 @@ fn an_unrelated_account_change_during_http_discards_the_late_read() {
     );
     assert!(result.is_none());
     assert!(!home.path().join(".on-n-off/limits").exists());
+    // The attempt stands all the same, so the next poll of this login waits its turn.
+    assert!(attempt(home.path(), &p).next > Instant::now());
 }
 #[test]
 fn a_pending_recovery_during_http_discards_the_late_read() {
@@ -264,6 +266,68 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
     .unwrap()
     .is_ok());
 }
+/// What each fetch result says, whether only a new login is worth another read, and how long the
+/// service asked to wait.
+#[test]
+fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
+    const SIGN_IN: &str =
+        "Usage refresh needs sign-in again or renewal by the client that owns this login.";
+    const OTHER: &str = "This saved login now signs in as a different account. Sign in again.";
+    const EXPIRED: &str =
+        "This saved login has expired. Use this account once, or sign in again, to renew it.";
+    const RATE: &str = "Usage refresh is rate limited. The last reading is retained.";
+    const UNAVAILABLE: &str = "Usage refresh is unavailable. The last reading is retained.";
+    let rate = |reset| Err(HttpError::RateLimited(reset).into());
+    for (result, expected) in [
+        (
+            Ok(reading(&profile())),
+            AttemptOutcome {
+                error: None,
+                rejected: false,
+                retry: Duration::ZERO,
+            },
+        ),
+        (
+            Err(HttpError::Unauthorized.into()),
+            AttemptOutcome::failed(SIGN_IN, true, Duration::ZERO),
+        ),
+        (
+            Err(SavedReadError::OtherAccount),
+            AttemptOutcome::failed(OTHER, true, Duration::ZERO),
+        ),
+        (
+            Err(SavedReadError::Expired),
+            AttemptOutcome::failed(EXPIRED, false, Duration::ZERO),
+        ),
+        (
+            rate(RateLimitReset::RetryAfter(30)),
+            AttemptOutcome::failed(RATE, false, Duration::from_secs(30)),
+        ),
+        (
+            rate(RateLimitReset::RetryAfter(10_000_000)),
+            AttemptOutcome::failed(RATE, false, Duration::from_secs(86400)),
+        ),
+        (
+            rate(RateLimitReset::At(0)),
+            AttemptOutcome::failed(RATE, false, Duration::ZERO),
+        ),
+        (
+            rate(RateLimitReset::Unknown),
+            AttemptOutcome::failed(RATE, false, Duration::ZERO),
+        ),
+        (
+            Err(HttpError::Status(503).into()),
+            AttemptOutcome::failed(UNAVAILABLE, false, Duration::ZERO),
+        ),
+        (
+            Err(HttpError::Network("offline".into()).into()),
+            AttemptOutcome::failed(UNAVAILABLE, false, Duration::ZERO),
+        ),
+    ] {
+        assert_eq!(attempt_outcome(&result), expected, "{:?}", result.err());
+    }
+}
+
 /// The attempt the last poll of `p` in `home` recorded.
 fn attempt(home: &Path, p: &Profile) -> Attempt {
     ATTEMPTS
