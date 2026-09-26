@@ -1,6 +1,6 @@
 //! Using a saved profile, recovering an interrupted switch, and signing out.
 use super::super::Activation;
-use super::fixture::{claude, claude_in, fingerprint, generation, identity, Harness, Heard};
+use super::fixture::{claude, claude_in, codex, fingerprint, generation, identity, Harness, Heard};
 use crate::dto::AgentId;
 
 /// Profile a is the CLI's login and has rotated to a2 since it was saved; b is saved.
@@ -74,7 +74,7 @@ fn running_clients_refuse_an_ordinary_switch_but_not_one_made_beside_them() {
 fn another_providers_profile_is_not_used() {
     let harness = Harness::new();
     two_profiles(&harness);
-    let codex = harness.saved(identity(AgentId::Codex, "c", "team"), claude("c", "c1"));
+    let codex = harness.saved(identity(AgentId::Codex, "c", "team"), codex("c", "c1"));
     let sealed = harness.sealed();
 
     let error = harness
@@ -207,7 +207,7 @@ fn recovery_requires_closed_clients() {
 fn a_recovery_pending_for_the_other_provider_is_refused() {
     let harness = Harness::new();
     harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
-    let codex = harness.saved(identity(AgentId::Codex, "c", "team"), claude("c", "c1"));
+    let codex = harness.saved(identity(AgentId::Codex, "c", "team"), codex("c", "c1"));
     harness.interrupted(&codex, Some(claude("c", "c0")));
     harness.signed_in(Some(claude("a", "a2")));
     let sealed = harness.sealed();
@@ -250,7 +250,7 @@ fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
     let other = harness.saved(identity(AgentId::Claude, "a", "other"), claude("a", "o1"));
     let b = harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
-    let c = harness.saved(identity(AgentId::Codex, "a", "team"), claude("a", "c1"));
+    let c = harness.saved(identity(AgentId::Codex, "a", "team"), codex("a", "c1"));
     harness.signed_in(Some(claude("a", "a2")));
     let sign_in = harness.sign_in();
 
@@ -283,8 +283,8 @@ fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
 fn signing_out_one_provider_leaves_the_other_providers_logins() {
     let harness = Harness::new();
     let claude_a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
-    let codex_a = harness.saved(identity(AgentId::Codex, "a", "team"), claude("a", "c1"));
-    harness.signed_in(Some(claude("a", "c2")));
+    let codex_a = harness.saved(identity(AgentId::Codex, "a", "team"), codex("a", "c1"));
+    harness.signed_in(Some(codex("a", "c2")));
 
     harness.accounts().sign_out(AgentId::Codex).unwrap();
 

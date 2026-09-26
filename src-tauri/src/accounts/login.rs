@@ -1,7 +1,7 @@
 //! Isolated official sign-in with operation-scoped cancellation and publication guards.
 use super::model::Identity;
+use super::store;
 use super::transaction::Native;
-use super::{home, store};
 use crate::{dto::AgentId, file_lease::FileLease};
 use std::{
     collections::VecDeque,
@@ -142,77 +142,137 @@ impl Drop for LoginLease {
         }
     }
 }
-pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<(), String> {
-    uuid::Uuid::parse_str(&id).map_err(|_| "Invalid sign-in operation.")?;
-    let canceled = LOGIN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .reserve(&id, expected.clone())?;
-    let _lease = LoginLease(id.clone());
-    let home = home()?;
-    let native = super::adapter(provider)?.native(&home)?;
-    native.preflight()?;
-    // Unlock storage before asking the user to sign in, so a denied vault cannot strand a login.
-    let ticket = start(&home, provider, expected.as_deref())?;
-    let root = home.join(".on-n-off/accounts/logins");
-    std::fs::create_dir_all(&root).map_err(|_| "Cannot create isolated sign-in storage.")?;
-    let scratch = tempfile::Builder::new()
-        .prefix("login-")
-        .tempdir_in(&root)
-        .map_err(|_| "Cannot prepare isolated sign-in.")?;
-    let isolated = native.isolated(scratch.path())?;
-    let lease_file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .read(true)
-        .write(true)
-        .open(scratch.path().join("lease"))
-        .map_err(|_| "Cannot own isolated sign-in storage.")?;
-    let lease = FileLease::acquire(lease_file, std::fs::File::try_lock)
-        .map_err(|_| "Cannot own isolated sign-in storage.")?;
-    super::vault::atomic_write(
-        &scratch.path().join("provider.json"),
-        &serde_json::to_vec(&provider).map_err(|_| "Cannot record isolated sign-in ownership.")?,
-    )?;
-    let result: Result<(), String> = (|| {
-        let child = isolated
-            .sign_in()
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|_| {
-                "Could not start official sign-in. Check the provider CLI installation."
-            })?;
-        match crate::process::wait_with_cancellation(child,Duration::from_secs(300),||canceled.load(Ordering::Acquire)){
+impl super::Accounts {
+    /// Signs in to `provider` with its official client in an isolated home, then publishes the
+    /// login as a profile awaiting activation; `expected` is the profile a sign-in again is for.
+    /// Announced only once published: nothing else it does changes a login.
+    pub(super) fn add(
+        &self,
+        provider: AgentId,
+        id: String,
+        expected: Option<String>,
+    ) -> Result<(), String> {
+        uuid::Uuid::parse_str(&id).map_err(|_| "Invalid sign-in operation.")?;
+        let canceled = LOGIN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .reserve(&id, expected.clone())?;
+        let _lease = LoginLease(id.clone());
+        let home = &self.home;
+        let native = self.native(provider)?;
+        native.preflight()?;
+        // Unlock storage before asking the user to sign in, so a denied vault cannot strand a login.
+        let ticket = start(home, provider, expected.as_deref())?;
+        let root = home.join(".on-n-off/accounts/logins");
+        std::fs::create_dir_all(&root).map_err(|_| "Cannot create isolated sign-in storage.")?;
+        let scratch = tempfile::Builder::new()
+            .prefix("login-")
+            .tempdir_in(&root)
+            .map_err(|_| "Cannot prepare isolated sign-in.")?;
+        let isolated = native.isolated(scratch.path())?;
+        let lease_file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(scratch.path().join("lease"))
+            .map_err(|_| "Cannot own isolated sign-in storage.")?;
+        let lease = FileLease::acquire(lease_file, std::fs::File::try_lock)
+            .map_err(|_| "Cannot own isolated sign-in storage.")?;
+        super::vault::atomic_write(
+            &scratch.path().join("provider.json"),
+            &serde_json::to_vec(&provider)
+                .map_err(|_| "Cannot record isolated sign-in ownership.")?,
+        )?;
+        let result: Result<(), String> = (|| {
+            let child = isolated
+                .sign_in()
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|_| {
+                    "Could not start official sign-in. Check the provider CLI installation."
+                })?;
+            match crate::process::wait_with_cancellation(child,Duration::from_secs(300),||canceled.load(Ordering::Acquire)){
    Ok(crate::process::CommandOutcome::Exited{success:true,..})=>{},
    _=>return Err("Sign-in was canceled, timed out, or did not complete. The current native login was not changed.".into())
   }
-        if canceled.load(Ordering::Acquire) {
-            return Err("Sign-in was canceled.".into());
+            if canceled.load(Ordering::Acquire) {
+                return Err("Sign-in was canceled.".into());
+            }
+            let prepared = prepare_login(isolated.as_ref(), |login, identity| {
+                isolated.first_usage(scratch.path(), login, identity)
+            })?;
+            publish(
+                &LOGIN,
+                home,
+                &ticket,
+                &id,
+                &canceled,
+                expected.as_deref(),
+                prepared,
+            )
+        })();
+        let cleanup = isolated.clean();
+        drop(lease);
+        if cleanup.is_err() {
+            let _retained = scratch.keep();
+            return Err("The isolated login could not be cleaned from protected storage. Its private recovery directory was retained.".into());
         }
-        let prepared = prepare_login(isolated.as_ref(), |login, identity| {
-            isolated.first_usage(scratch.path(), login, identity)
-        })?;
-        publish(
-            &LOGIN,
-            &home,
-            &ticket,
-            &id,
-            &canceled,
-            expected.as_deref(),
-            prepared,
-        )
-    })();
-    let cleanup = isolated.clean();
-    drop(lease);
-    if cleanup.is_err() {
-        let _retained = scratch.keep();
-        return Err("The isolated login could not be cleaned from protected storage. Its private recovery directory was retained.".into());
+        result?;
+        // Unlike a use or a sign-out, only a published sign-in changed anything to announce.
+        self.notify.changed(provider);
+        Ok(())
     }
-    result?;
-    // Unlike a use or a sign-out, only a published sign-in changed anything to announce.
-    super::changed(provider);
-    Ok(())
+
+    /// Recover only app-created, abandoned login homes after their provider processes have exited.
+    /// Live leases, unrecognized folders and inaccessible Keychain entries are left intact.
+    pub(super) fn recover_abandoned(&self) {
+        let Ok(entries) = std::fs::read_dir(self.home.join(".on-n-off/accounts/logins")) else {
+            return;
+        };
+        for entry in entries.flatten().take(128) {
+            let path = entry.path();
+            if !entry.file_name().to_string_lossy().starts_with("login-")
+                || !entry
+                    .file_type()
+                    .is_ok_and(|t| t.is_dir() && !t.is_symlink())
+            {
+                continue;
+            }
+            let Ok(file) = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path.join("lease"))
+            else {
+                continue;
+            };
+            let Ok(lease) = FileLease::acquire(file, std::fs::File::try_lock) else {
+                continue;
+            };
+            let Some(provider) = std::fs::read(path.join("provider.json"))
+                .ok()
+                .filter(|v| v.len() < 100)
+                .and_then(|v| serde_json::from_slice::<AgentId>(&v).ok())
+            else {
+                continue;
+            };
+            // Only a provider with saved profiles resolves a native store.
+            let Ok(native) = self.native(provider) else {
+                continue;
+            };
+            if self.clients.closed(provider).is_err() {
+                continue;
+            }
+            let Ok(isolated) = native.isolated(&path) else {
+                continue;
+            };
+            if isolated.clean().is_ok() {
+                drop(lease);
+                let _ = std::fs::remove_dir_all(path);
+            }
+        }
+    }
 }
 
 /// What a sign-in is checked against before the official client runs: no pending recovery, and
@@ -282,57 +342,6 @@ fn publish(
             Ok(())
         },
     )?
-}
-
-/// Recover only app-created, abandoned login homes after their provider processes have exited.
-/// Live leases, unrecognized folders and inaccessible Keychain entries are left intact.
-pub(super) fn recover_abandoned(home: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(home.join(".on-n-off/accounts/logins")) else {
-        return;
-    };
-    for entry in entries.flatten().take(128) {
-        let path = entry.path();
-        if !entry.file_name().to_string_lossy().starts_with("login-")
-            || !entry
-                .file_type()
-                .is_ok_and(|t| t.is_dir() && !t.is_symlink())
-        {
-            continue;
-        }
-        let Ok(file) = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path.join("lease"))
-        else {
-            continue;
-        };
-        let Ok(lease) = FileLease::acquire(file, std::fs::File::try_lock) else {
-            continue;
-        };
-        let Some(provider) = std::fs::read(path.join("provider.json"))
-            .ok()
-            .filter(|v| v.len() < 100)
-            .and_then(|v| serde_json::from_slice::<AgentId>(&v).ok())
-        else {
-            continue;
-        };
-        let Ok(adapter) = super::adapter(provider) else {
-            continue;
-        };
-        if super::clients::require_closed(provider).is_err() {
-            continue;
-        }
-        let Ok(native) = adapter
-            .native(&path)
-            .and_then(|native| native.isolated(&path))
-        else {
-            continue;
-        };
-        if native.clean().is_ok() {
-            drop(lease);
-            let _ = std::fs::remove_dir_all(path);
-        }
-    }
 }
 
 #[cfg(test)]

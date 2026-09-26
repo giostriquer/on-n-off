@@ -1,19 +1,18 @@
 //! Excludes native account mutation from in-process provider reads without holding a mutex
 //! across network I/O. Shared/exclusive file leases also exclude other app processes; the
 //! separate vault lease serializes protected database publication.
+use super::PROVIDERS;
 use crate::{dto::AgentId, file_lease::FileLease};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
-static ACTIVITY: Mutex<[usize; 2]> = Mutex::new([0, 0]);
-static SWITCHING: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
+static ACTIVITY: Mutex<[usize; PROVIDERS.len()]> = Mutex::new([0; PROVIDERS.len()]);
+static SWITCHING: [AtomicBool; PROVIDERS.len()] =
+    [const { AtomicBool::new(false) }; PROVIDERS.len()];
+/// The provider's slot; `None` for a provider without saved profiles, whose reads nothing excludes.
 fn index(provider: AgentId) -> Option<usize> {
-    match provider {
-        AgentId::Claude => Some(0),
-        AgentId::Codex => Some(1),
-        _ => None,
-    }
+    PROVIDERS.iter().position(|p| *p == provider)
 }
 pub struct Read(Option<usize>, Option<FileLease>);
 pub fn read(provider: AgentId) -> Option<Read> {

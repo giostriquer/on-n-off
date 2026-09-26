@@ -17,4 +17,7 @@ fn account_actions_map_to_their_activation() {
 mod fixture;
 mod listing;
 mod profiles;
+mod remembering;
+mod saved_usage;
+mod signing_in;
 mod switching;

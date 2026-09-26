@@ -18,11 +18,23 @@ struct Process {
     args: String,
 }
 
+/// How a provider's clients are told apart from every other process, and whether they refuse an
+/// ordinary switch. Each adapter holds its provider's.
+pub(super) struct Client {
+    /// The executable a client runs as, and the script a JavaScript runtime launches for it.
+    pub(super) name: &'static str,
+    /// The package's own entry script, which identifies a client whatever runs it.
+    pub(super) package_entry: &'static str,
+    /// Whether an ordinary switch refuses to run beside these clients: not when they handle a
+    /// native credential change themselves.
+    pub(super) blocks_activation: bool,
+}
+
 const SCRIPT_HOSTS: [&str; 6] = ["node", "node.exe", "bun", "bun.exe", "deno", "deno.exe"];
 const SCRIPT_EXTENSIONS: [&str; 8] = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"];
 
 /// Names the clients an ordinary switch refuses to run beside, so a person can close them or
-/// switch anyway. Claude Code handles native credential changes, so Claude has none.
+/// switch anyway: none for a provider whose clients take a native credential change.
 ///
 /// This scan runs before the account-change lease, while on-n-off's own provider reads may be
 /// live, so it leaves out processes on-n-off started. The checks that gate a change never do:
@@ -30,7 +42,7 @@ const SCRIPT_EXTENSIONS: [&str; 8] = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".mt
 /// a real client there, while the lease already keeps on-n-off's own reads from running.
 pub fn activation_blockers(provider: AgentId) -> Result<Vec<String>, String> {
     blockers(
-        provider,
+        super::adapter(provider)?.client(),
         running_processes,
         Some(&std::process::id().to_string()),
     )
@@ -38,22 +50,30 @@ pub fn activation_blockers(provider: AgentId) -> Result<Vec<String>, String> {
 
 /// Sign-out, crash recovery, and abandoned-login cleanup still require closed clients.
 pub fn require_activation_safe(provider: AgentId) -> Result<(), String> {
-    closed(&blockers(provider, running_processes, None)?)
+    closed(&blockers(
+        super::adapter(provider)?.client(),
+        running_processes,
+        None,
+    )?)
 }
 
 pub fn require_closed(provider: AgentId) -> Result<(), String> {
-    closed(&running_clients(provider, running_processes, None)?)
+    closed(&running_clients(
+        super::adapter(provider)?.client(),
+        running_processes,
+        None,
+    )?)
 }
 
 fn blockers(
-    provider: AgentId,
+    client: &Client,
     scan: impl FnOnce() -> Result<Vec<Process>, String>,
     own: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    if provider == AgentId::Claude {
+    if !client.blocks_activation {
         return Ok(Vec::new());
     }
-    running_clients(provider, scan, own)
+    running_clients(client, scan, own)
 }
 
 fn closed(clients: &[String]) -> Result<(), String> {
@@ -64,23 +84,23 @@ fn closed(clients: &[String]) -> Result<(), String> {
 }
 
 fn running_clients(
-    provider: AgentId,
+    client: &Client,
     scan: impl FnOnce() -> Result<Vec<Process>, String>,
     own: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let processes =
         scan().map_err(|_| "Could not check running clients. Close provider clients and retry.")?;
-    Ok(clients(&processes, provider, own))
+    Ok(clients(&processes, client, own))
 }
 
 /// `own` leaves out the processes that pid started.
-fn clients(processes: &[Process], provider: AgentId, own: Option<&str>) -> Vec<String> {
+fn clients(processes: &[Process], client: &Client, own: Option<&str>) -> Vec<String> {
     let by_pid: HashMap<_, _> = processes.iter().map(|p| (p.pid.as_str(), p)).collect();
     processes
         .iter()
         .filter(|process| own.is_none_or(|own| !lineage(process, &by_pid).any(|p| p.pid == own)))
         .filter_map(|process| {
-            let name = client_name(process, provider)?;
+            let name = client_name(process, client)?;
             // Name a client after the app bundle it runs in or was started from, which is what
             // a person closes; one with no app around it keeps its own name.
             Some(
@@ -194,33 +214,24 @@ fn cim_processes(output: &str) -> Vec<Process> {
 }
 
 /// The name a provider client goes by, or `None` for any other process.
-fn client_name(process: &Process, provider: AgentId) -> Option<String> {
-    let name = if provider == AgentId::Claude {
-        "claude"
-    } else {
-        "codex"
-    };
+fn client_name(process: &Process, client: &Client) -> Option<String> {
+    let name = client.name;
     let file = process.executable.rsplit(['/', '\\']).next()?;
     let base = normalized(file);
     if base == name || base == format!("{name}.exe") {
         return Some(file.to_owned());
     }
     let script = SCRIPT_HOSTS.contains(&base.as_str()) && launches_script(process, name);
-    (script || runs_package_entry(process, provider)).then(|| name.to_owned())
+    (script || runs_package_entry(process, client)).then(|| name.to_owned())
 }
 
 /// The package's own entry script identifies a client whatever runs it, including an Electron
 /// helper acting as Node.
-fn runs_package_entry(process: &Process, provider: AgentId) -> bool {
-    let entry = if provider == AgentId::Claude {
-        "/@anthropic-ai/claude-code/cli.js"
-    } else {
-        "/@openai/codex/bin/codex.js"
-    };
+fn runs_package_entry(process: &Process, client: &Client) -> bool {
     process
         .args
         .split_whitespace()
-        .any(|token| normalized(token).ends_with(entry))
+        .any(|token| normalized(token).ends_with(client.package_entry))
 }
 
 /// The script is the first argument after the runtime's own flags. Windows quotes a path with

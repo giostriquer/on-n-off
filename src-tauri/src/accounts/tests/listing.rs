@@ -1,4 +1,4 @@
-use super::fixture::{claude, identity, Harness};
+use super::fixture::{claude, codex, identity, Harness};
 use crate::dto::AgentId;
 
 #[test]
@@ -6,7 +6,7 @@ fn listing_shows_this_providers_profiles_and_which_one_the_cli_uses() {
     let harness = Harness::new();
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
     let b = harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
-    harness.saved(identity(AgentId::Codex, "c", "team"), claude("c", "c1"));
+    harness.saved(identity(AgentId::Codex, "c", "team"), codex("c", "c1"));
     harness.seed(|db| db.profiles[1].login = None);
     harness.signed_in(Some(claude("a", "a2")));
     let sealed = harness.sealed();

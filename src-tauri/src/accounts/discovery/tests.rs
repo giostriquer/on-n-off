@@ -169,12 +169,40 @@ fn natural_accounts_are_saved_once_and_pending_reauthentication_is_preserved() {
     assert!(candidate(&native, &loaded).unwrap().is_none());
 }
 
+/// Account operations over `home` that must never reach a native store, a client or a listener.
+fn untouched(home: &Path) -> super::super::Accounts {
+    struct Untouched;
+    impl super::super::Clients for Untouched {
+        fn activation_safe(&self, _: AgentId) -> Result<(), String> {
+            panic!("checked running clients")
+        }
+        fn closed(&self, _: AgentId) -> Result<(), String> {
+            panic!("checked running clients")
+        }
+    }
+    impl super::super::Notify for Untouched {
+        fn changed(&self, _: AgentId) {
+            panic!("announced a change")
+        }
+        fn accounts(&self) {
+            panic!("announced a change")
+        }
+    }
+    super::super::Accounts {
+        home: home.into(),
+        native: Box::new(|_, _| panic!("resolved a native store")),
+        clients: Box::new(Untouched),
+        notify: Box::new(Untouched),
+    }
+}
+
 #[test]
 fn remembering_is_off_by_default_and_does_not_create_a_vault() {
     let root = tempfile::tempdir().unwrap();
     assert!(!enabled(root.path()).unwrap());
-    assert!(!poll_home(root.path(), AgentId::Claude).unwrap());
-    assert!(!poll_home(root.path(), AgentId::Codex).unwrap());
+    let accounts = untouched(root.path());
+    assert!(!accounts.remember(AgentId::Claude).unwrap());
+    assert!(!accounts.remember(AgentId::Codex).unwrap());
     assert!(!root.path().join(".on-n-off").exists());
 }
 

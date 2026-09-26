@@ -235,3 +235,38 @@ fn account_changes_refuse_a_managed_codex_configuration() {
         fs::remove_file(path).unwrap();
     }
 }
+
+/// An API-key login has no subscription, so the signed-in subscription is no one's and every saved
+/// account's usage is read. A blank key makes no API-key login, but still no profile.
+#[test]
+fn a_codex_api_key_login_is_signed_in_with_no_subscription() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    fs::create_dir_all(&store.config_home).unwrap();
+    assert_eq!(store.subscription(), Ok(None), "signed out");
+    let signed_in = |key: Value| {
+        let mut auth = json!({"tokens": {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "account_id": "team",
+            "id_token": id_token(&json!({"chatgpt_user_id": "user", "chatgpt_account_id": "team"})),
+        }});
+        if !key.is_null() {
+            auth["OPENAI_API_KEY"] = key;
+        }
+        fs::write(store.config_home.join("auth.json"), auth.to_string()).unwrap();
+        store.subscription()
+    };
+    let user = Identity {
+        provider: AgentId::Codex,
+        user_id: "user".into(),
+        workspace_id: "team".into(),
+    };
+    assert_eq!(signed_in(Value::Null), Ok(Some(user)));
+    assert_eq!(signed_in(json!("fixture-api-key")), Ok(None));
+    assert_eq!(
+        signed_in(json!(" ")).err().as_deref(),
+        Some("API key logins cannot be saved as subscription profiles."),
+        "a blank key is not an API-key login, but no subscription profile either"
+    );
+}

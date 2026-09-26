@@ -390,6 +390,8 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
     }
 }
 
+/// A native API-key login is no subscription (`codex::CodexNative::subscription`), so it excludes
+/// no saved account from polling.
 #[test]
 fn native_api_key_login_does_not_block_saved_subscription_polling() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -404,10 +406,7 @@ fn native_api_key_login_does_not_block_saved_subscription_polling() {
         AgentId::Codex,
         false,
         &mut entries,
-        Ok(Some(Login {
-            auth: json!({"OPENAI_API_KEY":"fixture-api-key"}),
-            account: json!({}),
-        })),
+        Ok(None),
         &|| Ok(open(home.path())),
         &|p| {
             calls.fetch_add(1, Ordering::SeqCst);
@@ -575,7 +574,7 @@ fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_result
                 AgentId::Claude,
                 force,
                 entries,
-                Ok(active.login.clone()),
+                Ok(Some(active.identity.clone())),
                 &|| Ok(open(home.path())),
                 &|p| {
                     assert_eq!(p.id, inactive.id);

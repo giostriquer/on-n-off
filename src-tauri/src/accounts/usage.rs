@@ -1,6 +1,9 @@
 //! Poll every saved subscription without publishing credentials to a native client. Shared
 //! native shadows are access-only. Only a never-activated isolated sign-in owns renewal.
-use super::store::{Guard, Login, Profile, Store, Ticket};
+use super::{
+    model::Identity,
+    store::{Guard, Login, Profile, Store, Ticket},
+};
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     http::{HttpError, RateLimitReset},
@@ -20,9 +23,11 @@ struct Attempt {
     error: Option<String>,
     rejected: bool,
 }
-struct FetchResult {
-    login: Option<Login>,
-    result: Result<ProviderLimitsDto, HttpError>,
+/// One saved profile's fetch: the login it was made with, which a renewal may have replaced, and
+/// the reading.
+pub(super) struct FetchResult {
+    pub(super) login: Option<Login>,
+    pub(super) result: Result<ProviderLimitsDto, HttpError>,
 }
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
@@ -34,46 +39,50 @@ pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<Provider
     if tests::refresh_fixture(force, entries) {
         return;
     }
-    let Ok(home) = super::home() else {
+    let Ok(accounts) = super::Accounts::live() else {
         return;
     };
-    if !Store::vault_exists(&home) {
-        return;
-    }
-    let open = || Store::open_existing(&home);
-    let native = super::adapter(provider)
-        .and_then(|adapter| adapter.native(&home))
-        .and_then(|native| native.read());
-    refresh_with(&home, provider, force, entries, native, &open, &|profile| {
-        fetch_profile(profile, &open)
-    });
+    accounts.refresh_usage(provider, force, entries, &fetch_profile);
 }
 
+/// How one saved profile's usage is fetched, given how to open the vault.
+type Fetch<'a> = dyn Fn(&Profile, &dyn Fn() -> Result<Store, String>) -> FetchResult + Sync + 'a;
+
+impl super::Accounts {
+    /// Merges a fresh reading of every saved `provider` account but the one its CLI is signed in
+    /// with into `entries`, each fetched by `fetch`. Nothing is read on a device with no vault.
+    pub(super) fn refresh_usage(
+        &self,
+        provider: AgentId,
+        force: bool,
+        entries: &mut Vec<ProviderLimitsDto>,
+        fetch: &Fetch<'_>,
+    ) {
+        let home = &self.home;
+        if !Store::vault_exists(home) {
+            return;
+        }
+        let open = || Store::open_existing(home);
+        let native = self
+            .native(provider)
+            .and_then(|native| native.subscription());
+        refresh_with(home, provider, force, entries, native, &open, &|profile| {
+            fetch(profile, &open)
+        });
+    }
+}
+
+/// `native` is who the CLI is signed in as with a subscription; a native store that could not be
+/// read reads no saved account either.
 fn refresh_with(
     home: &Path,
     provider: AgentId,
     force: bool,
     entries: &mut Vec<ProviderLimitsDto>,
-    native: Result<Option<Login>, String>,
+    native: Result<Option<Identity>, String>,
     open: &(dyn Fn() -> Result<Store, String> + Sync),
     fetch: &(dyn Fn(&Profile) -> FetchResult + Sync),
 ) {
-    let native = native.and_then(|login| match login {
-        Some(login)
-            if provider == AgentId::Codex
-                && login
-                    .auth
-                    .get("OPENAI_API_KEY")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|key| !key.trim().is_empty()) =>
-        {
-            Ok(None)
-        }
-        Some(login) => super::view(provider, &login)
-            .and_then(|login| login.identity())
-            .map(Some),
-        None => Ok(None),
-    });
     let Ok(native) = native else {
         return;
     };

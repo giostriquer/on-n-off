@@ -13,8 +13,13 @@ fn child(pid: &str, parent: &str, executable: &str, args: &str) -> Process {
     }
 }
 
+/// How the provider's adapter tells its clients apart.
+fn client(provider: AgentId) -> &'static Client {
+    super::super::adapter(provider).unwrap().client()
+}
+
 fn is_client(executable: &str, args: &str, provider: AgentId) -> bool {
-    client_name(&process(executable, args), provider).is_some()
+    client_name(&process(executable, args), client(provider)).is_some()
 }
 
 #[test]
@@ -209,7 +214,7 @@ fn names_each_client_after_the_app_it_runs_in_or_was_started_from() {
         child("51", "50", "C:\\Windows\\explorer.exe", ""),
     ];
     assert_eq!(
-        clients(&processes, AgentId::Codex, Some("99")),
+        clients(&processes, client(AgentId::Codex), Some("99")),
         [
             "Acme Studio (codex)",
             "ChatGPT",
@@ -235,12 +240,12 @@ fn only_the_prompt_leaves_out_the_clients_on_n_off_started_itself() {
         ]
     };
     assert_eq!(
-        blockers(AgentId::Codex, || Ok(processes()), Some("99")),
+        blockers(client(AgentId::Codex), || Ok(processes()), Some("99")),
         Ok(Vec::new())
     );
     // A reused pid can make a real client look like on-n-off's child, so gates never exclude.
     assert_eq!(
-        running_clients(AgentId::Codex, || Ok(processes()), None),
+        running_clients(client(AgentId::Codex), || Ok(processes()), None),
         Ok(vec!["on-n-off (codex)".to_owned()])
     );
 }
@@ -248,18 +253,18 @@ fn only_the_prompt_leaves_out_the_clients_on_n_off_started_itself() {
 #[test]
 fn only_codex_scans_before_a_switch_and_a_failed_scan_refuses() {
     let claude = blockers(
-        AgentId::Claude,
+        client(AgentId::Claude),
         || panic!("Claude switches never scan"),
         None,
     );
     assert_eq!(claude, Ok(Vec::new()));
     let codex = blockers(
-        AgentId::Codex,
+        client(AgentId::Codex),
         || Ok(vec![child("5", "1", "codex", "codex")]),
         None,
     );
     assert_eq!(codex, Ok(vec!["codex".to_owned()]));
-    let failed = blockers(AgentId::Codex, || Err("ps failed".into()), None).unwrap_err();
+    let failed = blockers(client(AgentId::Codex), || Err("ps failed".into()), None).unwrap_err();
     assert!(
         failed.starts_with("Could not check running clients."),
         "{failed}"

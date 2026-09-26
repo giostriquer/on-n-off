@@ -56,6 +56,9 @@ fn home() -> Result<PathBuf, String> {
     crate::paths::user_home().map_err(|_| "Cannot resolve account storage home.".into())
 }
 
+/// The providers with saved profiles, each with an adapter.
+const PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
+
 /// One provider's half of the accounts seam: `claude::Claude` or `codex::Codex`, each owning
 /// everything account code does differently for its provider. Generic account code asks
 /// [`adapter`] for it rather than asking which provider it has. The catalog's `AgentAdapter`
@@ -65,6 +68,8 @@ trait Adapter: Sync {
     fn native(&self, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
     /// `login` read by this provider's rules.
     fn login<'a>(&self, login: &'a store::Login) -> Box<dyn model::LoginView + 'a>;
+    /// How this provider's client processes are told apart, and whether they refuse a switch.
+    fn client(&self) -> &'static clients::Client;
 }
 
 /// `provider`'s adapter: the one place account code tells the providers apart.
@@ -92,6 +97,11 @@ trait NativeAccount: Native {
     fn logout(&self) -> Result<(), String>;
     /// The provider's store in `dir`, private to one isolated sign-in, created there.
     fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
+    /// Who the CLI is signed in as with a subscription, whose saved accounts' usage is read
+    /// beside it: `None` when it is signed out, or signed in some way that has no subscription.
+    fn subscription(&self) -> Result<Option<model::Identity>, String> {
+        self.read()?.map(|login| self.identify(&login)).transpose()
+    }
 }
 
 /// A provider's native store in a private directory, where an isolated sign-in runs the official
@@ -153,7 +163,8 @@ impl Clients for RunningClients {
 struct Announce;
 impl Notify for Announce {
     fn changed(&self, provider: AgentId) {
-        changed(provider);
+        crate::limits_refresh::account_changed(provider);
+        crate::read_revision::announce(crate::read_revision::Source::Accounts);
     }
     fn accounts(&self) {
         crate::read_revision::announce(crate::read_revision::Source::Accounts);
@@ -200,6 +211,11 @@ pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Resul
 pub fn sign_out(provider: AgentId) -> Result<(), String> {
     Accounts::live()?.sign_out(provider)
 }
+/// Signs in to `provider` with its official client in an isolated home and saves the login as a
+/// profile awaiting activation. `expected` is the profile a sign-in again is for.
+pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<(), String> {
+    Accounts::live()?.add(provider, id, expected)
+}
 
 /// How an account change treats provider clients that are still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,7 +244,7 @@ impl Accounts {
         let _read = activity::read(provider)
             .ok_or("An account change is running. Retry when it finishes.")?;
         let home = &self.home;
-        login::recover_abandoned(home);
+        self.recover_abandoned();
         let native = self.native(provider)?;
         let current = native
             .read()
@@ -454,15 +470,11 @@ impl Accounts {
         result
     }
 }
-fn changed(provider: AgentId) {
-    crate::limits_refresh::account_changed(provider);
-    crate::read_revision::announce(crate::read_revision::Source::Accounts);
-}
 
 pub(crate) mod claude_renew;
 
 mod login;
-pub use login::{add, cancel};
+pub use login::cancel;
 
 pub(crate) mod discovery;
 

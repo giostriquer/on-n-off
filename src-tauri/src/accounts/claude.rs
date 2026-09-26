@@ -11,6 +11,7 @@ use super::{
         self, BeginError, ClaudeLocks, KeychainProbe, LockError, LockScope, SecureStorage,
         StorageDir, StoreError, Stored,
     },
+    clients::Client,
     model::{self, AccessToken, Identity, LoginView},
     native::{self, CUSTOM_HOME},
     store::Login,
@@ -39,6 +40,15 @@ impl super::Adapter for Claude {
 
     fn login<'a>(&self, login: &'a Login) -> Box<dyn LoginView + 'a> {
         Box::new(ClaudeLogin::of(login))
+    }
+
+    /// Claude Code handles a native credential change itself, so its clients refuse no switch.
+    fn client(&self) -> &'static Client {
+        &Client {
+            name: "claude",
+            package_entry: "/@anthropic-ai/claude-code/cli.js",
+            blocks_activation: false,
+        }
     }
 }
 

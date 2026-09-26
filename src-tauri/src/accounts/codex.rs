@@ -5,6 +5,7 @@
 //! starts, the read, the write and its verification, and an isolated sign-in. Which backend holds
 //! the login is `codex_store`'s question; this adapter asks it.
 use super::{
+    clients::Client,
     codex_store,
     model::{self, AccessToken, Identity, LoginView},
     native::{self, CUSTOM_HOME},
@@ -33,6 +34,15 @@ impl super::Adapter for Codex {
 
     fn login<'a>(&self, login: &'a Login) -> Box<dyn LoginView + 'a> {
         Box::new(CodexLogin::of(login))
+    }
+
+    /// Running Codex clients never pick up a replaced login, so they refuse an ordinary switch.
+    fn client(&self) -> &'static Client {
+        &Client {
+            name: "codex",
+            package_entry: "/@openai/codex/bin/codex.js",
+            blocks_activation: true,
+        }
     }
 }
 
@@ -217,6 +227,15 @@ impl NativeAccount for CodexNative {
     fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
         Ok(Box::new(Self::isolated(dir)?))
     }
+
+    /// An API-key login has no subscription, so it is no one's: every saved account is read.
+    fn subscription(&self) -> Result<Option<Identity>, String> {
+        match self.read()? {
+            Some(login) if CodexLogin::of(&login).api_key() => Ok(None),
+            Some(login) => self.identify(&login).map(Some),
+            None => Ok(None),
+        }
+    }
 }
 
 impl IsolatedSignIn for CodexNative {
@@ -272,6 +291,14 @@ impl<'a> CodexLogin<'a> {
         model::string(self.auth, "/tokens/access_token")
             .ok()
             .map(AccessToken::new)
+    }
+
+    /// Whether this is an API-key login: a subscription login has no key, or a blank one.
+    fn api_key(&self) -> bool {
+        self.auth
+            .get("OPENAI_API_KEY")
+            .and_then(Value::as_str)
+            .is_some_and(|key| !key.trim().is_empty())
     }
 
     /// The workspace the tokens are for, `tokens.account_id`, when it names one.
