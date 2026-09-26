@@ -172,8 +172,6 @@ function AccountCard({
 
       {card.status?.kind === "paused" ? (
         <p className="px-3.5 pt-3 text-[13px] font-medium text-[var(--silkscreen)]">Refresh paused.</p>
-      ) : card.status?.kind === "remembered" ? (
-        <p className="px-3.5 pt-3 text-[13px] text-[var(--mute)]">Remembered account.</p>
       ) : null}
 
       {freshness.message ? (

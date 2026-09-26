@@ -597,14 +597,13 @@ it("drops the badge on the local minute clock once the paid period ends, without
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
-it("says a remembered reading is a remembered account, and marks a saved read that failed only by its last-known badge", async () => {
+it("says nothing of a remembered reading on the screen, and marks a saved read that failed only by its last-known badge", async () => {
   answer([okClaude()], [okCodex(), staleCodex(), okCodex({ account: { id: "acct-saved", label: "saved@codex.example" }, currentAccount: false, status: "failed", message: "Saved usage credential is no longer accepted." })]);
   renderLimits();
   const remembered = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
-  // Body text, as "Refresh paused." is: the header keeps its room for the account's name.
-  const status = within(remembered).getByText("Remembered account.");
-  expect(remembered.querySelector("header")!.contains(status)).toBe(false);
-  expect(within(card("Codex limits · work@codex.example")).queryByText(/Remembered account/)).toBeNull();
+  // The model's "remembered" also covers saved accounts read live every poll, so the screen shows none.
+  expect(within(remembered).queryByText(/Remembered account/)).toBeNull();
+  expect(within(remembered).getByRole("meter", { name: "Weekly · all models" })).toBeTruthy();
   const failed = card("Codex limits · saved@codex.example");
   expect(within(failed).getByRole("button", { name: "Usage status: Last known usage" })).toBeTruthy();
   expect(within(failed).queryByText(/Remembered account/)).toBeNull();
