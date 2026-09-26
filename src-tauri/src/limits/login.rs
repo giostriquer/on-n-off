@@ -2,48 +2,46 @@
 //! No saved vault credential is loaded or independently renewed here.
 use super::{credentials::ClaudeCredential, *};
 
-pub(crate) fn read(
-    isolated_home: &Path,
+/// The first usage reading of an isolated Claude sign-in as `identity`, read with its login's
+/// `credential`, which must sign in as that user in that workspace.
+pub(crate) fn read_claude(
     identity: &Identity,
-    claude: Option<ClaudeCredential>,
+    credential: ClaudeCredential,
 ) -> Option<ProviderLimitsDto> {
-    read_with(
-        isolated_home,
-        identity,
-        claude,
-        CLAUDE_PROFILE_URL,
-        CLAUDE_USAGE_URL,
-    )
+    read_claude_at(identity, credential, CLAUDE_PROFILE_URL, CLAUDE_USAGE_URL)
 }
 
-fn read_with(
-    isolated_home: &Path,
+fn read_claude_at(
     identity: &Identity,
-    claude: Option<ClaudeCredential>,
+    credential: ClaudeCredential,
     profile_url: &str,
     usage_url: &str,
 ) -> Option<ProviderLimitsDto> {
-    let mut dto = match identity.provider {
-        AgentId::Codex => codex_limits(isolated_home, false),
-        AgentId::Claude => {
-            let selected = Some(expected_claude_identity(identity));
-            let mut dto = claude_limits(
-                CredentialLookup::Found(claude?),
-                &selected,
-                profile_url,
-                usage_url,
-            )
-            .dto;
-            if dto.status != LimitsStatus::Ok {
-                return None;
-            }
-            let account = dto.account.as_mut()?;
-            account.legacy_id = Some(identity.user_id.clone());
-            account.id = identity.observation_key();
-            dto
-        }
-        _ => return None,
-    };
+    let mut dto = claude_limits(
+        CredentialLookup::Found(credential),
+        &Some(expected_claude_identity(identity)),
+        profile_url,
+        usage_url,
+    )
+    .dto;
+    if dto.status != LimitsStatus::Ok {
+        return None;
+    }
+    let account = dto.account.as_mut()?;
+    account.legacy_id = Some(identity.user_id.clone());
+    account.id = identity.observation_key();
+    accepted(identity, dto)
+}
+
+/// The first usage reading of an isolated Codex sign-in as `identity`, read by Codex's own
+/// app-server in `isolated_home`, which needs nothing from the login itself.
+pub(crate) fn read_codex(isolated_home: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
+    accepted(identity, codex_limits(isolated_home, false))
+}
+
+/// `dto`, when it is an answer about `identity` that observed something, as a card that is not the
+/// signed-in account's.
+fn accepted(identity: &Identity, mut dto: ProviderLimitsDto) -> Option<ProviderLimitsDto> {
     if dto.status != LimitsStatus::Ok
         || dto.account.as_ref()?.id != identity.observation_key()
         || !dto.reading.has_observations()

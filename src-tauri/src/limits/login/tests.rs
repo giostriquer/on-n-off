@@ -25,14 +25,7 @@ fn isolated_claude_sign_in_keeps_a_scoped_dated_snapshot_without_reading_the_act
         "200 OK",
         r#"{"seven_day":{"utilization":61,"resets_at":"2026-09-20T12:00:00Z"}}"#,
     );
-    let dto = read_with(
-        home.path(),
-        &identity(),
-        Some(credential()),
-        &profile,
-        &usage,
-    )
-    .unwrap();
+    let dto = read_claude_at(&identity(), credential(), &profile, &usage).unwrap();
     profile_request.join().unwrap();
     usage_request.join().unwrap();
     assert!(!dto.current_account);
@@ -54,20 +47,12 @@ fn isolated_claude_sign_in_keeps_a_scoped_dated_snapshot_without_reading_the_act
 /// The first usage read sends the signed-in read's headers.
 #[test]
 fn the_first_usage_read_sends_the_signed_in_reads_headers() {
-    let home = tempfile::tempdir().unwrap();
     let (profile, profile_request) = serve_once(
         "200 OK",
         r#"{"account":{"uuid":"user","email":"me@example.com"},"organization":{"uuid":"team"}}"#,
     );
     let (usage, usage_request) = serve_once("200 OK", r#"{"seven_day":{"utilization":61}}"#);
-    read_with(
-        home.path(),
-        &identity(),
-        Some(credential()),
-        &profile,
-        &usage,
-    )
-    .unwrap();
+    read_claude_at(&identity(), credential(), &profile, &usage).unwrap();
     let profile_head = profile_request.join().unwrap();
     let usage_head = usage_request.join().unwrap();
     for head in [&profile_head, &usage_head] {
@@ -111,14 +96,7 @@ fn saved_claude_session_keeps_the_reported_percentage_and_optional_reset() {
             {"kind":"weekly_all", "group":"weekly", "percent":90, "resets_at":"2026-09-21T12:00:00Z"}
         ]}).to_string();
         let (usage, usage_request) = serve_once("200 OK", &body);
-        let dto = read_with(
-            home.path(),
-            &identity(),
-            Some(credential()),
-            &profile,
-            &usage,
-        )
-        .unwrap();
+        let dto = read_claude_at(&identity(), credential(), &profile, &usage).unwrap();
         profile_request.join().unwrap();
         usage_request.join().unwrap();
         remember(home.path(), &dto).unwrap();
@@ -142,10 +120,9 @@ fn wrong_claude_user_or_workspace_never_contributes_usage() {
     ] {
         let home = tempfile::tempdir().unwrap();
         let (profile, request) = serve_once("200 OK", body);
-        assert!(read_with(
-            home.path(),
+        assert!(read_claude_at(
             &identity(),
-            Some(credential()),
+            credential(),
             &profile,
             &crate::http::refused_url()
         )

@@ -423,13 +423,14 @@ impl IsolatedSignIn for ClaudeNative {
         command
     }
 
+    /// Read with the login's own credential, which needs nothing from the directory.
     fn first_usage(
         &self,
-        dir: &Path,
+        _dir: &Path,
         login: &Login,
         identity: &Identity,
     ) -> Option<ProviderLimitsDto> {
-        crate::limits::login::read(dir, identity, ClaudeLogin::of(login).credential())
+        crate::limits::login::read_claude(identity, ClaudeLogin::of(login).credential()?)
     }
 
     /// Deletes the sign-in's own scoped Keychain entry, never Claude Code's unscoped one.

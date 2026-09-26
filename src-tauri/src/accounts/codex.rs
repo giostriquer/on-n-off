@@ -281,7 +281,7 @@ impl IsolatedSignIn for CodexNative {
         _login: &Login,
         identity: &Identity,
     ) -> Option<ProviderLimitsDto> {
-        crate::limits::login::read(dir, identity, None)
+        crate::limits::login::read_codex(dir, identity)
     }
 
     /// Codex keeps an isolated login inside its home, so nothing is left outside it.
