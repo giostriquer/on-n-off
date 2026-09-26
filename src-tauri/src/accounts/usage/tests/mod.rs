@@ -256,6 +256,97 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
     .unwrap()
     .is_ok());
 }
+/// What a poll that read nothing says, and whether it waits for a new login before it reads again.
+#[test]
+fn a_poll_that_read_nothing_says_why() {
+    use std::cell::Cell;
+    for (error, message, sticky) in [
+        (
+            HttpError::Unauthorized,
+            "Usage refresh needs sign-in again or renewal by the client that owns this login.",
+            true,
+        ),
+        (
+            HttpError::RateLimited(RateLimitReset::RetryAfter(30)),
+            "Usage refresh is rate limited. The last reading is retained.",
+            false,
+        ),
+        (
+            HttpError::Status(429),
+            "Usage refresh is unavailable. The last reading is retained.",
+            false,
+        ),
+        (
+            HttpError::Network("offline".into()),
+            "Usage refresh is unavailable. The last reading is retained.",
+            false,
+        ),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let p = stored(home.path());
+        let fetches = Cell::new(0);
+        let poll = || {
+            poll_with(
+                home.path(),
+                &p,
+                &ticket(home.path()),
+                false,
+                &|| Ok(open(home.path())),
+                &|p| {
+                    fetches.set(fetches.get() + 1);
+                    FetchResult {
+                        login: p.login.clone(),
+                        result: Err(error.clone()),
+                    }
+                },
+            )
+        };
+        assert_eq!(poll(), Some(Err(message.to_string())), "{error:?}");
+        let state = ATTEMPTS
+            .get()
+            .and_then(|attempts| {
+                let key = format!("{}:{}", home.path().display(), p.id);
+                attempts.lock().unwrap().get(&key).cloned()
+            })
+            .expect("the attempt is recorded");
+        assert_eq!(state.rejected, sticky, "{error:?}");
+        assert_eq!(poll(), Some(Err(message.to_string())), "{error:?}");
+        assert_eq!(fetches.get(), 1, "{error:?}");
+    }
+}
+
+/// A reading the snapshot store could not keep is shown as a failed poll without its numbers, and
+/// the poll counts as a success.
+#[test]
+fn a_reading_that_could_not_be_saved_is_shown_as_a_failed_poll() {
+    let home = tempfile::tempdir().unwrap();
+    let p = stored(home.path());
+    // A file where the snapshot directory goes: every snapshot write fails.
+    std::fs::write(home.path().join(".on-n-off/limits"), "").unwrap();
+    let poll = || {
+        poll_with(
+            home.path(),
+            &p,
+            &ticket(home.path()),
+            false,
+            &|| Ok(open(home.path())),
+            &|p| FetchResult {
+                login: p.login.clone(),
+                result: Ok(reading(p)),
+            },
+        )
+    };
+    assert_eq!(
+        poll(),
+        Some(Err("Could not save the latest usage reading.".to_string()))
+    );
+    assert_eq!(
+        poll(),
+        None,
+        "recorded as a success, so it waits out the interval"
+    );
+}
+
 #[test]
 fn a_new_credential_retries_a_previously_rejected_account() {
     let home = tempfile::tempdir().unwrap();

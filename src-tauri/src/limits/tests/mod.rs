@@ -418,6 +418,24 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
     assert!(dto.reading.windows.is_empty());
 }
 
+/// A throttled signed-in read reports the status code it got.
+#[test]
+fn a_throttled_claude_read_names_the_status_it_got() {
+    let home = scratch_dir("limits-claude-throttled");
+    write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
+    let (profile_url, profile_request) =
+        crate::http::serve_once_capturing("429 Too Many Requests", &["Retry-After: 30"], "{}");
+    let lookup = read_claude_credential(&StorageDir::default_in(&home), Ok(None), NOW_MS);
+    let dto = claude_limits(lookup, &None, &profile_url, &refused_url()).dto;
+    profile_request.join().unwrap();
+
+    assert_eq!(dto.status, LimitsStatus::Failed);
+    assert_eq!(
+        dto.message.as_deref(),
+        Some("Could not reach the Claude usage service (HTTP 429).")
+    );
+}
+
 #[test]
 fn providers_without_a_subscription_are_unsupported() {
     for provider in [AgentId::Cursor, AgentId::Antigravity] {
