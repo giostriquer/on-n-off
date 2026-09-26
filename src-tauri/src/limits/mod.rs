@@ -21,7 +21,6 @@ pub(crate) mod login;
 mod pipeline;
 mod reading;
 mod renewal;
-pub(crate) mod saved;
 mod snapshots;
 
 pub(crate) use reading::keep_remembered;
@@ -32,6 +31,7 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::Utc;
 
 use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
+use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
     AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
@@ -466,7 +466,7 @@ fn claude_read(
 }
 
 /// The account a saved profile's Claude read expects: the profile's user in its workspace.
-fn expected_claude_identity(identity: &crate::accounts::model::Identity) -> ClaudeIdentity {
+fn expected_claude_identity(identity: &Identity) -> ClaudeIdentity {
     ClaudeIdentity {
         account: LimitsAccountDto {
             id: identity.user_id.clone(),
@@ -475,6 +475,86 @@ fn expected_claude_identity(identity: &crate::accounts::model::Identity) -> Clau
         },
         organization_id: Some(identity.workspace_id.clone()),
     }
+}
+
+/// A saved profile's Claude card, read with its login's `credential`, which must sign in as the
+/// profile's user in its workspace. A login without an access token is refused before any request.
+/// No CLI is started and nothing is renewed here.
+pub(crate) fn read_saved_claude(
+    identity: &Identity,
+    credential: Option<ClaudeCredential>,
+) -> Result<ProviderLimitsDto, HttpError> {
+    read_saved_claude_at(identity, credential, CLAUDE_PROFILE_URL, CLAUDE_USAGE_URL)
+}
+
+fn read_saved_claude_at(
+    identity: &Identity,
+    credential: Option<ClaudeCredential>,
+    profile_url: &str,
+    usage_url: &str,
+) -> Result<ProviderLimitsDto, HttpError> {
+    let credential = credential.ok_or(HttpError::Unauthorized)?;
+    let parsed = claude_read(
+        &credential,
+        Some(&expected_claude_identity(identity)),
+        profile_url,
+        usage_url,
+        ClaudeHeaders::Saved,
+    )
+    .map_err(|error| match error {
+        ProviderLoadError::Http(error) => error,
+        ProviderLoadError::AccountMismatch => HttpError::Unauthorized,
+    })?;
+    saved_card(identity, parsed)
+}
+
+/// A saved profile's Codex card, read over HTTP with its login's access `token` (`codex::read_wham`).
+/// A login without one is refused before any request. No CLI is started and nothing is renewed
+/// here.
+pub(crate) fn read_saved_codex(
+    identity: &Identity,
+    token: Option<AccessToken>,
+) -> Result<ProviderLimitsDto, HttpError> {
+    read_saved_codex_at(identity, token, codex::CODEX)
+}
+
+fn read_saved_codex_at(
+    identity: &Identity,
+    token: Option<AccessToken>,
+    urls: codex::CodexEndpoints<'_>,
+) -> Result<ProviderLimitsDto, HttpError> {
+    let token = token.ok_or(HttpError::Unauthorized)?;
+    let reading = codex::read_wham(identity, token, urls)?;
+    saved_card(
+        identity,
+        Parsed {
+            account: None,
+            reading,
+        },
+    )
+}
+
+/// A saved profile's read as its card: known by the profile's observation key, never the signed-in
+/// account's. A read that observed nothing is an error, so the card keeps what it remembers.
+fn saved_card(identity: &Identity, mut parsed: Parsed) -> Result<ProviderLimitsDto, HttpError> {
+    let label = parsed.account.as_ref().and_then(|a| a.label.clone());
+    parsed.account = Some(LimitsAccountDto {
+        id: identity.observation_key(),
+        label,
+        legacy_id: Some(if identity.provider == AgentId::Codex {
+            identity.workspace_id.clone()
+        } else {
+            identity.user_id.clone()
+        }),
+    });
+    let mut dto = finish(identity.provider, LimitsStatus::Ok, None, parsed);
+    dto.current_account = false;
+    if !dto.reading.has_observations() {
+        return Err(HttpError::Parse(
+            "Usage response contained no quota observations.".into(),
+        ));
+    }
+    Ok(dto)
 }
 
 /// Claude's usage read with its saved resets. The resets are optional, so a refusal of the reset

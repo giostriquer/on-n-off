@@ -1,7 +1,9 @@
+//! A saved profile's Codex read (`read_saved_codex`): the usage body app-server reads, asked over
+//! HTTP with the access token its login holds, starting no CLI.
 use super::*;
-use crate::dto::LimitsResetCreditsDto;
-use crate::http::{head_header, serve_once, serve_once_capturing};
-use serde_json::json;
+use crate::http::serve_once_capturing;
+use codex::CodexEndpoints;
+use serde_json::Value;
 
 fn identity(provider: AgentId) -> Identity {
     Identity {
@@ -11,234 +13,25 @@ fn identity(provider: AgentId) -> Identity {
     }
 }
 
-#[test]
-fn saved_claude_reads_verified_usage_without_a_native_login() {
-    let (profile, p) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team"}}"#,
-    );
-    let (usage, u) = serve_once_capturing("200 OK", &[], r#"{"seven_day":{"utilization":61}}"#);
-    let auth = json!({"claudeAiOauth":{"accessToken":"fixture-access"}});
-    let dto = read_at(
-        &identity(AgentId::Claude),
-        &auth,
-        &profile,
-        &usage,
-        CodexEndpoints {
-            usage: "unused",
-            reset_credits: "unused",
-            credit_usage: "unused",
-            subscriptions: "unused",
-        },
-    )
-    .unwrap();
-    p.join().unwrap();
-    let request = u.join().unwrap();
-    assert!(request.head.contains("Bearer fixture-access"));
-    assert_eq!(dto.reading.windows[0].used_percent, 61.0);
-    assert!(!dto.reading.windows[0].observed_at.is_empty());
-    assert!(!dto.current_account);
-    assert_eq!(
-        dto.account.unwrap().id,
-        identity(AgentId::Claude).observation_key()
-    );
+/// `read_saved_codex_at` with the access token in `auth`, a Codex credentials document.
+fn read_at(
+    identity: &Identity,
+    auth: &Value,
+    codex: CodexEndpoints<'_>,
+) -> Result<ProviderLimitsDto, HttpError> {
+    let token = crate::accounts::model::string(auth, "/tokens/access_token")
+        .ok()
+        .map(AccessToken::new);
+    read_saved_codex_at(identity, token, codex)
 }
 
-/// The headers a saved Claude read sends: the token and the OAuth beta header on both requests,
-/// and nothing else of its own.
-#[test]
-fn saved_claude_sends_the_token_and_the_oauth_beta_header_on_both_requests() {
-    let (profile, p) = serve_once_capturing(
-        "200 OK",
-        &[],
-        r#"{"account":{"uuid":"user"},"organization":{"uuid":"team"}}"#,
-    );
-    let (usage, u) = serve_once_capturing("200 OK", &[], r#"{"seven_day":{"utilization":61}}"#);
-    read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
-        &profile,
-        &usage,
-        CodexEndpoints {
-            usage: "unused",
-            reset_credits: "unused",
-            credit_usage: "unused",
-            subscriptions: "unused",
-        },
-    )
-    .unwrap();
-    for head in [p.join().unwrap().head, u.join().unwrap().head] {
-        assert_eq!(
-            head_header(&head, "authorization"),
-            Some("Bearer fixture-access"),
-            "{head}"
-        );
-        assert_eq!(
-            head_header(&head, "anthropic-beta"),
-            Some("oauth-2025-04-20"),
-            "{head}"
-        );
-        assert_eq!(head_header(&head, "cache-control"), None, "{head}");
-        assert_eq!(head_header(&head, "content-type"), None, "{head}");
-    }
-}
-
-/// A saved Claude account carries the subscription status its profile reports, like the native one.
-#[test]
-fn saved_claude_carries_the_subscription_status_its_profile_reports() {
-    let (profile, p) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team","subscription_status":"canceled"}}"#,
-    );
-    let (usage, u) = serve_once_capturing("200 OK", &[], r#"{"seven_day":{"utilization":61}}"#);
-    let auth = json!({"claudeAiOauth":{"accessToken":"fixture-access"}});
-
-    let dto = read_at(
-        &identity(AgentId::Claude),
-        &auth,
-        &profile,
-        &usage,
-        CodexEndpoints {
-            usage: "unused",
-            reset_credits: "unused",
-            credit_usage: "unused",
-            subscriptions: "unused",
-        },
-    )
-    .unwrap();
-    p.join().unwrap();
-    u.join().unwrap();
-
-    assert_eq!(dto.reading.subscription_status.as_deref(), Some("canceled"));
-}
-
-#[test]
-fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
-    let (profile, p) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team"}}"#,
-    );
-    let (usage, u) = serve_once_capturing(
-        "200 OK",
-        &[],
-        r#"{"seven_day":{"utilization":61},"cedar_ember":{"eligible":true,"grants":[{"id":"launch","resets_left":1,"ends_at":"2026-10-05T00:00:00Z"}]}}"#,
-    );
-    let auth = json!({"claudeAiOauth":{"accessToken":"fixture-access"}});
-    let dto = read_at(
-        &identity(AgentId::Claude),
-        &auth,
-        &profile,
-        &usage,
-        CodexEndpoints {
-            usage: "unused",
-            reset_credits: "unused",
-            credit_usage: "unused",
-            subscriptions: "unused",
-        },
-    )
-    .unwrap();
-    p.join().unwrap();
-    let request = u.join().unwrap();
-    let request_line = request.head.lines().next().unwrap_or_default();
-    assert!(
-        request_line.contains("?cedar_ember=1&skip_spend=1 "),
-        "{request_line}"
-    );
-    assert_eq!(dto.reading.windows[0].used_percent, 61.0);
-    assert_eq!(
-        dto.reading
-            .reset_credits
-            .map(|resets| resets.available_count),
-        Some(1)
-    );
-}
-
-/// On this path a rejected login renews the saved profile and spends its refresh token, so a
-/// refusal of the optional reset query must never be read as one.
-#[test]
-fn saved_claude_falls_back_to_the_plain_read_when_the_reset_query_is_refused() {
-    let (profile, p) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team"}}"#,
-    );
-    let (usage, u) = crate::http::serve_sequence(&[
-        ("403 Forbidden", &[], "{}"),
-        ("200 OK", &[], r#"{"seven_day":{"utilization":61}}"#),
-    ]);
-    let dto = read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
-        &profile,
-        &usage,
-        CodexEndpoints {
-            usage: "unused",
-            reset_credits: "unused",
-            credit_usage: "unused",
-            subscriptions: "unused",
-        },
-    )
-    .unwrap();
-    p.join().unwrap();
-    let requests = u.join().unwrap();
-    assert!(!requests[1]
-        .head
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .contains('?'));
-    assert_eq!(dto.reading.windows[0].used_percent, 61.0);
-    assert_eq!(dto.reading.reset_credits, None);
-}
-
-#[test]
-fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
-    use crate::dto::LimitWindowKind::{Model, Session, Weekly};
-
-    for session_percent in [0, 67] {
-        let payloads = [
-            json!({
-                "five_hour": {"utilization": session_percent},
-                "seven_day": {"utilization": 99},
-                "seven_day_opus": {"utilization": 100}
-            }),
-            json!({"limits": [
-                {"kind": "session", "group": "session", "percent": session_percent},
-                {"kind": "weekly_opus", "group": "weekly", "percent": 100},
-                {"kind": "weekly_all", "group": "weekly", "percent": 99}
-            ]}),
-        ];
-        for payload in payloads {
-            let (profile, p) = serve_once(
-                "200 OK",
-                r#"{"account":{"uuid":"user"},"organization":{"uuid":"team"}}"#,
-            );
-            let (usage, u) = serve_once("200 OK", &payload.to_string());
-            let dto = read_at(
-                &identity(AgentId::Claude),
-                &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
-                &profile,
-                &usage,
-                CodexEndpoints {
-                    usage: "unused",
-                    reset_credits: "unused",
-                    credit_usage: "unused",
-                    subscriptions: "unused",
-                },
-            )
-            .unwrap();
-            p.join().unwrap();
-            u.join().unwrap();
-
-            assert!(!dto.current_account);
-            assert_eq!(
-                dto.reading.windows
-                    .iter()
-                    .map(|window| (window.kind, window.used_percent))
-                    .collect::<Vec<_>>(),
-                vec![(Weekly, 99.0), (Session, f64::from(session_percent)), (Model, 100.0)],
-                "saved Claude window priority must not depend on usage or response order: {payload}"
-            );
-        }
+/// Endpoints no saved Codex read of these tests reaches.
+fn no_codex() -> CodexEndpoints<'static> {
+    CodexEndpoints {
+        usage: "unused",
+        reset_credits: "unused",
+        credit_usage: "unused",
+        subscriptions: "unused",
     }
 }
 
@@ -252,8 +45,6 @@ fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
     let dto = read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"access_token":"fixture-access"}}),
-        "unused",
-        "unused",
         CodexEndpoints {
             usage: &url,
             reset_credits: "unused",
@@ -310,8 +101,6 @@ fn saved_codex_reads_the_members_share_of_the_workspace_credits() {
     let dto = read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"access_token":"fixture-access"}}),
-        "unused",
-        "unused",
         CodexEndpoints {
             usage: &url,
             reset_credits: "unused",
@@ -345,8 +134,6 @@ fn saved_codex_takes_the_shares_meter_from_what_codex_says_remains() {
     let dto = read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"access_token":"fixture-access"}}),
-        "unused",
-        "unused",
         CodexEndpoints {
             usage: &url,
             reset_credits: "unused",
@@ -374,8 +161,6 @@ fn saved_codex_marks_a_members_used_up_share_reached() {
     let dto = read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"access_token":"fixture-access"}}),
-        "unused",
-        "unused",
         CodexEndpoints {
             usage: &url,
             reset_credits: "unused",
@@ -414,8 +199,6 @@ fn read_codex(usage: &str, resets: &str) -> Result<ProviderLimitsDto, HttpError>
     read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"access_token":"fixture-access"}}),
-        "unused",
-        "unused",
         CodexEndpoints {
             usage,
             reset_credits: resets,
@@ -547,50 +330,6 @@ fn saved_codex_treats_a_malformed_banked_reset_count_as_unknown() {
 }
 
 #[test]
-fn wrong_claude_identity_stops_before_usage() {
-    let (profile, p) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"other"},"organization":{"uuid":"team"}}"#,
-    );
-    let result = read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"accessToken":"fixture"}}),
-        &profile,
-        &crate::http::refused_url(),
-        CodexEndpoints {
-            usage: "unused",
-            reset_credits: "unused",
-            credit_usage: "unused",
-            subscriptions: "unused",
-        },
-    );
-    p.join().unwrap();
-    assert!(matches!(result, Err(HttpError::Unauthorized)));
-}
-
-#[test]
-fn matching_claude_user_in_another_workspace_is_rejected_before_usage() {
-    let (url, request) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user"},"organization":{"uuid":"other-team"}}"#,
-    );
-    let result = read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"accessToken":"fixture"}}),
-        &url,
-        &crate::http::refused_url(),
-        CodexEndpoints {
-            usage: "unused",
-            reset_credits: "unused",
-            credit_usage: "unused",
-            subscriptions: "unused",
-        },
-    );
-    request.join().unwrap();
-    assert!(matches!(result, Err(HttpError::Unauthorized)));
-}
-
-#[test]
 fn codex_quota_for_another_account_is_rejected() {
     let (url, request) = serve_once(
         "200 OK",
@@ -599,8 +338,6 @@ fn codex_quota_for_another_account_is_rejected() {
     let result = read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"access_token":"fixture"}}),
-        "unused",
-        "unused",
         CodexEndpoints {
             usage: &url,
             reset_credits: "unused",
@@ -643,8 +380,6 @@ fn a_saved_codex_read_takes_the_term_for_its_own_workspace() {
         let dto = read_at(
             who,
             &json!({"tokens":{"access_token":"fixture-access"}}),
-            "unused",
-            "unused",
             CodexEndpoints {
                 usage: &usage_url,
                 reset_credits: "unused",
@@ -697,8 +432,6 @@ fn read_codex_spending(
     read_at(
         who,
         &json!({"tokens":{"access_token":"fixture-access"}}),
-        "unused",
-        "unused",
         CodexEndpoints {
             usage,
             reset_credits: "unused",
@@ -817,150 +550,45 @@ fn a_spending_read_that_fails_leaves_the_usage_read_standing() {
     }
 }
 
-/// "team" and "enterprise" are Claude plans too. The spending read belongs to Codex's usage read, so
-/// a saved Claude account on either plan never asks the ChatGPT backend what it spent.
+/// A refused login is `Unauthorized` and a throttled one keeps its status code.
 #[test]
-fn a_saved_claude_team_or_enterprise_account_is_never_asked_what_it_spent() {
-    for plan in ["team", "enterprise"] {
-        let (profile, p) = serve_once(
-            "200 OK",
-            r#"{"account":{"uuid":"user","email":"you@example.com"},"organization":{"uuid":"team"}}"#,
-        );
-        let (usage, u) = serve_once("200 OK", r#"{"seven_day":{"utilization":61}}"#);
-        let spending = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        spending.set_nonblocking(true).unwrap();
-        let credit_usage = format!("http://{}/breakdown", spending.local_addr().unwrap());
-        let dto = read_at(
-            &identity(AgentId::Claude),
-            &json!({"claudeAiOauth":{"accessToken":"fixture-access","subscriptionType":plan}}),
-            &profile,
-            &usage,
-            CodexEndpoints {
-                usage: "unused",
-                reset_credits: "unused",
-                credit_usage: &credit_usage,
-                subscriptions: "unused",
-            },
-        )
-        .unwrap();
-        p.join().unwrap();
-        u.join().unwrap();
-
-        assert_eq!(dto.reading.plan.as_deref(), Some(plan));
-        assert_eq!(
-            spending.accept().map(|_| ()).map_err(|error| error.kind()),
-            Err(std::io::ErrorKind::WouldBlock),
-            "a Claude {plan} account asked what it spent"
-        );
-        assert_eq!(dto.reading.credits_spent, None);
-    }
-}
-
-/// Endpoints no saved Codex read of these tests reaches.
-fn no_codex() -> CodexEndpoints<'static> {
-    CodexEndpoints {
-        usage: "unused",
-        reset_credits: "unused",
-        credit_usage: "unused",
-        subscriptions: "unused",
-    }
-}
-
-/// A refused login is `Unauthorized` and a throttled one keeps its status code, for either
-/// provider.
-#[test]
-fn a_saved_read_the_service_refuses_or_throttles_keeps_its_status() {
+fn a_saved_codex_read_the_service_refuses_or_throttles_keeps_its_status() {
     for (status, expected) in [
         ("401 Unauthorized", HttpError::Unauthorized),
         ("429 Too Many Requests", HttpError::Status(429)),
     ] {
-        let (profile, p) = serve_once_capturing(status, &["Retry-After: 30"], "{}");
-        let claude = read_at(
-            &identity(AgentId::Claude),
-            &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
-            &profile,
-            &crate::http::refused_url(),
-            no_codex(),
-        );
-        p.join().unwrap();
-        assert_eq!(claude.err(), Some(expected.clone()), "Claude {status}");
-
         let (usage, u) = serve_once_capturing(status, &["Retry-After: 30"], "{}");
         let codex = read_codex(&usage, "unused");
         u.join().unwrap();
-        assert_eq!(codex.err(), Some(expected), "Codex {status}");
+        assert_eq!(codex.err(), Some(expected), "{status}");
     }
 }
 
 /// A read that answered with nothing to show is an error, so the card keeps what it remembers.
 #[test]
-fn a_saved_read_that_observed_nothing_is_an_error() {
-    let nothing = Some(HttpError::Parse(
-        "Usage response contained no quota observations.".into(),
-    ));
-    let (profile, p) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user"},"organization":{"uuid":"team"}}"#,
-    );
-    let (usage, u) = serve_once("200 OK", "{}");
-    let claude = read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"accessToken":"fixture-access"}}),
-        &profile,
-        &usage,
-        no_codex(),
-    );
-    p.join().unwrap();
-    u.join().unwrap();
-    assert_eq!(claude.err(), nothing);
-
+fn a_saved_codex_read_that_observed_nothing_is_an_error() {
     let (usage, u) = serve_once("200 OK", r#"{"plan_type":"pro"}"#);
     let codex = read_codex(&usage, "unused");
     u.join().unwrap();
-    assert_eq!(codex.err(), nothing);
+    assert_eq!(
+        codex.err(),
+        Some(HttpError::Parse(
+            "Usage response contained no quota observations.".into()
+        ))
+    );
 }
 
 /// A saved login without an access token is refused before any request.
 #[test]
-fn a_saved_login_without_an_access_token_sends_nothing() {
+fn a_saved_codex_login_without_an_access_token_sends_nothing() {
     let refused = crate::http::refused_url();
-    let claude = read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"refreshToken":"fixture-refresh"}}),
-        &refused,
-        &refused,
-        no_codex(),
-    );
-    assert_eq!(claude.err(), Some(HttpError::Unauthorized));
     let codex = read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"refresh_token":"fixture-refresh"}}),
-        "unused",
-        "unused",
         CodexEndpoints {
             usage: &refused,
             ..no_codex()
         },
     );
     assert_eq!(codex.err(), Some(HttpError::Unauthorized));
-}
-
-/// A saved Claude login past its `expiresAt` is sent all the same: this read never checks it.
-#[test]
-fn a_saved_claude_read_sends_a_token_past_its_expiry() {
-    let (profile, p) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user"},"organization":{"uuid":"team"}}"#,
-    );
-    let (usage, u) = serve_once("200 OK", r#"{"seven_day":{"utilization":61}}"#);
-    let dto = read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"r","expiresAt":1}}),
-        &profile,
-        &usage,
-        no_codex(),
-    );
-    assert!(p.join().unwrap().contains("Bearer fixture-access"));
-    u.join().unwrap();
-    assert_eq!(dto.unwrap().reading.windows[0].used_percent, 61.0);
 }

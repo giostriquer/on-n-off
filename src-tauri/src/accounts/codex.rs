@@ -51,6 +51,14 @@ impl super::Adapter for Codex {
         login.renewed(&reply, now_ms)
     }
 
+    fn read_usage(
+        &self,
+        identity: &Identity,
+        login: &Login,
+    ) -> Result<ProviderLimitsDto, crate::http::HttpError> {
+        crate::limits::read_saved_codex(identity, CodexLogin::of(login).access_token())
+    }
+
     /// Running Codex clients never pick up a replaced login, so they refuse an ordinary switch.
     fn client(&self) -> &'static Client {
         &Client {
@@ -298,13 +306,7 @@ impl<'a> CodexLogin<'a> {
 
     /// The access token, for one request header; `None` for a login without one.
     pub(crate) fn access_token(&self) -> Option<AccessToken> {
-        Self::access_token_in(self.auth)
-    }
-
-    /// The access token in a Codex credentials document, `auth`: a saved account's, as its usage
-    /// read holds it. `None` for a document without one.
-    pub(crate) fn access_token_in(auth: &Value) -> Option<AccessToken> {
-        model::string(auth, "/tokens/access_token")
+        model::string(self.auth, "/tokens/access_token")
             .ok()
             .map(AccessToken::new)
     }

@@ -244,7 +244,11 @@ fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) ->
     fetch_with(
         profile,
         chrono::Utc::now().timestamp_millis(),
-        &|login| crate::limits::saved::read(&profile.identity, &login.auth),
+        &|login| {
+            super::adapter(profile.identity.provider)
+                .map_err(|_| HttpError::Unauthorized)?
+                .read_usage(&profile.identity, login)
+        },
         &|| {
             super::usage_renew::renew_owned(profile, open, &|login| {
                 super::usage_renew::request(

@@ -7,6 +7,8 @@ mod credits_spent;
 mod memory;
 mod remembered_reading;
 mod renewal;
+mod saved_claude;
+mod saved_codex;
 
 use super::*;
 use crate::dto::{

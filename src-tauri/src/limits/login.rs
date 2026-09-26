@@ -1,7 +1,6 @@
 //! First usage observation during isolated official sign-in, before its native home is removed.
 //! No saved vault credential is loaded or independently renewed here.
 use super::{credentials::ClaudeCredential, *};
-use crate::accounts::model::Identity;
 
 pub(crate) fn read(
     isolated_home: &Path,

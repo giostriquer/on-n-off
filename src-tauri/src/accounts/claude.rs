@@ -53,6 +53,14 @@ impl super::Adapter for Claude {
         claude_renew::renew_private(login, now_ms, token_url)
     }
 
+    fn read_usage(
+        &self,
+        identity: &Identity,
+        login: &Login,
+    ) -> Result<ProviderLimitsDto, crate::http::HttpError> {
+        crate::limits::read_saved_claude(identity, ClaudeLogin::of(login).credential())
+    }
+
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.
     fn client(&self) -> &'static Client {
         &Client {
@@ -461,14 +469,14 @@ impl<'a> ClaudeLogin<'a> {
         }
     }
 
-    /// What Limits reads with: the access token, its expiry and the plan.
+    /// What Limits reads with: the access token, its expiry and the plan. `None` for a login Claude
+    /// Code has signed out of, which empties `claudeAiOauth` of its access token.
     pub(crate) fn credential(&self) -> Option<ClaudeCredential> {
         Self::credential_in(self.auth)
     }
 
-    /// The credential in a Claude credentials document, `auth`, which holds no account record:
-    /// what the store holds, or a saved account's credential as its usage read holds it. `None`
-    /// for a login Claude Code has signed out of, which empties `claudeAiOauth` of its access token.
+    /// The credential in a Claude credentials document, `auth`, which holds no account record, as
+    /// the store holds it.
     pub(crate) fn credential_in(auth: &Value) -> Option<ClaudeCredential> {
         parse_claude_credential(auth)
     }
