@@ -28,8 +28,7 @@ fn read_claude_at(
         return None;
     }
     let account = dto.account.as_mut()?;
-    account.legacy_id = Some(identity.user_id.clone());
-    account.id = identity.observation_key();
+    *account = scoped_account(identity, account.label.take());
     accepted(identity, dto)
 }
 

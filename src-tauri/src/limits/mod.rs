@@ -351,13 +351,12 @@ fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
     }
     if let (Some(identity), Some(account)) = (&selected_identity, &mut loaded.dto.account) {
         if let Some(workspace) = &identity.organization_id {
-            account.legacy_id = Some(identity.account.id.clone());
-            account.id = crate::accounts::model::Identity {
+            let identity = Identity {
                 provider: AgentId::Claude,
                 user_id: identity.account.id.clone(),
                 workspace_id: workspace.clone(),
-            }
-            .observation_key();
+            };
+            *account = scoped_account(&identity, account.label.take());
         }
     }
     loaded.dto
@@ -537,16 +536,8 @@ fn read_saved_codex_at(
 /// A saved profile's read as its card: known by the profile's observation key, never the signed-in
 /// account's. A read that observed nothing is an error, so the card keeps what it remembers.
 fn saved_card(identity: &Identity, mut parsed: Parsed) -> Result<ProviderLimitsDto, HttpError> {
-    let label = parsed.account.as_ref().and_then(|a| a.label.clone());
-    parsed.account = Some(LimitsAccountDto {
-        id: identity.observation_key(),
-        label,
-        legacy_id: Some(if identity.provider == AgentId::Codex {
-            identity.workspace_id.clone()
-        } else {
-            identity.user_id.clone()
-        }),
-    });
+    let label = parsed.account.and_then(|account| account.label);
+    parsed.account = Some(scoped_account(identity, label));
     let mut dto = finish(identity.provider, LimitsStatus::Ok, None, parsed);
     dto.current_account = false;
     if !dto.reading.has_observations() {
@@ -555,6 +546,21 @@ fn saved_card(identity: &Identity, mut parsed: Parsed) -> Result<ProviderLimitsD
         ));
     }
     Ok(dto)
+}
+
+/// The account a card of `identity` is known by, labelled `label`: its observation key, with the
+/// key its cards had before scoped identities as its legacy id (Claude's user, Codex's workspace),
+/// through which it supersedes them (`snapshots::without_superseded`).
+fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDto {
+    LimitsAccountDto {
+        id: identity.observation_key(),
+        label,
+        legacy_id: Some(if identity.provider == AgentId::Codex {
+            identity.workspace_id.clone()
+        } else {
+            identity.user_id.clone()
+        }),
+    }
 }
 
 /// Claude's usage read with its saved resets. The resets are optional, so a refusal of the reset
