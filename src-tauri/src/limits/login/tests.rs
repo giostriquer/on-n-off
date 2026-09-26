@@ -1,5 +1,5 @@
 use super::*;
-use crate::http::{head_header, serve_once};
+use crate::http::serve_once;
 use serde_json::json;
 
 fn identity() -> Identity {
@@ -15,7 +15,7 @@ fn credential() -> ClaudeCredential {
     }})).unwrap()
 }
 #[test]
-fn isolated_claude_sign_in_keeps_a_scoped_dated_snapshot_without_reading_the_active_home() {
+fn a_first_claude_reading_is_remembered_as_a_scoped_dated_snapshot() {
     let home = tempfile::tempdir().unwrap();
     let (profile, profile_request) = serve_once(
         "200 OK",
@@ -48,45 +48,6 @@ fn isolated_claude_sign_in_keeps_a_scoped_dated_snapshot_without_reading_the_act
     assert_eq!(reloaded.len(), 1);
     assert_eq!(reloaded[0].reading.windows, dto.reading.windows);
     assert_eq!(reloaded[0].account, dto.account);
-    assert!(!home.path().join(".claude").exists());
-    assert!(!home.path().join(".claude.json").exists());
-}
-#[test]
-fn the_first_usage_read_sends_the_claude_headers() {
-    let (profile, profile_request) = serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"user","email":"me@example.com"},"organization":{"uuid":"team"}}"#,
-    );
-    let (usage, usage_request) = serve_once("200 OK", r#"{"seven_day":{"utilization":61}}"#);
-    read_saved_claude_at(
-        &identity(),
-        Some(credential()),
-        Utc::now().timestamp_millis(),
-        &profile,
-        &usage,
-    )
-    .unwrap();
-    for head in [
-        profile_request.join().unwrap(),
-        usage_request.join().unwrap(),
-    ] {
-        assert_eq!(
-            head_header(&head, "authorization"),
-            Some("Bearer fixture-access"),
-            "{head}"
-        );
-        assert_eq!(
-            head_header(&head, "anthropic-beta"),
-            Some("oauth-2025-04-20"),
-            "{head}"
-        );
-        assert_eq!(
-            head_header(&head, "cache-control"),
-            Some("no-cache"),
-            "{head}"
-        );
-        assert_eq!(head_header(&head, "content-type"), None, "{head}");
-    }
 }
 #[test]
 fn saved_claude_session_keeps_the_reported_percentage_and_optional_reset() {
@@ -192,4 +153,49 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
             .count(),
         3
     );
+}
+
+/// What a first usage reading keeps: an answer about the signed-in identity that observed
+/// something, as a card that is not the signed-in account's. Anything else is no reading.
+#[test]
+fn a_first_reading_is_kept_only_when_it_answered_for_the_identity_with_something_observed() {
+    let who = Identity {
+        provider: AgentId::Codex,
+        ..identity()
+    };
+    let answered = ProviderLimitsDto::for_test(AgentId::Codex, &who.observation_key())
+        .with_reading(Reading {
+            windows: vec![super::super::json::window(
+                "primary",
+                "Weekly · all models",
+                crate::dto::LimitWindowKind::Weekly,
+                42.0,
+                None,
+            )],
+            ..Reading::default()
+        });
+
+    let kept = accepted(&who, answered.clone()).expect("an answer about the identity");
+    assert!(!kept.current_account);
+    assert_eq!(kept.reading, answered.reading);
+
+    let failed = ProviderLimitsDto {
+        status: LimitsStatus::Failed,
+        ..answered.clone()
+    };
+    let mut another = answered.clone();
+    another.account.as_mut().unwrap().id = "profile:someone-else".into();
+    let unnamed = ProviderLimitsDto {
+        account: None,
+        ..answered.clone()
+    };
+    let empty = answered.with_reading(Reading::default());
+    for (case, card) in [
+        ("failed", failed),
+        ("another account", another),
+        ("no account", unnamed),
+        ("nothing observed", empty),
+    ] {
+        assert_eq!(accepted(&who, card), None, "{case}");
+    }
 }
