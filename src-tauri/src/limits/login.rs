@@ -2,34 +2,13 @@
 //! No saved vault credential is loaded or independently renewed here.
 use super::{credentials::ClaudeCredential, *};
 
-/// The first usage reading of an isolated Claude sign-in as `identity`, read with its login's
-/// `credential`, which must sign in as that user in that workspace.
+/// The first usage reading of an isolated Claude sign-in as `identity`: a saved profile's read
+/// (`read_saved_claude`) with its login's `credential`.
 pub(crate) fn read_claude(
     identity: &Identity,
     credential: ClaudeCredential,
 ) -> Option<ProviderLimitsDto> {
-    read_claude_at(identity, credential, CLAUDE_PROFILE_URL, CLAUDE_USAGE_URL)
-}
-
-fn read_claude_at(
-    identity: &Identity,
-    credential: ClaudeCredential,
-    profile_url: &str,
-    usage_url: &str,
-) -> Option<ProviderLimitsDto> {
-    let mut dto = claude_limits(
-        CredentialLookup::Found(credential),
-        &Some(expected_claude_identity(identity)),
-        profile_url,
-        usage_url,
-    )
-    .dto;
-    if dto.status != LimitsStatus::Ok {
-        return None;
-    }
-    let account = dto.account.as_mut()?;
-    *account = scoped_account(identity, account.label.take());
-    accepted(identity, dto)
+    read_saved_claude(identity, Some(credential)).ok()
 }
 
 /// The first usage reading of an isolated Codex sign-in as `identity`, read by Codex's own
