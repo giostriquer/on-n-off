@@ -335,7 +335,7 @@ the code today; a change that moves one updates its row.
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
 | Account details | `plan` and `subscription_status` on `Reading` |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); what a fresh read keeps from it is the remember policy, `Reading::keeping` (`limits/reading.rs`) |
-| Native store | `NativeStore` (`accounts/native.rs`); for Claude, where the login lives, how it is read and written and Claude Code's locks around it are `accounts/claude_store.rs` |
+| Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects) |
 | Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`) |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |
 | Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |

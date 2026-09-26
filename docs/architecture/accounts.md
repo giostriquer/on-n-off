@@ -72,6 +72,35 @@ the ticket guards is rechecked under the lease afterwards, in one of three ways:
 
 The epoch and the recovery journal are private to the store.
 
+## Provider adapters
+
+Everything account code does differently for Claude and Codex sits behind one accounts-local seam,
+separate from the catalog's `AgentAdapter` (which accounts touch only through
+`supports_accounts`, the IPC gate). `accounts::adapter` is the one place that tells the providers
+apart; it gives the provider's `Adapter`, `claude::Claude` or `codex::Codex`, and generic account
+code asks that rather than which provider it has. An adapter:
+
+- resolves the provider's native store, which the operations reach through the `Accounts`
+  context's `ResolveNative`: `ClaudeNative` over `claude_store.rs`, `CodexNative` over
+  `codex_store.rs`. Each is the transaction's `Native` and a `NativeAccount`: its preflight
+  (custom homes, environment credentials, managed policy), its sign-out, the signed-in
+  subscription whose saved accounts' usage is read beside it (an API-key Codex login has none),
+  and an `IsolatedSignIn` in a private directory with the official sign-in command, the first usage
+  reading and the cleanup of anything the sign-in left outside that directory;
+- reads a login through its typed view, `ClaudeLogin` or `CodexLogin` (`accounts::view`), so
+  nothing else reads a login's JSON: identity and email, the credential generation's fingerprint,
+  whether a saved login is due to renew, and the private renewal's request and fold. A `Login`
+  keeps its stored shape, `{auth, account}`, so the vault, the recovery journal and the renewal
+  journal written by earlier versions still load, and each view fills only its own slots of the
+  one fingerprint layout every version has hashed. Whole documents are still written raw:
+  Codex's `auth.json` verbatim, Claude's `claudeAiOauth` merged into its credentials document
+  beside the `oauthAccount` record `ConfigIo` patches;
+- says how its client processes are recognized and whether they refuse an ordinary switch.
+
+Sign-in, the cleanup of abandoned sign-in homes, automatic remembering and the saved accounts'
+usage refresh are methods on the same `Accounts` context as the six operations, so they resolve
+the native store and reach running clients and listeners the same way.
+
 `accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
 existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
 store under its locks. Where Claude's login lives and how it is locked belongs to
@@ -84,7 +113,7 @@ Code's own account name first, and one lock protocol. A renewal whose refresh lo
 finds taken away sends no grant. An emptied `claudeAiOauth`, Claude Code's sign-out, is no native
 login. The same grant/parser implementation also serves private vault renewal
 under the saved-account journal. Limits consumes access-only projections. The one projection that
-carries a credential is `native::codex_metadata_and_access`: the signed-in Codex login's identity
+carries a credential is `codex_store::metadata_and_access`: the signed-in Codex login's identity
 and its access token alone (never its refresh or id token, never the login JSON), wrapped in
 `model::AccessToken`, which has no `Debug`, `Clone` or serialization and reads back only as an
 `Authorization` header value. Its one caller is the app-server read's identity check after the
@@ -93,7 +122,10 @@ handshake (`limits/codex_app_server.rs`), and only for a workspace plan; it hand
 `/backend-api/wham/usage/daily-workspace-user-token-usage-breakdown`. That exception to "Codex alone
 makes requests for the signed-in account" is the user's decision (2026-09-24). Native Codex delegates
 renewal to its official app-server; private saved Codex credentials use the JSON refresh grant
-without starting a CLI or writing auth.json.
+without starting a CLI or writing auth.json. Which backend holds Codex's login, and how its
+keyring item is named and reached, is `accounts/codex_store.rs`'s question, as Claude's store is
+`claude_store.rs`'s. Limits reads a saved login's credential only through the typed views and
+the signed-in Codex login only through `codex_store`'s projections.
 
 ## Operations
 
@@ -252,9 +284,13 @@ Focused tests use disposable homes, fake native verification boundaries, real fi
 authenticated encryption and browser/HTTP fixtures. They cover identity separation, newer outgoing
 generations, wrong-user reauthentication, cancellation, partial publication, recovery, MCP
 preservation, corrupted vaults and browser workspace membership. Tests do not use personal accounts.
-The account operations run on `Accounts` (`accounts/mod.rs`), which tests build from a scratch home
-whose vault the fixture key unlocks, a fake native store, fake running clients and a notifier that
-records what it heard; a test build fails any test that reaches the OS credential store.
+The account operations, sign-in, remembering and the saved accounts' usage refresh run on
+`Accounts` (`accounts/mod.rs`), which tests build from a scratch home whose vault the fixture key
+unlocks, a fake native store that reads each provider's logins by that provider's rules, a fake
+isolated sign-in whose official client is a stub, fake running clients and a notifier that
+records what it heard; a test build fails any test that reaches the OS credential store. Each
+adapter's native store is tested beside it (`claude/tests/`, `codex/tests/`), with a scratch home,
+an injected environment and managed-policy paths, and a fake `security`.
 
 Real browser sign-in, provider revocation, macOS Keychain interoperability and Windows credential
 storage require designated-account validation on those platforms. Fixture tests and a read-only

@@ -1,5 +1,8 @@
 //! Opt-in saved logins. Native stores own shared generations; only never-activated private
 //! sign-ins can renew in the vault. Saved usage reads never activate an account.
+//!
+//! Every operation runs on the [`Accounts`] context. What differs between Claude and Codex lives
+//! in the provider's [`Adapter`] (`claude.rs`, `codex.rs`), which [`adapter`] alone chooses.
 pub(crate) mod model;
 pub(crate) mod vault;
 
