@@ -119,7 +119,7 @@ export type LimitCardsInput = {
 
 /** A card before it is presented: a reading, a saved profile, or both. */
 type Slot = { reading: ProviderLimits; profile: SavedProfile | null }
-  | { reading: null; profile: SavedProfile & { observationId: string }; provider: AgentId };
+  | { reading: null; profile: SavedProfile; provider: AgentId };
 
 /**
  * One provider's cards, in order. Legacy history a verified saved identity replaced is merged away
@@ -134,10 +134,7 @@ export function limitCards({ provider, entries, profiles, now }: LimitCardsInput
     profile: profiles.find(profile => profile.observationId === reading.account?.id) ?? null,
   }));
   for (const profile of profiles) {
-    const { observationId } = profile;
-    if (observationId && !slots.some(slot => accountOf(slot)?.id === observationId)) {
-      slots.push({ reading: null, profile: { ...profile, observationId }, provider });
-    }
+    if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile, provider });
   }
   return orderSlots(slots, now).map((slot, index) => presentCard(slot, index, legacyAccounts, now));
 }

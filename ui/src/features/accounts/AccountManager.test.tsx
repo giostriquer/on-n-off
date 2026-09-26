@@ -15,7 +15,7 @@ function Cards() {
   const manager = useAccountManagement();
   return <>{manager?.query.data?.profiles.map(profile => <section key={profile.id} aria-label={profile.email ?? "account"}>
     <span>{profile.email}</span><span>{profile.category}</span>
-    <AccountCardActions accountId={profile.observationId!} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>} />
+    <AccountCardActions accountId={profile.observationId} label={profile.email!} current={profile.active} profile={profile} onForget={forget} header={menu => <header>{menu}</header>} />
   </section>)}</>;
 }
 function setup({ preferences = false, onCommit }: { preferences?: boolean; onCommit?: () => void } = {}) {

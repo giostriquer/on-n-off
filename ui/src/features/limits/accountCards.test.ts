@@ -9,7 +9,7 @@ const profile: SavedProfile = {
   email: "person@example.com", label: "person@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, needsLogin: false,
 };
 const scoped: ProviderLimits = {
-  provider: "codex", status: "ok", account: { id: profile.observationId!, label: profile.email }, currentAccount: false,
+  provider: "codex", status: "ok", account: { id: profile.observationId, label: profile.email }, currentAccount: false,
   windows: [{ id: "weekly", label: "Weekly", kind: "weekly", usedPercent: 0, observedAt: profile.savedAt }],
 };
 const legacy: ProviderLimits = { ...scoped, account: { id: "team", label: profile.email }, windows: [{ ...scoped.windows[0], usedPercent: 100 }] };
@@ -31,7 +31,7 @@ it.each([
   { ...scoped, windows: [], resetCredits: { availableCount: 0, nextExpiresAt: null } },
   { ...scoped, status: "failed" as const },
   { ...scoped, account: { id: "profile:other-user", label: profile.email } },
-  { ...scoped, account: { id: profile.observationId!, label: "other@example.com" } },
+  { ...scoped, account: { id: profile.observationId, label: "other@example.com" } },
 ])("retains history when scoped usage cannot be verified: %j", candidate => {
   expect(accountCards([candidate, legacy], [profile]).entries).toEqual([candidate, legacy]);
 });
