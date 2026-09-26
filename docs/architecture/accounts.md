@@ -102,10 +102,12 @@ code asks that rather than which provider it has. An adapter:
   written raw: Codex's `auth.json` verbatim, Claude's `claudeAiOauth` merged into its credentials
   document beside the `oauthAccount` record `ConfigIo` patches;
 - reads a saved profile's usage with its login (`read_usage`), through the provider's Limits
-  reader: Claude's credential to `limits::read_saved_claude`, the signed-in Claude read expecting
-  the profile's identity; Codex's access token to `limits::read_saved_codex`, the `wham/usage`
-  body app-server itself reads, without starting a CLI. Claude's first usage after a sign-in is the
-  same read; Codex's runs app-server in the isolated home;
+  reader, asking the services it is given (`limits::SavedReadUrls`): Claude's credential to
+  `limits::read_saved_claude`, the signed-in Claude read expecting the profile's identity, unless
+  the login's renewal is due, which reads as expired without a request; Codex's access token to
+  `limits::read_saved_codex`, the `wham/usage` body app-server itself reads, without starting a
+  CLI. A login without an access token is refused before either. Claude's first usage after a
+  sign-in is the same read; Codex's runs app-server in the isolated home;
 - renews a never-activated private login at its token endpoint: Claude's grant sent from
   `claude_renew.rs`, Codex's built and folded by its login and sent from `usage_renew.rs`;
 - says how its client processes are recognized and whether they refuse an ordinary switch.
