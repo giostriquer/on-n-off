@@ -213,14 +213,14 @@ describe("hasObservations", () => {
 
   it("keeps a card with only a workspace-credit share as a paused refresh rather than an empty one", () => {
     const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", workspaceCredits: SHARE };
-    expect(presentLimitAccount(failed, "unavailable").refreshPaused).toBe(true);
-    expect(presentLimitAccount({ ...failed, currentAccount: false }, "unavailable").remembered).toBe(true);
+    expect(presentLimitAccount(failed, "unavailable").status).toEqual({ kind: "paused" });
+    expect(presentLimitAccount({ ...failed, currentAccount: false }, "unavailable").status).toEqual({ kind: "savedRefresh", detail: "Refresh failed" });
   });
 
   it("keeps a card with only banked resets as a paused refresh rather than an empty one", () => {
     const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", resetCredits: { availableCount: 1, nextExpiresAt: null } };
-    expect(presentLimitAccount(failed, "unavailable").refreshPaused).toBe(true);
-    expect(presentLimitAccount({ ...failed, currentAccount: false }, "unavailable").remembered).toBe(true);
+    expect(presentLimitAccount(failed, "unavailable").status).toEqual({ kind: "paused" });
+    expect(presentLimitAccount({ ...failed, currentAccount: false }, "unavailable").status).toEqual({ kind: "savedRefresh", detail: "Refresh failed" });
   });
 });
 
@@ -235,12 +235,12 @@ describe.each(["failed", "unauthenticated"] as const)("saved %s usage status", s
   ])("quietly identifies retained $name", observation => {
     const presented = presentLimitAccount({provider:"codex", currentAccount:false, status, message, ...observation}, "fallback");
     expect(presented.message).toBeNull();
-    expect(presented.savedRefreshDetail).toBe(message);
+    expect(presented.status).toEqual({ kind: "savedRefresh", detail: message });
   });
   it("keeps the error visible without any retained observation", () => {
     const presented = presentLimitAccount({provider:"codex", currentAccount:false, status, message, windows:[], resetCredits:{availableCount:0, nextExpiresAt:null}}, "fallback");
     expect(presented.message).toBe(message);
-    expect(presented.savedRefreshDetail).toBeNull();
+    expect(presented.status).toBeNull();
   });
 });
 

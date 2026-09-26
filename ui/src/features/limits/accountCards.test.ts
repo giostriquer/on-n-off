@@ -49,7 +49,7 @@ it("counts every window a card carries, as the card itself does", () => {
   };
 
   expect(accountCards([onlyAWindowOnceHidden, legacy], [profile]).entries).toEqual([onlyAWindowOnceHidden]);
-  expect(presentLimitAccount(onlyAWindowOnceHidden, "fallback").remembered).toBe(true);
+  expect(presentLimitAccount(onlyAWindowOnceHidden, "fallback").status).toEqual({ kind: "remembered" });
 });
 it("does not infer identity from email without a saved profile", () => {
   expect(accountCards([scoped, legacy], []).entries).toEqual([scoped, legacy]);

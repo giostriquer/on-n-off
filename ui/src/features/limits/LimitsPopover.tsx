@@ -209,7 +209,7 @@ function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }
       </header>
 
       {freshness.message ? (
-        <p className={`m-0 text-[12px] ${freshness.failed ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
+        <p className={`m-0 text-[12px] ${freshness.readStatus === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
           {freshness.message}
         </p>
       ) : null}

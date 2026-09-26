@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
+import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { formatObservedAt } from "$lib/limitsFormat";
 import { refreshLimits } from "./useLimitsProviders";
 import { Limits } from "./Limits";
+import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -36,59 +37,6 @@ function deferred<T>(): Deferred<T> {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
-}
-
-const NOW = "2026-08-17T20:00:00Z";
-
-function okClaude(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return {
-    provider: "claude",
-    status: "ok",
-    account: { id: "uuid-1", label: "me@claude.example" },
-    currentAccount: true,
-    plan: "max",
-    windows: [
-      { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
-      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-18T04:59:59Z", observedAt: NOW },
-      { id: "weekly_opus", label: "Weekly · Opus", kind: "model", usedPercent: 91.4, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
-    ],
-    ...overrides,
-  };
-}
-
-function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return {
-    provider: "codex",
-    status: "ok",
-    account: { id: "acct-work", label: "work@codex.example" },
-    currentAccount: true,
-    plan: "pro",
-    windows: [
-      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 74, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
-      { id: "extra:gpt-5.6-luna", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
-    ],
-    credits: { balance: "12.5", unlimited: false },
-    ...overrides,
-  };
-}
-
-/** A remembered snapshot of the other Codex account: read yesterday, one window already reset. */
-function staleCodex(): ProviderLimits {
-  return {
-    provider: "codex",
-    status: "ok",
-    account: { id: "acct-personal", label: "personal@codex.example" },
-    currentAccount: false,
-    plan: "plus",
-    windows: [
-      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 88, resetsAt: "2026-08-20T10:00:00Z", observedAt: "2026-08-16T21:40:00.000Z" },
-      { id: "secondary", label: "5 hour · all models", kind: "session", usedPercent: 40, resetsAt: "2026-08-16T22:00:00Z", observedAt: "2026-08-16T21:40:00.000Z" },
-    ],
-  };
-}
-
-function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): ProviderLimits {
-  return { provider, status, message, currentAccount: true, windows: [] };
 }
 
 function answer(
@@ -315,7 +263,7 @@ describe("Limits", () => {
     await waitFor(() => expect(remove).toBeEnabled());
     fireEvent.click(remove);
     fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
-    await waitFor(() => expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex", "acct-personal"));
+    await waitFor(() => expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex", "acct-personal", undefined));
     // The card only goes once the backend has actually forgotten it.
     expect(card("Codex limits · personal@codex.example")).toBeTruthy();
     await act(async () => {
@@ -598,9 +546,9 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
  fireEvent.click(screen.getByRole("button",{name:"Remove account"}));
  fireEvent.click(screen.getByRole("button",{name:"Confirm removal"}));
  await waitFor(()=>expect(accountAction).toHaveBeenCalled());
- await waitFor(()=>expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","profile:user-team"));
+ await waitFor(()=>expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","profile:user-team",undefined));
  // Legacy history goes first, so a partial failure keeps the scoped observation available.
- expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex","team","shared@example.com"],["codex","profile:user-team"]]);
+ expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex","team","shared@example.com"],["codex","profile:user-team",undefined]]);
  await act(async()=>{await client.invalidateQueries({queryKey:["limits","codex"]});});
  expect(screen.queryByRole("region",{name:"Codex limits · shared@example.com"})).toBeNull();
  expect(card("Codex limits · personal@codex.example")).toBeTruthy();

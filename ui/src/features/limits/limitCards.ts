@@ -21,6 +21,7 @@ import {
   unexpiredBankedResets,
   usableAgainAt,
   usageLeft,
+  type CardStatus,
   type LimitAccountPresentation,
   type LimitWindowPresentation,
 } from "./limitPresentation";
@@ -29,15 +30,7 @@ import {
  * Where a Claude reset is spent. on-n-off only reports Claude's, and Claude Code spends the reset of
  * whoever it is signed in as, so only the signed-in account's card names the command.
  */
-export const CLAUDE_RESET_HINT = "/limit-reset in Claude Code";
-
-/**
- * What a card says about how current its numbers are, one thing at a time and in this precedence:
- * a saved account whose read failed shows its last known usage (`detail` says why); any other
- * reading that is not the signed-in account's is remembered; the signed-in account's own refresh
- * can be paused, its numbers the last it read.
- */
-export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "remembered" } | { kind: "paused" };
+const CLAUDE_RESET_HINT = "/limit-reset in Claude Code";
 
 /**
  * A quota window as a card shows it. The headline window's `note` is empty when the provider
@@ -66,25 +59,33 @@ export type CardSubscription =
   | { provider: "codex"; accountId: string; current: boolean; term: LimitsSubscription | null }
   | { provider: "claude"; status: string | null; lastKnown: boolean; checkedAt: string | null };
 
-/** One argument list for `forgetLimitsSnapshot`: an account id, and the email a legacy id must still carry. */
-export type ForgetStep = [accountId: string, expectedEmail?: string];
+/** One snapshot to forget: an account id, and for a legacy id the email it must still carry. */
+export type ForgetStep = { accountId: string; expectedEmail?: string };
+
+/** The account a card's controls act on. */
+export type CardAccount = {
+  id: string;
+  /** How the controls and their confirmations name the account: its email or label, else its id. */
+  name: string;
+  profile: SavedProfile | null;
+  /** What removing the account deletes, in order: its legacy history first, then its own. */
+  forget: ForgetStep[];
+  /** The reading a Codex card's banked-reset action spends against; null on Claude and without a reading. */
+  codexActions: ProviderLimits | null;
+};
 
 /** Everything one Limits card shows, decided once for both the Limits screen and the menu-bar popover. */
 export type LimitCard = {
   key: string;
   provider: AgentId;
-  /** The reading the card shows; null for a saved profile no read has answered for yet. */
-  reading: ProviderLimits | null;
-  profile: SavedProfile | null;
-  accountId: string | null;
   identity: {
     /** What the card is called: the saved profile's email, else the read's label, else the provider. */
     label: string;
     ariaLabel: string;
     category: string | null;
-    /** How the account controls name the account: its email or label, else its id. */
-    accountName: string | null;
   };
+  /** Null for a read that names no account, which has no account controls. */
+  account: CardAccount | null;
   plan: string | null;
   status: CardStatus | null;
   /** The account in use: the saved profiles' word for it, else the read's. */
@@ -92,23 +93,18 @@ export type LimitCard = {
   headline: CardWindow | null;
   rows: CardWindow[];
   figures: CardFigures;
-  /** Whether the card's footer offers to spend a Codex banked reset. */
-  resetAction: boolean;
   empty: { reason: "usageUnavailable" | "noWindows"; copy: string } | null;
   freshness: {
     updatedAt: string | null;
     lastKnown: boolean;
     message: string | null;
-    failed: boolean;
     readStatus: LimitsStatus;
   };
-  /** What removing the account deletes, in order: its legacy history first, then its own. */
-  forget: ForgetStep[];
   subscription: CardSubscription | null;
 };
 
 export type LimitCardsInput = {
-  /** The provider whose cards these are; a profile-only card is this provider's. */
+  /** The provider whose cards these are. */
   provider: AgentId;
   /** Its readings; undefined until the first read answers. */
   entries: ProviderLimits[] | undefined;
@@ -118,8 +114,7 @@ export type LimitCardsInput = {
 };
 
 /** A card before it is presented: a reading, a saved profile, or both. */
-type Slot = { reading: ProviderLimits; profile: SavedProfile | null }
-  | { reading: null; profile: SavedProfile; provider: AgentId };
+type Slot = { reading: ProviderLimits; profile: SavedProfile | null } | { reading: null; profile: SavedProfile };
 
 /**
  * One provider's cards, in order. Legacy history a verified saved identity replaced is merged away
@@ -134,9 +129,9 @@ export function limitCards({ provider, entries, profiles, now }: LimitCardsInput
     profile: profiles.find(profile => profile.observationId === reading.account?.id) ?? null,
   }));
   for (const profile of profiles) {
-    if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile, provider });
+    if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile });
   }
-  return orderSlots(slots, now).map((slot, index) => presentCard(slot, index, legacyAccounts, now));
+  return orderSlots(slots, provider, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, now));
 }
 
 function accountOf(slot: Slot) {
@@ -160,8 +155,8 @@ function isCurrent(slot: Slot): boolean {
  * main window and as a renewed one is decided in one place. The sort is stable: equal ranks keep
  * the backend's order, newest observation first, with profile-only cards after them.
  */
-function orderSlots(slots: Slot[], now: number): Slot[] {
-  const ranked = slots.map(slot => ({ slot, rank: cardRank(slot, now) }));
+function orderSlots(slots: Slot[], provider: AgentId, now: number): Slot[] {
+  const ranked = slots.map(slot => ({ slot, rank: cardRank(slot, provider, now) }));
   ranked.sort((a, b) => compare(a.rank[0], b.rank[0]) || compare(a.rank[1], b.rank[1]));
   return ranked.map(({ slot }) => slot);
 }
@@ -169,12 +164,12 @@ function orderSlots(slots: Slot[], now: number): Slot[] {
 /** The group, then the group's own measure: capacity left (negated, most first) or the return instant. */
 type CardRank = [group: number, within: number];
 
-function cardRank(slot: Slot, now: number): CardRank {
+function cardRank(slot: Slot, provider: AgentId, now: number): CardRank {
   if (isCurrent(slot)) return [0, 0];
   const entry = slot.reading;
   const left = entry ? usageLeft(entry, now) : null;
   if (!entry || left === null) return [3, 0];
-  if (left > 0) return [1, -left * planMultiplier(entry.plan, entry.provider)];
+  if (left > 0) return [1, -left * planMultiplier(entry.plan, provider)];
   return [2, usableAgainAt(entry, now)];
 }
 
@@ -183,14 +178,13 @@ function compare(a: number, b: number): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** What a profile-only card says about its freshness: nothing was read, so nothing is stale. */
-const UNREAD: LimitAccountPresentation = {
-  message: null, refreshPaused: false, savedRefreshDetail: null, remembered: false, lastKnown: false, updatedAt: null,
-};
+/** A profile-only card has read nothing, so nothing on it is stale. */
+const UNREAD: LimitAccountPresentation = { status: null, message: null, lastKnown: false, updatedAt: null };
 
-function presentCard(slot: Slot, index: number, legacyAccounts: Map<string, { id: string; email: string }[]>, now: number): LimitCard {
+type LegacyAccounts = Map<string, { id: string; email: string }[]>;
+
+function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccounts: LegacyAccounts, now: number): LimitCard {
   const { reading, profile } = slot;
-  const provider = slot.reading ? slot.reading.provider : slot.provider;
   const name = providerLabel(provider);
   const account = accountOf(slot);
   const current = isCurrent(slot);
@@ -202,22 +196,24 @@ function presentCard(slot: Slot, index: number, legacyAccounts: Map<string, { id
   return {
     key: `${current ? "current" : "remembered"}-${account?.id ?? index}`,
     provider,
-    reading,
-    profile,
-    accountId: account?.id ?? null,
     identity: {
       label: label ?? name,
       ariaLabel: label ? `${name} limits · ${label}` : `${name} limits`,
       category: profile?.category || null,
-      accountName: account ? label ?? account.id : null,
+    },
+    account: account && {
+      id: account.id,
+      name: label ?? account.id,
+      profile,
+      forget: [...(legacyAccounts.get(account.id) ?? []).map(({ id, email }) => ({ accountId: id, expectedEmail: email })), { accountId: account.id }],
+      codexActions: provider === "codex" ? reading : null,
     },
     plan: planLabel(reading?.plan, provider) || null,
-    status: cardStatus(presentation),
+    status: presentation.status,
     active: !!account && (profile?.active ?? current),
     headline: headline ? presentWindow(headline, now) : null,
     rows: rest.map(window => presentRow(window, provider, now)),
-    figures: reading ? figures(reading, now) : NO_FIGURES,
-    resetAction: provider === "codex" && reading !== null,
+    figures: reading ? figures(reading, provider, now) : NO_FIGURES,
     empty: hasWindows || readStatus !== "ok" || presentation.message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
       : { reason: "noWindows", copy: `${name} reported no rate-limit windows.` },
@@ -225,22 +221,25 @@ function presentCard(slot: Slot, index: number, legacyAccounts: Map<string, { id
       updatedAt: presentation.updatedAt,
       lastKnown: presentation.lastKnown,
       message: presentation.message,
-      failed: readStatus === "failed",
       readStatus,
     },
-    forget: account ? [...(legacyAccounts.get(account.id) ?? []).map(({ id, email }): ForgetStep => [id, email]), [account.id]] : [],
-    subscription: provider === "codex"
-      ? account ? { provider, accountId: account.id, current, term: reading?.subscription ?? null } : null
-      : provider === "claude"
-        ? { provider, status: reading?.subscriptionStatus ?? null, lastKnown: presentation.lastKnown, checkedAt: presentation.updatedAt }
-        : null,
+    subscription: subscription(provider, account?.id ?? null, current, reading, presentation),
   };
 }
 
-function cardStatus({ savedRefreshDetail, remembered, refreshPaused }: LimitAccountPresentation): CardStatus | null {
-  if (savedRefreshDetail) return { kind: "savedRefresh", detail: savedRefreshDetail };
-  if (remembered) return { kind: "remembered" };
-  if (refreshPaused) return { kind: "paused" };
+/**
+ * Codex's badge reads each account's paid-through date, refreshing only the signed-in one's; it needs
+ * an account to ask about. Claude's shows the status the read reported, as current as the card is.
+ */
+function subscription(
+  provider: AgentId,
+  accountId: string | null,
+  current: boolean,
+  reading: ProviderLimits | null,
+  { lastKnown, updatedAt }: LimitAccountPresentation,
+): CardSubscription | null {
+  if (provider === "codex") return accountId === null ? null : { provider, accountId, current, term: reading?.subscription ?? null };
+  if (provider === "claude") return { provider, status: reading?.subscriptionStatus ?? null, lastKnown, checkedAt: updatedAt };
   return null;
 }
 
@@ -258,7 +257,7 @@ function presentRow(window: LimitWindow, provider: AgentId, now: number): CardWi
 
 const NO_FIGURES: CardFigures = { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null };
 
-function figures(reading: ProviderLimits, now: number): CardFigures {
+function figures(reading: ProviderLimits, provider: AgentId, now: number): CardFigures {
   const share = reading.workspaceCredits ?? null;
   const spent = reading.creditsSpent ?? null;
   const credits = reading.credits ?? null;
@@ -267,7 +266,7 @@ function figures(reading: ProviderLimits, now: number): CardFigures {
     ownBalance: credits && (!(share || spent) || credits.unlimited || Number(credits.balance) !== 0) ? credits : null,
     workspaceShare: share,
     creditsSpent: spent,
-    bankedResets: banked ? { resetCredits: banked, hint: reading.provider === "claude" && reading.currentAccount ? CLAUDE_RESET_HINT : null } : null,
-    paidOffer: reading.provider === "codex" ? reading.resetOffer ?? null : null,
+    bankedResets: banked ? { resetCredits: banked, hint: provider === "claude" && reading.currentAccount ? CLAUDE_RESET_HINT : null } : null,
+    paidOffer: provider === "codex" ? reading.resetOffer ?? null : null,
   };
 }

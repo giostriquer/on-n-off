@@ -9,7 +9,7 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { limitCards, type CardWindow, type LimitCard } from "./limitCards";
+import { limitCards, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
@@ -80,12 +80,12 @@ function ProviderColumn({
   const [forgetError, setForgetError] = useState<string | null>(null);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
 
-  async function forget({ forget: steps }: LimitCard) {
+  async function forget({ forget: steps }: CardAccount) {
     setForgetError(null);
     // Keep the verified association from the confirmed card even after its saved login is removed.
-    const ids = steps.map(([accountId]) => accountId);
+    const ids = steps.map(({ accountId }) => accountId);
     try {
-      for (const step of steps) await api.forgetLimitsSnapshot(provider, ...step);
+      for (const { accountId, expectedEmail } of steps) await api.forgetLimitsSnapshot(provider, accountId, expectedEmail);
       queryClient.setQueryData<ProviderLimits[]>(["limits", provider], (current) =>
         current?.filter((entry) => entry.currentAccount || !entry.account || !ids.includes(entry.account.id)),
       );
@@ -117,7 +117,7 @@ function ProviderColumn({
           card={card}
           now={now}
           error={index === 0 ? error : null}
-          onForget={allowForget ? () => forget(card) : undefined}
+          onForget={allowForget && card.account ? () => forget(card.account!) : undefined}
         />
       ))}
     </div>
@@ -164,8 +164,7 @@ function AccountCard({
   error: string | null;
   onForget?: () => Promise<void>;
 }) {
-  const { provider, identity, freshness, figures, reading } = card;
-  const { accountName } = identity;
+  const { provider, identity, freshness, figures, account } = card;
   const subscription = <AccountSubscriptionBadge subscription={card.subscription} now={now} />;
   const header = (menu: ReactNode) => <CardHeader card={card} provider={provider} title={identity.label} subscription={subscription} menu={menu} />;
   const content = <>
@@ -179,7 +178,7 @@ function AccountCard({
 
       {freshness.message ? (
         <p
-          className={`px-3.5 ${card.headline || card.rows.length > 0 ? "pt-1.5" : "py-4"} text-[13px] ${freshness.failed ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
+          className={`px-3.5 ${card.headline || card.rows.length > 0 ? "pt-1.5" : "py-4"} text-[13px] ${freshness.readStatus === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
         >
           {freshness.message}
         </p>
@@ -194,7 +193,7 @@ function AccountCard({
       ) : null}
 
       <CreditsRows figures={figures} provider={provider} now={now} />
-      <BankedResetsRow resetCredits={figures.bankedResets?.resetCredits} hint={figures.bankedResets?.hint} now={now} />
+      <BankedResetsRow banked={figures.bankedResets} now={now} />
       <ResetOfferRow offer={figures.paidOffer} />
   </>;
   return (
@@ -203,8 +202,8 @@ function AccountCard({
       aria-label={identity.ariaLabel}
       data-status={freshness.readStatus}
     >
-      {card.accountId !== null && accountName !== null ? <AccountCardActions accountId={card.accountId} label={accountName} current={card.active} profile={card.profile ?? undefined} onForget={onForget} header={header}
-        footer={card.resetAction && reading ? state => <CodexAccountActions entry={reading} label={accountName} now={now} state={state} /> : undefined}>
+      {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined} onForget={onForget} header={header}
+        footer={account.codexActions ? state => <CodexAccountActions entry={account.codexActions!} label={account.name} now={now} state={state} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
     </section>

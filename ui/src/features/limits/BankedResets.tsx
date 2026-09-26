@@ -2,9 +2,10 @@ import { useRef, useState } from "react";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
-import type { LimitsResetCredits, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
+import type { LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
 import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
+import type { CardFigures } from "./limitCards";
 import { unexpiredBankedResets, usageLeft } from "./limitPresentation";
 import { SummaryRow } from "./SummaryRow";
 
@@ -30,16 +31,17 @@ export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
 
 /**
  * The banked reset count as one more row under the windows, with when the next one expires and,
- * when the card is given one, where the reset is spent.
+ * when the card is given one, where the reset is spent. Whether a count is worth showing is the
+ * card model's call (`CardFigures`).
  */
-export function BankedResetsRow({ resetCredits, hint, now }: { resetCredits?: LimitsResetCredits | null; hint?: string | null; now: number }) {
-  const banked = unexpiredBankedResets(resetCredits, now);
+export function BankedResetsRow({ banked, now }: { banked: CardFigures["bankedResets"]; now: number }) {
   if (!banked) return null;
-  const expiresIn = formatResetIn(banked.nextExpiresAt, now);
-  const lead = banked.availableCount > 1 ? "next expires" : "expires";
-  const expiry = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(banked.nextExpiresAt)}` : undefined;
+  const { resetCredits, hint } = banked;
+  const expiresIn = formatResetIn(resetCredits.nextExpiresAt, now);
+  const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
+  const expiry = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
   const note = [expiry, hint].filter(Boolean).join(" · ");
-  return <SummaryRow label="Banked resets" value={banked.availableCount} note={note} />;
+  return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
 }
 
 /**

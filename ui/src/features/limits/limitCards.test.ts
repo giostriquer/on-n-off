@@ -4,61 +4,9 @@ import { formatObservedAt } from "$lib/limitsFormat";
 import type { LimitsCredits, LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import { limitCards, type LimitCard } from "./limitCards";
+import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 
-const NOW = "2026-08-17T20:00:00Z";
 const AT_NOW = Date.parse(NOW);
-
-function okClaude(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return {
-    provider: "claude",
-    status: "ok",
-    account: { id: "uuid-1", label: "me@claude.example" },
-    currentAccount: true,
-    plan: "max",
-    windows: [
-      { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
-      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-18T04:59:59Z", observedAt: NOW },
-      { id: "weekly_opus", label: "Weekly · Opus", kind: "model", usedPercent: 91.4, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
-    ],
-    ...overrides,
-  };
-}
-
-function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return {
-    provider: "codex",
-    status: "ok",
-    account: { id: "acct-work", label: "work@codex.example" },
-    currentAccount: true,
-    plan: "pro",
-    windows: [
-      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 74, resetsAt: "2026-08-24T23:34:33Z", observedAt: NOW },
-      { id: "extra:gpt-5.6-luna", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: "2026-08-17T19:59:00Z", observedAt: NOW },
-    ],
-    credits: { balance: "12.5", unlimited: false },
-    ...overrides,
-  };
-}
-
-/** A remembered reading of the other Codex account: read yesterday, its session already reset. */
-function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return {
-    provider: "codex",
-    status: "ok",
-    account: { id: "acct-personal", label: "personal@codex.example" },
-    currentAccount: false,
-    plan: "plus",
-    windows: [
-      { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 88, resetsAt: "2026-08-20T10:00:00Z", observedAt: "2026-08-16T21:40:00.000Z" },
-      { id: "secondary", label: "5 hour · all models", kind: "session", usedPercent: 40, resetsAt: "2026-08-16T22:00:00Z", observedAt: "2026-08-16T21:40:00.000Z" },
-    ],
-    ...overrides,
-  };
-}
-
-function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): ProviderLimits {
-  return { provider, status, message, currentAccount: true, windows: [] };
-}
 
 function saved(provider: AgentId, id: string, observationId: string, email: string, overrides: Partial<SavedProfile> = {}): SavedProfile {
   return { id, observationId, identity: { provider, userId: id, workspaceId: id }, email, label: email, savedAt: NOW, active: false, needsLogin: false, ...overrides };
@@ -78,22 +26,25 @@ describe("which cards a provider shows", () => {
     expect(limitCards({ provider: "codex", entries: [], profiles: [], now: AT_NOW })).toEqual([]);
   });
 
-  it("gives a saved profile no read has answered for a card of the column's provider, even before any read", () => {
-    const [card] = cards(undefined, [saved("codex", "unread", "profile:unread", "unread@codex.example", { active: true })], AT_NOW, "claude");
-    expect(card).toMatchObject({
-      provider: "claude", reading: null, accountId: "profile:unread", active: true, key: "current-profile:unread",
-      identity: { label: "unread@codex.example", ariaLabel: "Claude limits · unread@codex.example", accountName: "unread@codex.example" },
-      status: null, headline: null, rows: [], plan: null, resetAction: false,
+  it("gives a saved profile no read has answered for a card of its own, even before any read", () => {
+    const profile = saved("claude", "unread", "profile:unread", "unread@claude.example", { active: true });
+    const [card] = cards(undefined, [profile], AT_NOW, "claude");
+    expect(card).toEqual({
+      key: "current-profile:unread", provider: "claude",
+      identity: { label: "unread@claude.example", ariaLabel: "Claude limits · unread@claude.example", category: null },
+      account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }], codexActions: null },
+      plan: null, status: null, active: true, headline: null, rows: [],
+      figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
-      freshness: { updatedAt: null, lastKnown: false, message: null, failed: false, readStatus: "ok" },
-      forget: [["profile:unread"]],
+      freshness: { updatedAt: null, lastKnown: false, message: null, readStatus: "ok" },
+      subscription: { provider: "claude", status: null, lastKnown: false, checkedAt: null },
     });
   });
 
   it("gives a saved Codex profile no read answered for its own subscription read, and no reset to spend", () => {
     const [card] = cards(undefined, [saved("codex", "unread", "profile:unread", "unread@codex.example")], AT_NOW, "codex");
     expect(card).toMatchObject({
-      provider: "codex", reading: null, active: false, key: "remembered-profile:unread", resetAction: false,
+      provider: "codex", active: false, key: "remembered-profile:unread", account: { id: "profile:unread", codexActions: null },
       subscription: { provider: "codex", accountId: "profile:unread", current: false, term: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
     });
@@ -104,7 +55,7 @@ describe("which cards a provider shows", () => {
       [saved("codex", "saved", "profile:user-team", "shared@example.com", { identity: { provider: "codex", userId: "user", workspaceId: "team" } })]);
     // Unverified legacy quotas stay historical until a fresh scoped observation arrives.
     expect(labels(shown)).toEqual(["shared@example.com", "shared@example.com"]);
-    expect(shown.map(card => card.reading?.account?.id ?? null)).toEqual(["team", null]);
+    expect(shown.map(card => [card.account?.id, card.empty?.reason ?? null])).toEqual([["team", null], ["profile:user-team", "usageUnavailable"]]);
   });
 
   it("reconciles legacy cards from a saved identity when an older app drops the snapshot alias, and forgets the legacy history first", () => {
@@ -115,8 +66,8 @@ describe("which cards a provider shows", () => {
     const shown = cards([scoped, legacy, staleCodex()], [profile]);
     expect(labels(shown)).toEqual(["shared@example.com", "personal@codex.example"]);
     expect(shown[0].headline?.text).toBe("0%");
-    expect(shown[0].forget).toEqual([["team", "shared@example.com"], ["profile:user-team"]]);
-    expect(shown[1].forget).toEqual([["acct-personal"]]);
+    expect(shown[0].account?.forget).toEqual([{ accountId: "team", expectedEmail: "shared@example.com" }, { accountId: "profile:user-team" }]);
+    expect(shown[1].account?.forget).toEqual([{ accountId: "acct-personal" }]);
   });
 });
 
@@ -142,7 +93,7 @@ describe("card order", () => {
       ...overrides,
     };
   }
-  const order = (entries: ProviderLimits[], profiles: SavedProfile[] = []) => labels(cards(entries, profiles, ORDER_NOW, "claude"));
+  const order = (entries: ProviderLimits[], profiles: SavedProfile[] = [], provider: AgentId = "claude") => labels(cards(entries, profiles, ORDER_NOW, provider));
 
   it("puts the active account first even when it is out of usage", () => {
     const active = account("active", { session: [100, at(2)], weekly: [100, at(48)] }, { currentAccount: true });
@@ -165,7 +116,7 @@ describe("card order", () => {
     // Codex: Pro is ×20 to Plus, as the badge says.
     const pro = account("pro", { weekly: [60, at(100)] }, { provider: "codex", plan: "pro" });
     const plus = account("plus", { weekly: [0, at(100)] }, { provider: "codex", plan: "plus" });
-    expect(order([plus, pro])).toEqual(["pro", "plus"]);
+    expect(order([plus, pro], [], "codex")).toEqual(["pro", "plus"]);
     // A Claude login whose tier the backend could not name is still a Max, worth five.
     const bareMax = account("bare max at 30% left", { weekly: [70, at(100)] }, { plan: "max" });
     const proUntouched = account("pro untouched", { weekly: [0, at(100)] }, { plan: "pro" });
@@ -230,18 +181,20 @@ describe("a card's identity", () => {
       saved("codex", "work", "acct-work", "work@codex.example", { category: "Client A" }),
       saved("codex", "personal", "acct-personal", "personal@codex.example", { active: true }),
     ]);
-    expect(shown.map(({ identity, active }) => ({ ...identity, active }))).toEqual([
-      { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: "Client A", accountName: "work@codex.example", active: false },
-      { label: "personal@codex.example", ariaLabel: "Codex limits · personal@codex.example", category: null, accountName: "personal@codex.example", active: true },
+    expect(shown.map(({ identity, account, active }) => ({ ...identity, name: account?.name, active }))).toEqual([
+      { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: "Client A", name: "work@codex.example", active: false },
+      { label: "personal@codex.example", ariaLabel: "Codex limits · personal@codex.example", category: null, name: "personal@codex.example", active: true },
     ]);
   });
 
   it.each([
-    ["the read's label", { account: { id: "acct-work", label: "work@codex.example" } }, { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: null, accountName: "work@codex.example" }],
-    ["the account id for the controls when the read has no label", { account: { id: "acct-work", label: null } }, { label: "Codex", ariaLabel: "Codex limits", category: null, accountName: "acct-work" }],
-    ["the provider when there is no account", { account: null }, { label: "Codex", ariaLabel: "Codex limits", category: null, accountName: null }],
-  ] as const)("falls back to %s", (_case, overrides, identity) => {
-    expect(cards([okCodex(overrides)])[0].identity).toEqual(identity);
+    ["the read's label", { account: { id: "acct-work", label: "work@codex.example" } }, { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: null }, "work@codex.example"],
+    ["the account id for the controls when the read has no label", { account: { id: "acct-work", label: null } }, { label: "Codex", ariaLabel: "Codex limits", category: null }, "acct-work"],
+    ["the provider, with no account to control, when there is no account", { account: null }, { label: "Codex", ariaLabel: "Codex limits", category: null }, null],
+  ] as const)("falls back to %s", (_case, overrides, identity, name) => {
+    const [card] = cards([okCodex(overrides)]);
+    expect(card.identity).toEqual(identity);
+    expect(card.account?.name ?? null).toBe(name);
   });
 
   it("marks only the accounts in use as active, never one without an account", () => {
@@ -345,7 +298,7 @@ describe("a card's status and message", () => {
       status: { kind: "paused" },
       headline: { percent: 12 },
       rows: [{ id: "session", percent: 0, note: expect.stringMatching(/^reset 15h ago · \w{3} \d\d:\d\d$/) }],
-      freshness: { message: expect.stringMatching(/^Access token expired/), failed: false, lastKnown: true, updatedAt: formatObservedAt(observedAt), readStatus: "unauthenticated" },
+      freshness: { message: expect.stringMatching(/^Access token expired/), lastKnown: true, updatedAt: formatObservedAt(observedAt), readStatus: "unauthenticated" },
       empty: null,
     });
   });
@@ -357,7 +310,7 @@ describe("a card's status and message", () => {
     ["failed", "Could not reach the Claude usage service (HTTP 503)."],
   ])("carries the provider's message for %s, with no windows and no empty copy", (status, message) => {
     expect(cards([statusOnly("claude", status, message)])[0]).toMatchObject({
-      headline: null, rows: [], empty: null, freshness: { message, readStatus: status, failed: status === "failed" },
+      headline: null, rows: [], empty: null, freshness: { message, readStatus: status },
     });
   });
 
@@ -417,7 +370,7 @@ describe("a card's figures", () => {
     const two = { availableCount: 2, nextExpiresAt: null };
     const claude = cards([okClaude({ resetCredits: two }), okClaude({ account: { id: "uuid-2", label: "other@claude.example" }, currentAccount: false, resetCredits: one })]);
     const codex = cards([okCodex({ resetCredits: two }), staleCodex({ resetCredits: one })]);
-    expect([...claude, ...codex].map(card => [card.identity.label, card.figures.bankedResets, card.resetAction])).toEqual([
+    expect([...claude, ...codex].map(card => [card.identity.label, card.figures.bankedResets, card.account?.codexActions != null])).toEqual([
       ["me@claude.example", { resetCredits: two, hint: "/limit-reset in Claude Code" }, false],
       ["other@claude.example", { resetCredits: one, hint: null }, false],
       ["work@codex.example", { resetCredits: two, hint: null }, true],
@@ -425,9 +378,13 @@ describe("a card's figures", () => {
     ]);
   });
 
-  it("drops banked resets whose soonest expiry has passed, or that count none", () => {
-    expect(cards([okCodex({ resetCredits: { availableCount: 2, nextExpiresAt: "2026-08-17T19:00:00Z" } })])[0].figures.bankedResets).toBeNull();
-    expect(cards([okCodex({ resetCredits: { availableCount: 0, nextExpiresAt: null } })])[0].figures.bankedResets).toBeNull();
+  it.each([
+    ["whose soonest expiry has passed", { availableCount: 2, nextExpiresAt: "2026-08-17T19:00:00Z" }],
+    ["whose soonest expiry is now", { availableCount: 2, nextExpiresAt: NOW }],
+    ["that count none", { availableCount: 0, nextExpiresAt: null }],
+    ["that were never reported", null],
+  ] as const)("drops banked resets %s, since what is left is not known", (_case, resetCredits) => {
+    expect(cards([okClaude({ resetCredits })])[0].figures.bankedResets).toBeNull();
   });
 
   it("shows a paid reset offer on a Codex card that carries one, and never on Claude", () => {
