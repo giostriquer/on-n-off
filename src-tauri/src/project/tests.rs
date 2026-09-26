@@ -73,6 +73,7 @@ fn parses_claude_and_codex_recognized_projects() {
 #[test]
 fn overlays_project_skills_and_mcp_read_only() {
     let root = crate::paths::scratch_dir("on-n-off-project-scope");
+    let home = crate::paths::scratch_dir("on-n-off-project-scope-home");
     fs::create_dir_all(root.join(".claude").join("skills").join("local-feed")).unwrap();
     fs::write(
         root.join(".claude")
@@ -102,7 +103,7 @@ fn overlays_project_skills_and_mcp_read_only() {
         mcp_servers: vec![],
         hooks: vec![],
     };
-    overlay_project(&mut tab, &root, AgentId::Claude);
+    overlay_project_in(&mut tab, &root, AgentId::Claude, Some(&home));
     assert_eq!(tab.user_skills.len(), 2);
     let local = tab
         .user_skills
@@ -138,18 +139,15 @@ fn inspect_reads_git_branch_and_local_counts() {
     .unwrap();
     fs::create_dir_all(root.join(".git")).unwrap();
     fs::write(root.join(".git").join("HEAD"), "ref: refs/heads/main\n").unwrap();
-    let inspected = inspect_project(&root, AgentId::Claude);
+    let home = crate::paths::scratch_dir("on-n-off-inspect-project-home");
+    let inspected = inspect_project_in(&root, AgentId::Claude, Some(&home));
     assert_eq!(inspected.branch, "main");
     assert_eq!(inspected.skill_count, 1);
     assert_eq!(inspected.mcp_count, 1);
     assert_eq!(git_branch(&root), "main");
-    let expanded = expand_project_path("~/dev/app");
-    assert!(
-        expanded
-            .to_string_lossy()
-            .replace('\\', "/")
-            .ends_with("dev/app"),
-        "{expanded:?}"
+    assert_eq!(
+        expand_project_path_in("~/dev/app", Some(&home)),
+        home.join("dev").join("app")
     );
 }
 
@@ -165,6 +163,7 @@ fn write_skill(dir: &Path, name: &str, description: &str) {
 #[test]
 fn overlay_collapses_same_name_across_skill_roots() {
     let root = crate::paths::scratch_dir("on-n-off-project-skill-dedupe");
+    let home = crate::paths::scratch_dir("on-n-off-project-skill-dedupe-home");
     write_skill(
         &root.join(".claude").join("skills"),
         "find-skills",
@@ -200,7 +199,7 @@ fn overlay_collapses_same_name_across_skill_roots() {
         mcp_servers: vec![],
         hooks: vec![],
     };
-    overlay_project(&mut tab, &root, AgentId::Claude);
+    overlay_project_in(&mut tab, &root, AgentId::Claude, Some(&home));
     let names: Vec<_> = tab
         .user_skills
         .iter()

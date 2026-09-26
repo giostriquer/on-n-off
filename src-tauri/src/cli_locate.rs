@@ -30,13 +30,16 @@ const ENV_END: &str = "__ON_N_OFF_ENV_END__";
 /// Every directory searched for agent CLIs, in priority order, computed once per process.
 pub fn cli_search_path() -> &'static [PathBuf] {
     static SEARCH_PATH: OnceLock<Vec<PathBuf>> = OnceLock::new();
-    SEARCH_PATH.get_or_init(|| {
-        merge_search_path(
-            env::var_os("PATH"),
-            environment_path_dirs(),
-            well_known_cli_dirs(),
-        )
-    })
+    SEARCH_PATH.get_or_init(|| search_path_under(user_home().ok().as_deref()))
+}
+
+/// [`cli_search_path`] for a user whose home is `home`; without one there is no well-known tier.
+fn search_path_under(home: Option<&Path>) -> Vec<PathBuf> {
+    merge_search_path(
+        env::var_os("PATH"),
+        environment_path_dirs(),
+        home.map(well_known_cli_dirs_for).unwrap_or_default(),
+    )
 }
 
 /// [`cli_search_path`] joined into a PATH value for child processes; `None` if it cannot be joined.
@@ -214,12 +217,6 @@ fn is_executable(_path: &Path) -> bool {
 }
 
 /// Install folders that commonly hold agent CLIs but are missing from a GUI app's PATH.
-pub fn well_known_cli_dirs() -> Vec<PathBuf> {
-    user_home()
-        .map(|home| well_known_cli_dirs_for(&home))
-        .unwrap_or_default()
-}
-
 fn well_known_cli_dirs_for(home: &Path) -> Vec<PathBuf> {
     if cfg!(windows) {
         windows_cli_dirs(home)

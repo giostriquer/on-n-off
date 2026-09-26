@@ -95,14 +95,8 @@ fn children_get_the_cli_search_path() {
             "child PATH lacks {dir:?}: {printed}"
         );
     }
-    // The well-known tier (not just the process PATH) must reach the child. Compared by
-    // suffix because the home they sit under may be a disposable ON_N_OFF_HOME.
-    assert!(
-        search_path
-            .iter()
-            .any(|dir| dir.ends_with(std::path::Path::new(".local").join("bin"))),
-        "well-known dirs missing from the search path: {search_path:?}"
-    );
+    // That the search path carries the well-known tier, not just the process PATH, is pinned
+    // under an injected home in `cli_locate`'s tests: a test build has no home of its own.
 }
 
 #[test]

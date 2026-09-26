@@ -421,8 +421,9 @@ fn a_throttled_claude_read_says_it_is_rate_limited() {
 
 #[test]
 fn providers_without_a_subscription_are_unsupported() {
+    let rig = Rig::new("limits-unsupported");
     for provider in [AgentId::Cursor, AgentId::Antigravity] {
-        let dtos = read_limits(provider, false);
+        let dtos = rig.read(provider, false, &refused_url(), &refused_url());
         assert_eq!(dtos.len(), 1);
         assert_eq!(dtos[0].provider, provider);
         assert_eq!(dtos[0].status, LimitsStatus::Unsupported);
@@ -632,7 +633,8 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
         .contains("sign in again"));
 }
 
-/// Live probe against the real home, read-only: one read per provider, printed.
+/// Live probe against the real home, read-only: one read per provider, printed. A test build has
+/// no user home, so the probe reads the one named in `ON_N_OFF_PROBE_HOME` (`paths::probe_home`).
 ///
 /// Claude reads only the real home's `~/.claude/.credentials.json`: a test build's sealed
 /// environment (`paths::process_env`) treats every home as disposable, so `CLAUDE_CONFIG_DIR`,
@@ -641,7 +643,7 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
 /// and its native store reads a keyring login through the real `security` when its config selects
 /// one, which is what `with_real_keychain` allows.
 ///
-/// `cargo test --manifest-path src-tauri/Cargo.toml probe_real_home_limits -- --ignored --nocapture`
+/// `ON_N_OFF_PROBE_HOME="$HOME" cargo test --manifest-path src-tauri/Cargo.toml probe_real_home_limits -- --ignored --nocapture`
 #[test]
 #[ignore = "real-home network probe; not part of CI"]
 fn probe_real_home_limits() {
@@ -651,9 +653,26 @@ fn probe_real_home_limits() {
     print_real_home_limits();
 }
 
+/// What [`read_limits`] reads, under the probed home rather than the user home.
 fn print_real_home_limits() {
+    let home = crate::paths::probe_home();
     for provider in [AgentId::Claude, AgentId::Codex] {
-        for dto in read_limits(provider, false) {
+        let dtos = read_limits_in(
+            provider,
+            false,
+            Sources {
+                home: &home,
+                memo: &CLAUDE_LOGIN,
+                keychain: claude_store::keychain_probe,
+                claude: ClaudeEndpoints {
+                    token: claude_renew::TOKEN_URL,
+                    profile: CLAUDE_PROFILE_URL,
+                    usage: CLAUDE_USAGE_URL,
+                },
+                now_ms: Utc::now().timestamp_millis(),
+            },
+        );
+        for dto in dtos {
             println!(
                     "{:?}: current_account={} account={:?} status={:?} plan={:?} message={:?} credits={:?}",
                     provider,

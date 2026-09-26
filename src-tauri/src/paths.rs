@@ -1,3 +1,4 @@
+#[cfg(not(test))]
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -19,6 +20,12 @@ pub(crate) fn process_env(name: &str) -> Option<OsString> {
     (name == "ON_N_OFF_HOME").then(|| OsString::from("disposable"))
 }
 
+/// The home every agent home and on-n-off's own data sit under: `ON_N_OFF_HOME` when it is set,
+/// else `USERPROFILE` or `HOME`. A test binary has none, so no test can read or write a
+/// developer's real `~/.claude`, `~/.codex` or `~/.on-n-off` through it or a helper built on it:
+/// each fails as it would on a machine without a home. A test that needs a home hands its own
+/// root to a `*_for(home)` or `*_in` function instead.
+#[cfg(not(test))]
 pub fn user_home() -> Result<PathBuf, AdapterError> {
     if let Ok(root) = env::var("ON_N_OFF_HOME") {
         return Ok(PathBuf::from(root));
@@ -27,6 +34,10 @@ pub fn user_home() -> Result<PathBuf, AdapterError> {
         .or_else(|_| env::var("HOME"))
         .map(PathBuf::from)
         .map_err(|_| AdapterError::message("home directory not found"))
+}
+#[cfg(test)]
+pub fn user_home() -> Result<PathBuf, AdapterError> {
+    Err(AdapterError::message("a test build has no user home"))
 }
 
 pub fn claude_root_for(home: &std::path::Path) -> PathBuf {
@@ -183,6 +194,16 @@ pub fn scratch_dir(prefix: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::create_dir_all(&dir);
     dir
+}
+
+/// The home a deliberate, `#[ignore]`d real-home probe reads: the one whoever runs it names in
+/// `ON_N_OFF_PROBE_HOME`. A test build has no user home of its own ([`user_home`]), so a real
+/// home is reached only when a person hands it over for that run.
+#[cfg(test)]
+pub fn probe_home() -> PathBuf {
+    std::env::var_os("ON_N_OFF_PROBE_HOME")
+        .map(PathBuf::from)
+        .expect("name the home this probe reads in ON_N_OFF_PROBE_HOME")
 }
 
 #[cfg(test)]
