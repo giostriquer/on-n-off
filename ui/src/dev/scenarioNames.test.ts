@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { unknownScenario } from "./scenarioNames";
 
 describe("unknownScenario", () => {
-  it.each(["ok", "stale", "limitsBand", "accountDuplicate", "hooks"])("knows %s", name => {
+  it.each([
+    // Pull-request and Limits scenarios, one of each table.
+    "ok", "stale", "limitsBand", "accountDuplicate",
+    // The ones mockIpc.ts answers for itself.
+    "accountLogin", "accountLocked", "accountClients", "catalog", "hooks", "mcpSources",
+  ])("knows %s", name => {
     expect(unknownScenario(name)).toBeNull();
   });
 

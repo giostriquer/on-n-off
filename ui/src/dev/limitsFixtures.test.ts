@@ -36,7 +36,14 @@ describe("limitsScenario", () => {
     expect(limitsScenario("stale").readLimits("codex")).toEqual(limitsScenario("ok").readLimits("codex"));
   });
 
-  it("brings accountDuplicate's scoped reading only once a sign-in finishes", () => {
+  it("gives accountDuplicate its saved Codex login and the usual Claude ones", () => {
+    const scenario = limitsScenario("accountDuplicate");
+    expect(scenario.readAccounts("codex")).toMatchObject({ nativeObservationId: "codex-1" });
+    expect(scenario.readAccounts("codex").profiles.map(profile => profile.observationId)).toEqual(["profile:shared"]);
+    expect(scenario.readAccounts("claude").profiles.map(profile => profile.observationId)).toEqual(["claude-1", "claude-2"]);
+  });
+
+  it("brings accountDuplicate's scoped reading only once a sign-in starts, for that page alone", () => {
     const scenario = limitsScenario("accountDuplicate");
     const legacy = "ca292064-c3f4-453c-b15a-43ef63c46478";
     expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", legacy]);
@@ -44,5 +51,7 @@ describe("limitsScenario", () => {
     expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", legacy]);
     scenario.addAccount();
     expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", "profile:shared", legacy]);
+    // Another page's scenario starts clean.
+    expect(ids(limitsScenario("accountDuplicate").readLimits("codex"))).toEqual(["codex-1", legacy]);
   });
 });

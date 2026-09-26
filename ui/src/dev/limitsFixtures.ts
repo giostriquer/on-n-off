@@ -272,12 +272,20 @@ function savedRefreshPaused([live]: ProviderLimits[]): ProviderLimits[] {
  * (`addAccount`) brings the scoped reading, which the card then merges the history into.
  */
 const DUPLICATE_WORKSPACE = "ca292064-c3f4-453c-b15a-43ef63c46478";
-let duplicateReconnected = false;
 
-function accountDuplicateCodex(): ProviderLimits[] {
+function accountDuplicate(): LimitsScenario {
+  let reconnected = false;
+  return {
+    codex: () => accountDuplicateCodex(reconnected),
+    accounts: { codex: accountDuplicateAccounts },
+    addAccount: () => { reconnected = true; },
+  };
+}
+
+function accountDuplicateCodex(reconnected: boolean): ProviderLimits[] {
   const legacy = { ...CODEX[1], currentAccount: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
   // Older app versions can rewrite the scoped snapshot without its optional legacyId.
-  return [CODEX[0], ...(duplicateReconnected ? [{ ...legacy,
+  return [CODEX[0], ...(reconnected ? [{ ...legacy,
     account: { id: "profile:shared", label: "shared@example.com" },
     windows: CODEX[0].windows.map(window => ({ ...window, usedPercent: 42 })),
   }] : []), legacy];
@@ -318,38 +326,35 @@ type LimitsProvider = Extract<AgentId, "claude" | "codex">;
 export type LimitsScenario = Partial<Record<LimitsProvider, () => ProviderLimits[]>> & {
   accounts?: Partial<Record<LimitsProvider, () => AccountsReading>>;
   codexSubscription?: (accountId: string) => SubscriptionDate | null;
-  /** What a finished sign-in (`add_account`) changes about the scenario's later answers. */
+  /** What starting a sign-in (`add_account`) changes about the scenario's later answers. */
   addAccount?: () => void;
 };
 
-export const LIMITS_SCENARIOS: Record<string, LimitsScenario> = {
-  subscriptionMissing: { codexSubscription: () => null },
-  subscriptionBadges: { codex: subscriptionBadgesCodex },
-  claudeMissingReset: { claude: claudeWithoutReset },
-  claudeNoWeekly: { claude: claudeWithoutWeekly },
-  savedRefreshPaused: { claude: () => savedRefreshPaused(CLAUDE), codex: () => savedRefreshPaused(CODEX) },
-  limitsBand: { claude: limitsBandClaude, codex: limitsBandCodex },
-  limitsOrder: {
+/** Each scenario is built afresh per page, so one that changes as it is used starts clean. */
+export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
+  subscriptionMissing: () => ({ codexSubscription: () => null }),
+  subscriptionBadges: () => ({ codex: subscriptionBadgesCodex }),
+  claudeMissingReset: () => ({ claude: claudeWithoutReset }),
+  claudeNoWeekly: () => ({ claude: claudeWithoutWeekly }),
+  savedRefreshPaused: () => ({ claude: () => savedRefreshPaused(CLAUDE), codex: () => savedRefreshPaused(CODEX) }),
+  limitsBand: () => ({ claude: limitsBandClaude, codex: limitsBandCodex }),
+  limitsOrder: () => ({
     claude: limitsOrderClaude,
     accounts: { claude: () => ({ profiles: [], nativeObservationId: "order-current", nativeAccount: null, recoveryRequired: false, notice: null }) },
-  },
-  bankedResets: { claude: bankedResetsClaude, codex: bankedResetsCodex },
-  sameEmailWorkspaces: { codex: sameEmailWorkspacesCodex, accounts: { codex: sameEmailWorkspacesAccounts } },
-  workspaceCredits: { codex: workspaceCreditsCodex },
-  creditsSpent: { codex: creditsSpentCodex },
-  claudeSubscriptionStatus: { claude: claudeSubscriptionStatusClaude },
-  accountDuplicate: {
-    codex: accountDuplicateCodex,
-    accounts: { codex: accountDuplicateAccounts },
-    addAccount: () => { duplicateReconnected = true; },
-  },
+  }),
+  bankedResets: () => ({ claude: bankedResetsClaude, codex: bankedResetsCodex }),
+  sameEmailWorkspaces: () => ({ codex: sameEmailWorkspacesCodex, accounts: { codex: sameEmailWorkspacesAccounts } }),
+  workspaceCredits: () => ({ codex: workspaceCreditsCodex }),
+  creditsSpent: () => ({ codex: creditsSpentCodex }),
+  claudeSubscriptionStatus: () => ({ claude: claudeSubscriptionStatusClaude }),
+  accountDuplicate,
 };
 
 const OK = { claude: () => CLAUDE, codex: () => CODEX };
 
 /** The Limits commands' answers under `?mock=<name>`; a name that is not a Limits scenario answers as `ok`. */
 export function limitsScenario(name: string) {
-  const chosen: LimitsScenario = Object.hasOwn(LIMITS_SCENARIOS, name) ? LIMITS_SCENARIOS[name] : {};
+  const chosen: LimitsScenario = Object.hasOwn(LIMITS_SCENARIOS, name) ? LIMITS_SCENARIOS[name]() : {};
   const provider = (agent: unknown) => (agent === "claude" || agent === "codex" ? agent : null);
   return {
     readLimits(agentId: unknown): ProviderLimits[] {
