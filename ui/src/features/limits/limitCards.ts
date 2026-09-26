@@ -39,11 +39,11 @@ export const CLAUDE_RESET_HINT = "/limit-reset in Claude Code";
  */
 export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "remembered" } | { kind: "paused" };
 
-/** A quota window as a card shows it. `note` is empty when the provider reported no reset. */
+/**
+ * A quota window as a card shows it. The headline window's `note` is empty when the provider
+ * reported no reset; a row under it says why instead.
+ */
 export type CardWindow = LimitWindowPresentation & { id: string; label: string };
-
-/** A window under the headline window; `rowNote` is its note, or why there is none. */
-export type CardRow = CardWindow & { rowNote: string };
 
 /** The figures a card shows under its windows, each already judged worth showing. */
 export type CardFigures = {
@@ -90,7 +90,7 @@ export type LimitCard = {
   /** The account in use: the saved profiles' word for it, else the read's. */
   active: boolean;
   headline: CardWindow | null;
-  rows: CardRow[];
+  rows: CardWindow[];
   figures: CardFigures;
   /** Whether the card's footer offers to spend a Codex banked reset. */
   resetAction: boolean;
@@ -252,11 +252,11 @@ function presentWindow(window: LimitWindow, now: number): CardWindow {
 }
 
 /** A row with no reset says why: a Claude session that has not started yet, or a reset the provider did not report. */
-function presentRow(window: LimitWindow, provider: AgentId, now: number): CardRow {
+function presentRow(window: LimitWindow, provider: AgentId, now: number): CardWindow {
   const presented = presentWindow(window, now);
   const awaitingFirstMessage = provider === "claude" && window.kind === "session"
     && window.usedPercent === 0 && window.resetsAt == null;
-  return { ...presented, rowNote: presented.note || (awaitingFirstMessage ? "Starts with your first message" : "Reset time unavailable") };
+  return { ...presented, note: presented.note || (awaitingFirstMessage ? "Starts with your first message" : "Reset time unavailable") };
 }
 
 const NO_FIGURES: CardFigures = { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null };

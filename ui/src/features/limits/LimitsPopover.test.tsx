@@ -286,6 +286,21 @@ it("marks saved usage quietly in the popover and exposes its failure on focus", 
   expect(screen.getByRole("tooltip")).toHaveTextContent(reason);
 });
 
+it("says under a row why it shows no reset, as the Limits screen does", async () => {
+  const kept = limits("claude", "claude-kept", "kept@claude.example", false);
+  kept.windows = [kept.windows[0], { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 0, resetsAt: null, observedAt: "2026-08-17T12:00:00Z" }];
+  const codex = limits("codex", "codex-current", "current@codex.example", true);
+  codex.windows = [codex.windows[0], { id: "extra", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: null, observedAt: "2026-08-18T12:00:00Z" }];
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [limits("claude", "claude-current", "current@claude.example", true), kept] : [codex]));
+  renderPopover();
+  const row = (article: HTMLElement, meter: string) => within(article).getByRole("meter", { name: meter }).parentElement!;
+  const claude = await screen.findByRole("article", { name: "Claude limits · kept@claude.example" });
+  expect(within(row(claude, "5 hour · all models")).getByText("Starts with your first message")).toBeInTheDocument();
+  const current = screen.getByRole("article", { name: "Codex limits · current@codex.example" });
+  expect(within(row(current, "Weekly · GPT-5.6-Luna")).getByText("Reset time unavailable")).toBeInTheDocument();
+});
+
 it("says an answered read with no windows has none, as the Limits screen words it", async () => {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
     ? [{ ...limits("claude", "claude-current", "current@claude.example", true), windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));

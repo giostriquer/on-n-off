@@ -9,7 +9,7 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { limitCards, type CardRow, type CardWindow, type LimitCard } from "./limitCards";
+import { limitCards, type CardWindow, type LimitCard } from "./limitCards";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
@@ -251,6 +251,6 @@ function HeadlineWindow({
 }
 
 /** Remaining windows as compact meter rows, with the reset, or why there is none, as the note. */
-function WindowRow({ row, provider }: { row: CardRow; provider: AgentId }) {
-  return <MeterRow label={row.label} note={row.rowNote} percent={row.percent} text={row.text} color={row.color} provider={provider} />;
+function WindowRow({ row, provider }: { row: CardWindow; provider: AgentId }) {
+  return <MeterRow label={row.label} note={row.note} percent={row.percent} text={row.text} color={row.color} provider={provider} />;
 }

@@ -255,7 +255,7 @@ describe("a card's windows", () => {
   it("leads with the weekly window and presents the rest as rows, a passed reset back at zero", () => {
     const [current, remembered] = cards([okCodex(), staleCodex()]);
     expect(current.headline).toMatchObject({ id: "primary", label: "Weekly · all models", percent: 74, text: "74%", color: undefined });
-    expect(current.rows).toMatchObject([{ id: "extra:gpt-5.6-luna", percent: 0, text: "0%", color: undefined, rowNote: expect.stringMatching(/^reset 1m ago · \w{3} \d\d:\d\d$/) }]);
+    expect(current.rows).toMatchObject([{ id: "extra:gpt-5.6-luna", percent: 0, text: "0%", color: undefined, note: expect.stringMatching(/^reset 1m ago · \w{3} \d\d:\d\d$/) }]);
     expect(remembered.headline).toMatchObject({ percent: 88, text: "88%", color: undefined, note: expect.stringMatching(/^resets in 2d 14h/) });
     expect(remembered.rows).toMatchObject([{ id: "secondary", percent: 0, text: "0%", color: undefined, note: expect.stringMatching(/^reset 22h ago · \w{3} \d\d:\d\d$/) }]);
   });
@@ -280,23 +280,23 @@ describe("a card's windows", () => {
     [0, null, "Starts with your first message"],
     [17, null, "Reset time unavailable"],
     [0, "invalid", "Reset time unavailable"],
-  ] as const)("says why a remembered Claude session at %s percent with reset %s shows no reset", (usedPercent, resetsAt, rowNote) => {
+  ] as const)("says why a remembered Claude session at %s percent with reset %s shows no reset", (usedPercent, resetsAt, note) => {
     const remembered = okClaude({ currentAccount: false });
     remembered.windows[1] = { ...remembered.windows[1], usedPercent, resetsAt };
     expect(cards([remembered])[0].rows[0]).toEqual({
-      id: "session", label: "5 hour · all models", percent: usedPercent, text: `${usedPercent}%`, color: undefined, note: "", rowNote,
+      id: "session", label: "5 hour · all models", percent: usedPercent, text: `${usedPercent}%`, color: undefined, note,
     });
   });
 
   it("keeps a reported countdown even when a remembered Claude session has zero usage", () => {
     const remembered = okClaude({ currentAccount: false });
     remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: "2026-08-17T23:00:00Z" };
-    expect(cards([remembered])[0].rows[0]).toMatchObject({ text: "0%", rowNote: expect.stringMatching(/^resets in 3h 0m/) });
+    expect(cards([remembered])[0].rows[0]).toMatchObject({ text: "0%", note: expect.stringMatching(/^resets in 3h 0m/) });
   });
 
   it("says a Codex session with no reset has none, not that it waits for a first message", () => {
     const session = { id: "secondary", label: "5 hour · all models", kind: "session" as const, usedPercent: 0, resetsAt: null, observedAt: NOW };
-    expect(cards([okCodex({ windows: [session] })])[0].rows[0].rowNote).toBe("Reset time unavailable");
+    expect(cards([okCodex({ windows: [session] })])[0].rows[0].note).toBe("Reset time unavailable");
   });
 });
 
