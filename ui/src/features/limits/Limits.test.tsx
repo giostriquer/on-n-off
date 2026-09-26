@@ -636,6 +636,19 @@ it("drops the badge on the local minute clock once the paid period ends, without
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
+it("says a remembered reading is a remembered account, and marks a saved read that failed only by its last-known badge", async () => {
+  answer([okClaude()], [okCodex(), staleCodex(), okCodex({ account: { id: "acct-saved", label: "saved@codex.example" }, currentAccount: false, status: "failed", message: "Saved usage credential is no longer accepted." })]);
+  renderLimits();
+  const remembered = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+  // Body text, as "Refresh paused." is: the header keeps its room for the account's name.
+  const status = within(remembered).getByText("Remembered account.");
+  expect(remembered.querySelector("header")!.contains(status)).toBe(false);
+  expect(within(card("Codex limits · work@codex.example")).queryByText(/Remembered account/)).toBeNull();
+  const failed = card("Codex limits · saved@codex.example");
+  expect(within(failed).getByRole("button", { name: "Usage status: Last known usage" })).toBeTruthy();
+  expect(within(failed).queryByText(/Remembered account/)).toBeNull();
+});
+
 it("quietly identifies last-known usage and reveals the reason on focus", async () => {
   const reason = "Saved usage credential is no longer accepted.";
   answer([okClaude()], [okCodex({currentAccount:false, status:"failed", message:reason})]);
