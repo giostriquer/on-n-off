@@ -311,6 +311,20 @@ fn signing_out_refuses_during_a_pending_recovery_without_writing_or_logging_out(
     assert!(harness.heard().is_empty());
 }
 
+/// A pending recovery refuses a sign-out before it reads the native login (the Keychain, on
+/// macOS).
+#[test]
+fn a_sign_out_refused_by_a_pending_recovery_reads_no_native_login() {
+    let harness = Harness::new();
+    let (_, b) = two_profiles(&harness);
+    harness.interrupted(&b, Some(claude("a", "a2")));
+
+    assert!(harness.accounts().sign_out(AgentId::Claude).is_err());
+
+    assert_eq!(harness.native.reads.get(), 0, "read the native login");
+    assert_eq!(harness.native.locks.get(), 0, "took the native locks");
+}
+
 #[test]
 fn signing_out_requires_closed_clients() {
     let harness = Harness::new();

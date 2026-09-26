@@ -372,6 +372,7 @@ impl Accounts {
         let native = self.native(provider)?;
         native.preflight()?;
         self.clients.closed(provider)?;
+        store::Store::gate(&self.home, &store::ChangeKind::Account)?;
         let current = native.read()?.ok_or("No native account is signed in.")?;
         let identity = native.identify(&current)?;
         let result = store::Store::open(&self.home, true)?.change_then(
