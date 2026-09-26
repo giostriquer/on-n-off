@@ -149,6 +149,19 @@ describe("Limits", () => {
     expect(within(card("Codex limits · personal@codex.example")).queryByRole("img", { name: "Active account" })).toBeNull();
   });
 
+  it("says under a row why it shows no reset", async () => {
+    const remembered = okClaude({ currentAccount: false, account: { id: "uuid-2", label: "other@claude.example" } });
+    remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: null };
+    const codex = okCodex();
+    codex.windows[1] = { ...codex.windows[1], resetsAt: null };
+    answer([okClaude(), remembered], [codex]);
+    renderLimits();
+    const row = (region: string, meter: string) => within(card(region)).getByRole("meter", { name: meter });
+    await screen.findByRole("region", { name: "Claude limits · other@claude.example" });
+    expect(row("Claude limits · other@claude.example", "5 hour · all models")).toHaveAccessibleDescription("Starts with your first message");
+    expect(row("Codex limits · work@codex.example", "Weekly · GPT-5.6-Luna")).toHaveAccessibleDescription("Reset time unavailable");
+  });
+
   it("opens account actions from the header and dismisses them with Escape or an outside click", async () => {
     answer([okClaude()], [okCodex(), staleCodex()]);
     renderLimits();
