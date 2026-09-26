@@ -82,6 +82,44 @@ fn a_model_limit_crossing_one_hundred_percent_notifies_once() {
     assert!(observe(&mut state, &[exhausted]).is_empty());
 }
 
+/// Codex's hidden buckets never reach a surface, so one reaching its limit is no reason to notify.
+/// The Codex reader drops them before the monitor sees the read; the weekly window beside it still
+/// notifies.
+#[test]
+fn a_hidden_codex_window_reaching_its_limit_never_notifies() {
+    let read = |weekly: u32, spark: u32, observed_at: &str| {
+        let main = serde_json::json!({"limitId": "codex",
+            "primary": {"usedPercent": weekly, "windowDurationMins": 10080, "resetsAt": 1787838960}});
+        crate::limits::codex_card(
+            serde_json::json!({
+                "rateLimits": main,
+                "rateLimitsByLimitId": {
+                    "codex": main,
+                    "codex_bengalfox": {"limitId": "codex_bengalfox",
+                        "limitName": "GPT-5.3-Codex-Spark",
+                        "primary": {"usedPercent": spark, "windowDurationMins": 10080,
+                            "resetsAt": 1787859937}}
+                }
+            }),
+            "account-a",
+            observed_at,
+        )
+    };
+    let mut state = MonitorState::default();
+    assert!(observe(&mut state, &[read(50, 90, "2026-08-19T12:00:00Z")]).is_empty());
+
+    let events = observe(&mut state, &[read(100, 100, "2026-08-19T13:00:00Z")]);
+
+    let reached: Vec<(LimitEventKind, &str)> = events
+        .iter()
+        .map(|event| (event.kind, event.window_label.as_str()))
+        .collect();
+    assert_eq!(
+        reached,
+        [(LimitEventKind::Exhausted, "Weekly · all models")]
+    );
+}
+
 #[test]
 fn a_usage_correction_does_not_rearm_an_exhausted_limit() {
     let mut state = MonitorState::default();

@@ -4,8 +4,11 @@
 //! writing a card over its file (`SnapshotStore::save`), and a saved account's poll
 //! (`accounts/usage.rs`). Each field's rule is chosen once, in [`Reading::keeping`]:
 //!
-//! - **Windows**: an answer's own. A failed read keeps its own with the remembered ones merged in
-//!   by id, the newer observation of each winning.
+//! - **Windows**: an answer's own. An answer that reports other windows but no weekly also keeps
+//!   the remembered weekly, dated when it was read: a card's headline window is its weekly, and a
+//!   card that misses it keeps the last one read rather than lead with its session. An answer
+//!   that reports no windows at all keeps none. A failed read keeps its own with the remembered
+//!   ones merged in by id, the newer observation of each winning.
 //! - **Plan, subscription status, credits, workspace credits**: an answer's own, absent included.
 //!   A failed read keeps its own, else the remembered ones.
 //! - **Credits spent, subscription term**: fetched beside the usage read, which may not have been
@@ -19,7 +22,7 @@
 
 use chrono::{DateTime, SecondsFormat, Utc};
 
-use crate::dto::{LimitWindowDto, LimitsStatus, ProviderLimitsDto, Reading};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto, Reading};
 
 /// How the read behind a reading went, which decides the column of the policy that applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +116,7 @@ impl Reading {
             windows: if failed {
                 merged(windows, remembered_windows)
             } else {
-                windows
+                with_remembered_weekly(windows, remembered_windows)
             },
             credits: kept(credits, remembered_credits, failed),
             workspace_credits: kept(workspace_credits, remembered_share, failed),
@@ -179,6 +182,23 @@ fn merged(
         }
     }
     windows.sort_by_key(|window| super::pipeline::kind_rank(window.kind));
+    windows
+}
+
+/// An answer's own windows, with the remembered weekly window, as it was observed, when the answer
+/// reports other windows but no weekly. An answer with no windows at all keeps none: a read of
+/// figures alone clears the windows it no longer reports. Weekly first, then session, then model.
+/// A carried weekly never lapses on its own: it stays until a read reports a weekly again or the
+/// user removes the account, and past its reset it reads as a window that has reset.
+fn with_remembered_weekly(
+    mut windows: Vec<LimitWindowDto>,
+    remembered: Vec<LimitWindowDto>,
+) -> Vec<LimitWindowDto> {
+    let is_weekly = |window: &LimitWindowDto| window.kind == LimitWindowKind::Weekly;
+    if !windows.is_empty() && !windows.iter().any(is_weekly) {
+        windows.extend(remembered.into_iter().filter(is_weekly));
+        windows.sort_by_key(|window| super::pipeline::kind_rank(window.kind));
+    }
     windows
 }
 

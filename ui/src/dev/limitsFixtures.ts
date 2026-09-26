@@ -40,8 +40,6 @@ const CODEX: ProviderLimits[] = [
     plan: "pro",
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 48, resetsAt: at(5 * 24 * 60 + 23 * 60), windowSeconds: 604_800, observedAt: OBSERVED },
-      { id: "extra:spark", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(5 * 60), windowSeconds: 18_000, observedAt: OBSERVED },
-      { id: "extra:spark:secondary", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(7 * 24 * 60), windowSeconds: 604_800, observedAt: OBSERVED },
     ],
     credits: { balance: "0", unlimited: false },
     subscription: { activeUntil: at(26 * 24 * 60), willRenew: true, checkedAt: at(-30) },
@@ -54,7 +52,6 @@ const CODEX: ProviderLimits[] = [
     plan: "pro",
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 97, resetsAt: at(-85), windowSeconds: 604_800, observedAt: REMEMBERED_OBSERVED },
-      { id: "extra:spark", label: "5 hour · GPT-5.3-Codex-Spark", kind: "model", usedPercent: 0, resetsAt: at(-4 * 24 * 60 - 7 * 60), windowSeconds: 18_000, observedAt: REMEMBERED_OBSERVED },
     ],
     subscription: { activeUntil: at(3 * 24 * 60 + 12 * 60), willRenew: false, note: "cancelled", checkedAt: at(-26 * 60) },
   },
@@ -97,6 +94,16 @@ export function claudeWithoutReset(): ProviderLimits[] {
     windows: CLAUDE[0].windows.map(window => window.kind === "session"
       ? { ...window, usedPercent: 0, resetsAt: null }
       : window),
+  }];
+}
+
+/** A saved Claude account whose read reported no weekly window: its card leads with nothing. */
+export function claudeWithoutWeekly(): ProviderLimits[] {
+  return [CLAUDE[0], {
+    ...CLAUDE[0],
+    account: { id: "claude-2", label: "other@example.com" },
+    currentAccount: false,
+    windows: CLAUDE[0].windows.filter(window => window.kind !== "weekly"),
   }];
 }
 

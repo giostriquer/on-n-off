@@ -1,66 +1,69 @@
 use super::*;
 
+/// The label of a cell whose account reports `windows`.
+fn ring_label(provider: AgentId, windows: Vec<LimitWindowDto>) -> String {
+    match cell_content(&CellData::Provider(projected(signed_in(provider, windows)))) {
+        CellContent::Provider { label, .. } => label,
+        _ => panic!("wrong content kind"),
+    }
+}
+
 #[test]
-fn codex_hides_internal_windows_from_both_ring_and_popover() {
-    let provider = ProviderData {
-        provider: AgentId::Codex,
-        status: LimitsStatus::Ok,
-        message: None,
-        windows: vec![
-            LimitWindowDto {
-                id: "w-session".into(),
-                label: "Session".into(),
-                kind: LimitWindowKind::Session,
-                used_percent: 10.0,
-                resets_at: None,
-                window_seconds: None,
-                observed_at: "2026-09-01T10:00:00Z".into(),
-            },
-            LimitWindowDto {
-                id: "extra:base_model_inference".into(),
-                label: "Weekly · gpt-5.3-codex-spark".into(),
-                kind: LimitWindowKind::Model,
-                used_percent: 90.0,
-                resets_at: None,
-                window_seconds: None,
-                observed_at: "2026-09-01T10:00:00Z".into(),
-            },
-        ],
-        workspace_credits: None,
-        sessions: Vec::new(),
-    };
-    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let planned = plan(
-        &settings(),
-        &displays,
-        &data(vec![CellData::Provider(provider)]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
-    )
-    .unwrap();
-    let popover = planned.popover.unwrap();
-    let bars = popover
-        .entries
-        .iter()
-        .filter(|(item, _)| matches!(item, PopItem::Bar { .. }))
-        .count();
-    assert_eq!(
-        bars, 1,
-        "the internal codex window never reaches the popover"
+fn claudes_ring_leads_with_its_weekly_over_its_session() {
+    let weekly = window(
+        "weekly_all",
+        "Weekly · all models",
+        LimitWindowKind::Weekly,
+        41.0,
     );
+    let session = window(
+        "session",
+        "5 hour · all models",
+        LimitWindowKind::Session,
+        73.0,
+    );
+    assert_eq!(
+        ring_label(AgentId::Claude, vec![weekly, session.clone()]),
+        "41%"
+    );
+    assert_eq!(
+        ring_label(AgentId::Claude, vec![session]),
+        "—",
+        "without a weekly window the ring leads with nothing, never the session"
+    );
+}
+
+#[test]
+fn codexs_ring_leads_with_its_weekly_over_its_session() {
+    let windows = vec![
+        window(
+            "secondary",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            10.0,
+        ),
+        window(
+            "primary",
+            "5 hour · all models",
+            LimitWindowKind::Session,
+            20.0,
+        ),
+    ];
+    assert_eq!(ring_label(AgentId::Codex, windows.clone()), "10%");
+    assert_eq!(ring_label(AgentId::Codex, windows[1..].to_vec()), "—");
 }
 #[test]
 fn unreadable_providers_fall_back_to_the_dash_label() {
-    let mut provider = provider_data(AgentId::Cursor, 50.0);
-    provider.status = LimitsStatus::Failed;
-    provider.message = Some("Could not read usage.".into());
-    let content = cell_content(&CellData::Provider(provider));
+    let mut failed = signed_in(AgentId::Cursor, vec![session_window(50.0)]);
+    failed.status = LimitsStatus::Failed;
+    failed.message = Some("Could not read usage.".into());
+    let content = cell_content(&CellData::Provider(projected(failed)));
     match content {
-        CellContent::Provider { label, primary, .. } => {
+        CellContent::Provider {
+            label, headline, ..
+        } => {
             assert_eq!(label, "—");
-            assert!(primary.is_none());
+            assert!(headline.is_none());
         }
         _ => panic!("wrong content kind"),
     }
@@ -97,10 +100,12 @@ fn a_reset_window_reads_as_zero_and_never_recites_its_spent_figure() {
     expired.resets_at = Some("2020-01-01T00:00:00Z".into());
     let content = cell_content(&CellData::Provider(claude_with(vec![expired.clone()])));
     match content {
-        CellContent::Provider { label, primary, .. } => {
+        CellContent::Provider {
+            label, headline, ..
+        } => {
             assert_eq!(label, "0%", "the quota renewed at the reset");
             assert_eq!(
-                primary.and_then(|quota| quota.percent),
+                headline.and_then(|quota| quota.percent),
                 Some(0.0),
                 "and the ring draws an empty arc rather than none at all"
             );
@@ -448,9 +453,13 @@ fn popover_texts(provider: ProviderData) -> Vec<String> {
         .collect()
 }
 
-fn inner_ring(provider: ProviderData) -> Option<InnerRing> {
+/// The inner ring a cell draws: the host's choice, its figure, and the ink and track it is drawn in.
+fn inner_ring(provider: ProviderData) -> Option<(InnerRing, QuotaView, (Color, Color))> {
     match cell_content(&CellData::Provider(provider)) {
-        CellContent::Provider { inner, .. } => inner,
+        CellContent::Provider { inner, .. } => inner.map(|(ring, quota)| {
+            let colors = inner_ring_colors(&ring);
+            (ring, quota, colors)
+        }),
         _ => panic!("wrong content kind"),
     }
 }
@@ -459,22 +468,24 @@ fn inner_ring(provider: ProviderData) -> Option<InnerRing> {
 fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
     let member = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
     match cell_content(&CellData::Provider(member.clone())) {
-        CellContent::Provider { label, primary, .. } => {
+        CellContent::Provider {
+            label, headline, ..
+        } => {
             assert_eq!(label, "31%", "the weekly stays the headline");
-            assert_eq!(primary.and_then(|quota| quota.percent), Some(31.0));
+            assert_eq!(headline.and_then(|quota| quota.percent), Some(31.0));
         }
         _ => panic!("wrong content kind"),
     }
     assert_eq!(
         inner_ring(member),
-        Some(InnerRing {
-            quota: QuotaView {
+        Some((
+            InnerRing::WorkspaceShare,
+            QuotaView {
                 percent: Some(32.0),
                 reached: false
             },
-            ink: CREDITS_INK,
-            track: CREDITS_TRACK,
-        })
+            (CREDITS_INK, CREDITS_TRACK),
+        ))
     );
     assert_eq!(
         inner_ring(codex_member(share(
@@ -483,16 +494,16 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
             true,
             "2020-01-01T12:00:00Z"
         )))
-        .map(|ring| ring.quota),
+        .map(|(_, quota, _)| quota),
         Some(QuotaView {
             percent: Some(0.0),
             reached: false
         }),
         "a share past its reset has renewed, as a window has"
     );
-    let mut unreadable = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
+    let mut unreadable = codex_member_card(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
     unreadable.status = LimitsStatus::Failed;
-    assert!(inner_ring(unreadable).is_none());
+    assert!(inner_ring(projected(unreadable)).is_none());
 }
 
 /// Claude's Fable window takes the same inner ring, in its own terracotta.
@@ -507,9 +518,15 @@ fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
         ),
         window("fable", "Weekly · Fable", LimitWindowKind::Model, 13.0),
     ]);
-    let ring = inner_ring(claude).expect("an inner ring");
-    assert_eq!(ring.quota.percent, Some(13.0));
-    assert_eq!((ring.ink, ring.track), (FABLE_ORANGE, FABLE_TRACK));
+    let (ring, quota, colors) = inner_ring(claude).expect("an inner ring");
+    assert_eq!(
+        ring,
+        InnerRing::Fable {
+            window_id: "fable".into()
+        }
+    );
+    assert_eq!(quota.percent, Some(13.0));
+    assert_eq!(colors, (FABLE_ORANGE, FABLE_TRACK));
 }
 
 #[test]
@@ -581,12 +598,12 @@ fn the_codex_popover_words_a_reached_and_a_renewed_share_as_the_app_does() {
 /// A paused account with only a remembered share still says the values below are last observed.
 #[test]
 fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
-    let mut paused = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
+    let mut paused = codex_member_card(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
     paused.status = LimitsStatus::Failed;
     paused.message = Some("Refresh failed.".into());
-    paused.windows.clear();
+    paused.reading.windows.clear();
 
-    let texts = popover_texts(paused);
+    let texts = popover_texts(projected(paused));
     assert!(
         texts.contains(&"Refresh paused. Last observed values below.".to_string()),
         "{texts:?}"

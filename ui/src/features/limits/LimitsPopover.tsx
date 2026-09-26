@@ -15,7 +15,7 @@ import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { orderAccountCards } from "./accountCards";
-import { presentLimitAccount, presentLimitWindow, visibleLimitWindows } from "./limitPresentation";
+import { presentLimitAccount, presentLimitWindow } from "./limitPresentation";
 import { limitsRefreshMs, useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
@@ -193,7 +193,7 @@ function PopoverAccount({ entry, now, divided }: { entry: ProviderLimits; now: n
   const name = providerLabel(entry.provider);
   const label = entry.account?.label ?? name;
   const plan = planLabel(entry.plan, entry.provider);
-  const windows = visibleLimitWindows(entry);
+  const windows = entry.windows;
   const { message, refreshPaused, remembered, updatedAt, savedRefreshDetail } = presentLimitAccount(entry, `${name} limits are unavailable.`);
 
   return (

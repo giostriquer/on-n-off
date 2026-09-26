@@ -20,6 +20,11 @@ Everything one read reported about one provider account: its quota windows, its 
 account details.
 _Avoid_: snapshot, observation set
 
+**Headline window**:
+The quota window a card or the notch leads with: its weekly window. A card that has none leads with
+nothing; a read that reports other windows but misses it keeps the last one read.
+_Avoid_: hero, primary
+
 **Figure**:
 A value on a reading other than a quota window: the credit balance, workspace credits, credits
 spent, banked resets, the subscription term or a reset offer.

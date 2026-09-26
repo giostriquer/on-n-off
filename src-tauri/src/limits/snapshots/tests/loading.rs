@@ -1,5 +1,6 @@
 //! What loading gives back: files written before a figure existed, files from an obsolete
-//! schema, and banked-reset counts whose soonest expiry has passed.
+//! schema, banked-reset counts whose soonest expiry has passed, and Codex files that still hold
+//! hidden windows.
 
 use super::*;
 
@@ -218,4 +219,98 @@ fn a_remembered_term_loads_back() {
         .expect("a snapshot written before the field loads");
     assert_eq!(older.reading.subscription, None);
     let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A remembered Codex file as a version before the reader dropped hidden windows wrote it: the
+/// weekly window beside `extra` windows, all observed at one time.
+fn codex_file_with(store: &SnapshotStore, account: &str, extra: &[(&str, &str)]) -> PathBuf {
+    let window = |id: &str, label: &str, kind: &str| {
+        serde_json::json!({"id": id, "label": label, "kind": kind, "usedPercent": 100,
+            "resetsAt": "2026-08-24T23:34:33+00:00", "observedAt": "2026-08-17T10:00:00.000Z"})
+    };
+    let mut windows = vec![window("primary", "Weekly · all models", "weekly")];
+    windows.extend(extra.iter().map(|(id, label)| window(id, label, "model")));
+    fs::create_dir_all(store.dir()).unwrap();
+    let path = store.dir().join(file_name(AgentId::Codex, account));
+    let stored = serde_json::json!({"schemaVersion": 2, "provider": "codex",
+        "account": {"id": account, "label": "a@x"}, "plan": "pro", "windows": windows,
+        "observedAt": "2026-08-17T10:00:00.000Z"});
+    fs::write(&path, stored.to_string()).unwrap();
+    path
+}
+
+/// Files written before the Codex reader dropped hidden windows still hold some. Loading drops
+/// them through the reader's own rule, by bucket id and by name, so a paused read's last observed
+/// values never bring one back. The file itself loses them only at its next save.
+#[test]
+fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
+    let home = scratch_dir("limits-snap-hidden-windows");
+    let store = SnapshotStore::for_home(&home);
+    let path = codex_file_with(
+        &store,
+        "acct-1",
+        &[
+            ("extra:codex_bengalfox", "5 hour · GPT-5.3-Codex-Spark"),
+            ("extra:base_model_inference:secondary", "Weekly · Inference"),
+            ("extra:reserve", "Weekly · GPT-Reserve"),
+            ("extra:gpt_luna", "Weekly · GPT-5.6-Luna"),
+        ],
+    );
+
+    let remembered = store.load(AgentId::Codex).remove(0);
+    let ids = |card: &ProviderLimitsDto| -> Vec<String> {
+        card.reading
+            .windows
+            .iter()
+            .map(|window| window.id.clone())
+            .collect()
+    };
+    assert_eq!(ids(&remembered), ["primary", "extra:gpt_luna"]);
+
+    let mut paused = ProviderLimitsDto {
+        status: LimitsStatus::Failed,
+        message: Some("Refresh failed.".into()),
+        ..ProviderLimitsDto::for_test(AgentId::Codex, "acct-1")
+    };
+    crate::limits::keep_remembered(&mut paused, remembered.reading);
+    assert_eq!(ids(&paused), ["primary", "extra:gpt_luna"]);
+    assert!(fs::read_to_string(path)
+        .unwrap()
+        .contains("codex_bengalfox"));
+}
+
+/// A remembered Codex file holding only hidden windows has observed nothing a surface shows, so it
+/// is not loaded, as none would be saved.
+#[test]
+fn a_remembered_codex_file_with_only_hidden_windows_is_not_loaded() {
+    let home = scratch_dir("limits-snap-only-hidden-windows");
+    let store = SnapshotStore::for_home(&home);
+    let path = codex_file_with(
+        &store,
+        "acct-1",
+        &[("extra:codex_bengalfox", "5 hour · GPT-5.3-Codex-Spark")],
+    );
+    let mut stored: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    stored["windows"].as_array_mut().unwrap().remove(0);
+    fs::write(&path, stored.to_string()).unwrap();
+
+    assert!(store.load(AgentId::Codex).is_empty());
+}
+
+/// The hidden-window rule is Codex's: another provider's remembered windows load whatever they are
+/// called.
+#[test]
+fn another_providers_remembered_windows_load_whatever_their_names() {
+    let home = scratch_dir("limits-snap-hidden-rule-is-codexs");
+    let store = SnapshotStore::for_home(&home);
+    let mut claude = snapshot(AgentId::Claude, "user-1", "a@x", "2026-08-17T10:00:00.000Z");
+    let mut named_like_hidden = claude.reading.windows[0].clone();
+    named_like_hidden.id = "extra:codex_bengalfox".into();
+    named_like_hidden.label = "Weekly · GPT-Reserve".into();
+    named_like_hidden.kind = LimitWindowKind::Model;
+    claude.reading.windows.push(named_like_hidden);
+    store.save(&claude).unwrap();
+
+    assert_eq!(store.load(AgentId::Claude)[0].reading.windows.len(), 2);
 }

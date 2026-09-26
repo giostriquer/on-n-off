@@ -1,5 +1,7 @@
 use super::*;
 
+mod projection;
+
 fn display(id: &str, x: f64, scale: f64) -> Display {
     Display {
         id: id.into(),

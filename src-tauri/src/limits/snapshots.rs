@@ -226,15 +226,20 @@ impl StoredSnapshot {
             .or_else(|| newest(&self.reading.windows))
     }
 
-    /// The card a remembered reading shows at `now`.
+    /// The card a remembered reading shows at `now`. A Codex file written before the reader dropped
+    /// hidden windows loses them here, by the reader's own rule; the file loses them at its next save.
     fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
+        let mut reading = self.reading.known_at(now);
+        if self.provider == AgentId::Codex {
+            super::codex::drop_hidden(&mut reading.windows);
+        }
         ProviderLimitsDto {
             provider: self.provider,
             status: LimitsStatus::Ok,
             message: None,
             account: Some(self.account),
             current_account: false,
-            reading: self.reading.known_at(now),
+            reading,
         }
     }
 }

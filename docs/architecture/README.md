@@ -331,6 +331,7 @@ the code today; a change that moves one updates its row.
 | --- | --- |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
+| Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` on the screen (`ui/src/features/limits/limitPresentation.ts`) and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Provider.headline` |
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
 | Account details | `plan` and `subscription_status` on `Reading` |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); what a fresh read keeps from it is the remember policy, `Reading::keeping` (`limits/reading.rs`) |
