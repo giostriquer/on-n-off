@@ -402,9 +402,9 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
     assert!(dto.reading.windows.is_empty());
 }
 
-/// A throttled signed-in read reports the status code it got.
+/// A throttled signed-in read says it is rate limited.
 #[test]
-fn a_throttled_claude_read_names_the_status_it_got() {
+fn a_throttled_claude_read_says_it_is_rate_limited() {
     let home = scratch_dir("limits-claude-throttled");
     write(&home, ".claude/.credentials.json", CLAUDE_CREDENTIALS);
     let (profile_url, profile_request) =
@@ -416,7 +416,7 @@ fn a_throttled_claude_read_names_the_status_it_got() {
     assert_eq!(dto.status, LimitsStatus::Failed);
     assert_eq!(
         dto.message.as_deref(),
-        Some("Could not reach the Claude usage service (HTTP 429).")
+        Some("Could not reach the Claude usage service (rate limited).")
     );
 }
 

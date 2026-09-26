@@ -552,12 +552,15 @@ fn a_spending_read_that_fails_leaves_the_usage_read_standing() {
     }
 }
 
-/// A refused login is `Unauthorized` and a throttled one keeps its status code.
+/// A refused login is `Unauthorized`, and a throttled one is rate limited until its `Retry-After`.
 #[test]
-fn a_saved_codex_read_the_service_refuses_or_throttles_keeps_its_status() {
+fn a_saved_codex_read_the_service_refuses_or_throttles_says_which() {
     for (status, expected) in [
         ("401 Unauthorized", HttpError::Unauthorized),
-        ("429 Too Many Requests", HttpError::Status(429)),
+        (
+            "429 Too Many Requests",
+            HttpError::RateLimited(crate::http::RateLimitReset::RetryAfter(30)),
+        ),
     ] {
         let (usage, u) = serve_once_capturing(status, &["Retry-After: 30"], "{}");
         let codex = read_codex(&usage, "unused");

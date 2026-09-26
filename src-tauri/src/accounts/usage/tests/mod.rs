@@ -282,7 +282,7 @@ fn a_poll_that_read_nothing_says_why() {
             false,
         ),
         (
-            HttpError::Status(429).into(),
+            HttpError::Status(503).into(),
             "Usage refresh is unavailable. The last reading is retained.",
             false,
         ),

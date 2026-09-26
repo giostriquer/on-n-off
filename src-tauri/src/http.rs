@@ -22,8 +22,8 @@ pub enum RateLimitReset {
 pub enum HttpError {
     /// The stored token was rejected (401; also 403 for the Limits GET, whose services use it).
     Unauthorized,
-    /// The service's rate limit is exhausted (403/429 carrying `x-ratelimit-remaining: 0` or
-    /// `retry-after`).
+    /// The service's rate limit is exhausted: a 429 from the Limits GET, or a GitHub 403/429
+    /// carrying `x-ratelimit-remaining: 0` or `retry-after`.
     RateLimited(RateLimitReset),
     /// Any other non-success status.
     Status(u16),
@@ -139,9 +139,11 @@ pub fn post_grant(url: &str, body: &Value) -> Result<Value, HttpError> {
     finish(response, Forbidden::Status)
 }
 
-/// How an endpoint reads a 403 — the only place the three callers' status taxonomies differ.
+/// How an endpoint reads a 403 and a 429 — the only place the three callers' status taxonomies
+/// differ.
 enum Forbidden {
-    /// The Limits services answer 403 for a rejected token.
+    /// The Limits services answer 403 for a rejected token, and 429 for an exhausted rate limit,
+    /// with the `retry-after` that says when to ask again.
     Unauthorized,
     /// GitHub answers 403 or 429 for an exhausted limit and 401 for a bad token.
     RateLimit,
@@ -149,14 +151,17 @@ enum Forbidden {
     Status,
 }
 
-/// The one status ladder this module owns: 2xx parses, 401 is always a rejected token, and a 403
-/// means whatever the endpoint says it means.
+/// The one status ladder this module owns: 2xx parses, 401 is always a rejected token, and a 403 or
+/// a 429 means whatever the endpoint says it means.
 fn finish(response: Reply, forbidden: Forbidden) -> Result<Value, HttpError> {
     let code = response.status().as_u16();
     match (code, &forbidden) {
         (200..=299, _) => parse_body(response),
         (401, _) => Err(HttpError::Unauthorized),
         (403, Forbidden::Unauthorized) => Err(HttpError::Unauthorized),
+        (429, Forbidden::Unauthorized) => Err(HttpError::RateLimited(
+            rate_limit_reset(&response).unwrap_or(RateLimitReset::Unknown),
+        )),
         (403 | 429, Forbidden::RateLimit) => Err(match rate_limit_reset(&response) {
             Some(reset) => HttpError::RateLimited(reset),
             None if code == 429 => HttpError::RateLimited(RateLimitReset::Unknown),

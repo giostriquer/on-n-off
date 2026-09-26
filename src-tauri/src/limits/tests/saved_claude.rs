@@ -279,12 +279,15 @@ fn a_saved_claude_team_or_enterprise_account_has_no_spending_figure() {
     }
 }
 
-/// A refused login is `Unauthorized` and a throttled one keeps its status code.
+/// A refused login is `Unauthorized`, and a throttled one is rate limited until its `Retry-After`.
 #[test]
-fn a_saved_claude_read_the_service_refuses_or_throttles_keeps_its_status() {
+fn a_saved_claude_read_the_service_refuses_or_throttles_says_which() {
     for (status, expected) in [
         ("401 Unauthorized", HttpError::Unauthorized),
-        ("429 Too Many Requests", HttpError::Status(429)),
+        (
+            "429 Too Many Requests",
+            HttpError::RateLimited(crate::http::RateLimitReset::RetryAfter(30)),
+        ),
     ] {
         let (profile, p) = serve_once_capturing(status, &["Retry-After: 30"], "{}");
         let claude = read_at(
