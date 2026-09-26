@@ -9,7 +9,7 @@ use crate::dto::AdapterError;
 /// `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME` to a real home, find the
 /// Claude Code Keychain entry under a developer's own account name, or read the login Keychain at
 /// all. A test that needs another environment hands one to the resolver it tests
-/// (`accounts::claude_store::dirs`, `NativeStore::resolve_from`).
+/// (`accounts::claude_store::dirs`, the adapters' `resolve_from`).
 #[cfg(not(test))]
 pub(crate) fn process_env(name: &str) -> Option<OsString> {
     env::var_os(name)

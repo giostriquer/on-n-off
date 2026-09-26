@@ -4,7 +4,7 @@ use super::super::{
     model::{Identity, LoginView},
     store::{ChangeKind, Database, Guard, Login, Store, Ticket},
     transaction::{Native, NativeGuard, Recovery},
-    Accounts, Clients, NativeAccount, Notify,
+    Accounts, Clients, IsolatedSignIn, NativeAccount, Notify,
 };
 use crate::dto::AgentId;
 use serde_json::json;
@@ -114,6 +114,9 @@ impl NativeAccount for FakeNative {
         }
         *self.0.live.borrow_mut() = None;
         Ok(())
+    }
+    fn isolated(&self, _: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        Err("The fake native store runs no sign-in.".into())
     }
 }
 

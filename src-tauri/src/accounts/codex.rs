@@ -14,6 +14,10 @@ use std::path::Path;
 pub(super) struct Codex;
 
 impl super::Adapter for Codex {
+    fn native(&self, home: &Path) -> Result<Box<dyn super::NativeAccount>, String> {
+        Ok(Box::new(super::native::NativeStore::resolve(home)?))
+    }
+
     fn login<'a>(&self, login: &'a Login) -> Box<dyn LoginView + 'a> {
         Box::new(CodexLogin::of(login))
     }

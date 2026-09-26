@@ -1,6 +1,56 @@
 use super::*;
 use serde_json::json;
 
+/// What account changes say about a native home the environment chose.
+const CUSTOM_HOME: &str = "Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.";
+
+/// A file-backed store under `root`: the default dirs, and no Keychain to consult.
+fn claude(root: &Path) -> ClaudeNative {
+    let home = root.join(".claude");
+    fs::create_dir_all(&home).unwrap();
+    ClaudeNative {
+        config_home: home,
+        config_file: root.join(".claude.json"),
+        custom: false,
+        use_keychain: false,
+        secure_storage: None,
+    }
+}
+/// An environment holding exactly `vars`, for `resolve_from`.
+fn environment<'a>(
+    vars: &'a [(&'a str, PathBuf)],
+) -> impl Fn(&str) -> Option<std::ffi::OsString> + 'a {
+    move |name| {
+        vars.iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.clone().into_os_string())
+    }
+}
+
+/// The environment a command reads, as the child will see it: `Some(None)` is a variable removed.
+fn command_env(command: &Command) -> std::collections::HashMap<String, Option<std::ffi::OsString>> {
+    command
+        .get_envs()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.map(std::ffi::OsStr::to_os_string),
+            )
+        })
+        .collect()
+}
+
+/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
+const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
+
+/// A login the switch publishes.
+fn incoming() -> Login {
+    Login {
+        auth: json!({"claudeAiOauth":{"accessToken":"incoming"}}),
+        account: json!({"accountUuid":"b","organizationUuid":"org-b"}),
+    }
+}
+
 /// A Claude login with these credentials and this account record.
 fn login(auth: Value, account: Value) -> Login {
     Login { auth, account }
@@ -96,3 +146,8 @@ fn a_claude_logins_fingerprint_is_its_token_generation_alone() {
     rotated.auth["claudeAiOauth"]["refreshToken"] = json!("refresh-b");
     assert_ne!(fingerprint(&rotated), fingerprint(&claude));
 }
+
+#[cfg(target_os = "macos")]
+mod keychain;
+mod native_store;
+mod secure_storage;

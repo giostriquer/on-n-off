@@ -151,21 +151,21 @@ fn poll_home(home: &Path, provider: AgentId) -> Result<bool, String> {
     }
     let _read = super::activity::read(provider)
         .ok_or("An account change is running. Automatic remembering will retry.")?;
-    let native = super::native::NativeStore::resolve(provider, home)?;
+    let native = super::adapter(provider)?.native(home)?;
     native.preflight()?;
     let db = Store::open_existing(home)?.load()?;
     // Nothing is remembered while an interrupted switch awaits recovery.
     let Ok(ticket) = db.ticket(Guard::SignIn) else {
         return Ok(false);
     };
-    let Some(login) = candidate(&native, &db)? else {
+    let Some(login) = candidate(native.as_ref(), &db)? else {
         return Ok(false);
     };
     // Network verification holds no vault lease. Recheck consent, epoch, recovery, exclusions
     // and the exact native credential under the leases before publishing its protected copy.
     let store = Store::open_existing(home)?;
     let remember = enabled(home)?;
-    publish(store, &ticket, &native, login, remember)
+    publish(store, &ticket, native.as_ref(), login, remember)
 }
 pub fn setup(app: &mut tauri::App) {
     crate::monitor::spawn::<AccountDiscovery, _, _>(app, run);

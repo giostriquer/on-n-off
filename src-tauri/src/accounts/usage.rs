@@ -1,10 +1,6 @@
 //! Poll every saved subscription without publishing credentials to a native client. Shared
 //! native shadows are access-only. Only a never-activated isolated sign-in owns renewal.
-use super::{
-    native::NativeStore,
-    store::{Guard, Login, Profile, Store, Ticket},
-    transaction::Native,
-};
+use super::store::{Guard, Login, Profile, Store, Ticket};
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     http::{HttpError, RateLimitReset},
@@ -45,7 +41,9 @@ pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<Provider
         return;
     }
     let open = || Store::open_existing(&home);
-    let native = NativeStore::resolve(provider, &home).and_then(|n| n.read());
+    let native = super::adapter(provider)
+        .and_then(|adapter| adapter.native(&home))
+        .and_then(|native| native.read());
     refresh_with(&home, provider, force, entries, native, &open, &|profile| {
         fetch_profile(profile, &open)
     });

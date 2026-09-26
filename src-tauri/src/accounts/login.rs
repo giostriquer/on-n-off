@@ -1,7 +1,7 @@
 //! Isolated official sign-in with operation-scoped cancellation and publication guards.
 use super::model::Identity;
 use super::transaction::Native;
-use super::{home, native, store};
+use super::{home, store};
 use crate::{dto::AgentId, file_lease::FileLease};
 use std::{
     collections::VecDeque,
@@ -150,7 +150,7 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         .reserve(&id, expected.clone())?;
     let _lease = LoginLease(id.clone());
     let home = home()?;
-    let native = native::NativeStore::resolve(provider, &home)?;
+    let native = super::adapter(provider)?.native(&home)?;
     native.preflight()?;
     // Unlock storage before asking the user to sign in, so a denied vault cannot strand a login.
     let ticket = start(&home, provider, expected.as_deref())?;
@@ -160,7 +160,7 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         .prefix("login-")
         .tempdir_in(&root)
         .map_err(|_| "Cannot prepare isolated sign-in.")?;
-    let isolated = native::NativeStore::isolated(provider, scratch.path())?;
+    let isolated = native.isolated(scratch.path())?;
     let lease_file = std::fs::OpenOptions::new()
         .create_new(true)
         .read(true)
@@ -174,13 +174,8 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         &serde_json::to_vec(&provider).map_err(|_| "Cannot record isolated sign-in ownership.")?,
     )?;
     let result: Result<(), String> = (|| {
-        let mut command = isolated.command();
-        if provider == AgentId::Claude {
-            command.args(["auth", "login", "--claudeai"]);
-        } else {
-            command.arg("login");
-        }
-        let child = command
+        let child = isolated
+            .sign_in()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -195,12 +190,8 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
         if canceled.load(Ordering::Acquire) {
             return Err("Sign-in was canceled.".into());
         }
-        let prepared = prepare_login(&isolated, |login, identity| {
-            crate::limits::login::read(
-                scratch.path(),
-                identity,
-                crate::limits::credentials::parse_claude_credential(&login.auth),
-            )
+        let prepared = prepare_login(isolated.as_ref(), |login, identity| {
+            isolated.first_usage(scratch.path(), login, identity)
         })?;
         publish(
             &LOGIN,
@@ -212,7 +203,7 @@ pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<()
             prepared,
         )
     })();
-    let cleanup = isolated.clean_isolated();
+    let cleanup = isolated.clean();
     drop(lease);
     if cleanup.is_err() {
         let _retained = scratch.keep();
@@ -325,15 +316,19 @@ pub(super) fn recover_abandoned(home: &std::path::Path) {
         else {
             continue;
         };
-        if !matches!(provider, AgentId::Claude | AgentId::Codex)
-            || super::clients::require_closed(provider).is_err()
-        {
-            continue;
-        }
-        let Ok(native) = native::NativeStore::isolated(provider, &path) else {
+        let Ok(adapter) = super::adapter(provider) else {
             continue;
         };
-        if native.clean_isolated().is_ok() {
+        if super::clients::require_closed(provider).is_err() {
+            continue;
+        }
+        let Ok(native) = adapter
+            .native(&path)
+            .and_then(|native| native.isolated(&path))
+        else {
+            continue;
+        };
+        if native.clean().is_ok() {
             drop(lease);
             let _ = std::fs::remove_dir_all(path);
         }

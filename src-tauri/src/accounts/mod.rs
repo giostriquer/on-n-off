@@ -61,6 +61,8 @@ fn home() -> Result<PathBuf, String> {
 /// [`adapter`] for it rather than asking which provider it has. The catalog's `AgentAdapter`
 /// (`crate::adapter`) is a different seam; accounts touch it only through `supports_accounts`.
 trait Adapter: Sync {
+    /// The provider's native store under `home`, where this process's environment puts it.
+    fn native(&self, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
     /// `login` read by this provider's rules.
     fn login<'a>(&self, login: &'a store::Login) -> Box<dyn model::LoginView + 'a>;
 }
@@ -80,13 +82,33 @@ fn view(provider: AgentId, login: &store::Login) -> Result<Box<dyn model::LoginV
 }
 
 /// A provider's native store as the account operations use it: the activation transaction's
-/// `Native`, plus the check an operation makes before touching it and the official sign-out.
+/// `Native`, plus the check an operation makes before touching it, the official sign-out, and the
+/// private store an isolated sign-in runs in.
 trait NativeAccount: Native {
     /// Refuses a native setup on-n-off leaves to the official client: a custom home, an
     /// environment credential or a managed login policy.
     fn preflight(&self) -> Result<(), String>;
     /// Signs the CLI out through its own command.
     fn logout(&self) -> Result<(), String>;
+    /// The provider's store in `dir`, private to one isolated sign-in, created there.
+    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
+}
+
+/// A provider's native store in a private directory, where an isolated sign-in runs the official
+/// client and reads back the login it left.
+trait IsolatedSignIn: Native {
+    /// The official sign-in, ready to spawn in this store.
+    fn sign_in(&self) -> std::process::Command;
+    /// The first usage reading of `login`, signed in as `identity` in `dir`, before the directory
+    /// is removed.
+    fn first_usage(
+        &self,
+        dir: &Path,
+        login: &store::Login,
+        identity: &model::Identity,
+    ) -> Option<crate::dto::ProviderLimitsDto>;
+    /// Removes what the sign-in left outside `dir`: a scoped Keychain entry.
+    fn clean(&self) -> Result<(), String>;
 }
 
 /// Running provider clients, which an account change checks for before it touches a native login.
@@ -142,9 +164,7 @@ impl Accounts {
     fn live() -> Result<Self, String> {
         Ok(Self {
             home: home()?,
-            native: Box::new(|provider, home| {
-                Ok(Box::new(native::NativeStore::resolve(provider, home)?))
-            }),
+            native: Box::new(|provider, home| adapter(provider)?.native(home)),
             clients: Box::new(RunningClients),
             notify: Box::new(Announce),
         })
