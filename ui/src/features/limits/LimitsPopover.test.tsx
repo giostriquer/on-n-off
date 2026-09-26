@@ -135,7 +135,23 @@ describe("LimitsPopover", () => {
       "Codex limits · kept@codex.example",
     ]);
     expect(screen.getAllByText("Remembered account")).toHaveLength(2);
+    expect(screen.queryByText("Refresh paused")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
+  });
+
+  it("lists accounts in the card model's order, not the order the read gave them", async () => {
+    const out = limits("claude", "claude-out", "out@claude.example", false);
+    out.windows = [{ ...out.windows[0], usedPercent: 100 }];
+    readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+      ? [out, limits("claude", "claude-kept", "kept@claude.example", false), limits("claude", "claude-current", "current@claude.example", true)] : []));
+    renderPopover();
+
+    const claude = await screen.findByRole("region", { name: "Claude accounts" });
+    expect((await within(claude).findAllByRole("article")).map((entry) => entry.getAttribute("aria-label"))).toEqual([
+      "Claude limits · current@claude.example",
+      "Claude limits · kept@claude.example",
+      "Claude limits · out@claude.example",
+    ]);
   });
 
   it("uses the critical tone for a nearly exhausted meter fill", async () => {

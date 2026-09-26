@@ -335,6 +335,8 @@ describe("Limits", () => {
     const current = card("Codex limits");
     expect(within(current).getByText("Sign in with `codex` to see subscription limits.")).toBeTruthy();
     expect(current.getAttribute("data-status")).toBe("signedOut");
+    // A read with no account has no account to act on.
+    expect(within(current).queryByRole("button", { name: /More actions|Sign in/ })).toBeNull();
   });
 
   it("keeps the card and reports the error when Forget fails", async () => {

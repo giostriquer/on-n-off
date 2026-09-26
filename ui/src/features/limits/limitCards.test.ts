@@ -90,6 +90,15 @@ describe("which cards a provider shows", () => {
     });
   });
 
+  it("gives a saved Codex profile no read answered for its own subscription read, and no reset to spend", () => {
+    const [card] = cards(undefined, [saved("codex", "unread", "profile:unread", "unread@codex.example")], AT_NOW, "codex");
+    expect(card).toMatchObject({
+      provider: "codex", reading: null, active: false, key: "remembered-profile:unread", resetAction: false,
+      subscription: { provider: "codex", accountId: "profile:unread", current: false, term: null },
+      empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
+    });
+  });
+
   it("keeps an unverified legacy card beside its saved login", () => {
     const shown = cards([okCodex({ account: { id: "team", label: "shared@example.com" }, currentAccount: false })],
       [saved("codex", "saved", "profile:user-team", "shared@example.com", { identity: { provider: "codex", userId: "user", workspaceId: "team" } })]);
@@ -288,6 +297,12 @@ describe("a card's windows", () => {
     });
   });
 
+  it("says a Claude model row at 0% with no reset has none, not that it waits for a first message", () => {
+    const remembered = okClaude({ currentAccount: false });
+    remembered.windows[2] = { ...remembered.windows[2], usedPercent: 0, resetsAt: null };
+    expect(cards([remembered])[0].rows[1]).toMatchObject({ id: "weekly_opus", note: "Reset time unavailable" });
+  });
+
   it("keeps a reported countdown even when a remembered Claude session has zero usage", () => {
     const remembered = okClaude({ currentAccount: false });
     remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: "2026-08-17T23:00:00Z" };
@@ -367,6 +382,13 @@ describe("a card's empty copy", () => {
       plan: null, empty: { reason: "noWindows", copy: "Claude reported no rate-limit windows." },
     });
     expect(cards([okCodex({ windows: [], currentAccount: false })], [])[0].empty).toEqual({ reason: "noWindows", copy: "Codex reported no rate-limit windows." });
+  });
+
+  it("gives a saved read that failed but kept only figures its status, not an empty copy", () => {
+    const reason = "Saved usage credential is no longer accepted.";
+    const [card] = cards([okCodex({ currentAccount: false, status: "failed", message: reason, windows: [] })]);
+    expect(card.status).toEqual({ kind: "savedRefresh", detail: reason });
+    expect(card.empty).toBeNull();
   });
 });
 
