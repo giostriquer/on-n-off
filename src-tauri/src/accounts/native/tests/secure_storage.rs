@@ -67,9 +67,6 @@ fn an_isolated_claude_sign_in_never_inherits_a_secure_storage_dir() {
     );
 }
 
-/// What account changes say about a native home the environment chose.
-const CUSTOM_HOME: &str = "Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.";
-
 /// A store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved is a custom native home like one
 /// `CLAUDE_CONFIG_DIR` chose, so account changes defer to the official client for it. Named
 /// explicitly, even `~/.claude` moves the login to a scoped Keychain entry. Set but empty, the

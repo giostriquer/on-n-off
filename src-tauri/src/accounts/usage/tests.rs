@@ -487,6 +487,68 @@ fn automatic_renewal_policy_covers_both_providers_and_never_renews_shadows() {
     }
 }
 
+/// A private login this owns, for `user` in `team`, whose access token expires as `expiry` says.
+fn owned_with(provider: AgentId, expiry: Option<i64>) -> Profile {
+    use base64::Engine;
+    let jwt = |value: serde_json::Value| {
+        format!(
+            "header.{}.signature",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(&value).unwrap())
+        )
+    };
+    let mut p = profile();
+    p.identity.provider = provider;
+    p.usage_renewal_owned = true;
+    p.login = Some(if provider == AgentId::Claude {
+        let mut auth = json!({"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}});
+        if let Some(at) = expiry {
+            auth["claudeAiOauth"]["expiresAt"] = json!(at);
+        }
+        Login {
+            auth,
+            account: json!({"accountUuid":"user","organizationUuid":"team"}),
+        }
+    } else {
+        let access = expiry.map_or_else(|| "not-a-jwt".to_string(), |exp| jwt(json!({"exp": exp})));
+        Login {
+            auth: json!({"tokens":{"access_token":access,"refresh_token":"refresh","account_id":"team",
+                "id_token":jwt(json!({"https://api.openai.com/auth":{"chatgpt_user_id":"user","chatgpt_account_id":"team"}}))}}),
+            account: serde_json::Value::Null,
+        }
+    });
+    p
+}
+
+/// When a saved login is due to renew before it is read, at 1,000,000 ms: a Claude one once its
+/// access token's `expiresAt` (ms) is reached, never without one; a Codex one within ten minutes
+/// of its access token's `exp` (s), or when that cannot be read.
+#[test]
+fn a_saved_login_renews_before_its_read_once_its_provider_says_it_is_due() {
+    use std::cell::Cell;
+    for (provider, expiry, due) in [
+        (AgentId::Claude, Some(1_000_000), true),
+        (AgentId::Claude, Some(1_000_001), false),
+        (AgentId::Claude, None, false),
+        (AgentId::Codex, Some(1_599), true),
+        (AgentId::Codex, Some(1_600), false),
+        (AgentId::Codex, None, true),
+    ] {
+        let p = owned_with(provider, expiry);
+        let renewals = Cell::new(0);
+        let result = fetch_with(&p, 1_000_000, &|_| Ok(reading(&p)), &|| {
+            renewals.set(renewals.get() + 1);
+            Ok(p.login.clone().unwrap())
+        });
+        assert!(result.result.is_ok(), "{provider:?} {expiry:?}");
+        assert_eq!(
+            renewals.get(),
+            usize::from(due),
+            "{provider:?} expiring at {expiry:?}"
+        );
+    }
+}
+
 #[test]
 fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_results() {
     use std::sync::atomic::{AtomicUsize, Ordering};

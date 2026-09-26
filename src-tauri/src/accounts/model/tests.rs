@@ -75,3 +75,47 @@ fn a_codex_login_renews_soon_within_ten_minutes_of_expiry_or_without_a_readable_
     assert!(codex_renews_soon(&expiring_at(1_000_599), 1_000_000));
     assert!(codex_renews_soon(&auth("user-a", "team"), 1_000_000));
 }
+
+/// A Claude profile is the account in its organization, and only a renewable login is one: both
+/// tokens are required, and blank ones count as missing.
+#[test]
+fn a_claude_identity_is_the_account_in_its_organization_and_needs_both_tokens() {
+    let account =
+        json!({"accountUuid":"user-a","organizationUuid":"org-a","emailAddress":"a@example.com"});
+    let renewable = json!({"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}});
+    let found = identity(AgentId::Claude, &renewable, &account).unwrap();
+    assert_eq!(
+        (
+            found.provider,
+            found.user_id.as_str(),
+            found.workspace_id.as_str()
+        ),
+        (AgentId::Claude, "user-a", "org-a")
+    );
+    for auth in [
+        json!({"claudeAiOauth":{"accessToken":"access"}}),
+        json!({"claudeAiOauth":{"refreshToken":"refresh"}}),
+        json!({"claudeAiOauth":{"accessToken":" ","refreshToken":"refresh"}}),
+    ] {
+        assert!(
+            identity(AgentId::Claude, &auth, &account).is_err(),
+            "{auth}"
+        );
+    }
+}
+
+/// A Codex login that carries an API key is not a subscription, so it is never a profile; a key
+/// left null is no key.
+#[test]
+fn a_codex_api_key_login_is_not_a_subscription_profile() {
+    let mut value = auth("user-a", "team");
+    value["OPENAI_API_KEY"] = json!("fixture-api-key");
+    assert_eq!(
+        identity(AgentId::Codex, &value, &Value::Null)
+            .err()
+            .as_deref(),
+        Some("API key logins cannot be saved as subscription profiles.")
+    );
+    value["OPENAI_API_KEY"] = Value::Null;
+    assert!(identity(AgentId::Codex, &value, &Value::Null).is_ok());
+}
