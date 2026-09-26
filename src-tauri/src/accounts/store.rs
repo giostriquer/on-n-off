@@ -1,4 +1,11 @@
-use super::model::Identity;
+//! The saved-profile vault and the protocol every change to it follows. An account change goes
+//! through `Store::change`, which refuses it during a pending recovery, rejects every sign-in in
+//! flight by bumping the sign-in epoch, persists it and releases the lease before the caller
+//! announces it. Work too slow to hold the lease takes a `Ticket` first, rechecked under the lease
+//! afterwards: a sign-in's by `Store::change` with `ChangeKind::SignIn`, which then bumps the epoch
+//! as any account change does; a remembered login's and a renewal's by `Store::publish`, which bumps
+//! nothing; a usage reading's by `Store::recheck`, since the reading is published outside the vault.
+use super::{model::Identity, transaction::Recovery};
 use crate::file_lease::FileLease;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,14 +34,130 @@ pub struct Profile {
 #[derive(Default, Serialize, Deserialize)]
 pub struct Database {
     pub profiles: Vec<Profile>,
+    /// The sign-in epoch: every account change bumps it, and a sign-in, a remembered login or a
+    /// usage reading that started before it publishes nothing.
     #[serde(default)]
-    pub login_epoch: u64,
+    login_epoch: u64,
     #[serde(default)]
     pub ignored_accounts: Vec<Identity>,
     #[serde(default)]
     pub ignored_credentials: Vec<String>,
+    /// The journal of a switch that was interrupted, which every account change but recovery and
+    /// a metadata edit waits for.
     #[serde(default)]
-    pub recovery: Option<super::transaction::Recovery>,
+    recovery: Option<Recovery>,
+}
+
+/// Refused while an interrupted switch awaits recovery.
+const RECOVER_FIRST: &str = "Recover the interrupted account change first.";
+/// A sign-in or a remembered login whose ticket no longer holds.
+const SIGN_IN_CHANGED: &str = "The account state changed while sign-in was running. Start sign-in again after recovery or account changes finish.";
+
+/// Which change `Store::change` makes to the vault, and so which of its rules it follows: an
+/// account change (`Account`, `SignIn`, `Recovery`), remembering turned on, or a metadata edit.
+/// `gate` and `bumps` spell out each kind's rule.
+pub enum ChangeKind<'t> {
+    /// Changes which logins are saved or which one a CLI uses (save, remove, use, sign out):
+    /// refused during a pending recovery, and rejects every sign-in in flight.
+    Account,
+    /// Publishes a sign-in, which is itself an account change: refused unless its ticket still
+    /// holds.
+    SignIn(&'t Ticket),
+    /// Recovers the interrupted switch, so it requires one; rejects every sign-in in flight.
+    Recovery,
+    /// Turns automatic remembering on. It rejects every sign-in or remembered login in flight, so
+    /// a check made before the person opted out cannot publish after they opt back in. It changes
+    /// no login, so a pending recovery does not refuse it.
+    Remembering,
+    /// Edits a profile's display metadata: allowed during recovery, and rejects nothing in flight.
+    Metadata,
+}
+
+impl ChangeKind<'_> {
+    /// Refuses this change when its rule does, before anything is written.
+    fn gate(&self, db: &Database) -> Result<(), String> {
+        match self {
+            Self::Account if db.recovery.is_some() => Err(RECOVER_FIRST.into()),
+            Self::Recovery if db.recovery.is_none() => Err("No recovery is pending.".into()),
+            Self::SignIn(ticket) => db.check(ticket),
+            Self::Account | Self::Recovery | Self::Remembering | Self::Metadata => Ok(()),
+        }
+    }
+    /// Whether this change rejects every sign-in, remembered login and usage reading in flight.
+    fn bumps(&self) -> bool {
+        match self {
+            Self::Account | Self::SignIn(_) | Self::Recovery | Self::Remembering => true,
+            Self::Metadata => false,
+        }
+    }
+}
+
+/// What a publication after slow work, which ran without the vault lease, still requires of the
+/// vault. Taken with `Database::ticket` before the work and rechecked under the lease after it by
+/// `ChangeKind::SignIn` (a sign-in), `Store::publish` (a remembered login, a renewal) or
+/// `Store::recheck` (a usage reading). A pending recovery rejects every ticket.
+#[derive(Clone)]
+pub struct Ticket(Guarded);
+#[derive(Clone)]
+enum Guarded {
+    /// The sign-in epoch the ticket was taken at: any account change since rejects it.
+    Epoch(u64),
+    /// The epoch, and a saved profile still holding the login a usage reading was made with.
+    Reading { epoch: u64, held: HeldLogin },
+    /// A saved profile still holding the login that was renewed, and still owning its renewal.
+    /// There is no epoch to compare: the renewal has spent the refresh token by the time it
+    /// publishes, so an account change that left this profile alone must not reject it.
+    Renewal(HeldLogin),
+}
+#[derive(Clone)]
+struct HeldLogin {
+    id: String,
+    identity: Identity,
+    fingerprint: String,
+}
+impl HeldLogin {
+    fn of(profile: &Profile, login: &Login) -> Self {
+        Self {
+            id: profile.id.clone(),
+            identity: profile.identity.clone(),
+            fingerprint: login.fingerprint(),
+        }
+    }
+    /// The saved profile that still holds this login, if one does.
+    fn in_vault<'db>(&self, db: &'db Database) -> Option<&'db Profile> {
+        db.profiles.iter().find(|profile| {
+            profile.id == self.id
+                && profile.identity == self.identity
+                && profile.login.as_ref().map(Login::fingerprint).as_ref()
+                    == Some(&self.fingerprint)
+        })
+    }
+}
+
+/// What a ticket guards.
+pub enum Guard<'a> {
+    /// The sign-in epoch: any account change since the ticket rejects the publication. A sign-in,
+    /// a remembered login and a usage reading take this.
+    SignIn,
+    /// A private renewal of this profile: it must still hold the login that was renewed and still
+    /// own its renewal. Deliberately not the epoch: the renewal has spent the refresh token by the
+    /// time it publishes, so an account change that left this profile alone must not reject the
+    /// renewed login, or it would be lost.
+    Renewal(&'a Profile),
+}
+
+impl Ticket {
+    /// This ticket, now also rejected once `profile` no longer holds `login`: the generation a
+    /// usage reading was made with. A renewal's ticket moves to that login, still without an epoch.
+    pub fn holding(&self, profile: &Profile, login: &Login) -> Self {
+        let held = HeldLogin::of(profile, login);
+        Self(match self.0 {
+            Guarded::Epoch(epoch) | Guarded::Reading { epoch, .. } => {
+                Guarded::Reading { epoch, held }
+            }
+            Guarded::Renewal(_) => Guarded::Renewal(held),
+        })
+    }
 }
 impl Login {
     pub fn fingerprint(&self) -> String {
@@ -132,17 +255,84 @@ impl Database {
         }
     }
 
-    pub fn invalidate_logins(&mut self) -> Result<(), String> {
+    /// The interrupted switch awaiting recovery, if any.
+    pub fn recovery(&self) -> Option<&Recovery> {
+        self.recovery.as_ref()
+    }
+    /// The saved profile an interrupted switch was switching to, while it awaits recovery.
+    pub fn recovery_target(&self) -> Option<&Profile> {
+        let journal = self.recovery.as_ref()?;
+        self.profiles.iter().find(|p| p.id == journal.target_id)
+    }
+    /// The pending journal, for the switch that wrote it to update.
+    pub fn recovery_mut(&mut self) -> Option<&mut Recovery> {
+        self.recovery.as_mut()
+    }
+    /// Journals a switch before any native write, so a crash leaves it to recover.
+    pub fn begin_recovery(&mut self, journal: Recovery) {
+        self.recovery = Some(journal);
+    }
+    /// Clears the journal once the switch finished or was undone, giving it back.
+    pub fn end_recovery(&mut self) -> Option<Recovery> {
+        self.recovery.take()
+    }
+
+    /// A ticket for a publication after slow work that runs without the vault lease. Refused
+    /// during a pending recovery, and for a renewal whose profile no longer holds its login.
+    pub fn ticket(&self, guard: Guard<'_>) -> Result<Ticket, String> {
+        match guard {
+            Guard::SignIn => {
+                if self.recovery.is_some() {
+                    return Err(RECOVER_FIRST.into());
+                }
+                Ok(Ticket(Guarded::Epoch(self.login_epoch)))
+            }
+            Guard::Renewal(profile) => {
+                let login = profile
+                    .login
+                    .as_ref()
+                    .ok_or("Sign in again to refresh this account.")?;
+                let ticket = Ticket(Guarded::Renewal(HeldLogin::of(profile, login)));
+                self.check(&ticket)
+                    .map_err(|_| "The saved login changed before renewal.")?;
+                Ok(ticket)
+            }
+        }
+    }
+    /// Whether this vault still vouches for `ticket`.
+    fn check(&self, ticket: &Ticket) -> Result<(), String> {
+        let recovering = self.recovery.is_some();
+        match &ticket.0 {
+            Guarded::Epoch(epoch) if recovering || *epoch != self.login_epoch => {
+                Err(SIGN_IN_CHANGED.into())
+            }
+            Guarded::Reading { epoch, held }
+                if recovering || *epoch != self.login_epoch || held.in_vault(self).is_none() =>
+            {
+                Err("The account state changed while usage was read.".into())
+            }
+            Guarded::Renewal(_) if recovering => Err("An account change needs recovery.".into()),
+            Guarded::Renewal(held)
+                if !held.in_vault(self).is_some_and(|p| p.usage_renewal_owned) =>
+            {
+                Err("The saved login changed during renewal.".into())
+            }
+            Guarded::Epoch(_) | Guarded::Reading { .. } | Guarded::Renewal(_) => Ok(()),
+        }
+    }
+    /// Refuses `kind` by its rule, then bumps the sign-in epoch if the kind does.
+    fn admit(&mut self, kind: &ChangeKind<'_>) -> Result<(), String> {
+        kind.gate(self)?;
+        if kind.bumps() {
+            self.invalidate_logins()?;
+        }
+        Ok(())
+    }
+    fn invalidate_logins(&mut self) -> Result<(), String> {
         self.login_epoch = self
             .login_epoch
             .checked_add(1)
             .ok_or("Sign-in generation exhausted.")?;
-        Ok(())
-    }
-    pub fn allow_publication(&self, epoch: u64) -> Result<(), String> {
-        if self.recovery.is_some() || self.login_epoch != epoch {
-            return Err("The account state changed while sign-in was running. Start sign-in again after recovery or account changes finish.".into());
-        }
         Ok(())
     }
     pub fn save(
@@ -233,9 +423,25 @@ pub(crate) mod lease_timeout_override {
 
 pub struct Store {
     pub root: std::path::PathBuf,
-    pub(super) key: [u8; 32],
+    key: [u8; 32],
     _lease: FileLease,
 }
+
+/// Seals records kept beside the vault, such as a private renewal's journal, with the vault's key,
+/// and keeps them readable once the lease is released, without handing the key itself out.
+#[derive(Clone)]
+pub struct Sealer([u8; 32]);
+impl Sealer {
+    pub fn seal(&self, plain: &[u8]) -> Result<Vec<u8>, String> {
+        super::vault::seal(&self.0, plain)
+    }
+    pub fn unseal(&self, sealed: &[u8]) -> Result<Vec<u8>, String> {
+        super::vault::unseal(&self.0, sealed)
+    }
+}
+
+/// What `persist` does for a follow-up that must write the vault again under the same lease.
+pub type Persist<'a> = dyn FnMut(&Database) -> Result<(), String> + 'a;
 impl Store {
     pub fn lease(home: &std::path::Path) -> Result<(std::path::PathBuf, FileLease), String> {
         Self::lease_with_timeout(home, lease_timeout())
@@ -283,7 +489,9 @@ impl Store {
             super::vault::key(root, create, true)
         })
     }
-    pub fn open_read(home: &std::path::Path) -> Result<Self, String> {
+    /// Opens an existing vault for a background read or publication, without asking the OS again
+    /// for a key it refused. It never creates a vault, but its lease is as exclusive as any other.
+    pub fn open_existing(home: &std::path::Path) -> Result<Self, String> {
         Self::open_with_key(home, false, |root, create| {
             super::vault::key(root, create, false)
         })
@@ -326,11 +534,99 @@ impl Store {
             Err(_) => Err("Cannot read saved profile storage.".into()),
         }
     }
-    pub fn persist(&self, db: &Database) -> Result<(), String> {
-        let plain = serde_json::to_vec(db).map_err(|_| "Cannot encode saved profiles.")?;
-        let sealed = super::vault::seal(&self.key, &plain)?;
+    fn persist(&self, db: &Database) -> Result<(), String> {
+        self.write(&encode(db)?)
+    }
+    fn write(&self, plain: &[u8]) -> Result<(), String> {
+        let sealed = super::vault::seal(&self.key, plain)?;
         super::vault::atomic_write(&self.root.join("vault.enc"), &sealed)
     }
+    pub fn sealer(&self) -> Sealer {
+        Sealer(self.key)
+    }
+
+    /// Refuses `kind` now if its rule would, for an operation about to do native work that a
+    /// refused change must never do: verifying a login, which for Claude may renew and rewrite it.
+    /// It creates no vault and writes nothing; `change` gates again under its own lease. An
+    /// explicit action may retry a vault unlock the OS refused, so this is not `open_existing`.
+    pub fn gate(home: &std::path::Path, kind: &ChangeKind<'_>) -> Result<(), String> {
+        if !Self::vault_exists(home) {
+            return kind.gate(&Database::default());
+        }
+        kind.gate(&Self::open(home, false)?.load()?)
+    }
+
+    /// Makes one change under this store's lease: refuses it by `kind`'s rule, bumps the
+    /// sign-in epoch unless it is a metadata edit, lets `edit` change the database, persists it if
+    /// anything changed and releases the lease before returning, so the caller announces the
+    /// change after release.
+    pub fn change<T>(
+        self,
+        kind: ChangeKind<'_>,
+        edit: impl FnOnce(&mut Database) -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.change_then(kind, edit, |value, _, _| Ok(value))?
+    }
+    /// `change`, then `then` with what `edit` returned, still under the lease once the change is
+    /// durable: the native half of a use or a sign-out, which may persist again. The outer error
+    /// means the change was refused or not written; the inner result is `then`'s.
+    pub fn change_then<E, T>(
+        self,
+        kind: ChangeKind<'_>,
+        edit: impl FnOnce(&mut Database) -> Result<E, String>,
+        then: impl FnOnce(E, &mut Database, &mut Persist<'_>) -> Result<T, String>,
+    ) -> Result<Result<T, String>, String> {
+        self.commit(|db| db.admit(&kind), edit, then)
+    }
+    /// Publishes after slow work that ran without the lease: loads the vault under this lease,
+    /// refuses unless it still vouches for `ticket`, lets `edit` change it, persists it if `edit`
+    /// changed anything and releases the lease. A publication is not an account change, so it
+    /// bumps nothing, and one that finds nothing left to publish writes nothing.
+    pub fn publish<T>(
+        self,
+        ticket: &Ticket,
+        edit: impl FnOnce(&mut Database) -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.publish_then(ticket, edit, |value, _, _| Ok(value))?
+    }
+    /// `publish`, then `then` with what `edit` returned, still under the lease once the
+    /// publication is durable.
+    pub fn publish_then<E, T>(
+        self,
+        ticket: &Ticket,
+        edit: impl FnOnce(&mut Database) -> Result<E, String>,
+        then: impl FnOnce(E, &mut Database, &mut Persist<'_>) -> Result<T, String>,
+    ) -> Result<Result<T, String>, String> {
+        self.commit(|db| db.check(ticket), edit, then)
+    }
+    /// Whether the vault, loaded under this store's lease, still vouches for `ticket`: for a
+    /// publication outside the vault, a usage reading, that the caller makes while it still holds
+    /// the lease.
+    pub fn recheck(&self, ticket: &Ticket) -> Result<(), String> {
+        self.load()?.check(ticket)
+    }
+    fn commit<E, T>(
+        self,
+        admit: impl FnOnce(&mut Database) -> Result<(), String>,
+        edit: impl FnOnce(&mut Database) -> Result<E, String>,
+        then: impl FnOnce(E, &mut Database, &mut Persist<'_>) -> Result<T, String>,
+    ) -> Result<Result<T, String>, String> {
+        let mut db = self.load()?;
+        let loaded = encode(&db)?;
+        admit(&mut db)?;
+        let value = edit(&mut db)?;
+        let edited = encode(&db)?;
+        if edited != loaded {
+            self.write(&edited)?;
+        }
+        let result = then(value, &mut db, &mut |db| self.persist(db));
+        drop(self);
+        Ok(result)
+    }
+}
+
+fn encode(db: &Database) -> Result<Vec<u8>, String> {
+    serde_json::to_vec(db).map_err(|_| "Cannot encode saved profiles.".into())
 }
 
 #[cfg(test)]

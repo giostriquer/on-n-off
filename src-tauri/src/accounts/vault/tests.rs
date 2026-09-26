@@ -126,3 +126,10 @@ pub(crate) fn unlock_fixture(home: &tempfile::TempDir) {
         .get(&scope, true, || Ok([7; 32]))
         .unwrap();
 }
+
+#[test]
+#[should_panic(expected = "a test reached the OS credential store")]
+fn a_test_that_never_unlocked_its_home_cannot_reach_the_os_credential_store() {
+    let home = tempfile::tempdir().unwrap();
+    let _ = key(home.path(), true, true);
+}

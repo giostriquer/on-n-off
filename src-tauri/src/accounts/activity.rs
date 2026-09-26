@@ -86,7 +86,7 @@ fn lease(home: &std::path::Path, provider: usize, exclusive: bool) -> Result<Fil
     })
 }
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(not(test))]
 fn runtime_lease(provider: usize, exclusive: bool) -> Result<Option<FileLease>, String> {

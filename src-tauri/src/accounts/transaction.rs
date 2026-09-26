@@ -61,7 +61,7 @@ pub fn activate(
     alongside_clients: bool,
     persist: &mut dyn FnMut(&Database) -> Result<(), String>,
 ) -> Result<(), String> {
-    if db.recovery.is_some() {
+    if db.recovery().is_some() {
         return Err("An interrupted account change needs recovery first.".into());
     }
     let profile = db
@@ -112,7 +112,7 @@ pub fn activate(
     if let Some(target) = db.profiles.iter_mut().find(|p| p.id == id) {
         target.usage_renewal_owned = false;
     }
-    db.recovery = Some(Recovery {
+    db.begin_recovery(Recovery {
         target_id: id.into(),
         outgoing,
         outgoing_identity,
@@ -120,7 +120,7 @@ pub fn activate(
     persist(db)?; // No native write before the protected journal is durable.
     if let Err(error) = settle_outgoing(db, native, &profile.identity, persist) {
         // Nothing was published, so a retained journal would only demand recovery.
-        db.recovery = None;
+        db.end_recovery();
         return Err(match persist(db) {
             Ok(()) => format!("{error} Nothing was replaced."),
             Err(_) => format!("{error} Nothing was replaced, but the interrupted change could not be cleared; recover it before another action."),
@@ -161,9 +161,11 @@ pub fn activate(
             "{error} Recovery completed. Check the current account before retrying."
         ));
     }
-    let recovery = db.recovery.take();
+    let journal = db.end_recovery();
     if let Err(error) = persist(db) {
-        db.recovery = recovery;
+        if let Some(journal) = journal {
+            db.begin_recovery(journal);
+        }
         return Err(format!("{error} Native login changed, but completion could not be recorded. Recover the interrupted change before another action."));
     }
     Ok(())
@@ -191,8 +193,8 @@ fn settle_outgoing(
     persist: &mut dyn FnMut(&Database) -> Result<(), String>,
 ) -> Result<(), String> {
     let journal = db
-        .recovery
-        .clone()
+        .recovery()
+        .cloned()
         .ok_or("Protected recovery is missing.")?;
     let latest = native.read()?;
     if latest.as_ref().map(|v| &v.auth) == journal.outgoing.as_ref().map(|v| &v.auth) {
@@ -203,7 +205,7 @@ fn settle_outgoing(
         return Err("The native login changed during the switch.".into());
     }
     capture(db, latest.as_ref(), identity.as_ref(), target)?;
-    if let Some(journal) = db.recovery.as_mut() {
+    if let Some(journal) = db.recovery_mut() {
         journal.outgoing = latest;
     }
     persist(db)
@@ -216,8 +218,8 @@ fn restored(error: &str, restore: Result<(), String>) -> String {
 }
 fn pending(db: &Database) -> Result<(Recovery, super::store::Profile), String> {
     let journal = db
-        .recovery
-        .clone()
+        .recovery()
+        .cloned()
         .ok_or("No account change needs recovery.")?;
     let target = db
         .profiles
@@ -309,9 +311,9 @@ fn finish(
                 .into(),
         );
     }
-    db.recovery = None;
+    db.end_recovery();
     if let Err(error) = persist(db) {
-        db.recovery = Some(journal);
+        db.begin_recovery(journal);
         return Err(error);
     }
     Ok(())

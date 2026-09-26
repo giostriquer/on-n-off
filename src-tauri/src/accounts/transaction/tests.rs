@@ -73,7 +73,7 @@ fn switch_back_uses_the_outgoing_cli_rotated_generation() {
         native.read().unwrap().unwrap().auth["refresh"],
         "cli-rotated-a"
     );
-    assert!(reloaded.recovery.is_none());
+    assert!(reloaded.recovery().is_none());
 }
 #[test]
 fn backup_failure_never_changes_native_login() {
@@ -229,7 +229,7 @@ fn switching_away_from_a_removed_account_keeps_only_its_recovery_backup() {
     db.ignored_accounts.push(identity.clone());
     let mut saw_protected_outgoing = false;
     activate(&mut db, &native, &b, false, &mut |db| {
-        if let Some(journal) = &db.recovery {
+        if let Some(journal) = db.recovery() {
             saw_protected_outgoing = journal.outgoing.is_some();
         }
         Ok(())
@@ -349,7 +349,7 @@ fn switch(
     let mut snapshots = Vec::new();
     let result = activate(db, native, id, alongside, &mut |db| {
         let snapshot: Database = serde_json::from_str(&serde_json::to_string(db).unwrap()).unwrap();
-        if snapshot.recovery.is_some()
+        if snapshot.recovery().is_some()
             && native
                 .store
                 .live
@@ -395,11 +395,7 @@ fn recaptures_and_journals_an_outgoing_login_a_client_rotated_during_the_switch(
         saved.login.as_ref().unwrap().auth["refresh"],
         "client-rotated-a"
     );
-    let journaled = snapshots
-        .iter()
-        .rev()
-        .find_map(|s| s.recovery.as_ref())
-        .unwrap();
+    let journaled = snapshots.iter().rev().find_map(|s| s.recovery()).unwrap();
     assert_eq!(
         journaled.outgoing.as_ref().unwrap().auth["refresh"],
         "client-rotated-a"
@@ -431,8 +427,8 @@ fn never_publishes_over_a_login_that_changed_account_and_clears_its_journal() {
         native.store.live.borrow().as_ref().unwrap().auth["user"],
         "c"
     );
-    assert!(db.recovery.is_none());
-    assert!(snapshots.last().unwrap().recovery.is_none());
+    assert!(db.recovery().is_none());
+    assert!(snapshots.last().unwrap().recovery().is_none());
 }
 
 #[test]
@@ -461,7 +457,7 @@ fn verification_never_runs_under_the_native_locks() {
         ..Default::default()
     });
     assert!(switch(&mut db, &native, &b, false).0.is_err());
-    assert!(db.recovery.is_some());
+    assert!(db.recovery().is_some());
     recover(&mut db, &native, &mut |_| Ok(())).unwrap();
     assert_eq!(
         native.verified.get(),
@@ -472,7 +468,7 @@ fn verification_never_runs_under_the_native_locks() {
         !native.verified_locked.get(),
         "recovery verified under the locks"
     );
-    assert!(db.recovery.is_none());
+    assert!(db.recovery().is_none());
 }
 
 #[test]
@@ -485,8 +481,8 @@ fn keeps_the_journal_without_verifying_when_a_client_overwrites_the_new_login() 
     let error = result.unwrap_err();
     assert!(error.contains("pending recovery"), "{error}");
     assert_eq!(native.verified.get(), 0);
-    assert!(db.recovery.is_some());
-    assert!(snapshots.last().unwrap().recovery.is_some());
+    assert!(db.recovery().is_some());
+    assert!(snapshots.last().unwrap().recovery().is_some());
     assert_eq!(live_refresh(&native), "client-refreshed-a");
 }
 
@@ -499,7 +495,7 @@ fn a_client_signing_out_after_the_switch_is_left_signed_out() {
     let error = switch(&mut db, &native, &b, true).0.unwrap_err();
     assert!(error.contains("pending recovery"), "{error}");
     assert_eq!(live_refresh(&native), "none");
-    assert!(db.recovery.is_some());
+    assert!(db.recovery().is_some());
 }
 
 #[test]
@@ -511,7 +507,7 @@ fn restores_the_outgoing_login_a_client_wrote_back_without_verifying() {
     let error = switch(&mut db, &native, &b, true).0.unwrap_err();
     assert!(error.contains("The previous login was restored"), "{error}");
     assert_eq!(native.verified.get(), 0);
-    assert!(db.recovery.is_none());
+    assert!(db.recovery().is_none());
     assert_eq!(live_refresh(&native), "cli-rotated-a");
 }
 
@@ -525,7 +521,7 @@ fn a_failed_verification_beside_clients_never_verifies_bytes_a_client_wrote() {
     let error = switch(&mut db, &native, &b, true).0.unwrap_err();
     assert!(error.contains("pending recovery"), "{error}");
     assert_eq!(native.verified.get(), 1);
-    assert!(db.recovery.is_some());
+    assert!(db.recovery().is_some());
     assert_eq!(live_refresh(&native), "client-refreshed-a");
 }
 
@@ -537,7 +533,7 @@ fn switching_beside_clients_refuses_the_same_workspace_or_a_renewing_login() {
     });
     let error = switch(&mut db, &native, &b, true).0.unwrap_err();
     assert!(error.contains("about to renew"), "{error}");
-    assert!(db.recovery.is_none());
+    assert!(db.recovery().is_none());
     assert_eq!(live_refresh(&native), "cli-rotated-a");
     assert!(
         switch(&mut db, &native, &b, false).0.is_ok(),
@@ -563,7 +559,7 @@ fn a_failed_verification_beside_clients_restores_bytes_it_owns() {
     let error = switch(&mut db, &native, &b, true).0.unwrap_err();
     assert!(error.contains("The previous login was restored"), "{error}");
     assert_eq!(native.verified.get(), 1);
-    assert!(db.recovery.is_none());
+    assert!(db.recovery().is_none());
     assert_eq!(live_refresh(&native), "cli-rotated-a");
 }
 
@@ -576,7 +572,7 @@ fn a_switch_from_signed_out_that_a_client_signs_out_again_ends_signed_out() {
     *native.store.live.borrow_mut() = None;
     let error = switch(&mut db, &native, &b, true).0.unwrap_err();
     assert!(error.contains("The previous login was restored"), "{error}");
-    assert!(db.recovery.is_none());
+    assert!(db.recovery().is_none());
     assert_eq!(live_refresh(&native), "none");
 }
 
@@ -611,7 +607,7 @@ fn an_unreadable_read_back_is_not_blamed_on_a_client() {
         "{error}"
     );
     assert_eq!(native.0.verified.get(), 0);
-    assert!(db.recovery.is_some());
+    assert!(db.recovery().is_some());
 }
 
 #[test]
@@ -623,7 +619,7 @@ fn a_journal_that_cannot_be_cleared_before_publication_says_so() {
     let mut writes = 0;
     let error = activate(&mut db, &native, &b, false, &mut |db| {
         writes += 1;
-        if db.recovery.is_some() {
+        if db.recovery().is_some() {
             *native.store.live.borrow_mut() = native.client.during.clone().unwrap();
             return Ok(());
         }
@@ -648,7 +644,7 @@ fn activation_revokes_private_ownership_in_the_durable_journal_before_native_pub
         .usage_renewal_owned = true;
     let mut journaled = false;
     activate(&mut db, &native, &b, false, &mut |db| {
-        if db.recovery.is_some() {
+        if db.recovery().is_some() {
             assert!(
                 !db.profiles
                     .iter()

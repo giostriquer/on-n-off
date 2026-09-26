@@ -2,6 +2,35 @@ use super::*;
 use crate::dto::AgentId;
 use serde_json::json;
 use std::cell::RefCell;
+
+/// A scratch home with an empty vault under a fixture key, one account change old.
+fn vault() -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    open(home.path())
+        .change(ChangeKind::Account, |_| Ok(()))
+        .unwrap();
+    home
+}
+fn open(home: &Path) -> Store {
+    Store::open_with_key(home, true, |_, _| Ok([3; 32])).unwrap()
+}
+fn loaded(home: &Path) -> Database {
+    open(home).load().unwrap()
+}
+/// A digest of the sealed vault: every write changes it, since every seal takes a new nonce.
+fn sealed(home: &Path) -> String {
+    crate::sha::sha256_hex(&std::fs::read(home.join(".on-n-off/accounts/vault.enc")).unwrap())
+}
+fn sign_in_ticket(home: &Path) -> Ticket {
+    loaded(home).ticket(Guard::SignIn).unwrap()
+}
+fn interrupted() -> super::super::transaction::Recovery {
+    super::super::transaction::Recovery {
+        target_id: "target".into(),
+        outgoing: None,
+        outgoing_identity: None,
+    }
+}
 struct Client {
     live: RefCell<Option<Login>>,
     refused: bool,
@@ -58,17 +87,20 @@ fn a_natural_switch_during_verification_is_not_saved_under_the_previous_account(
 }
 #[test]
 fn disabling_remembering_or_a_newer_operation_prevents_late_publication() {
-    for (enabled, epoch) in [(false, 0), (true, 1)] {
+    for (enabled, changed) in [(false, false), (true, true)] {
         let native = client();
-        let mut db = Database {
-            login_epoch: epoch,
-            ..Database::default()
-        };
-        let result = publish(&mut db, &native, login("a"), 0, enabled, &mut |_| {
-            panic!("late publication")
-        });
+        let home = vault();
+        let ticket = sign_in_ticket(home.path());
+        if changed {
+            open(home.path())
+                .change(ChangeKind::Account, |_| Ok(()))
+                .unwrap();
+        }
+        let before = sealed(home.path());
+        let result = publish(open(home.path()), &ticket, &native, login("a"), enabled);
         assert!(result.is_err() || result == Ok(false));
-        assert!(db.profiles.is_empty());
+        assert!(loaded(home.path()).profiles.is_empty());
+        assert_eq!(sealed(home.path()), before, "late publication");
     }
 }
 #[test]
@@ -86,27 +118,46 @@ fn removed_accounts_and_signed_out_credential_generations_stay_excluded() {
 fn native_changes_before_publication_do_not_save_the_old_candidate() {
     let native = client();
     *native.live.borrow_mut() = Some(login("b"));
-    let mut db = Database::default();
+    let home = vault();
+    let ticket = sign_in_ticket(home.path());
+    let before = sealed(home.path());
+    assert!(publish(open(home.path()), &ticket, &native, login("a"), true).is_err());
     assert!(
-        publish(&mut db, &native, login("a"), 0, true, &mut |_| panic!(
-            "wrong account saved"
-        ))
-        .is_err()
+        loaded(home.path()).profiles.is_empty(),
+        "wrong account saved"
     );
-    assert!(db.profiles.is_empty());
+    assert_eq!(sealed(home.path()), before, "nothing persisted");
+}
+/// A candidate no longer eligible once the lease is held, because another app instance saved it
+/// first, publishes nothing and leaves the vault as it was.
+#[test]
+fn an_ineligible_candidate_at_publication_writes_nothing() {
+    let native = client();
+    let home = vault();
+    let ticket = sign_in_ticket(home.path());
+    open(home.path())
+        .change(ChangeKind::Metadata, |db| {
+            db.save(native.identify(&login("a"))?, login("a"), None)
+        })
+        .unwrap();
+    let before = sealed(home.path());
+
+    assert_eq!(
+        publish(open(home.path()), &ticket, &native, login("a"), true),
+        Ok(false)
+    );
+
+    assert_eq!(sealed(home.path()), before, "rewrote an unchanged vault");
 }
 #[test]
 fn natural_accounts_are_saved_once_and_pending_reauthentication_is_preserved() {
     let native = client();
-    let mut db = Database::default();
-    let mut persisted = String::new();
+    let home = vault();
+    let db = loaded(home.path());
+    let ticket = db.ticket(Guard::SignIn).unwrap();
     let found = candidate(&native, &db).unwrap().unwrap();
-    assert!(publish(&mut db, &native, found, 0, true, &mut |db| {
-        persisted = serde_json::to_string(db).unwrap();
-        Ok(())
-    })
-    .unwrap());
-    let mut loaded: Database = serde_json::from_str(&persisted).unwrap();
+    assert!(publish(open(home.path()), &ticket, &native, found, true).unwrap());
+    let mut loaded = loaded(home.path());
     assert_eq!(loaded.profiles[0].email.as_deref(), Some("a@example.com"));
     assert!(candidate(&native, &loaded).unwrap().is_none());
     loaded.profiles[0].pending_activation = true;
@@ -148,4 +199,43 @@ fn metadata_changes_cannot_reenroll_a_signed_out_credential_generation() {
     native.live.borrow_mut().as_mut().unwrap().account["emailAddress"] =
         json!("updated@example.com");
     assert!(candidate(&native, &db).unwrap().is_none());
+}
+#[test]
+fn a_pending_recovery_prevents_late_publication_even_at_the_same_epoch() {
+    let native = client();
+    let home = vault();
+    let ticket = sign_in_ticket(home.path());
+    open(home.path())
+        .change(ChangeKind::Metadata, |db| {
+            db.begin_recovery(interrupted());
+            Ok(())
+        })
+        .unwrap();
+    let before = sealed(home.path());
+    assert!(publish(open(home.path()), &ticket, &native, login("a"), true).is_err());
+    assert!(loaded(home.path()).profiles.is_empty());
+    assert_eq!(sealed(home.path()), before, "published during recovery");
+}
+
+/// Turning remembering on rejects every check made before it, so one from before an opt-out
+/// cannot publish after the opt-in. It changes no login, so a pending recovery does not refuse it.
+#[test]
+fn turning_remembering_on_rejects_earlier_checks_and_is_allowed_during_recovery() {
+    let native = client();
+    let home = vault();
+    let ticket = sign_in_ticket(home.path());
+    set_enabled_in(home.path(), true, &|_| Ok(open(home.path()))).unwrap();
+    assert!(enabled(home.path()).unwrap());
+    assert!(publish(open(home.path()), &ticket, &native, login("a"), true).is_err());
+
+    let home = vault();
+    open(home.path())
+        .change(ChangeKind::Metadata, |db| {
+            db.begin_recovery(interrupted());
+            Ok(())
+        })
+        .unwrap();
+    set_enabled_in(home.path(), true, &|_| Ok(open(home.path()))).unwrap();
+    assert!(enabled(home.path()).unwrap());
+    assert!(loaded(home.path()).recovery().is_some());
 }

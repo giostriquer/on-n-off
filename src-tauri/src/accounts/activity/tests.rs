@@ -30,3 +30,16 @@ fn released_leases_are_free_while_a_spawned_child_still_shares_them() {
     assert!(lease(root.path(), 0, true).is_ok());
     drop(inherited);
 }
+
+/// Whether no read or change of `provider` is running in this process. Only tests that hold no
+/// reservation of their own concurrently, such as the serialized account-operation tests, can rely
+/// on it.
+pub(crate) fn idle(provider: AgentId) -> bool {
+    let Some(i) = index(provider) else {
+        return true;
+    };
+    let reading = ACTIVITY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)[i];
+    reading == 0 && !SWITCHING[i].load(Ordering::Acquire)
+}
