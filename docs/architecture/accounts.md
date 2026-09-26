@@ -80,26 +80,33 @@ separate from the catalog's `AgentAdapter` (which accounts touch only through
 apart; it gives the provider's `Adapter`, `claude::Claude` or `codex::Codex`, and generic account
 code asks that rather than which provider it has. An adapter:
 
-- resolves the provider's native store, which the operations reach through the `Accounts`
-  context's `ResolveNative`: `ClaudeNative` over `claude_store.rs`, `CodexNative` over
-  `codex_store.rs`. Each is the transaction's `Native` and a `NativeAccount`: its preflight
-  (custom homes, environment credentials, managed policy), its sign-out, the signed-in
-  subscription whose saved accounts' usage is read beside it (an API-key Codex login has none),
-  and an `IsolatedSignIn` in a private directory with the official sign-in command, the first usage
-  reading and the cleanup of anything the sign-in left outside that directory;
+- resolves the provider's native stores, which the operations reach through the `Accounts`
+  context's `NativeStores` resolver: `ClaudeNative` over `claude_store.rs`, `CodexNative` over
+  `codex_store.rs`. The user's own store is the transaction's `Native` and a `NativeAccount`: its
+  preflight (custom homes, environment credentials, managed policy), its sign-out, and the
+  signed-in subscription whose saved accounts' usage is read beside it (an API-key Codex login
+  has none). A private one in a directory is an `IsolatedSignIn`, with the official sign-in
+  command, the first usage reading and the cleanup of anything the sign-in left outside that
+  directory;
 - reads a login through its typed view, `ClaudeLogin` or `CodexLogin` (`accounts::view`), so
-  nothing else reads a login's JSON: identity and email, the credential generation's fingerprint,
-  whether a saved login is due to renew, and the private renewal's request and fold. A `Login`
-  keeps its stored shape, `{auth, account}`, so the vault, the recovery journal and the renewal
-  journal written by earlier versions still load, and each view fills only its own slots of the
-  one fingerprint layout every version has hashed. Whole documents are still written raw:
-  Codex's `auth.json` verbatim, Claude's `claudeAiOauth` merged into its credentials document
-  beside the `oauthAccount` record `ConfigIo` patches;
+  nothing else reads a login's JSON: identity and email, the credential generation's fingerprint
+  and whether a saved login is due to renew. A view only reads; a bare credentials document, as
+  the saved usage reader holds it, gives its credential or access token through associated
+  functions instead. A `Login` keeps its stored shape, `{auth, account}`, so the vault, the
+  recovery journal and the renewal journal written by earlier versions still load, and
+  `model.rs` keeps the one fingerprint layout every version has hashed. Whole documents are still
+  written raw: Codex's `auth.json` verbatim, Claude's `claudeAiOauth` merged into its credentials
+  document beside the `oauthAccount` record `ConfigIo` patches;
+- renews a never-activated private login at its token endpoint: Claude's grant sent from
+  `claude_renew.rs`, Codex's built and folded by its login and sent from `usage_renew.rs`;
 - says how its client processes are recognized and whether they refuse an ordinary switch.
 
 Sign-in, the cleanup of abandoned sign-in homes, automatic remembering and the saved accounts'
 usage refresh are methods on the same `Accounts` context as the six operations, so they resolve
-the native store and reach running clients and listeners the same way.
+native stores and reach running clients and listeners the same way. A remembering poll announces
+the account list once when it saved a login or changed the provider's notice. Vault access stays
+generic: a saved Codex profile's claims are found in the vault by `accounts::saved_codex_claims`
+and read through the Codex view.
 
 `accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
 existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
