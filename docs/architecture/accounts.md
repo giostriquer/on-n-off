@@ -54,13 +54,23 @@ sign out, or a sign-in's publication) goes through `Store::change`: a pending re
 vault lease before returning, so the caller announces it after release. `change_then` runs what must
 follow under the same lease once the change is durable: a switch's native write, the official
 logout. A category edit is a metadata change, allowed during recovery and bumping nothing. Turning
-remembering on bumps the epoch but is allowed during recovery, since it changes no login. Work too
-slow to hold the lease (an isolated sign-in, a remembered login's verification, a usage read, a
-private renewal) takes a `Ticket` first and publishes through `Store::publish`, which rechecks under
-the lease what the ticket guards and bumps nothing: the epoch for a sign-in, a remembered login and
-a usage reading (a reading also holds its login generation), and only the profile's login and
-ownership for a renewal. A pending recovery rejects every ticket. The epoch and the recovery journal
-are private to the store.
+remembering on bumps the epoch but is allowed during recovery, since it changes no login. A change
+that changed nothing writes nothing. Save current and sign out ask `Store::gate` first, read-only and
+without creating a vault, so a pending recovery refuses them before they verify or read the native
+login; the change gates again under its lease.
+
+Work too slow to hold the lease (an isolated sign-in, a remembered login's verification, a usage
+read, a private renewal) takes a `Ticket` first, and a pending recovery refuses every ticket. What
+the ticket guards is rechecked under the lease afterwards, in one of three ways:
+
+- a sign-in's ticket guards the sign-in epoch, and its publication is itself an account change:
+  `Store::change` with `ChangeKind::SignIn` rechecks the ticket, then bumps the epoch;
+- `Store::publish` rechecks a remembered login's ticket (the epoch) and a private renewal's (the
+  profile's login and renewal ownership, and deliberately not the epoch), and bumps nothing;
+- `Store::recheck` serves a usage reading, which is published outside the vault: its ticket guards
+  the epoch and the login generation the reading was made with.
+
+The epoch and the recovery journal are private to the store.
 
 `accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
 existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
@@ -119,7 +129,7 @@ without starting a CLI or writing auth.json.
 An in-process reservation and a cross-process shared/exclusive activity lease exclude provider
 reads from account activation. A separate lease serializes vault access. Existing vault keys are unlocked before acquiring the shared storage lease, so an OS prompt does
 not block another provider's file transaction. Initial key/vault creation remains serialized.
-Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Every account change releases its leases before it is announced. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks
+Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Every account change releases its leases, the vault lease and the provider's activity reservation, before it is announced. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks
 (Claude Code's refresh lock, its legacy lock beside the config dir's real path, and the config
 file's lock) cover the outgoing reread, durable journal and publication; the credential write goes
 through `claude_store::begin`, the one writer the renewal uses too, which takes Claude Code's

@@ -1,8 +1,10 @@
 //! The saved-profile vault and the protocol every change to it follows. An account change goes
 //! through `Store::change`, which refuses it during a pending recovery, rejects every sign-in in
 //! flight by bumping the sign-in epoch, persists it and releases the lease before the caller
-//! announces it. Work too slow to hold the lease takes a `Ticket` first and publishes through
-//! `Store::publish`, which rechecks under the lease whatever the ticket guards.
+//! announces it. Work too slow to hold the lease takes a `Ticket` first, rechecked under the lease
+//! afterwards: a sign-in's by `Store::change` with `ChangeKind::SignIn`, which then bumps the epoch
+//! as any account change does; a remembered login's and a renewal's by `Store::publish`, which bumps
+//! nothing; a usage reading's by `Store::recheck`, since the reading is published outside the vault.
 use super::{model::Identity, transaction::Recovery};
 use crate::file_lease::FileLease;
 use serde::{Deserialize, Serialize};
@@ -91,8 +93,9 @@ impl ChangeKind<'_> {
 }
 
 /// What a publication after slow work, which ran without the vault lease, still requires of the
-/// vault. Taken with `Database::ticket` before the work and rechecked under the lease after it.
-/// A pending recovery rejects every ticket.
+/// vault. Taken with `Database::ticket` before the work and rechecked under the lease after it by
+/// `ChangeKind::SignIn` (a sign-in), `Store::publish` (a remembered login, a renewal) or
+/// `Store::recheck` (a usage reading). A pending recovery rejects every ticket.
 #[derive(Clone)]
 pub struct Ticket(Guarded);
 #[derive(Clone)]
