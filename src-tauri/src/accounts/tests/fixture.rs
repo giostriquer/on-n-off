@@ -135,7 +135,10 @@ impl Clients for FakeClients {
     }
 }
 
-/// What the notifier heard, and whether the vault lease was already free when it did.
+/// What the notifier heard, and whether every lease the operation held was already free when it
+/// did: the vault lease and each provider's in-process read or change reservation. A change still
+/// held would refuse the Limits read the notification starts; a read still held would keep the
+/// next account change refused through it.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Heard {
     Changed(AgentId),
@@ -149,7 +152,10 @@ struct Listener(Rc<Recorder>);
 impl Listener {
     fn record(&self, heard: Heard) {
         let _now = super::super::override_lease_timeout(std::time::Duration::ZERO);
-        let released = Store::lease(&self.0.home).is_ok();
+        let released = Store::lease(&self.0.home).is_ok()
+            && [AgentId::Claude, AgentId::Codex]
+                .into_iter()
+                .all(super::super::activity::tests::idle);
         self.0.heard.borrow_mut().push((heard, released));
     }
 }

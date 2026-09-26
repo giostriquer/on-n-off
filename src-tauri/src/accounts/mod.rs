@@ -226,7 +226,7 @@ impl Accounts {
     }
 
     fn save_current(&self, provider: AgentId) -> Result<(), String> {
-        let _read = activity::read(provider).ok_or("An account change is running.")?;
+        let read = activity::read(provider).ok_or("An account change is running.")?;
         let native = self.native(provider)?;
         native.preflight()?;
         native.verify()?;
@@ -258,6 +258,9 @@ impl Accounts {
                 Ok(())
             },
         )??;
+        // The Limits refresh this starts runs outside the provider reservation, which would
+        // otherwise keep refusing a use or a sign-out for as long as that read takes.
+        drop(read);
         self.notify.changed(provider);
         Ok(())
     }
