@@ -178,6 +178,31 @@ fn recovery_restores_the_outgoing_login_with_clients_closed() {
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
+/// Recovery rewrites the native login, so running clients refuse it: one could overwrite the
+/// restored outgoing login after the journal is cleared.
+#[test]
+fn recovery_requires_closed_clients() {
+    let harness = Harness::new();
+    let (_, b) = two_profiles(&harness);
+    harness.interrupted(&b, Some(claude("a", "a2")));
+    harness.signed_in(Some(claude("b", "b1")));
+    harness.clients.running.set(true);
+    let sealed = harness.sealed();
+
+    assert!(harness
+        .accounts()
+        .activate(AgentId::Claude, "", Activation::Recover)
+        .is_err());
+
+    assert_eq!(harness.sealed(), sealed);
+    assert_eq!(harness.live(), Some("b1".into()));
+    assert_eq!(
+        harness.vault().recovery().map(|j| j.target_id.clone()),
+        Some(b)
+    );
+    assert!(harness.heard().is_empty());
+}
+
 #[test]
 fn a_recovery_pending_for_the_other_provider_is_refused() {
     let harness = Harness::new();
