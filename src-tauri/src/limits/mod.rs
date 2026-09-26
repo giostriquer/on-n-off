@@ -465,11 +465,10 @@ impl From<HttpError> for SavedReadError {
 }
 
 /// A saved profile's Claude card, read at `now_ms` with its login's `credential`, which must sign
-/// in as the profile's user in its workspace. A login without an access token is refused before any
-/// request. No CLI is started and nothing is renewed here.
+/// in as the profile's user in its workspace. No CLI is started and nothing is renewed here.
 pub(crate) fn read_saved_claude(
     identity: &Identity,
-    credential: Option<ClaudeCredential>,
+    credential: ClaudeCredential,
     now_ms: i64,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     read_saved_claude_at(
@@ -483,12 +482,11 @@ pub(crate) fn read_saved_claude(
 
 fn read_saved_claude_at(
     identity: &Identity,
-    credential: Option<ClaudeCredential>,
+    credential: ClaudeCredential,
     now_ms: i64,
     profile_url: &str,
     usage_url: &str,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    let credential = credential.ok_or(HttpError::Unauthorized)?;
     // As the signed-in read reports an expired login without asking (`read_claude_credential`).
     // A login on-n-off renews was renewed before this read (`accounts/usage.rs`).
     if credential.expires_at_ms.is_some_and(|at| at <= now_ms) {
@@ -508,21 +506,19 @@ fn read_saved_claude_at(
 }
 
 /// A saved profile's Codex card, read over HTTP with its login's access `token` (`codex::read_wham`).
-/// A login without one is refused before any request. No CLI is started and nothing is renewed
-/// here.
+/// No CLI is started and nothing is renewed here.
 pub(crate) fn read_saved_codex(
     identity: &Identity,
-    token: Option<AccessToken>,
+    token: AccessToken,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     read_saved_codex_at(identity, token, codex::CODEX)
 }
 
 fn read_saved_codex_at(
     identity: &Identity,
-    token: Option<AccessToken>,
+    token: AccessToken,
     urls: codex::CodexEndpoints<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    let token = token.ok_or(HttpError::Unauthorized)?;
     let reading = codex::read_wham(identity, token, urls)?;
     saved_card(
         identity,

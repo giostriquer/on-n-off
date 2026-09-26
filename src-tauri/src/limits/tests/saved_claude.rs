@@ -19,13 +19,8 @@ fn read_at(
     profile: &str,
     usage: &str,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    read_saved_claude_at(
-        identity,
-        credentials::parse_claude_credential(auth),
-        NOW_MS,
-        profile,
-        usage,
-    )
+    let credential = credentials::parse_claude_credential(auth).expect("the fixture's credential");
+    read_saved_claude_at(identity, credential, NOW_MS, profile, usage)
 }
 
 #[test]
@@ -322,15 +317,105 @@ fn a_saved_claude_read_that_observed_nothing_is_an_error() {
     );
 }
 
-/// A saved login without an access token is refused before any request.
+/// A Max ×20 login's credential, as an isolated sign-in leaves it.
+fn max_credential() -> ClaudeCredential {
+    credentials::parse_claude_credential(&json!({"claudeAiOauth": {
+        "accessToken":"fixture-access", "subscriptionType":"max", "rateLimitTier":"default_claude_max_20x"
+    }}))
+    .unwrap()
+}
+
 #[test]
-fn a_saved_claude_login_without_an_access_token_sends_nothing() {
-    let refused = crate::http::refused_url();
-    let claude = read_at(
-        &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"refreshToken":"fixture-refresh"}}),
-        &refused,
-        &refused,
+fn a_first_claude_reading_is_remembered_as_a_scoped_dated_snapshot() {
+    let home = tempfile::tempdir().unwrap();
+    let (profile, profile_request) = serve_once(
+        "200 OK",
+        r#"{"account":{"uuid":"user","email":"me@example.com"},"organization":{"uuid":"team"}}"#,
     );
-    assert_eq!(claude.err(), Some(HttpError::Unauthorized.into()));
+    let (usage, usage_request) = serve_once(
+        "200 OK",
+        r#"{"seven_day":{"utilization":61,"resets_at":"2026-09-20T12:00:00Z"}}"#,
+    );
+    let dto = read_saved_claude_at(
+        &identity(AgentId::Claude),
+        max_credential(),
+        NOW_MS,
+        &profile,
+        &usage,
+    )
+    .unwrap();
+    profile_request.join().unwrap();
+    usage_request.join().unwrap();
+    assert!(!dto.current_account);
+    assert_eq!(dto.reading.plan.as_deref(), Some("max ×20"));
+    assert_eq!(dto.reading.windows[0].used_percent, 61.0);
+    assert!(!dto.reading.windows[0].observed_at.is_empty());
+    let account = dto.account.as_ref().unwrap();
+    assert!(account.id.starts_with("profile:"));
+    assert_eq!(account.legacy_id.as_deref(), Some("user"));
+    assert_eq!(account.label.as_deref(), Some("me@example.com"));
+    remember(home.path(), dto.clone()).saved.unwrap();
+    let reloaded = SnapshotStore::for_home(home.path()).load(AgentId::Claude);
+    assert_eq!(reloaded.len(), 1);
+    assert_eq!(reloaded[0].reading.windows, dto.reading.windows);
+    assert_eq!(reloaded[0].account, dto.account);
+}
+
+#[test]
+fn saved_claude_session_keeps_the_reported_percentage_and_optional_reset() {
+    for reset in [None, Some("2026-09-20T12:00:00Z")] {
+        let home = tempfile::tempdir().unwrap();
+        let (profile, profile_request) = serve_once(
+            "200 OK",
+            r#"{"account":{"uuid":"user","email":"me@example.com"},"organization":{"uuid":"team"}}"#,
+        );
+        let body = json!({"limits": [
+            {"kind":"session", "group":"session", "percent":0, "resets_at":reset},
+            {"kind":"weekly_all", "group":"weekly", "percent":90, "resets_at":"2026-09-21T12:00:00Z"}
+        ]}).to_string();
+        let (usage, usage_request) = serve_once("200 OK", &body);
+        let dto = read_saved_claude_at(
+            &identity(AgentId::Claude),
+            max_credential(),
+            NOW_MS,
+            &profile,
+            &usage,
+        )
+        .unwrap();
+        profile_request.join().unwrap();
+        usage_request.join().unwrap();
+        remember(home.path(), dto.clone()).saved.unwrap();
+        let saved = SnapshotStore::for_home(home.path()).load(AgentId::Claude);
+        let session = saved[0]
+            .reading
+            .windows
+            .iter()
+            .find(|w| w.id == "session")
+            .unwrap();
+        assert_eq!(session.used_percent, 0.0);
+        assert_eq!(session.resets_at.as_deref(), reset);
+    }
+}
+
+#[test]
+fn wrong_claude_user_or_workspace_never_contributes_usage() {
+    for body in [
+        r#"{"account":{"uuid":"other","email":"me@example.com"},"organization":{"uuid":"team"}}"#,
+        r#"{"account":{"uuid":"user","email":"me@example.com"},"organization":{"uuid":"other"}}"#,
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let (profile, request) = serve_once("200 OK", body);
+        assert!(read_saved_claude_at(
+            &identity(AgentId::Claude),
+            max_credential(),
+            NOW_MS,
+            &profile,
+            &crate::http::refused_url()
+        )
+        .is_err());
+        request.join().unwrap();
+        assert!(SnapshotStore::for_home(home.path())
+            .load(AgentId::Claude)
+            .is_empty());
+    }
 }

@@ -59,7 +59,10 @@ impl super::Adapter for Claude {
         login: &Login,
         now_ms: i64,
     ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
-        crate::limits::read_saved_claude(identity, ClaudeLogin::of(login).credential(), now_ms)
+        let credential = ClaudeLogin::of(login)
+            .credential()
+            .ok_or(crate::http::HttpError::Unauthorized)?;
+        crate::limits::read_saved_claude(identity, credential, now_ms)
     }
 
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.
@@ -421,14 +424,21 @@ impl IsolatedSignIn for ClaudeNative {
         command
     }
 
-    /// Read with the login's own credential, which needs nothing from the directory.
+    /// A saved profile's read with the login's own credential, which needs nothing from the
+    /// directory.
     fn first_usage(
         &self,
         _dir: &Path,
         login: &Login,
         identity: &Identity,
     ) -> Option<ProviderLimitsDto> {
-        crate::limits::login::read_claude(identity, ClaudeLogin::of(login).credential()?)
+        let credential = ClaudeLogin::of(login).credential()?;
+        crate::limits::read_saved_claude(
+            identity,
+            credential,
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .ok()
     }
 
     /// Deletes the sign-in's own scoped Keychain entry, never Claude Code's unscoped one.

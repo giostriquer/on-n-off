@@ -20,19 +20,9 @@ fn read_at(
     codex: CodexEndpoints<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     let token = crate::accounts::model::string(auth, "/tokens/access_token")
-        .ok()
-        .map(AccessToken::new);
+        .map(AccessToken::new)
+        .expect("the fixture's access token");
     read_saved_codex_at(identity, token, codex)
-}
-
-/// Endpoints no saved Codex read of these tests reaches.
-fn no_codex() -> CodexEndpoints<'static> {
-    CodexEndpoints {
-        usage: "unused",
-        reset_credits: "unused",
-        credit_usage: "unused",
-        subscriptions: "unused",
-    }
 }
 
 #[test]
@@ -579,19 +569,4 @@ fn a_saved_codex_read_that_observed_nothing_is_an_error() {
         codex.err(),
         Some(HttpError::Parse("Usage response contained no quota observations.".into()).into())
     );
-}
-
-/// A saved login without an access token is refused before any request.
-#[test]
-fn a_saved_codex_login_without_an_access_token_sends_nothing() {
-    let refused = crate::http::refused_url();
-    let codex = read_at(
-        &identity(AgentId::Codex),
-        &json!({"tokens":{"refresh_token":"fixture-refresh"}}),
-        CodexEndpoints {
-            usage: &refused,
-            ..no_codex()
-        },
-    );
-    assert_eq!(codex.err(), Some(HttpError::Unauthorized.into()));
 }
