@@ -182,22 +182,19 @@ function PopoverProviderSection({
 }
 
 function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }) {
-  const { provider, reading, status, freshness } = card;
-  const name = providerLabel(provider);
-  const account = reading?.account;
-  const label = account?.label ?? name;
+  const { provider, identity, status, freshness } = card;
   const windows = card.headline ? [card.headline, ...card.rows] : card.rows;
 
   return (
     <article
-      aria-label={`${name} limits${account?.label ? ` · ${account.label}` : ""}`}
+      aria-label={identity.ariaLabel}
       className={`${divided ? "border-t border-[var(--popover-hair)]" : ""} px-2.5 py-2`}
       data-current-account={card.active ? "true" : "false"}
       data-status={freshness.readStatus}
     >
       <header className="mb-1.5 min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{identity.label}</span>
           {status?.kind === "savedRefresh" ? <UsageStatusBadge detail={status.detail} /> : status?.kind === "remembered" ? (
             <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">
               Remembered account

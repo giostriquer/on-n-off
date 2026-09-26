@@ -295,13 +295,17 @@ it("says an answered read with no windows has none, as the Limits screen words i
   expect(within(account).queryByText("No rate-limit windows.")).toBeNull();
 });
 
-it("names a card without an account by its provider", async () => {
+it.each([
+  ["by its account's label", { id: "claude-1", label: "you@example.com" }, "Claude limits · you@example.com", "you@example.com"],
+  ["by its provider when its account has no label", { id: "claude-1", label: null }, "Claude limits", "Claude"],
+  ["by its provider when it has no account", null, "Claude limits", "Claude"],
+] as const)("names a card %s, as the Limits screen does", async (_case, account, name, label) => {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
-    ? [{ provider: "claude", status: "signedOut", message: "Sign in with `claude`.", currentAccount: true, windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
+    ? [{ provider: "claude", status: "signedOut", message: "Sign in with `claude`.", account, currentAccount: true, windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
   renderPopover();
-  const account = await screen.findByRole("article", { name: "Claude limits" });
-  expect(within(account).getByText("Claude")).toBeInTheDocument();
-  expect(within(account).getByText("Sign in with `claude`.")).toBeInTheDocument();
+  const article = await screen.findByRole("article", { name });
+  expect(within(article).getByText(label)).toBeInTheDocument();
+  expect(within(article).getByText("Sign in with `claude`.")).toBeInTheDocument();
 });
 
 it("says a provider with no accounts has none saved", async () => {
