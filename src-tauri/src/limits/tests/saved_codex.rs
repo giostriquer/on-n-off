@@ -574,3 +574,63 @@ fn a_saved_codex_read_that_observed_nothing_is_an_error() {
         Some(HttpError::Parse("Usage response contained no quota observations.".into()).into())
     );
 }
+
+/// A usage body on `plan`, or on none, with one weekly window.
+fn usage_on(plan: Option<&str>) -> String {
+    let mut body =
+        json!({"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800}}});
+    if let Some(plan) = plan {
+        body["plan_type"] = json!(plan);
+    }
+    body.to_string()
+}
+
+/// The access a saved read asks with is its profile's own, so its term is asked whatever its plan:
+/// a workspace plan, a personal one or none.
+#[test]
+fn a_saved_codex_read_is_asked_its_term_whatever_its_plan() {
+    for plan in [Some("self_serve_business_prolite"), Some("pro"), None] {
+        let (usage, u) = serve_once("200 OK", &usage_on(plan));
+        let (subscriptions, s) = serve_once(
+            "200 OK",
+            r#"{"active_until":"2026-09-28T16:22:34Z","will_renew":true}"#,
+        );
+        let dto = read_at(
+            &member(&format!("term-on-{plan:?}")),
+            &json!({"tokens":{"access_token":"fixture-access"}}),
+            CodexEndpoints {
+                usage: &usage,
+                reset_credits: "unused",
+                credit_usage: &crate::http::refused_url(),
+                subscriptions: &subscriptions,
+            },
+        )
+        .unwrap();
+        u.join().unwrap();
+        s.join().unwrap();
+
+        assert!(dto.reading.subscription.is_some(), "{plan:?}");
+    }
+}
+
+/// A body that names no plan is not a workspace plan, and is never asked what it spent.
+#[test]
+fn saved_codex_never_asks_a_read_without_a_plan_what_it_spent() {
+    let (usage, u) = serve_once("200 OK", &usage_on(None));
+    let spending = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    spending.set_nonblocking(true).unwrap();
+    let dto = read_codex_spending(
+        &member("no-plan"),
+        &usage,
+        &format!("http://{}/breakdown", spending.local_addr().unwrap()),
+    )
+    .unwrap();
+    u.join().unwrap();
+
+    assert_eq!(
+        spending.accept().map(|_| ()).map_err(|error| error.kind()),
+        Err(std::io::ErrorKind::WouldBlock),
+        "a read without a plan has no pooled credits to ask about"
+    );
+    assert_eq!(dto.reading.credits_spent, None);
+}
