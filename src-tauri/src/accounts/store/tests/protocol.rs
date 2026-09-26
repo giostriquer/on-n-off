@@ -307,3 +307,38 @@ fn a_reading_ticket_holds_the_epoch_and_the_login_it_read_with() {
         "an account change"
     );
 }
+
+#[test]
+fn a_gate_applies_the_rule_without_creating_or_writing_a_vault() {
+    let home = tempfile::tempdir().unwrap();
+    assert!(Store::gate(home.path(), &ChangeKind::Account).is_ok());
+    assert_eq!(
+        Store::gate(home.path(), &ChangeKind::Recovery),
+        Err("No recovery is pending.".into())
+    );
+    assert!(!Store::vault_exists(home.path()));
+
+    // The key `vault::tests::unlock_fixture` gives this home.
+    let key = [7; 32];
+    let store = Store::open_with_key(home.path(), true, |_, _| Ok(key)).unwrap();
+    let db = Database {
+        recovery: Some(journal()),
+        ..Database::default()
+    };
+    store.persist(&db).unwrap();
+    drop(store);
+    super::super::super::vault::tests::unlock_fixture(&home);
+    let before = sealed(home.path());
+
+    assert_eq!(
+        Store::gate(home.path(), &ChangeKind::Account),
+        Err(RECOVER_FIRST.into())
+    );
+    assert!(Store::gate(home.path(), &ChangeKind::Recovery).is_ok());
+    assert!(Store::gate(home.path(), &ChangeKind::Metadata).is_ok());
+    assert_eq!(sealed(home.path()), before);
+    assert!(
+        Store::lease_with_timeout(home.path(), Duration::ZERO).is_ok(),
+        "the gate releases the lease"
+    );
+}

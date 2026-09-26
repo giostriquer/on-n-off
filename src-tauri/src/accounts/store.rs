@@ -540,6 +540,17 @@ impl Store {
         Sealer(self.key)
     }
 
+    /// Refuses `kind` now if its rule would, for an operation about to do native work that a
+    /// refused change must never do: verifying a login, which for Claude may renew and rewrite it.
+    /// It creates no vault and writes nothing; `change` gates again under its own lease. An
+    /// explicit action may retry a vault unlock the OS refused, so this is not `open_existing`.
+    pub fn gate(home: &std::path::Path, kind: &ChangeKind<'_>) -> Result<(), String> {
+        if !Self::vault_exists(home) {
+            return kind.gate(&Database::default());
+        }
+        kind.gate(&Self::open(home, false)?.load()?)
+    }
+
     /// Makes one change under this store's lease: refuses it by `kind`'s rule, bumps the
     /// sign-in epoch unless it is a metadata edit, lets `edit` change the database, persists it and
     /// releases the lease before returning, so the caller announces the change after release.

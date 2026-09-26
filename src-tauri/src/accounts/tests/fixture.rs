@@ -91,7 +91,10 @@ impl Native for FakeNative {
         *self.0.live.borrow_mut() = login.cloned();
         Ok(())
     }
+    /// Verification reads the native login, and for Claude may renew and rewrite it under
+    /// Claude Code's lock, so it counts as a read.
     fn verify(&self) -> Result<(), String> {
+        self.0.reads.set(self.0.reads.get() + 1);
         self.0.verify_error.borrow().clone().map_or(Ok(()), Err)
     }
 }

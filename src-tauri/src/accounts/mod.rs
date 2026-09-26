@@ -229,6 +229,7 @@ impl Accounts {
         let read = activity::read(provider).ok_or("An account change is running.")?;
         let native = self.native(provider)?;
         native.preflight()?;
+        store::Store::gate(&self.home, &store::ChangeKind::Account)?;
         native.verify()?;
         store::Store::open(&self.home, true)?.change_then(
             store::ChangeKind::Account,
