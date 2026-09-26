@@ -519,6 +519,34 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
     assert_eq!(value["currentAccount"], true);
 }
 
+/// A saved profile's card says so over IPC as `savedProfile`; no other card carries the key, and a
+/// card without it reads as not one.
+#[test]
+fn only_a_saved_profiles_card_carries_the_saved_profile_key() {
+    let remembered = ProviderLimitsDto {
+        current_account: false,
+        ..ProviderLimitsDto::for_test(AgentId::Codex, "profile:acct-1")
+    };
+    let saved = ProviderLimitsDto {
+        saved_profile: true,
+        ..remembered.clone()
+    };
+
+    let value = serde_json::to_value(&saved).unwrap();
+    assert_eq!(value["savedProfile"], json!(true));
+    assert_eq!(
+        serde_json::from_value::<ProviderLimitsDto>(value).unwrap(),
+        saved
+    );
+    let value = serde_json::to_value(&remembered).unwrap();
+    assert!(value.get("savedProfile").is_none(), "{value}");
+    assert!(
+        !serde_json::from_value::<ProviderLimitsDto>(value)
+            .unwrap()
+            .saved_profile
+    );
+}
+
 /// Every note crosses under the name the UI matches on, and comes back from a snapshot the same way.
 #[test]
 fn every_subscription_note_keeps_its_wire_name() {

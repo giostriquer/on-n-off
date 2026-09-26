@@ -243,6 +243,7 @@ impl StoredSnapshot {
             message: None,
             account: Some(self.account),
             current_account: false,
+            saved_profile: false,
             reading,
         }
     }

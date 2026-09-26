@@ -232,8 +232,9 @@ impl Reading {
 
 /// Subscription rate-limit snapshot for one provider account. Provider-side problems are encoded
 /// in `status` + `message` rather than returned as errors so the UI can render each provider
-/// independently. `current_account: false` marks a remembered account the provider is no longer
-/// signed into. Each window carries its own observation time.
+/// independently. `current_account` marks the account the provider is signed into, and
+/// `saved_profile` a saved profile Limits polls; a card that is neither is a remembered reading.
+/// Each window carries its own observation time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderLimitsDto {
@@ -244,6 +245,11 @@ pub struct ProviderLimitsDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<LimitsAccountDto>,
     pub current_account: bool,
+    /// A saved profile's card that Limits polls (`accounts/usage.rs`): read this poll, held back
+    /// by its last poll, or failed. Never the signed-in card, nor history no saved profile polls.
+    /// It describes this read, so it never reaches a snapshot file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub saved_profile: bool,
     /// What the read reported, or what is remembered of the account where it could not say.
     #[serde(flatten)]
     pub reading: Reading,
@@ -265,6 +271,7 @@ impl ProviderLimitsDto {
                 label: None,
             }),
             current_account: true,
+            saved_profile: false,
             reading: Reading::default(),
         }
     }

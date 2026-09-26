@@ -240,6 +240,7 @@ fn a_failed_saved_read_keeps_the_cards_whole_reading() {
     let mut expected = serde_json::to_value(&remembered).unwrap();
     expected["status"] = json!("failed");
     expected["message"] = json!("paused");
+    expected["savedProfile"] = json!(true);
     assert_eq!(entries.len(), 1);
     assert_eq!(serde_json::to_value(&entries[0]).unwrap(), expected);
 }
@@ -297,9 +298,11 @@ fn an_answered_poll_keeps_the_same_figures_on_its_card_and_on_disk() {
                          "checkedAt": "2026-09-19T00:00:00Z"},
         "resetCredits": {"availableCount": 1}
     });
-    assert_eq!(serde_json::to_value(&entries[0]).unwrap(), expected);
     assert_eq!(
         serde_json::to_value(&remembered(home.path(), AgentId::Codex)[0]).unwrap(),
         expected
     );
+    let mut card = expected;
+    card["savedProfile"] = json!(true);
+    assert_eq!(serde_json::to_value(&entries[0]).unwrap(), card);
 }

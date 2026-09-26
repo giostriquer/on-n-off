@@ -330,14 +330,13 @@ fn fetch_with(
     FetchResult { login, result }
 }
 
+/// `profile`'s poll into `entries`, whose card for it then says it is a saved profile Limits polls,
+/// whatever the poll came to. The signed-in account's card is never touched.
 fn merge(
     entries: &mut Vec<ProviderLimitsDto>,
     profile: &Profile,
     result: Option<Result<ProviderLimitsDto, String>>,
 ) {
-    let Some(result) = result else {
-        return;
-    };
     let key = profile.identity.observation_key();
     let existing = entries
         .iter()
@@ -345,8 +344,15 @@ fn merge(
     if existing.is_some_and(|i| entries[i].current_account) {
         return;
     }
+    let Some(result) = result else {
+        // Held back by its last poll, the profile shows the snapshot that poll left.
+        if let Some(i) = existing {
+            entries[i].saved_profile = true;
+        }
+        return;
+    };
     let remembered = existing.map(|i| &entries[i]);
-    let dto = match result {
+    let mut dto = match result {
         // The poll kept from the account's file as it wrote over it (`limits::remember`).
         Ok(dto) => dto,
         // A failed poll read nothing of its own: the card keeps its identity and shows what it
@@ -370,6 +376,7 @@ fn merge(
                 message: Some(error),
                 account,
                 current_account,
+                saved_profile: false,
                 reading: Reading::default(),
             };
             if let Some(remembered) = remembered.map(|card| card.reading.clone()) {
@@ -378,6 +385,7 @@ fn merge(
             dto
         }
     };
+    dto.saved_profile = true;
     if let Some(i) = existing {
         entries[i] = dto;
     } else {
