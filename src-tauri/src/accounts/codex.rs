@@ -51,10 +51,12 @@ impl super::Adapter for Codex {
         login.renewed(&reply, now_ms)
     }
 
+    /// Read whatever the access token's expiry: Codex's backend says whether it still takes it.
     fn read_usage(
         &self,
         identity: &Identity,
         login: &Login,
+        _now_ms: i64,
     ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
         crate::limits::read_saved_codex(identity, CodexLogin::of(login).access_token())
     }

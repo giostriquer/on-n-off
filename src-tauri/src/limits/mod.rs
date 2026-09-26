@@ -453,6 +453,9 @@ pub(crate) enum SavedReadError {
     Http(HttpError),
     /// The login now signs in as a different account than the profile's.
     OtherAccount,
+    /// The login's access token has expired, and on-n-off does not renew this login: the client
+    /// it was saved from does, and the next time that login is captured its renewal comes along.
+    Expired,
 }
 
 impl From<HttpError> for SavedReadError {
@@ -461,23 +464,36 @@ impl From<HttpError> for SavedReadError {
     }
 }
 
-/// A saved profile's Claude card, read with its login's `credential`, which must sign in as the
-/// profile's user in its workspace. A login without an access token is refused before any request.
-/// No CLI is started and nothing is renewed here.
+/// A saved profile's Claude card, read at `now_ms` with its login's `credential`, which must sign
+/// in as the profile's user in its workspace. A login without an access token is refused before any
+/// request. No CLI is started and nothing is renewed here.
 pub(crate) fn read_saved_claude(
     identity: &Identity,
     credential: Option<ClaudeCredential>,
+    now_ms: i64,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    read_saved_claude_at(identity, credential, CLAUDE_PROFILE_URL, CLAUDE_USAGE_URL)
+    read_saved_claude_at(
+        identity,
+        credential,
+        now_ms,
+        CLAUDE_PROFILE_URL,
+        CLAUDE_USAGE_URL,
+    )
 }
 
 fn read_saved_claude_at(
     identity: &Identity,
     credential: Option<ClaudeCredential>,
+    now_ms: i64,
     profile_url: &str,
     usage_url: &str,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     let credential = credential.ok_or(HttpError::Unauthorized)?;
+    // As the signed-in read reports an expired login without asking (`read_claude_credential`).
+    // A login on-n-off renews was renewed before this read (`accounts/usage.rs`).
+    if credential.expires_at_ms.is_some_and(|at| at <= now_ms) {
+        return Err(SavedReadError::Expired);
+    }
     let parsed = claude_read(
         &credential,
         Some(&expected_claude_identity(identity)),

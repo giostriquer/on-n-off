@@ -57,8 +57,9 @@ impl super::Adapter for Claude {
         &self,
         identity: &Identity,
         login: &Login,
+        now_ms: i64,
     ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
-        crate::limits::read_saved_claude(identity, ClaudeLogin::of(login).credential())
+        crate::limits::read_saved_claude(identity, ClaudeLogin::of(login).credential(), now_ms)
     }
 
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.

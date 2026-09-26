@@ -272,6 +272,11 @@ fn a_poll_that_read_nothing_says_why() {
             true,
         ),
         (
+            SavedReadError::Expired,
+            "This saved login has expired. Use this account once, or sign in again, to renew it.",
+            false,
+        ),
+        (
             HttpError::RateLimited(RateLimitReset::RetryAfter(30)).into(),
             "Usage refresh is rate limited. The last reading is retained.",
             false,

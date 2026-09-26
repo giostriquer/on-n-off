@@ -176,6 +176,16 @@ fn poll_with(
             true,
             Duration::ZERO,
         ),
+        // Not held back like a refusal: the next capture of the login this one was saved from
+        // brings its renewal, and a new login is read at once.
+        Err(SavedReadError::Expired) => (
+            Some(
+                "This saved login has expired. Use this account once, or sign in again, to renew it."
+                    .into(),
+            ),
+            false,
+            Duration::ZERO,
+        ),
         Err(SavedReadError::Http(HttpError::RateLimited(reset))) => {
             let seconds = match reset {
                 RateLimitReset::RetryAfter(s) => *s,
@@ -248,13 +258,14 @@ fn poll_with(
 }
 
 fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) -> FetchResult {
+    let now = chrono::Utc::now().timestamp_millis();
     fetch_with(
         profile,
-        chrono::Utc::now().timestamp_millis(),
+        now,
         &|login| {
             super::adapter(profile.identity.provider)
                 .map_err(|_| HttpError::Unauthorized)?
-                .read_usage(&profile.identity, login)
+                .read_usage(&profile.identity, login, now)
         },
         &|| {
             super::usage_renew::renew_owned(profile, open, &|login| {

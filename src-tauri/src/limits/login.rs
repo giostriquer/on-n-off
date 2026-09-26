@@ -8,7 +8,7 @@ pub(crate) fn read_claude(
     identity: &Identity,
     credential: ClaudeCredential,
 ) -> Option<ProviderLimitsDto> {
-    read_saved_claude(identity, Some(credential)).ok()
+    read_saved_claude(identity, Some(credential), Utc::now().timestamp_millis()).ok()
 }
 
 /// The first usage reading of an isolated Codex sign-in as `identity`, read by Codex's own

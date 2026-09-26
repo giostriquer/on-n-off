@@ -22,6 +22,7 @@ fn read_at(
     read_saved_claude_at(
         identity,
         credentials::parse_claude_credential(auth),
+        NOW_MS,
         profile,
         usage,
     )
@@ -226,9 +227,17 @@ fn matching_claude_user_in_another_workspace_is_rejected_before_usage() {
     assert_eq!(result.err(), Some(SavedReadError::OtherAccount));
 }
 
-/// A saved Claude login past its `expiresAt` is sent all the same: this read never checks it.
+/// A saved Claude login whose access token has reached its `expiresAt` is not sent: the read
+/// says it expired. One short of it is read.
 #[test]
-fn a_saved_claude_read_sends_a_token_past_its_expiry() {
+fn an_expired_saved_claude_login_sends_nothing() {
+    let refused = crate::http::refused_url();
+    for expires_at in [1, NOW_MS] {
+        let auth = json!({"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"r","expiresAt":expires_at}});
+        let result = read_at(&identity(AgentId::Claude), &auth, &refused, &refused);
+        assert_eq!(result.err(), Some(SavedReadError::Expired), "{expires_at}");
+    }
+
     let (profile, p) = serve_once(
         "200 OK",
         r#"{"account":{"uuid":"user"},"organization":{"uuid":"team"}}"#,
@@ -236,7 +245,7 @@ fn a_saved_claude_read_sends_a_token_past_its_expiry() {
     let (usage, u) = serve_once("200 OK", r#"{"seven_day":{"utilization":61}}"#);
     let dto = read_at(
         &identity(AgentId::Claude),
-        &json!({"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"r","expiresAt":1}}),
+        &json!({"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"r","expiresAt":NOW_MS + 1}}),
         &profile,
         &usage,
     );

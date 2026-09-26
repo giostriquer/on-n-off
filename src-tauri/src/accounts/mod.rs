@@ -85,12 +85,13 @@ trait Adapter: Sync {
         now_ms: i64,
         token_url: &str,
     ) -> Result<store::Login, String>;
-    /// The usage of the saved profile `identity`, read with its `login` by the provider's Limits
-    /// reader: access-only requests that start no CLI and renew nothing.
+    /// The usage of the saved profile `identity`, read at `now_ms` with its `login` by the
+    /// provider's Limits reader: access-only requests that start no CLI and renew nothing.
     fn read_usage(
         &self,
         identity: &model::Identity,
         login: &store::Login,
+        now_ms: i64,
     ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
 }
 
