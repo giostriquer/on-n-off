@@ -91,7 +91,8 @@ export type LimitsResetOffer = {
 
 /**
  * Mirrors `ProviderLimitsDto`: provider-side problems arrive as a status, not an error.
- * `currentAccount: false` is an account remembered independently of the CLI's current login.
+ * `currentAccount` is the account the CLI is signed in with and `savedProfile` a saved profile
+ * Limits polls; a reading that is neither is remembered.
  */
 export type ProviderLimits = {
   provider: AgentId;
@@ -99,6 +100,11 @@ export type ProviderLimits = {
   message?: string | null;
   account?: LimitsAccount | null;
   currentAccount: boolean;
+  /**
+   * A saved profile Limits polls: read this poll, held back by its last poll, or failed. Absent on
+   * the signed-in card and on remembered readings.
+   */
+  savedProfile?: boolean;
   plan?: string | null;
   /** Claude only: the profile's `organization.subscription_status`, as Anthropic writes it. */
   subscriptionStatus?: string | null;

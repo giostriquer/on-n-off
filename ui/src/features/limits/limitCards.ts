@@ -88,8 +88,9 @@ export type LimitCard = {
   account: CardAccount | null;
   plan: string | null;
   /**
-   * "remembered" also fires for a saved account's reading, which is read live every poll. The Limits
-   * screen shows no remembered status until a reading says whether it was read live this poll.
+   * The card's one status (`presentLimitAccount`), from whether the reading is the signed-in
+   * account's or a saved profile's Limits polls (`savedProfile`): "remembered" is only for a reading
+   * that is neither.
    */
   status: CardStatus | null;
   /** The account in use: the saved profiles' word for it, else the read's. */

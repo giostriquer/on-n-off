@@ -139,6 +139,20 @@ describe("LimitsPopover", () => {
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
   });
 
+  it("pins \"Remembered account\" only on history, never on a saved profile Limits polls", async () => {
+    readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+      ? [limits("claude", "claude-current", "current@claude.example", true),
+        { ...limits("claude", "claude-saved", "saved@claude.example", false), savedProfile: true },
+        limits("claude", "claude-kept", "kept@claude.example", false)]
+      : []));
+    renderPopover();
+
+    const saved = await screen.findByRole("article", { name: "Claude limits · saved@claude.example" });
+    expect(within(saved).queryByText("Remembered account")).toBeNull();
+    const kept = screen.getByRole("article", { name: "Claude limits · kept@claude.example" });
+    expect(within(kept).getByText("Remembered account")).toBeInTheDocument();
+  });
+
   it("lists accounts in the card model's order, not the order the read gave them", async () => {
     const out = limits("claude", "claude-out", "out@claude.example", false);
     out.windows = [{ ...out.windows[0], usedPercent: 100 }];
@@ -289,7 +303,7 @@ describe("LimitsPopover", () => {
 it("marks saved usage quietly in the popover and exposes its failure on focus", async () => {
   const reason = "Saved usage credential is no longer accepted.";
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
-    ? [{...limits("claude", "saved", "you@example.com", false), status:"unauthenticated", message:reason}] : []));
+    ? [{...limits("claude", "saved", "you@example.com", false), savedProfile:true, status:"unauthenticated", message:reason}] : []));
   renderPopover();
   const account = await screen.findByRole("article", {name:"Claude limits · you@example.com"});
   const badge = within(account).getByRole("button", {name:"Usage status: Last known usage"});
