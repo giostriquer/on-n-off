@@ -428,3 +428,45 @@ fn a_legacy_keyed_card_keeps_from_its_own_file_even_when_the_list_hides_it() {
     );
     let _ = fs::remove_dir_all(&home);
 }
+
+/// A Codex file whose only observation, a banked count, has lapsed is not listed: nothing it still
+/// knows is an observation. A read of that account that could not tell the term keeps the file's
+/// term all the same, as it would from any file of its own; the lapsed count stays unknown.
+#[test]
+fn an_answer_keeps_the_term_of_its_own_file_whose_lapsed_count_hides_it() {
+    let home = scratch_dir("limits-reading-lapsed-term");
+    let store = SnapshotStore::for_home(&home);
+    let term = json!({"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
+                      "note": "cancelled", "checkedAt": "2026-08-17T10:00:00Z"});
+    store
+        .save(&card(json!({
+            "provider": "codex",
+            "status": "ok",
+            "account": {"id": "acct-1", "label": "a@example.com"},
+            "currentAccount": false,
+            "plan": "pro",
+            "windows": [],
+            "subscription": term,
+            "resetCredits": {"availableCount": 2, "nextExpiresAt": "2020-01-01T00:00:00+00:00"}
+        })))
+        .unwrap();
+    assert!(store.load(AgentId::Codex).is_empty(), "the file is hidden");
+    let answered = card(json!({
+        "provider": "codex",
+        "status": "ok",
+        "account": {"id": "acct-1", "label": "a@example.com"},
+        "currentAccount": true,
+        "plan": "pro",
+        "windows": [
+            {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 50.0,
+             "observedAt": "2026-08-17T11:00:00.000Z"}
+        ]
+    }));
+
+    let listed = aggregate_accounts(&store, answered);
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(wire(&listed[0])["subscription"], term);
+    assert_eq!(wire(&listed[0]).get("resetCredits"), None);
+    let _ = fs::remove_dir_all(&home);
+}
