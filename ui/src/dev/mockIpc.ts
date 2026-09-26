@@ -10,7 +10,8 @@
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
-import { LIMITS_SCENARIOS, limitsScenario, reconnectDuplicate } from "./limitsFixtures";
+import { limitsScenario } from "./limitsFixtures";
+import { unknownScenario } from "./scenarioNames";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageHistoryStatus, UsageSummary } from "$lib/usageTypes";
 
@@ -30,13 +31,8 @@ declare global {
 const params = new URLSearchParams(window.location.search);
 const scenario = params.get("mock") || "ok";
 const latency = Number(params.get("latency") ?? 80);
-// Scenarios this file answers for itself. `SCENARIOS` holds the pull-request ones and
-// `LIMITS_SCENARIOS` the ones that change what the Limits commands answer.
-const LOCAL_SCENARIOS = ["accountLogin", "accountLocked", "accountClients", "catalog", "hooks", "mcpSources"];
-const KNOWN_SCENARIOS = [...Object.keys(SCENARIOS), ...Object.keys(LIMITS_SCENARIOS), ...LOCAL_SCENARIOS];
-if (!KNOWN_SCENARIOS.includes(scenario)) {
-  console.error(`[mock] unknown scenario "${scenario}"; known: ${KNOWN_SCENARIOS.join(", ")}`);
-}
+const scenarioProblem = unknownScenario(scenario);
+if (scenarioProblem) console.error(scenarioProblem);
 const limits = limitsScenario(scenario);
 
 const vaultDenied = new Error("Could not unlock saved accounts.");
@@ -262,11 +258,10 @@ const handlers: Record<string, Handler> = {
     if (args.action === "remember") rememberingMock = true;
     if (args.action === "stopRemembering") rememberingMock = false;
   },
-  add_account: (args) => scenario === "accountDuplicate"
-    ? (reconnectDuplicate(), undefined)
-    : scenario === "accountLogin"
-    ? new Promise<void>(resolve => pendingLogins.set(String(args.operationId), resolve))
-    : undefined,
+  add_account: (args) => {
+    limits.addAccount();
+    return scenario === "accountLogin" ? new Promise<void>(resolve => pendingLogins.set(String(args.operationId), resolve)) : undefined;
+  },
   cancel_account_login: (args) => {
     const id = String(args.operationId);
     pendingLogins.get(id)?.();

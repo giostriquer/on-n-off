@@ -269,14 +269,10 @@ function savedRefreshPaused([live]: ProviderLimits[]): ProviderLimits[] {
 /**
  * `?mock=accountDuplicate`: a saved Codex login whose history an older app version wrote under its
  * workspace id, without the legacyId that ties it to the scoped reading. Signing in again
- * (`reconnectDuplicate`) brings the scoped reading, which the card then merges the history into.
+ * (`addAccount`) brings the scoped reading, which the card then merges the history into.
  */
 const DUPLICATE_WORKSPACE = "ca292064-c3f4-453c-b15a-43ef63c46478";
 let duplicateReconnected = false;
-
-export function reconnectDuplicate() {
-  duplicateReconnected = true;
-}
 
 function accountDuplicateCodex(): ProviderLimits[] {
   const legacy = { ...CODEX[1], currentAccount: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
@@ -322,6 +318,8 @@ type LimitsProvider = Extract<AgentId, "claude" | "codex">;
 export type LimitsScenario = Partial<Record<LimitsProvider, () => ProviderLimits[]>> & {
   accounts?: Partial<Record<LimitsProvider, () => AccountsReading>>;
   codexSubscription?: (accountId: string) => SubscriptionDate | null;
+  /** What a finished sign-in (`add_account`) changes about the scenario's later answers. */
+  addAccount?: () => void;
 };
 
 export const LIMITS_SCENARIOS: Record<string, LimitsScenario> = {
@@ -340,7 +338,11 @@ export const LIMITS_SCENARIOS: Record<string, LimitsScenario> = {
   workspaceCredits: { codex: workspaceCreditsCodex },
   creditsSpent: { codex: creditsSpentCodex },
   claudeSubscriptionStatus: { claude: claudeSubscriptionStatusClaude },
-  accountDuplicate: { codex: accountDuplicateCodex, accounts: { codex: accountDuplicateAccounts } },
+  accountDuplicate: {
+    codex: accountDuplicateCodex,
+    accounts: { codex: accountDuplicateAccounts },
+    addAccount: () => { duplicateReconnected = true; },
+  },
 };
 
 const OK = { claude: () => CLAUDE, codex: () => CODEX };
@@ -361,6 +363,9 @@ export function limitsScenario(name: string) {
     },
     readCodexSubscription(accountId: unknown): SubscriptionDate | null {
       return (chosen.codexSubscription ?? paidThrough)(String(accountId));
+    },
+    addAccount() {
+      chosen.addAccount?.();
     },
   };
 }
