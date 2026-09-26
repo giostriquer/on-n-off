@@ -18,6 +18,7 @@ mod fixture;
 mod listing;
 mod profiles;
 mod remembering;
+mod saved_claims;
 mod saved_usage;
 mod signing_in;
 mod switching;

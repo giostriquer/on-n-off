@@ -19,7 +19,7 @@ use std::{
 };
 
 /// Where a Codex login lives.
-pub(super) enum Target {
+enum Target {
     /// `<codex home>/auth.json`.
     File(PathBuf),
     /// The item Codex files for one home in the OS credential store.
@@ -28,7 +28,7 @@ pub(super) enum Target {
 
 impl Target {
     /// The stored document; `None` when nothing is stored there.
-    pub(super) fn read(&self) -> Result<Option<Value>, String> {
+    fn read(&self) -> Result<Option<Value>, String> {
         let bytes = match self {
             Self::File(path) => match fs::read(path) {
                 Ok(v) => v,
@@ -64,7 +64,7 @@ impl Target {
     }
 
     /// Replaces the stored document with `value` verbatim, or removes it for `None`.
-    pub(super) fn write(&self, value: Option<&Value>) -> Result<(), String> {
+    fn write(&self, value: Option<&Value>) -> Result<(), String> {
         let bytes = value
             .map(serde_json::to_vec)
             .transpose()
@@ -133,7 +133,7 @@ pub(super) fn config(config_home: &Path) -> Result<toml::Value, String> {
 /// `cli_auth_credentials_store` is `file` (the default), `keyring`, or `auto`, which uses the
 /// credential-store item when there is one and the file otherwise. Any other backend is refused,
 /// and so is a config that names a `profile`, whose effective backend cannot be verified.
-pub(super) fn target(config_home: &Path) -> Result<Target, String> {
+fn target(config_home: &Path) -> Result<Target, String> {
     let config = config(config_home)?;
     if config.get("profile").is_some() {
         return Err("Codex configuration profiles must use the official account controls until their effective credential backend can be verified.".into());
@@ -173,6 +173,12 @@ pub(super) fn read(config_home: &Path) -> Result<Option<Login>, String> {
         auth,
         account: Value::Null,
     }))
+}
+
+/// Replaces the login stored for `config_home`, wherever its config puts it, with `auth` verbatim,
+/// or removes it for `None`.
+pub(super) fn write(config_home: &Path, auth: Option<&Value>) -> Result<(), String> {
+    target(config_home)?.write(auth)
 }
 
 /// The key a Codex card is known by: the user and workspace together when the claims name the

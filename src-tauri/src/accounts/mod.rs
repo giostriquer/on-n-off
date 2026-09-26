@@ -512,6 +512,23 @@ pub use login::cancel;
 
 pub(crate) mod discovery;
 
+/// The `https://api.openai.com/auth` claims of a saved Codex profile's ID token: identity and plan
+/// metadata, never its tokens. `None` for an unknown key, a profile without a login, or a device
+/// with no vault; an error when the vault exists and cannot be read right now.
+pub(crate) fn saved_codex_claims(
+    home: &Path,
+    key: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    if !model::Identity::is_profile_key(key) || !store::Store::vault_exists(home) {
+        return Ok(None);
+    }
+    let db = store::Store::open_existing(home)?.load()?;
+    Ok(db
+        .observed(AgentId::Codex, key)
+        .and_then(|profile| profile.login.as_ref())
+        .and_then(|login| codex::CodexLogin::of(login).auth_claims().ok().flatten()))
+}
+
 #[cfg(test)]
 pub(crate) use store::tests::saved_codex_fixture;
 

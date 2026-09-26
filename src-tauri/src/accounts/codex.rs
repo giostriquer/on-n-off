@@ -9,7 +9,7 @@ use super::{
     codex_store,
     model::{self, AccessToken, Identity, LoginView},
     native::{self, CUSTOM_HOME},
-    store::{Login, Store},
+    store::Login,
     transaction::{Native, NativeGuard, ReadBack},
     usage_renew, IsolatedSignIn, NativeAccount,
 };
@@ -210,7 +210,7 @@ impl Native for CodexNative {
         locks: Box<dyn NativeGuard>,
     ) -> Result<ReadBack, String> {
         locks.ensure()?;
-        codex_store::target(&self.config_home)?.write(login.map(|l| &l.auth))?;
+        codex_store::write(&self.config_home, login.map(|l| &l.auth))?;
         let back = self.read();
         drop(locks);
         Ok(back)
@@ -455,20 +455,6 @@ fn token_claims(auth: &Value, pointer: &str) -> Result<Value, String> {
         .decode(encoded.trim_end_matches('='))
         .map_err(|_| "Invalid native identity token.")?;
     serde_json::from_slice(&bytes).map_err(|_| "Invalid native identity token.".into())
-}
-
-/// The `https://api.openai.com/auth` claims of a saved Codex profile's ID token: identity and plan
-/// metadata, never its tokens. `None` for an unknown key, a profile without a login, or a device
-/// with no vault; an error when the vault exists and cannot be read right now.
-pub(crate) fn saved_claims(home: &Path, key: &str) -> Result<Option<Value>, String> {
-    if !Identity::is_profile_key(key) || !Store::vault_exists(home) {
-        return Ok(None);
-    }
-    let db = Store::open_existing(home)?.load()?;
-    Ok(db
-        .observed(AgentId::Codex, key)
-        .and_then(|profile| profile.login.as_ref())
-        .and_then(|login| CodexLogin::of(login).auth_claims().ok().flatten()))
 }
 
 #[cfg(test)]

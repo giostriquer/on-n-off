@@ -73,7 +73,7 @@ fn read_at(
         .map(|(_, claims)| claims);
     let claims = match native {
         Some(claims) => Some(claims),
-        None => crate::accounts::codex::saved_claims(home, account)?,
+        None => crate::accounts::saved_codex_claims(home, account)?,
     };
     Ok(claims.and_then(|claims| parse_claims(&claims, account, now)))
 }
