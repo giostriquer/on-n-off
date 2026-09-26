@@ -49,7 +49,6 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
     );
 }
 
-/// A saved Claude read sends the one Claude header set on both requests.
 #[test]
 fn saved_claude_sends_the_claude_headers_on_both_requests() {
     let (profile, p) = serve_once_capturing(

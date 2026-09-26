@@ -402,7 +402,6 @@ fn claude_rejects_usage_when_the_authenticated_organization_is_different() {
     assert!(dto.reading.windows.is_empty());
 }
 
-/// A throttled signed-in read says it is rate limited.
 #[test]
 fn a_throttled_claude_read_says_it_is_rate_limited() {
     let home = scratch_dir("limits-claude-throttled");
