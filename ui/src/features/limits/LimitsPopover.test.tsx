@@ -286,12 +286,13 @@ it("marks saved usage quietly in the popover and exposes its failure on focus", 
   expect(screen.getByRole("tooltip")).toHaveTextContent(reason);
 });
 
-it("says an answered read with no windows has none", async () => {
+it("says an answered read with no windows has none, as the Limits screen words it", async () => {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
     ? [{ ...limits("claude", "claude-current", "current@claude.example", true), windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
   renderPopover();
   const account = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
-  expect(within(account).getByText("No rate-limit windows.")).toBeInTheDocument();
+  expect(within(account).getByText("Claude reported no rate-limit windows.")).toBeInTheDocument();
+  expect(within(account).queryByText("No rate-limit windows.")).toBeNull();
 });
 
 it("names a card without an account by its provider", async () => {

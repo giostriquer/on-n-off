@@ -225,7 +225,7 @@ function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }
           ))}
         </div>
       ) : card.empty ? (
-        <p className="m-0 text-[12px] text-[var(--mute)]">No rate-limit windows.</p>
+        <p className="m-0 text-[12px] text-[var(--mute)]">{card.empty.copy}</p>
       ) : null}
     </article>
   );
