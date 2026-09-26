@@ -288,9 +288,6 @@ pub(crate) struct CodexLogin<'a> {
     account: &'a Value,
 }
 
-/// The account record of a login read from its credential alone. Codex keeps none.
-static NO_ACCOUNT: Value = Value::Null;
-
 impl<'a> CodexLogin<'a> {
     pub(crate) fn of(login: &'a Login) -> Self {
         Self {
@@ -299,17 +296,15 @@ impl<'a> CodexLogin<'a> {
         }
     }
 
-    /// The credential alone, as a saved account's usage read holds it.
-    pub(crate) fn of_auth(auth: &'a Value) -> Self {
-        Self {
-            auth,
-            account: &NO_ACCOUNT,
-        }
-    }
-
     /// The access token, for one request header; `None` for a login without one.
     pub(crate) fn access_token(&self) -> Option<AccessToken> {
-        model::string(self.auth, "/tokens/access_token")
+        Self::access_token_in(self.auth)
+    }
+
+    /// The access token in a Codex credentials document, `auth`: a saved account's, as its usage
+    /// read holds it. `None` for a document without one.
+    pub(crate) fn access_token_in(auth: &Value) -> Option<AccessToken> {
+        model::string(auth, "/tokens/access_token")
             .ok()
             .map(AccessToken::new)
     }

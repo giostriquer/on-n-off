@@ -361,7 +361,7 @@ impl Native for ClaudeNative {
             .get("oauthAccount")
             .cloned()
             .unwrap_or(Value::Null);
-        if ClaudeLogin::of_auth(&auth).credential().is_none() {
+        if ClaudeLogin::credential_in(&auth).is_none() {
             return Ok(None);
         }
         Ok(Some(Login {
@@ -453,9 +453,6 @@ pub(crate) struct ClaudeLogin<'a> {
     account: &'a Value,
 }
 
-/// The account record of a login read from its credential alone.
-static NO_ACCOUNT: Value = Value::Null;
-
 impl<'a> ClaudeLogin<'a> {
     pub(crate) fn of(login: &'a Login) -> Self {
         Self {
@@ -464,18 +461,16 @@ impl<'a> ClaudeLogin<'a> {
         }
     }
 
-    /// The credential alone, as a saved account's usage read holds it.
-    pub(crate) fn of_auth(auth: &'a Value) -> Self {
-        Self {
-            auth,
-            account: &NO_ACCOUNT,
-        }
+    /// What Limits reads with: the access token, its expiry and the plan.
+    pub(crate) fn credential(&self) -> Option<ClaudeCredential> {
+        Self::credential_in(self.auth)
     }
 
-    /// What Limits reads with: the access token, its expiry and the plan. `None` for a login
-    /// Claude Code has signed out of, which empties `claudeAiOauth` of its access token.
-    pub(crate) fn credential(&self) -> Option<ClaudeCredential> {
-        parse_claude_credential(self.auth)
+    /// The credential in a Claude credentials document, `auth`, which holds no account record:
+    /// what the store holds, or a saved account's credential as its usage read holds it. `None`
+    /// for a login Claude Code has signed out of, which empties `claudeAiOauth` of its access token.
+    pub(crate) fn credential_in(auth: &Value) -> Option<ClaudeCredential> {
+        parse_claude_credential(auth)
     }
 
     /// The access token, for one request header.

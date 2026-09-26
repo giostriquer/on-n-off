@@ -40,8 +40,7 @@ fn read_at(
 ) -> Result<ProviderLimitsDto, HttpError> {
     let mut parsed = match identity.provider {
         AgentId::Claude => {
-            let credential = crate::accounts::claude::ClaudeLogin::of_auth(auth)
-                .credential()
+            let credential = crate::accounts::claude::ClaudeLogin::credential_in(auth)
                 .ok_or(HttpError::Unauthorized)?;
             let bearer = format!("Bearer {}", credential.token);
             let claude::ClaudeProfile {
@@ -77,8 +76,7 @@ fn read_at(
             }
         }
         AgentId::Codex => {
-            let token = crate::accounts::codex::CodexLogin::of_auth(auth)
-                .access_token()
+            let token = crate::accounts::codex::CodexLogin::access_token_in(auth)
                 .ok_or(HttpError::Unauthorized)?;
             let bearer = token.authorization();
             let headers = [

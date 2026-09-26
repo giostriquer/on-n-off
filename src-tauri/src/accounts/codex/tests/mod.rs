@@ -47,8 +47,16 @@ fn auth(user: &str, workspace: &str) -> Value {
     json!({"tokens":{"id_token":format!("e30.{}.sig",URL_SAFE_NO_PAD.encode(claims.to_string())),"access_token":"access","refresh_token":"renewable","account_id":workspace}})
 }
 
+/// A Codex login of `auth`, with no account record beside it, as Codex keeps none.
+fn login_of(auth: &Value) -> Login {
+    Login {
+        auth: auth.clone(),
+        account: Value::Null,
+    }
+}
+
 fn identity_of(auth: &Value) -> Result<Identity, String> {
-    CodexLogin::of_auth(auth).identity()
+    CodexLogin::of(&login_of(auth)).identity()
 }
 
 #[test]
@@ -101,7 +109,7 @@ fn a_codex_login_renews_soon_within_ten_minutes_of_expiry_or_without_a_readable_
         ));
         value
     };
-    let renews_soon = |auth: &Value| CodexLogin::of_auth(auth).renews_soon(1_000_000);
+    let renews_soon = |auth: &Value| CodexLogin::of(&login_of(auth)).renews_soon(1_000_000);
     assert!(!renews_soon(&expiring_at(1_000_600)));
     assert!(renews_soon(&expiring_at(1_000_599)));
     assert!(renews_soon(&auth("user-a", "team")));
@@ -111,7 +119,7 @@ fn a_codex_login_renews_soon_within_ten_minutes_of_expiry_or_without_a_readable_
 /// auth claims, and none without an ID token.
 #[test]
 fn a_codex_logins_email_is_the_id_tokens_own_claim() {
-    let email = |auth: Value| CodexLogin::of_auth(&auth).email();
+    let email = |auth: Value| CodexLogin::of(&login_of(&auth)).email();
     let with = |payload: Value| json!({"tokens":{"access_token":"access","refresh_token":"refresh","id_token":jwt(&payload)}});
     assert_eq!(
         email(with(json!({"email":" c@example.com "}))).as_deref(),
@@ -141,7 +149,7 @@ fn a_codex_logins_email_is_the_id_tokens_own_claim() {
 #[test]
 fn a_codex_logins_fingerprint_is_its_token_generation_alone() {
     let codex = json!({"tokens":{"access_token":"access-c","refresh_token":"refresh-c","id_token":"id-one","account_id":"team"},"last_refresh":"2026-09-01T00:00:00Z"});
-    let fingerprint = |auth: &Value| CodexLogin::of_auth(auth).fingerprint();
+    let fingerprint = |auth: &Value| CodexLogin::of(&login_of(auth)).fingerprint();
     assert_eq!(
         fingerprint(&codex),
         "4ca39507b5d18d079c34d4882ed151f283570622c6f465583e7972fa0e8bce4a"
