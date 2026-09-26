@@ -206,34 +206,41 @@ fn poll_with(
             Duration::ZERO,
         ),
     };
-    let failures = if error.is_some() {
-        previous
-            .as_ref()
-            .map_or(1, |a| a.failures.saturating_add(1))
-    } else {
-        0
+    // This attempt, as the next poll of the same login is held back by: until a new login when it
+    // was rejected, else for the poll interval, doubled for each failure in a row.
+    let record = |error: &Option<String>, rejected: bool, retry: Duration| {
+        let failures = if error.is_some() {
+            previous
+                .as_ref()
+                .map_or(1, |a| a.failures.saturating_add(1))
+        } else {
+            0
+        };
+        let interval = crate::limits_refresh::poll_interval();
+        let delay = interval
+            .saturating_mul(1_u32 << failures.min(4))
+            .min(Duration::from_secs(3600))
+            .max(retry);
+        if let Ok(mut attempts) = attempts.lock() {
+            attempts.insert(
+                key.clone(),
+                Attempt {
+                    fingerprint: fingerprint.clone(),
+                    next: Instant::now() + delay,
+                    failures,
+                    error: error.clone(),
+                    rejected,
+                },
+            );
+        }
     };
-    let interval = crate::limits_refresh::poll_interval();
-    let delay = interval
-        .saturating_mul(1_u32 << failures.min(4))
-        .min(Duration::from_secs(3600))
-        .max(retry);
-    if let Ok(mut attempts) = attempts.lock() {
-        attempts.insert(
-            key,
-            Attempt {
-                fingerprint: fingerprint.clone(),
-                next: Instant::now() + delay,
-                failures,
-                error: error.clone(),
-                rejected,
-            },
-        );
-    }
+    record(&error, rejected, retry);
     // Removal, reauthentication and logout can proceed while HTTP is in flight. Recheck under
     // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
     let store = open().ok()?;
-    store.recheck(&ticket.holding(profile, fingerprint)).ok()?;
+    store
+        .recheck(&ticket.holding(profile, fingerprint.clone()))
+        .ok()?;
     match result {
         Ok(mut dto) => {
             if dto
@@ -248,9 +255,14 @@ fn poll_with(
                     account.label.clone_from(&profile.email);
                 }
             }
-            let remembered = crate::limits::remember(home, dto);
+            let mut remembered = crate::limits::remember(home, dto);
             if remembered.saved.is_err() {
-                return Some(Err("Could not save the latest usage reading.".into()));
+                // The reading stands, under the failure; only the snapshot is missing, so the poll
+                // counts as failed and reads again once its backoff passes.
+                let error = Some("Could not save the latest usage reading.".to_string());
+                record(&error, false, Duration::ZERO);
+                remembered.card.status = LimitsStatus::Failed;
+                remembered.card.message = error;
             }
             Some(Ok(remembered.card))
         }

@@ -325,10 +325,10 @@ fn a_poll_that_read_nothing_says_why() {
     }
 }
 
-/// A reading the snapshot store could not keep is shown as a failed poll without its numbers, and
-/// the poll counts as a success.
+/// A reading the snapshot store could not keep is still shown, under the failure, and the poll
+/// counts as failed so it is read again once its backoff passes.
 #[test]
-fn a_reading_that_could_not_be_saved_is_shown_as_a_failed_poll() {
+fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
     // A file where the snapshot directory goes: every snapshot write fails.
@@ -346,14 +346,15 @@ fn a_reading_that_could_not_be_saved_is_shown_as_a_failed_poll() {
             },
         )
     };
+    let message = "Could not save the latest usage reading.";
+    let card = poll().expect("a card").expect("the fresh reading");
+    assert_eq!(card.status, LimitsStatus::Failed);
+    assert_eq!(card.message.as_deref(), Some(message));
+    assert_eq!(card.reading.windows, reading(&p).reading.windows);
     assert_eq!(
         poll(),
-        Some(Err("Could not save the latest usage reading.".to_string()))
-    );
-    assert_eq!(
-        poll(),
-        None,
-        "recorded as a success, so it waits out the interval"
+        Some(Err(message.to_string())),
+        "recorded as a failure, so it backs off and reads again"
     );
 }
 
