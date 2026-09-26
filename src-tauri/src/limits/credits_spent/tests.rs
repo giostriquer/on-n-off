@@ -241,15 +241,6 @@ fn a_successful_read_does_not_hold_the_next_one_back() {
     assert_eq!(requests.join().unwrap().len(), 2);
 }
 
-/// The signed-in login's access projection, as the read's identity check hands it over.
-fn access(key: &str) -> Option<CodexAccess> {
-    Some(CodexAccess {
-        observation_key: key.to_string(),
-        workspace_id: "team".to_string(),
-        token: AccessToken::new("native-access"),
-    })
-}
-
 /// A saved account's projection, as the saved read builds it.
 fn projection(key: &str) -> CodexAccess {
     CodexAccess {
@@ -257,66 +248,6 @@ fn projection(key: &str) -> CodexAccess {
         workspace_id: "team".to_string(),
         token: AccessToken::new("t"),
     }
-}
-
-/// The signed-in card has no token of its own (app-server reads it), so its login's access token is
-/// used, for its own workspace, and the figure is that card's.
-#[test]
-fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
-    let key = account("signed-in");
-    let (url, request) = crate::http::serve_once_capturing(
-        "200 OK",
-        &[],
-        &breakdown(&[("2026-09-24", &[18303.4])]).to_string(),
-    );
-
-    let spent = signed_in(
-        access(&key).as_ref(),
-        &Parsed::for_card(Some(&key), Some("self_serve_business_prolite")),
-        &url,
-        now(),
-    );
-    let head = request.join().unwrap().head;
-
-    assert!(head.contains("Bearer native-access"), "{head}");
-    assert!(
-        head.to_lowercase().contains("chatgpt-account-id: team"),
-        "{head}"
-    );
-    assert_eq!(spent.map(|spent| spent.last_7_days), Some(18303.4));
-}
-
-/// A personal plan pools nothing and is never asked, whatever access it is handed.
-#[test]
-fn a_personal_signed_in_card_is_never_asked() {
-    let (listener, url) = never_asked();
-    for plan in [Some("pro"), Some("plus"), None] {
-        let key = account("personal");
-        let spent = signed_in(
-            access(&key).as_ref(),
-            &Parsed::for_card(Some(&key), plan),
-            &url,
-            now(),
-        );
-        assert_eq!(spent, None, "{plan:?}");
-    }
-    assert!(!was_asked(&listener));
-}
-
-/// Another account's token is never spent on this card, and no access at all is no figure.
-#[test]
-fn access_that_is_not_the_cards_account_is_not_asked() {
-    let (listener, url) = never_asked();
-    for handed in [access(&account("other-login")), None] {
-        let spent = signed_in(
-            handed.as_ref(),
-            &Parsed::for_card(Some("the-cards-account"), Some("business")),
-            &url,
-            now(),
-        );
-        assert_eq!(spent, None);
-    }
-    assert!(!was_asked(&listener));
 }
 
 fn failed_before(key: &str, count: u32) {

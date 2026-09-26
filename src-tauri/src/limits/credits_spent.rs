@@ -9,7 +9,6 @@ use chrono::{DateTime, Days, NaiveDate, SecondsFormat, Utc};
 use serde_json::Value;
 
 use super::backend_memo::PerAccount;
-use super::Parsed;
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::AccessToken;
 use crate::dto::{AgentId, LimitsCreditsSpentDto, ProviderLimitsDto};
@@ -154,33 +153,6 @@ pub(super) fn read_backed_off(
     MEMO.read_backed_off(&access.observation_key, || {
         read(&access.token, &access.workspace_id, url, now)
     })
-}
-
-/// The signed-in Codex account's spending, asked with its own access token: app-server reads that
-/// card without handing one over, and the saved shadow of the signed-in login is never polled.
-/// Using the native login's access token for this one read-only GET is the user's decision
-/// (2026-09-24), an exception to Codex alone making requests for the signed-in account. It is
-/// asked only for a workspace plan, with the access projection the read's identity check took from
-/// the login it confirmed (`codex_app_server::normalize_app_server`), and only for that card.
-pub(super) fn signed_in(
-    access: Option<&CodexAccess>,
-    parsed: &Parsed,
-    url: &str,
-    now: DateTime<Utc>,
-) -> Option<LimitsCreditsSpentDto> {
-    if !parsed
-        .reading
-        .plan
-        .as_deref()
-        .is_some_and(is_codex_workspace_plan)
-    {
-        return None;
-    }
-    let access = access?;
-    if parsed.account.as_ref().map(|account| account.id.as_str()) != Some(&access.observation_key) {
-        return None;
-    }
-    read_backed_off(access, url, now)
 }
 
 /// Drop what is remembered about `account`, so a test starts from nothing.

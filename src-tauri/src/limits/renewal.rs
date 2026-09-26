@@ -13,7 +13,6 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 
 use super::backend_memo::PerAccount;
-use super::Parsed;
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::AccessToken;
 use crate::dto::{AgentId, LimitsSubscriptionDto, ProviderLimitsDto, SubscriptionNote};
@@ -120,22 +119,6 @@ pub(super) fn read_backed_off(
     MEMO.read_backed_off(&access.observation_key, || {
         read(&access.token, &access.workspace_id, url, now)
     })
-}
-
-/// The signed-in Codex account's term, asked with its own access token under the same decision as
-/// `credits_spent::signed_in` (extended to this read on 2026-09-25): only for the card the read's
-/// identity check confirmed.
-pub(super) fn signed_in(
-    access: Option<&CodexAccess>,
-    parsed: &Parsed,
-    url: &str,
-    now: DateTime<Utc>,
-) -> Option<LimitsSubscriptionDto> {
-    let access = access?;
-    if parsed.account.as_ref().map(|account| account.id.as_str()) != Some(&access.observation_key) {
-        return None;
-    }
-    read_backed_off(access, url, now)
 }
 
 /// Drop what is remembered about `account`, so a test starts from nothing.

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use super::json::window;
-use super::{credits_spent, renewal};
+use super::{credits_spent, renewal, Parsed};
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
@@ -138,9 +138,9 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
             main.spend_control_reached,
         ),
         // Spending comes from its own endpoint, asked after this parse for a workspace plan
-        // (`limits/credits_spent.rs`): by the saved read, or after the signed-in read's identity check.
+        // (`backend_figures`): by the saved read, or after the signed-in read's identity check.
         credits_spent: None,
-        // The term too (`limits/renewal.rs`), for every Codex card.
+        // The term too, for every Codex card.
         subscription: None,
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
         reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
@@ -369,8 +369,9 @@ const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_RESET_CREDITS_URL: &str =
     "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 
-/// The services one saved Codex read talks to, together as `ClaudeEndpoints` keeps Claude's, so a
-/// fourth costs one field and not an edit at every call site.
+/// The services a Codex read talks to over HTTP, together as `ClaudeEndpoints` keeps Claude's, so a
+/// fifth costs one field and not an edit at every call site. A saved read asks all four; the
+/// signed-in read, which app-server makes, only the two backend figures' (`backend_figures`).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CodexEndpoints<'a> {
     pub(crate) usage: &'a str,
@@ -388,13 +389,14 @@ pub(super) const CODEX: CodexEndpoints<'static> = CodexEndpoints {
     subscriptions: renewal::CODEX_SUBSCRIPTIONS_URL,
 };
 
-/// A saved profile's Codex reading, read with its access token `token` for its workspace. A body
-/// that names another workspace is refused; one that names none is accepted.
+/// A saved profile's Codex read, with its access token `token` for its workspace, as the card of
+/// the profile's account. A body that names another workspace is refused; one that names none is
+/// accepted.
 pub(super) fn read_wham(
     identity: &Identity,
     token: AccessToken,
     urls: CodexEndpoints<'_>,
-) -> Result<Reading, super::SavedReadError> {
+) -> Result<Parsed, super::SavedReadError> {
     let bearer = token.authorization();
     let headers = [
         ("Authorization", bearer.as_str()),
@@ -415,24 +417,52 @@ pub(super) fn read_wham(
         .is_some_and(|count| count > 0))
     .then(|| get_json(urls.reset_credits, &headers).ok())
     .flatten();
-    let mut reading = parse_codex_usage(&payload, details.as_ref())?;
-    // The backend reads never decide the read: an account the endpoint refuses just has
-    // no figure. Only a workspace pools credits, so only one is asked what it spent.
+    let mut card = Parsed {
+        account: Some(super::scoped_account(identity, None)),
+        reading: parse_codex_usage(&payload, details.as_ref())?,
+    };
+    // The profile's own access, so the card's account by construction.
     let access = CodexAccess {
         observation_key: identity.observation_key(),
         workspace_id: identity.workspace_id.clone(),
         token,
     };
-    if reading
+    backend_figures(&mut card, Some(&access), urls, Utc::now());
+    Ok(card)
+}
+
+/// The figures ChatGPT's backend gives a Codex `card` beside its usage, each asked at `urls` with
+/// `access` only when that is the card's own account, so another account's token is never spent
+/// on it: the subscription's term (`renewal.rs`), and on a workspace plan, the only kind that
+/// pools credits, what the member spent (`credits_spent.rs`). Neither decides the read: each is no
+/// figure when it is not asked, fails or is backing off.
+///
+/// A saved read hands over its profile's own access. The signed-in read hands over the projection
+/// its identity check took from the login it confirmed (`codex_app_server::normalize_app_server`):
+/// app-server reads that card without handing over a token, and the saved shadow of the signed-in
+/// login is never polled. Using the native login's access token for these read-only GETs is the
+/// user's decision (2026-09-24, extended to the term on 2026-09-25), an exception to Codex alone
+/// making requests for the signed-in account.
+pub(super) fn backend_figures(
+    card: &mut Parsed,
+    access: Option<&CodexAccess>,
+    urls: CodexEndpoints<'_>,
+    now: DateTime<Utc>,
+) {
+    let access = access.filter(|access| {
+        card.account.as_ref().map(|account| account.id.as_str())
+            == Some(access.observation_key.as_str())
+    });
+    let workspace = card
+        .reading
         .plan
         .as_deref()
-        .is_some_and(credits_spent::is_codex_workspace_plan)
-    {
-        reading.credits_spent =
-            credits_spent::read_backed_off(&access, urls.credit_usage, Utc::now());
-    }
-    reading.subscription = renewal::read_backed_off(&access, urls.subscriptions, Utc::now());
-    Ok(reading)
+        .is_some_and(credits_spent::is_codex_workspace_plan);
+    card.reading.credits_spent = access
+        .filter(|_| workspace)
+        .and_then(|access| credits_spent::read_backed_off(access, urls.credit_usage, now));
+    card.reading.subscription =
+        access.and_then(|access| renewal::read_backed_off(access, urls.subscriptions, now));
 }
 
 /// The HTTP response uses seconds and snake_case; the existing app-server parser uses minutes

@@ -194,29 +194,3 @@ fn a_backoff_that_has_run_out_lets_a_working_endpoint_answer() {
     assert_eq!(MEMO.backoff_of(&account.observation_key), None);
     MEMO.forget(&account.observation_key);
 }
-
-#[test]
-fn the_signed_in_read_asks_only_for_the_confirmed_card() {
-    let card = |account: &str| Parsed::for_card(Some(account), Some("pro"));
-    MEMO.forget("renewal-signed-in");
-    let (listener, quiet) = never_asked();
-    assert!(signed_in(None, &card("renewal-signed-in"), &quiet, now()).is_none());
-    assert!(signed_in(
-        Some(&projection("renewal-signed-in")),
-        &card("someone-else"),
-        &quiet,
-        now()
-    )
-    .is_none());
-    assert!(!was_asked(&listener), "asked without a confirmed card");
-    let (url, served) = serve_once("200 OK", &term(true).to_string());
-    assert!(signed_in(
-        Some(&projection("renewal-signed-in")),
-        &card("renewal-signed-in"),
-        &url,
-        now()
-    )
-    .is_some());
-    served.join().unwrap();
-    MEMO.forget("renewal-signed-in");
-}

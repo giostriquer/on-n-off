@@ -314,14 +314,7 @@ pub(crate) fn read_saved_codex(
     token: AccessToken,
     urls: &SavedReadUrls<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    let reading = codex::read_wham(identity, token, urls.codex)?;
-    saved_card(
-        identity,
-        Parsed {
-            account: None,
-            reading,
-        },
-    )
+    saved_card(identity, codex::read_wham(identity, token, urls.codex)?)
 }
 
 /// A saved profile's read as its card: known by the profile's observation key, never the signed-in

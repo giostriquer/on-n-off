@@ -205,38 +205,12 @@ fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> R
 
 pub(super) fn read(home: &Path, force: bool) -> Result<Parsed, AppServerFailure> {
     read_with(home, force, ProcessTransport::spawn, |parsed, access| {
-        backend_reads(parsed, access, LIVE_BACKEND, chrono::Utc::now());
+        super::codex::backend_figures(parsed, access, super::codex::CODEX, chrono::Utc::now());
     })
 }
 
-/// The endpoints the backend reads ask once the card's account is confirmed.
-#[derive(Clone, Copy)]
-pub(super) struct BackendUrls<'a> {
-    pub(super) credit_usage: &'a str,
-    pub(super) subscriptions: &'a str,
-}
-
-const LIVE_BACKEND: BackendUrls<'static> = BackendUrls {
-    credit_usage: super::credits_spent::CODEX_CREDIT_USAGE_URL,
-    subscriptions: super::renewal::CODEX_SUBSCRIPTIONS_URL,
-};
-
-/// The reads that take the confirmed card's access projection: what a workspace member spent, and
-/// the subscription's term. Neither decides the read; each is no figure when it fails.
-pub(super) fn backend_reads(
-    parsed: &mut Parsed,
-    access: Option<&CodexAccess>,
-    urls: BackendUrls<'_>,
-    now: chrono::DateTime<chrono::Utc>,
-) {
-    parsed.reading.credits_spent =
-        super::credits_spent::signed_in(access, parsed, urls.credit_usage, now);
-    parsed.reading.subscription =
-        super::renewal::signed_in(access, parsed, urls.subscriptions, now);
-}
-
 /// `read`, with the app-server process and what runs once the card's account is confirmed (the
-/// backend reads that take its access projection) replaceable for tests.
+/// backend figures that take its access projection, `codex::backend_figures`) replaceable for tests.
 fn read_with<T: JsonLineTransport>(
     home: &Path,
     force: bool,
@@ -642,8 +616,8 @@ fn normalize_app_server(
         .map(str::to_string)
         .or(reading.plan);
     // One read of the native store confirms the account and takes the access projection the term
-    // read needs for every card, and the spending read for a workspace plan (`renewal::signed_in`,
-    // `credits_spent::signed_in`).
+    // read needs for every card, and the spending read for a workspace plan
+    // (`codex::backend_figures`).
     let (after, access) = crate::accounts::codex_store::metadata_and_access(&session.codex_home)
         .map_err(AppServerFailure::Failed)?
         .map_or((None, None), |(metadata, access)| (Some(metadata), access));

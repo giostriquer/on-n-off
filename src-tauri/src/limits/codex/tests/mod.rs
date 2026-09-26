@@ -1,3 +1,5 @@
+mod figures;
+
 use super::*;
 use crate::dto::LimitsWorkspaceCreditsDto;
 use serde_json::json;

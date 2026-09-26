@@ -701,10 +701,12 @@ fn a_signed_in_read_takes_its_term_and_spending_with_its_own_token_once_the_acco
         false,
         |_| Ok(business_session(&codex_home, "chatgpt")),
         |parsed: &mut Parsed, access: Option<&CodexAccess>| {
-            backend_reads(
+            super::super::codex::backend_figures(
                 parsed,
                 access,
-                BackendUrls {
+                super::super::CodexEndpoints {
+                    usage: "unused",
+                    reset_credits: "unused",
                     credit_usage: &breakdown,
                     subscriptions: &url,
                 },
@@ -758,79 +760,4 @@ fn a_failed_signed_in_read_never_asks_what_it_spent() {
 
     assert!(matches!(not_chatgpt, Err(AppServerFailure::Unsupported(_))));
     assert!(matches!(no_process, Err(AppServerFailure::Failed(_))));
-}
-
-/// A listener that never answers: a request would sit in its backlog, where `accept` finds it.
-fn never_asked(path: &str) -> (std::net::TcpListener, String) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let url = format!("http://{}/{path}", listener.local_addr().unwrap());
-    (listener, url)
-}
-
-/// The access projection the identity check hands over for the login it confirmed as `key`.
-fn access_of(key: &str) -> CodexAccess {
-    CodexAccess {
-        observation_key: key.to_string(),
-        workspace_id: "team".to_string(),
-        token: crate::accounts::model::AccessToken::new("fixture-access"),
-    }
-}
-
-/// Another account's access, or none, is no access to this card: a workspace card is asked
-/// neither what it spent nor its term.
-#[test]
-fn a_signed_in_card_without_its_own_access_is_asked_for_no_backend_figure() {
-    let (spending, credit_usage) = never_asked("breakdown");
-    let (terms, subscriptions) = never_asked("subscriptions");
-    let other = access_of("another-account");
-    for access in [Some(&other), None] {
-        let mut parsed = Parsed::for_card(Some("the-cards-account"), Some("business"));
-        backend_reads(
-            &mut parsed,
-            access,
-            BackendUrls {
-                credit_usage: &credit_usage,
-                subscriptions: &subscriptions,
-            },
-            chrono::Utc::now(),
-        );
-        assert_eq!(parsed.reading.credits_spent, None);
-        assert_eq!(parsed.reading.subscription, None);
-    }
-    assert!(spending.accept().is_err(), "asked what the card spent");
-    assert!(terms.accept().is_err(), "asked the card's term");
-}
-
-/// With its own access, a card on a personal plan, or on none, is asked its term but never what it
-/// spent.
-#[test]
-fn a_signed_in_card_is_asked_its_term_whatever_its_plan() {
-    for (plan, key) in [
-        (Some("pro"), "signed-in-term-pro"),
-        (None, "signed-in-term-no-plan"),
-    ] {
-        super::super::renewal::forget(key);
-        let (spending, credit_usage) = never_asked("breakdown");
-        let (subscriptions, term) = crate::http::serve_once(
-            "200 OK",
-            r#"{"active_until":"2026-09-28T16:22:34Z","will_renew":true}"#,
-        );
-        let mut parsed = Parsed::for_card(Some(key), plan);
-        backend_reads(
-            &mut parsed,
-            Some(&access_of(key)),
-            BackendUrls {
-                credit_usage: &credit_usage,
-                subscriptions: &subscriptions,
-            },
-            chrono::Utc::now(),
-        );
-        term.join().unwrap();
-
-        assert!(parsed.reading.subscription.is_some(), "{plan:?}");
-        assert_eq!(parsed.reading.credits_spent, None, "{plan:?}");
-        assert!(spending.accept().is_err(), "{plan:?}: asked what it spent");
-        super::super::renewal::forget(key);
-    }
 }
