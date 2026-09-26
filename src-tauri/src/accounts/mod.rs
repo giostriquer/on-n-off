@@ -91,7 +91,7 @@ trait Adapter: Sync {
         &self,
         identity: &model::Identity,
         login: &store::Login,
-    ) -> Result<crate::dto::ProviderLimitsDto, crate::http::HttpError>;
+    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
 }
 
 /// `provider`'s adapter: the one place account code tells the providers apart.

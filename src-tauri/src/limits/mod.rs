@@ -445,13 +445,29 @@ fn expected_claude_identity(identity: &Identity) -> ClaudeIdentity {
     }
 }
 
+/// Why a saved profile's read gave no card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SavedReadError {
+    /// The request failed. `HttpError::Unauthorized` is a login the service refused, or one that
+    /// holds no access token.
+    Http(HttpError),
+    /// The login now signs in as a different account than the profile's.
+    OtherAccount,
+}
+
+impl From<HttpError> for SavedReadError {
+    fn from(error: HttpError) -> Self {
+        Self::Http(error)
+    }
+}
+
 /// A saved profile's Claude card, read with its login's `credential`, which must sign in as the
 /// profile's user in its workspace. A login without an access token is refused before any request.
 /// No CLI is started and nothing is renewed here.
 pub(crate) fn read_saved_claude(
     identity: &Identity,
     credential: Option<ClaudeCredential>,
-) -> Result<ProviderLimitsDto, HttpError> {
+) -> Result<ProviderLimitsDto, SavedReadError> {
     read_saved_claude_at(identity, credential, CLAUDE_PROFILE_URL, CLAUDE_USAGE_URL)
 }
 
@@ -460,7 +476,7 @@ fn read_saved_claude_at(
     credential: Option<ClaudeCredential>,
     profile_url: &str,
     usage_url: &str,
-) -> Result<ProviderLimitsDto, HttpError> {
+) -> Result<ProviderLimitsDto, SavedReadError> {
     let credential = credential.ok_or(HttpError::Unauthorized)?;
     let parsed = claude_read(
         &credential,
@@ -469,8 +485,8 @@ fn read_saved_claude_at(
         usage_url,
     )
     .map_err(|error| match error {
-        ProviderLoadError::Http(error) => error,
-        ProviderLoadError::AccountMismatch => HttpError::Unauthorized,
+        ProviderLoadError::Http(error) => SavedReadError::Http(error),
+        ProviderLoadError::AccountMismatch => SavedReadError::OtherAccount,
     })?;
     saved_card(identity, parsed)
 }
@@ -481,7 +497,7 @@ fn read_saved_claude_at(
 pub(crate) fn read_saved_codex(
     identity: &Identity,
     token: Option<AccessToken>,
-) -> Result<ProviderLimitsDto, HttpError> {
+) -> Result<ProviderLimitsDto, SavedReadError> {
     read_saved_codex_at(identity, token, codex::CODEX)
 }
 
@@ -489,7 +505,7 @@ fn read_saved_codex_at(
     identity: &Identity,
     token: Option<AccessToken>,
     urls: codex::CodexEndpoints<'_>,
-) -> Result<ProviderLimitsDto, HttpError> {
+) -> Result<ProviderLimitsDto, SavedReadError> {
     let token = token.ok_or(HttpError::Unauthorized)?;
     let reading = codex::read_wham(identity, token, urls)?;
     saved_card(
@@ -503,15 +519,18 @@ fn read_saved_codex_at(
 
 /// A saved profile's read as its card: known by the profile's observation key, never the signed-in
 /// account's. A read that observed nothing is an error, so the card keeps what it remembers.
-fn saved_card(identity: &Identity, mut parsed: Parsed) -> Result<ProviderLimitsDto, HttpError> {
+fn saved_card(
+    identity: &Identity,
+    mut parsed: Parsed,
+) -> Result<ProviderLimitsDto, SavedReadError> {
     let label = parsed.account.and_then(|account| account.label);
     parsed.account = Some(scoped_account(identity, label));
     let mut dto = finish(identity.provider, LimitsStatus::Ok, None, parsed);
     dto.current_account = false;
     if !dto.reading.has_observations() {
-        return Err(HttpError::Parse(
-            "Usage response contained no quota observations.".into(),
-        ));
+        return Err(
+            HttpError::Parse("Usage response contained no quota observations.".into()).into(),
+        );
     }
     Ok(dto)
 }

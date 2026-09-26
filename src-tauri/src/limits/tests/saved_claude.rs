@@ -18,7 +18,7 @@ fn read_at(
     auth: &Value,
     profile: &str,
     usage: &str,
-) -> Result<ProviderLimitsDto, HttpError> {
+) -> Result<ProviderLimitsDto, SavedReadError> {
     read_saved_claude_at(
         identity,
         credentials::parse_claude_credential(auth),
@@ -192,6 +192,7 @@ fn saved_claude_keeps_weekly_primary_for_both_usage_formats() {
     }
 }
 
+/// A login that now signs in as another user is its own outcome, found before usage is asked.
 #[test]
 fn wrong_claude_identity_stops_before_usage() {
     let (profile, p) = serve_once(
@@ -205,9 +206,10 @@ fn wrong_claude_identity_stops_before_usage() {
         &crate::http::refused_url(),
     );
     p.join().unwrap();
-    assert!(matches!(result, Err(HttpError::Unauthorized)));
+    assert_eq!(result.err(), Some(SavedReadError::OtherAccount));
 }
 
+/// The same user in another workspace is another account too.
 #[test]
 fn matching_claude_user_in_another_workspace_is_rejected_before_usage() {
     let (url, request) = serve_once(
@@ -221,7 +223,7 @@ fn matching_claude_user_in_another_workspace_is_rejected_before_usage() {
         &crate::http::refused_url(),
     );
     request.join().unwrap();
-    assert!(matches!(result, Err(HttpError::Unauthorized)));
+    assert_eq!(result.err(), Some(SavedReadError::OtherAccount));
 }
 
 /// A saved Claude login past its `expiresAt` is sent all the same: this read never checks it.
@@ -283,7 +285,7 @@ fn a_saved_claude_read_the_service_refuses_or_throttles_keeps_its_status() {
             &crate::http::refused_url(),
         );
         p.join().unwrap();
-        assert_eq!(claude.err(), Some(expected), "{status}");
+        assert_eq!(claude.err(), Some(expected.into()), "{status}");
     }
 }
 
@@ -305,9 +307,7 @@ fn a_saved_claude_read_that_observed_nothing_is_an_error() {
     u.join().unwrap();
     assert_eq!(
         claude.err(),
-        Some(HttpError::Parse(
-            "Usage response contained no quota observations.".into()
-        ))
+        Some(HttpError::Parse("Usage response contained no quota observations.".into()).into())
     );
 }
 
@@ -321,5 +321,5 @@ fn a_saved_claude_login_without_an_access_token_sends_nothing() {
         &refused,
         &refused,
     );
-    assert_eq!(claude.err(), Some(HttpError::Unauthorized));
+    assert_eq!(claude.err(), Some(HttpError::Unauthorized.into()));
 }

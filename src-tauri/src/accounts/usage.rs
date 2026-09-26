@@ -7,6 +7,7 @@ use super::{
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     http::{HttpError, RateLimitReset},
+    limits::SavedReadError,
 };
 use std::{
     collections::HashMap,
@@ -27,7 +28,7 @@ struct Attempt {
 /// the reading.
 pub(super) struct FetchResult {
     pub(super) login: Option<Login>,
-    pub(super) result: Result<ProviderLimitsDto, HttpError>,
+    pub(super) result: Result<ProviderLimitsDto, SavedReadError>,
 }
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
@@ -161,7 +162,7 @@ fn poll_with(
     let result = fetched.result;
     let (error, rejected, retry) = match &result {
         Ok(_) => (None, false, Duration::ZERO),
-        Err(HttpError::Unauthorized) => (
+        Err(SavedReadError::Http(HttpError::Unauthorized)) => (
             Some(
                 "Usage refresh needs sign-in again or renewal by the client that owns this login."
                     .into(),
@@ -169,7 +170,13 @@ fn poll_with(
             true,
             Duration::ZERO,
         ),
-        Err(HttpError::RateLimited(reset)) => {
+        // Renewal cannot change whose login it is, so only a new login is worth another read.
+        Err(SavedReadError::OtherAccount) => (
+            Some("This saved login now signs in as a different account. Sign in again.".into()),
+            true,
+            Duration::ZERO,
+        ),
+        Err(SavedReadError::Http(HttpError::RateLimited(reset))) => {
             let seconds = match reset {
                 RateLimitReset::RetryAfter(s) => *s,
                 RateLimitReset::At(at) => {
@@ -259,6 +266,7 @@ fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) ->
             })
             .map_err(|_| {
                 HttpError::Network("Private account renewal requires recovery or sign-in.".into())
+                    .into()
             })
         },
     )
@@ -267,8 +275,8 @@ fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) ->
 fn fetch_with(
     profile: &Profile,
     now: i64,
-    read: &dyn Fn(&Login) -> Result<ProviderLimitsDto, HttpError>,
-    renew: &dyn Fn() -> Result<Login, HttpError>,
+    read: &dyn Fn(&Login) -> Result<ProviderLimitsDto, SavedReadError>,
+    renew: &dyn Fn() -> Result<Login, SavedReadError>,
 ) -> FetchResult {
     let mut login = profile.login.clone();
     let result = (|| {
@@ -276,7 +284,7 @@ fn fetch_with(
         let view =
             super::view(profile.identity.provider, current).map_err(|_| HttpError::Unauthorized)?;
         if view.identity().ok().as_ref() != Some(&profile.identity) {
-            return Err(HttpError::Unauthorized);
+            return Err(HttpError::Unauthorized.into());
         }
         let expired = view.renewal_due(now);
         drop(view);
@@ -286,7 +294,9 @@ fn fetch_with(
             renewed = true;
         }
         let mut result = read(current);
-        if matches!(result, Err(HttpError::Unauthorized)) && profile.usage_renewal_owned && !renewed
+        if matches!(result, Err(SavedReadError::Http(HttpError::Unauthorized)))
+            && profile.usage_renewal_owned
+            && !renewed
         {
             *current = renew()?;
             result = read(current);

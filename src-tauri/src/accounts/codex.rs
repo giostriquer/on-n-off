@@ -55,7 +55,7 @@ impl super::Adapter for Codex {
         &self,
         identity: &Identity,
         login: &Login,
-    ) -> Result<ProviderLimitsDto, crate::http::HttpError> {
+    ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
         crate::limits::read_saved_codex(identity, CodexLogin::of(login).access_token())
     }
 

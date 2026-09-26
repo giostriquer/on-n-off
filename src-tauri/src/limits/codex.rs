@@ -389,12 +389,12 @@ pub(super) const CODEX: CodexEndpoints<'static> = CodexEndpoints {
 };
 
 /// A saved profile's Codex reading, read with its access token `token` for its workspace. A body
-/// that names another workspace is refused as `Unauthorized`; one that names none is accepted.
+/// that names another workspace is refused; one that names none is accepted.
 pub(super) fn read_wham(
     identity: &Identity,
     token: AccessToken,
     urls: CodexEndpoints<'_>,
-) -> Result<Reading, HttpError> {
+) -> Result<Reading, super::SavedReadError> {
     let bearer = token.authorization();
     let headers = [
         ("Authorization", bearer.as_str()),
@@ -407,7 +407,7 @@ pub(super) fn read_wham(
         .and_then(Value::as_str)
         .is_some_and(|id| id != identity.workspace_id)
     {
-        return Err(HttpError::Unauthorized);
+        return Err(super::SavedReadError::OtherAccount);
     }
     // As in Codex's own app-server, the detail read never decides the read: without it the
     // count still stands, only without an expiry.

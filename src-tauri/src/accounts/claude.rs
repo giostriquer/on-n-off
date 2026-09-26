@@ -57,7 +57,7 @@ impl super::Adapter for Claude {
         &self,
         identity: &Identity,
         login: &Login,
-    ) -> Result<ProviderLimitsDto, crate::http::HttpError> {
+    ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
         crate::limits::read_saved_claude(identity, ClaudeLogin::of(login).credential())
     }
 

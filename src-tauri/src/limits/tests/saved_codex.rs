@@ -18,7 +18,7 @@ fn read_at(
     identity: &Identity,
     auth: &Value,
     codex: CodexEndpoints<'_>,
-) -> Result<ProviderLimitsDto, HttpError> {
+) -> Result<ProviderLimitsDto, SavedReadError> {
     let token = crate::accounts::model::string(auth, "/tokens/access_token")
         .ok()
         .map(AccessToken::new);
@@ -195,7 +195,7 @@ fn codex_endpoints(
     )
 }
 
-fn read_codex(usage: &str, resets: &str) -> Result<ProviderLimitsDto, HttpError> {
+fn read_codex(usage: &str, resets: &str) -> Result<ProviderLimitsDto, SavedReadError> {
     read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"access_token":"fixture-access"}}),
@@ -329,6 +329,8 @@ fn saved_codex_treats_a_malformed_banked_reset_count_as_unknown() {
     }
 }
 
+/// A body for another workspace is another account; a body that names none is accepted
+/// (`saved_codex_reads_scoped_quota_without_starting_a_cli`).
 #[test]
 fn codex_quota_for_another_account_is_rejected() {
     let (url, request) = serve_once(
@@ -346,7 +348,7 @@ fn codex_quota_for_another_account_is_rejected() {
         },
     );
     request.join().unwrap();
-    assert!(matches!(result, Err(HttpError::Unauthorized)));
+    assert_eq!(result.err(), Some(SavedReadError::OtherAccount));
 }
 
 const CODEX_BUSINESS_USAGE: &str = r#"{"plan_type":"self_serve_business_prolite","rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800}},"credits":{"has_credits":true,"unlimited":false,"balance":"0"}}"#;
@@ -428,7 +430,7 @@ fn read_codex_spending(
     who: &Identity,
     usage: &str,
     spending: &str,
-) -> Result<ProviderLimitsDto, HttpError> {
+) -> Result<ProviderLimitsDto, SavedReadError> {
     read_at(
         who,
         &json!({"tokens":{"access_token":"fixture-access"}}),
@@ -560,7 +562,7 @@ fn a_saved_codex_read_the_service_refuses_or_throttles_keeps_its_status() {
         let (usage, u) = serve_once_capturing(status, &["Retry-After: 30"], "{}");
         let codex = read_codex(&usage, "unused");
         u.join().unwrap();
-        assert_eq!(codex.err(), Some(expected), "{status}");
+        assert_eq!(codex.err(), Some(expected.into()), "{status}");
     }
 }
 
@@ -572,9 +574,7 @@ fn a_saved_codex_read_that_observed_nothing_is_an_error() {
     u.join().unwrap();
     assert_eq!(
         codex.err(),
-        Some(HttpError::Parse(
-            "Usage response contained no quota observations.".into()
-        ))
+        Some(HttpError::Parse("Usage response contained no quota observations.".into()).into())
     );
 }
 
@@ -590,5 +590,5 @@ fn a_saved_codex_login_without_an_access_token_sends_nothing() {
             ..no_codex()
         },
     );
-    assert_eq!(codex.err(), Some(HttpError::Unauthorized));
+    assert_eq!(codex.err(), Some(HttpError::Unauthorized.into()));
 }

@@ -41,7 +41,7 @@ fn automatic_renewal_policy_covers_both_providers_and_never_renews_shadows() {
                         &|_| {
                             reads.set(reads.get() + 1);
                             if unauthorized {
-                                Err(HttpError::Unauthorized)
+                                Err(HttpError::Unauthorized.into())
                             } else {
                                 Ok(reading(&p))
                             }
@@ -157,7 +157,7 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
                 &|login| {
                     reads.set(reads.get() + 1);
                     if fingerprint(login) == old {
-                        Err(HttpError::Unauthorized)
+                        Err(HttpError::Unauthorized.into())
                     } else {
                         assert_eq!(fingerprint(login), fingerprint(&rotated));
                         Ok(reading(&p))
@@ -169,5 +169,27 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
             assert_eq!(fingerprint(&result.login.unwrap()), fingerprint(&rotated));
             assert_eq!(reads.get(), if expired { 1 } else { 2 });
         }
+    }
+}
+
+/// Renewal cannot make a login sign in as another account, so a read that found one spends no
+/// refresh token, whoever owns the login and whether or not it has expired.
+#[test]
+fn a_login_that_signs_in_as_another_account_is_never_renewed_for_it() {
+    use std::cell::Cell;
+    for provider in [AgentId::Claude, AgentId::Codex] {
+        let p = policy_profile(provider, true, false);
+        let renewals = Cell::new(0);
+        let result = fetch_with(
+            &p,
+            1_000_000,
+            &|_| Err(SavedReadError::OtherAccount),
+            &|| {
+                renewals.set(renewals.get() + 1);
+                Ok(p.login.clone().unwrap())
+            },
+        );
+        assert_eq!(result.result.err(), Some(SavedReadError::OtherAccount));
+        assert_eq!(renewals.get(), 0, "{provider:?}");
     }
 }

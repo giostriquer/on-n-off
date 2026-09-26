@@ -230,7 +230,7 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
                 calls.set(calls.get() + 1);
                 FetchResult {
                     login: p.login.clone(),
-                    result: Err(HttpError::RateLimited(RateLimitReset::RetryAfter(1800))),
+                    result: Err(HttpError::RateLimited(RateLimitReset::RetryAfter(1800)).into()),
                 }
             },
         );
@@ -262,22 +262,27 @@ fn a_poll_that_read_nothing_says_why() {
     use std::cell::Cell;
     for (error, message, sticky) in [
         (
-            HttpError::Unauthorized,
+            HttpError::Unauthorized.into(),
             "Usage refresh needs sign-in again or renewal by the client that owns this login.",
             true,
         ),
         (
-            HttpError::RateLimited(RateLimitReset::RetryAfter(30)),
+            SavedReadError::OtherAccount,
+            "This saved login now signs in as a different account. Sign in again.",
+            true,
+        ),
+        (
+            HttpError::RateLimited(RateLimitReset::RetryAfter(30)).into(),
             "Usage refresh is rate limited. The last reading is retained.",
             false,
         ),
         (
-            HttpError::Status(429),
+            HttpError::Status(429).into(),
             "Usage refresh is unavailable. The last reading is retained.",
             false,
         ),
         (
-            HttpError::Network("offline".into()),
+            HttpError::Network("offline".into()).into(),
             "Usage refresh is unavailable. The last reading is retained.",
             false,
         ),
@@ -360,7 +365,7 @@ fn a_new_credential_retries_a_previously_rejected_account() {
         &|p| {
             FetchResult {
                 login: p.login.clone(),
-                result: Err(HttpError::Unauthorized),
+                result: Err(HttpError::Unauthorized.into()),
             }
         }
     )
@@ -406,7 +411,8 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
                         HttpError::Unauthorized
                     } else {
                         HttpError::RateLimited(RateLimitReset::RetryAfter(1800))
-                    }),
+                    }
+                    .into()),
                 }
             },
         );
