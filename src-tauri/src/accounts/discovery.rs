@@ -89,19 +89,20 @@ fn update_notice(provider: AgentId, message: Option<String>) {
         crate::read_revision::announce(crate::read_revision::Source::Accounts);
     }
 }
-fn eligible(db: &Database, identity: &Identity, login: &Login) -> bool {
-    !db.ignored_accounts.contains(identity)
-        && !db.ignored_credentials.contains(&login.fingerprint())
+fn eligible(db: &Database, identity: &Identity, login: &Login) -> Result<bool, String> {
+    let fingerprint = super::view(identity.provider, login)?.fingerprint();
+    Ok(!db.ignored_accounts.contains(identity)
+        && !db.ignored_credentials.contains(&fingerprint)
         && !db.profiles.iter().any(|p| {
             p.identity == *identity && (p.pending_activation || p.login.as_ref() == Some(login))
-        })
+        }))
 }
 fn candidate(native: &dyn Native, db: &Database) -> Result<Option<Login>, String> {
     let Some(login) = native.read()? else {
         return Ok(None);
     };
     let identity = native.identify(&login)?;
-    if !eligible(db, &identity, &login) {
+    if !eligible(db, &identity, &login)? {
         return Ok(None);
     }
     native.verify_observed()?;
@@ -129,7 +130,7 @@ fn publish(
         ticket,
         |db| {
             let identity = native.identify(&login)?;
-            if !eligible(db, &identity, &login) {
+            if !eligible(db, &identity, &login)? {
                 return Ok(None);
             }
             let locks = native.lock()?;

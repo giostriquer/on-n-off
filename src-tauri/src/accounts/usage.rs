@@ -1,7 +1,6 @@
 //! Poll every saved subscription without publishing credentials to a native client. Shared
 //! native shadows are access-only. Only a never-activated isolated sign-in owns renewal.
 use super::{
-    model,
     native::NativeStore,
     store::{Guard, Login, Profile, Store, Ticket},
     transaction::Native,
@@ -72,7 +71,9 @@ fn refresh_with(
         {
             Ok(None)
         }
-        Some(login) => model::identity(provider, &login.auth, &login.account).map(Some),
+        Some(login) => super::view(provider, &login)
+            .and_then(|login| login.identity())
+            .map(Some),
         None => Ok(None),
     });
     let Ok(native) = native else {
@@ -123,7 +124,9 @@ fn poll_with(
     fetch: &dyn Fn(&Profile) -> FetchResult,
 ) -> Option<Result<ProviderLimitsDto, String>> {
     let login = profile.login.as_ref()?;
-    let fingerprint = login.fingerprint();
+    let fingerprint = super::view(profile.identity.provider, login)
+        .ok()?
+        .fingerprint();
     let key = format!("{}:{}", home.display(), profile.id);
     let attempts = ATTEMPTS.get_or_init(Mutex::default);
     let previous = attempts
@@ -136,13 +139,18 @@ fn poll_with(
         if previous.rejected
             || (Instant::now() < previous.next && (!force || previous.error.is_some()))
         {
-            open().ok()?.recheck(&ticket.holding(profile, login)).ok()?;
+            open()
+                .ok()?
+                .recheck(&ticket.holding(profile, login).ok()?)
+                .ok()?;
             return previous.error.clone().map(Err);
         }
     }
     let fetched = fetch(profile);
     let fetched_login = fetched.login?;
-    let fingerprint = fetched_login.fingerprint();
+    let fingerprint = super::view(profile.identity.provider, &fetched_login)
+        .ok()?
+        .fingerprint();
     let result = fetched.result;
     let (error, rejected, retry) = match &result {
         Ok(_) => (None, false, Duration::ZERO),
@@ -202,7 +210,7 @@ fn poll_with(
     // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
     let store = open().ok()?;
     store
-        .recheck(&ticket.holding(profile, &fetched_login))
+        .recheck(&ticket.holding(profile, &fetched_login).ok()?)
         .ok()?;
     match result {
         Ok(mut dto) => {
@@ -256,22 +264,13 @@ fn fetch_with(
     let mut login = profile.login.clone();
     let result = (|| {
         let current = login.as_mut().ok_or(HttpError::Unauthorized)?;
-        if model::identity(profile.identity.provider, &current.auth, &current.account)
-            .ok()
-            .as_ref()
-            != Some(&profile.identity)
-        {
+        let view =
+            super::view(profile.identity.provider, current).map_err(|_| HttpError::Unauthorized)?;
+        if view.identity().ok().as_ref() != Some(&profile.identity) {
             return Err(HttpError::Unauthorized);
         }
-        let expired = match profile.identity.provider {
-            AgentId::Claude => current
-                .auth
-                .pointer("/claudeAiOauth/expiresAt")
-                .and_then(serde_json::Value::as_i64)
-                .is_some_and(|v| v <= now),
-            AgentId::Codex => model::codex_renews_soon(&current.auth, now / 1000),
-            _ => false,
-        };
+        let expired = view.renewal_due(now);
+        drop(view);
         let mut renewed = false;
         if expired && profile.usage_renewal_owned {
             *current = renew()?;

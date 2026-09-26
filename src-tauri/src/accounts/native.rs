@@ -353,7 +353,7 @@ impl Native for NativeStore {
         Ok(Some(Login { auth, account }))
     }
     fn identify(&self, login: &Login) -> Result<Identity, String> {
-        model::identity(self.provider, &login.auth, &login.account)
+        super::view(self.provider, login)?.identity()
     }
     fn write(&self, login: Option<&Login>) -> Result<(), String> {
         self.write_locked(login, self.lock()?).map(drop)
@@ -385,7 +385,7 @@ impl Native for NativeStore {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |v| i64::try_from(v.as_secs()).unwrap_or(i64::MAX));
-        self.provider == AgentId::Codex && model::codex_renews_soon(&login.auth, now)
+        self.provider == AgentId::Codex && super::codex::CodexLogin::of(login).renews_soon(now)
     }
     fn verify_observed(&self) -> Result<(), String> {
         if self.provider == AgentId::Codex && !self.custom {

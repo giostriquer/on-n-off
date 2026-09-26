@@ -299,7 +299,8 @@ fn a_reading_ticket_holds_the_epoch_and_the_login_it_read_with() {
     let reading = db
         .ticket(Guard::SignIn)
         .unwrap()
-        .holding(&db.profiles[0], &login("a1"));
+        .holding(&db.profiles[0], &login("a1"))
+        .unwrap();
     assert!(open(home.path()).recheck(&reading).is_ok());
 
     let rotated = db.ticket(Guard::SignIn).unwrap();
@@ -310,7 +311,7 @@ fn a_reading_ticket_holds_the_epoch_and_the_login_it_read_with() {
         })
         .unwrap();
     assert!(open(home.path()).recheck(&reading).is_err(), "a new login");
-    let reading = rotated.holding(&db.profiles[0], &login("a2"));
+    let reading = rotated.holding(&db.profiles[0], &login("a2")).unwrap();
     assert!(open(home.path()).recheck(&reading).is_ok());
 
     open(home.path())

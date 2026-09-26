@@ -111,7 +111,11 @@ fn removed_accounts_and_signed_out_credential_generations_stay_excluded() {
         .push(native.identify(&login("a")).unwrap());
     assert!(candidate(&native, &db).unwrap().is_none());
     db.ignored_accounts.clear();
-    db.ignored_credentials.push(login("a").fingerprint());
+    db.ignored_credentials.push(
+        super::super::view(AgentId::Claude, &login("a"))
+            .unwrap()
+            .fingerprint(),
+    );
     assert!(candidate(&native, &db).unwrap().is_none());
 }
 #[test]
@@ -195,7 +199,11 @@ fn opting_out_never_needs_to_decrypt_a_damaged_vault() {
 fn metadata_changes_cannot_reenroll_a_signed_out_credential_generation() {
     let native = client();
     let mut db = Database::default();
-    db.ignored_credentials.push(login("a").fingerprint());
+    db.ignored_credentials.push(
+        super::super::view(AgentId::Claude, &login("a"))
+            .unwrap()
+            .fingerprint(),
+    );
     native.live.borrow_mut().as_mut().unwrap().account["emailAddress"] =
         json!("updated@example.com");
     assert!(candidate(&native, &db).unwrap().is_none());

@@ -116,20 +116,23 @@ struct HeldLogin {
     fingerprint: String,
 }
 impl HeldLogin {
-    fn of(profile: &Profile, login: &Login) -> Self {
-        Self {
+    fn of(profile: &Profile, login: &Login) -> Result<Self, String> {
+        Ok(Self {
             id: profile.id.clone(),
             identity: profile.identity.clone(),
-            fingerprint: login.fingerprint(),
-        }
+            fingerprint: super::view(profile.identity.provider, login)?.fingerprint(),
+        })
     }
     /// The saved profile that still holds this login, if one does.
     fn in_vault<'db>(&self, db: &'db Database) -> Option<&'db Profile> {
         db.profiles.iter().find(|profile| {
             profile.id == self.id
                 && profile.identity == self.identity
-                && profile.login.as_ref().map(Login::fingerprint).as_ref()
-                    == Some(&self.fingerprint)
+                && profile
+                    .login
+                    .as_ref()
+                    .and_then(|login| super::view(profile.identity.provider, login).ok())
+                    .is_some_and(|login| login.fingerprint() == self.fingerprint)
         })
     }
 }
@@ -149,56 +152,26 @@ pub enum Guard<'a> {
 impl Ticket {
     /// This ticket, now also rejected once `profile` no longer holds `login`: the generation a
     /// usage reading was made with. A renewal's ticket moves to that login, still without an epoch.
-    pub fn holding(&self, profile: &Profile, login: &Login) -> Self {
-        let held = HeldLogin::of(profile, login);
-        Self(match self.0 {
+    pub fn holding(&self, profile: &Profile, login: &Login) -> Result<Self, String> {
+        let held = HeldLogin::of(profile, login)?;
+        Ok(Self(match self.0 {
             Guarded::Epoch(epoch) | Guarded::Reading { epoch, .. } => {
                 Guarded::Reading { epoch, held }
             }
             Guarded::Renewal(_) => Guarded::Renewal(held),
-        })
+        }))
     }
 }
-impl Login {
-    pub fn fingerprint(&self) -> String {
-        // Presentation metadata and refreshed identity claims do not create a new OAuth generation.
-        let generation = (
-            self.auth.pointer("/claudeAiOauth/accessToken"),
-            self.auth.pointer("/claudeAiOauth/refreshToken"),
-            self.auth.pointer("/tokens/access_token"),
-            self.auth.pointer("/tokens/refresh_token"),
-        );
-        crate::sha::sha256_hex(
-            &serde_json::to_vec(&generation).expect("serializable credential generation"),
-        )
-    }
-    pub fn email(&self, provider: crate::dto::AgentId) -> Option<String> {
-        let email = if provider == crate::dto::AgentId::Claude {
-            self.account
-                .get("emailAddress")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        } else {
-            super::model::claims(&self.auth).ok().and_then(|claims| {
-                claims
-                    .get("email")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-        };
-        email.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
-    }
+/// The email `login` names by `provider`'s rules.
+fn login_email(provider: crate::dto::AgentId, login: &Login) -> Option<String> {
+    super::view(provider, login).ok()?.email()
 }
 impl Database {
-    /// The ID-token claims of the saved Codex profile with this observation key, when it has a login.
-    pub fn codex_claims(&self, key: &str) -> Option<Value> {
-        let profile = self.profiles.iter().find(|p| {
-            p.identity.provider == crate::dto::AgentId::Codex && p.identity.observation_key() == key
-        })?;
-        super::model::claims(&profile.login.as_ref()?.auth)
-            .ok()?
-            .get("https://api.openai.com/auth")
-            .cloned()
+    /// The saved profile of `provider` whose card has this observation key.
+    pub fn observed(&self, provider: crate::dto::AgentId, key: &str) -> Option<&Profile> {
+        self.profiles
+            .iter()
+            .find(|p| p.identity.provider == provider && p.identity.observation_key() == key)
     }
     pub fn reenroll(&mut self, identity: &Identity) {
         self.ignored_accounts.retain(|ignored| ignored != identity);
@@ -234,7 +207,7 @@ impl Database {
                 profile.email = profile
                     .login
                     .as_ref()
-                    .and_then(|login| login.email(profile.identity.provider));
+                    .and_then(|login| login_email(profile.identity.provider, login));
                 if profile.category.is_none()
                     && profile.email.as_deref() != Some(&profile.label)
                     && ![
@@ -292,7 +265,7 @@ impl Database {
                     .login
                     .as_ref()
                     .ok_or("Sign in again to refresh this account.")?;
-                let ticket = Ticket(Guarded::Renewal(HeldLogin::of(profile, login)));
+                let ticket = Ticket(Guarded::Renewal(HeldLogin::of(profile, login)?));
                 self.check(&ticket)
                     .map_err(|_| "The saved login changed before renewal.")?;
                 Ok(ticket)
@@ -351,7 +324,7 @@ impl Database {
                 return Err("Sign-in returned a different user or workspace. The saved profile has not changed.".into());
             }
         }
-        let email = login.email(identity.provider);
+        let email = login_email(identity.provider, &login);
         if let Some(profile) = self.profiles.iter_mut().find(|p| p.identity == identity) {
             if email.is_some() {
                 profile.email = email;

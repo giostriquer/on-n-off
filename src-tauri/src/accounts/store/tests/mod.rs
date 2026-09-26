@@ -181,17 +181,6 @@ fn older_profile_names_load_as_categories_without_becoming_the_email() {
     assert_eq!(loaded.profiles[0].category.as_deref(), Some("Client A"));
 }
 
-/// A login whose ID token carries these `https://api.openai.com/auth` claims.
-fn login_with_claims(claims: Value) -> Login {
-    Login {
-        auth: json!({"tokens": {
-            "id_token": crate::accounts::model::tests::id_token(&claims),
-            "refresh_token": "never-projected"
-        }}),
-        account: Value::Null,
-    }
-}
-
 /// Save one Codex profile with this login into `home`'s vault, which `vault::tests::unlock_fixture`
 /// has already unlocked, and give back its observation key.
 pub(crate) fn saved_codex_fixture(
@@ -213,46 +202,6 @@ pub(crate) fn saved_codex_fixture(
     .unwrap();
     store.persist(&db).unwrap();
     key
-}
-
-#[test]
-fn codex_claims_come_only_from_the_exact_saved_login_after_vault_reload() {
-    let root = tempfile::tempdir().unwrap();
-    let store = Store {
-        root: root.path().into(),
-        key: [9; 32],
-        _lease: held(root.path()),
-    };
-    let mut db = Database::default();
-    let saved = identity("inactive");
-    let key = saved.observation_key();
-    db.save(
-        saved,
-        login_with_claims(json!({"chatgpt_plan_type": "pro"})),
-        None,
-    )
-    .unwrap();
-    store.persist(&db).unwrap();
-    let mut loaded = store.load().unwrap();
-    let claims = loaded.codex_claims(&key).unwrap();
-    assert_eq!(claims["chatgpt_plan_type"], "pro");
-    assert!(claims.get("refresh_token").is_none() && claims.get("id_token").is_none());
-    assert!(loaded
-        .codex_claims(&identity("other-user").observation_key())
-        .is_none());
-    let mut other_workspace = identity("inactive");
-    other_workspace.workspace_id = "other".into();
-    assert!(loaded
-        .codex_claims(&other_workspace.observation_key())
-        .is_none());
-    loaded.profiles[0].login = None;
-    assert!(
-        loaded.codex_claims(&key).is_none(),
-        "a profile awaiting sign-in has no token to read"
-    );
-    loaded.profiles.clear();
-    store.persist(&loaded).unwrap();
-    assert!(store.load().unwrap().codex_claims(&key).is_none());
 }
 
 #[test]
@@ -507,103 +456,6 @@ fn a_vault_from_before_the_later_fields_loads_without_them() {
     );
     assert_eq!(profile.label, "Email unavailable");
     assert_eq!(profile.category, None, "a default name is not a category");
-}
-
-/// An unsigned JWT whose payload is `payload`.
-fn jwt(payload: &Value) -> String {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    format!("e30.{}.sig", URL_SAFE_NO_PAD.encode(payload.to_string()))
-}
-
-/// Email is display metadata, read where each provider keeps it and trimmed: Claude's in the
-/// account record, Codex's as the ID token's own `email` claim.
-#[test]
-fn a_logins_email_is_read_where_its_provider_keeps_it() {
-    let claude = |account: Value| Login {
-        auth: json!({"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}}),
-        account,
-    };
-    let email = |login: Login, provider| login.email(provider);
-    assert_eq!(
-        email(
-            claude(json!({"emailAddress":" a@example.com "})),
-            AgentId::Claude
-        )
-        .as_deref(),
-        Some("a@example.com")
-    );
-    assert_eq!(
-        email(claude(json!({"emailAddress":"  "})), AgentId::Claude),
-        None
-    );
-    assert_eq!(email(claude(Value::Null), AgentId::Claude), None);
-
-    let codex = |payload: Value| Login {
-        auth: json!({"tokens":{"access_token":"access","refresh_token":"refresh","id_token":jwt(&payload)}}),
-        account: Value::Null,
-    };
-    assert_eq!(
-        email(codex(json!({"email":" c@example.com "})), AgentId::Codex).as_deref(),
-        Some("c@example.com")
-    );
-    assert_eq!(
-        email(
-            codex(json!({"https://api.openai.com/auth":{"email":"nested@example.com"}})),
-            AgentId::Codex
-        ),
-        None,
-        "only the top-level claim is the email"
-    );
-    assert_eq!(
-        email(
-            Login {
-                auth: json!({"tokens":{"access_token":"access"}}),
-                account: json!({"emailAddress":"a@example.com"}),
-            },
-            AgentId::Codex
-        ),
-        None,
-        "a Codex login without an ID token has no email"
-    );
-}
-
-/// A credential generation is its access and refresh tokens and nothing else. The digests are
-/// literals because a vault's signed-out generations and a renewal journal written by an earlier
-/// version must still match the login they name.
-#[test]
-fn a_logins_fingerprint_is_its_token_generation_alone() {
-    let claude = Login {
-        auth: json!({"claudeAiOauth":{"accessToken":"access-a","refreshToken":"refresh-a","expiresAt":1}}),
-        account: json!({"accountUuid":"a","emailAddress":"a@example.com"}),
-    };
-    assert_eq!(
-        claude.fingerprint(),
-        "fdeed22ee434f77cea8634af474c4d1aaa71da120a95eb7f4f5015fbf4a765bf"
-    );
-    let mut presented = claude.clone();
-    presented.account["emailAddress"] = json!("renamed@example.com");
-    presented.auth["claudeAiOauth"]["expiresAt"] = json!(2);
-    presented.auth["claudeAiOauth"]["subscriptionType"] = json!("max");
-    assert_eq!(presented.fingerprint(), claude.fingerprint());
-    let mut rotated = claude.clone();
-    rotated.auth["claudeAiOauth"]["refreshToken"] = json!("refresh-b");
-    assert_ne!(rotated.fingerprint(), claude.fingerprint());
-
-    let codex = Login {
-        auth: json!({"tokens":{"access_token":"access-c","refresh_token":"refresh-c","id_token":"id-one","account_id":"team"},"last_refresh":"2026-09-01T00:00:00Z"}),
-        account: Value::Null,
-    };
-    assert_eq!(
-        codex.fingerprint(),
-        "4ca39507b5d18d079c34d4882ed151f283570622c6f465583e7972fa0e8bce4a"
-    );
-    let mut reissued = codex.clone();
-    reissued.auth["tokens"]["id_token"] = json!("id-two");
-    reissued.auth["last_refresh"] = json!("2026-09-02T00:00:00Z");
-    assert_eq!(reissued.fingerprint(), codex.fingerprint());
-    let mut renewed = codex.clone();
-    renewed.auth["tokens"]["access_token"] = json!("access-d");
-    assert_ne!(renewed.fingerprint(), codex.fingerprint());
 }
 
 mod protocol;

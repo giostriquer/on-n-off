@@ -1,5 +1,8 @@
 use super::*;
-use crate::accounts::store::{ChangeKind, Database};
+use crate::accounts::{
+    model,
+    store::{ChangeKind, Database},
+};
 use serde_json::json;
 fn profile() -> Profile {
     let mut db = super::super::store::Database::default();
@@ -628,7 +631,9 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
     for provider in [AgentId::Claude, AgentId::Codex] {
         for expired in [false, true] {
             let p = policy_profile(provider, true, expired);
-            let old = p.login.as_ref().unwrap().fingerprint();
+            let fingerprint =
+                |login: &Login| super::super::view(provider, login).unwrap().fingerprint();
+            let old = fingerprint(p.login.as_ref().unwrap());
             let mut rotated = p.login.clone().unwrap();
             if provider == AgentId::Claude {
                 rotated.auth["claudeAiOauth"]["accessToken"] = json!("rotated-access");
@@ -641,17 +646,17 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
                 1_000_000,
                 &|login| {
                     reads.set(reads.get() + 1);
-                    if login.fingerprint() == old {
+                    if fingerprint(login) == old {
                         Err(HttpError::Unauthorized)
                     } else {
-                        assert_eq!(login.fingerprint(), rotated.fingerprint());
+                        assert_eq!(fingerprint(login), fingerprint(&rotated));
                         Ok(reading(&p))
                     }
                 },
                 &|| Ok(rotated.clone()),
             );
             assert!(result.result.is_ok());
-            assert_eq!(result.login.unwrap().fingerprint(), rotated.fingerprint());
+            assert_eq!(fingerprint(&result.login.unwrap()), fingerprint(&rotated));
             assert_eq!(reads.get(), if expired { 1 } else { 2 });
         }
     }

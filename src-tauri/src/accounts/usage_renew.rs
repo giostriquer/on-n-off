@@ -3,13 +3,12 @@
 //! next poll cannot replay a possibly consumed refresh token. A completed reply is encrypted
 //! before vault publication and can be adopted after a failed save.
 use super::{
-    model,
+    codex::CodexLogin,
     store::{Guard, Login, Profile, Sealer, Store},
     vault,
 };
 use crate::{dto::AgentId, file_lease::FileLease};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize)]
@@ -55,11 +54,12 @@ impl Renewals {
         let Some(journal) = self.read(&self.journal(profile))? else {
             return Ok(());
         };
-        if profile
+        let held = profile
             .login
             .as_ref()
-            .is_some_and(|l| l.fingerprint() == journal.fingerprint)
-        {
+            .map(|login| super::view(profile.identity.provider, login).map(|v| v.fingerprint()))
+            .transpose()?;
+        if held.is_some_and(|fingerprint| fingerprint == journal.fingerprint) {
             return Err("This login has an unfinished usage renewal. Refresh usage to recover it, or sign in again before switching.".into());
         }
         Ok(())
@@ -100,7 +100,7 @@ pub(super) fn renew_owned(
     let _lease = acquire_renewal_lease(&renewals.root, &id)?;
     let path = renewals.journal(profile);
     drop(store); // Vault publication lock never spans a provider request.
-    let fingerprint = source.fingerprint();
+    let fingerprint = super::view(profile.identity.provider, source)?.fingerprint();
     let previous = renewals.read(&path)?;
     let save = |journal: &Journal| -> Result<(), String> {
         let bytes = serde_json::to_vec(journal).map_err(|_| "Cannot encode protected renewal.")?;
@@ -122,9 +122,7 @@ pub(super) fn renew_owned(
         })?;
         renewed
     };
-    if model::identity(profile.identity.provider, &renewed.auth, &renewed.account)?
-        != profile.identity
-    {
+    if super::view(profile.identity.provider, &renewed)?.identity()? != profile.identity {
         return Err("Renewal returned a different account. Sign in again.".into());
     }
     // Only this profile's login and ownership vouch for the renewed login, never the epoch.
@@ -146,53 +144,25 @@ pub(super) fn renew_owned(
     Ok(renewed)
 }
 
+/// Renews a private `login` of `provider` with that provider's grant.
 pub(super) fn request(provider: AgentId, login: &Login, now_ms: i64) -> Result<Login, String> {
-    request_at(
-        provider,
-        login,
-        now_ms,
-        super::claude_renew::TOKEN_URL,
-        "https://auth.openai.com/oauth/token",
-    )
+    super::view(provider, login)?.renew_private(now_ms)
 }
-fn request_at(
-    provider: AgentId,
-    login: &Login,
+
+/// Codex's token endpoint.
+pub(super) const CODEX_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
+
+/// Codex's private grant: `login`'s request sent to `token_url`, the reply folded back into it.
+/// Native credentials still renew exclusively through the official app-server path.
+pub(super) fn renew_codex(
+    login: &CodexLogin<'_>,
     now_ms: i64,
-    claude_url: &str,
-    codex_url: &str,
+    token_url: &str,
 ) -> Result<Login, String> {
-    let mut login = login.clone();
-    match provider {
-        AgentId::Claude => {
-            login.auth = super::claude_renew::renew_private(&login.auth, now_ms, claude_url)?;
-        }
-        AgentId::Codex => {
-            // Codex login/src/oauth/client.rs uses a JSON ChatGPT refresh grant. Native
-            // credentials still renew exclusively through the official app-server path.
-            let token = model::string(&login.auth, "/tokens/refresh_token")?;
-            let reply=crate::http::post_grant(codex_url,&json!({"grant_type":"refresh_token","refresh_token":token,"client_id":"app_EMoamEEZ73f0CkXaXp7hrann"}))
-                .map_err(|_|"Could not renew the private Codex login. Sign in again if needed.")?;
-            let access = model::string(&reply, "/access_token")?.to_owned();
-            login.auth["tokens"]["access_token"] = Value::String(access);
-            for name in ["refresh_token", "id_token"] {
-                if let Some(value) = reply
-                    .get(name)
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.trim().is_empty())
-                {
-                    login.auth["tokens"][name] = Value::String(value.to_owned());
-                }
-            }
-            login.auth["last_refresh"] = Value::String(
-                chrono::DateTime::from_timestamp_millis(now_ms)
-                    .ok_or("Invalid renewal time.")?
-                    .to_rfc3339(),
-            );
-        }
-        _ => return Err("This provider does not support private renewal.".into()),
-    }
-    Ok(login)
+    let request = login.renewal_request()?;
+    let reply = crate::http::post_grant(token_url, &request)
+        .map_err(|_| "Could not renew the private Codex login. Sign in again if needed.")?;
+    login.renewed(&reply, now_ms)
 }
 
 #[cfg(test)]

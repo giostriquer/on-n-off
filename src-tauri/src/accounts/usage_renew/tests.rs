@@ -1,12 +1,13 @@
 use super::*;
 use crate::{
     accounts::{
-        model,
+        claude::ClaudeLogin,
+        codex::CodexLogin,
         store::{ChangeKind, Database},
     },
     dto::AgentId,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use std::cell::Cell;
 
 fn setup(home: &Path, owned: bool) -> Profile {
@@ -20,7 +21,7 @@ fn setup(home: &Path, owned: bool) -> Profile {
 fn saved(home: &Path, provider: AgentId, login: Login, owned: bool) -> Profile {
     open(home)
         .change(ChangeKind::Metadata, |db| {
-            let identity = model::identity(provider, &login.auth, &login.account)?;
+            let identity = super::super::view(provider, &login)?.identity()?;
             db.save(identity, login, None)?;
             db.profiles[0].usage_renewal_owned = owned;
             Ok(db.profiles[0].clone())
@@ -264,7 +265,7 @@ fn private_claude_grant_preserves_scope_and_saves_rotated_credentials() {
         r#"{"access_token":"fresh","refresh_token":"rotated","expires_in":28800,"scope":"user:profile user:inference"}"#,
     );
     let result = renew_owned(&p, &|| Ok(open(home.path())), &|l| {
-        request_at(AgentId::Claude, l, 1000, &url, "unused")
+        super::super::claude_renew::renew_private(&ClaudeLogin::of(l), 1000, &url)
     })
     .unwrap();
     let request = server.join().unwrap();
@@ -299,7 +300,7 @@ fn private_codex_grant_retains_identity_when_reply_omits_id_token() {
         r#"{"access_token":"fresh","refresh_token":"rotated"}"#,
     );
     let result = renew_owned(&p, &|| Ok(open(home.path())), &|l| {
-        request_at(AgentId::Codex, l, 1000, "unused", &url)
+        renew_codex(&CodexLogin::of(l), 1000, &url)
     })
     .unwrap();
     let request = server.join().unwrap();
@@ -335,7 +336,7 @@ fn a_private_codex_renewal_sends_codexs_grant_and_keeps_every_field_it_does_not_
         r#"{"access_token":"fresh","refresh_token":"rotated","id_token":"id-new","expires_in":3600}"#,
     );
 
-    let renewed = request_at(AgentId::Codex, &login, 1000, "unused", &url).unwrap();
+    let renewed = renew_codex(&CodexLogin::of(&login), 1000, &url).unwrap();
 
     let body: Value = serde_json::from_str(&server.join().unwrap().body).unwrap();
     assert_eq!(
@@ -369,7 +370,7 @@ fn a_private_codex_renewal_keeps_the_tokens_a_reply_leaves_blank_and_refuses_one
         &[],
         r#"{"access_token":"fresh","refresh_token":" ","id_token":""}"#,
     );
-    let renewed = request_at(AgentId::Codex, &login, 1000, "unused", &url).unwrap();
+    let renewed = renew_codex(&CodexLogin::of(&login), 1000, &url).unwrap();
     server.join().unwrap();
     assert_eq!(renewed.auth["tokens"]["access_token"], "fresh");
     assert_eq!(renewed.auth["tokens"]["refresh_token"], "original");
@@ -377,7 +378,7 @@ fn a_private_codex_renewal_keeps_the_tokens_a_reply_leaves_blank_and_refuses_one
 
     let (url, server) =
         crate::http::serve_once_capturing("200 OK", &[], r#"{"refresh_token":"rotated"}"#);
-    assert!(request_at(AgentId::Codex, &login, 1000, "unused", &url).is_err());
+    assert!(renew_codex(&CodexLogin::of(&login), 1000, &url).is_err());
     server.join().unwrap();
 }
 
@@ -398,7 +399,8 @@ fn a_private_claude_renewal_redeems_for_the_logins_own_client_and_keeps_what_it_
         r#"{"access_token":"fresh","expires_in":100,"refresh_token":"rotated","refresh_token_expires_in":200,"scope":"user:profile"}"#,
     );
 
-    let renewed = request_at(AgentId::Claude, &login, 1000, &url, "unused").unwrap();
+    let renewed =
+        super::super::claude_renew::renew_private(&ClaudeLogin::of(&login), 1000, &url).unwrap();
 
     let body: Value = serde_json::from_str(&server.join().unwrap().body).unwrap();
     assert_eq!(
@@ -425,7 +427,9 @@ fn a_completed_renewal_journal_an_earlier_version_wrote_is_adopted_without_a_gra
     let renewals = Renewals::of(&open(home.path()));
     std::fs::create_dir_all(&renewals.root).unwrap();
     let journal = json!({
-        "fingerprint": profile.login.as_ref().unwrap().fingerprint(),
+        "fingerprint": super::super::view(AgentId::Claude, profile.login.as_ref().unwrap())
+            .unwrap()
+            .fingerprint(),
         "login": {
             "auth": {"claudeAiOauth": {"accessToken": "journaled", "refreshToken": "journaled-refresh"}},
             "account": {"accountUuid": "user", "organizationUuid": "team"}

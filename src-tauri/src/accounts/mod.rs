@@ -11,7 +11,9 @@ mod usage_renew;
 
 mod transaction;
 
+pub(crate) mod claude;
 pub(crate) mod claude_store;
+pub(crate) mod codex;
 pub(crate) mod codex_store;
 mod keychain;
 #[cfg(all(target_os = "macos", test))]
@@ -52,6 +54,29 @@ pub struct AccountsDto {
 }
 fn home() -> Result<PathBuf, String> {
     crate::paths::user_home().map_err(|_| "Cannot resolve account storage home.".into())
+}
+
+/// One provider's half of the accounts seam: `claude::Claude` or `codex::Codex`, each owning
+/// everything account code does differently for its provider. Generic account code asks
+/// [`adapter`] for it rather than asking which provider it has. The catalog's `AgentAdapter`
+/// (`crate::adapter`) is a different seam; accounts touch it only through `supports_accounts`.
+trait Adapter: Sync {
+    /// `login` read by this provider's rules.
+    fn login<'a>(&self, login: &'a store::Login) -> Box<dyn model::LoginView + 'a>;
+}
+
+/// `provider`'s adapter: the one place account code tells the providers apart.
+fn adapter(provider: AgentId) -> Result<&'static dyn Adapter, String> {
+    match provider {
+        AgentId::Claude => Ok(&claude::Claude),
+        AgentId::Codex => Ok(&codex::Codex),
+        _ => Err("Saved subscription profiles are not supported for this provider.".into()),
+    }
+}
+
+/// `login` read by `provider`'s rules.
+fn view(provider: AgentId, login: &store::Login) -> Result<Box<dyn model::LoginView + '_>, String> {
+    adapter(provider).map(|adapter| adapter.login(login))
 }
 
 /// A provider's native store as the account operations use it: the activation transaction's
@@ -379,7 +404,7 @@ impl Accounts {
         let result = store::Store::open(&self.home, true)?.change_then(
             store::ChangeKind::Account,
             |db| {
-                let fingerprint = current.fingerprint();
+                let fingerprint = view(provider, &current)?.fingerprint();
                 if !db.ignored_credentials.contains(&fingerprint) {
                     db.ignored_credentials.push(fingerprint);
                 }
@@ -420,19 +445,6 @@ mod login;
 pub use login::{add, cancel};
 
 pub(crate) mod discovery;
-
-/// The `https://api.openai.com/auth` claims of a saved Codex profile's ID token: identity and plan
-/// metadata, never its tokens. `None` for an unknown key, a profile without a login, or a device
-/// with no vault; an error when the vault exists and cannot be read right now.
-pub(crate) fn saved_codex_claims(
-    home: &std::path::Path,
-    key: &str,
-) -> Result<Option<serde_json::Value>, String> {
-    if !model::Identity::is_profile_key(key) || !store::Store::vault_exists(home) {
-        return Ok(None);
-    }
-    Ok(store::Store::open_existing(home)?.load()?.codex_claims(key))
-}
 
 #[cfg(test)]
 pub(crate) use store::tests::saved_codex_fixture;

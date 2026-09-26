@@ -109,7 +109,12 @@ fn prepare_login(
                 && dto.status == crate::dto::LimitsStatus::Ok
                 && dto.account.as_ref().is_some_and(|account| {
                     account.id == identity.observation_key()
-                        && match (account.label.as_deref(), latest.email(identity.provider)) {
+                        && match (
+                            account.label.as_deref(),
+                            super::view(identity.provider, &latest)
+                                .ok()
+                                .and_then(|latest| latest.email()),
+                        ) {
                             (Some(observed), Some(email)) => {
                                 observed.trim().eq_ignore_ascii_case(&email)
                             }

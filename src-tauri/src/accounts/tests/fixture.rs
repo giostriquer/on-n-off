@@ -1,7 +1,7 @@
 //! The account operations over a scratch home: its vault unlocked by a fixture key, a fake native
 //! store, fake running clients and a notifier that records what it heard.
 use super::super::{
-    model::Identity,
+    model::{Identity, LoginView},
     store::{ChangeKind, Database, Guard, Login, Store, Ticket},
     transaction::{Native, NativeGuard, Recovery},
     Accounts, Clients, NativeAccount, Notify,
@@ -46,6 +46,11 @@ pub(super) fn generation(login: Option<&Login>) -> Option<String> {
     Some(token.trim_start_matches("refresh-").to_owned())
 }
 
+/// The generation `login` is, as `provider` fingerprints it.
+pub(super) fn fingerprint(provider: AgentId, login: &Login) -> String {
+    super::super::view(provider, login).unwrap().fingerprint()
+}
+
 pub(super) fn identity(provider: AgentId, user: &str, workspace: &str) -> Identity {
     Identity {
         provider,
@@ -81,7 +86,7 @@ impl Native for FakeNative {
         Ok(self.0.live.borrow().clone())
     }
     fn identify(&self, login: &Login) -> Result<Identity, String> {
-        let claude = super::super::model::identity(AgentId::Claude, &login.auth, &login.account)?;
+        let claude = super::super::claude::ClaudeLogin::of(login).identity()?;
         Ok(Identity {
             provider: self.1,
             ..claude

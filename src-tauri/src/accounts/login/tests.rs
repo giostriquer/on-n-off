@@ -22,7 +22,7 @@ fn cancellation_is_scoped_and_old_operations_cannot_publish() {
     assert!(registry.current("c"));
 }
 
-use super::super::store::Login;
+use super::super::{model::LoginView, store::Login};
 use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto};
 use serde_json::json;
 use std::cell::RefCell;
@@ -33,7 +33,7 @@ impl Native for IsolatedLogin {
         Ok(Some(self.0.borrow().clone()))
     }
     fn identify(&self, login: &Login) -> Result<Identity, String> {
-        super::super::model::identity(AgentId::Codex, &login.auth, &login.account)
+        super::super::codex::CodexLogin::of(login).identity()
     }
     fn verify(&self) -> Result<(), String> {
         Ok(())
@@ -136,8 +136,9 @@ fn vault_home() -> tempfile::TempDir {
 }
 fn finished(user: &str) -> PreparedLogin {
     let login = fixture_login(user, "team", "isolated");
-    let identity =
-        super::super::model::identity(AgentId::Codex, &login.auth, &login.account).unwrap();
+    let identity = super::super::codex::CodexLogin::of(&login)
+        .identity()
+        .unwrap();
     PreparedLogin {
         usage: Some(usage(&identity)),
         identity,

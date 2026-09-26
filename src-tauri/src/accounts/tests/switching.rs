@@ -1,6 +1,6 @@
 //! Using a saved profile, recovering an interrupted switch, and signing out.
 use super::super::Activation;
-use super::fixture::{claude, claude_in, generation, identity, Harness, Heard};
+use super::fixture::{claude, claude_in, fingerprint, generation, identity, Harness, Heard};
 use crate::dto::AgentId;
 
 /// Profile a is the CLI's login and has rotated to a2 since it was saved; b is saved.
@@ -269,7 +269,10 @@ fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
     };
     assert!(!kept(&a) && !kept(&other));
     assert!(kept(&b) && kept(&c));
-    assert_eq!(vault.ignored_credentials, [claude("a", "a2").fingerprint()]);
+    assert_eq!(
+        vault.ignored_credentials,
+        [fingerprint(AgentId::Claude, &claude("a", "a2"))]
+    );
     assert!(!harness.vouches(&sign_in));
     assert_eq!(*harness.clients.asked.borrow(), ["closed"]);
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
@@ -314,7 +317,10 @@ fn a_failed_logout_keeps_the_forgotten_logins_and_is_still_announced() {
 
     let vault = harness.vault();
     assert!(vault.profiles[0].login.is_none());
-    assert_eq!(vault.ignored_credentials, [claude("a", "a2").fingerprint()]);
+    assert_eq!(
+        vault.ignored_credentials,
+        [fingerprint(AgentId::Claude, &claude("a", "a2"))]
+    );
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 

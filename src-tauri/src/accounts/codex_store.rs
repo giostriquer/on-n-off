@@ -11,7 +11,7 @@
 //! On macOS the credential store is the Keychain, reached through `/usr/bin/security`
 //! (`super::keychain`), never this process's own identity; elsewhere it is the `keyring` crate.
 
-use super::{model, store::Login, vault};
+use super::{codex::CodexLogin, model, store::Login, vault};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -205,19 +205,13 @@ pub(crate) fn metadata(config_home: &Path) -> Result<Option<Metadata>, String> {
 
 /// A Codex login's observation key and workspace claims, refusing claims for another workspace.
 fn identity(login: &Login) -> Result<Option<Metadata>, String> {
-    let Some(workspace) = login
-        .auth
-        .pointer("/tokens/account_id")
-        .and_then(Value::as_str)
-        .filter(|v| !v.trim().is_empty())
-    else {
+    let login = CodexLogin::of(login);
+    let Some(workspace) = login.workspace() else {
         return Ok(None);
     };
-    let claims = if login.auth.pointer("/tokens/id_token").is_some() {
-        let payload = model::claims(&login.auth)?;
-        let claims = payload
-            .get("https://api.openai.com/auth")
-            .cloned()
+    let claims = if login.has_id_token() {
+        let claims = login
+            .auth_claims()?
             .ok_or("Missing native account claims.")?;
         if claims.get("chatgpt_account_id").and_then(Value::as_str) != Some(workspace) {
             return Err("Native workspace claims disagree.".into());
@@ -257,17 +251,17 @@ pub(crate) fn metadata_and_access(
     let Some((observation_key, claims)) = identity(&login)? else {
         return Ok(None);
     };
-    let access = match model::string(&login.auth, "/tokens/access_token") {
-        Ok(token) => Some(CodexAccess {
+    let access = match CodexLogin::of(&login).access_token() {
+        Some(token) => Some(CodexAccess {
             observation_key: observation_key.clone(),
             workspace_id: claims
                 .get("chatgpt_account_id")
                 .and_then(Value::as_str)
                 .ok_or("Missing native account claims.")?
                 .to_string(),
-            token: model::AccessToken::new(token),
+            token,
         }),
-        Err(_) => None,
+        None => None,
     };
     Ok(Some(((observation_key, claims), access)))
 }
