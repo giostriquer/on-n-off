@@ -88,9 +88,8 @@ export type LimitCard = {
   account: CardAccount | null;
   plan: string | null;
   /**
-   * "remembered" also fires for a saved account's reading, which is read live every poll: a reading
-   * does not yet say where it came from. The Limits screen shows no remembered status until a
-   * provenance flag on the reading (refactor candidate 05) tells the two apart.
+   * "remembered" also fires for a saved account's reading, which is read live every poll. The Limits
+   * screen shows no remembered status until a reading says whether it was read live this poll.
    */
   status: CardStatus | null;
   /** The account in use: the saved profiles' word for it, else the read's. */

@@ -30,7 +30,10 @@ export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "rem
 
 export type LimitAccountPresentation = {
   status: CardStatus | null;
-  /** The read's message when it is worth showing on its own: a failed read with nothing kept. */
+  /**
+   * The read's message: set for every read that is not ok, a paused signed-in read that kept its
+   * windows included, unless the saved-refresh status already carries it.
+   */
   message: string | null;
   /**
    * The card's read did not answer, so the account metadata it shows (a subscription status, a plan)

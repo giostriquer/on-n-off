@@ -117,7 +117,7 @@ function ProviderColumn({
           card={card}
           now={now}
           error={index === 0 ? error : null}
-          onForget={allowForget && card.account ? () => forget(card.account!) : undefined}
+          onForget={allowForget ? forget : undefined}
         />
       ))}
     </div>
@@ -162,9 +162,10 @@ function AccountCard({
   card: LimitCard;
   now: number;
   error: string | null;
-  onForget?: () => Promise<void>;
+  onForget?: (account: CardAccount) => Promise<void>;
 }) {
   const { provider, identity, freshness, figures, account } = card;
+  const codexActions = account?.codexActions ?? null;
   const subscription = <AccountSubscriptionBadge subscription={card.subscription} now={now} />;
   const header = (menu: ReactNode) => <CardHeader card={card} provider={provider} title={identity.label} subscription={subscription} menu={menu} />;
   const content = <>
@@ -200,8 +201,9 @@ function AccountCard({
       aria-label={identity.ariaLabel}
       data-status={freshness.readStatus}
     >
-      {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined} onForget={onForget} header={header}
-        footer={account.codexActions ? state => <CodexAccountActions entry={account.codexActions!} label={account.name} now={now} state={state} /> : undefined}>
+      {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined}
+        onForget={onForget ? () => onForget(account) : undefined} header={header}
+        footer={codexActions ? state => <CodexAccountActions entry={codexActions} label={account.name} now={now} state={state} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
     </section>
