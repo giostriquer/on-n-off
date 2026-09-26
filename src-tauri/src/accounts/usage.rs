@@ -48,7 +48,7 @@ pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<Provider
     let open = || Store::open_existing(&home);
     let native = NativeStore::resolve(provider, &home).and_then(|n| n.read());
     refresh_with(&home, provider, force, entries, native, &open, &|profile| {
-        fetch_profile(&home, profile, &open)
+        fetch_profile(profile, &open)
     });
 }
 
@@ -227,17 +227,13 @@ fn poll_with(
     }
 }
 
-fn fetch_profile(
-    home: &Path,
-    profile: &Profile,
-    open: &dyn Fn() -> Result<Store, String>,
-) -> FetchResult {
+fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) -> FetchResult {
     fetch_with(
         profile,
         chrono::Utc::now().timestamp_millis(),
         &|login| crate::limits::saved::read(&profile.identity, &login.auth),
         &|| {
-            super::usage_renew::renew_owned(home, profile, open, &|login| {
+            super::usage_renew::renew_owned(profile, open, &|login| {
                 super::usage_renew::request(
                     profile.identity.provider,
                     login,

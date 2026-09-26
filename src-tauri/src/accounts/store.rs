@@ -256,6 +256,11 @@ impl Database {
     pub fn recovery(&self) -> Option<&Recovery> {
         self.recovery.as_ref()
     }
+    /// The saved profile an interrupted switch was switching to, while it awaits recovery.
+    pub fn recovery_target(&self) -> Option<&Profile> {
+        let journal = self.recovery.as_ref()?;
+        self.profiles.iter().find(|p| p.id == journal.target_id)
+    }
     /// The pending journal, for the switch that wrote it to update.
     pub fn recovery_mut(&mut self) -> Option<&mut Recovery> {
         self.recovery.as_mut()

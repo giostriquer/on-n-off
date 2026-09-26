@@ -41,8 +41,7 @@ fn meanwhile(home: &Path, kind: ChangeKind<'_>, edit: impl FnOnce(&mut Database)
 }
 /// Whether `profile`'s login may be activated, as `use` asks before it switches.
 fn ready(home: &Path, profile: &Profile) -> Result<(), String> {
-    let store = open(home);
-    activation_ready(&store.root.join("usage-renewals"), &store.sealer(), profile)
+    Renewals::of(&open(home)).activation_ready(profile)
 }
 fn rotated(login: &Login) -> Login {
     let mut login = login.clone();
@@ -54,7 +53,7 @@ fn rotated(login: &Login) -> Login {
 fn owned_renewal_persists_rotated_login_encrypted_without_native_writes() {
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
-    let login = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
+    let login = renew_owned(&profile, &|| Ok(open(home.path())), &|login| {
         Ok(rotated(login))
     })
     .unwrap();
@@ -78,13 +77,11 @@ fn native_shadows_never_redeem_a_refresh_token() {
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), false);
     let calls = Cell::new(0);
-    assert!(
-        renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
-            calls.set(calls.get() + 1);
-            Ok(rotated(login))
-        })
-        .is_err()
-    );
+    assert!(renew_owned(&profile, &|| Ok(open(home.path())), &|login| {
+        calls.set(calls.get() + 1);
+        Ok(rotated(login))
+    })
+    .is_err());
     assert_eq!(calls.get(), 0);
 }
 #[test]
@@ -93,7 +90,7 @@ fn interrupted_renewal_never_redeems_the_same_generation_again() {
     let profile = setup(home.path(), true);
     let calls = Cell::new(0);
     let renew = || {
-        renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|_| {
+        renew_owned(&profile, &|| Ok(open(home.path())), &|_| {
             calls.set(calls.get() + 1);
             Err("connection lost".into())
         })
@@ -112,12 +109,11 @@ fn a_second_renewal_is_refused_while_a_grant_is_in_flight() {
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
     let nested = std::cell::RefCell::new(None);
-    let login = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
-        *nested.borrow_mut() =
-            renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|_| {
-                panic!("a second grant must not start while the first is in flight")
-            })
-            .err();
+    let login = renew_owned(&profile, &|| Ok(open(home.path())), &|login| {
+        *nested.borrow_mut() = renew_owned(&profile, &|| Ok(open(home.path())), &|_| {
+            panic!("a second grant must not start while the first is in flight")
+        })
+        .err();
         Ok(rotated(login))
     })
     .unwrap();
@@ -149,7 +145,7 @@ fn a_finished_renewal_frees_its_lease_while_a_spawned_child_still_shares_it() {
 fn removing_profile_during_renewal_does_not_resurrect_it() {
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
-    let result = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
+    let result = renew_owned(&profile, &|| Ok(open(home.path())), &|login| {
         meanwhile(home.path(), ChangeKind::Account, |db| db.profiles.clear());
         Ok(rotated(login))
     });
@@ -164,7 +160,7 @@ fn removing_profile_during_renewal_does_not_resurrect_it() {
 fn an_unrelated_account_change_during_renewal_still_publishes_the_renewed_login() {
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
-    let login = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
+    let login = renew_owned(&profile, &|| Ok(open(home.path())), &|login| {
         meanwhile(home.path(), ChangeKind::Account, |_| {});
         Ok(rotated(login))
     })
@@ -183,7 +179,7 @@ fn an_unrelated_account_change_during_renewal_still_publishes_the_renewed_login(
 fn a_pending_recovery_rejects_the_renewed_login_and_keeps_the_reply_for_later() {
     let home = tempfile::tempdir().unwrap();
     let profile = setup(home.path(), true);
-    let result = renew_owned(home.path(), &profile, &|| Ok(open(home.path())), &|login| {
+    let result = renew_owned(&profile, &|| Ok(open(home.path())), &|login| {
         meanwhile(home.path(), ChangeKind::Metadata, |db| {
             db.begin_recovery(super::super::transaction::Recovery {
                 target_id: profile.id.clone(),
@@ -212,7 +208,6 @@ fn a_completed_reply_recovers_after_publication_failure_without_another_grant() 
     let calls = Cell::new(0);
     let opens = Cell::new(0);
     assert!(renew_owned(
-        home.path(),
         &p,
         &|| {
             opens.set(opens.get() + 1);
@@ -229,7 +224,7 @@ fn a_completed_reply_recovers_after_publication_failure_without_another_grant() 
     )
     .is_err());
     assert!(ready(home.path(), &p).is_err());
-    let result = renew_owned(home.path(), &p, &|| Ok(open(home.path())), &|login| {
+    let result = renew_owned(&p, &|| Ok(open(home.path())), &|login| {
         calls.set(calls.get() + 1);
         Ok(rotated(login))
     })
@@ -243,15 +238,13 @@ fn a_completed_reply_recovers_after_publication_failure_without_another_grant() 
 fn changed_ownership_during_renewal_never_overwrites_the_native_shadow() {
     let home = tempfile::tempdir().unwrap();
     let p = setup(home.path(), true);
-    assert!(
-        renew_owned(home.path(), &p, &|| Ok(open(home.path())), &|login| {
-            meanwhile(home.path(), ChangeKind::Account, |db| {
-                db.profiles[0].usage_renewal_owned = false
-            });
-            Ok(rotated(login))
-        })
-        .is_err()
-    );
+    assert!(renew_owned(&p, &|| Ok(open(home.path())), &|login| {
+        meanwhile(home.path(), ChangeKind::Account, |db| {
+            db.profiles[0].usage_renewal_owned = false
+        });
+        Ok(rotated(login))
+    })
+    .is_err());
     assert_eq!(
         open(home.path()).load().unwrap().profiles[0]
             .login
@@ -270,7 +263,7 @@ fn private_claude_grant_preserves_scope_and_saves_rotated_credentials() {
         &[],
         r#"{"access_token":"fresh","refresh_token":"rotated","expires_in":28800,"scope":"user:profile user:inference"}"#,
     );
-    let result = renew_owned(home.path(), &p, &|| Ok(open(home.path())), &|l| {
+    let result = renew_owned(&p, &|| Ok(open(home.path())), &|l| {
         request_at(AgentId::Claude, l, 1000, &url, "unused")
     })
     .unwrap();
@@ -305,7 +298,7 @@ fn private_codex_grant_retains_identity_when_reply_omits_id_token() {
         &[],
         r#"{"access_token":"fresh","refresh_token":"rotated"}"#,
     );
-    let result = renew_owned(home.path(), &p, &|| Ok(open(home.path())), &|l| {
+    let result = renew_owned(&p, &|| Ok(open(home.path())), &|l| {
         request_at(AgentId::Codex, l, 1000, "unused", &url)
     })
     .unwrap();

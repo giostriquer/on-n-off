@@ -149,7 +149,7 @@ pub fn remove(id: &str) -> Result<(), String> {
     Accounts::live()?.remove(id)
 }
 pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Result<(), String> {
-    Accounts::live()?.use_profile(provider, id, activation)
+    Accounts::live()?.activate(provider, id, activation)
 }
 pub fn sign_out(provider: AgentId) -> Result<(), String> {
     Accounts::live()?.sign_out(provider)
@@ -176,18 +176,6 @@ impl Activation {
         }
     }
 }
-fn check_clients(
-    activation: Activation,
-    provider: AgentId,
-    activation_safe: impl FnOnce(AgentId) -> Result<(), String>,
-    closed: impl FnOnce(AgentId) -> Result<(), String>,
-) -> Result<(), String> {
-    match activation {
-        Activation::Ordinary => activation_safe(provider),
-        Activation::AlongsideClients => Ok(()),
-        Activation::Recover => closed(provider),
-    }
-}
 
 impl Accounts {
     fn list(&self, provider: AgentId) -> Result<AccountsDto, String> {
@@ -209,8 +197,7 @@ impl Accounts {
             store::Database::default()
         };
         let recovery_required = db
-            .recovery()
-            .and_then(|journal| db.profiles.iter().find(|p| p.id == journal.target_id))
+            .recovery_target()
             .is_some_and(|profile| profile.identity.provider == provider);
         Ok(AccountsDto {
             profiles: db
@@ -304,67 +291,70 @@ impl Accounts {
         Ok(())
     }
 
+    /// The account action a Use or Recover button asks for.
+    fn activate(&self, provider: AgentId, id: &str, activation: Activation) -> Result<(), String> {
+        match activation {
+            Activation::Ordinary => self.use_profile(provider, id, false),
+            Activation::AlongsideClients => self.use_profile(provider, id, true),
+            Activation::Recover => self.recover(provider),
+        }
+    }
+
+    /// Publishes profile `id`'s login to the provider's CLI. `alongside_clients` is the person's
+    /// choice to switch beside running clients, which then keep the previous account.
+    ///
     /// Announced once the change is durable, whether the switch then succeeds or fails: a
     /// rollback may have touched the native login. A sign-in is announced only once published.
     fn use_profile(
         &self,
         provider: AgentId,
         id: &str,
-        activation: Activation,
+        alongside_clients: bool,
     ) -> Result<(), String> {
         let change = activity::change(provider)?;
         let native = self.native(provider)?;
         native.preflight()?;
-        check_clients(
-            activation,
-            provider,
-            |provider| self.clients.activation_safe(provider),
-            |provider| self.clients.closed(provider),
-        )?;
+        if !alongside_clients {
+            self.clients.activation_safe(provider)?;
+        }
         let store = store::Store::open(&self.home, false)?;
-        let renewals = store.root.join("usage-renewals");
-        let sealer = store.sealer();
-        let kind = match activation {
-            Activation::Recover => store::ChangeKind::Recovery,
-            Activation::Ordinary | Activation::AlongsideClients => store::ChangeKind::Account,
-        };
+        let renewals = usage_renew::Renewals::of(&store);
         let native: &dyn Native = native.as_ref();
         let result = store.change_then(
-            kind,
+            store::ChangeKind::Account,
             |db| {
-                if activation == Activation::Recover {
-                    let journal = db.recovery().ok_or("No recovery is pending.")?;
-                    let target = db
-                        .profiles
-                        .iter()
-                        .find(|p| p.id == journal.target_id)
-                        .ok_or("Recovery profile is missing.")?;
-                    if target.identity.provider != provider {
-                        return Err("Recovery belongs to the other provider.".into());
-                    }
-                    return Ok(());
-                }
-                if !db
-                    .profiles
-                    .iter()
-                    .any(|p| p.id == id && p.identity.provider == provider)
-                {
-                    return Err("Profile does not belong to this provider.".into());
-                }
                 let target = db
                     .profiles
                     .iter()
-                    .find(|p| p.id == id)
-                    .ok_or("Profile no longer exists.")?;
-                usage_renew::activation_ready(&renewals, &sealer, target)
+                    .find(|p| p.id == id && p.identity.provider == provider)
+                    .ok_or("Profile does not belong to this provider.")?;
+                renewals.activation_ready(target)
             },
-            |(), db, persist| match activation {
-                Activation::Recover => transaction::recover(db, native, persist),
-                Activation::Ordinary => transaction::activate(db, native, id, false, persist),
-                Activation::AlongsideClients => {
-                    transaction::activate(db, native, id, true, persist)
+            |(), db, persist| transaction::activate(db, native, id, alongside_clients, persist),
+        )?;
+        drop(change);
+        self.notify.changed(provider);
+        result
+    }
+
+    /// Restores the outgoing login of an interrupted switch, with every client closed.
+    /// Announced like a use, whether it then succeeds or fails.
+    fn recover(&self, provider: AgentId) -> Result<(), String> {
+        let change = activity::change(provider)?;
+        let native = self.native(provider)?;
+        native.preflight()?;
+        self.clients.closed(provider)?;
+        let native: &dyn Native = native.as_ref();
+        let result = store::Store::open(&self.home, false)?.change_then(
+            store::ChangeKind::Recovery,
+            |db| {
+                let target = db.recovery_target().ok_or("Recovery profile is missing.")?;
+                if target.identity.provider != provider {
+                    return Err("Recovery belongs to the other provider.".into());
                 }
+                Ok(())
             },
+            |(), db, persist| transaction::recover(db, native, persist),
         )?;
         drop(change);
         self.notify.changed(provider);

@@ -19,7 +19,7 @@ fn using_a_profile_publishes_its_login_and_keeps_the_latest_outgoing_one() {
 
     harness
         .accounts()
-        .use_profile(AgentId::Claude, &b, Activation::Ordinary)
+        .activate(AgentId::Claude, &b, Activation::Ordinary)
         .unwrap();
 
     assert_eq!(harness.live(), Some("b1".into()));
@@ -55,7 +55,7 @@ fn running_clients_refuse_an_ordinary_switch_but_not_one_made_beside_them() {
 
     assert!(harness
         .accounts()
-        .use_profile(AgentId::Claude, &b, Activation::Ordinary)
+        .activate(AgentId::Claude, &b, Activation::Ordinary)
         .is_err());
     assert_eq!(harness.live(), Some("a2".into()));
     assert_eq!(harness.sealed(), sealed);
@@ -63,7 +63,7 @@ fn running_clients_refuse_an_ordinary_switch_but_not_one_made_beside_them() {
 
     harness
         .accounts()
-        .use_profile(AgentId::Claude, &elsewhere, Activation::AlongsideClients)
+        .activate(AgentId::Claude, &elsewhere, Activation::AlongsideClients)
         .unwrap();
     assert_eq!(harness.live(), Some("e1".into()));
     assert_eq!(*harness.clients.asked.borrow(), ["activation safe"]);
@@ -78,7 +78,7 @@ fn another_providers_profile_is_not_used() {
 
     let error = harness
         .accounts()
-        .use_profile(AgentId::Claude, &codex, Activation::Ordinary)
+        .activate(AgentId::Claude, &codex, Activation::Ordinary)
         .unwrap_err();
 
     assert_eq!(error, "Profile does not belong to this provider.");
@@ -97,7 +97,7 @@ fn a_login_with_an_unfinished_private_renewal_is_not_used() {
     });
     let open = || super::super::store::Store::open_existing(harness.path());
     assert!(
-        super::super::usage_renew::renew_owned(harness.path(), &profile, &open, &|_| {
+        super::super::usage_renew::renew_owned(&profile, &open, &|_| {
             Err("connection lost".into())
         })
         .is_err()
@@ -106,7 +106,7 @@ fn a_login_with_an_unfinished_private_renewal_is_not_used() {
 
     let error = harness
         .accounts()
-        .use_profile(AgentId::Claude, &b, Activation::Ordinary)
+        .activate(AgentId::Claude, &b, Activation::Ordinary)
         .unwrap_err();
 
     assert!(error.contains("unfinished usage renewal"), "{error}");
@@ -123,7 +123,7 @@ fn a_failed_switch_restores_the_outgoing_login_and_is_still_announced() {
 
     assert!(harness
         .accounts()
-        .use_profile(AgentId::Claude, &b, Activation::Ordinary)
+        .activate(AgentId::Claude, &b, Activation::Ordinary)
         .is_err());
 
     assert_eq!(harness.live(), Some("a2".into()));
@@ -143,7 +143,7 @@ fn a_pending_recovery_refuses_a_use_before_anything_is_written() {
     for activation in [Activation::Ordinary, Activation::AlongsideClients] {
         let error = harness
             .accounts()
-            .use_profile(AgentId::Claude, &b, activation)
+            .activate(AgentId::Claude, &b, activation)
             .unwrap_err();
 
         assert_eq!(harness.sealed(), sealed, "{activation:?} wrote the vault");
@@ -167,7 +167,7 @@ fn recovery_restores_the_outgoing_login_with_clients_closed() {
 
     harness
         .accounts()
-        .use_profile(AgentId::Claude, "", Activation::Recover)
+        .activate(AgentId::Claude, "", Activation::Recover)
         .unwrap();
 
     assert_eq!(harness.live(), Some("a2".into()));
@@ -185,7 +185,7 @@ fn recovery_without_a_pending_journal_is_refused() {
 
     let error = harness
         .accounts()
-        .use_profile(AgentId::Claude, "", Activation::Recover)
+        .activate(AgentId::Claude, "", Activation::Recover)
         .unwrap_err();
 
     assert_eq!(error, "No recovery is pending.");
