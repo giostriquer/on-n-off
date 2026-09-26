@@ -116,12 +116,13 @@ struct HeldLogin {
     fingerprint: String,
 }
 impl HeldLogin {
-    fn of(profile: &Profile, login: &Login) -> Result<Self, String> {
-        Ok(Self {
+    /// `profile` holding the generation `fingerprint` names.
+    fn of(profile: &Profile, fingerprint: String) -> Self {
+        Self {
             id: profile.id.clone(),
             identity: profile.identity.clone(),
-            fingerprint: super::view(profile.identity.provider, login)?.fingerprint(),
-        })
+            fingerprint,
+        }
     }
     /// The saved profile that still holds this login, if one does.
     fn in_vault<'db>(&self, db: &'db Database) -> Option<&'db Profile> {
@@ -150,16 +151,17 @@ pub enum Guard<'a> {
 }
 
 impl Ticket {
-    /// This ticket, now also rejected once `profile` no longer holds `login`: the generation a
-    /// usage reading was made with. A renewal's ticket moves to that login, still without an epoch.
-    pub fn holding(&self, profile: &Profile, login: &Login) -> Result<Self, String> {
-        let held = HeldLogin::of(profile, login)?;
-        Ok(Self(match self.0 {
+    /// This ticket, now also rejected once `profile` no longer holds the login whose generation
+    /// `fingerprint` names: the one a usage reading was made with. A renewal's ticket moves to that
+    /// login, still without an epoch.
+    pub fn holding(&self, profile: &Profile, fingerprint: String) -> Self {
+        let held = HeldLogin::of(profile, fingerprint);
+        Self(match self.0 {
             Guarded::Epoch(epoch) | Guarded::Reading { epoch, .. } => {
                 Guarded::Reading { epoch, held }
             }
             Guarded::Renewal(_) => Guarded::Renewal(held),
-        }))
+        })
     }
 }
 /// The email `login` names by `provider`'s rules.
@@ -265,7 +267,8 @@ impl Database {
                     .login
                     .as_ref()
                     .ok_or("Sign in again to refresh this account.")?;
-                let ticket = Ticket(Guarded::Renewal(HeldLogin::of(profile, login)?));
+                let fingerprint = super::view(profile.identity.provider, login)?.fingerprint();
+                let ticket = Ticket(Guarded::Renewal(HeldLogin::of(profile, fingerprint)));
                 self.check(&ticket)
                     .map_err(|_| "The saved login changed before renewal.")?;
                 Ok(ticket)

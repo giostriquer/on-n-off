@@ -505,12 +505,10 @@ impl LoginView for ClaudeLogin<'_> {
     }
 
     fn fingerprint(&self) -> String {
-        model::fingerprint([
+        model::claude_fingerprint(
             self.auth.pointer("/claudeAiOauth/accessToken"),
             self.auth.pointer("/claudeAiOauth/refreshToken"),
-            None,
-            None,
-        ])
+        )
     }
 
     /// Once its access token's `expiresAt` is reached; never for a login that states none.

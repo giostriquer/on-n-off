@@ -438,12 +438,10 @@ impl LoginView for CodexLogin<'_> {
     }
 
     fn fingerprint(&self) -> String {
-        model::fingerprint([
-            None,
-            None,
+        model::codex_fingerprint(
             self.auth.pointer("/tokens/access_token"),
             self.auth.pointer("/tokens/refresh_token"),
-        ])
+        )
     }
 
     fn renewal_due(&self, now_ms: i64) -> bool {

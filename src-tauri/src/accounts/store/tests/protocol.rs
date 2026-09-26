@@ -29,6 +29,12 @@ fn login(generation: &str) -> Login {
         account: serde_json::Value::Null,
     }
 }
+/// The fingerprint of the Codex login `login(generation)`.
+fn generation(generation: &str) -> String {
+    super::super::super::view(AgentId::Codex, &login(generation))
+        .unwrap()
+        .fingerprint()
+}
 /// A vault holding one Codex profile whose login is `generation`, owning its private renewal.
 fn seeded(generation: &str) -> tempfile::TempDir {
     let home = tempfile::tempdir().unwrap();
@@ -299,8 +305,7 @@ fn a_reading_ticket_holds_the_epoch_and_the_login_it_read_with() {
     let reading = db
         .ticket(Guard::SignIn)
         .unwrap()
-        .holding(&db.profiles[0], &login("a1"))
-        .unwrap();
+        .holding(&db.profiles[0], generation("a1"));
     assert!(open(home.path()).recheck(&reading).is_ok());
 
     let rotated = db.ticket(Guard::SignIn).unwrap();
@@ -311,7 +316,7 @@ fn a_reading_ticket_holds_the_epoch_and_the_login_it_read_with() {
         })
         .unwrap();
     assert!(open(home.path()).recheck(&reading).is_err(), "a new login");
-    let reading = rotated.holding(&db.profiles[0], &login("a2")).unwrap();
+    let reading = rotated.holding(&db.profiles[0], generation("a2"));
     assert!(open(home.path()).recheck(&reading).is_ok());
 
     open(home.path())

@@ -43,10 +43,20 @@ pub(crate) trait LoginView {
     fn renewal_due(&self, now_ms: i64) -> bool;
 }
 
+/// A Claude generation's fingerprint, from its access and refresh tokens.
+pub(super) fn claude_fingerprint(access: Option<&Value>, refresh: Option<&Value>) -> String {
+    fingerprint([access, refresh, None, None])
+}
+
+/// A Codex generation's fingerprint, from its access and refresh tokens.
+pub(super) fn codex_fingerprint(access: Option<&Value>, refresh: Option<&Value>) -> String {
+    fingerprint([None, None, access, refresh])
+}
+
 /// A generation's fingerprint over the four slots every version has hashed: Claude's access and
 /// refresh tokens, then Codex's. Each provider fills its own two and leaves the other's empty, so
 /// the fingerprints a vault's signed-out generations and a renewal journal hold keep matching.
-pub(super) fn fingerprint(slots: [Option<&Value>; 4]) -> String {
+fn fingerprint(slots: [Option<&Value>; 4]) -> String {
     crate::sha::sha256_hex(&serde_json::to_vec(&slots).expect("serializable credential generation"))
 }
 

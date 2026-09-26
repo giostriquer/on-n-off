@@ -148,7 +148,7 @@ fn poll_with(
         {
             open()
                 .ok()?
-                .recheck(&ticket.holding(profile, login).ok()?)
+                .recheck(&ticket.holding(profile, fingerprint))
                 .ok()?;
             return previous.error.clone().map(Err);
         }
@@ -216,9 +216,7 @@ fn poll_with(
     // Removal, reauthentication and logout can proceed while HTTP is in flight. Recheck under
     // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
     let store = open().ok()?;
-    store
-        .recheck(&ticket.holding(profile, &fetched_login).ok()?)
-        .ok()?;
+    store.recheck(&ticket.holding(profile, fingerprint)).ok()?;
     match result {
         Ok(mut dto) => {
             if dto
