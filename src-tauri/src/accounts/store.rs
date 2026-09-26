@@ -53,6 +53,7 @@ const SIGN_IN_CHANGED: &str = "The account state changed while sign-in was runni
 
 /// Which change `Store::change` makes to the vault, and so which of its rules it follows: an
 /// account change (`Account`, `SignIn`, `Recovery`), remembering turned on, or a metadata edit.
+/// `gate` and `bumps` spell out each kind's rule.
 pub enum ChangeKind<'t> {
     /// Changes which logins are saved or which one a CLI uses (save, remove, use, sign out):
     /// refused during a pending recovery, and rejects every sign-in in flight.
@@ -70,38 +71,63 @@ pub enum ChangeKind<'t> {
     Metadata,
 }
 
+impl ChangeKind<'_> {
+    /// Refuses this change when its rule does, before anything is written.
+    fn gate(&self, db: &Database) -> Result<(), String> {
+        match self {
+            Self::Account if db.recovery.is_some() => Err(RECOVER_FIRST.into()),
+            Self::Recovery if db.recovery.is_none() => Err("No recovery is pending.".into()),
+            Self::SignIn(ticket) => db.check(ticket),
+            Self::Account | Self::Recovery | Self::Remembering | Self::Metadata => Ok(()),
+        }
+    }
+    /// Whether this change rejects every sign-in, remembered login and usage reading in flight.
+    fn bumps(&self) -> bool {
+        match self {
+            Self::Account | Self::SignIn(_) | Self::Recovery | Self::Remembering => true,
+            Self::Metadata => false,
+        }
+    }
+}
+
 /// What a publication after slow work, which ran without the vault lease, still requires of the
-/// vault. Taken with `Database::ticket` before the work; `Store::publish` rechecks it after.
+/// vault. Taken with `Database::ticket` before the work and rechecked under the lease after it.
 /// A pending recovery rejects every ticket.
 #[derive(Clone)]
-pub struct Ticket {
-    /// The sign-in epoch when the ticket was taken: any account change since rejects it.
-    epoch: Option<u64>,
-    /// The saved login the slow work used: rejected once its profile no longer holds it.
-    login: Option<HeldLogin>,
+pub struct Ticket(Guarded);
+#[derive(Clone)]
+enum Guarded {
+    /// The sign-in epoch the ticket was taken at: any account change since rejects it.
+    Epoch(u64),
+    /// The epoch, and a saved profile still holding the login a usage reading was made with.
+    Reading { epoch: u64, held: HeldLogin },
+    /// A saved profile still holding the login that was renewed, and still owning its renewal.
+    /// There is no epoch to compare: the renewal has spent the refresh token by the time it
+    /// publishes, so an account change that left this profile alone must not reject it.
+    Renewal(HeldLogin),
 }
 #[derive(Clone)]
 struct HeldLogin {
     id: String,
     identity: Identity,
     fingerprint: String,
-    /// The profile must also still own its private renewal.
-    renewal: bool,
 }
 impl HeldLogin {
-    fn of(profile: &Profile, login: &Login, renewal: bool) -> Self {
+    fn of(profile: &Profile, login: &Login) -> Self {
         Self {
             id: profile.id.clone(),
             identity: profile.identity.clone(),
             fingerprint: login.fingerprint(),
-            renewal,
         }
     }
-    fn held_by(&self, profile: &Profile) -> bool {
-        profile.id == self.id
-            && profile.identity == self.identity
-            && profile.login.as_ref().map(Login::fingerprint).as_ref() == Some(&self.fingerprint)
-            && (!self.renewal || profile.usage_renewal_owned)
+    /// The saved profile that still holds this login, if one does.
+    fn in_vault<'db>(&self, db: &'db Database) -> Option<&'db Profile> {
+        db.profiles.iter().find(|profile| {
+            profile.id == self.id
+                && profile.identity == self.identity
+                && profile.login.as_ref().map(Login::fingerprint).as_ref()
+                    == Some(&self.fingerprint)
+        })
     }
 }
 
@@ -118,13 +144,16 @@ pub enum Guard<'a> {
 }
 
 impl Ticket {
-    /// This ticket, also rejected once `profile` no longer holds `login`: the generation a usage
-    /// reading was made with.
+    /// This ticket, now also rejected once `profile` no longer holds `login`: the generation a
+    /// usage reading was made with. A renewal's ticket moves to that login, still without an epoch.
     pub fn holding(&self, profile: &Profile, login: &Login) -> Self {
-        Self {
-            epoch: self.epoch,
-            login: Some(HeldLogin::of(profile, login, false)),
-        }
+        let held = HeldLogin::of(profile, login);
+        Self(match self.0 {
+            Guarded::Epoch(epoch) | Guarded::Reading { epoch, .. } => {
+                Guarded::Reading { epoch, held }
+            }
+            Guarded::Renewal(_) => Guarded::Renewal(held),
+        })
     }
 }
 impl Login {
@@ -248,20 +277,14 @@ impl Database {
                 if self.recovery.is_some() {
                     return Err(RECOVER_FIRST.into());
                 }
-                Ok(Ticket {
-                    epoch: Some(self.login_epoch),
-                    login: None,
-                })
+                Ok(Ticket(Guarded::Epoch(self.login_epoch)))
             }
             Guard::Renewal(profile) => {
                 let login = profile
                     .login
                     .as_ref()
                     .ok_or("Sign in again to refresh this account.")?;
-                let ticket = Ticket {
-                    epoch: None,
-                    login: Some(HeldLogin::of(profile, login, true)),
-                };
+                let ticket = Ticket(Guarded::Renewal(HeldLogin::of(profile, login)));
                 self.check(&ticket)
                     .map_err(|_| "The saved login changed before renewal.")?;
                 Ok(ticket)
@@ -270,34 +293,32 @@ impl Database {
     }
     /// Whether this vault still vouches for `ticket`.
     fn check(&self, ticket: &Ticket) -> Result<(), String> {
-        let holds = self.recovery.is_none()
-            && ticket.epoch.is_none_or(|epoch| epoch == self.login_epoch)
-            && ticket
-                .login
-                .as_ref()
-                .is_none_or(|held| self.profiles.iter().any(|p| held.held_by(p)));
-        if holds {
-            return Ok(());
-        }
-        Err(match ticket.epoch {
-            Some(_) => SIGN_IN_CHANGED,
-            None if self.recovery.is_some() => "An account change needs recovery.",
-            None => "The saved login changed meanwhile.",
-        }
-        .into())
-    }
-    /// Refuses `kind` when its rule does, then bumps the sign-in epoch unless it is a metadata edit.
-    fn admit(&mut self, kind: &ChangeKind<'_>) -> Result<(), String> {
-        match kind {
-            ChangeKind::Account if self.recovery.is_some() => return Err(RECOVER_FIRST.into()),
-            ChangeKind::SignIn(ticket) => self.check(ticket)?,
-            ChangeKind::Recovery if self.recovery.is_none() => {
-                return Err("No recovery is pending.".into())
+        let recovering = self.recovery.is_some();
+        match &ticket.0 {
+            Guarded::Epoch(epoch) if recovering || *epoch != self.login_epoch => {
+                Err(SIGN_IN_CHANGED.into())
             }
-            ChangeKind::Metadata => return Ok(()),
-            _ => {}
+            Guarded::Reading { epoch, held }
+                if recovering || *epoch != self.login_epoch || held.in_vault(self).is_none() =>
+            {
+                Err("The account state changed while usage was read.".into())
+            }
+            Guarded::Renewal(_) if recovering => Err("An account change needs recovery.".into()),
+            Guarded::Renewal(held)
+                if !held.in_vault(self).is_some_and(|p| p.usage_renewal_owned) =>
+            {
+                Err("The saved login changed during renewal.".into())
+            }
+            Guarded::Epoch(_) | Guarded::Reading { .. } | Guarded::Renewal(_) => Ok(()),
         }
-        self.invalidate_logins()
+    }
+    /// Refuses `kind` by its rule, then bumps the sign-in epoch if the kind does.
+    fn admit(&mut self, kind: &ChangeKind<'_>) -> Result<(), String> {
+        kind.gate(self)?;
+        if kind.bumps() {
+            self.invalidate_logins()?;
+        }
+        Ok(())
     }
     fn invalidate_logins(&mut self) -> Result<(), String> {
         self.login_epoch = self
