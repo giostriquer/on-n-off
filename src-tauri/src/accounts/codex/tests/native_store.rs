@@ -270,3 +270,51 @@ fn a_codex_api_key_login_is_signed_in_with_no_subscription() {
         "a blank key is not an API-key login, but no subscription profile either"
     );
 }
+
+/// What a command runs its program with.
+fn args(command: &Command) -> Vec<String> {
+    command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// The official client signs in, reports its login and signs out with its own commands, each in
+/// the home it is started for.
+#[test]
+fn codex_signs_in_reports_and_signs_out_through_its_own_commands() {
+    let root = tempfile::tempdir().unwrap();
+    let isolated = CodexNative::isolated(root.path()).unwrap();
+    let sign_in = isolated.sign_in();
+    assert_eq!(args(&sign_in), ["login"]);
+    assert_eq!(
+        command_env(&sign_in).get("CODEX_HOME"),
+        Some(&Some(root.path().join(".codex").into_os_string()))
+    );
+
+    let store = CodexNative::resolve(root.path()).unwrap();
+    assert_eq!(args(&store.logout_command()), ["logout"]);
+    assert_eq!(args(&store.status_command()), ["login", "status"]);
+    assert_eq!(
+        command_env(&store.status_command()).get("CODEX_HOME"),
+        Some(&Some(root.path().join(".codex").into_os_string()))
+    );
+}
+
+/// A running Codex client renews its login within ten minutes of its access token's expiry, so
+/// the switch beside it treats such a login as about to be rewritten; one good for an hour is not.
+#[test]
+fn a_codex_login_close_to_its_access_tokens_expiry_renews_soon() {
+    let root = tempfile::tempdir().unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
+    let now = chrono::Utc::now().timestamp();
+    let expiring = |exp: i64| Login {
+        auth: json!({"tokens": {
+            "access_token": format!("header.{}.signature", URL_SAFE_NO_PAD.encode(json!({"exp": exp}).to_string())),
+            "refresh_token": "refresh",
+        }}),
+        account: Value::Null,
+    };
+    assert!(!store.renews_soon(&expiring(now + 3600)), "an hour ahead");
+    assert!(store.renews_soon(&expiring(now + 60)), "within a minute");
+}

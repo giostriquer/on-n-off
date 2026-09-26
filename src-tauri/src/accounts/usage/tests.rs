@@ -390,10 +390,10 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
     }
 }
 
-/// A native API-key login is no subscription (`codex::CodexNative::subscription`), so it excludes
-/// no saved account from polling.
+/// A CLI signed in with no subscription login, an API key among them
+/// (`codex::CodexNative::subscription`), excludes no saved account from polling.
 #[test]
-fn native_api_key_login_does_not_block_saved_subscription_polling() {
+fn a_cli_without_a_subscription_login_excludes_no_saved_account_from_polling() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let home = tempfile::tempdir().unwrap();
     let mut p = stored(home.path());

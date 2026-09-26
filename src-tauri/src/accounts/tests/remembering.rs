@@ -69,3 +69,21 @@ fn turning_remembering_on_or_off_is_announced() {
         [(Heard::Accounts, true), (Heard::Accounts, true)]
     );
 }
+
+/// A sign-out whose logout failed leaves the CLI signed in with the generation it forgot; that
+/// generation, as its own provider fingerprints it, is not remembered again.
+#[test]
+fn a_codex_generation_signed_out_of_is_not_remembered_again() {
+    let harness = Harness::new();
+    harness.saved(identity(AgentId::Codex, "a", "team"), codex("a", "c1"));
+    harness.signed_in(Some(codex("a", "c2")));
+    *harness.native.logout_error.borrow_mut() = Some("logout failed".into());
+    assert!(harness.accounts().sign_out(AgentId::Codex).is_err());
+    assert_eq!(harness.live(), Some("c2".into()));
+    remembering(&harness, true);
+    harness.heard();
+
+    assert_eq!(harness.accounts().remember(AgentId::Codex), Ok(false));
+    assert!(harness.vault().profiles[0].login.is_none());
+    assert!(harness.heard().is_empty());
+}

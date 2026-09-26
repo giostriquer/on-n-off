@@ -612,3 +612,30 @@ fn account_changes_refuse_managed_claude_settings_that_force_how_it_signs_in() {
         assert_eq!(preflight().err().as_deref(), refusal, "{content}");
     }
 }
+
+/// What a command runs its program with.
+fn args(command: &Command) -> Vec<String> {
+    command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// The official client signs in with its claude.ai login and signs out with its own command, both
+/// in the store they are started for.
+#[test]
+fn claude_signs_in_and_out_through_its_own_auth_commands() {
+    let root = tempfile::tempdir().unwrap();
+    let isolated = ClaudeNative::isolated(root.path()).unwrap();
+    let sign_in = isolated.sign_in();
+    assert_eq!(args(&sign_in), ["auth", "login", "--claudeai"]);
+    assert_eq!(
+        command_env(&sign_in).get("CLAUDE_CONFIG_DIR"),
+        Some(&Some(root.path().join(".claude").into_os_string()))
+    );
+
+    let store = claude(root.path());
+    let logout = store.logout_command();
+    assert_eq!(args(&logout), ["auth", "logout"]);
+    assert_eq!(logout.get_current_dir(), Some(store.config_home.as_path()));
+}

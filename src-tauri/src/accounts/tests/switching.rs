@@ -38,7 +38,10 @@ fn using_a_profile_publishes_its_login_and_keeps_the_latest_outgoing_one() {
     assert_eq!(login(&b), Some("b1".into()));
     assert!(vault.recovery().is_none());
     assert!(!harness.vouches(&sign_in));
-    assert_eq!(*harness.clients.asked.borrow(), ["activation safe"]);
+    assert_eq!(
+        *harness.clients.asked.borrow(),
+        [("activation safe", AgentId::Claude)]
+    );
     assert_eq!(*harness.native.resolved.borrow(), [AgentId::Claude]);
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
@@ -67,7 +70,10 @@ fn running_clients_refuse_an_ordinary_switch_but_not_one_made_beside_them() {
         .activate(AgentId::Claude, &elsewhere, Activation::AlongsideClients)
         .unwrap();
     assert_eq!(harness.live(), Some("e1".into()));
-    assert_eq!(*harness.clients.asked.borrow(), ["activation safe"]);
+    assert_eq!(
+        *harness.clients.asked.borrow(),
+        [("activation safe", AgentId::Claude)]
+    );
 }
 
 #[test]
@@ -174,7 +180,10 @@ fn recovery_restores_the_outgoing_login_with_clients_closed() {
     assert_eq!(harness.live(), Some("a2".into()));
     assert!(harness.vault().recovery().is_none());
     assert!(!harness.vouches(&sign_in));
-    assert_eq!(*harness.clients.asked.borrow(), ["closed"]);
+    assert_eq!(
+        *harness.clients.asked.borrow(),
+        [("closed", AgentId::Claude)]
+    );
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
@@ -274,7 +283,10 @@ fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
         [fingerprint(AgentId::Claude, &claude("a", "a2"))]
     );
     assert!(!harness.vouches(&sign_in));
-    assert_eq!(*harness.clients.asked.borrow(), ["closed"]);
+    assert_eq!(
+        *harness.clients.asked.borrow(),
+        [("closed", AgentId::Claude)]
+    );
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
@@ -289,6 +301,10 @@ fn signing_out_one_provider_leaves_the_other_providers_logins() {
     harness.accounts().sign_out(AgentId::Codex).unwrap();
 
     assert_eq!(*harness.native.resolved.borrow(), [AgentId::Codex]);
+    assert_eq!(
+        *harness.clients.asked.borrow(),
+        [("closed", AgentId::Codex)]
+    );
     let vault = harness.vault();
     let kept = |id: &str| {
         vault
@@ -300,6 +316,11 @@ fn signing_out_one_provider_leaves_the_other_providers_logins() {
             .is_some()
     };
     assert!(kept(&claude_a) && !kept(&codex_a));
+    assert_eq!(
+        vault.ignored_credentials,
+        [fingerprint(AgentId::Codex, &codex("a", "c2"))],
+        "the signed-out generation, as Codex fingerprints it"
+    );
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Codex), true)]);
 }
 

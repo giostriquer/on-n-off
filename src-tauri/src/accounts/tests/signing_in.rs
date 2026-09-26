@@ -88,7 +88,11 @@ fn an_abandoned_sign_in_home_is_cleaned_only_once_its_clients_are_closed() {
     harness.accounts().list(AgentId::Claude).unwrap();
     assert!(dir.exists());
     assert_eq!(harness.native.cleaned.get(), 0);
-    assert_eq!(*harness.clients.asked.borrow(), ["closed"]);
+    assert_eq!(
+        *harness.clients.asked.borrow(),
+        [("closed", AgentId::Codex)],
+        "the abandoned home's own provider's clients"
+    );
 
     harness.clients.running.set(false);
     harness.accounts().list(AgentId::Claude).unwrap();

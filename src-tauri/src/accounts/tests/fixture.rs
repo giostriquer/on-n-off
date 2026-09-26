@@ -179,16 +179,16 @@ impl IsolatedSignIn for FakeIsolated {
     }
 }
 
-/// Running clients: which checks were asked, and whether they refuse.
+/// Running clients: which checks were asked for which provider, and whether they refuse.
 #[derive(Default)]
 pub(super) struct ClientState {
     pub running: Cell<bool>,
-    pub asked: RefCell<Vec<&'static str>>,
+    pub asked: RefCell<Vec<(&'static str, AgentId)>>,
 }
 struct FakeClients(Rc<ClientState>);
 impl FakeClients {
-    fn ask(&self, check: &'static str) -> Result<(), String> {
-        self.0.asked.borrow_mut().push(check);
+    fn ask(&self, check: &'static str, provider: AgentId) -> Result<(), String> {
+        self.0.asked.borrow_mut().push((check, provider));
         if self.0.running.get() {
             Err("Close this provider's clients.".into())
         } else {
@@ -197,11 +197,11 @@ impl FakeClients {
     }
 }
 impl Clients for FakeClients {
-    fn activation_safe(&self, _: AgentId) -> Result<(), String> {
-        self.ask("activation safe")
+    fn activation_safe(&self, provider: AgentId) -> Result<(), String> {
+        self.ask("activation safe", provider)
     }
-    fn closed(&self, _: AgentId) -> Result<(), String> {
-        self.ask("closed")
+    fn closed(&self, provider: AgentId) -> Result<(), String> {
+        self.ask("closed", provider)
     }
 }
 
