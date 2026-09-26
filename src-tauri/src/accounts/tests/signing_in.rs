@@ -98,8 +98,15 @@ fn an_abandoned_sign_in_home_is_cleaned_only_once_its_clients_are_closed() {
     harness.accounts().list(AgentId::Claude).unwrap();
     assert!(!dir.exists());
     assert_eq!(harness.native.cleaned.get(), 1);
-    assert_eq!(*harness.native.isolated.borrow(), [dir]);
-    assert!(harness.native.resolved.borrow().contains(&AgentId::Codex));
+    assert_eq!(
+        *harness.native.isolated.borrow(),
+        [(AgentId::Codex, dir.clone()), (AgentId::Codex, dir)],
+        "each listing resolved the home's own provider's isolated store"
+    );
+    assert!(
+        !harness.native.resolved.borrow().contains(&AgentId::Codex),
+        "cleaning a sign-in's home resolves no user store"
+    );
 }
 
 /// A home marked for a provider with no saved profiles is not one on-n-off made: it is left

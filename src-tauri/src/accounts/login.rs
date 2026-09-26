@@ -169,7 +169,7 @@ impl super::Accounts {
             .prefix("login-")
             .tempdir_in(&root)
             .map_err(|_| "Cannot prepare isolated sign-in.")?;
-        let isolated = native.isolated(scratch.path())?;
+        let isolated = self.isolated(provider, scratch.path())?;
         let lease_file = std::fs::OpenOptions::new()
             .create_new(true)
             .read(true)
@@ -257,16 +257,14 @@ impl super::Accounts {
             else {
                 continue;
             };
-            // Only a provider with saved profiles resolves a native store.
-            let Ok(native) = self.native(provider) else {
+            // Only a provider with saved profiles has an isolated store. The home a sign-in left
+            // already holds its store's directory, so resolving it creates nothing.
+            let Ok(isolated) = self.isolated(provider, &path) else {
                 continue;
             };
             if self.clients.closed(provider).is_err() {
                 continue;
             }
-            let Ok(isolated) = native.isolated(&path) else {
-                continue;
-            };
             if isolated.clean().is_ok() {
                 drop(lease);
                 let _ = std::fs::remove_dir_all(path);

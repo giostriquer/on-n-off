@@ -36,6 +36,10 @@ impl super::Adapter for Claude {
         Ok(Box::new(ClaudeNative::resolve(home)?))
     }
 
+    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        Ok(Box::new(ClaudeNative::isolated(dir)?))
+    }
+
     fn login<'a>(&self, login: &'a Login) -> Box<dyn LoginView + 'a> {
         Box::new(ClaudeLogin::of(login))
     }
@@ -401,10 +405,6 @@ impl NativeAccount for ClaudeNative {
 
     fn logout(&self) -> Result<(), String> {
         native::run(&mut self.logout_command(), Duration::from_secs(45)).map(|_| ())
-    }
-
-    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
-        Ok(Box::new(Self::isolated(dir)?))
     }
 }
 

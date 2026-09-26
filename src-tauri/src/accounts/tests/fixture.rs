@@ -5,7 +5,7 @@ use super::super::{
     model::Identity,
     store::{ChangeKind, Database, Guard, Login, Store, Ticket},
     transaction::{Native, NativeGuard, Recovery},
-    Accounts, Clients, IsolatedSignIn, NativeAccount, Notify,
+    Accounts, Clients, IsolatedSignIn, NativeAccount, NativeStores, Notify,
 };
 use crate::dto::AgentId;
 use serde_json::json;
@@ -93,8 +93,8 @@ pub(super) struct NativeState {
     pub signed_in: RefCell<Option<Login>>,
     /// How the official sign-in exits.
     pub sign_in_exit: Cell<i32>,
-    /// The directories isolated stores were made in, and how many were cleaned.
-    pub isolated: RefCell<Vec<PathBuf>>,
+    /// Which provider's isolated store was made in which directory, and how many were cleaned.
+    pub isolated: RefCell<Vec<(AgentId, PathBuf)>>,
     pub cleaned: Cell<usize>,
 }
 /// The native store of the provider it was resolved for, reading logins by that provider's rules.
@@ -135,9 +135,24 @@ impl NativeAccount for FakeNative {
         *self.0.live.borrow_mut() = None;
         Ok(())
     }
-    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
-        self.0.isolated.borrow_mut().push(dir.into());
-        Ok(Box::new(FakeIsolated(self.clone(), dir.into())))
+}
+
+/// The stores the operations resolve: fakes over one shared state, and only for a provider with
+/// an adapter, as the live resolver has.
+struct FakeStores(Rc<NativeState>);
+impl NativeStores for FakeStores {
+    fn native(&self, provider: AgentId, _: &Path) -> Result<Box<dyn NativeAccount>, String> {
+        super::super::adapter(provider)?;
+        self.0.resolved.borrow_mut().push(provider);
+        Ok(Box::new(FakeNative(self.0.clone(), provider)))
+    }
+    fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        super::super::adapter(provider)?;
+        self.0.isolated.borrow_mut().push((provider, dir.into()));
+        Ok(Box::new(FakeIsolated(
+            FakeNative(self.0.clone(), provider),
+            dir.into(),
+        )))
     }
 }
 
@@ -268,15 +283,9 @@ impl Harness {
         self.home.path()
     }
     pub fn accounts(&self) -> Accounts {
-        let native = self.native.clone();
         Accounts {
             home: self.path().into(),
-            // Only a provider with an adapter has a native store, as in the live resolver.
-            native: Box::new(move |provider, _| {
-                super::super::adapter(provider)?;
-                native.resolved.borrow_mut().push(provider);
-                Ok(Box::new(FakeNative(native.clone(), provider)))
-            }),
+            stores: Box::new(FakeStores(self.native.clone())),
             clients: Box::new(FakeClients(self.clients.clone())),
             notify: Box::new(Listener(self.recorder.clone())),
         }

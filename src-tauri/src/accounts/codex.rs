@@ -31,6 +31,10 @@ impl super::Adapter for Codex {
         Ok(Box::new(CodexNative::resolve(home)?))
     }
 
+    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        Ok(Box::new(CodexNative::isolated(dir)?))
+    }
+
     fn login<'a>(&self, login: &'a Login) -> Box<dyn LoginView + 'a> {
         Box::new(CodexLogin::of(login))
     }
@@ -243,10 +247,6 @@ impl NativeAccount for CodexNative {
 
     fn logout(&self) -> Result<(), String> {
         native::run(&mut self.logout_command(), Duration::from_secs(45)).map(|_| ())
-    }
-
-    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
-        Ok(Box::new(Self::isolated(dir)?))
     }
 
     /// An API-key login has no subscription, so it is no one's: every saved account is read.

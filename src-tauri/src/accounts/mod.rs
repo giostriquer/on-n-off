@@ -69,6 +69,8 @@ const PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 trait Adapter: Sync {
     /// The provider's native store under `home`, where this process's environment puts it.
     fn native(&self, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
+    /// The provider's store in `dir`, private to one isolated sign-in, created there.
+    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
     /// `login` read by this provider's rules.
     fn login<'a>(&self, login: &'a store::Login) -> Box<dyn model::LoginView + 'a>;
     /// How this provider's client processes are told apart, and whether they refuse a switch.
@@ -100,16 +102,13 @@ fn view(provider: AgentId, login: &store::Login) -> Result<Box<dyn model::LoginV
 }
 
 /// A provider's native store as the account operations use it: the activation transaction's
-/// `Native`, plus the check an operation makes before touching it, the official sign-out, and the
-/// private store an isolated sign-in runs in.
+/// `Native`, plus the check an operation makes before touching it and the official sign-out.
 trait NativeAccount: Native {
     /// Refuses a native setup on-n-off leaves to the official client: a custom home, an
     /// environment credential or a managed login policy.
     fn preflight(&self) -> Result<(), String>;
     /// Signs the CLI out through its own command.
     fn logout(&self) -> Result<(), String>;
-    /// The provider's store in `dir`, private to one isolated sign-in, created there.
-    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
     /// Who the CLI is signed in as with a subscription, whose saved accounts' usage is read
     /// beside it: `None` when it is signed out, or signed in some way that has no subscription.
     fn subscription(&self) -> Result<Option<model::Identity>, String> {
@@ -130,7 +129,8 @@ trait IsolatedSignIn: Native {
         login: &store::Login,
         identity: &model::Identity,
     ) -> Option<crate::dto::ProviderLimitsDto>;
-    /// Removes what the sign-in left outside `dir`: a scoped Keychain entry.
+    /// Removes anything the sign-in left outside `dir`, such as the scoped Keychain entry a Claude
+    /// sign-in files on macOS.
     fn clean(&self) -> Result<(), String>;
 }
 
@@ -151,14 +151,32 @@ trait Notify {
     fn accounts(&self);
 }
 
-type ResolveNative = Box<dyn Fn(AgentId, &Path) -> Result<Box<dyn NativeAccount>, String>>;
+/// Where the account operations find a provider's native stores: the user's own, and the private
+/// one an isolated sign-in runs in.
+trait NativeStores {
+    /// `provider`'s native store under `home`.
+    fn native(&self, provider: AgentId, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
+    /// `provider`'s store in `dir`, private to one isolated sign-in, created there.
+    fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
+}
+
+/// The native stores each provider's adapter resolves.
+struct AdapterStores;
+impl NativeStores for AdapterStores {
+    fn native(&self, provider: AgentId, home: &Path) -> Result<Box<dyn NativeAccount>, String> {
+        adapter(provider)?.native(home)
+    }
+    fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        adapter(provider)?.isolated(dir)
+    }
+}
 
 /// The account operations over one home, with what they reach outside the vault: the provider's
-/// native store, its running clients, and whoever hears about a change. `live` builds it from the
+/// native stores, its running clients, and whoever hears about a change. `live` builds it from the
 /// real ones; tests build it from a scratch home and fakes.
 struct Accounts {
     home: PathBuf,
-    native: ResolveNative,
+    stores: Box<dyn NativeStores>,
     clients: Box<dyn Clients>,
     notify: Box<dyn Notify>,
 }
@@ -188,13 +206,16 @@ impl Accounts {
     fn live() -> Result<Self, String> {
         Ok(Self {
             home: home()?,
-            native: Box::new(|provider, home| adapter(provider)?.native(home)),
+            stores: Box::new(AdapterStores),
             clients: Box::new(RunningClients),
             notify: Box::new(Announce),
         })
     }
     fn native(&self, provider: AgentId) -> Result<Box<dyn NativeAccount>, String> {
-        (self.native)(provider, &self.home)
+        self.stores.native(provider, &self.home)
+    }
+    fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        self.stores.isolated(provider, dir)
     }
 }
 

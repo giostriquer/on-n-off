@@ -188,9 +188,25 @@ fn untouched(home: &Path) -> super::super::Accounts {
             panic!("announced a change")
         }
     }
+    impl super::super::NativeStores for Untouched {
+        fn native(
+            &self,
+            _: AgentId,
+            _: &Path,
+        ) -> Result<Box<dyn super::super::NativeAccount>, String> {
+            panic!("resolved a native store")
+        }
+        fn isolated(
+            &self,
+            _: AgentId,
+            _: &Path,
+        ) -> Result<Box<dyn super::super::IsolatedSignIn>, String> {
+            panic!("resolved a native store")
+        }
+    }
     super::super::Accounts {
         home: home.into(),
-        native: Box::new(|_, _| panic!("resolved a native store")),
+        stores: Box::new(Untouched),
         clients: Box::new(Untouched),
         notify: Box::new(Untouched),
     }
