@@ -40,7 +40,7 @@ fn codex_item(secret: Option<&'static str>) -> impl Fn(&str) -> crate::process::
 fn codex_keyring_storage_is_the_item_codex_files_for_this_home() {
     use crate::accounts::keychain::with_test_runner;
     let root = tempfile::tempdir().unwrap();
-    let store = NativeStore::resolve(root.path()).unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
     fs::create_dir_all(&store.config_home).unwrap();
     fs::write(&store.config_file, "cli_auth_credentials_store = 'keyring'").unwrap();
     fs::write(
@@ -98,7 +98,7 @@ fn codex_keyring_storage_is_the_item_codex_files_for_this_home() {
 fn codex_auto_storage_prefers_the_keychain_item_and_falls_back_to_the_file() {
     use crate::accounts::keychain::with_test_runner;
     let root = tempfile::tempdir().unwrap();
-    let store = NativeStore::resolve(root.path()).unwrap();
+    let store = CodexNative::resolve(root.path()).unwrap();
     fs::create_dir_all(&store.config_home).unwrap();
     fs::write(&store.config_file, "cli_auth_credentials_store = 'auto'").unwrap();
     fs::write(

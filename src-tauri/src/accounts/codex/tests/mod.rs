@@ -1,6 +1,33 @@
 use super::*;
 use serde_json::json;
 
+/// What account changes say about a native home the environment chose.
+const CUSTOM_HOME: &str = "Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.";
+
+/// An environment holding exactly `vars`, for `resolve_from`.
+fn environment<'a>(
+    vars: &'a [(&'a str, PathBuf)],
+) -> impl Fn(&str) -> Option<std::ffi::OsString> + 'a {
+    move |name| {
+        vars.iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.clone().into_os_string())
+    }
+}
+
+/// The environment a command reads, as the child will see it: `Some(None)` is a variable removed.
+fn command_env(command: &Command) -> std::collections::HashMap<String, Option<std::ffi::OsString>> {
+    command
+        .get_envs()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.map(std::ffi::OsStr::to_os_string),
+            )
+        })
+        .collect()
+}
+
 /// An unsigned ID token whose `https://api.openai.com/auth` claims are `claims`, shaped the way
 /// `CodexLogin` decodes it: fixtures across the crate build their logins from it.
 pub(crate) fn id_token(claims: &Value) -> String {
@@ -217,3 +244,7 @@ fn codex_claims_come_only_from_the_exact_saved_login_after_vault_reload() {
         "a legacy key names no profile"
     );
 }
+
+#[cfg(target_os = "macos")]
+mod keychain;
+mod native_store;

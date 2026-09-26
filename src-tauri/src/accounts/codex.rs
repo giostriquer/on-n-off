@@ -1,25 +1,244 @@
 //! The Codex adapter: Codex's half of the accounts seam. It reads a Codex login by Codex's rules
-//! ([`CodexLogin`]): `auth.json` as Codex writes it, whose ID token's claims say who it is.
+//! ([`CodexLogin`]): `auth.json` as Codex writes it, whose ID token's claims say who it is. And it
+//! is the account switch's view of Codex's native store ([`CodexNative`]): which home the
+//! environment selects and when account changes defer to the official client, the `codex` it
+//! starts, the read, the write and its verification, and an isolated sign-in. Which backend holds
+//! the login is `codex_store`'s question; this adapter asks it.
 use super::{
+    codex_store,
     model::{self, AccessToken, Identity, LoginView},
+    native::{self, CUSTOM_HOME},
     store::{Login, Store},
-    usage_renew,
+    transaction::{Native, NativeGuard, ReadBack},
+    usage_renew, IsolatedSignIn, NativeAccount,
 };
-use crate::dto::AgentId;
+use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde_json::Value;
-use std::path::Path;
+use std::{
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 /// Codex's adapter.
 pub(super) struct Codex;
 
 impl super::Adapter for Codex {
-    fn native(&self, home: &Path) -> Result<Box<dyn super::NativeAccount>, String> {
-        Ok(Box::new(super::native::NativeStore::resolve(home)?))
+    fn native(&self, home: &Path) -> Result<Box<dyn NativeAccount>, String> {
+        Ok(Box::new(CodexNative::resolve(home)?))
     }
 
     fn login<'a>(&self, login: &'a Login) -> Box<dyn LoginView + 'a> {
         Box::new(CodexLogin::of(login))
+    }
+}
+
+/// The credentials that override Codex's own login when set in its environment.
+const ENV_CREDENTIALS: [&str; 3] = ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_AUTH_TOKEN"];
+
+/// Where an administrator's managed Codex configuration lives.
+const MANAGED_CONFIG: [&str; 2] = [
+    "/etc/codex/requirements.toml",
+    "/etc/codex/managed_config.toml",
+];
+
+/// Codex's native store as the account switch uses it: the user's own, where the environment
+/// puts it ([`CodexNative::resolve`]), or an isolated sign-in's.
+pub(super) struct CodexNative {
+    config_home: PathBuf,
+    config_file: PathBuf,
+    /// `CODEX_HOME` chose the home, or this is an isolated sign-in's.
+    custom: bool,
+}
+
+impl CodexNative {
+    /// The user's store under `home`, as this process's environment places it.
+    pub(super) fn resolve(home: &Path) -> Result<Self, String> {
+        Self::resolve_from(home, &crate::paths::process_env)
+    }
+
+    fn resolve_from(
+        home: &Path,
+        lookup: &dyn Fn(&str) -> Option<OsString>,
+    ) -> Result<Self, String> {
+        // ON_N_OFF_HOME always isolates tests and development from real native homes.
+        let disposable = lookup("ON_N_OFF_HOME").is_some();
+        let override_home = if disposable {
+            None
+        } else {
+            lookup("CODEX_HOME")
+        };
+        let custom = override_home.is_some();
+        let config_home = override_home
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".codex"));
+        if !config_home.is_absolute() {
+            return Err("The provider home must be an absolute path.".into());
+        }
+        Ok(Self {
+            config_file: codex_store::config_file(&config_home),
+            config_home,
+            custom,
+        })
+    }
+
+    /// A private store in `dir` for one isolated sign-in.
+    fn isolated(dir: &Path) -> Result<Self, String> {
+        let config_home = dir.join(".codex");
+        fs::create_dir_all(&config_home).map_err(|_| "Cannot create isolated login home.")?;
+        Ok(Self {
+            config_file: codex_store::config_file(&config_home),
+            config_home,
+            custom: true,
+        })
+    }
+
+    /// `preflight` against the environment `env` reads and the managed configuration files at
+    /// `managed`.
+    fn preflight_in(
+        &self,
+        env: &dyn Fn(&str) -> Option<OsString>,
+        managed: &[&Path],
+    ) -> Result<(), String> {
+        if self.custom {
+            return Err(CUSTOM_HOME.into());
+        }
+        native::refuse_linked(&self.config_file)?;
+        native::refuse_env_credentials(&ENV_CREDENTIALS, env)?;
+        let config = codex_store::config(&self.config_home)?;
+        for key in [
+            "forced_login_method",
+            "forced_chatgpt_workspace_id",
+            "auth_keyring_backend",
+            "profile",
+        ] {
+            if config.get(key).is_some() {
+                return Err("This Codex installation enforces an authentication policy. Use its official sign-in controls.".into());
+            }
+        }
+        if managed.iter().any(|path| path.exists()) {
+            return Err(
+                "Managed Codex authentication must be changed through the official client.".into(),
+            );
+        }
+        Ok(())
+    }
+
+    /// A `codex` working in this store's home.
+    fn command(&self) -> Command {
+        let mut command = native::cli(AgentId::Codex, "codex");
+        command.env("CODEX_HOME", &self.config_home);
+        command.current_dir(&self.config_home);
+        command
+    }
+
+    /// Whether Codex's own signed-in usage read succeeds: its app-server renews and reads the
+    /// login, so on-n-off never renews a native Codex login itself. `force` skips the shared cache.
+    fn verify_signed_in(&self, force: bool) -> Result<(), String> {
+        let entries = crate::limits::read_limits(AgentId::Codex, force);
+        if entries
+            .iter()
+            .any(|v| v.current_account && v.status == LimitsStatus::Ok)
+        {
+            Ok(())
+        } else {
+            Err("The CLI login could not be verified. Check connectivity or sign in again.".into())
+        }
+    }
+}
+
+impl Native for CodexNative {
+    /// Whatever document the store its config selects holds.
+    fn read(&self) -> Result<Option<Login>, String> {
+        codex_store::read(&self.config_home)
+    }
+
+    fn identify(&self, login: &Login) -> Result<Identity, String> {
+        CodexLogin::of(login).identity()
+    }
+
+    fn write(&self, login: Option<&Login>) -> Result<(), String> {
+        self.write_locked(login, self.lock()?).map(drop)
+    }
+
+    /// The login's document, verbatim, to the store its config selects.
+    fn write_locked(
+        &self,
+        login: Option<&Login>,
+        locks: Box<dyn NativeGuard>,
+    ) -> Result<ReadBack, String> {
+        locks.ensure()?;
+        codex_store::target(&self.config_home)?.write(login.map(|l| &l.auth))?;
+        let back = self.read();
+        drop(locks);
+        Ok(back)
+    }
+
+    fn verify(&self) -> Result<(), String> {
+        if self.custom {
+            return native::run(
+                self.command().args(["login", "status"]),
+                Duration::from_secs(30),
+            )
+            .map(|_| ());
+        }
+        self.verify_signed_in(true)
+    }
+
+    fn renews_soon(&self, login: &Login) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |v| i64::try_from(v.as_secs()).unwrap_or(i64::MAX));
+        CodexLogin::of(login).renews_soon(now)
+    }
+
+    fn verify_observed(&self) -> Result<(), String> {
+        if self.custom {
+            self.verify()
+        } else {
+            self.verify_signed_in(false)
+        }
+    }
+}
+
+impl NativeAccount for CodexNative {
+    fn preflight(&self) -> Result<(), String> {
+        let managed = MANAGED_CONFIG.map(Path::new);
+        self.preflight_in(&crate::paths::process_env, &managed)
+    }
+
+    fn logout(&self) -> Result<(), String> {
+        native::run(self.command().arg("logout"), Duration::from_secs(45)).map(|_| ())
+    }
+
+    fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
+        Ok(Box::new(Self::isolated(dir)?))
+    }
+}
+
+impl IsolatedSignIn for CodexNative {
+    fn sign_in(&self) -> Command {
+        let mut command = self.command();
+        command.arg("login");
+        command
+    }
+
+    /// Read by Codex's own app-server in `dir`, which needs nothing from the login itself.
+    fn first_usage(
+        &self,
+        dir: &Path,
+        _login: &Login,
+        identity: &Identity,
+    ) -> Option<ProviderLimitsDto> {
+        crate::limits::login::read(dir, identity, None)
+    }
+
+    /// Codex keeps an isolated login inside its home, so nothing is left outside it.
+    fn clean(&self) -> Result<(), String> {
+        Ok(())
     }
 }
 
