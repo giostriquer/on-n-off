@@ -384,51 +384,20 @@ fn claude_limits(
                 selected_identity.as_ref(),
                 profile_url,
                 usage_url,
-                ClaudeHeaders::SignedIn,
             )
         },
     )
 }
 
-/// The headers a Claude read sends beside its token.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ClaudeHeaders {
-    /// The signed-in read's, which the first usage after a sign-in shares: a JSON content type and
-    /// no cached answer on the profile request, the OAuth beta header and no cached answer on the
-    /// usage request.
-    SignedIn,
-    /// A saved profile's: the OAuth beta header on both requests.
-    Saved,
-}
-
-impl ClaudeHeaders {
-    fn profile(self, bearer: &str) -> Vec<(&str, &str)> {
-        match self {
-            Self::SignedIn => vec![
-                ("Authorization", bearer),
-                ("Content-Type", "application/json"),
-                ("Cache-Control", "no-cache"),
-            ],
-            Self::Saved => vec![
-                ("Authorization", bearer),
-                ("anthropic-beta", "oauth-2025-04-20"),
-            ],
-        }
-    }
-
-    fn usage(self, bearer: &str) -> Vec<(&str, &str)> {
-        match self {
-            Self::SignedIn => vec![
-                ("Authorization", bearer),
-                ("anthropic-beta", "oauth-2025-04-20"),
-                ("Cache-Control", "no-cache"),
-            ],
-            Self::Saved => vec![
-                ("Authorization", bearer),
-                ("anthropic-beta", "oauth-2025-04-20"),
-            ],
-        }
-    }
+/// The headers every Claude request on-n-off sends with a login, given its `Authorization` value:
+/// the OAuth beta header Anthropic's OAuth endpoints expect, and no cached answer. The Limits reads
+/// and the account switch's verification (`accounts/claude.rs`) all send these.
+pub(crate) fn claude_headers(authorization: &str) -> [(&'static str, &str); 3] {
+    [
+        ("Authorization", authorization),
+        ("anthropic-beta", "oauth-2025-04-20"),
+        ("Cache-Control", "no-cache"),
+    ]
 }
 
 /// One Claude read with `credential`: its profile, which must be `expected` when an account is
@@ -439,10 +408,10 @@ fn claude_read(
     expected: Option<&ClaudeIdentity>,
     profile_url: &str,
     usage_url: &str,
-    headers: ClaudeHeaders,
 ) -> Result<Parsed, ProviderLoadError> {
     let bearer = format!("Bearer {}", credential.token);
-    let profile_payload = get_json(profile_url, &headers.profile(&bearer))?;
+    let headers = claude_headers(&bearer);
+    let profile_payload = get_json(profile_url, &headers)?;
     let claude::ClaudeProfile {
         identity: profile,
         subscription_status,
@@ -453,7 +422,7 @@ fn claude_read(
     }) {
         return Err(ProviderLoadError::AccountMismatch);
     }
-    let usage = claude_usage(usage_url, &headers.usage(&bearer))?;
+    let usage = claude_usage(usage_url, &headers)?;
     Ok(Parsed {
         account: Some(profile.account),
         reading: Reading {
@@ -498,7 +467,6 @@ fn read_saved_claude_at(
         Some(&expected_claude_identity(identity)),
         profile_url,
         usage_url,
-        ClaudeHeaders::Saved,
     )
     .map_err(|error| match error {
         ProviderLoadError::Http(error) => error,

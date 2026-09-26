@@ -300,6 +300,27 @@ fn account_of(dto: &ProviderLimitsDto) -> LimitsAccountDto {
     dto.account.clone().expect("account")
 }
 
+/// The one header set every Claude request sends: the token, the OAuth beta header, and no cached
+/// answer. A GET states no content type.
+fn assert_claude_headers(head: &str, authorization: &str) {
+    assert_eq!(
+        head_header(head, "authorization"),
+        Some(authorization),
+        "{head}"
+    );
+    assert_eq!(
+        head_header(head, "anthropic-beta"),
+        Some("oauth-2025-04-20"),
+        "{head}"
+    );
+    assert_eq!(
+        head_header(head, "cache-control"),
+        Some("no-cache"),
+        "{head}"
+    );
+    assert_eq!(head_header(head, "content-type"), None, "{head}");
+}
+
 #[test]
 fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
     let home = scratch_dir("limits-claude");
@@ -310,48 +331,9 @@ fn claude_pipeline_sends_the_oauth_headers_and_maps_the_payload() {
     let dto = claude_limits(lookup, &None, &profile_url, &usage_url).dto;
     let profile_head = profile_request.join().unwrap();
     let usage_head = usage_request.join().unwrap();
-    assert_eq!(
-        head_header(&profile_head, "authorization"),
-        Some("Bearer kc-token"),
-        "{profile_head}"
-    );
-    assert_eq!(
-        head_header(&profile_head, "cache-control"),
-        Some("no-cache"),
-        "{profile_head}"
-    );
-    assert_eq!(
-        head_header(&usage_head, "authorization"),
-        Some("Bearer kc-token"),
-        "{usage_head}"
-    );
-    assert_eq!(
-        head_header(&usage_head, "anthropic-beta"),
-        Some("oauth-2025-04-20"),
-        "{usage_head}"
-    );
-    // The profile request states a JSON body it does not send and no OAuth beta; the usage request
-    // asks for no cached answer too.
-    assert_eq!(
-        head_header(&profile_head, "content-type"),
-        Some("application/json"),
-        "{profile_head}"
-    );
-    assert_eq!(
-        head_header(&profile_head, "anthropic-beta"),
-        None,
-        "{profile_head}"
-    );
-    assert_eq!(
-        head_header(&usage_head, "cache-control"),
-        Some("no-cache"),
-        "{usage_head}"
-    );
-    assert_eq!(
-        head_header(&usage_head, "content-type"),
-        None,
-        "{usage_head}"
-    );
+    for head in [&profile_head, &usage_head] {
+        assert_claude_headers(head, "Bearer kc-token");
+    }
     assert_eq!(dto.status, LimitsStatus::Ok, "{:?}", dto.message);
     assert_eq!(dto.reading.plan.as_deref(), Some("max"));
     assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));

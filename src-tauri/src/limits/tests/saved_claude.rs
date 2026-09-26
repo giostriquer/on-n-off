@@ -48,10 +48,9 @@ fn saved_claude_reads_verified_usage_without_a_native_login() {
     );
 }
 
-/// The headers a saved Claude read sends: the token and the OAuth beta header on both requests,
-/// and nothing else of its own.
+/// A saved Claude read sends the one Claude header set on both requests.
 #[test]
-fn saved_claude_sends_the_token_and_the_oauth_beta_header_on_both_requests() {
+fn saved_claude_sends_the_claude_headers_on_both_requests() {
     let (profile, p) = serve_once_capturing(
         "200 OK",
         &[],
@@ -66,18 +65,7 @@ fn saved_claude_sends_the_token_and_the_oauth_beta_header_on_both_requests() {
     )
     .unwrap();
     for head in [p.join().unwrap().head, u.join().unwrap().head] {
-        assert_eq!(
-            head_header(&head, "authorization"),
-            Some("Bearer fixture-access"),
-            "{head}"
-        );
-        assert_eq!(
-            head_header(&head, "anthropic-beta"),
-            Some("oauth-2025-04-20"),
-            "{head}"
-        );
-        assert_eq!(head_header(&head, "cache-control"), None, "{head}");
-        assert_eq!(head_header(&head, "content-type"), None, "{head}");
+        super::assert_claude_headers(&head, "Bearer fixture-access");
     }
 }
 

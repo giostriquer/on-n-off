@@ -44,44 +44,36 @@ fn isolated_claude_sign_in_keeps_a_scoped_dated_snapshot_without_reading_the_act
     assert!(!home.path().join(".claude").exists());
     assert!(!home.path().join(".claude.json").exists());
 }
-/// The first usage read sends the signed-in read's headers.
+/// The first usage read sends the one Claude header set on both requests.
 #[test]
-fn the_first_usage_read_sends_the_signed_in_reads_headers() {
+fn the_first_usage_read_sends_the_claude_headers() {
     let (profile, profile_request) = serve_once(
         "200 OK",
         r#"{"account":{"uuid":"user","email":"me@example.com"},"organization":{"uuid":"team"}}"#,
     );
     let (usage, usage_request) = serve_once("200 OK", r#"{"seven_day":{"utilization":61}}"#);
     read_claude_at(&identity(), credential(), &profile, &usage).unwrap();
-    let profile_head = profile_request.join().unwrap();
-    let usage_head = usage_request.join().unwrap();
-    for head in [&profile_head, &usage_head] {
+    for head in [
+        profile_request.join().unwrap(),
+        usage_request.join().unwrap(),
+    ] {
         assert_eq!(
-            head_header(head, "authorization"),
+            head_header(&head, "authorization"),
             Some("Bearer fixture-access"),
             "{head}"
         );
         assert_eq!(
-            head_header(head, "cache-control"),
+            head_header(&head, "anthropic-beta"),
+            Some("oauth-2025-04-20"),
+            "{head}"
+        );
+        assert_eq!(
+            head_header(&head, "cache-control"),
             Some("no-cache"),
             "{head}"
         );
+        assert_eq!(head_header(&head, "content-type"), None, "{head}");
     }
-    assert_eq!(
-        head_header(&profile_head, "content-type"),
-        Some("application/json"),
-        "{profile_head}"
-    );
-    assert_eq!(
-        head_header(&profile_head, "anthropic-beta"),
-        None,
-        "{profile_head}"
-    );
-    assert_eq!(
-        head_header(&usage_head, "anthropic-beta"),
-        Some("oauth-2025-04-20"),
-        "{usage_head}"
-    );
 }
 #[test]
 fn saved_claude_session_keeps_the_reported_percentage_and_optional_reset() {

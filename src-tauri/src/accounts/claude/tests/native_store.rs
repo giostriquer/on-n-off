@@ -77,10 +77,9 @@ fn isolated_claude_sign_in_keeps_the_os_home_for_keychain_lookup() {
     assert_ne!(native.service(), "Claude Code-credentials");
 }
 
-/// Verification asks the profile endpoint with the token and the OAuth beta header, and nothing
-/// else of its own.
+/// Verification asks the profile endpoint with the one Claude header set the Limits reads send.
 #[test]
-fn verification_sends_the_token_and_the_oauth_beta_header() {
+fn verification_sends_the_claude_headers() {
     let root = tempfile::tempdir().unwrap();
     let native = claude(root.path());
     fs::write(
@@ -102,7 +101,7 @@ fn verification_sends_the_token_and_the_oauth_beta_header() {
     let header = |name| crate::http::head_header(&head, name);
     assert_eq!(header("authorization"), Some("Bearer test-token"), "{head}");
     assert_eq!(header("anthropic-beta"), Some("oauth-2025-04-20"), "{head}");
-    assert_eq!(header("cache-control"), None, "{head}");
+    assert_eq!(header("cache-control"), Some("no-cache"), "{head}");
     assert_eq!(header("content-type"), None, "{head}");
 }
 

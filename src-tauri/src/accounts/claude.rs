@@ -269,15 +269,12 @@ impl ClaudeNative {
         }
         let login = self.read()?.ok_or("No native login was found.")?;
         let identity = self.identify(&login)?;
-        let token = ClaudeLogin::of(&login).access_token()?;
-        let profile = crate::http::get_json(
-            profile_url,
-            &[
-                ("Authorization", &token.authorization()),
-                ("anthropic-beta", "oauth-2025-04-20"),
-            ],
-        )
-        .map_err(|_| "Could not verify the Claude login. Check connectivity or sign in again.")?;
+        let authorization = ClaudeLogin::of(&login).access_token()?.authorization();
+        let profile =
+            crate::http::get_json(profile_url, &crate::limits::claude_headers(&authorization))
+                .map_err(|_| {
+                    "Could not verify the Claude login. Check connectivity or sign in again."
+                })?;
         if profile.pointer("/account/uuid").and_then(Value::as_str) != Some(&identity.user_id)
             || profile
                 .pointer("/organization/uuid")
