@@ -65,24 +65,20 @@ pub fn notice(provider: AgentId) -> Option<String> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)[index(provider)?]
     .clone()
 }
-fn update_notice(provider: AgentId, message: Option<String>) {
+/// Records `message` as the provider's notice; whether that changed it. The caller announces.
+fn update_notice(provider: AgentId, message: Option<String>) -> bool {
     let Some(index) = index(provider) else {
-        return;
+        return false;
     };
-    let changed = {
-        let mut notices = NOTICES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let slot = &mut notices[index];
-        if *slot == message {
-            false
-        } else {
-            *slot = message;
-            true
-        }
-    };
-    if changed {
-        crate::read_revision::announce(crate::read_revision::Source::Accounts);
+    let mut notices = NOTICES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let slot = &mut notices[index];
+    if *slot == message {
+        false
+    } else {
+        *slot = message;
+        true
     }
 }
 fn eligible(db: &Database, identity: &Identity, login: &Login) -> Result<bool, String> {
@@ -142,7 +138,7 @@ fn publish(
     )?
 }
 impl super::Accounts {
-    /// Turns automatic remembering on or off, and clears every provider's notice.
+    /// Turns automatic remembering on or off and clears every provider's notice, announced once.
     pub(super) fn set_remembering(&self, remember: bool) -> Result<(), String> {
         let home = &self.home;
         set_enabled_in(home, remember, &|create| Store::open(home, create))?;
@@ -153,14 +149,26 @@ impl super::Accounts {
         Ok(())
     }
 
+    /// One automatic-remembering poll of `provider`: remembers its login if it should, and keeps
+    /// what went wrong as the provider's notice. A saved login and a changed notice are one change
+    /// to the account list, announced once its leases are released.
+    pub(super) fn poll_remembering(&self, provider: AgentId) {
+        let result = self.remember(provider);
+        let saved = result == Ok(true);
+        let noticed = update_notice(provider, result.err());
+        if saved || noticed {
+            self.notify.accounts();
+        }
+    }
+
     /// Saves `provider`'s verified native login as a profile when remembering is on and it is
-    /// one to remember; whether it saved one. Announced once saved and its leases released.
+    /// one to remember; whether it saved one. The caller announces it.
     pub(super) fn remember(&self, provider: AgentId) -> Result<bool, String> {
         let home = &self.home;
         if !enabled(home)? {
             return Ok(false);
         }
-        let read = super::activity::read(provider)
+        let _read = super::activity::read(provider)
             .ok_or("An account change is running. Automatic remembering will retry.")?;
         let native = self.native(provider)?;
         native.preflight()?;
@@ -177,12 +185,7 @@ impl super::Accounts {
         // protected copy.
         let store = Store::open_existing(home)?;
         let remember = enabled(home)?;
-        let saved = publish(store, &ticket, native.as_ref(), login, remember)?;
-        drop(read);
-        if saved {
-            self.notify.accounts();
-        }
-        Ok(saved)
+        publish(store, &ticket, native.as_ref(), login, remember)
     }
 }
 pub fn setup(app: &mut tauri::App) {
@@ -194,12 +197,17 @@ pub fn wake(app: &tauri::AppHandle) {
 async fn run(_app: tauri::AppHandle, mut wake: tauri::async_runtime::Receiver<()>) {
     loop {
         for provider in PROVIDERS {
-            let result = tauri::async_runtime::spawn_blocking(move || {
-                super::Accounts::live()?.remember(provider)
+            let polled = tauri::async_runtime::spawn_blocking(move || {
+                super::Accounts::live().map(|accounts| accounts.poll_remembering(provider))
             })
             .await
             .unwrap_or_else(|_| Err("Automatic account remembering could not complete.".into()));
-            update_notice(provider, result.err());
+            // Without a context there is no one else to announce the notice.
+            if let Err(message) = polled {
+                if update_notice(provider, Some(message)) {
+                    crate::read_revision::announce(crate::read_revision::Source::Accounts);
+                }
+            }
         }
         crate::monitor::wait_for_wake_or_deadline(&mut wake, INTERVAL).await;
     }
