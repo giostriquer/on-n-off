@@ -1,21 +1,18 @@
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
-import type { SavedProfile } from "$lib/accountTypes";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
 import { useState, type ReactNode } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
-import { planLabel } from "$lib/limitsFormat";
-import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { headlineWindow, presentLimitAccount, presentLimitWindow } from "./limitPresentation";
+import { limitCards, type CardRow, type CardWindow, type LimitCard } from "./limitCards";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
-import { accountCards, orderAccountCards } from "./accountCards";
-import { BankedResetsRow, CLAUDE_RESET_HINT, ResetOfferRow } from "./BankedResets";
+import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
 import { UsageStatusBadge } from "./UsageStatusBadge";
 import { CreditsRows } from "./Credits";
@@ -79,27 +76,16 @@ function ProviderColumn({
   const queryClient = useQueryClient();
   const name = providerLabel(provider);
   const manager = useAccountManagement();
-  const profiles = manager?.query.data?.profiles ?? [];
-  const cards = accountCards(query.data ?? [], profiles);
-  const known = query.data || profiles.length ? cards.entries : null;
-  if (known) for (const profile of profiles) {
-    if (profile.observationId && !known.some(entry => entry.account?.id === profile.observationId)) {
-      known.push({ provider, status: "ok", account: { id: profile.observationId, label: profile.email }, currentAccount: profile.active, windows: [], message: "Usage unavailable." });
-    }
-  }
-  const entries = known ? orderAccountCards(known, now) : null;
+  const cards = limitCards({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], now });
   const [forgetError, setForgetError] = useState<string | null>(null);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
 
-  async function forget(accountId: string) {
+  async function forget({ forget: steps }: LimitCard) {
     setForgetError(null);
     // Keep the verified association from the confirmed card even after its saved login is removed.
-    // Delete legacy history first so a partial failure keeps the scoped observation available.
-    const legacy = cards.legacyAccounts.get(accountId) ?? [];
-    const ids = [...legacy.map(account => account.id), accountId];
+    const ids = steps.map(([accountId]) => accountId);
     try {
-      for (const account of legacy) await api.forgetLimitsSnapshot(provider, account.id, account.email);
-      await api.forgetLimitsSnapshot(provider, accountId);
+      for (const step of steps) await api.forgetLimitsSnapshot(provider, ...step);
       queryClient.setQueryData<ProviderLimits[]>(["limits", provider], (current) =>
         current?.filter((entry) => entry.currentAccount || !entry.account || !ids.includes(entry.account.id)),
       );
@@ -109,14 +95,14 @@ function ProviderColumn({
     }
   }
 
-  if (!entries) {
+  if (!cards) {
     return (
       <section
         className="overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
         aria-label={`${name} limits`}
         data-status="pending"
       >
-        <CardHeader provider={provider} />
+        <CardHeader provider={provider} title={name} />
         {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{query.isFetching ? "Checking limits…" : "No data yet."}</p>
       </section>
@@ -125,14 +111,13 @@ function ProviderColumn({
 
   return (
     <div className="flex flex-col gap-3">
-      {entries.map((entry, index) => (
+      {cards.map((card, index) => (
         <AccountCard
-          key={`${entry.currentAccount ? "current" : "remembered"}-${entry.account?.id ?? index}`}
-          entry={entry}
-          profile={profiles.find(profile => profile.observationId === entry.account?.id)}
+          key={card.key}
+          card={card}
           now={now}
           error={index === 0 ? error : null}
-          onForget={allowForget ? forget : undefined}
+          onForget={allowForget ? () => forget(card) : undefined}
         />
       ))}
     </div>
@@ -140,100 +125,85 @@ function ProviderColumn({
 }
 
 /** Account identity stays prominent; workspace ids are never displayed. */
-function CardHeader({ entry, provider, updatedAt, subscription, profile, menu, activeWithoutHeadline, savedRefreshDetail }: { entry?: ProviderLimits; provider: AgentId; updatedAt?: string | null; subscription?: ReactNode; profile?: SavedProfile; menu?: ReactNode; activeWithoutHeadline?: boolean; savedRefreshDetail?: string | null }) {
-  const name = providerLabel(provider);
-  const label = profile?.email ?? entry?.account?.label ?? null;
-  const plan = planLabel(entry?.plan, provider);
+function CardHeader({ card, provider, title, subscription, menu }: { card?: LimitCard; provider: AgentId; title: string; subscription?: ReactNode; menu?: ReactNode }) {
+  const updatedAt = card?.freshness.updatedAt;
+  const status = card?.status;
   return (
     <header className="border-b border-[var(--hair)] px-3.5 py-2.5" title={updatedAt ? `Usage last checked ${updatedAt}` : undefined}>
       <div className="flex items-center gap-2.5">
         <ProviderIcon provider={provider} className="size-3.5 shrink-0 translate-y-[0.5px]" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold" title={label ?? name}>{label ?? name}</div>
+          <div className="truncate text-[13px] font-semibold" title={title}>{title}</div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-        {activeWithoutHeadline && <ActiveAccountDot />}
+        {card?.active && !card.headline && <ActiveAccountDot />}
         {subscription}
-        {savedRefreshDetail && <UsageStatusBadge detail={savedRefreshDetail} />}
-        {plan ? (
+        {status?.kind === "savedRefresh" && <UsageStatusBadge detail={status.detail} />}
+        {card?.plan ? (
           <span className="rounded-md border border-[var(--hair)] px-1.5 py-0.5 type-badge uppercase">
-            {plan}
+            {card.plan}
           </span>
         ) : null}
         </div>
         {menu}
       </div>
-      {profile?.category && <div className="mt-0.5 break-words pl-6 text-[11px] text-[var(--mute)]">{profile.category}</div>}
+      {card?.identity.category && <div className="mt-0.5 break-words pl-6 text-[11px] text-[var(--mute)]">{card.identity.category}</div>}
       {updatedAt ? <p className="sr-only">Latest observation {updatedAt}</p> : null}
     </header>
   );
 }
 
 function AccountCard({
-  entry,
-  profile,
+  card,
   now,
   error,
   onForget,
 }: {
-  entry: ProviderLimits;
-  profile?: SavedProfile;
+  card: LimitCard;
   now: number;
   error: string | null;
-  onForget?: (accountId: string) => Promise<void>;
+  onForget?: () => Promise<void>;
 }) {
-  const name = providerLabel(entry.provider);
-  const account = entry.account ?? null;
-  const label = profile?.email ?? account?.label ?? null;
-  const title = label ? `${name} limits · ${label}` : `${name} limits`;
-  const { headline, rest } = headlineWindow(entry);
-  const active = !!account && (profile?.active ?? entry.currentAccount);
-  const presentation = presentLimitAccount(entry, `${name} limits are unavailable.`);
-  const { message, refreshPaused, updatedAt, savedRefreshDetail } = presentation;
-
-  const subscription = <AccountSubscriptionBadge entry={entry} now={now} freshness={presentation} />;
-  const header = (menu: ReactNode) => <CardHeader savedRefreshDetail={savedRefreshDetail} activeWithoutHeadline={active && !headline} menu={menu} entry={entry} provider={entry.provider} updatedAt={updatedAt} subscription={subscription} profile={profile} />;
+  const { provider, identity, freshness, figures, reading } = card;
+  const { accountName } = identity;
+  const subscription = <AccountSubscriptionBadge subscription={card.subscription} now={now} />;
+  const header = (menu: ReactNode) => <CardHeader card={card} provider={provider} title={identity.label} subscription={subscription} menu={menu} />;
   const content = <>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 
-      {refreshPaused ? (
+      {card.status?.kind === "paused" ? (
         <p className="px-3.5 pt-3 text-[13px] font-medium text-[var(--silkscreen)]">Refresh paused.</p>
       ) : null}
 
-      {message ? (
+      {freshness.message ? (
         <p
-          className={`px-3.5 ${entry.windows.length > 0 ? "pt-1.5" : "py-4"} text-[13px] ${entry.status === "failed" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
+          className={`px-3.5 ${card.headline || card.rows.length > 0 ? "pt-1.5" : "py-4"} text-[13px] ${freshness.failed ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
         >
-          {message}
+          {freshness.message}
         </p>
       ) : null}
 
-      {headline ? <HeadlineWindow active={active} window={headline} provider={entry.provider} now={now} /> : null}
-      {rest.map((window) => (
-        <WindowRow
-          key={window.id}
-          window={window}
-          provider={entry.provider}
-          now={now}
-        />
+      {card.headline ? <HeadlineWindow active={card.active} window={card.headline} provider={provider} /> : null}
+      {card.rows.map((row) => (
+        <WindowRow key={row.id} row={row} provider={provider} />
       ))}
-      {entry.windows.length === 0 && entry.status === "ok" && !message ? (
-        <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{profile ? "Usage unavailable." : `${name} reported no rate-limit windows.`}</p>
+      {card.empty ? (
+        <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{card.empty.copy}</p>
       ) : null}
 
-      <CreditsRows entry={entry} now={now} />
-      <BankedResetsRow resetCredits={entry.resetCredits} hint={entry.provider === "claude" && entry.currentAccount ? CLAUDE_RESET_HINT : undefined} now={now} />
-      {entry.provider === "codex" ? <ResetOfferRow offer={entry.resetOffer} /> : null}
+      <CreditsRows figures={figures} provider={provider} now={now} />
+      <BankedResetsRow resetCredits={figures.bankedResets?.resetCredits} hint={figures.bankedResets?.hint} now={now} />
+      <ResetOfferRow offer={figures.paidOffer} />
   </>;
   return (
     <section
       className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
-      aria-label={title}
-      data-status={entry.status}
-      data-current-account={entry.currentAccount ? "true" : "false"}
+      aria-label={identity.ariaLabel}
+      data-status={freshness.readStatus}
+      data-current-account={card.active ? "true" : "false"}
     >
-      {account ? <AccountCardActions accountId={account.id} label={label ?? account.id} current={profile?.active ?? entry.currentAccount} profile={profile} onForget={onForget} header={header}
-        footer={entry.provider === "codex" ? state => <CodexAccountActions entry={entry} label={label ?? account.id} now={now} state={state} /> : undefined}>
+      {card.accountId !== null && accountName !== null ? <AccountCardActions accountId={card.accountId} label={accountName} current={card.active} profile={card.profile ?? undefined} onForget={onForget} header={header}
+        footer={card.resetAction && reading ? state => <CodexAccountActions entry={reading} label={accountName} now={now} state={state} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
     </section>
@@ -250,18 +220,16 @@ function HeadlineWindow({
   active,
   window,
   provider,
-  now,
 }: {
   active: boolean;
-  window: LimitWindow;
+  window: CardWindow;
   provider: AgentId;
-  now: number;
 }) {
-  const { percent, note, text, color } = presentLimitWindow(window, now);
+  const { label, percent, note, text, color } = window;
   return (
     <div className="flex flex-col gap-2 p-3.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{window.label}</span>
+        <span className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{label}</span>
         {active && <ActiveAccountDot />}
       </div>
       <div className="flex items-baseline gap-2">
@@ -275,25 +243,12 @@ function HeadlineWindow({
           <span className="min-w-0 flex-1 pb-0.5 font-mono text-[12px] leading-snug text-[var(--mute)]">{note}</span>
         ) : null}
       </div>
-      <Meter label={window.label} percent={percent} provider={provider} className="h-1.5" />
+      <Meter label={label} percent={percent} provider={provider} className="h-1.5" />
     </div>
   );
 }
 
-/** Remaining windows as compact meter rows, with the reset as the note. */
-function WindowRow({
-  window,
-  provider,
-  now,
-}: {
-  window: LimitWindow;
-  provider: AgentId;
-  now: number;
-}) {
-  const { percent, note, text, color } = presentLimitWindow(window, now);
-  const awaitingFirstMessage = provider === "claude" && window.kind === "session"
-    && window.usedPercent === 0 && window.resetsAt == null;
-  const resetNote = note || (awaitingFirstMessage ? "Starts with your first message" : "Reset time unavailable");
-  return <MeterRow label={window.label} note={resetNote} percent={percent} text={text} color={color} provider={provider} />;
+/** Remaining windows as compact meter rows, with the reset, or why there is none, as the note. */
+function WindowRow({ row, provider }: { row: CardRow; provider: AgentId }) {
+  return <MeterRow label={row.label} note={row.rowNote} percent={row.percent} text={row.text} color={row.color} provider={provider} />;
 }
-

@@ -29,16 +29,10 @@ export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
 }
 
 /**
- * Where a Claude reset is spent. on-n-off only reports Claude's, and Claude Code spends the reset of
- * whoever it is signed in as, so only the signed-in account's card names the command.
- */
-export const CLAUDE_RESET_HINT = "/limit-reset in Claude Code";
-
-/**
  * The banked reset count as one more row under the windows, with when the next one expires and,
  * when the card is given one, where the reset is spent.
  */
-export function BankedResetsRow({ resetCredits, hint, now }: { resetCredits?: LimitsResetCredits | null; hint?: string; now: number }) {
+export function BankedResetsRow({ resetCredits, hint, now }: { resetCredits?: LimitsResetCredits | null; hint?: string | null; now: number }) {
   const banked = unexpiredBankedResets(resetCredits, now);
   if (!banked) return null;
   const expiresIn = formatResetIn(banked.nextExpiresAt, now);

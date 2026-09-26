@@ -1,25 +1,26 @@
-import type { LimitsCreditsSpent, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsCreditsSpent, LimitsWorkspaceCredits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
+import type { CardFigures } from "./limitCards";
 import { presentCreditsSpent, presentWorkspaceShare } from "./limitPresentation";
 import { MeterRow } from "./Meter";
 import { SummaryRow } from "./SummaryRow";
 
 /**
  * The account's credits as rows under the windows, so they never crowd the header's identity: the
- * member's share of a business workspace's pooled credits (Codex's spend control), what the member
- * spent lately, and the account's own balance. In a workspace the credits are the workspace's, so
- * the own balance reads 0 beside a share or spending that says what the member actually has; it is
- * left out then.
+ * account's own balance, the member's share of a business workspace's pooled credits (Codex's spend
+ * control) and what the member spent lately. Which of them a card shows is the card model's call
+ * (`CardFigures`).
  */
-export function CreditsRows({ entry, now }: { entry: Pick<ProviderLimits, "provider" | "credits" | "workspaceCredits" | "creditsSpent">; now: number }) {
-  const share = entry.workspaceCredits;
-  const spent = entry.creditsSpent;
-  const credits = entry.credits;
-  const ownBalance = credits && (!(share || spent) || credits.unlimited || Number(credits.balance) !== 0) ? credits : null;
+export function CreditsRows({ figures, provider, now }: {
+  figures: Pick<CardFigures, "ownBalance" | "workspaceShare" | "creditsSpent">;
+  provider: AgentId;
+  now: number;
+}) {
+  const { ownBalance, workspaceShare: share, creditsSpent: spent } = figures;
   return (
     <>
       {ownBalance ? <SummaryRow label="Credits" value={ownBalance.unlimited ? "Unlimited" : ownBalance.balance} /> : null}
-      {share ? <WorkspaceShareRow share={share} provider={entry.provider} now={now} /> : null}
+      {share ? <WorkspaceShareRow share={share} provider={provider} now={now} /> : null}
       {spent ? <CreditsSpentRow spent={spent} /> : null}
     </>
   );
