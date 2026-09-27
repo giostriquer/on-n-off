@@ -115,9 +115,10 @@ export type LimitCard = {
    */
   archived: boolean;
   /**
-   * The footer offers Archive account in place of Use account: a saved login, not signed in and not
-   * needing sign-in again, whose subscription is known to have ended without renewing. Still the
-   * user's click; nothing archives an account on its own.
+   * The footer offers Archive account in place of Use account: a saved login, neither signed in nor
+   * the one the account list says the CLI uses, not needing sign-in again, whose subscription is
+   * known to have ended without renewing. Still the user's click; nothing archives an account on
+   * its own.
    */
   archiveInsteadOfUse: boolean;
 };
@@ -222,6 +223,7 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
   const cardSubscription = subscription(provider, account?.id ?? null, current, reading, presentation);
+  const active = !!account && (profile?.active ?? current);
   return {
     key: `${current ? "current" : "remembered"}-${account?.id ?? index}`,
     provider,
@@ -239,7 +241,7 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
     },
     plan: planLabel(reading?.plan, provider) || null,
     status: presentation.status,
-    active: !!account && (profile?.active ?? current),
+    active,
     headline: headline ? presentWindow(headline, now) : null,
     rows: rest.map(window => presentRow(window, provider, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
@@ -254,7 +256,7 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
     },
     subscription: cardSubscription,
     archived: !current && !!(reading ? reading.archived : profile?.archived),
-    archiveInsteadOfUse: !current && !!profile && !profile.needsLogin && subscriptionEnded(cardSubscription, now),
+    archiveInsteadOfUse: !current && !active && !!profile && !profile.needsLogin && subscriptionEnded(cardSubscription, now),
   };
 }
 

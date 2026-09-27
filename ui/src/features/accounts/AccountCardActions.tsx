@@ -23,7 +23,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   onForget?: (id: string) => Promise<void>;
   /** Archive account, offered on every card but the signed-in one; it asks nothing and deletes nothing. */
   onArchive?: () => Promise<void>;
-  /** The footer offers Archive account in place of Use account (`LimitCard.archiveInsteadOfUse`). */
+  /** The footer offers Archive account in place of Use account (`LimitCard.archiveInsteadOfUse`, which is never the current card's). */
   archiveInsteadOfUse?: boolean;
   header: (menu: ReactNode) => ReactNode;
   /** More account actions beside the primary one; see `AccountFooterState`. */
@@ -82,6 +82,14 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     } catch (error) { setError(parseInvokeError(error).message); }
     finally { setRemoving(false); }
   }
+  /** The footer's one primary action, the first that applies. */
+  function primaryAction(): ReactNode {
+    if (signingIn) return <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button>;
+    if (archiveInsteadOfUse && onArchive) return <button className={button} disabled={disabled} onClick={() => void onArchive()}>Archive account</button>;
+    if (!profile) return <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>;
+    if (current && !profile.pendingActivation) return null;
+    return <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : startSwitch(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>;
+  }
   const menu = <div className="relative shrink-0" ref={root} onBlur={event => {
     if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) dismiss();
   }} onKeyDown={event => {
@@ -114,9 +122,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     {header(menu)}
     {children}
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
-      {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button>
-        : archiveInsteadOfUse && onArchive && !current ? <button className={button} disabled={disabled} onClick={() => void onArchive()}>Archive account</button> : profile ? (!current || profile.pendingActivation) && <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : startSwitch(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
-        : <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
+      {primaryAction()}
       {switchingAlongside
         ? <SwitchAlongsideConfirmation product={provider === "codex" ? "Codex" : "Claude"} clients={switchingAlongside.clients} disabled={!!disabled}
           onSwitch={() => { setClients(null); void action("useAlongsideClients", switchingAlongside.profile.id).catch(() => {}); }}

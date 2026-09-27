@@ -488,11 +488,13 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["Codex: will not renew, but its date is ahead", false, codexSaved(term(false, AHEAD)), profileOf("codex")],
     ["Codex: renews, though its date has passed", false, codexSaved(term(true, PASSED)), profileOf("codex")],
     ["Codex: no term read", false, codexSaved(null), profileOf("codex")],
+    ["Codex: a term whose date cannot be read", false, codexSaved(term(false, "not a date")), profileOf("codex")],
     ["Claude: expired", true, claudeSaved("expired"), profileOf("claude")],
     ["Claude: canceled, which may still run to the end of its period", false, claudeSaved("canceled"), profileOf("claude")],
     ["Claude: payment due", false, claudeSaved("past_due"), profileOf("claude")],
     ["Claude: no status read", false, claudeSaved(null), profileOf("claude")],
     ["the signed-in account", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex", { active: true })],
+    ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf("codex", { active: true })],
     ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
     ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf("codex", { needsLogin: true })],
   ])("%s → Archive account in place of Use account: %s", (_case, expected, entry, profile) => {
