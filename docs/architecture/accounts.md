@@ -244,13 +244,16 @@ signed-in card cannot be archived.
   collapsed under each provider's cards, with Unarchive and Remove account; the popover shows none.
 - **What unarchives.** Unarchive, which then reads the provider again, forced, so the account comes
   back polled. Save account, Add account and Sign in again, as they undo a Remove. And becoming the
-  signed-in account, whether the switch happened in on-n-off or in the provider's CLI: a read that
-  replaced the shared cache unarchives the account it names once the cache lock is released, and
-  announces the account list only when the archive changed. Its legacy id comes along only while
-  that history names the same email, since in a shared workspace it can hold another member's.
+  signed-in account, whether the switch happened in on-n-off or in the provider's CLI: a provider
+  read unarchives the account it names under the cache lock, before its saved polls and before it
+  flags the cards, and announces the account list outside the lock, only when the archive changed.
+  Its legacy id comes along only while that history is the one the account replaced, by the rule
+  that hides it (the same email), since in a shared workspace it can hold another member's.
   Automatic remembering never unarchives.
-- **Removed.** Remove account on an archived account works as it does on a card, and Forget takes
-  every id whose snapshot it deletes out of the archive.
+- **Removed.** Remove account on an archived account works as it does on a card, through the same
+  sequence and under the same blocked rule: never while the account list is loading or failed,
+  when no card knows its saved login. Forget takes every id whose snapshot it deletes out of the
+  archive.
 
 ## Native scope and limitations
 
