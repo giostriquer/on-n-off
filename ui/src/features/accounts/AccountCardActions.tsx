@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
@@ -27,7 +27,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   /** The footer offers Archive account in place of Use account (`LimitCard.archiveInsteadOfUse`, which is never the current card's). */
   archiveInsteadOfUse?: boolean;
   /** Receives the More actions button, where focus can land when a neighbouring card goes. */
-  menuButtonRef?: (node: HTMLButtonElement | null) => void;
+  menuButtonRef?: RefCallback<HTMLButtonElement>;
   header: (menu: ReactNode) => ReactNode;
   /** More account actions beside the primary one; see `AccountFooterState`. */
   footer?: (state: AccountFooterState) => ReactNode;

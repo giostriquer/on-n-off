@@ -1,6 +1,6 @@
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
-import { useRef, useState, type ReactNode, type RefObject } from "react";
+import { useRef, useState, type ReactNode, type RefCallback, type RefObject } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
@@ -28,7 +28,7 @@ export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes })
 function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
   // Only Claude and Codex carry a subscription the backend can read; the rest report `unsupported`.
   const { providers, loading, now } = useLimitsProviders(pollMinutes);
-  const addAccount = useRef<HTMLButtonElement>(null);
+  const addAccount = useRef<HTMLButtonElement | null>(null);
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="limits-screen" aria-busy={loading}>
@@ -45,7 +45,7 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
             ) : null}
           </p>
         </div>
-        <AddAccount ref={addAccount} />
+        <AddAccount buttonRef={node => { addAccount.current = node; }} />
       </header>
 
       <div className="grid items-start gap-3 lg:grid-cols-2">
@@ -234,7 +234,7 @@ function AccountCard({
   error: string | null;
   onForget: (account: CardAccount) => Promise<void>;
   onArchive: (account: CardAccount) => Promise<void>;
-  menuButtonRef: (node: HTMLButtonElement | null) => void;
+  menuButtonRef: RefCallback<HTMLButtonElement>;
 }) {
   const { provider, identity, freshness, figures, account } = card;
   const codexActions = account?.codexActions ?? null;
