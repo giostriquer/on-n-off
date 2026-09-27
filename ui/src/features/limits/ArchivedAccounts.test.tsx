@@ -179,6 +179,25 @@ describe("focus as an archived row leaves", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "First card" })).toHaveFocus());
   });
 
+  it("skips a neighbour that refuses focus, as a row whose own unarchive is still running", async () => {
+    const [history, unread] = archived();
+    let finishUnread!: () => void;
+    const onUnarchive = vi.fn((account: CardAccount) => account.id === "profile:unread"
+      ? new Promise<void>(resolve => { finishUnread = resolve; }) : Promise.resolve());
+    const { rerender } = render(<Column cards={[history, unread]} onUnarchive={onUnarchive} />);
+    fireEvent.click(screen.getByRole("button", { name: "Archived (2)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unarchive unread@codex.example" }));
+    expect(screen.getByRole("button", { name: "Unarchive unread@codex.example" })).toBeDisabled();
+
+    screen.getByRole("button", { name: "Unarchive history@codex.example" }).focus();
+    fireEvent.click(screen.getByRole("button", { name: "Unarchive history@codex.example" }));
+    await waitFor(() => expect(onUnarchive).toHaveBeenCalledTimes(2));
+    rerender(<Column cards={[unread]} onUnarchive={onUnarchive} />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archived (1)" })).toHaveFocus());
+    await act(async () => { finishUnread(); });
+  });
+
   it("stays where the user moved it before the row left", async () => {
     const [history, unread] = archived();
     const onUnarchive = vi.fn().mockResolvedValue(undefined);
