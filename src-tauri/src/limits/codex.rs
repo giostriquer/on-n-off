@@ -453,24 +453,16 @@ pub(super) const CODEX: CodexEndpoints<'static> = CodexEndpoints {
     subscriptions: renewal::CODEX_SUBSCRIPTIONS_URL,
 };
 
-/// A saved profile's Codex card, read over HTTP with its login's access `token` (`read_wham`).
-/// No CLI is started and nothing is renewed here.
+/// A saved profile's Codex card, read over HTTP from the backend body app-server itself reads
+/// (`wham/usage`) with its login's access `token`, for its workspace. A body that names another
+/// workspace is refused; one that names none is accepted. No CLI is started and nothing is renewed
+/// here.
 pub(crate) fn read_saved_codex(
     identity: &Identity,
     token: AccessToken,
     urls: &SavedReadUrls<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    saved_card(identity, read_wham(identity, token, urls.codex)?)
-}
-
-/// A saved profile's Codex read, with its access token `token` for its workspace, as the card of
-/// the profile's account. A body that names another workspace is refused; one that names none is
-/// accepted.
-pub(super) fn read_wham(
-    identity: &Identity,
-    token: AccessToken,
-    urls: CodexEndpoints<'_>,
-) -> Result<Parsed, SavedReadError> {
+    let urls = urls.codex;
     let bearer = token.authorization();
     let headers = [
         ("Authorization", bearer.as_str()),
@@ -492,6 +484,8 @@ pub(super) fn read_wham(
     .then(|| get_json(urls.reset_credits, &headers).ok())
     .flatten();
     let mut card = Parsed {
+        // The profile's account already, for the gate to match the access against; `saved_card`
+        // sets it again, as it does for every saved card.
         account: Some(super::scoped_account(identity, None)),
         reading: parse_codex_usage(&payload, details.as_ref())?,
     };
@@ -502,7 +496,7 @@ pub(super) fn read_wham(
         token,
     };
     backend_figures(&mut card, Some(&access), urls, Utc::now());
-    Ok(card)
+    saved_card(identity, card)
 }
 
 /// The figures ChatGPT's backend gives a Codex `card` beside its usage, each asked at `urls` with
