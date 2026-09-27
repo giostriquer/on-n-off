@@ -9,8 +9,7 @@ import type { CardAccount, LimitCard } from "./limitCards";
 /**
  * A provider's archived accounts: a collapsed "Archived (n)" list, absent while there are none.
  * Each row names the account, shows no usage, and offers Unarchive and Remove account; archived
- * accounts are never used from here. It takes the cards and the two actions and nothing else, so
- * the Limits screen can place it wherever it reads best.
+ * accounts are never used from here.
  */
 export function ArchivedAccounts({ provider, cards, blocked, onUnarchive, onRemove }: {
   provider: AgentId;

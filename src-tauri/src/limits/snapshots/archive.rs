@@ -75,8 +75,7 @@ impl SnapshotStore {
         self.unarchive_locked(provider, &ids)
     }
 
-    /// Takes `ids` out of the archive for a caller that already holds the snapshot lock: Forget,
-    /// for the ids whose snapshots it deleted.
+    /// Takes `ids` out of the archive for a caller that already holds the snapshot lock.
     pub(super) fn unarchive_locked(
         &self,
         provider: AgentId,
