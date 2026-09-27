@@ -87,6 +87,7 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
         force,
         &|force| crate::limits::read_limits(agent, force),
         &|entries| crate::limits::unarchive_signed_in(agent, entries),
+        &|entries| crate::limits::flag_archived(agent, entries),
     )
 }
 
@@ -98,17 +99,22 @@ fn read_provider(
     force: bool,
     native: &dyn Fn(bool) -> Vec<ProviderLimitsDto>,
     unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
+    flag: &dyn Fn(&mut [ProviderLimitsDto]),
 ) -> (Vec<ProviderLimitsDto>, u64) {
+    let mut unarchived = false;
     let (entries, reading) = read_through_cache(cache, interval, force, |force| {
         let mut entries = native(force);
+        // Being signed in unarchives an account, before the saved polls and before the cards are
+        // flagged once, all under the cache lock, which Forget and archiving write under too.
+        unarchived = unarchive(&entries);
         crate::accounts::usage::refresh(agent, force, &mut entries);
+        flag(&mut entries);
         entries
     });
     announce(cache, reading);
-    // Being signed in unarchives an account. Only the read that replaced the cache writes it, once
-    // the lock is released, and the saved-account list is announced only when the archive changed:
-    // a consumer answering either announcement is served this cache and writes nothing.
-    if reading.replaced() && unarchive(&entries) {
+    // Only a read that replaced the cache can have unarchived anything, so the account list is told
+    // of a change, never of a read, and outside the lock.
+    if unarchived {
         read_revision::announce(Source::Accounts);
     }
     (entries, reading.revision())
@@ -126,6 +132,7 @@ pub(crate) fn test_saved_reader(
         false,
         native,
         &|_| false,
+        &|_| {},
     )
     .0;
     let cached = read_provider(
@@ -135,6 +142,7 @@ pub(crate) fn test_saved_reader(
         false,
         native,
         &|_| false,
+        &|_| {},
     )
     .0;
     (first, cached)
@@ -221,8 +229,8 @@ fn set_archived_with(
 }
 
 /// Writes the archive under the cache lock, as Forget does, so the edit cannot race an in-flight
-/// read, then flags the cached entries it names; the signed-in card is never archived. The
-/// entries' reading, and whether the archive changed.
+/// read, then flags the cached entries it names. The entries' reading, and whether the archive
+/// changed.
 fn archive_through_cache<F>(
     cache: &Cache,
     ids: &[String],
@@ -237,17 +245,15 @@ where
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let changed = write()?;
-    let mut edited = false;
-    for entry in cached.iter_mut().flat_map(|read| read.entries.iter_mut()) {
-        let named = entry
-            .account
-            .as_ref()
-            .is_some_and(|account| ids.contains(&account.id));
-        if named && !entry.current_account && entry.archived != archived {
-            entry.archived = archived;
-            edited = true;
-        }
-    }
+    let edited = cached.as_mut().is_some_and(|read| {
+        crate::limits::mark_archived(&mut read.entries, |id, was| {
+            if ids.iter().any(|named| named == id) {
+                archived
+            } else {
+                was
+            }
+        })
+    });
     let reading = if edited {
         Reading::Replaced(cache.revision.bump())
     } else {

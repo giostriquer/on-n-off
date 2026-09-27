@@ -1,5 +1,6 @@
-//! Archived accounts in a provider's list: flagged once the legacy history their cards replaced is
-//! hidden, so that history stays hidden behind them, and the signed-in card never.
+//! Archived accounts in a provider's list: flagged after the list hid the legacy history their
+//! cards replaced, so that history stays hidden behind them, and the signed-in card never; and the
+//! signed-in account a read names, unarchived.
 
 use super::account;
 use crate::dto::LimitWindowKind;
@@ -63,7 +64,8 @@ fn archived_accounts_are_flagged_and_still_hide_the_history_they_replaced() {
     store.save(&read("acct-b", "b@example.com", 9)).unwrap();
     archive(&store, &["profile:a", "team"]);
 
-    let listed = aggregate_accounts(&store, read("acct-me", "me@example.com", 11));
+    let mut listed = aggregate_accounts(&store, read("acct-me", "me@example.com", 11));
+    flag_archived_at(&home, AgentId::Codex, &mut listed);
 
     assert_eq!(
         summary(&listed),
@@ -86,7 +88,8 @@ fn the_signed_in_card_is_never_flagged_archived() {
     store.save(&read("acct-b", "b@example.com", 9)).unwrap();
     archive(&store, &["acct-me", "acct-b"]);
 
-    let listed = aggregate_accounts(&store, read("acct-me", "me@example.com", 11));
+    let mut listed = aggregate_accounts(&store, read("acct-me", "me@example.com", 11));
+    flag_archived_at(&home, AgentId::Codex, &mut listed);
 
     assert_eq!(
         summary(&listed),
@@ -109,10 +112,11 @@ fn the_signed_in_account_a_read_names_is_unarchived() {
     remembered.current_account = false;
     remembered.archived = true;
 
-    assert_eq!(
-        unarchive_signed_in_at(&home, AgentId::Codex, &[signed_in, remembered.clone()]),
-        Ok(true)
-    );
+    assert!(unarchive_signed_in_at(
+        &home,
+        AgentId::Codex,
+        &[signed_in, remembered.clone()]
+    ));
     assert_eq!(
         store.archived(AgentId::Codex),
         ["acct-b".to_string()].into()
@@ -124,13 +128,41 @@ fn the_signed_in_account_a_read_names_is_unarchived() {
         None,
         Parsed::default(),
     );
-    assert_eq!(
-        unarchive_signed_in_at(&home, AgentId::Codex, &[signed_out, remembered]),
-        Ok(false)
-    );
+    assert!(!unarchive_signed_in_at(
+        &home,
+        AgentId::Codex,
+        &[signed_out, remembered]
+    ));
     assert_eq!(
         store.archived(AgentId::Codex),
         ["acct-b".to_string()].into()
+    );
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// A write that fails changed nothing: the account stays archived, for the next read to try again,
+/// and the read says nothing changed, so the account list is not announced.
+#[cfg(unix)]
+#[test]
+fn a_signed_in_read_that_cannot_write_the_archive_says_nothing_changed() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = scratch_dir("limits-archived-unwritable");
+    let store = SnapshotStore::for_home(&home);
+    archive(&store, &["acct-me"]);
+    let dir = home.join(".on-n-off").join("limits");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    let changed = unarchive_signed_in_at(
+        &home,
+        AgentId::Codex,
+        &[read("acct-me", "me@example.com", 11)],
+    );
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!changed);
+    assert_eq!(
+        store.archived(AgentId::Codex),
+        ["acct-me".to_string()].into()
     );
     let _ = std::fs::remove_dir_all(home);
 }

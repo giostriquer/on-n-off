@@ -355,55 +355,77 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
     assert!(read_revision::take_announced().is_empty());
 }
 
-/// Being signed in unarchives an account: a read that replaced the shared cache unarchives the
-/// signed-in account it names, outside the cache lock, and announces the saved-account list only
-/// when that changed the archive. A read served from the cache writes and announces nothing:
-/// announce a replacement, never a read.
+/// A read does the archive's part in one place and one order, under the cache lock as Forget
+/// writes: the signed-in account unarchived first, since being signed in unarchives an account, then
+/// every card flagged once, so no flagged signed-in card is ever cached. The account list is
+/// announced outside the lock, only when the read unarchived something: a replacement, never a
+/// read, so a read served from the cache writes and announces nothing.
 #[test]
-fn a_replacing_read_unarchives_the_signed_in_account_and_announces_only_a_change() {
+fn a_replacing_read_unarchives_then_flags_under_the_lock_and_announces_only_a_change() {
     let cache = Cache::new(Source::LimitsClaude);
     let _ = read_revision::take_announced();
+    let log = std::cell::RefCell::new(Vec::new());
     let changes = std::cell::Cell::new(true);
-    let written = std::cell::RefCell::new(Vec::new());
-    let unarchive = |entries: &[ProviderLimitsDto]| {
+    let native = |_| {
+        log.borrow_mut().push("native");
+        vec![
+            snapshot("signed-in", true, LimitsStatus::Ok),
+            snapshot("put-away", false, LimitsStatus::Ok),
+        ]
+    };
+    let unarchive = |_: &[ProviderLimitsDto]| {
         assert!(
-            cache.read.try_lock().is_ok(),
-            "written outside the cache lock"
+            cache.read.try_lock().is_err(),
+            "unarchived under the cache lock"
         );
-        written.borrow_mut().push(entries.len());
+        log.borrow_mut().push("unarchive");
         changes.get()
     };
-    let native = |_| vec![snapshot("signed-in", true, LimitsStatus::Ok)];
+    let flag = |entries: &mut [ProviderLimitsDto]| {
+        assert!(
+            cache.read.try_lock().is_err(),
+            "flagged under the cache lock"
+        );
+        log.borrow_mut().push("flag");
+        for entry in entries.iter_mut().filter(|entry| !entry.current_account) {
+            entry.archived = true;
+        }
+    };
     let interval = Duration::from_secs(300);
+    let read = |force| {
+        read_provider(
+            &cache,
+            AgentId::Claude,
+            interval,
+            force,
+            &native,
+            &unarchive,
+            &flag,
+        )
+        .0
+    };
 
-    read_provider(
-        &cache,
-        AgentId::Claude,
-        interval,
-        false,
-        &native,
-        &unarchive,
+    let entries = read(false);
+    assert_eq!(*log.borrow(), ["native", "unarchive", "flag"]);
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.archived)
+            .collect::<Vec<_>>(),
+        [false, true]
     );
-    assert_eq!(*written.borrow(), [1]);
     assert_eq!(
         read_revision::take_announced(),
         [Source::LimitsClaude, Source::Accounts]
     );
 
-    read_provider(
-        &cache,
-        AgentId::Claude,
-        interval,
-        false,
-        &native,
-        &unarchive,
-    );
-    assert_eq!(*written.borrow(), [1], "a cached answer writes nothing");
+    assert_eq!(read(false), entries, "the cache holds the flagged cards");
+    assert_eq!(log.borrow().len(), 3, "a cached answer writes nothing");
     assert!(read_revision::take_announced().is_empty());
 
     changes.set(false);
-    read_provider(&cache, AgentId::Claude, interval, true, &native, &unarchive);
-    assert_eq!(*written.borrow(), [1, 1]);
+    read(true);
+    assert_eq!(log.borrow().len(), 6);
     assert_eq!(
         read_revision::take_announced(),
         [Source::LimitsClaude],

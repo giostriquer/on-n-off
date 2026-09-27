@@ -216,28 +216,15 @@ fn provider_read_guard(agent: AgentId) -> MutexGuard<'static, ()> {
 }
 
 /// The current account's card, keeping what its read could not tell from the account's remembered
-/// reading, persisted; then the other remembered accounts, newest first, each flagged when the user
-/// archived it. The flag goes on once the legacy history a card replaced is hidden, so an archived
-/// card keeps hiding it; the signed-in card is never flagged, since being signed in unarchives it.
+/// reading, persisted; then the other remembered accounts, newest first.
 fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<ProviderLimitsDto> {
-    let provider = current.provider;
     let current_account = current.account.as_ref().map(|account| account.id.clone());
-    let mut remembered = store.load(provider);
+    let mut remembered = store.load(current.provider);
     remembered.retain(|snapshot| {
         snapshot.account.as_ref().map(|account| &account.id) != current_account.as_ref()
     });
     let current = store.remember(current).card;
-    let mut accounts =
-        snapshots::without_superseded(std::iter::once(current).chain(remembered).collect());
-    let archived = store.archived(provider);
-    for card in &mut accounts {
-        card.archived = !card.current_account
-            && card
-                .account
-                .as_ref()
-                .is_some_and(|account| archived.contains(&account.id));
-    }
-    accounts
+    snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
 }
 
 /// `card`, keeping what its read could not tell from what `home` remembers of its account, written
@@ -271,28 +258,62 @@ pub(crate) fn set_archived_at(
     SnapshotStore::for_home(home).set_archived(provider, ids, archived)
 }
 
+/// Sets each card's `archived` to what `archived` says of its account id and its current flag: the
+/// one rule every flag goes through. The signed-in card is never archived, since being signed in
+/// unarchives an account, and a card that names no account is not one. Whether any flag changed.
+pub(crate) fn mark_archived(
+    entries: &mut [ProviderLimitsDto],
+    archived: impl Fn(&str, bool) -> bool,
+) -> bool {
+    let mut changed = false;
+    for card in entries {
+        let flag = !card.current_account
+            && card
+                .account
+                .as_ref()
+                .is_some_and(|account| archived(&account.id, card.archived));
+        changed |= flag != card.archived;
+        card.archived = flag;
+    }
+    changed
+}
+
+/// Flags the cards of a read of `agent` whose accounts the user archived, once the read has named
+/// its signed-in account and the saved polls have answered.
+pub fn flag_archived(agent: AgentId, entries: &mut [ProviderLimitsDto]) {
+    if let Ok(home) = paths::user_home() {
+        flag_archived_at(&home, agent, entries);
+    }
+}
+
+/// [`flag_archived`] under `home`.
+pub(crate) fn flag_archived_at(home: &Path, agent: AgentId, entries: &mut [ProviderLimitsDto]) {
+    let archived = SnapshotStore::for_home(home).archived(agent);
+    mark_archived(entries, |id, _| archived.contains(id));
+}
+
 /// Unarchives the signed-in account a read of `agent` gave `entries` for, since being signed in
 /// unarchives an account whether it was switched to in on-n-off or in the provider's CLI; whether
-/// the archive changed. A write that fails leaves it archived, for the next read to try again.
+/// the archive changed.
 pub fn unarchive_signed_in(agent: AgentId, entries: &[ProviderLimitsDto]) -> bool {
-    paths::user_home().is_ok_and(|home| unarchive_signed_in_at(&home, agent, entries) == Ok(true))
+    paths::user_home().is_ok_and(|home| unarchive_signed_in_at(&home, agent, entries))
 }
 
 /// [`unarchive_signed_in`] under `home`: the signed-in card's id, and the legacy id its history was
-/// kept under when that history names the same email (`SnapshotStore::unarchive_account`).
+/// kept under when that history is this account's (`SnapshotStore::unarchive_account`). A write
+/// that fails changed nothing and leaves the account archived, for the next read to try again.
 pub(crate) fn unarchive_signed_in_at(
     home: &Path,
     agent: AgentId,
     entries: &[ProviderLimitsDto],
-) -> Result<bool, String> {
-    let Some(account) = entries
+) -> bool {
+    entries
         .iter()
         .find(|entry| entry.current_account)
         .and_then(|entry| entry.account.as_ref())
-    else {
-        return Ok(false);
-    };
-    SnapshotStore::for_home(home).unarchive_account(agent, account)
+        .is_some_and(|account| {
+            SnapshotStore::for_home(home).unarchive_account(agent, account) == Ok(true)
+        })
 }
 
 /// Unarchives the saved profile `identity`, labelled `email`, which the user just saved or signed in
