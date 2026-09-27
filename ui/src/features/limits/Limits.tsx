@@ -84,7 +84,7 @@ function ProviderColumn({
   const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], now });
   const [forgetError, setForgetError] = useState<string | null>(null);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
-  const blocked = !!manager?.busy || !!manager?.query.data?.recoveryRequired;
+  const blocked = manager?.blocked ?? false;
 
   async function forget({ forget: steps }: CardAccount) {
     setForgetError(null);
@@ -101,9 +101,8 @@ function ProviderColumn({
     }
   }
 
-  /** Remove account, as a card's menu does it: the saved login first, then every snapshot. */
   async function remove(account: CardAccount) {
-    if (account.profile && manager) await manager.action("remove", account.profile.id, undefined, () => forget(account));
+    if (manager) await manager.removeAccount(account.profile?.id, () => forget(account));
     else await forget(account);
   }
 

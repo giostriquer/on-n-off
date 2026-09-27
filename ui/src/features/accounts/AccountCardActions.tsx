@@ -13,6 +13,11 @@ import { accountButton as button, useAccountManagement } from "./AccountManager"
  */
 export type AccountFooterState = { current: boolean; blocked: boolean; unconfirmedCurrent: boolean };
 
+/** What Remove account asks before it removes `label`, wherever it is offered. */
+export function removeAccountQuestion(label: string): string {
+  return `Remove ${label} from on-n-off? You will need to sign in to add it again.`;
+}
+
 export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   onForget?: (id: string) => Promise<void>;
@@ -55,12 +60,12 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     return () => document.removeEventListener("pointerdown", outside);
   }, [open, editing, confirmation]);
   if (!manager) return <>{header(null)}{children}</>;
-  const { provider, busy, query, action, use, add, cancel, loginTarget } = manager;
+  const { provider, busy, blocked, query, action, removeAccount, use, add, cancel, loginTarget } = manager;
   const nativeMatches = !query.isFetching && query.data?.nativeObservationId === accountId;
   // A current card whose native login is not confirmed as this account must not act on it.
   const unconfirmedCurrent = current && !nativeMatches;
   const signingIn = loginTarget === accountId && (busy === "login" || busy === "cancelLogin");
-  const disabled = !!busy || removing || query.isPending || !!query.error || query.data?.recoveryRequired;
+  const disabled = blocked || removing;
   const switchingAlongside = clients && profile && !profile.needsLogin ? { clients, profile } : null;
   function startSwitch(profileId: string) {
     setClients(null);
@@ -72,10 +77,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     try {
       if (confirmation === "signOut") await action("signOut");
       else if (confirmation === "removeLogin" && profile) await action("remove", profile.id);
-      else {
-        if (profile) await action("remove", profile.id, undefined, () => onForget?.(accountId) ?? Promise.resolve());
-        else await onForget?.(accountId);
-      }
+      else await removeAccount(profile?.id, () => onForget?.(accountId) ?? Promise.resolve());
       complete();
     } catch (error) { setError(parseInvokeError(error).message); }
     finally { setRemoving(false); }
@@ -102,7 +104,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
       <button className={button} disabled={disabled}>Save category</button><button type="button" className={button} onClick={close}>Cancel</button>
     </form>}
     {confirmation && <div role="group" aria-label="Confirm account action" className="text-[12px]">
-      <p>{confirmation === "remove" ? `Remove ${label} from on-n-off? You will need to sign in to add it again.` : confirmation === "removeLogin" ? `Remove the saved login for ${label}? This account stays signed in.` : "Sign out of this account? The provider may also revoke its saved sign-ins."}</p>
+      <p>{confirmation === "remove" ? removeAccountQuestion(label) : confirmation === "removeLogin" ? `Remove the saved login for ${label}? This account stays signed in.` : "Sign out of this account? The provider may also revoke its saved sign-ins."}</p>
       <div className="flex gap-2"><button className={button} disabled={disabled || (confirmation === "signOut" && (!current || !nativeMatches))} onClick={() => void confirm()}>{confirmation === "signOut" ? "Confirm sign out" : "Confirm removal"}</button><button className={button} onClick={close}>Cancel</button></div>
     </div>}
     {error && <p role="alert" className="text-[12px] text-[var(--trip)]">{error}</p>}

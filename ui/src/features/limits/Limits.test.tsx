@@ -709,6 +709,24 @@ describe("archiving", () => {
     expect(setLimitsArchived).not.toHaveBeenCalled();
   });
 
+  // While the account list is pending (a Keychain prompt) or failed (an unreadable vault) no card
+  // knows its saved login, so Remove account would forget the snapshots and leave the login saved,
+  // to come back unarchived once the vault opens. The rows wait, as a card's controls do.
+  it.each(["pending", "failed", "recovering"] as const)("keeps an archived row's actions disabled while the account list is %s", async (state) => {
+    const denied = { kind: "message", message: "Could not unlock saved accounts.", path: null };
+    readAccounts.mockImplementation((provider: AgentId) => state === "pending" ? new Promise(() => {})
+      : state === "failed" ? Promise.reject(denied)
+      : Promise.resolve({ profiles: [], nativeAccount: null, recoveryRequired: provider === "codex", notice: null }));
+    answer([okClaude()], [okCodex(), staleCodex({ savedProfile: true, archived: true })]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
+    if (state === "failed") await waitFor(() => expect(screen.getAllByText("Could not unlock saved accounts.").length).toBeGreaterThan(0));
+    if (state === "recovering") await screen.findByRole("button", { name: "Recover account" });
+
+    expect(screen.getByRole("button", { name: "Unarchive personal@codex.example" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove account personal@codex.example" })).toBeDisabled();
+  });
+
   it("offers Archive account in place of Use account once a saved subscription ended without renewing", async () => {
     const profile = { id: "lapsed", observationId: "acct-personal", identity: { provider: "codex" as const, userId: "lapsed", workspaceId: "team" }, email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false };
     const lapsed = staleCodex({ savedProfile: true, subscription: { activeUntil: "2026-08-10T00:00:00Z", willRenew: false, checkedAt: NOW } });

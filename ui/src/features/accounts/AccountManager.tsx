@@ -59,6 +59,14 @@ function useController(provider: AccountProvider) {
       }
     }
   }
+  /**
+   * Remove account: the saved login first when the account has one, then `forget` drops every
+   * snapshot the card stands for. A card and an archived row both remove through here.
+   */
+  async function removeAccount(profileId: string | undefined, forget: () => Promise<void>) {
+    if (profileId) await action("remove", profileId, undefined, forget);
+    else await forget();
+  }
   async function cancel() {
     const id = operation.current;
     if (!id || busy === "cancelLogin") return;
@@ -70,7 +78,12 @@ function useController(provider: AccountProvider) {
       }
     }
   }
-  return { provider, query, busy, error, action, use, add, cancel, loginTarget };
+  /**
+   * The account controls cannot act: an operation is running, the account list is loading or failed
+   * (so no card knows its saved login yet), or an interrupted change needs recovery.
+   */
+  const blocked = !!busy || query.isPending || !!query.error || !!query.data?.recoveryRequired;
+  return { provider, query, busy, blocked, error, action, removeAccount, use, add, cancel, loginTarget };
 }
 const Controllers = createContext<Record<AccountProvider, ReturnType<typeof useController>> | null>(null);
 export function AccountControllers({ children }: { children: ReactNode }) {

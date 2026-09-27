@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { removeAccountQuestion } from "@/features/accounts/AccountCardActions";
 import { accountButton as button } from "@/features/accounts/AccountManager";
 import { parseInvokeError } from "$lib/error";
 import type { AgentId } from "$lib/types";
@@ -15,7 +16,7 @@ export function ArchivedAccounts({ provider, cards, blocked, onUnarchive, onRemo
   provider: AgentId;
   /** The column's archived cards (`limitColumn`), in card order. */
   cards: LimitCard[];
-  /** The account controls cannot act right now: an operation is running or recovery is required. */
+  /** The account controls cannot act right now (the account manager's `blocked`). */
   blocked: boolean;
   onUnarchive: (account: CardAccount) => Promise<void>;
   /** Remove account, exactly as a card's menu does it. */
@@ -82,7 +83,7 @@ function ArchivedRow({ card, account, blocked, onUnarchive, onRemove }: {
       </div>
       {confirming && <div role="group" aria-label="Confirm account action" className="mt-2 flex flex-col gap-2 text-[12px]"
         onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); cancel(); } }}>
-        <p className="m-0">Remove {label} from on-n-off? You will need to sign in to add it again.</p>
+        <p className="m-0">{removeAccountQuestion(label)}</p>
         <div className="flex gap-2">
           <button type="button" autoFocus className={button} disabled={disabled} onClick={() => void run(onRemove)}>Confirm removal</button>
           <button type="button" className={button} onClick={cancel}>Cancel</button>
