@@ -203,14 +203,18 @@ fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> R
     }
 }
 
-pub(super) fn read(home: &Path, force: bool) -> Result<Parsed, AppServerFailure> {
-    read_with(home, force, ProcessTransport::spawn, |parsed, access| {
-        super::codex::backend_figures(parsed, access, super::codex::CODEX, chrono::Utc::now());
-    })
+/// The signed-in account's card, read by app-server in `home`. `after_identity` runs on the card
+/// once the native login is confirmed to be the account it read, with that login's access
+/// projection; the reader asks its backend figures there (`codex::codex_limits`).
+pub(super) fn read(
+    home: &Path,
+    force: bool,
+    after_identity: impl FnOnce(&mut Parsed, Option<&CodexAccess>),
+) -> Result<Parsed, AppServerFailure> {
+    read_with(home, force, ProcessTransport::spawn, after_identity)
 }
 
-/// `read`, with the app-server process and what runs once the card's account is confirmed (the
-/// backend figures that take its access projection, `codex::backend_figures`) replaceable for tests.
+/// `read`, with the app-server process replaceable for tests.
 fn read_with<T: JsonLineTransport>(
     home: &Path,
     force: bool,

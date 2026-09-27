@@ -369,9 +369,14 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
     })
 }
 
-/// Codex owns login, token refresh and usage requests through its documented app-server APIs.
+/// Codex owns login, token refresh and usage requests through its documented app-server APIs. Once
+/// app-server's read has confirmed the account, the card's backend figures are asked with the
+/// native login's access projection (`backend_figures`).
 pub(super) fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
-    match codex_app_server::read(home, force) {
+    let figures = |card: &mut Parsed, access: Option<&CodexAccess>| {
+        backend_figures(card, access, CODEX, Utc::now());
+    };
+    match codex_app_server::read(home, force, figures) {
         Ok(parsed) => finish(AgentId::Codex, LimitsStatus::Ok, None, parsed),
         Err(codex_app_server::AppServerFailure::SignedOut) => finish(
             AgentId::Codex,
