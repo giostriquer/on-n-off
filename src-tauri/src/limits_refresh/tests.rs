@@ -351,6 +351,62 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
     assert!(read_revision::take_announced().is_empty());
 }
 
+/// Being signed in unarchives an account: a read that replaced the shared cache unarchives the
+/// signed-in account it names, outside the cache lock, and announces the saved-account list only
+/// when that changed the archive. A read served from the cache writes and announces nothing:
+/// announce a replacement, never a read.
+#[test]
+fn a_replacing_read_unarchives_the_signed_in_account_and_announces_only_a_change() {
+    let cache = Cache::new(Source::LimitsClaude);
+    let _ = read_revision::take_announced();
+    let changes = std::cell::Cell::new(true);
+    let written = std::cell::RefCell::new(Vec::new());
+    let unarchive = |entries: &[ProviderLimitsDto]| {
+        assert!(
+            cache.read.try_lock().is_ok(),
+            "written outside the cache lock"
+        );
+        written.borrow_mut().push(entries.len());
+        changes.get()
+    };
+    let native = |_| vec![snapshot("signed-in", true, LimitsStatus::Ok)];
+    let interval = Duration::from_secs(300);
+
+    read_provider(
+        &cache,
+        AgentId::Claude,
+        interval,
+        false,
+        &native,
+        &unarchive,
+    );
+    assert_eq!(*written.borrow(), [1]);
+    assert_eq!(
+        read_revision::take_announced(),
+        [Source::LimitsClaude, Source::Accounts]
+    );
+
+    read_provider(
+        &cache,
+        AgentId::Claude,
+        interval,
+        false,
+        &native,
+        &unarchive,
+    );
+    assert_eq!(*written.borrow(), [1], "a cached answer writes nothing");
+    assert!(read_revision::take_announced().is_empty());
+
+    changes.set(false);
+    read_provider(&cache, AgentId::Claude, interval, true, &native, &unarchive);
+    assert_eq!(*written.borrow(), [1, 1]);
+    assert_eq!(
+        read_revision::take_announced(),
+        [Source::LimitsClaude],
+        "nothing was unarchived, so the account list is not announced"
+    );
+}
+
 struct Lease<'a>(&'a std::cell::RefCell<Vec<&'static str>>);
 
 impl Drop for Lease<'_> {

@@ -343,7 +343,7 @@ impl Accounts {
         native.preflight()?;
         store::Store::gate(&self.home, &store::ChangeKind::Account)?;
         native.verify()?;
-        store::Store::open(&self.home, true)?.change_then(
+        let (identity, email) = store::Store::open(&self.home, true)?.change_then(
             store::ChangeKind::Account,
             // Past the gate: a pending recovery refuses the save before the native locks are
             // taken or the native login is read.
@@ -361,16 +361,24 @@ impl Accounts {
                     return Err("This account has a new saved sign-in awaiting activation. Use it before saving the current login.".into());
                 }
                 db.reenroll(&identity);
-                db.save(identity, login, None)?;
-                Ok(native_locks)
+                let id = db.save(identity.clone(), login, None)?;
+                let email = db
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == id)
+                    .and_then(|p| p.email.clone());
+                Ok((native_locks, identity, email))
             },
             // The native locks cover the save and go before the vault lease, so a publication
             // waiting on the vault never finds them still held.
-            |native_locks, _, _| {
+            |(native_locks, identity, email), _, _| {
                 drop(native_locks);
-                Ok(())
+                Ok((identity, email))
             },
         )??;
+        // Saving is an explicit re-add, which unarchives the account as it undoes a Remove. The
+        // save stands whatever the archive does: a failed write leaves the account archived.
+        let _ = crate::limits::unarchive_profile(&self.home, &identity, email);
         // The Limits refresh this starts runs outside the provider reservation, which would
         // otherwise keep refusing a use or a sign-out for as long as that read takes.
         drop(read);

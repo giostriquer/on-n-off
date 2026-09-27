@@ -1,11 +1,11 @@
 //! The archive file: what it holds per provider, what a missing or malformed one reads as, that
 //! writes are whole and serialized, that the snapshot loader never takes it for a snapshot, and
-//! which ids Forget takes out of it.
+//! which ids Forget and an unarchived account take out of it.
 
 use super::super::tests::snapshot;
 use super::super::{is_snapshot_file, SnapshotStore};
 use super::ARCHIVE_FILE;
-use crate::dto::AgentId;
+use crate::dto::{AgentId, LimitsAccountDto};
 use crate::paths::scratch_dir;
 use std::collections::BTreeSet;
 use std::fs;
@@ -212,5 +212,86 @@ fn forgetting_an_account_unarchives_every_id_it_deletes() {
     // A profile with no snapshot of its own is forgotten by its id all the same.
     store.forget(AgentId::Codex, "profile:other").unwrap();
     assert!(store.archived(AgentId::Codex).is_empty());
+    let _ = fs::remove_dir_all(home);
+}
+
+fn account(id: &str, legacy_id: Option<&str>, label: Option<&str>) -> LimitsAccountDto {
+    LimitsAccountDto {
+        id: id.to_string(),
+        legacy_id: legacy_id.map(str::to_string),
+        label: label.map(str::to_string),
+    }
+}
+
+/// An unarchived account takes its own id out of the archive, and the legacy id its history was
+/// kept under only while that history names the same email: in a shared workspace the legacy id
+/// can hold another member's history, which stays archived.
+#[test]
+fn unarchiving_an_account_takes_along_only_its_own_legacy_history() {
+    let home = scratch_dir("limits-archive-unarchive-account");
+    let store = SnapshotStore::for_home(&home);
+    scoped_with_history(&store);
+    let archive = |values: &[&str]| {
+        store
+            .set_archived(AgentId::Codex, &ids(values), true)
+            .unwrap();
+    };
+
+    archive(&["profile:a", "team", "profile:other"]);
+    assert_eq!(
+        store.unarchive_account(
+            AgentId::Codex,
+            &account("profile:a", Some("team"), Some(" A@Example.com "))
+        ),
+        Ok(true)
+    );
+    assert_eq!(store.archived(AgentId::Codex), set(&["profile:other"]));
+    assert_eq!(
+        store.unarchive_account(
+            AgentId::Codex,
+            &account("profile:a", Some("team"), Some("a@example.com"))
+        ),
+        Ok(false),
+        "nothing left to unarchive"
+    );
+
+    archive(&["profile:b", "team"]);
+    assert_eq!(
+        store.unarchive_account(
+            AgentId::Codex,
+            &account("profile:b", Some("team"), Some("b@example.com"))
+        ),
+        Ok(true)
+    );
+    assert_eq!(
+        store.archived(AgentId::Codex),
+        set(&["profile:other", "team"]),
+        "another member's history stays archived"
+    );
+    store
+        .unarchive_account(AgentId::Codex, &account("profile:a", Some("team"), None))
+        .unwrap();
+    assert!(
+        store.archived(AgentId::Codex).contains("team"),
+        "without a label nothing ties the history to the account"
+    );
+
+    archive(&["legacy-without-file"]);
+    store
+        .unarchive_account(
+            AgentId::Codex,
+            &account(
+                "profile:c",
+                Some("legacy-without-file"),
+                Some("c@example.com"),
+            ),
+        )
+        .unwrap();
+    assert!(
+        store
+            .archived(AgentId::Codex)
+            .contains("legacy-without-file"),
+        "no history names the account"
+    );
     let _ = fs::remove_dir_all(home);
 }

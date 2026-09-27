@@ -271,6 +271,43 @@ pub(crate) fn set_archived_at(
     SnapshotStore::for_home(home).set_archived(provider, ids, archived)
 }
 
+/// Unarchives the signed-in account a read of `agent` gave `entries` for, since being signed in
+/// unarchives an account whether it was switched to in on-n-off or in the provider's CLI; whether
+/// the archive changed. A write that fails leaves it archived, for the next read to try again.
+pub fn unarchive_signed_in(agent: AgentId, entries: &[ProviderLimitsDto]) -> bool {
+    paths::user_home().is_ok_and(|home| unarchive_signed_in_at(&home, agent, entries) == Ok(true))
+}
+
+/// [`unarchive_signed_in`] under `home`: the signed-in card's id, and the legacy id its history was
+/// kept under when that history names the same email (`SnapshotStore::unarchive_account`).
+pub(crate) fn unarchive_signed_in_at(
+    home: &Path,
+    agent: AgentId,
+    entries: &[ProviderLimitsDto],
+) -> Result<bool, String> {
+    let Some(account) = entries
+        .iter()
+        .find(|entry| entry.current_account)
+        .and_then(|entry| entry.account.as_ref())
+    else {
+        return Ok(false);
+    };
+    SnapshotStore::for_home(home).unarchive_account(agent, account)
+}
+
+/// Unarchives the saved profile `identity`, labelled `email`, which the user just saved or signed in
+/// to again (Save account, Add account, Sign in again), as those undo a Remove: its own card, and
+/// its legacy history when that history names the same email. Automatic remembering never calls
+/// this. Whether the archive changed.
+pub(crate) fn unarchive_profile(
+    home: &Path,
+    identity: &Identity,
+    email: Option<String>,
+) -> Result<bool, String> {
+    SnapshotStore::for_home(home)
+        .unarchive_account(identity.provider, &scoped_account(identity, email))
+}
+
 /// What `home` remembers for `provider`, as the next read loads it.
 #[cfg(test)]
 pub(crate) fn remembered(home: &Path, provider: AgentId) -> Vec<ProviderLimitsDto> {

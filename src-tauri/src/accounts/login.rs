@@ -308,6 +308,7 @@ fn publish(
         login,
         usage,
     } = prepared;
+    let signed_in = identity.clone();
     store::Store::open(home, false)?.change_then(
         store::ChangeKind::SignIn(ticket),
         |db| {
@@ -328,14 +329,17 @@ fn publish(
                 .ok_or("Saved profile disappeared.")?;
             profile.pending_activation = true;
             profile.usage_renewal_owned = true;
-            Ok(operation)
+            Ok((operation, profile.email.clone()))
         },
-        |operation, _, _| {
+        |(operation, email), _, _| {
             if let Some(usage) = usage {
                 // Only a successfully published login may add observations. Quota storage
                 // failure must not discard a valid login; its previous history remains untouched.
                 let _ = crate::limits::remember(home, usage);
             }
+            // A published sign-in is an explicit re-add, which unarchives its account as it
+            // undoes a Remove; as with its observations, a failed write must not discard it.
+            let _ = crate::limits::unarchive_profile(home, &signed_in, email);
             drop(operation);
             Ok(())
         },

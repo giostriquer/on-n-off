@@ -94,3 +94,43 @@ fn the_signed_in_card_is_never_flagged_archived() {
     );
     let _ = std::fs::remove_dir_all(home);
 }
+
+/// Being signed in unarchives an account: the signed-in card's own id, and its legacy history's
+/// when that history names the same email. Other archived accounts stay archived, and a read that
+/// names no signed-in account unarchives nothing.
+#[test]
+fn the_signed_in_account_a_read_names_is_unarchived() {
+    let home = scratch_dir("limits-archived-unarchive-signed-in");
+    let store = SnapshotStore::for_home(&home);
+    store.save(&read("team", "a@example.com", 8)).unwrap();
+    archive(&store, &["profile:a", "team", "acct-b"]);
+    let signed_in = read("profile:a", "a@example.com", 11).with_legacy_id("team");
+    let mut remembered = read("acct-b", "b@example.com", 9);
+    remembered.current_account = false;
+    remembered.archived = true;
+
+    assert_eq!(
+        unarchive_signed_in_at(&home, AgentId::Codex, &[signed_in, remembered.clone()]),
+        Ok(true)
+    );
+    assert_eq!(
+        store.archived(AgentId::Codex),
+        ["acct-b".to_string()].into()
+    );
+
+    let signed_out = finish(
+        AgentId::Codex,
+        LimitsStatus::SignedOut,
+        None,
+        Parsed::default(),
+    );
+    assert_eq!(
+        unarchive_signed_in_at(&home, AgentId::Codex, &[signed_out, remembered]),
+        Ok(false)
+    );
+    assert_eq!(
+        store.archived(AgentId::Codex),
+        ["acct-b".to_string()].into()
+    );
+    let _ = std::fs::remove_dir_all(home);
+}

@@ -80,9 +80,14 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
         );
     };
     let interval = poll_interval();
-    read_provider(cache, agent, interval, force, &|force| {
-        crate::limits::read_limits(agent, force)
-    })
+    read_provider(
+        cache,
+        agent,
+        interval,
+        force,
+        &|force| crate::limits::read_limits(agent, force),
+        &|entries| crate::limits::unarchive_signed_in(agent, entries),
+    )
 }
 
 /// Common composition boundary: active native results and saved-account results share one cache.
@@ -92,6 +97,7 @@ fn read_provider(
     interval: Duration,
     force: bool,
     native: &dyn Fn(bool) -> Vec<ProviderLimitsDto>,
+    unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
 ) -> (Vec<ProviderLimitsDto>, u64) {
     let (entries, reading) = read_through_cache(cache, interval, force, |force| {
         let mut entries = native(force);
@@ -99,6 +105,12 @@ fn read_provider(
         entries
     });
     announce(cache, reading);
+    // Being signed in unarchives an account. Only the read that replaced the cache writes it, once
+    // the lock is released, and the saved-account list is announced only when the archive changed:
+    // a consumer answering either announcement is served this cache and writes nothing.
+    if reading.replaced() && unarchive(&entries) {
+        read_revision::announce(Source::Accounts);
+    }
     (entries, reading.revision())
 }
 
@@ -113,6 +125,7 @@ pub(crate) fn test_saved_reader(
         Duration::from_secs(300),
         false,
         native,
+        &|_| false,
     )
     .0;
     let cached = read_provider(
@@ -121,6 +134,7 @@ pub(crate) fn test_saved_reader(
         Duration::from_secs(300),
         false,
         native,
+        &|_| false,
     )
     .0;
     (first, cached)
