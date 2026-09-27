@@ -191,5 +191,10 @@ describe("focus as an archived row leaves", () => {
     rerender(<Column cards={[unread]} onUnarchive={onUnarchive} />);
     await act(async () => {});
     expect(screen.getByRole("button", { name: "First card" })).toHaveFocus();
+
+    act(() => screen.getByRole("button", { name: "First card" }).blur());
+    rerender(<Column cards={[unread]} onUnarchive={onUnarchive} />);
+    await act(async () => {});
+    expect(document.body, "a hand-off that did not move focus is over, not waiting for a later render").toHaveFocus();
   });
 });

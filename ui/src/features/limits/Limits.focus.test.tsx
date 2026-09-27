@@ -31,9 +31,12 @@ function answer(claude: ProviderLimits[], codex: ProviderLimits[]) {
   readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : codex));
 }
 
+/** The screen, and a way to render it again as a poll or the minute timer would. */
 function renderLimits() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
-  return render(<QueryClientProvider client={client}><Limits /></QueryClientProvider>);
+  const screenTree = () => <QueryClientProvider client={client}><Limits /></QueryClientProvider>;
+  const view = render(screenTree());
+  return { renderAgain: () => view.rerender(screenTree()) };
 }
 
 beforeEach(() => {
@@ -93,7 +96,7 @@ describe("focus as an account leaves", () => {
     const forgetting = deferred<void>();
     forgetLimitsSnapshot.mockReturnValue(forgetting.promise);
     answer([okClaude()], [okCodex(), staleCodex(), spare]);
-    renderLimits();
+    const { renderAgain } = renderLimits();
     fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove account" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
@@ -104,6 +107,11 @@ describe("focus as an account leaves", () => {
 
     await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
     expect(elsewhere).toHaveFocus();
+
+    act(() => elsewhere.blur());
+    renderAgain();
+    await act(async () => {});
+    expect(document.body, "a hand-off that did not move focus is over, not waiting for a later render").toHaveFocus();
   });
 
   it("goes to the column's first card once its last archived account is unarchived", async () => {
