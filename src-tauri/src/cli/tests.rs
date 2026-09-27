@@ -80,23 +80,30 @@ fn non_executable_launcher_gets_a_permission_hint() {
     );
 }
 
+/// A child is handed the search path as an explicit `PATH`, not the PATH the app inherited: in a
+/// test build the two hold the same directories, so only the command's own environment tells
+/// them apart.
 #[test]
 fn children_get_the_cli_search_path() {
-    let printed = CliStub::new("path-echo")
-        .print_env("PATH")
-        .cli(&stub_dir())
-        .run(&[])
-        .expect("path-echo");
+    let cli = CliStub::new("path-echo").print_env("PATH").cli(&stub_dir());
+    let expected = cli_search_path_value().expect("the search path joins into one PATH");
+    let command = cli.command();
+    let handed: Vec<_> = command
+        .get_envs()
+        .filter(|(name, _)| *name == "PATH")
+        .collect();
+    assert_eq!(handed, [("PATH".as_ref(), Some(expected.as_os_str()))]);
+
+    let printed = cli.run(&[]).expect("path-echo");
     let printed_dirs: Vec<PathBuf> = std::env::split_paths(printed.trim()).collect();
     let search_path = crate::cli_locate::cli_search_path();
+    assert!(!search_path.is_empty(), "no search path to hand over");
     for dir in search_path {
         assert!(
             printed_dirs.contains(dir),
             "child PATH lacks {dir:?}: {printed}"
         );
     }
-    // That the search path carries the well-known tier, not just the process PATH, is pinned
-    // under an injected home in `cli_locate`'s tests: a test build has no home of its own.
 }
 
 #[test]
