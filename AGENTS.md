@@ -37,7 +37,8 @@ of the file — start there, not here.
 - `limits_monitor.rs`, `github_monitor.rs`, `monitor.rs` — background polling and notifications.
 - `cli_locate.rs`, `cli.rs`, `process.rs` — finding and running provider CLIs.
 - `config_io.rs`, `backup.rs` — guarded configuration writes and rollback.
-- `paths.rs` — agent homes and app data paths; `ON_N_OFF_HOME` redirects them for tests.
+- `paths.rs` — agent homes and app data paths; `ON_N_OFF_HOME` redirects them in a running app.
+  A test build has no user home at all.
 - `cli_stub.rs` — test-only fake CLI builder (`.cmd` on Windows, `sh` script elsewhere).
 - `tray.rs` — the status item on both platforms: a Limits popover on macOS, the app's own home
   on Windows. See [`OS.md`](OS.md) for what differs.
@@ -108,8 +109,10 @@ have already cost someone a day.
 **Data safety.** Agent homes — `~/.claude`, `.codex`, `.gemini`, `.cursor`, `.agents` — are real
 user data.
 
-- Tests use temporary fixtures or point `ON_N_OFF_HOME` at a disposable directory. Never run a
-  mutating test against the real home.
+- A test build has no user home: `paths::user_home`, and every path helper built on it, fails
+  there as it would on a machine without one. Tests inject their roots (`paths::scratch_dir`, a
+  `*_for(home)` or `*_in` function); an ignored real-home probe reads only the home its runner
+  names in `ON_N_OFF_PROBE_HOME`. Never run a mutating test against the real home.
 - Every provider-config write goes through `ConfigIo`: backup → atomic replace → validate →
   rollback. Preserve all four.
 - Never weaken validation, or repair a malformed fixture, to make a test pass.

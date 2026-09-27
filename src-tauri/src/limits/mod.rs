@@ -129,11 +129,17 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             )]
         }
     };
+    read_limits_at(agent, force, &home)
+}
+
+/// [`read_limits`] under `home`, with the live Claude login memo, Keychain probe, endpoints and
+/// clock.
+fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> Vec<ProviderLimitsDto> {
     read_limits_in(
         agent,
         force,
         Sources {
-            home: &home,
+            home,
             now_ms: Utc::now().timestamp_millis(),
             claude: ClaudeSources::live(),
         },

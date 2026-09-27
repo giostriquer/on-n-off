@@ -42,6 +42,17 @@ fn cache_freshness_uses_the_configured_interval_and_force_bypasses_it() {
     ));
 }
 
+/// Every automatic read paces itself by this interval. A test build has no user home, so it is
+/// the settings default, never whatever a developer's own settings file says.
+#[test]
+fn a_test_builds_poll_interval_is_the_settings_default() {
+    let minutes = crate::settings::AppSettings::default().limits_poll_minutes;
+    assert_eq!(
+        poll_interval(),
+        Duration::from_secs(u64::from(minutes) * 60)
+    );
+}
+
 #[test]
 fn automatic_failures_back_off_for_every_consumer() {
     let refreshed_at = Instant::now();

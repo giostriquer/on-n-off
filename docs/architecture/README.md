@@ -305,7 +305,7 @@ gone nothing can rebuild it.
 | `cli_locate.rs` | A GUI app does not inherit a terminal's `PATH`. Builds one merged search list and hands it to spawned CLIs as their `PATH`. |
 | `process.rs` | Child-process draining with a hard deadline; stdout and stderr drained concurrently, or a full pipe deadlocks. |
 | `config_io.rs`, `backup.rs` | Every provider-config write: backup → atomic replace → validate → rollback. |
-| `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them for tests. |
+| `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. |
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
 | `dto.rs` | The serialized shapes crossing the IPC boundary. Changing one is a compatibility event. |

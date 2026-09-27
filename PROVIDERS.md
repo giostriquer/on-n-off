@@ -11,7 +11,8 @@ adapter assumes today (change the adapter and this file together).
 ## Common shape
 
 - Home: `~/.<provider>` under `user_home()` — `ON_N_OFF_HOME` overrides the home for **all**
-  providers (tests, QA fixtures). `%USERPROFILE%` on Windows, `$HOME` elsewhere.
+  providers (QA fixtures). `%USERPROFILE%` on Windows, `$HOME` elsewhere. A test build has no
+  user home; tests hand each adapter its root.
 - Plugin id: `<name>@<marketplace>`; `local` when there is no marketplace (`paths::plugin_id_parts`).
 - Manifest lookup order for versions (`plugin_meta.rs`): `.cursor-plugin/plugin.json`,
   `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `plugin.json`, then a version-looking
