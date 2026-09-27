@@ -409,6 +409,21 @@ pub async fn forget_limits_snapshot(
     .await
 }
 
+/// Archive or unarchive the accounts a Limits card names: its own id and the legacy ids merged
+/// into it. Only the user's action in the UI calls this; unarchiving reads the provider again.
+#[tauri::command]
+pub async fn set_limits_archived(
+    agent_id: AgentId,
+    account_ids: Vec<String>,
+    archived: bool,
+) -> Result<(), AdapterError> {
+    blocking("limits archive", move || {
+        crate::limits_refresh::set_archived(agent_id, &account_ids, archived)
+            .map_err(AdapterError::message)
+    })
+    .await
+}
+
 /// The GitHub screen's pull requests (authored, review-requested, assigned) with their CI
 /// rollups, off the UI thread. Auth is borrowed from `gh auth token`; GitHub-side problems come
 /// back as a `status` + `hint` on the DTO, not as an `Err`. `force` skips the in-memory result.

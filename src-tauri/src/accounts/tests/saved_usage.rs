@@ -63,3 +63,40 @@ fn a_usage_refresh_without_a_vault_reads_nothing() {
     assert!(entries.is_empty());
     assert!(harness.native.resolved.borrow().is_empty());
 }
+
+/// An archived account is dormant: a usage refresh never reads it, and so never renews it either,
+/// even a login on-n-off owns, since a private renewal runs only inside a read.
+#[test]
+fn a_usage_refresh_leaves_archived_accounts_alone() {
+    let harness = Harness::new();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    let b = identity(AgentId::Claude, "b", "team");
+    harness.saved(b.clone(), claude("b", "b1"));
+    let c = harness.saved(identity(AgentId::Claude, "c", "team"), claude("c", "c1"));
+    harness.seed(|db| db.profiles[1].usage_renewal_owned = true);
+    harness.signed_in(Some(claude("a", "a2")));
+    crate::limits::set_archived_at(
+        harness.path(),
+        AgentId::Claude,
+        &[b.observation_key()],
+        true,
+    )
+    .unwrap();
+    let fetched = Mutex::new(Vec::new());
+    let mut entries = Vec::new();
+
+    harness
+        .accounts()
+        .refresh_usage(AgentId::Claude, false, &mut entries, &|profile, _| {
+            fetched.lock().unwrap().push(profile.id.clone());
+            FetchResult {
+                login: profile.login.clone(),
+                result: Ok(reading(&profile.identity.observation_key())),
+            }
+        });
+
+    assert_eq!(*fetched.lock().unwrap(), [c]);
+    assert!(entries
+        .iter()
+        .all(|entry| entry.account.as_ref().unwrap().id != b.observation_key()));
+}

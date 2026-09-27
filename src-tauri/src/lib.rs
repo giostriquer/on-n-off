@@ -131,6 +131,7 @@ pub fn run() {
             commands::cancel_account_login,
             commands::read_codex_subscription,
             commands::forget_limits_snapshot,
+            commands::set_limits_archived,
             commands::consume_codex_reset_credit,
             commands::read_github_prs,
             commands::hide_limits_popover,

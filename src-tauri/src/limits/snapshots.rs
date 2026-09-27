@@ -16,6 +16,8 @@ use super::reading::{keep_remembered, newest, parse_observed_at};
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::usage::cache_io::atomic_write;
 
+mod archive;
+
 const SNAPSHOT_SCHEMA_VERSION: u8 = 2;
 // Sign-in and the live provider reader can publish concurrently. Protect the timestamp check
 // and replacement together; this lock covers only local snapshot I/O, never provider calls.
@@ -120,17 +122,12 @@ impl SnapshotStore {
     /// takes the history it replaced.
     fn stored(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
         let now = Utc::now();
-        let prefix = format!("{}-", provider.key());
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return Vec::new();
         };
         let mut snapshots: Vec<(Option<DateTime<Utc>>, ProviderLimitsDto)> = entries
             .flatten()
-            .filter(|entry| {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                name.starts_with(&prefix) && name.ends_with(".json")
-            })
+            .filter(|entry| is_snapshot_file(provider, &entry.file_name().to_string_lossy()))
             .filter_map(|entry| {
                 let path = entry.path();
                 let raw = fs::read_to_string(&path).ok()?;
@@ -143,8 +140,9 @@ impl SnapshotStore {
         snapshots.into_iter().map(|(_, dto)| dto).collect()
     }
 
-    /// Conditionally remove legacy history identified by a confirmed saved-account card.
-    /// Recheck the stored label: a workspace-only key may have been reused by another user.
+    /// Conditionally remove legacy history identified by a confirmed saved-account card, and
+    /// unarchive it. Recheck the stored label: a workspace-only key may have been reused by another
+    /// user.
     pub fn forget_matching_email(
         &self,
         provider: AgentId,
@@ -159,9 +157,12 @@ impl SnapshotStore {
             return Err(changed.into());
         }
         let path = self.dir.join(file_name(provider, account_id));
+        let forgotten = [account_id.to_string()];
         let raw = match fs::read_to_string(&path) {
             Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return self.unarchive_locked(provider, &forgotten).map(drop);
+            }
             Err(_) => return Err(changed.into()),
         };
         let stored = decode(&raw).ok_or(changed)?;
@@ -175,27 +176,31 @@ impl SnapshotStore {
         {
             return Err(changed.into());
         }
-        self.remove_file(provider, account_id)
+        self.remove_file(provider, account_id)?;
+        self.unarchive_locked(provider, &forgotten).map(drop)
     }
 
-    /// Delete one account's snapshot; unknown accounts are a no-op.
+    /// Delete one account's snapshot, with the legacy history it supersedes, and unarchive every id
+    /// deleted; unknown accounts are a no-op but for the archive.
     pub fn forget(&self, provider: AgentId, account_id: &str) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let all = self.stored(provider);
+        let mut forgotten = Vec::new();
         if let Some(target) = all
             .iter()
             .find(|dto| dto.account.as_ref().is_some_and(|a| a.id == account_id))
         {
             for legacy in all.iter().filter(|dto| supersedes(target, dto)) {
-                self.remove_file(
-                    provider,
-                    &legacy.account.as_ref().expect("matched account").id,
-                )?;
+                let id = &legacy.account.as_ref().expect("matched account").id;
+                self.remove_file(provider, id)?;
+                forgotten.push(id.clone());
             }
         }
-        self.remove_file(provider, account_id)
+        self.remove_file(provider, account_id)?;
+        forgotten.push(account_id.to_string());
+        self.unarchive_locked(provider, &forgotten).map(drop)
     }
 
     fn remove_file(&self, provider: AgentId, account_id: &str) -> Result<(), String> {
@@ -244,6 +249,7 @@ impl StoredSnapshot {
             account: Some(self.account),
             current_account: false,
             saved_profile: false,
+            archived: false,
             reading,
         }
     }
@@ -296,6 +302,12 @@ fn decode(raw: &str) -> Option<StoredSnapshot> {
 fn write_stored(path: &Path, stored: StoredSnapshot) -> Result<(), String> {
     let json = serde_json::to_string(&stored).map_err(|error| error.to_string())?;
     atomic_write(path, &json).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// Whether the loader reads the file called `name` as one of `provider`'s snapshots: every
+/// `<provider>-….json`, whatever else lives beside them.
+fn is_snapshot_file(provider: AgentId, name: &str) -> bool {
+    name.starts_with(&format!("{}-", provider.key())) && name.ends_with(".json")
 }
 
 /// `<provider>-<account>.json` with the account id reduced to a file-name-safe token; a short

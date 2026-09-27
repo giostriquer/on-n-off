@@ -74,7 +74,8 @@ impl super::Accounts {
 }
 
 /// `native` is who the CLI is signed in as with a subscription; a native store that could not be
-/// read reads no saved account either.
+/// read reads no saved account either. An account the user archived is left alone entirely: no
+/// read, and so no renewal, which runs only inside one.
 fn refresh_with(
     home: &Path,
     provider: AgentId,
@@ -94,6 +95,7 @@ fn refresh_with(
     let Ok(ticket) = db.ticket(Guard::SignIn) else {
         return;
     };
+    let archived = crate::limits::archived(home, provider);
     let profiles: Vec<_> = db
         .profiles
         .into_iter()
@@ -101,6 +103,7 @@ fn refresh_with(
             p.identity.provider == provider
                 && native.as_ref() != Some(&p.identity)
                 && p.login.is_some()
+                && !archived.contains(&p.identity.observation_key())
         })
         .collect();
     for batch in profiles.chunks(2) {
@@ -417,6 +420,7 @@ fn merge(
                 account,
                 current_account,
                 saved_profile: false,
+                archived: false,
                 reading: Reading::default(),
             };
             if let Some(remembered) = remembered.map(|card| card.reading.clone()) {

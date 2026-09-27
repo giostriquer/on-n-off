@@ -32,6 +32,7 @@ pub(crate) use codex::{read_saved_codex, CodexEndpoints};
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::Remembered;
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -215,15 +216,28 @@ fn provider_read_guard(agent: AgentId) -> MutexGuard<'static, ()> {
 }
 
 /// The current account's card, keeping what its read could not tell from the account's remembered
-/// reading, persisted; then the other remembered accounts, newest first.
+/// reading, persisted; then the other remembered accounts, newest first, each flagged when the user
+/// archived it. The flag goes on once the legacy history a card replaced is hidden, so an archived
+/// card keeps hiding it; the signed-in card is never flagged, since being signed in unarchives it.
 fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<ProviderLimitsDto> {
+    let provider = current.provider;
     let current_account = current.account.as_ref().map(|account| account.id.clone());
-    let mut remembered = store.load(current.provider);
+    let mut remembered = store.load(provider);
     remembered.retain(|snapshot| {
         snapshot.account.as_ref().map(|account| &account.id) != current_account.as_ref()
     });
     let current = store.remember(current).card;
-    snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
+    let mut accounts =
+        snapshots::without_superseded(std::iter::once(current).chain(remembered).collect());
+    let archived = store.archived(provider);
+    for card in &mut accounts {
+        card.archived = !card.current_account
+            && card
+                .account
+                .as_ref()
+                .is_some_and(|account| archived.contains(&account.id));
+    }
+    accounts
 }
 
 /// `card`, keeping what its read could not tell from what `home` remembers of its account, written
@@ -232,6 +246,29 @@ fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<
 /// registry accepted the login it was read with.
 pub(crate) fn remember(home: &Path, card: ProviderLimitsDto) -> Remembered {
     SnapshotStore::for_home(home).remember(card)
+}
+
+/// The ids of the accounts of `provider` the user archived under `home`.
+pub(crate) fn archived(home: &Path, provider: AgentId) -> BTreeSet<String> {
+    SnapshotStore::for_home(home).archived(provider)
+}
+
+/// Archives or unarchives the accounts `ids` of `agent` names, the user's own action from a Limits
+/// card; whether the archive changed.
+pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<bool, String> {
+    let home = paths::user_home().map_err(|error| error.message)?;
+    set_archived_at(&home, agent, ids, archived)
+}
+
+/// Archives or unarchives `ids` of `provider` under `home`, the user's own action; whether the
+/// archive changed.
+pub(crate) fn set_archived_at(
+    home: &Path,
+    provider: AgentId,
+    ids: &[String],
+    archived: bool,
+) -> Result<bool, String> {
+    SnapshotStore::for_home(home).set_archived(provider, ids, archived)
 }
 
 /// What `home` remembers for `provider`, as the next read loads it.

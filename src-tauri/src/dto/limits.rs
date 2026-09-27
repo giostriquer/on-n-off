@@ -234,7 +234,8 @@ impl Reading {
 /// in `status` + `message` rather than returned as errors so the UI can render each provider
 /// independently. `current_account` marks the account the provider is signed into, and
 /// `saved_profile` a saved profile Limits polls; a card that is neither is a remembered reading.
-/// Each window carries its own observation time.
+/// `archived` marks an account the user archived, whatever else it is. Each window carries its own
+/// observation time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderLimitsDto {
@@ -250,6 +251,11 @@ pub struct ProviderLimitsDto {
     /// It describes this read, so it never reaches a snapshot file.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub saved_profile: bool,
+    /// An account the user archived (`limits/snapshots/archive.rs`): hidden from the Limits
+    /// surfaces and never polled. Never the signed-in card, which becoming signed in unarchives.
+    /// It describes the archive, so it never reaches a snapshot file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
     /// What the read reported, or what is remembered of the account where it could not say.
     #[serde(flatten)]
     pub reading: Reading,
@@ -272,6 +278,7 @@ impl ProviderLimitsDto {
             }),
             current_account: true,
             saved_profile: false,
+            archived: false,
             reading: Reading::default(),
         }
     }

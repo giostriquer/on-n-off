@@ -44,6 +44,10 @@ pub struct ProfileDto {
     active: bool,
     needs_login: bool,
     pending_activation: bool,
+    /// The user archived this account (`limits/snapshots/archive.rs`). Read from the archive,
+    /// never the vault.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    archived: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -305,12 +309,14 @@ impl Accounts {
         let recovery_required = db
             .recovery_target()
             .is_some_and(|profile| profile.identity.provider == provider);
+        let archived = crate::limits::archived(home, provider);
         Ok(AccountsDto {
             profiles: db
                 .profiles
                 .into_iter()
                 .filter(|p| p.identity.provider == provider)
                 .map(|p| ProfileDto {
+                    archived: archived.contains(&p.identity.observation_key()),
                     observation_id: p.identity.observation_key(),
                     active: current.as_ref() == Some(&p.identity),
                     id: p.id,

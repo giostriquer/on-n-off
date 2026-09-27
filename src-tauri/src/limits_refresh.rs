@@ -160,6 +160,88 @@ pub fn forget_snapshot(
     Ok(())
 }
 
+/// Archives or unarchives the accounts `ids` of `agent` names, the user's own action from a Limits
+/// card: the card's own id and the legacy ids merged into it. The shared entries follow at once,
+/// and unarchiving then reads the provider again, forced, so the account comes back polled rather
+/// than remembered until the next poll.
+pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<(), String> {
+    let Some(cache) = cache_for(agent) else {
+        return Err(format!(
+            "{} has no accounts to archive.",
+            agent.display_name()
+        ));
+    };
+    set_archived_with(
+        cache,
+        ids,
+        archived,
+        || crate::limits::set_archived(agent, ids, archived),
+        || {
+            let _ = read_limits(agent, true);
+        },
+    )
+}
+
+/// [`set_archived`] with its archive `write` and the provider's forced `reread` given. Each
+/// announcement is of a replacement, made outside the lock: the entries to the other window, and
+/// the archive to the account list, which reads it for the profiles no entry answers for.
+fn set_archived_with(
+    cache: &Cache,
+    ids: &[String],
+    archived: bool,
+    write: impl FnOnce() -> Result<bool, String>,
+    reread: impl FnOnce(),
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Err("No account to archive.".to_string());
+    }
+    let (reading, changed) = archive_through_cache(cache, ids, archived, write)?;
+    announce(cache, reading);
+    if changed {
+        read_revision::announce(Source::Accounts);
+    }
+    if !archived {
+        reread();
+    }
+    Ok(())
+}
+
+/// Writes the archive under the cache lock, as Forget does, so the edit cannot race an in-flight
+/// read, then flags the cached entries it names; the signed-in card is never archived. The
+/// entries' reading, and whether the archive changed.
+fn archive_through_cache<F>(
+    cache: &Cache,
+    ids: &[String],
+    archived: bool,
+    write: F,
+) -> Result<(Reading, bool), String>
+where
+    F: FnOnce() -> Result<bool, String>,
+{
+    let mut cached = cache
+        .read
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let changed = write()?;
+    let mut edited = false;
+    for entry in cached.iter_mut().flat_map(|read| read.entries.iter_mut()) {
+        let named = entry
+            .account
+            .as_ref()
+            .is_some_and(|account| ids.contains(&account.id));
+        if named && !entry.current_account && entry.archived != archived {
+            entry.archived = archived;
+            edited = true;
+        }
+    }
+    let reading = if edited {
+        Reading::Replaced(cache.revision.bump())
+    } else {
+        Reading::Unchanged(cache.revision.current())
+    };
+    Ok((reading, changed))
+}
+
 /// Spend one banked Codex reset, then replace the shared Codex read so every surface shows the
 /// renewed windows and the count that is left. An account change in progress refuses the attempt
 /// rather than spend a reset on an account that is being replaced.

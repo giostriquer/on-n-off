@@ -104,6 +104,25 @@ fn a_saved_profiles_card_is_filed_without_saying_so() {
     let _ = fs::remove_dir_all(&home);
 }
 
+/// Whether an account is archived lives in the archive, so its file never says, and the card it
+/// loads back is not flagged until the read path looks it up.
+#[test]
+fn an_archived_card_is_filed_without_saying_so() {
+    let home = scratch_dir("limits-snap-file-shape-archived");
+    let store = SnapshotStore::for_home(&home);
+    let archived = ProviderLimitsDto {
+        current_account: false,
+        archived: true,
+        ..every_figure()
+    };
+
+    store.save(&archived).unwrap();
+
+    assert!(the_file(&store).get("archived").is_none());
+    assert!(!store.load(AgentId::Codex)[0].archived);
+    let _ = fs::remove_dir_all(&home);
+}
+
 /// A newer read that told only its plan and one window: the account details and balances it did
 /// not report are gone, its windows replace the old ones, and the figures it could not tell stay.
 #[test]

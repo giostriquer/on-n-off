@@ -129,6 +129,7 @@ pub(super) fn finish(
         account: parsed.account,
         current_account: true,
         saved_profile: false,
+        archived: false,
         reading: parsed.reading,
     }
 }
