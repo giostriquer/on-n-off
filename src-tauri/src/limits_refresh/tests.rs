@@ -236,6 +236,203 @@ fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_succes
     );
 }
 
+fn seeded(entries: Vec<ProviderLimitsDto>) -> Cache {
+    let cache = Cache::new(Source::LimitsCodex);
+    *cache.read.lock().unwrap() = Some(CachedRead {
+        refreshed_at: Instant::now(),
+        entries,
+        consecutive_failures: 0,
+    });
+    cache
+}
+
+fn ids(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_string()).collect()
+}
+
+/// Whether each cached entry is archived, in order.
+fn flags(cache: &Cache) -> Vec<bool> {
+    let read = cache.read.lock().unwrap();
+    read.as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|entry| entry.archived)
+        .collect()
+}
+
+/// The shared entries follow the archive once the disk write succeeded, and only the entries it
+/// names; the signed-in card is never flagged. Only an edit that changed an entry replaces them.
+#[test]
+fn archiving_flags_the_shared_entries_after_the_disk_write_and_never_the_signed_in_card() {
+    let cache = seeded(vec![
+        snapshot("signed-in", true, LimitsStatus::Ok),
+        snapshot("saved", false, LimitsStatus::Ok),
+        snapshot("legacy", false, LimitsStatus::Ok),
+    ]);
+
+    let archived = archive_through_cache(
+        &cache,
+        &ids(&["signed-in", "saved", "legacy"]),
+        true,
+        || {
+            assert!(
+                cache.read.try_lock().is_err(),
+                "written under the cache lock"
+            );
+            Ok(true)
+        },
+    );
+    assert_eq!(archived, Ok((Reading::Replaced(1), true)));
+    assert_eq!(flags(&cache), [false, true, true]);
+
+    let again = archive_through_cache(&cache, &ids(&["saved"]), true, || Ok(false));
+    assert_eq!(again, Ok((Reading::Unchanged(1), false)));
+
+    let unarchived = archive_through_cache(&cache, &ids(&["legacy"]), false, || Ok(true));
+    assert_eq!(unarchived, Ok((Reading::Replaced(2), true)));
+    assert_eq!(flags(&cache), [false, true, false]);
+
+    let failed =
+        archive_through_cache(
+            &cache,
+            &ids(&["legacy"]),
+            true,
+            || Err("disk failed".into()),
+        );
+    assert_eq!(failed, Err("disk failed".into()));
+    assert_eq!(flags(&cache), [false, true, false], "nothing changed");
+}
+
+/// Archiving tells the other window its entries changed and the account list that the archive did;
+/// unarchiving then reads the provider again, once the lock is released, so the account comes back
+/// polled rather than remembered. A change that changed nothing is announced to nobody.
+#[test]
+fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
+    let cache = seeded(vec![
+        snapshot("signed-in", true, LimitsStatus::Ok),
+        snapshot("saved", false, LimitsStatus::Ok),
+    ]);
+    let _ = read_revision::take_announced();
+    let rereads = std::cell::Cell::new(0);
+    let reread = |force: bool| {
+        assert!(cache.read.try_lock().is_ok(), "read again outside the lock");
+        assert!(
+            force,
+            "forced, so a held-back poll cannot leave it remembered"
+        );
+        rereads.set(rereads.get() + 1);
+    };
+
+    set_archived_with(&cache, &ids(&["saved"]), true, || Ok(true), reread).unwrap();
+    assert_eq!(
+        read_revision::take_announced(),
+        [Source::LimitsCodex, Source::Accounts]
+    );
+    assert_eq!(rereads.get(), 0, "archiving reads nothing");
+
+    set_archived_with(&cache, &ids(&["saved"]), true, || Ok(false), reread).unwrap();
+    assert!(read_revision::take_announced().is_empty());
+
+    set_archived_with(&cache, &ids(&["saved"]), false, || Ok(true), reread).unwrap();
+    assert_eq!(
+        read_revision::take_announced(),
+        [Source::LimitsCodex, Source::Accounts]
+    );
+    assert_eq!(rereads.get(), 1);
+
+    let refused = set_archived_with(&cache, &[], true, || Ok(true), reread);
+    assert!(refused.is_err(), "no account named");
+    let failed = set_archived_with(
+        &cache,
+        &ids(&["saved"]),
+        false,
+        || Err("disk".into()),
+        reread,
+    );
+    assert_eq!(failed, Err("disk".into()));
+    assert_eq!(rereads.get(), 1, "a failed unarchive reads nothing");
+    assert!(read_revision::take_announced().is_empty());
+}
+
+/// A read does the archive's part in one place and one order, under the cache lock as Forget
+/// writes: the signed-in account unarchived first, since being signed in unarchives an account, then
+/// every card flagged once, so no flagged signed-in card is ever cached. The account list is
+/// announced outside the lock, only when the read unarchived something: a replacement, never a
+/// read, so a read served from the cache writes and announces nothing.
+#[test]
+fn a_replacing_read_unarchives_then_flags_under_the_lock_and_announces_only_a_change() {
+    let cache = Cache::new(Source::LimitsClaude);
+    let _ = read_revision::take_announced();
+    let log = std::cell::RefCell::new(Vec::new());
+    let changes = std::cell::Cell::new(true);
+    let native = |_| {
+        log.borrow_mut().push("native");
+        vec![
+            snapshot("signed-in", true, LimitsStatus::Ok),
+            snapshot("put-away", false, LimitsStatus::Ok),
+        ]
+    };
+    let unarchive = |_: &[ProviderLimitsDto]| {
+        assert!(
+            cache.read.try_lock().is_err(),
+            "unarchived under the cache lock"
+        );
+        log.borrow_mut().push("unarchive");
+        changes.get()
+    };
+    let flag = |entries: &mut [ProviderLimitsDto]| {
+        assert!(
+            cache.read.try_lock().is_err(),
+            "flagged under the cache lock"
+        );
+        log.borrow_mut().push("flag");
+        for entry in entries.iter_mut().filter(|entry| !entry.current_account) {
+            entry.archived = true;
+        }
+    };
+    let interval = Duration::from_secs(300);
+    let read = |force| {
+        read_provider(
+            &cache,
+            AgentId::Claude,
+            interval,
+            force,
+            &native,
+            &unarchive,
+            &flag,
+        )
+        .0
+    };
+
+    let entries = read(false);
+    assert_eq!(*log.borrow(), ["native", "unarchive", "flag"]);
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.archived)
+            .collect::<Vec<_>>(),
+        [false, true]
+    );
+    assert_eq!(
+        read_revision::take_announced(),
+        [Source::LimitsClaude, Source::Accounts]
+    );
+
+    assert_eq!(read(false), entries, "the cache holds the flagged cards");
+    assert_eq!(log.borrow().len(), 3, "a cached answer writes nothing");
+    assert!(read_revision::take_announced().is_empty());
+
+    changes.set(false);
+    read(true);
+    assert_eq!(log.borrow().len(), 6);
+    assert_eq!(
+        read_revision::take_announced(),
+        [Source::LimitsClaude],
+        "nothing was unarchived, so the account list is not announced"
+    );
+}
+
 struct Lease<'a>(&'a std::cell::RefCell<Vec<&'static str>>);
 
 impl Drop for Lease<'_> {

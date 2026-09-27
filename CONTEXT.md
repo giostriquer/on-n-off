@@ -36,10 +36,17 @@ nothing else has observed nothing.
 _Avoid_: metadata
 
 **Remembered reading**:
-The last reading kept for an account, shown when the account is neither the signed-in one nor a
-saved profile Limits is polling: one the user switched away from without saving it, or a saved
-profile Limits cannot poll now.
+The last reading kept for an account, shown when the account is neither the signed-in one, a saved
+profile Limits is polling, nor an archived account: one the user switched away from without saving
+it, or a saved profile Limits cannot poll now.
 _Avoid_: cache, snapshot (the file that stores it)
+
+**Archived account**:
+An account the user has put away: hidden from Limits and not polled, its saved login and last
+reading kept so it can be brought back without signing in again. Only the user archives or
+unarchives an account: by Unarchive, by adding it again, or by signing in to it. Unrelated to
+Codex's archived sessions, which Usage reads.
+_Avoid_: hidden, disabled, paused
 
 ### Accounts
 

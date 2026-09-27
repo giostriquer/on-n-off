@@ -3,7 +3,7 @@ import type { SavedProfile } from "$lib/accountTypes";
 import { formatObservedAt } from "$lib/limitsFormat";
 import type { LimitsCredits, LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
-import { limitCards, type LimitCard } from "./limitCards";
+import { limitCards, limitColumn, type LimitCard } from "./limitCards";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 
 const AT_NOW = Date.parse(NOW);
@@ -38,6 +38,7 @@ describe("which cards a provider shows", () => {
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
       freshness: { updatedAt: null, lastKnown: false, message: null, readStatus: "ok" },
       subscription: { provider: "claude", status: null, lastKnown: false, checkedAt: null },
+      archived: false, archiveInsteadOfUse: false,
     });
   });
 
@@ -422,5 +423,83 @@ describe("a card's subscription badge", () => {
     const entry = okClaude({ subscriptionStatus: "past_due", ...overrides });
     entry.windows = entry.windows.map(window => ({ ...window, observedAt }));
     expect(cards([entry])[0].subscription).toEqual({ provider: "claude", status: "past_due", lastKnown, checkedAt: formatObservedAt(observedAt) });
+  });
+});
+
+describe("archived accounts", () => {
+  const signedIn = okCodex({ account: { id: "acct-me", label: "me@codex.example" } });
+  const archivedSaved = staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, archived: true });
+  const archivedHistory = staleCodex({ account: { id: "team", label: "history@codex.example" }, archived: true });
+  const visibleSaved = staleCodex({ account: { id: "profile:kept", label: "kept@codex.example" }, savedProfile: true });
+  const column = (entries: ProviderLimits[] | undefined, profiles: SavedProfile[] = []) =>
+    limitColumn({ provider: "codex", entries, profiles, now: AT_NOW });
+
+  it("splits a provider's cards into the visible ones and the archived ones, profile-only cards included", () => {
+    const shown = column([signedIn, archivedSaved, archivedHistory, visibleSaved], [
+      saved("codex", "saved", "profile:saved", "saved@codex.example"),
+      saved("codex", "unread", "profile:unread", "unread@codex.example", { archived: true }),
+      saved("codex", "fresh", "profile:fresh", "fresh@codex.example"),
+    ]);
+    expect(shown && labels(shown.visible)).toEqual(["me@codex.example", "kept@codex.example", "fresh@codex.example"]);
+    expect(shown && labels(shown.archived)).toEqual(["saved@codex.example", "history@codex.example", "unread@codex.example"]);
+    expect(shown?.archived.map(card => card.archived)).toEqual([true, true, true]);
+    expect(shown?.visible.map(card => card.archived)).toEqual([false, false, false]);
+  });
+
+  it("archives a card with the legacy history merged into it, whose ids it takes along", () => {
+    const profile = saved("codex", "saved", "profile:user-team", "shared@example.com", { identity: { provider: "codex", userId: "user", workspaceId: "team" } });
+    const scoped = okCodex({ account: { id: "profile:user-team", label: "shared@example.com" }, currentAccount: false, archived: true });
+    const legacy = okCodex({ account: { id: "team", label: "shared@example.com" }, currentAccount: false, archived: true });
+    const shown = column([signedIn, scoped, legacy], [profile]);
+    expect(shown && labels(shown.archived)).toEqual(["shared@example.com"]);
+    expect(shown?.archived[0].account?.forget).toEqual([{ accountId: "team", expectedEmail: "shared@example.com" }, { accountId: "profile:user-team" }]);
+  });
+
+  it("never lists the signed-in card as archived", () => {
+    const shown = column([{ ...signedIn, archived: true }], [saved("codex", "me", "acct-me", "me@codex.example", { active: true, archived: true })]);
+    expect(shown && labels(shown.visible)).toEqual(["me@codex.example"]);
+    expect(shown?.archived).toEqual([]);
+  });
+
+  it("takes a reading's word over its profile's, which the account list may not have refreshed yet", () => {
+    const shown = column([signedIn, visibleSaved], [saved("codex", "kept", "profile:kept", "kept@codex.example", { archived: true })]);
+    expect(shown && labels(shown.visible)).toEqual(["me@codex.example", "kept@codex.example"]);
+    expect(shown?.archived).toEqual([]);
+  });
+
+  it("is nothing until a read answers or a profile is saved", () => {
+    expect(column(undefined)).toBeNull();
+  });
+});
+
+describe("the footer of a saved account whose subscription ended", () => {
+  const PASSED = "2026-08-10T00:00:00Z";
+  const AHEAD = "2026-09-10T00:00:00Z";
+  const term = (willRenew: boolean, activeUntil: string) => ({ activeUntil, willRenew, checkedAt: NOW });
+  const codexSaved = (subscription: ProviderLimits["subscription"], overrides: Partial<ProviderLimits> = {}) =>
+    staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, subscription, ...overrides });
+  const claudeSaved = (subscriptionStatus: string | null) =>
+    okClaude({ account: { id: "profile:saved", label: "saved@claude.example" }, currentAccount: false, savedProfile: true, subscriptionStatus });
+  const profileOf = (provider: AgentId, overrides: Partial<SavedProfile> = {}) =>
+    saved(provider, "saved", "profile:saved", `saved@${provider}.example`, overrides);
+
+  it.each<[string, boolean, ProviderLimits, SavedProfile | null]>([
+    ["Codex: will not renew and its date has passed", true, codexSaved(term(false, PASSED)), profileOf("codex")],
+    ["Codex: will not renew, but its date is ahead", false, codexSaved(term(false, AHEAD)), profileOf("codex")],
+    ["Codex: renews, though its date has passed", false, codexSaved(term(true, PASSED)), profileOf("codex")],
+    ["Codex: no term read", false, codexSaved(null), profileOf("codex")],
+    ["Codex: a term whose date cannot be read", false, codexSaved(term(false, "not a date")), profileOf("codex")],
+    ["Claude: expired", true, claudeSaved("expired"), profileOf("claude")],
+    ["Claude: canceled, which may still run to the end of its period", false, claudeSaved("canceled"), profileOf("claude")],
+    ["Claude: payment due", false, claudeSaved("past_due"), profileOf("claude")],
+    ["Claude: no status read", false, claudeSaved(null), profileOf("claude")],
+    ["the signed-in account", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex", { active: true })],
+    ["signed in by the read, before the account list marks it active", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex")],
+    ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf("codex", { active: true })],
+    ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
+    ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf("codex", { needsLogin: true })],
+  ])("%s → Archive account in place of Use account: %s", (_case, expected, entry, profile) => {
+    const shown = cards([entry], profile ? [profile] : [], AT_NOW, entry.provider);
+    expect(shown.find(card => card.account?.id === "profile:saved")?.archiveInsteadOfUse).toBe(expected);
   });
 });

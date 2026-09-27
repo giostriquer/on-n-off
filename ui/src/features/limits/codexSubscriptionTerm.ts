@@ -81,3 +81,11 @@ export function codexSubscriptionTerm(
     checked: checkedLine ? (term ? `Checked ${checkedLine}` : `Confirmed by OpenAI ${checkedLine}`) : null,
   };
 }
+
+/**
+ * Whether the billing endpoint's term says the plan has ended without renewing: it will not renew
+ * and its paid period has passed, the badge's `ended`. Without a term nothing says so.
+ */
+export function codexTermEnded(term: LimitsSubscription | null | undefined, now: number): boolean {
+  return !!term && codexSubscriptionTerm(term, null, now)?.state === "ended";
+}

@@ -12,7 +12,12 @@ impl SnapshotStore {
     }
 }
 
-fn snapshot(provider: AgentId, id: &str, label: &str, observed_at: &str) -> ProviderLimitsDto {
+pub(super) fn snapshot(
+    provider: AgentId,
+    id: &str,
+    label: &str,
+    observed_at: &str,
+) -> ProviderLimitsDto {
     let mut dto = ProviderLimitsDto::for_test(provider, id)
         .labelled(label)
         .with_reading(Reading {

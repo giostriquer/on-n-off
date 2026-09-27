@@ -32,6 +32,7 @@ pub(crate) use codex::{read_saved_codex, CodexEndpoints};
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::Remembered;
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -232,6 +233,100 @@ fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<
 /// registry accepted the login it was read with.
 pub(crate) fn remember(home: &Path, card: ProviderLimitsDto) -> Remembered {
     SnapshotStore::for_home(home).remember(card)
+}
+
+/// The ids of the accounts of `provider` the user archived under `home`.
+pub(crate) fn archived(home: &Path, provider: AgentId) -> BTreeSet<String> {
+    SnapshotStore::for_home(home).archived(provider)
+}
+
+/// Archives or unarchives the accounts `ids` of `agent` names, the user's own action from a Limits
+/// card; whether the archive changed.
+pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<bool, String> {
+    let home = paths::user_home().map_err(|error| error.message)?;
+    set_archived_at(&home, agent, ids, archived)
+}
+
+/// Archives or unarchives `ids` of `provider` under `home`, the user's own action; whether the
+/// archive changed.
+pub(crate) fn set_archived_at(
+    home: &Path,
+    provider: AgentId,
+    ids: &[String],
+    archived: bool,
+) -> Result<bool, String> {
+    SnapshotStore::for_home(home).set_archived(provider, ids, archived)
+}
+
+/// Sets each card's `archived` to what `archived` says of its account id and its current flag: the
+/// one rule every flag goes through. The signed-in card is never archived, since being signed in
+/// unarchives an account, and a card that names no account is not one. Whether any flag changed.
+pub(crate) fn mark_archived(
+    entries: &mut [ProviderLimitsDto],
+    archived: impl Fn(&str, bool) -> bool,
+) -> bool {
+    let mut changed = false;
+    for card in entries {
+        let flag = !card.current_account
+            && card
+                .account
+                .as_ref()
+                .is_some_and(|account| archived(&account.id, card.archived));
+        changed |= flag != card.archived;
+        card.archived = flag;
+    }
+    changed
+}
+
+/// Flags the cards of a read of `agent` whose accounts the user archived, once the read has named
+/// its signed-in account and the saved polls have answered.
+pub fn flag_archived(agent: AgentId, entries: &mut [ProviderLimitsDto]) {
+    if let Ok(home) = paths::user_home() {
+        flag_archived_at(&home, agent, entries);
+    }
+}
+
+/// [`flag_archived`] under `home`.
+pub(crate) fn flag_archived_at(home: &Path, agent: AgentId, entries: &mut [ProviderLimitsDto]) {
+    let archived = SnapshotStore::for_home(home).archived(agent);
+    mark_archived(entries, |id, _| archived.contains(id));
+}
+
+/// Unarchives the signed-in account a read of `agent` gave `entries` for, since being signed in
+/// unarchives an account whether it was switched to in on-n-off or in the provider's CLI; whether
+/// the archive changed.
+pub fn unarchive_signed_in(agent: AgentId, entries: &[ProviderLimitsDto]) -> bool {
+    paths::user_home().is_ok_and(|home| unarchive_signed_in_at(&home, agent, entries))
+}
+
+/// [`unarchive_signed_in`] under `home`: the signed-in card's id, and the legacy id its history was
+/// kept under when that history is this account's (`SnapshotStore::unarchive_account`). A write
+/// that fails changed nothing and leaves the account archived, for the next read to try again.
+pub(crate) fn unarchive_signed_in_at(
+    home: &Path,
+    agent: AgentId,
+    entries: &[ProviderLimitsDto],
+) -> bool {
+    entries
+        .iter()
+        .find(|entry| entry.current_account)
+        .and_then(|entry| entry.account.as_ref())
+        .is_some_and(|account| {
+            SnapshotStore::for_home(home).unarchive_account(agent, account) == Ok(true)
+        })
+}
+
+/// Unarchives the saved profile `identity`, labelled `email`, which the user just saved or signed in
+/// to again (Save account, Add account, Sign in again), as those undo a Remove: its own card, and
+/// its legacy history when that history names the same email. Automatic remembering never calls
+/// this. Whether the archive changed.
+pub(crate) fn unarchive_profile(
+    home: &Path,
+    identity: &Identity,
+    email: Option<String>,
+) -> Result<bool, String> {
+    SnapshotStore::for_home(home)
+        .unarchive_account(identity.provider, &scoped_account(identity, email))
 }
 
 /// What `home` remembers for `provider`, as the next read loads it.

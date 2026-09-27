@@ -268,6 +268,7 @@ const handlers: Record<string, Handler> = {
     pendingLogins.delete(id);
   },
   read_limits: (args) => limits.readLimits(args.agentId),
+  set_limits_archived: (args) => limits.setArchived(args.agentId, args.accountIds, args.archived),
   read_codex_subscription: (args) => limits.readCodexSubscription(args.accountId),
   consume_codex_reset_credit: () => "reset",
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),

@@ -149,6 +149,11 @@ export function forgetLimitsSnapshot(agentId: AgentId, accountId: string, expect
   return invoke("forget_limits_snapshot", { agentId, accountId, ...(expectedEmail !== undefined ? { expectedEmail } : {}) });
 }
 
+/** Archives or unarchives the accounts a Limits card names; unarchiving reads the provider again. */
+export function setLimitsArchived(agentId: AgentId, accountIds: string[], archived: boolean): Promise<void> {
+  return invoke("set_limits_archived", { agentId, accountIds, archived });
+}
+
 /** The GitHub screen's pull requests; `force` skips the backend's in-memory result. */
 export function readGithubPrs(force = false): Promise<GithubPrs> {
   return invoke("read_github_prs", { force });

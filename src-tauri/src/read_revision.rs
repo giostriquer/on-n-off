@@ -117,6 +117,8 @@ pub fn register(app: &AppHandle) {
 /// Tells every window that `source` now holds a read newer than the one they are showing. Call it
 /// only for a [`Reading::Replaced`], and only outside the lock that read holds.
 pub fn announce(source: Source) {
+    #[cfg(test)]
+    ANNOUNCED.with(|announced| announced.borrow_mut().push(source));
     if let Some(app) = APP.get() {
         let _ = app.emit(
             "shared-read-changed",
@@ -125,6 +127,18 @@ pub fn announce(source: Source) {
             },
         );
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static ANNOUNCED: std::cell::RefCell<Vec<Source>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// What this thread has announced since it last asked, oldest first: a test build has no windows
+/// to tell, so a test reads its announcements here.
+#[cfg(test)]
+pub fn take_announced() -> Vec<Source> {
+    ANNOUNCED.with(std::cell::RefCell::take)
 }
 
 #[cfg(test)]

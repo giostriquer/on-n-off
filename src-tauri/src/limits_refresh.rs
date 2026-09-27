@@ -80,9 +80,15 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
         );
     };
     let interval = poll_interval();
-    read_provider(cache, agent, interval, force, &|force| {
-        crate::limits::read_limits(agent, force)
-    })
+    read_provider(
+        cache,
+        agent,
+        interval,
+        force,
+        &|force| crate::limits::read_limits(agent, force),
+        &|entries| crate::limits::unarchive_signed_in(agent, entries),
+        &|entries| crate::limits::flag_archived(agent, entries),
+    )
 }
 
 /// Common composition boundary: active native results and saved-account results share one cache.
@@ -92,13 +98,25 @@ fn read_provider(
     interval: Duration,
     force: bool,
     native: &dyn Fn(bool) -> Vec<ProviderLimitsDto>,
+    unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
+    flag: &dyn Fn(&mut [ProviderLimitsDto]),
 ) -> (Vec<ProviderLimitsDto>, u64) {
+    let mut unarchived = false;
     let (entries, reading) = read_through_cache(cache, interval, force, |force| {
         let mut entries = native(force);
+        // Being signed in unarchives an account, before the saved polls and before the cards are
+        // flagged once, all under the cache lock, which Forget and archiving write under too.
+        unarchived = unarchive(&entries);
         crate::accounts::usage::refresh(agent, force, &mut entries);
+        flag(&mut entries);
         entries
     });
     announce(cache, reading);
+    // Only a read that replaced the cache can have unarchived anything, so the account list is told
+    // of a change, never of a read, and outside the lock.
+    if unarchived {
+        read_revision::announce(Source::Accounts);
+    }
     (entries, reading.revision())
 }
 
@@ -113,6 +131,8 @@ pub(crate) fn test_saved_reader(
         Duration::from_secs(300),
         false,
         native,
+        &|_| false,
+        &|_| {},
     )
     .0;
     let cached = read_provider(
@@ -121,6 +141,8 @@ pub(crate) fn test_saved_reader(
         Duration::from_secs(300),
         false,
         native,
+        &|_| false,
+        &|_| {},
     )
     .0;
     (first, cached)
@@ -158,6 +180,86 @@ pub fn forget_snapshot(
     // one already forgot, until its own poll comes round.
     announce(cache, reading);
     Ok(())
+}
+
+/// Archives or unarchives the accounts `ids` of `agent` names, the user's own action from a Limits
+/// card: the card's own id and the legacy ids merged into it. The shared entries follow at once,
+/// and unarchiving then reads the provider again, forced, so the account comes back polled rather
+/// than remembered until the next poll.
+pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<(), String> {
+    let Some(cache) = cache_for(agent) else {
+        return Err(format!(
+            "{} has no accounts to archive.",
+            agent.display_name()
+        ));
+    };
+    set_archived_with(
+        cache,
+        ids,
+        archived,
+        || crate::limits::set_archived(agent, ids, archived),
+        |force| {
+            let _ = read_limits(agent, force);
+        },
+    )
+}
+
+/// [`set_archived`] with its archive `write` and the provider's `reread`, told whether to force it.
+/// Each announcement is of a replacement, made outside the lock: the entries to the other window,
+/// and the archive to the account list, which reads it for the profiles no entry answers for.
+fn set_archived_with(
+    cache: &Cache,
+    ids: &[String],
+    archived: bool,
+    write: impl FnOnce() -> Result<bool, String>,
+    reread: impl FnOnce(bool),
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Err("No account to archive.".to_string());
+    }
+    let (reading, changed) = archive_through_cache(cache, ids, archived, write)?;
+    announce(cache, reading);
+    if changed {
+        read_revision::announce(Source::Accounts);
+    }
+    if !archived {
+        reread(true);
+    }
+    Ok(())
+}
+
+/// Writes the archive under the cache lock, as Forget does, so the edit cannot race an in-flight
+/// read, then flags the cached entries it names. The entries' reading, and whether the archive
+/// changed.
+fn archive_through_cache<F>(
+    cache: &Cache,
+    ids: &[String],
+    archived: bool,
+    write: F,
+) -> Result<(Reading, bool), String>
+where
+    F: FnOnce() -> Result<bool, String>,
+{
+    let mut cached = cache
+        .read
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let changed = write()?;
+    let edited = cached.as_mut().is_some_and(|read| {
+        crate::limits::mark_archived(&mut read.entries, |id, was| {
+            if ids.iter().any(|named| named == id) {
+                archived
+            } else {
+                was
+            }
+        })
+    });
+    let reading = if edited {
+        Reading::Replaced(cache.revision.bump())
+    } else {
+        Reading::Unchanged(cache.revision.current())
+    };
+    Ok((reading, changed))
 }
 
 /// Spend one banked Codex reset, then replace the shared Codex read so every surface shows the

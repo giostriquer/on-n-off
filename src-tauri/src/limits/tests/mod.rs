@@ -1,3 +1,4 @@
+mod archived;
 mod credits_spent;
 mod memory;
 mod remembered_reading;
@@ -331,6 +332,34 @@ fn only_a_saved_profiles_card_carries_the_saved_profile_key() {
         !serde_json::from_value::<ProviderLimitsDto>(value)
             .unwrap()
             .saved_profile
+    );
+}
+
+/// An archived card says so over IPC as `archived`; no other card carries the key, and a card
+/// without it, as every version before archiving sent, reads as not archived.
+#[test]
+fn only_an_archived_card_carries_the_archived_key() {
+    let remembered = ProviderLimitsDto {
+        current_account: false,
+        ..ProviderLimitsDto::for_test(AgentId::Codex, "profile:acct-1")
+    };
+    let archived = ProviderLimitsDto {
+        archived: true,
+        ..remembered.clone()
+    };
+
+    let value = serde_json::to_value(&archived).unwrap();
+    assert_eq!(value["archived"], json!(true));
+    assert_eq!(
+        serde_json::from_value::<ProviderLimitsDto>(value).unwrap(),
+        archived
+    );
+    let value = serde_json::to_value(&remembered).unwrap();
+    assert!(value.get("archived").is_none(), "{value}");
+    assert!(
+        !serde_json::from_value::<ProviderLimitsDto>(value)
+            .unwrap()
+            .archived
     );
 }
 

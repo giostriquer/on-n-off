@@ -36,6 +36,18 @@ const THEME_KEY = "on-n-off.theme";
 const SCREEN_KEY = "on-n-off.screen";
 const STEP_KEYS = ["click", "fill", "press", "hover", "scroll", "wait", "shot"];
 
+// The archived-accounts scenes' selectors: each column's archived list is its own region.
+const ARCHIVED = {
+  claude: "role=region[name='Claude archived accounts']",
+  codex: "role=region[name='Codex archived accounts']",
+};
+const ARCHIVED_OPEN = [
+  { click: `${ARCHIVED.claude} >> role=button[name='Archived (2)']` },
+  { click: `${ARCHIVED.codex} >> role=button[name='Archived (1)']` },
+  { wait: "role=button[name='Unarchive former@example.com']" },
+];
+const ARCHIVE_ACTION = "role=group[name='Actions for person@acme.example'] >> role=button[name='Archive account']";
+
 const SCENES = [
   { name: "github-ok", url: "/github?mock=ok" },
   { name: "github-ok-light", url: "/github?mock=ok", theme: "light" },
@@ -66,6 +78,21 @@ const SCENES = [
   { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
   // The menu-bar popover renders the same cards at the window size tray.rs gives it.
   { name: "limits-popover", url: "/?surface=limits-popover&mock=ok", viewport: { width: 350, height: 480 }, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
+  // Archived accounts: each column's list collapsed, then opened; the card menu's Archive account,
+  // and the card in its column's list once archived. The popover shows none of them.
+  { name: "limits-archived", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: [{ wait: `${ARCHIVED.claude} >> role=button[name='Archived (2)']` }] },
+  { name: "limits-archived-open", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
+  { name: "limits-archived-open-light", url: "/limits?mock=archivedAccounts", theme: "light", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
+  { name: "limits-archive-menu", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: [
+    { click: "role=button[name='More actions for person@acme.example']" },
+    { wait: ARCHIVE_ACTION },
+    { shot: "limits-archive-menu" },
+    { click: ARCHIVE_ACTION },
+    { click: `${ARCHIVED.codex} >> role=button[name='Archived (2)']` },
+    { wait: "role=button[name='Unarchive person@acme.example']" },
+    { shot: "limits-archived-after-archive" },
+  ] },
+  { name: "popover-archived", url: "/?surface=limits-popover&mock=archivedAccounts", viewport: { width: 350, height: 900 }, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
 ];
 
 function connects(port, host) {

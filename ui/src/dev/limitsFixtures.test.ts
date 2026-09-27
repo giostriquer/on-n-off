@@ -54,4 +54,27 @@ describe("limitsScenario", () => {
     // Another page's scenario starts clean.
     expect(ids(limitsScenario("accountDuplicate").readLimits("codex"))).toEqual(["codex-1", legacy]);
   });
+
+  it("archives archivedAccounts' saved reading, profile-only login and history, and follows archive and unarchive for that page alone", () => {
+    const scenario = limitsScenario("archivedAccounts");
+    const archived = (agent: string) => [
+      ...scenario.readLimits(agent).filter(entry => entry.archived).map(entry => entry.account?.id),
+      ...scenario.readAccounts(agent).profiles.filter(profile => profile.archived).map(profile => profile.observationId),
+    ];
+    expect(archived("claude")).toEqual(["claude-2", "claude-2", "profile:claude-unread"]);
+    expect(scenario.readAccounts("claude").profiles.map(profile => profile.observationId)).toContain("profile:claude-unread");
+    expect(ids(scenario.readLimits("claude"))).not.toContain("profile:claude-unread");
+    expect(archived("codex")).toEqual(["codex-history"]);
+    expect(scenario.readLimits("codex").find(entry => entry.account?.id === "codex-history")?.savedProfile).toBeFalsy();
+
+    scenario.setArchived("codex", ["codex-2"], true);
+    scenario.setArchived("claude", ["claude-2"], false);
+    expect(archived("codex")).toEqual(["codex-2", "codex-history", "codex-2"]);
+    expect(archived("claude")).toEqual(["profile:claude-unread"]);
+    expect(scenario.readLimits("claude")[0].archived, "never the signed-in card").toBeFalsy();
+    // Another page's scenario starts clean, and one without archive state ignores it.
+    expect(limitsScenario("archivedAccounts").readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-history"]);
+    limitsScenario("ok").setArchived("codex", ["codex-2"], true);
+    expect(limitsScenario("ok").readLimits("codex").some(entry => entry.archived)).toBe(false);
+  });
 });

@@ -13,6 +13,7 @@ const addAccount = vi.hoisted(() => vi.fn());
 const accountAction = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
 const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
+const setLimitsArchived = vi.hoisted(() => vi.fn());
 
 const sharedReadHandlers = vi.hoisted(() => new Set<(change: { source: string }) => void>());
 const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string }) => void) => {
@@ -21,7 +22,7 @@ const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string
 });
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
 
-vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit }));
+vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, setLimitsArchived, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit }));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -72,6 +73,7 @@ beforeEach(() => {
   consumeCodexResetCredit.mockReset();
   forgetLimitsSnapshot.mockReset();
   forgetLimitsSnapshot.mockResolvedValue(undefined);
+  setLimitsArchived.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -119,7 +121,9 @@ describe("Limits", () => {
     expect(within(remembered).getByRole("button", { name: "Sign in" })).toBeTruthy();
     fireEvent.click(trigger);
     expect(screen.getByRole("group", {name: "Actions for personal@codex.example"})).toBeTruthy();
-    expect(screen.getByRole("button", {name: "Remove account"})).toHaveFocus();
+    // The reversible action comes first and takes focus; Remove account, which asks first, is last.
+    expect(screen.getByRole("button", {name: "Archive account"})).toHaveFocus();
+    expect(screen.getByRole("button", {name: "Remove account"})).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement!, {key: "Escape"});
     expect(screen.queryByRole("group", {name: "Actions for personal@codex.example"})).toBeNull();
     expect(trigger).toHaveFocus();
@@ -649,4 +653,146 @@ it("shows the copy the card model gives an empty card", async () => {
   expect(within(await screen.findByRole("region", { name: "Codex limits · unread@codex.example" })).getByText("Usage unavailable.")).toBeTruthy();
   expect(within(card("Codex limits · empty@codex.example")).getByText("Usage unavailable.")).toBeTruthy();
   expect(within(card("Claude limits")).getByText("Claude reported no rate-limit windows.")).toBeTruthy();
+});
+
+describe("archiving", () => {
+  it("archives a card from its menu without asking and lists it under the column's archived accounts", async () => {
+    const spare = staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } });
+    // Codex is signed out, so its current entry names no account for the archive to look at.
+    const signedOut = statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.");
+    answer([okClaude()], [signedOut, staleCodex(), spare]);
+    renderLimits();
+    await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    fireEvent.click(screen.getByRole("button", { name: "More actions for me@claude.example" }));
+    expect(screen.queryByRole("button", { name: "Archive account" }), "never the signed-in card").toBeNull();
+    fireEvent.keyDown(screen.getByRole("button", { name: "More actions for me@claude.example" }), { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions for personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["acct-personal"], true));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Archived (1)" })).toHaveAttribute("aria-expanded", "false");
+    expect(card("Codex limits · spare@codex.example"), "only the card archived moves").toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+  });
+
+  it("archives and unarchives a saved login no read answers for, through the account list it comes from", async () => {
+    const unread = { id: "unread", observationId: "profile:unread", identity: { provider: "codex" as const, userId: "unread", workspaceId: "team" }, email: "unread@codex.example", label: "unread@codex.example", savedAt: NOW, active: false, needsLogin: false };
+    answer([okClaude()], [okCodex()]);
+    readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [unread] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+    const { client } = renderLimits();
+    const archivedFlag = () => client.getQueryData<{ profiles: { archived?: boolean }[] }>(["accounts", "codex"])?.profiles[0].archived;
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for unread@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["profile:unread"], true));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · unread@codex.example" })).toBeNull());
+    expect(archivedFlag()).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unarchive unread@codex.example" }));
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["profile:unread"], false));
+    expect(await screen.findByRole("region", { name: "Codex limits · unread@codex.example" })).toBeInTheDocument();
+    expect(archivedFlag()).toBe(false);
+  });
+
+  it("removes an archived history card by forgetting each of its snapshots, with no saved login to remove", async () => {
+    answer([okClaude()], [okCodex(), staleCodex({ archived: true })]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove account personal@codex.example" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove account personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
+
+    await waitFor(() => expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex", "acct-personal", undefined]]));
+    expect(accountAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps the card and says why when archiving it fails", async () => {
+    setLimitsArchived.mockRejectedValue({ kind: "message", message: "disk full", path: null });
+    answer([okClaude()], [okCodex(), staleCodex()]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+
+    expect(await screen.findByText("Could not archive that account: disk full")).toBeInTheDocument();
+    expect(card("Codex limits · personal@codex.example")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
+  });
+
+  it("unarchives an account in place, and leaves reading it again to the backend, which announces its forced read", async () => {
+    let archived = true;
+    readLimits.mockImplementation(async (provider: AgentId) => provider === "codex"
+      ? [okCodex(), staleCodex({ archived })] : [okClaude()]);
+    setLimitsArchived.mockImplementation(async () => { archived = false; });
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
+    const reads = readLimits.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Unarchive personal@codex.example" }));
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["acct-personal"], false));
+    expect(await screen.findByRole("region", { name: "Codex limits · personal@codex.example" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(readLimits.mock.calls.slice(reads), "no read of the UI's own").toEqual([]);
+
+    await act(async () => { for (const handler of sharedReadHandlers) handler({ source: "limits:codex" }); });
+    await waitFor(() => expect(readLimits.mock.calls.slice(reads)).toEqual([["codex", false]]));
+  });
+
+  it("removes an archived account as Remove account does: the saved login, then its history first", async () => {
+    const profile = { id: "saved", observationId: "profile:user-team", identity: { provider: "codex" as const, userId: "user", workspaceId: "team" }, email: "shared@example.com", label: "shared@example.com", savedAt: NOW, active: false, needsLogin: false, archived: true };
+    let history = [okCodex(), okCodex({ account: { id: profile.observationId, label: profile.email }, currentAccount: false, archived: true }),
+      okCodex({ account: { id: "team", label: profile.email }, currentAccount: false, archived: true })];
+    readLimits.mockImplementation(async (provider: AgentId) => provider === "codex" ? history : [okClaude()]);
+    readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+    forgetLimitsSnapshot.mockImplementation(async (_provider: string, id: string) => { history = history.filter(entry => entry.account?.id !== id); });
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove account shared@example.com" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
+
+    await waitFor(() => expect(forgetLimitsSnapshot).toHaveBeenCalledTimes(2));
+    expect(accountAction).toHaveBeenCalledWith("codex", "remove", "saved", undefined);
+    expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex", "team", "shared@example.com"], ["codex", "profile:user-team", undefined]]);
+    expect(setLimitsArchived).not.toHaveBeenCalled();
+  });
+
+  // While the account list is pending (a Keychain prompt) or failed (an unreadable vault) no card
+  // knows its saved login, so Remove account would forget the snapshots and leave the login saved,
+  // to come back unarchived once the vault opens. The rows wait, as a card's controls do.
+  it.each(["pending", "failed", "recovering"] as const)("keeps an archived row's actions disabled while the account list is %s", async (state) => {
+    const denied = { kind: "message", message: "Could not unlock saved accounts.", path: null };
+    readAccounts.mockImplementation((provider: AgentId) => state === "pending" ? new Promise(() => {})
+      : state === "failed" ? Promise.reject(denied)
+      : Promise.resolve({ profiles: [], nativeAccount: null, recoveryRequired: provider === "codex", notice: null }));
+    answer([okClaude()], [okCodex(), staleCodex({ savedProfile: true, archived: true })]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
+    if (state === "failed") await waitFor(() => expect(screen.getAllByText("Could not unlock saved accounts.").length).toBeGreaterThan(0));
+    if (state === "recovering") await screen.findByRole("button", { name: "Recover account" });
+
+    expect(screen.getByRole("button", { name: "Unarchive personal@codex.example" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove account personal@codex.example" })).toBeDisabled();
+  });
+
+  it("offers Archive account in place of Use account once a saved subscription ended without renewing", async () => {
+    const profile = { id: "lapsed", observationId: "acct-personal", identity: { provider: "codex" as const, userId: "lapsed", workspaceId: "team" }, email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false };
+    const lapsed = staleCodex({ savedProfile: true, subscription: { activeUntil: "2026-08-10T00:00:00Z", willRenew: false, checkedAt: NOW } });
+    answer([okClaude()], [okCodex(), lapsed]);
+    readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+    renderLimits();
+    const region = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    const footer = await within(region).findByRole("button", { name: "Archive account" });
+    expect(within(region).queryByRole("button", { name: "Use account" })).toBeNull();
+
+    fireEvent.click(footer);
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["acct-personal"], true));
+  });
 });

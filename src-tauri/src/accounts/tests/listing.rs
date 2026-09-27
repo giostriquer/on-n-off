@@ -68,3 +68,32 @@ fn a_pending_recovery_is_reported_only_to_the_provider_it_belongs_to() {
             .recovery_required
     );
 }
+
+/// Each profile says whether the user archived it, from the archive beside the snapshots; the key
+/// is left out for one that is not.
+#[test]
+fn listing_says_which_profiles_are_archived() {
+    let harness = Harness::new();
+    let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    let b_identity = identity(AgentId::Claude, "b", "team");
+    let b = harness.saved(b_identity.clone(), claude("b", "b1"));
+    crate::limits::set_archived_at(
+        harness.path(),
+        AgentId::Claude,
+        &[b_identity.observation_key()],
+        true,
+    )
+    .unwrap();
+
+    let listed = harness.accounts().list(AgentId::Claude).unwrap();
+
+    let shown: Vec<_> = listed
+        .profiles
+        .iter()
+        .map(|p| (p.id.as_str(), p.archived))
+        .collect();
+    assert_eq!(shown, [(a.as_str(), false), (b.as_str(), true)]);
+    let json = serde_json::to_value(&listed).unwrap();
+    assert!(json["profiles"][0].get("archived").is_none(), "{json}");
+    assert_eq!(json["profiles"][1]["archived"], true);
+}

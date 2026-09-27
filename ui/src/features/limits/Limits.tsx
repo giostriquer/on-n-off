@@ -4,12 +4,14 @@ import { useState, type ReactNode } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
+import type { AccountsReading } from "$lib/accountTypes";
 import { displayError, parseInvokeError } from "$lib/error";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { limitCards, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
+import { ArchivedAccounts } from "./ArchivedAccounts";
+import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
@@ -61,7 +63,10 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
   );
 }
 
-/** The current account card for a provider plus one card per remembered account. */
+/**
+ * The current account card for a provider plus one card per remembered account, then the accounts
+ * the user archived, collapsed.
+ */
 function ProviderColumn({
   provider,
   query,
@@ -76,9 +81,10 @@ function ProviderColumn({
   const queryClient = useQueryClient();
   const name = providerLabel(provider);
   const manager = useAccountManagement();
-  const cards = limitCards({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], now });
+  const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], now });
   const [forgetError, setForgetError] = useState<string | null>(null);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
+  const blocked = manager?.blocked ?? false;
 
   async function forget({ forget: steps }: CardAccount) {
     setForgetError(null);
@@ -95,7 +101,34 @@ function ProviderColumn({
     }
   }
 
-  if (!cards) {
+  async function remove(account: CardAccount) {
+    if (manager) await manager.removeAccount(account.profile?.id, () => forget(account));
+    else await forget(account);
+  }
+
+  /**
+   * Archive or unarchive every id the card stands for, its merged legacy history included; the card
+   * moves at once. Unarchiving also reads the provider again in the backend, which announces it.
+   */
+  async function setArchived({ forget: steps }: CardAccount, archived: boolean) {
+    setForgetError(null);
+    const ids = steps.map(({ accountId }) => accountId);
+    try {
+      await api.setLimitsArchived(provider, ids, archived);
+    } catch (reason: unknown) {
+      const verb = archived ? "archive" : "unarchive";
+      setForgetError(`Could not ${verb} that account: ${displayError(parseInvokeError(reason), name)}`);
+      throw reason;
+    }
+    queryClient.setQueryData<ProviderLimits[]>(["limits", provider], (current) => current?.map((entry) =>
+      !entry.currentAccount && entry.account && ids.includes(entry.account.id) ? { ...entry, archived } : entry));
+    queryClient.setQueryData<AccountsReading>(["accounts", provider], (current) => current && {
+      ...current,
+      profiles: current.profiles.map((profile) => ids.includes(profile.observationId) ? { ...profile, archived } : profile),
+    });
+  }
+
+  if (!column) {
     return (
       <section
         className="overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
@@ -111,15 +144,18 @@ function ProviderColumn({
 
   return (
     <div className="flex flex-col gap-3">
-      {cards.map((card, index) => (
+      {column.visible.map((card, index) => (
         <AccountCard
           key={card.key}
           card={card}
           now={now}
           error={index === 0 ? error : null}
           onForget={allowForget ? forget : undefined}
+          onArchive={allowForget ? (account) => setArchived(account, true).catch(() => {}) : undefined}
         />
       ))}
+      <ArchivedAccounts provider={provider} cards={column.archived} blocked={blocked}
+        onUnarchive={(account) => setArchived(account, false)} onRemove={remove} />
     </div>
   );
 }
@@ -158,11 +194,13 @@ function AccountCard({
   now,
   error,
   onForget,
+  onArchive,
 }: {
   card: LimitCard;
   now: number;
   error: string | null;
   onForget?: (account: CardAccount) => Promise<void>;
+  onArchive?: (account: CardAccount) => Promise<void>;
 }) {
   const { provider, identity, freshness, figures, account } = card;
   const codexActions = account?.codexActions ?? null;
@@ -204,7 +242,8 @@ function AccountCard({
       data-status={freshness.readStatus}
     >
       {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined}
-        onForget={onForget ? () => onForget(account) : undefined} header={header}
+        onForget={onForget ? () => onForget(account) : undefined}
+        onArchive={onArchive ? () => onArchive(account) : undefined} archiveInsteadOfUse={card.archiveInsteadOfUse} header={header}
         footer={codexActions ? state => <CodexAccountActions entry={codexActions} label={account.name} now={now} state={state} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}

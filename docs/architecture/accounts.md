@@ -221,6 +221,40 @@ native half fails, because a rollback or a failed logout may still have changed 
 a sign-in does so only once published, and a change refused before it wrote anything is not
 announced. A category edit announces only the account list.
 
+## Archived accounts
+
+Archive account puts a Limits account away without losing it: the saved profile and its remembered
+reading stay, so it comes back without signing in again. Only the user archives an account, from a
+card's menu or, when its subscription is known to have ended without renewing, from the card's
+footer in place of Use account. Nothing archives one on a timer, at expiry, or for disuse. The
+signed-in card cannot be archived.
+
+- **Storage.** The archived ids live in plaintext in `<home>/.on-n-off/limits/archived.json`,
+  per provider, beside the snapshots and keyed by the ids Forget takes: a card's own id and the
+  legacy ids merged into it, so its legacy history is archived with it. Writes hold the snapshot
+  lock and replace the file whole. The file needs no vault key, so the popover and a locked vault
+  honour it, and archiving a history card never creates a vault. A missing or malformed file
+  archives nothing; the next write replaces a malformed one.
+- **Dormant.** Saved polls skip an archived profile entirely: no usage read and no renewal of any
+  kind. A private renewal runs only inside a poll, so it never runs for an archived login, and the
+  renewal rules above are unchanged. If a provider expires an unused login meanwhile, unarchiving
+  shows the usual sign-in-again state.
+- **Shown.** The shared read flags archived cards (`archived`), after the legacy history they
+  replaced is hidden, and the account list flags archived profiles. The Limits screen lists them
+  collapsed under each provider's cards, with Unarchive and Remove account; the popover shows none.
+- **What unarchives.** Unarchive, which then reads the provider again, forced, so the account comes
+  back polled. Save account, Add account and Sign in again, as they undo a Remove. And becoming the
+  signed-in account, whether the switch happened in on-n-off or in the provider's CLI: a provider
+  read unarchives the account it names under the cache lock, before its saved polls and before it
+  flags the cards, and announces the account list outside the lock, only when the archive changed.
+  Its legacy id comes along only while that history is the one the account replaced, by the rule
+  that hides it (the same email), since in a shared workspace it can hold another member's.
+  Automatic remembering never unarchives.
+- **Removed.** Remove account on an archived account works as it does on a card, through the same
+  sequence and under the same blocked rule: never while the account list is loading or failed,
+  when no card knows its saved login. Forget takes every id whose snapshot it deletes out of the
+  archive.
+
 ## Native scope and limitations
 
 The guaranteed target is the default native CLI home. Custom native homes, selected Codex config
