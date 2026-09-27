@@ -1,22 +1,28 @@
-//! Codex subscription limits: normalize `account/rateLimits/read` from Codex app-server, and read a
-//! saved profile's usage from the backend body app-server itself reads (`wham/usage`) with the
-//! profile's access token, which starts no CLI and renews nothing.
+//! Codex subscription limits: the signed-in account's card, normalized from Codex app-server's
+//! `account/rateLimits/read` (`codex_limits`), and a saved profile's, read from the backend body
+//! app-server itself reads (`wham/usage`) with the profile's access token, which starts no CLI and
+//! renews nothing (`read_saved_codex`). Spending a banked reset goes through app-server too.
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde_json::Value;
 
 use super::json::window;
-use super::{credits_spent, renewal, Parsed};
+use super::pipeline::finish;
+use super::{codex_app_server, credits_spent, renewal, saved_card, Parsed};
+use super::{SavedReadError, SavedReadUrls};
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
-    LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
-    LimitsResetOfferDto, LimitsWorkspaceCreditsDto, Reading,
+    AgentId, LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto,
+    LimitsResetCreditsDto, LimitsResetOfferDto, LimitsStatus, LimitsWorkspaceCreditsDto,
+    ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
+use crate::paths;
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
@@ -363,6 +369,59 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
     })
 }
 
+/// Codex owns login, token refresh and usage requests through its documented app-server APIs.
+pub(super) fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
+    match codex_app_server::read(home, force) {
+        Ok(parsed) => finish(AgentId::Codex, LimitsStatus::Ok, None, parsed),
+        Err(codex_app_server::AppServerFailure::SignedOut) => finish(
+            AgentId::Codex,
+            LimitsStatus::SignedOut,
+            Some("Sign in with `codex` to see subscription limits.".to_string()),
+            Parsed::default(),
+        ),
+        Err(codex_app_server::AppServerFailure::Unsupported(message)) => finish(
+            AgentId::Codex,
+            LimitsStatus::Unsupported,
+            Some(message),
+            Parsed::default(),
+        ),
+        Err(codex_app_server::AppServerFailure::Failed(message)) => finish(
+            AgentId::Codex,
+            LimitsStatus::Failed,
+            Some(message),
+            Parsed::default(),
+        ),
+    }
+}
+
+/// The signed-in Codex card an app-server `account/rateLimits/read` result becomes, each window
+/// observed at `observed_at`: the reader's own parse and card, for tests elsewhere that need what
+/// the reader keeps of a read.
+#[cfg(test)]
+pub(crate) fn codex_card(
+    rate_limits: serde_json::Value,
+    account_id: &str,
+    observed_at: &str,
+) -> ProviderLimitsDto {
+    let payload = serde_json::from_value(rate_limits).expect("an app-server rate-limits result");
+    let mut reading = parse_codex(&payload);
+    for window in &mut reading.windows {
+        window.observed_at = observed_at.to_string();
+    }
+    super::signed_in_card(AgentId::Codex, account_id, reading)
+}
+
+/// Spend one banked Codex reset on the signed-in account `account_id` names. Blocking: holds the
+/// Codex read lock for one bounded app-server call, so it never overlaps a limits read.
+pub fn consume_codex_reset_credit(
+    account_id: &str,
+    idempotency_key: &str,
+) -> Result<ResetCreditOutcome, String> {
+    let home = paths::user_home().map_err(|error| error.message)?;
+    let _provider_guard = super::provider_read_guard(AgentId::Codex);
+    codex_app_server::consume_reset_credit(&home, account_id, idempotency_key)
+}
+
 /// Where a saved profile's Codex usage is read: the body app-server reads for the signed-in one.
 const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 /// Each banked reset's status and expiry; the usage body carries only the count.
@@ -389,6 +448,16 @@ pub(super) const CODEX: CodexEndpoints<'static> = CodexEndpoints {
     subscriptions: renewal::CODEX_SUBSCRIPTIONS_URL,
 };
 
+/// A saved profile's Codex card, read over HTTP with its login's access `token` (`read_wham`).
+/// No CLI is started and nothing is renewed here.
+pub(crate) fn read_saved_codex(
+    identity: &Identity,
+    token: AccessToken,
+    urls: &SavedReadUrls<'_>,
+) -> Result<ProviderLimitsDto, SavedReadError> {
+    saved_card(identity, read_wham(identity, token, urls.codex)?)
+}
+
 /// A saved profile's Codex read, with its access token `token` for its workspace, as the card of
 /// the profile's account. A body that names another workspace is refused; one that names none is
 /// accepted.
@@ -396,7 +465,7 @@ pub(super) fn read_wham(
     identity: &Identity,
     token: AccessToken,
     urls: CodexEndpoints<'_>,
-) -> Result<Parsed, super::SavedReadError> {
+) -> Result<Parsed, SavedReadError> {
     let bearer = token.authorization();
     let headers = [
         ("Authorization", bearer.as_str()),
@@ -409,7 +478,7 @@ pub(super) fn read_wham(
         .and_then(Value::as_str)
         .is_some_and(|id| id != identity.workspace_id)
     {
-        return Err(super::SavedReadError::OtherAccount);
+        return Err(SavedReadError::OtherAccount);
     }
     // As in Codex's own app-server, the detail read never decides the read: without it the
     // count still stands, only without an expiry.

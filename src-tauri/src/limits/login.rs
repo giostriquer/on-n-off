@@ -6,7 +6,7 @@ use super::*;
 /// The first usage reading of an isolated Codex sign-in as `identity`, read by Codex's own
 /// app-server in `isolated_home`, which needs nothing from the login itself.
 pub(crate) fn read_codex(isolated_home: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
-    accepted(identity, codex_limits(isolated_home, false))
+    accepted(identity, codex::codex_limits(isolated_home, false))
 }
 
 /// `dto`, when it is an answer about `identity` that observed something, as a card that is not the

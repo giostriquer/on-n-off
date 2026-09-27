@@ -2,14 +2,13 @@ mod credits_spent;
 mod memory;
 mod remembered_reading;
 mod renewal;
-mod saved_codex;
 
 use super::*;
 use crate::dto::{
     LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
     LimitsResetOfferDto, LimitsWorkspaceCreditsDto,
 };
-use crate::http::{serve_once, HttpError};
+use crate::http::HttpError;
 use crate::paths::scratch_dir;
 use credentials::CredentialLookup;
 use json::window;

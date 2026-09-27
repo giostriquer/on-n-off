@@ -1,7 +1,7 @@
 //! A saved profile's Codex read (`read_saved_codex`): the usage body app-server reads, asked over
 //! HTTP with the access token its login holds, starting no CLI.
 use super::*;
-use crate::http::serve_once_capturing;
+use crate::http::{serve_once, serve_once_capturing};
 use serde_json::Value;
 
 fn identity(provider: AgentId) -> Identity {

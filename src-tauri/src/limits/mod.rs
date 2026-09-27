@@ -2,7 +2,7 @@
 //! remembered snapshots, and account-correlated local observations. Claude's stored login is read by
 //! its reader (`claude.rs`) and renewed in one place only, [`claude_renew`], when its access token
 //! has expired and can still renew itself; Codex owns its authentication and refresh lifecycle
-//! through app-server.
+//! through app-server, which its reader (`codex.rs`) asks.
 //!
 //! `read_limits` never fails for provider-side reasons; every outcome is a `ProviderLimitsDto`
 //! whose `status` + `message` tell the UI what to show. Because each CLI stores one login at a
@@ -25,7 +25,10 @@ mod renewal;
 mod snapshots;
 
 pub(crate) use claude::{claude_headers, read_saved_claude};
-pub(crate) use codex::CodexEndpoints;
+#[cfg(test)]
+pub(crate) use codex::codex_card;
+pub use codex::consume_codex_reset_credit;
+pub(crate) use codex::{read_saved_codex, CodexEndpoints};
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::Remembered;
 
@@ -35,10 +38,8 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::Utc;
 
 use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
-use crate::accounts::model::{AccessToken, Identity};
-use crate::dto::{
-    AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading, ResetCreditOutcome,
-};
+use crate::accounts::model::Identity;
+use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
 use crate::paths;
 use claude::ClaudeEndpoints;
@@ -77,23 +78,6 @@ impl Parsed {
             },
         }
     }
-}
-
-/// The signed-in Codex card an app-server `account/rateLimits/read` result becomes, each window
-/// observed at `observed_at`: the reader's own parse and card, for tests elsewhere that need what
-/// the reader keeps of a read.
-#[cfg(test)]
-pub(crate) fn codex_card(
-    rate_limits: serde_json::Value,
-    account_id: &str,
-    observed_at: &str,
-) -> ProviderLimitsDto {
-    let payload = serde_json::from_value(rate_limits).expect("an app-server rate-limits result");
-    let mut reading = codex::parse_codex(&payload);
-    for window in &mut reading.windows {
-        window.observed_at = observed_at.to_string();
-    }
-    signed_in_card(AgentId::Codex, account_id, reading)
 }
 
 /// The card a read of the signed-in account `account_id` reporting `reading` becomes: the pipeline's
@@ -165,17 +149,6 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
     )
 }
 
-/// Spend one banked Codex reset on the signed-in account `account_id` names. Blocking: holds the
-/// Codex read lock for one bounded app-server call, so it never overlaps a limits read.
-pub fn consume_codex_reset_credit(
-    account_id: &str,
-    idempotency_key: &str,
-) -> Result<ResetCreditOutcome, String> {
-    let home = paths::user_home().map_err(|error| error.message)?;
-    let _provider_guard = provider_read_guard(AgentId::Codex);
-    codex_app_server::consume_reset_credit(&home, account_id, idempotency_key)
-}
-
 /// Drop the remembered snapshot of one account (the user's "Forget" on a remembered card).
 pub fn forget_snapshot(
     agent: AgentId,
@@ -204,7 +177,7 @@ fn read_limits_in<P: Fn(&StorageDir) -> KeychainProbe>(
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
     let current = match agent {
         AgentId::Claude => claude::claude_current(force, sources),
-        AgentId::Codex => codex_limits(home, force),
+        AgentId::Codex => codex::codex_limits(home, force),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
                 agent,
@@ -307,16 +280,6 @@ impl SavedReadUrls<'static> {
     };
 }
 
-/// A saved profile's Codex card, read over HTTP with its login's access `token` (`codex::read_wham`).
-/// No CLI is started and nothing is renewed here.
-pub(crate) fn read_saved_codex(
-    identity: &Identity,
-    token: AccessToken,
-    urls: &SavedReadUrls<'_>,
-) -> Result<ProviderLimitsDto, SavedReadError> {
-    saved_card(identity, codex::read_wham(identity, token, urls.codex)?)
-}
-
 /// A saved profile's read as its card: known by the profile's observation key, never the signed-in
 /// account's. A read that observed nothing is an error, so the card keeps what it remembers.
 fn saved_card(
@@ -347,31 +310,6 @@ fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDt
         } else {
             identity.user_id.clone()
         }),
-    }
-}
-
-/// Codex owns login, token refresh and usage requests through its documented app-server APIs.
-fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
-    match codex_app_server::read(home, force) {
-        Ok(parsed) => finish(AgentId::Codex, LimitsStatus::Ok, None, parsed),
-        Err(codex_app_server::AppServerFailure::SignedOut) => finish(
-            AgentId::Codex,
-            LimitsStatus::SignedOut,
-            Some("Sign in with `codex` to see subscription limits.".to_string()),
-            Parsed::default(),
-        ),
-        Err(codex_app_server::AppServerFailure::Unsupported(message)) => finish(
-            AgentId::Codex,
-            LimitsStatus::Unsupported,
-            Some(message),
-            Parsed::default(),
-        ),
-        Err(codex_app_server::AppServerFailure::Failed(message)) => finish(
-            AgentId::Codex,
-            LimitsStatus::Failed,
-            Some(message),
-            Parsed::default(),
-        ),
     }
 }
 
