@@ -102,7 +102,9 @@ describe("limitsScenario", () => {
 
     // Remove account removes a saved login before it forgets; forgetting alone leaves the login, unarchived.
     scenario.forgetSnapshot("claude", "profile:claude-unread");
-    expect(scenario.readAccounts("claude").profiles.find(profile => profile.id === "unread")?.archived).toBeFalsy();
+    const profiles = scenario.readAccounts("claude").profiles;
+    expect(profiles.map(profile => profile.id)).toEqual(["personal", "work", "unread"]);
+    expect(profiles[2].archived).toBeFalsy();
     scenario.removeLogin("claude", "unread");
     expect(scenario.readAccounts("claude").profiles.map(profile => profile.id)).toEqual(["personal", "work"]);
   });
