@@ -56,16 +56,17 @@ pub fn parse_codex_projects(text: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub fn expand_project_path(raw: &str) -> PathBuf {
+/// `raw` with a leading `~` standing for `home`; left as written when there is none.
+fn expand_project_path_in(raw: &str, home: Option<&Path>) -> PathBuf {
     let raw = raw.trim();
     if let Some(rest) = raw
         .strip_prefix("~/")
         .or_else(|| raw.strip_prefix("~\\"))
         .or_else(|| (raw == "~").then_some(""))
     {
-        if let Ok(home) = crate::paths::user_home() {
+        if let Some(home) = home {
             return if rest.is_empty() {
-                home
+                home.to_path_buf()
             } else {
                 home.join(rest)
             };
@@ -83,10 +84,15 @@ pub fn git_branch(root: &Path) -> String {
 }
 
 pub fn inspect_project(path: &Path, agent: AgentId) -> ProjectDto {
+    inspect_project_in(path, agent, crate::paths::user_home().ok().as_deref())
+}
+
+/// [`inspect_project`] under `home`, which a relative path's `~` and Claude's view both read.
+fn inspect_project_in(path: &Path, agent: AgentId, home: Option<&Path>) -> ProjectDto {
     let resolved = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        expand_project_path(&path.to_string_lossy())
+        expand_project_path_in(&path.to_string_lossy(), home)
     };
     let display = resolved.to_string_lossy().to_string();
     let mut tab = AgentTabDto {
@@ -96,7 +102,7 @@ pub fn inspect_project(path: &Path, agent: AgentId) -> ProjectDto {
         // Hooks are read from user settings only, never from a project overlay.
         hooks: vec![],
     };
-    overlay_project(&mut tab, &resolved, agent);
+    overlay_project_in(&mut tab, &resolved, agent, home);
     ProjectDto {
         id: normalize_project_key(&display),
         label: project_label(&display),

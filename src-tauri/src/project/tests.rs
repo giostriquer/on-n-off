@@ -143,14 +143,45 @@ fn inspect_reads_git_branch_and_local_counts() {
     assert_eq!(inspected.skill_count, 1);
     assert_eq!(inspected.mcp_count, 1);
     assert_eq!(git_branch(&root), "main");
-    let expanded = expand_project_path("~/dev/app");
-    assert!(
-        expanded
-            .to_string_lossy()
-            .replace('\\', "/")
-            .ends_with("dev/app"),
-        "{expanded:?}"
+}
+
+/// Under a home, inspecting a Claude project also counts the servers the home's `~/.claude.json`
+/// keeps for it, and a path written with `~` resolves inside that home.
+#[test]
+fn inspecting_under_a_home_reads_its_claude_json_and_expands_its_tilde() {
+    let home = crate::paths::scratch_dir("on-n-off-inspect-project-home");
+    let root = home.join("acme");
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::write(root.join(".git").join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    fs::write(
+        root.join(".mcp.json"),
+        r#"{"mcpServers":{"repo-docs":{"command":"node"}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join(".claude.json"),
+        serde_json::json!({
+            "projects": {
+                root.to_string_lossy(): {
+                    "mcpServers": { "scratchpad": { "command": "node", "args": ["pad.js"] } }
+                }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let absolute = inspect_project_in(&root, AgentId::Claude, Some(&home));
+    assert_eq!(
+        absolute.mcp_count, 2,
+        "the project's own server and the one the home keeps for it"
     );
+
+    let relative = inspect_project_in(Path::new("~/acme"), AgentId::Claude, Some(&home));
+    assert_eq!(Path::new(&relative.path), root);
+    assert_eq!(relative.branch, "main");
+    assert_eq!(relative.mcp_count, 2);
+    let _ = fs::remove_dir_all(home);
 }
 
 fn write_skill(dir: &Path, name: &str, description: &str) {

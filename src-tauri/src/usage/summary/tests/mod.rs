@@ -774,11 +774,13 @@ fn an_hourly_window_of_exactly_a_day_is_read_into_hour_buckets() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// Claim-check harness: time real-home common windows and reusable Full time.
-/// `cargo test --release --manifest-path src-tauri/Cargo.toml bench_real_home_usage_summary -- --ignored --nocapture`
+/// Claim-check harness: time real-home common windows and reusable Full time, under the home
+/// named in `ON_N_OFF_PROBE_HOME` (`paths::probe_home`), since a test build has no user home.
+/// `ON_N_OFF_PROBE_HOME="$HOME" cargo test --release --manifest-path src-tauri/Cargo.toml bench_real_home_usage_summary -- --ignored --nocapture`
 #[test]
 #[ignore = "real-home performance probe; not part of CI"]
 fn bench_real_home_usage_summary() {
+    let home = crate::paths::probe_home();
     let until = chrono::Local::now().date_naive();
     let mut output = Vec::new();
     let windows = [("7d", 7), ("30d", 30), ("90d", 90)];
@@ -801,10 +803,13 @@ fn bench_real_home_usage_summary() {
         // publication. Report the follow-up result instead of requiring a cache hit.
         let measurements = [("forced", true), ("cache-attempt", false)].map(|(pass, force)| {
             let wall = Instant::now();
-            let dto = read_summary(UsageSummaryInput {
-                force,
-                ..input.clone()
-            })
+            let dto = read_summary_in(
+                &home,
+                UsageSummaryInput {
+                    force,
+                    ..input.clone()
+                },
+            )
             .expect("read_summary");
             (pass, force, wall.elapsed().as_millis(), dto)
         });
@@ -842,7 +847,7 @@ fn bench_real_home_usage_summary() {
     let measurements = (1..=2)
         .map(|pass| {
             let wall = Instant::now();
-            let dto = read_summary(full_time.clone()).expect("read_summary");
+            let dto = read_summary_in(&home, full_time.clone()).expect("read_summary");
             (pass, wall.elapsed().as_millis(), dto)
         })
         .collect::<Vec<_>>();

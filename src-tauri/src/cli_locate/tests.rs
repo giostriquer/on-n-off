@@ -145,7 +145,7 @@ fn windows_well_known_dirs_include_the_github_cli_installers() {
 #[test]
 fn windows_well_known_dirs_include_native_provider_installers() {
     let local = PathBuf::from(env::var("LOCALAPPDATA").expect("LOCALAPPDATA"));
-    let dirs = well_known_cli_dirs();
+    let dirs = well_known_cli_dirs_for(&PathBuf::from("home"));
     assert!(dirs.contains(&local.join("cursor-agent")), "{dirs:?}");
     assert!(dirs.contains(&local.join("agy").join("bin")), "{dirs:?}");
 }
@@ -172,6 +172,16 @@ fn search_path_keeps_tier_order_and_dedupes() {
     assert_eq!(
         merge_search_path(None, &[], vec![PathBuf::from("/x")]),
         vec![PathBuf::from("/x")]
+    );
+}
+
+#[test]
+fn the_search_path_carries_the_well_known_tier_of_its_home() {
+    let home = scratch_dir("on-n-off-search-home");
+    let search_path = search_path_for(Some(&home));
+    assert!(
+        search_path.contains(&home.join(".local").join("bin")),
+        "well-known dirs missing from the search path: {search_path:?}"
     );
 }
 
