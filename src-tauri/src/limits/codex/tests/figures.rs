@@ -83,111 +83,98 @@ fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
     );
 }
 
-/// A personal plan pools nothing and is never asked, whatever access it is handed.
-#[test]
-fn a_personal_signed_in_card_is_never_asked() {
-    let (listener, url) = never_asked();
-    for plan in [Some("pro"), Some("plus"), None] {
-        let key = account("personal");
-        let mut card = Parsed::for_card(Some(&key), plan);
-        backend_figures(
-            &mut card,
-            access(&key).as_ref(),
-            urls(&url, &crate::http::refused_url()),
-            now(),
-        );
-        assert_eq!(card.reading.credits_spent, None, "{plan:?}");
+/// Whose access the gate is handed for a card.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Handed {
+    /// The card's own account's.
+    Own,
+    /// Another account's.
+    Other,
+    None,
+}
+
+/// An endpoint one case of the table expects asked, which answers `body` once, or never asked.
+enum Endpoint {
+    Asked(String, std::thread::JoinHandle<String>),
+    NeverAsked(std::net::TcpListener, String),
+}
+
+impl Endpoint {
+    fn new(asked: bool, body: &str) -> Self {
+        if asked {
+            let (url, request) = crate::http::serve_once("200 OK", body);
+            Self::Asked(url, request)
+        } else {
+            let (listener, url) = never_asked();
+            Self::NeverAsked(listener, url)
+        }
     }
-    assert!(!was_asked(&listener));
-}
 
-/// Another account's token is never spent on this card, and no access at all is no figure.
-#[test]
-fn access_that_is_not_the_cards_account_is_not_asked() {
-    let (listener, url) = never_asked();
-    for handed in [access(&account("other-login")), None] {
-        let mut card = Parsed::for_card(Some("the-cards-account"), Some("business"));
-        backend_figures(
-            &mut card,
-            handed.as_ref(),
-            urls(&url, &crate::http::refused_url()),
-            now(),
-        );
-        assert_eq!(card.reading.credits_spent, None);
+    fn url(&self) -> &str {
+        match self {
+            Self::Asked(url, _) | Self::NeverAsked(_, url) => url,
+        }
     }
-    assert!(!was_asked(&listener));
-}
 
-#[test]
-fn the_signed_in_read_asks_only_for_the_confirmed_card() {
-    let term = |card: &str, access: Option<&CodexAccess>, url: &str| {
-        let mut card = Parsed::for_card(Some(card), Some("pro"));
-        backend_figures(&mut card, access, urls("unused", url), now());
-        card.reading.subscription
-    };
-    renewal::forget("renewal-signed-in");
-    let (listener, quiet) = never_asked();
-    assert!(term("renewal-signed-in", None, &quiet).is_none());
-    assert!(term("someone-else", access("renewal-signed-in").as_ref(), &quiet).is_none());
-    assert!(!was_asked(&listener), "asked without a confirmed card");
-    let (url, served) = crate::http::serve_once("200 OK", TERM);
-    assert!(term(
-        "renewal-signed-in",
-        access("renewal-signed-in").as_ref(),
-        &url
-    )
-    .is_some());
-    served.join().unwrap();
-    renewal::forget("renewal-signed-in");
-}
-
-/// Another account's access, or none, is no access to this card: a workspace card is asked
-/// neither what it spent nor its term.
-#[test]
-fn a_signed_in_card_without_its_own_access_is_asked_for_no_backend_figure() {
-    let (spending, credit_usage) = never_asked();
-    let (terms, subscriptions) = never_asked();
-    for handed in [access("another-account"), None] {
-        let mut parsed = Parsed::for_card(Some("the-cards-account"), Some("business"));
-        backend_figures(
-            &mut parsed,
-            handed.as_ref(),
-            urls(&credit_usage, &subscriptions),
-            chrono::Utc::now(),
-        );
-        assert_eq!(parsed.reading.credits_spent, None);
-        assert_eq!(parsed.reading.subscription, None);
+    /// Fails `case` unless the endpoint was asked exactly when expected.
+    fn check(self, case: &str) {
+        match self {
+            Self::Asked(_, request) => {
+                request.join().unwrap();
+            }
+            Self::NeverAsked(listener, _) => assert!(!was_asked(&listener), "{case}: asked"),
+        }
     }
-    assert!(!was_asked(&spending), "asked what the card spent");
-    assert!(!was_asked(&terms), "asked the card's term");
 }
 
-/// With its own access, a card on a personal plan, or on none, is asked its term but never what it
-/// spent.
+/// Every plan against every access it can be handed, for both figures: the term is asked whatever
+/// the plan, and what was spent only on a workspace plan, both only with the card's own access, so
+/// another account's token is never spent on it and no access is no figure. A figure not asked is
+/// none, and its endpoint never hears of it.
 #[test]
-fn a_signed_in_card_is_asked_its_term_whatever_its_plan() {
-    for (plan, key) in [
-        (Some("pro"), "signed-in-term-pro"),
-        (None, "signed-in-term-no-plan"),
-    ] {
-        renewal::forget(key);
-        let (spending, credit_usage) = never_asked();
-        let (subscriptions, term) = crate::http::serve_once(
-            "200 OK",
-            r#"{"active_until":"2026-09-28T16:22:34Z","will_renew":true}"#,
-        );
-        let mut parsed = Parsed::for_card(Some(key), plan);
-        backend_figures(
-            &mut parsed,
-            access(key).as_ref(),
-            urls(&credit_usage, &subscriptions),
-            chrono::Utc::now(),
-        );
-        term.join().unwrap();
+fn each_figure_is_asked_only_with_the_cards_own_access_and_spending_only_on_a_workspace_plan() {
+    let plans = [
+        Some("business"),
+        Some("self_serve_business_prolite"),
+        Some("pro"),
+        Some("plus"),
+        None,
+    ];
+    for plan in plans {
+        for handed in [Handed::Own, Handed::Other, Handed::None] {
+            let case = format!("{plan:?} with {handed:?} access");
+            let key = account(&format!("table-{plan:?}-{handed:?}"));
+            let access = match handed {
+                Handed::Own => access(&key),
+                Handed::Other => access(&account("another-account")),
+                Handed::None => None,
+            };
+            let asks_term = handed == Handed::Own;
+            let workspace = matches!(plan, Some("business" | "self_serve_business_prolite"));
+            let asks_spending = asks_term && workspace;
+            let spending = Endpoint::new(asks_spending, &breakdown("2026-09-24", 5.5));
+            let term = Endpoint::new(asks_term, TERM);
 
-        assert!(parsed.reading.subscription.is_some(), "{plan:?}");
-        assert_eq!(parsed.reading.credits_spent, None, "{plan:?}");
-        assert!(!was_asked(&spending), "{plan:?}: asked what it spent");
-        renewal::forget(key);
+            let mut card = Parsed::for_card(Some(&key), plan);
+            backend_figures(
+                &mut card,
+                access.as_ref(),
+                urls(spending.url(), term.url()),
+                now(),
+            );
+            spending.check(&case);
+            term.check(&case);
+
+            assert_eq!(
+                card.reading.credits_spent.is_some(),
+                asks_spending,
+                "{case}: what was spent"
+            );
+            assert_eq!(
+                card.reading.subscription.is_some(),
+                asks_term,
+                "{case}: the term"
+            );
+        }
     }
 }
