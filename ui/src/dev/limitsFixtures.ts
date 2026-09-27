@@ -1,4 +1,4 @@
-import type { AccountsReading } from "$lib/accountTypes";
+import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
@@ -304,6 +304,53 @@ function accountDuplicateAccounts(): AccountsReading {
   };
 }
 
+/**
+ * `?mock=archivedAccounts`: Claude has a saved account and a login that never read archived; Codex a
+ * history card no saved login answers for, beside a saved account whose subscription ended without
+ * renewing, whose footer offers Archive account. Archive and Unarchive change this page's answers.
+ */
+const ARCHIVED_UNREAD: SavedProfile = {
+  id: "unread", observationId: "profile:claude-unread", identity: { provider: "claude", userId: "user-former", workspaceId: "Former workspace" },
+  label: "former@example.com", email: "former@example.com", category: "Old client", savedAt: "2026-07-01T09:00:00Z", active: false, needsLogin: false,
+};
+
+function archivedAccounts(): LimitsScenario {
+  const archived: Record<LimitsProvider, Set<string>> = {
+    claude: new Set(["claude-2", ARCHIVED_UNREAD.observationId]),
+    codex: new Set(["codex-history"]),
+  };
+  const flagged = (provider: LimitsProvider, entries: ProviderLimits[]) => entries.map(entry =>
+    !entry.currentAccount && entry.account && archived[provider].has(entry.account.id) ? { ...entry, archived: true } : entry);
+  const accounts = (provider: LimitsProvider, reading: AccountsReading): AccountsReading => ({
+    ...reading,
+    profiles: reading.profiles.map(profile => archived[provider].has(profile.observationId) ? { ...profile, archived: true } : profile),
+  });
+  return {
+    claude: () => flagged("claude", [CLAUDE[0], {
+      ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, plan: "max ×5",
+      windows: CLAUDE[0].windows.map(window => ({ ...window, usedPercent: window.usedPercent + 30 })),
+    }]),
+    codex: () => flagged("codex", [
+      CODEX[0],
+      { ...CODEX[1], subscription: { activeUntil: at(-2 * 24 * 60), willRenew: false, note: "cancelled", checkedAt: at(-30) } },
+      { ...CODEX[1], account: { id: "codex-history", label: "old-team@example.com" }, savedProfile: false, plan: "plus", subscription: null },
+    ]),
+    accounts: {
+      claude: () => {
+        const reading = savedAccounts("claude");
+        return accounts("claude", { ...reading, profiles: [...reading.profiles, ARCHIVED_UNREAD] });
+      },
+      codex: () => accounts("codex", savedAccounts("codex")),
+    },
+    setArchived: (provider, ids, value) => {
+      for (const id of ids) {
+        if (value) archived[provider].add(id);
+        else archived[provider].delete(id);
+      }
+    },
+  };
+}
+
 /** The saved accounts every scenario has unless it says otherwise: the live one, and one more. */
 function savedAccounts(agent: AgentId): AccountsReading {
   return {
@@ -334,6 +381,8 @@ export type LimitsScenario = Partial<Record<LimitsProvider, () => ProviderLimits
   codexSubscription?: (accountId: string) => SubscriptionDate | null;
   /** What starting a sign-in (`add_account`) changes about the scenario's later answers. */
   addAccount?: () => void;
+  /** What archiving or unarchiving (`set_limits_archived`) changes about the scenario's later answers. */
+  setArchived?: (provider: LimitsProvider, ids: string[], archived: boolean) => void;
 };
 
 /** Each scenario is built afresh per page, so one that changes as it is used starts clean. */
@@ -354,6 +403,7 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   creditsSpent: () => ({ codex: creditsSpentCodex }),
   claudeSubscriptionStatus: () => ({ claude: claudeSubscriptionStatusClaude }),
   accountDuplicate,
+  archivedAccounts,
 };
 
 const OK = { claude: () => CLAUDE, codex: () => CODEX };
@@ -377,6 +427,10 @@ export function limitsScenario(name: string) {
     },
     addAccount() {
       chosen.addAccount?.();
+    },
+    setArchived(agentId: unknown, ids: unknown, archived: unknown) {
+      const which = provider(agentId);
+      if (which && Array.isArray(ids)) chosen.setArchived?.(which, ids.map(String), archived === true);
     },
   };
 }
