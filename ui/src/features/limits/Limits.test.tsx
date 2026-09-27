@@ -882,3 +882,56 @@ describe("archiving", () => {
     expect(setLimitsArchived, "offered again").toHaveBeenCalledTimes(2);
   });
 });
+
+describe("focus as an account leaves", () => {
+  const spare = staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } });
+  const signedOut = statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.");
+
+  async function removeFromMenu(label: string) {
+    fireEvent.click(await screen.findByRole("button", { name: `More actions for ${label}` }));
+    fireEvent.click(within(screen.getByRole("group", { name: `Actions for ${label}` })).getByRole("button", { name: "Remove account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: `Codex limits · ${label}` })).toBeNull());
+  }
+
+  it.each([
+    ["the next card's More actions", [okCodex(), staleCodex(), spare], "personal@codex.example", "More actions for spare@codex.example"],
+    ["the previous card's, from the last card", [okCodex(), staleCodex(), spare], "spare@codex.example", "More actions for personal@codex.example"],
+    ["Add account, with no other card's actions left", [signedOut, staleCodex()], "personal@codex.example", "Add account"],
+  ])("goes to %s when a card is removed from its menu", async (_, codex, label, target) => {
+    answer([okClaude()], codex);
+    renderLimits();
+    await removeFromMenu(label);
+    expect(screen.getByRole("button", { name: target })).toHaveFocus();
+  });
+
+  it("stays where the user moved it while the removal waited", async () => {
+    const forgetting = deferred<void>();
+    forgetLimitsSnapshot.mockReturnValue(forgetting.promise);
+    answer([okClaude()], [okCodex(), staleCodex(), spare]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
+    const elsewhere = screen.getByRole("button", { name: "More actions for me@claude.example" });
+    elsewhere.focus();
+
+    await act(async () => { forgetting.resolve(); });
+
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
+    expect(elsewhere).toHaveFocus();
+  });
+
+  it("goes to the column's first card once its last archived account is unarchived", async () => {
+    answer([okClaude()], [okCodex(), staleCodex({ archived: true })]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
+    const unarchive = screen.getByRole("button", { name: "Unarchive personal@codex.example" });
+    await waitFor(() => expect(unarchive).toBeEnabled());
+    unarchive.focus();
+    fireEvent.click(unarchive);
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull());
+    await waitFor(() => expect(screen.getByRole("button", { name: "More actions for work@codex.example" })).toHaveFocus());
+  });
+});

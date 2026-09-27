@@ -1,14 +1,16 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { Plus } from "lucide-react";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { accountButton, useAccountControllers } from "./AccountManager";
 import { AutomaticAccountSaving } from "./AccountPreferences";
 
-export function AddAccount() {
+/** `ref` receives the Add account button, where focus can land once no card is left to take it. */
+export function AddAccount({ ref }: { ref?: Ref<HTMLButtonElement> }) {
   const controllers = useAccountControllers();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  useImperativeHandle(ref, () => trigger.current as HTMLButtonElement, []);
   const id = useId();
   useEffect(() => {
     if (!open) return;

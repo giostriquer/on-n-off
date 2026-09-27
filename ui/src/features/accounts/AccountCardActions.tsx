@@ -18,7 +18,7 @@ export function removeAccountQuestion(label: string): string {
   return `Remove ${label} from on-n-off? You will need to sign in to add it again.`;
 }
 
-export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, header, footer, children }: {
+export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, menuButtonRef, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   /** Drops the account's history for Remove account, after its saved login, if any, is removed. */
   onForget: () => Promise<void>;
@@ -26,6 +26,8 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   onArchive: () => Promise<void>;
   /** The footer offers Archive account in place of Use account (`LimitCard.archiveInsteadOfUse`, which is never the current card's). */
   archiveInsteadOfUse?: boolean;
+  /** Receives the More actions button, where focus can land when a neighbouring card goes. */
+  menuButtonRef?: (node: HTMLButtonElement | null) => void;
   header: (menu: ReactNode) => ReactNode;
   /** More account actions beside the primary one; see `AccountFooterState`. */
   footer?: (state: AccountFooterState) => ReactNode;
@@ -106,7 +108,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   }} onKeyDown={event => {
     if (event.key === "Escape") { event.stopPropagation(); close(); }
   }}>
-    <button ref={trigger} type="button" aria-label={`More actions for ${label}`} aria-expanded={open} aria-controls={open ? id : undefined}
+    <button ref={node => { trigger.current = node; menuButtonRef?.(node); }} type="button" aria-label={`More actions for ${label}`} aria-expanded={open} aria-controls={open ? id : undefined}
       className="flex size-6 items-center justify-center rounded-md text-[var(--mute)] hover:bg-[var(--wash)] hover:text-[var(--silkscreen)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)]"
       onClick={() => open ? close() : setMenuOpen(true)}>•••</button>
     <div id={id} hidden={!open} className="absolute right-0 top-full z-20 mt-2 w-64 max-w-[calc(100vw-3rem)] rounded-lg border border-[var(--hair)] bg-[var(--plate)] p-2 shadow-lg">

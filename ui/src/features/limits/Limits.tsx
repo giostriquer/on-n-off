@@ -1,12 +1,12 @@
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import type { AccountsReading } from "$lib/accountTypes";
 import { displayError, parseInvokeError } from "$lib/error";
-import { holdFocus } from "$lib/focusHandoff";
+import { holdFocus, useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
@@ -28,6 +28,7 @@ export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes })
 function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
   // Only Claude and Codex carry a subscription the backend can read; the rest report `unsupported`.
   const { providers, loading, now } = useLimitsProviders(pollMinutes);
+  const addAccount = useRef<HTMLButtonElement>(null);
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="limits-screen" aria-busy={loading}>
@@ -44,15 +45,15 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
             ) : null}
           </p>
         </div>
-        <AddAccount />
+        <AddAccount ref={addAccount} />
       </header>
 
       <div className="grid items-start gap-3 lg:grid-cols-2">
         {providers.map(({ provider, query }) => (
           <div key={provider} className="flex flex-col gap-3">
             {(provider === "claude" || provider === "codex") ? <AccountManager provider={provider}>
-              <ProviderColumn provider={provider} query={query} now={now} />
-            </AccountManager> : <ProviderColumn provider={provider} query={query} now={now} />}
+              <ProviderColumn provider={provider} query={query} now={now} addAccount={addAccount} />
+            </AccountManager> : <ProviderColumn provider={provider} query={query} now={now} addAccount={addAccount} />}
           </div>
         ))}
       </div>
@@ -72,10 +73,13 @@ function ProviderColumn({
   provider,
   query,
   now,
+  addAccount,
 }: {
   provider: AgentId;
   query: UseQueryResult<ProviderLimits[]>;
   now: number;
+  /** The screen's Add account button, where focus goes once no card is left to take it. */
+  addAccount: RefObject<HTMLButtonElement | null>;
 }) {
   const queryClient = useQueryClient();
   const name = providerLabel(provider);
@@ -83,6 +87,12 @@ function ProviderColumn({
   const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], now });
   const [forgetError, setForgetError] = useState<string | null>(null);
   const archivedList = useRef<ArchivedAccountsHandle>(null);
+  const menus = useRef(new Map<string, HTMLButtonElement>());
+  const visibleKeys = column?.visible.map(card => card.key) ?? [];
+  const menu = (key: string | undefined) => (key === undefined ? undefined : menus.current.get(key));
+  // A card removed from its menu hands focus to the next card's More actions, else the previous one's.
+  const handOffCard = useFocusHandoff<void>(visibleKeys, index =>
+    [menu(visibleKeys[index]), menu(visibleKeys[index - 1]), addAccount.current]);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
   const blocked = manager?.blocked ?? false;
 
@@ -110,6 +120,12 @@ function ProviderColumn({
       return; // setArchived says why
     }
     if (unmoved()) archivedList.current?.focus();
+  }
+
+  /** Remove account from a card's menu, whose last step drops the card; focus then goes on to its neighbour. */
+  async function forgetCard(key: string, account: CardAccount) {
+    await forget(account);
+    handOffCard(key);
   }
 
   async function remove(account: CardAccount) {
@@ -161,12 +177,16 @@ function ProviderColumn({
           card={card}
           now={now}
           error={index === 0 ? error : null}
-          onForget={forget}
+          onForget={(account) => forgetCard(card.key, account)}
           onArchive={archive}
+          menuButtonRef={(node) => {
+            if (node) menus.current.set(card.key, node);
+            else menus.current.delete(card.key);
+          }}
         />
       ))}
       <ArchivedAccounts ref={archivedList} provider={provider} cards={column.archived} blocked={blocked}
-        onUnarchive={(account) => setArchived(account, false)} onRemove={remove} />
+        onUnarchive={(account) => setArchived(account, false)} onRemove={remove} focusWhenEmpty={() => menu(visibleKeys[0])} />
     </div>
   );
 }
@@ -206,12 +226,14 @@ function AccountCard({
   error,
   onForget,
   onArchive,
+  menuButtonRef,
 }: {
   card: LimitCard;
   now: number;
   error: string | null;
   onForget: (account: CardAccount) => Promise<void>;
   onArchive: (account: CardAccount) => Promise<void>;
+  menuButtonRef: (node: HTMLButtonElement | null) => void;
 }) {
   const { provider, identity, freshness, figures, account } = card;
   const codexActions = account?.codexActions ?? null;
@@ -254,7 +276,7 @@ function AccountCard({
     >
       {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined}
         onForget={() => onForget(account)}
-        onArchive={() => onArchive(account)} archiveInsteadOfUse={card.archiveInsteadOfUse} header={header}
+        onArchive={() => onArchive(account)} archiveInsteadOfUse={card.archiveInsteadOfUse} menuButtonRef={menuButtonRef} header={header}
         footer={codexActions ? state => <CodexAccountActions entry={codexActions} label={account.name} now={now} state={state} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
