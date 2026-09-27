@@ -72,9 +72,15 @@ describe("limitsScenario", () => {
     expect(archived("codex")).toEqual(["codex-2", "codex-history", "codex-2"]);
     expect(archived("claude")).toEqual(["profile:claude-unread"]);
     expect(scenario.readLimits("claude")[0].archived, "never the signed-in card").toBeFalsy();
-    // Another page's scenario starts clean, and one without archive state ignores it.
+    // Another page's scenario starts clean.
     expect(limitsScenario("archivedAccounts").readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-history"]);
-    limitsScenario("ok").setArchived("codex", ["codex-2"], true);
+  });
+
+  it("follows archive and unarchive under any scenario, for that page alone", () => {
+    const scenario = limitsScenario("ok");
+    scenario.setArchived("codex", ["codex-2"], true);
+    expect(scenario.readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-2"]);
+    expect(scenario.readAccounts("codex").profiles.filter(profile => profile.archived).map(profile => profile.id)).toEqual(["work"]);
     expect(limitsScenario("ok").readLimits("codex").some(entry => entry.archived)).toBe(false);
   });
 
