@@ -70,12 +70,10 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
 function ProviderColumn({
   provider,
   query,
-  allowForget = true,
   now,
 }: {
   provider: AgentId;
   query: UseQueryResult<ProviderLimits[]>;
-  allowForget?: boolean;
   now: number;
 }) {
   const queryClient = useQueryClient();
@@ -151,9 +149,9 @@ function ProviderColumn({
           card={card}
           now={now}
           error={index === 0 ? error : null}
-          onForget={allowForget ? forget : undefined}
+          onForget={forget}
           // The archived card unmounts; focus follows it to the list instead of dropping to the page.
-          onArchive={allowForget ? (account) => setArchived(account, true).then(() => archivedList.current?.focus(), () => {}) : undefined}
+          onArchive={(account) => setArchived(account, true).then(() => archivedList.current?.focus(), () => {})}
         />
       ))}
       <ArchivedAccounts ref={archivedList} provider={provider} cards={column.archived} blocked={blocked}
@@ -201,8 +199,8 @@ function AccountCard({
   card: LimitCard;
   now: number;
   error: string | null;
-  onForget?: (account: CardAccount) => Promise<void>;
-  onArchive?: (account: CardAccount) => Promise<void>;
+  onForget: (account: CardAccount) => Promise<void>;
+  onArchive: (account: CardAccount) => Promise<void>;
 }) {
   const { provider, identity, freshness, figures, account } = card;
   const codexActions = account?.codexActions ?? null;
@@ -244,8 +242,8 @@ function AccountCard({
       data-status={freshness.readStatus}
     >
       {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined}
-        onForget={onForget ? () => onForget(account) : undefined}
-        onArchive={onArchive ? () => onArchive(account) : undefined} archiveInsteadOfUse={card.archiveInsteadOfUse} header={header}
+        onForget={() => onForget(account)}
+        onArchive={() => onArchive(account)} archiveInsteadOfUse={card.archiveInsteadOfUse} header={header}
         footer={codexActions ? state => <CodexAccountActions entry={codexActions} label={account.name} now={now} state={state} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}
