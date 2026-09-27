@@ -381,7 +381,10 @@ export type LimitsScenario = Partial<Record<LimitsProvider, () => ProviderLimits
   codexSubscription?: (accountId: string) => SubscriptionDate | null;
   /** What starting a sign-in (`add_account`) changes about the scenario's later answers. */
   addAccount?: () => void;
-  /** What archiving or unarchiving (`set_limits_archived`) changes about the scenario's later answers. */
+  /**
+   * What archiving or unarchiving (`set_limits_archived`) changes about the scenario's later
+   * answers. Forgetting a snapshot unarchives it through here too.
+   */
   setArchived?: (provider: LimitsProvider, ids: string[], archived: boolean) => void;
 };
 
@@ -408,19 +411,28 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
 
 const OK = { claude: () => CLAUDE, codex: () => CODEX };
 
-/** The Limits commands' answers under `?mock=<name>`; a name that is not a Limits scenario answers as `ok`. */
+/**
+ * The Limits commands' answers under `?mock=<name>`; a name that is not a Limits scenario answers as
+ * `ok`. Built once per page, which keeps what Remove account drops for that page alone.
+ */
 export function limitsScenario(name: string) {
   const chosen: LimitsScenario = Object.hasOwn(LIMITS_SCENARIOS, name) ? LIMITS_SCENARIOS[name]() : {};
   const provider = (agent: unknown) => (agent === "claude" || agent === "codex" ? agent : null);
+  // What Remove account dropped: forgotten snapshots by account id, removed saved logins by profile id.
+  const forgotten: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set() };
+  const removedLogins: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set() };
   return {
     readLimits(agentId: unknown): ProviderLimits[] {
       const which = provider(agentId);
-      return which ? (chosen[which] ?? OK[which])() : [];
+      // The signed-in card is a live read, which forgetting a snapshot does not remove.
+      return which ? (chosen[which] ?? OK[which])().filter(entry =>
+        entry.currentAccount || !entry.account || !forgotten[which].has(entry.account.id)) : [];
     },
     readAccounts(agent: unknown): AccountsReading {
       const which = provider(agent);
       const answer = which ? chosen.accounts?.[which] : undefined;
-      return answer ? answer() : savedAccounts(agent as AgentId);
+      const reading = answer ? answer() : savedAccounts(agent as AgentId);
+      return which ? { ...reading, profiles: reading.profiles.filter(profile => !removedLogins[which].has(profile.id)) } : reading;
     },
     readCodexSubscription(accountId: unknown): SubscriptionDate | null {
       return (chosen.codexSubscription ?? paidThrough)(String(accountId));
@@ -431,6 +443,18 @@ export function limitsScenario(name: string) {
     setArchived(agentId: unknown, ids: unknown, archived: unknown) {
       const which = provider(agentId);
       if (which && Array.isArray(ids)) chosen.setArchived?.(which, ids.map(String), archived === true);
+    },
+    /** `forget_limits_snapshot`: the account's snapshot goes, and it is unarchived, as the backend does. */
+    forgetSnapshot(agentId: unknown, accountId: unknown) {
+      const which = provider(agentId);
+      if (!which || typeof accountId !== "string") return;
+      forgotten[which].add(accountId);
+      chosen.setArchived?.(which, [accountId], false);
+    },
+    /** `account_action` `remove`: the saved login goes. */
+    removeLogin(agent: unknown, profileId: unknown) {
+      const which = provider(agent);
+      if (which && typeof profileId === "string") removedLogins[which].add(profileId);
     },
   };
 }

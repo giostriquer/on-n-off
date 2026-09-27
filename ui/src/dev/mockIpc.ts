@@ -257,6 +257,7 @@ const handlers: Record<string, Handler> = {
     if (args.action === "unlock") vaultLocked = false;
     if (args.action === "remember") rememberingMock = true;
     if (args.action === "stopRemembering") rememberingMock = false;
+    if (args.action === "remove") limits.removeLogin(args.agent, args.profileId);
   },
   add_account: (args) => {
     limits.addAccount();
@@ -269,6 +270,7 @@ const handlers: Record<string, Handler> = {
   },
   read_limits: (args) => limits.readLimits(args.agentId),
   set_limits_archived: (args) => limits.setArchived(args.agentId, args.accountIds, args.archived),
+  forget_limits_snapshot: (args) => limits.forgetSnapshot(args.agentId, args.accountId),
   read_codex_subscription: (args) => limits.readCodexSubscription(args.accountId),
   consume_codex_reset_credit: () => "reset",
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),
