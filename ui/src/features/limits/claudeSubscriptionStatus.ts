@@ -19,8 +19,21 @@ const KNOWN: Record<string, ClaudeStatusLabel | null> = {
   trialing: { label: "Trial", tone: "neutral" },
 };
 
+/**
+ * Whether the status says the subscription has already ended: only `expired` does. A cancellation
+ * may still run to the end of its period, which the status does not date, and a payment that is
+ * due has not ended anything yet.
+ */
+export function claudeSubscriptionEnded(status: string | null | undefined): boolean {
+  return statusKey(status) === "expired";
+}
+
+function statusKey(status: string | null | undefined): string {
+  return status?.trim().toLowerCase() ?? "";
+}
+
 export function claudeSubscriptionStatus(status: string | null | undefined): ClaudeStatusLabel | null {
-  const key = status?.trim().toLowerCase() ?? "";
+  const key = statusKey(status);
   if (!key) return null;
   if (Object.hasOwn(KNOWN, key)) return KNOWN[key];
   const words = key.replace(/_/g, " ");

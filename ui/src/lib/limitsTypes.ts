@@ -105,6 +105,11 @@ export type ProviderLimits = {
    * the signed-in card and on remembered readings.
    */
   savedProfile?: boolean;
+  /**
+   * The user archived this account: it belongs in the archived list, not among the cards. Absent
+   * when not, and never on the signed-in card, which being signed in unarchives.
+   */
+  archived?: boolean;
   plan?: string | null;
   /** Claude only: the profile's `organization.subscription_status`, as Anthropic writes it. */
   subscriptionStatus?: string | null;

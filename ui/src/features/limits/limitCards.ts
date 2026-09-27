@@ -14,6 +14,8 @@ import type {
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { accountCards } from "./accountCards";
+import { claudeSubscriptionEnded } from "./claudeSubscriptionStatus";
+import { codexTermEnded } from "./codexSubscriptionTerm";
 import {
   headlineWindow,
   presentLimitAccount,
@@ -107,6 +109,17 @@ export type LimitCard = {
     readStatus: LimitsStatus;
   };
   subscription: CardSubscription | null;
+  /**
+   * The user archived the account: the card belongs in the archived list. Never the signed-in card,
+   * which being signed in unarchives. A reading says so itself; a profile-only card has its profile's word.
+   */
+  archived: boolean;
+  /**
+   * The footer offers Archive account in place of Use account: a saved login, not signed in and not
+   * needing sign-in again, whose subscription is known to have ended without renewing. Still the
+   * user's click; nothing archives an account on its own.
+   */
+  archiveInsteadOfUse: boolean;
 };
 
 export type LimitCardsInput = {
@@ -138,6 +151,15 @@ export function limitCards({ provider, entries, profiles, now }: LimitCardsInput
     if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile });
   }
   return orderSlots(slots, provider, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, now));
+}
+
+/** One provider's cards as a column shows them: the visible ones, and the archived ones for its archived list. */
+export type LimitColumn = { visible: LimitCard[]; archived: LimitCard[] };
+
+/** `limitCards`, split into the visible and the archived, each in card order. Null while nothing is known. */
+export function limitColumn(input: LimitCardsInput): LimitColumn | null {
+  const cards = limitCards(input);
+  return cards && { visible: cards.filter(card => !card.archived), archived: cards.filter(card => card.archived) };
 }
 
 function accountOf(slot: Slot) {
@@ -199,6 +221,7 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
+  const cardSubscription = subscription(provider, account?.id ?? null, current, reading, presentation);
   return {
     key: `${current ? "current" : "remembered"}-${account?.id ?? index}`,
     provider,
@@ -229,8 +252,20 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
       message: presentation.message === null ? null : { text: presentation.message, tone: readStatus === "failed" ? "error" : "muted" },
       readStatus,
     },
-    subscription: subscription(provider, account?.id ?? null, current, reading, presentation),
+    subscription: cardSubscription,
+    archived: !current && !!(reading ? reading.archived : profile?.archived),
+    archiveInsteadOfUse: !current && !!profile && !profile.needsLogin && subscriptionEnded(cardSubscription, now),
   };
+}
+
+/**
+ * Whether the card's subscription is known to have ended without renewing: Codex's term says it
+ * will not renew and its date has passed; Claude's status says it expired.
+ */
+function subscriptionEnded(subscription: CardSubscription | null, now: number): boolean {
+  if (subscription?.provider === "codex") return codexTermEnded(subscription.term, now);
+  if (subscription?.provider === "claude") return claudeSubscriptionEnded(subscription.status);
+  return false;
 }
 
 /**
