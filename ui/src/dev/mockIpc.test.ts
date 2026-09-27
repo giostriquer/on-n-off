@@ -9,6 +9,9 @@ describe("the dev mock", () => {
 
     await forgetLimitsSnapshot("codex", "codex-history");
     expect((await readLimits("codex")).map(entry => entry.account?.id)).toEqual(["codex-1", "codex-2"]);
+    await accountAction("codex", "category", "work", "Client B");
+    await accountAction("codex", "use", "work");
+    expect((await readAccounts("codex")).profiles.map(profile => profile.id), "only remove drops a saved login").toEqual(["personal", "work"]);
     await accountAction("claude", "remove", "unread");
     expect((await readAccounts("claude")).profiles.map(profile => profile.id)).toEqual(["personal", "work"]);
   });
