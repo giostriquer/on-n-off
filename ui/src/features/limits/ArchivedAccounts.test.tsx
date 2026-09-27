@@ -40,6 +40,9 @@ describe("the archived accounts list", () => {
     const list = createRef<ArchivedAccountsHandle>();
     const props = { provider: "codex" as const, blocked: false, onUnarchive: vi.fn(), onRemove: vi.fn() };
     const { rerender } = render(<ArchivedAccounts ref={list} cards={[]} {...props} />);
+    rerender(<ArchivedAccounts ref={list} cards={archived()} {...props} />);
+    expect(screen.getByRole("button", { name: "Archived (2)" }), "never unasked, as the list first shows or its count changes").not.toHaveFocus();
+    rerender(<ArchivedAccounts ref={list} cards={[]} {...props} />);
 
     act(() => list.current?.focus());
     rerender(<ArchivedAccounts ref={list} cards={archived()} {...props} />);
