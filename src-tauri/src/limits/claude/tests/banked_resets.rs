@@ -106,9 +106,8 @@ fn a_network_failure_on_the_reset_query_is_not_retried() {
 
     let listener = hang_up.join().unwrap();
     assert!(matches!(result, Err(HttpError::Network(_))), "{result:?}");
-    listener.set_nonblocking(true).unwrap();
     assert!(
-        listener.accept().is_err(),
+        !crate::http::was_asked(&listener),
         "a second request went out after the connection dropped"
     );
 }

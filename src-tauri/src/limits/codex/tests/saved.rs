@@ -1,7 +1,7 @@
 //! A saved profile's Codex read (`read_saved_codex`): the usage body app-server reads, asked over
 //! HTTP with the access token its login holds, starting no CLI.
 use super::*;
-use crate::http::{serve_once, serve_once_capturing};
+use crate::http::{never_asked, serve_once, serve_once_capturing, was_asked};
 use serde_json::Value;
 
 fn identity(provider: AgentId) -> Identity {
@@ -284,20 +284,14 @@ fn saved_codex_reports_zero_banked_resets_without_asking_for_their_detail() {
         &[],
         r#"{"rate_limit":{"primary_window":{"used_percent":42}},"rate_limit_reset_credits":{"available_count":0}}"#,
     )]);
-    // A listener that never answers: a detail request would sit in its backlog, where `accept`
-    // finds it, rather than being refused and swallowed like a failed detail read.
-    let detail = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    detail.set_nonblocking(true).unwrap();
-    let resets = format!(
-        "http://{}/wham/rate-limit-reset-credits",
-        detail.local_addr().unwrap()
-    );
+    // A detail request would sit unanswered where `was_asked` finds it, rather than being refused
+    // and swallowed like a failed detail read.
+    let (detail, resets) = never_asked();
     let dto = read_codex(&usage, &resets).unwrap();
     requests.join().unwrap();
 
-    assert_eq!(
-        detail.accept().map(|_| ()).map_err(|error| error.kind()),
-        Err(std::io::ErrorKind::WouldBlock),
+    assert!(
+        !was_asked(&detail),
         "a count of 0 has no detail worth a request"
     );
 
@@ -502,19 +496,17 @@ fn saved_codex_never_asks_a_personal_plan_what_it_spent() {
         &[],
         r#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":12}}}"#,
     )]);
-    let spending = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    spending.set_nonblocking(true).unwrap();
+    let (spending, breakdown) = never_asked();
     let dto = read_codex_spending(
         &member("personal"),
         &format!("{}/wham/usage", url.trim_end_matches("/graphql")),
-        &format!("http://{}/breakdown", spending.local_addr().unwrap()),
+        &breakdown,
     )
     .unwrap();
     requests.join().unwrap();
 
-    assert_eq!(
-        spending.accept().map(|_| ()).map_err(|error| error.kind()),
-        Err(std::io::ErrorKind::WouldBlock),
+    assert!(
+        !was_asked(&spending),
         "a personal plan has no pooled credits to ask about"
     );
     assert_eq!(dto.reading.credits_spent, None);
@@ -620,19 +612,12 @@ fn a_saved_codex_read_is_asked_its_term_whatever_its_plan() {
 #[test]
 fn saved_codex_never_asks_a_read_without_a_plan_what_it_spent() {
     let (usage, u) = serve_once("200 OK", &usage_on(None));
-    let spending = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    spending.set_nonblocking(true).unwrap();
-    let dto = read_codex_spending(
-        &member("no-plan"),
-        &usage,
-        &format!("http://{}/breakdown", spending.local_addr().unwrap()),
-    )
-    .unwrap();
+    let (spending, breakdown) = never_asked();
+    let dto = read_codex_spending(&member("no-plan"), &usage, &breakdown).unwrap();
     u.join().unwrap();
 
-    assert_eq!(
-        spending.accept().map(|_| ()).map_err(|error| error.kind()),
-        Err(std::io::ErrorKind::WouldBlock),
+    assert!(
+        !was_asked(&spending),
         "a read without a plan has no pooled credits to ask about"
     );
     assert_eq!(dto.reading.credits_spent, None);

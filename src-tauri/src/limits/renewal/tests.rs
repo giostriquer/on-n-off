@@ -1,5 +1,5 @@
 use super::*;
-use crate::http::{refused_url, serve_once};
+use crate::http::{never_asked, refused_url, serve_once, was_asked};
 use serde_json::json;
 use std::time::Duration;
 
@@ -16,18 +16,6 @@ fn projection(key: &str) -> CodexAccess {
         workspace_id: "ws-1".into(),
         token: AccessToken::new("fixture-access"),
     }
-}
-
-/// A listener that never answers: a request would sit in its backlog, where `accept` finds it.
-fn never_asked() -> (std::net::TcpListener, String) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let url = format!("http://{}/subscriptions", listener.local_addr().unwrap());
-    (listener, url)
-}
-
-fn was_asked(listener: &std::net::TcpListener) -> bool {
-    listener.accept().is_ok()
 }
 
 /// A term in the shape the endpoint answers a team member, trimmed to what is read.

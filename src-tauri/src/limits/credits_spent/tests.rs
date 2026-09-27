@@ -1,4 +1,5 @@
 use super::*;
+use crate::http::{never_asked, was_asked};
 use crate::limits::backend_memo;
 use serde_json::json;
 use std::time::Instant;
@@ -195,18 +196,6 @@ fn a_refused_or_failed_read_is_no_figure() {
         ),
         None
     );
-}
-
-/// A listener that never answers: a request would sit in its backlog, where `accept` finds it.
-fn never_asked() -> (std::net::TcpListener, String) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let url = format!("http://{}/breakdown", listener.local_addr().unwrap());
-    (listener, url)
-}
-
-fn was_asked(listener: &std::net::TcpListener) -> bool {
-    listener.accept().is_ok()
 }
 
 /// A failing endpoint costs one request per backoff period, not one per refresh.

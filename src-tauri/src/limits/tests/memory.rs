@@ -1,15 +1,8 @@
-use crate::dto::{LimitWindowKind, LimitsAccountDto};
+use super::account;
+use crate::dto::LimitWindowKind;
 use crate::limits::json::window;
 use crate::limits::*;
 use crate::paths::scratch_dir;
-
-fn account(id: &str, label: &str) -> LimitsAccountDto {
-    LimitsAccountDto {
-        legacy_id: None,
-        id: id.to_string(),
-        label: Some(label.to_string()),
-    }
-}
 
 fn ok_snapshot(provider: AgentId, id: &str, label: &str, used: f64) -> ProviderLimitsDto {
     let mut dto = finish(

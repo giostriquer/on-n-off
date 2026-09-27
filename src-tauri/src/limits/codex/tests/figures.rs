@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::accounts::model::AccessToken;
+use crate::http::{never_asked, was_asked};
 
 fn now() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-09-24T12:00:00Z")
@@ -33,18 +34,6 @@ fn urls<'a>(credit_usage: &'a str, subscriptions: &'a str) -> CodexEndpoints<'a>
         credit_usage,
         subscriptions,
     }
-}
-
-/// A listener that never answers: a request would sit in its backlog, where `accept` finds it.
-fn never_asked() -> (std::net::TcpListener, String) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let url = format!("http://{}/backend", listener.local_addr().unwrap());
-    (listener, url)
-}
-
-fn was_asked(listener: &std::net::TcpListener) -> bool {
-    listener.accept().is_ok()
 }
 
 /// A breakdown in the shape the endpoint answers, for one day's credits of one model.
@@ -169,8 +158,8 @@ fn a_signed_in_card_without_its_own_access_is_asked_for_no_backend_figure() {
         assert_eq!(parsed.reading.credits_spent, None);
         assert_eq!(parsed.reading.subscription, None);
     }
-    assert!(spending.accept().is_err(), "asked what the card spent");
-    assert!(terms.accept().is_err(), "asked the card's term");
+    assert!(!was_asked(&spending), "asked what the card spent");
+    assert!(!was_asked(&terms), "asked the card's term");
 }
 
 /// With its own access, a card on a personal plan, or on none, is asked its term but never what it
@@ -198,7 +187,7 @@ fn a_signed_in_card_is_asked_its_term_whatever_its_plan() {
 
         assert!(parsed.reading.subscription.is_some(), "{plan:?}");
         assert_eq!(parsed.reading.credits_spent, None, "{plan:?}");
-        assert!(spending.accept().is_err(), "{plan:?}: asked what it spent");
+        assert!(!was_asked(&spending), "{plan:?}: asked what it spent");
         renewal::forget(key);
     }
 }

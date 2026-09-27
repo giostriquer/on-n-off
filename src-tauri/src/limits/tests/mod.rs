@@ -39,7 +39,8 @@ fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
     }
 }
 
-fn account(id: &str, label: &str) -> LimitsAccountDto {
+/// An account known as `id`, labelled `label`, for every test under `limits`.
+pub(super) fn account(id: &str, label: &str) -> LimitsAccountDto {
     LimitsAccountDto {
         legacy_id: None,
         id: id.to_string(),

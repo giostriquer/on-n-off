@@ -10,20 +10,13 @@ use super::*;
 use crate::http::{head_header, refused_url, serve_once, serve_sequence};
 use crate::limits::credentials::{self, read_claude_credential, ClaudeLoginMemo};
 use crate::limits::snapshots::SnapshotStore;
+use crate::limits::tests::account;
 use crate::limits::{read_limits_in, remember, CodexEndpoints};
 use crate::paths::scratch_dir;
 use serde_json::json;
 use std::cell::Cell;
 use std::fs;
 use std::path::Path;
-
-fn account(id: &str, label: &str) -> LimitsAccountDto {
-    LimitsAccountDto {
-        legacy_id: None,
-        id: id.to_string(),
-        label: Some(label.to_string()),
-    }
-}
 
 fn write(home: &Path, rel: &str, body: &str) {
     let path = home.join(rel);
