@@ -1,11 +1,10 @@
 //! A verified Claude user's remembered history, from the outside: shown as it was written when the
 //! live read fails, and kept apart from the user-only history of the legacy key it replaces.
 
+use super::*;
 use crate::dto::{LimitWindowDto, LimitWindowKind};
 use crate::http::{refused_url, serve_once};
 use crate::limits::json::window;
-use crate::limits::tests::refused_endpoints;
-use crate::limits::*;
 use crate::paths::scratch_dir;
 use std::fs;
 use std::path::PathBuf;
@@ -73,10 +72,12 @@ impl ClaudeObservationRig {
             false,
             Sources {
                 home: &self.home,
-                memo: &self.memo,
-                keychain: |_| Ok(None),
-                claude: refused_endpoints(&refused),
                 now_ms: LOGIN_EXPIRES_AT_MS + 1,
+                claude: ClaudeSources {
+                    memo: &self.memo,
+                    keychain: |_| Ok(None),
+                    endpoints: refused_endpoints(&refused),
+                },
             },
         )
     }
@@ -164,14 +165,16 @@ fn verified_claude_read_supersedes_its_legacy_user_card() {
         false,
         Sources {
             home: &rig.home,
-            memo: &rig.memo,
-            keychain: |_| Ok(None),
-            claude: ClaudeEndpoints {
-                token: &refused_url(),
-                profile: &profile,
-                usage: &usage,
-            },
             now_ms: LOGIN_EXPIRES_AT_MS - 1000,
+            claude: ClaudeSources {
+                memo: &rig.memo,
+                keychain: |_| Ok(None),
+                endpoints: ClaudeEndpoints {
+                    token: &refused_url(),
+                    profile: &profile,
+                    usage: &usage,
+                },
+            },
         },
     );
     profile_request.join().unwrap();

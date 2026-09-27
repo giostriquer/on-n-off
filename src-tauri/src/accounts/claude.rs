@@ -98,9 +98,6 @@ const ENV_CREDENTIALS: [&str; 3] = [
 /// Where an administrator's managed Claude Code settings live.
 const MANAGED_SETTINGS: &str = "/Library/Application Support/ClaudeCode/managed-settings.json";
 
-/// Where Claude Code's profile endpoint says who a login is.
-const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
-
 /// How the account switch words a store it could not read.
 fn store_error(error: StoreError) -> String {
     match error {
@@ -410,7 +407,7 @@ impl Native for ClaudeNative {
     }
 
     fn verify(&self) -> Result<(), String> {
-        self.verify_at(PROFILE_URL)
+        self.verify_at(crate::limits::CLAUDE.profile)
     }
 }
 

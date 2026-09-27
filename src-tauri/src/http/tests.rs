@@ -160,6 +160,23 @@ fn a_refused_url_fails_at_once_and_no_server_can_take_it() {
     );
 }
 
+/// `was_asked` sees a request made to `never_asked`'s server, so one that finds none means none was
+/// made.
+#[test]
+fn a_never_asked_server_tells_whether_it_was_asked() {
+    let (listener, _url) = never_asked();
+    assert!(!was_asked(&listener), "nothing has connected yet");
+    let _client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !was_asked(&listener) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a connection that was made went unseen"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// `ureq` reads `HTTP(S)_PROXY` and `ALL_PROXY` when the builder is made, and would send every
 /// loopback test server's request to that proxy. A builder given a proxy outright stands in for
 /// such an environment without touching the process-wide variables other tests read.

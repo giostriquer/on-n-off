@@ -135,10 +135,13 @@ carries a credential is `codex_store::metadata_and_access`: the signed-in Codex 
 and its access token alone (never its refresh or id token, never the login JSON), wrapped in
 `model::AccessToken`, which has no `Debug`, `Clone` or serialization and reads back only as an
 `Authorization` header value. Its one caller is the app-server read's identity check after the
-handshake (`limits/codex_app_server.rs`), and only for a workspace plan; it hands the token to
-`limits/credits_spent.rs`, which sends it in a single read-only GET to
-`/backend-api/wham/usage/daily-workspace-user-token-usage-breakdown`. That exception to "Codex alone
-makes requests for the signed-in account" is the user's decision (2026-09-24). Native Codex delegates
+handshake (`limits/codex_app_server.rs`). It hands the token to the gate both Codex reads ask their
+backend figures through (`limits/codex.rs` `backend_figures`), which uses it only for that card's
+account, one read-only GET per figure: the term from `/backend-api/subscriptions` (`limits/renewal.rs`)
+and, on a workspace plan, what was spent from
+`/backend-api/wham/usage/daily-workspace-user-token-usage-breakdown` (`limits/credits_spent.rs`).
+That exception to "Codex alone makes requests for the signed-in account" is the user's decision
+(2026-09-24, extended to the term on 2026-09-25). Native Codex delegates
 renewal to its official app-server; private saved Codex credentials use the JSON refresh grant
 without starting a CLI or writing auth.json. Which backend holds Codex's login, and how its
 keyring item is named and reached, is `accounts/codex_store.rs`'s question, as Claude's store is

@@ -414,5 +414,30 @@ pub(crate) fn refused_url() -> String {
     "http://127.0.0.1:0/usage".to_string()
 }
 
+/// A loopback server that never answers, for a request a test says is never made: its listener and
+/// a URL on it. A request made to it would wait for an answer and sit in the listener's backlog,
+/// where [`was_asked`] finds it, rather than failing at once and being swallowed like one to
+/// [`refused_url`].
+#[cfg(test)]
+pub(crate) fn never_asked() -> (std::net::TcpListener, String) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}/never-asked", listener.local_addr().unwrap());
+    (listener, url)
+}
+
+/// Whether a request reached `listener`, one from [`never_asked`] or a test's own, without waiting:
+/// the code under test has connected by the time it returns. Any failure to look, other than there
+/// being nothing to accept, fails the test rather than reading as no request.
+#[cfg(test)]
+pub(crate) fn was_asked(listener: &std::net::TcpListener) -> bool {
+    listener.set_nonblocking(true).unwrap();
+    match listener.accept() {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
+        Err(error) => panic!("loopback accept failed: {error}"),
+    }
+}
+
 #[cfg(test)]
 mod tests;

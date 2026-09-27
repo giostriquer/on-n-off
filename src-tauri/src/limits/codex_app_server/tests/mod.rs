@@ -701,10 +701,12 @@ fn a_signed_in_read_takes_its_term_and_spending_with_its_own_token_once_the_acco
         false,
         |_| Ok(business_session(&codex_home, "chatgpt")),
         |parsed: &mut Parsed, access: Option<&CodexAccess>| {
-            backend_reads(
+            super::super::codex::backend_figures(
                 parsed,
                 access,
-                BackendUrls {
+                super::super::CodexEndpoints {
+                    usage: "unused",
+                    reset_credits: "unused",
                     credit_usage: &breakdown,
                     subscriptions: &url,
                 },

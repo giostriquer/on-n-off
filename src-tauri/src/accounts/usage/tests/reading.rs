@@ -17,8 +17,11 @@ fn saved(provider: AgentId, auth: serde_json::Value) -> Profile {
 /// by the network error it gets.
 fn refused(url: &str) -> SavedReadUrls<'_> {
     SavedReadUrls {
-        claude_profile: url,
-        claude_usage: url,
+        claude: crate::limits::ClaudeEndpoints {
+            token: url,
+            profile: url,
+            usage: url,
+        },
         codex: crate::limits::CodexEndpoints {
             usage: url,
             reset_credits: url,

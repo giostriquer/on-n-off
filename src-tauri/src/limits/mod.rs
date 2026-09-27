@@ -1,7 +1,9 @@
 //! Subscription rate limits aggregated per account from provider-owned clients/endpoints,
-//! remembered snapshots, and account-correlated local observations. Claude's stored login is read
-//! here and renewed in one place only, [`claude_renew`], when its access token has expired and can
-//! still renew itself; Codex owns its authentication and refresh lifecycle through app-server.
+//! remembered snapshots, and account-correlated local observations. Claude's stored login is read by
+//! its reader (`claude.rs`) and renewed in one place only,
+//! [`claude_renew`](crate::accounts::claude_renew), when its access token has expired and can still
+//! renew itself; Codex owns its authentication and refresh lifecycle through app-server, which its
+//! reader (`codex.rs`) asks.
 //!
 //! `read_limits` never fails for provider-side reasons; every outcome is a `ProviderLimitsDto`
 //! whose `status` + `message` tell the UI what to show. Because each CLI stores one login at a
@@ -10,7 +12,6 @@
 
 mod backend_memo;
 mod claude;
-use crate::accounts::claude_renew;
 mod codex;
 mod codex_app_server;
 mod codex_sessions;
@@ -23,7 +24,11 @@ mod reading;
 mod renewal;
 mod snapshots;
 
-pub(crate) use codex::CodexEndpoints;
+pub(crate) use claude::{claude_headers, read_saved_claude, ClaudeEndpoints, CLAUDE};
+#[cfg(test)]
+pub(crate) use codex::codex_card;
+pub use codex::consume_codex_reset_credit;
+pub(crate) use codex::{read_saved_codex, CodexEndpoints};
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::Remembered;
 
@@ -32,28 +37,17 @@ use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 
-use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
-use crate::accounts::model::{AccessToken, Identity};
-use crate::dto::{
-    AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading, ResetCreditOutcome,
-};
-use crate::http::{get_json, HttpError};
+use crate::accounts::claude_store::{KeychainProbe, StorageDir};
+use crate::accounts::model::Identity;
+use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
+use crate::http::HttpError;
 use crate::paths;
-use credentials::{
-    read_claude_identity, ClaudeCredential, ClaudeIdentity, ClaudeLoginMemo, CredentialLookup,
-    LoginSource, CLAUDE_LOGIN,
-};
+use claude::ClaudeSources;
+use pipeline::finish;
 #[cfg(test)]
 use pipeline::resolve;
-use pipeline::{finish, resolve_provider, LoadFailureKind, ProviderLoadError, ResolveOutcome};
 use snapshots::SnapshotStore;
 
-const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
-/// Asks the usage read for the saved-reset block too. The query is the one Claude Code sends on
-/// demand for `/limit-reset`; its regular read is the plain URL, which is why [`claude_usage`] falls
-/// back to it. `skip_spend` leaves out the extra-usage spend figures, which on-n-off does not show.
-const CLAUDE_USAGE_QUERY: &str = "cedar_ember=1&skip_spend=1";
-const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 /// Account id used when the CLI stores no identity; keeps single-account behaviour intact.
 const DEFAULT_ACCOUNT: &str = "default";
 static CLAUDE_READ_LOCK: Mutex<()> = Mutex::new(());
@@ -85,23 +79,6 @@ impl Parsed {
     }
 }
 
-/// The signed-in Codex card an app-server `account/rateLimits/read` result becomes, each window
-/// observed at `observed_at`: the reader's own parse and card, for tests elsewhere that need what
-/// the reader keeps of a read.
-#[cfg(test)]
-pub(crate) fn codex_card(
-    rate_limits: serde_json::Value,
-    account_id: &str,
-    observed_at: &str,
-) -> ProviderLimitsDto {
-    let payload = serde_json::from_value(rate_limits).expect("an app-server rate-limits result");
-    let mut reading = codex::parse_codex(&payload);
-    for window in &mut reading.windows {
-        window.observed_at = observed_at.to_string();
-    }
-    signed_in_card(AgentId::Codex, account_id, reading)
-}
-
 /// The card a read of the signed-in account `account_id` reporting `reading` becomes: the pipeline's
 /// own card, so its windows come in the order every card lists them whatever order they are given
 /// in. For tests elsewhere that must not hand a consumer an order no read produces.
@@ -126,24 +103,12 @@ pub(crate) fn signed_in_card(
     )
 }
 
-/// The three services one Claude read talks to, together so adding a fourth costs one field and
-/// not an edit at every call site.
-#[derive(Debug, Clone, Copy)]
-struct ClaudeEndpoints<'a> {
-    /// Where a stale access token is renewed, before anything is asked of the other two.
-    token: &'a str,
-    profile: &'a str,
-    usage: &'a str,
-}
-
-/// Everything `read_limits` needs that tests replace: where the homes/snapshots live, the Claude
-/// Keychain probe and memo, and the Claude endpoints.
+/// Everything `read_limits` needs that tests replace: where the homes and snapshots live, the clock,
+/// and what the Claude read needs.
 struct Sources<'a, P: Fn(&StorageDir) -> KeychainProbe> {
     home: &'a Path,
-    memo: &'a ClaudeLoginMemo,
-    keychain: P,
-    claude: ClaudeEndpoints<'a>,
     now_ms: i64,
+    claude: ClaudeSources<'a, P>,
 }
 
 /// Current subscription limits for one provider, followed by remembered observations for its other
@@ -175,27 +140,10 @@ fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> Vec<ProviderLimit
         force,
         Sources {
             home,
-            memo: &CLAUDE_LOGIN,
-            keychain: claude_store::keychain_probe,
-            claude: ClaudeEndpoints {
-                token: claude_renew::TOKEN_URL,
-                profile: CLAUDE_PROFILE_URL,
-                usage: CLAUDE_USAGE_URL,
-            },
             now_ms: Utc::now().timestamp_millis(),
+            claude: ClaudeSources::live(),
         },
     )
-}
-
-/// Spend one banked Codex reset on the signed-in account `account_id` names. Blocking: holds the
-/// Codex read lock for one bounded app-server call, so it never overlaps a limits read.
-pub fn consume_codex_reset_credit(
-    account_id: &str,
-    idempotency_key: &str,
-) -> Result<ResetCreditOutcome, String> {
-    let home = paths::user_home().map_err(|error| error.message)?;
-    let _provider_guard = provider_read_guard(AgentId::Codex);
-    codex_app_server::consume_reset_credit(&home, account_id, idempotency_key)
 }
 
 /// Drop the remembered snapshot of one account (the user's "Forget" on a remembered card).
@@ -225,8 +173,8 @@ fn read_limits_in<P: Fn(&StorageDir) -> KeychainProbe>(
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
     let current = match agent {
-        AgentId::Claude => claude_current(force, sources),
-        AgentId::Codex => codex_limits(home, force),
+        AgentId::Claude => claude::claude_current(force, sources),
+        AgentId::Codex => codex::codex_limits(home, force),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
                 agent,
@@ -292,166 +240,6 @@ pub(crate) fn remembered(home: &Path, provider: AgentId) -> Vec<ProviderLimitsDt
     SnapshotStore::for_home(home).load(provider)
 }
 
-/// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
-/// login may be reused; otherwise the Keychain (or the credentials file) is read. A rejected token
-/// evicts the memo so the next read goes back to the Keychain.
-fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
-    force: bool,
-    sources: Sources<'_, P>,
-) -> ProviderLimitsDto {
-    let Sources {
-        home,
-        memo,
-        keychain,
-        claude,
-        now_ms,
-        ..
-    } = sources;
-    // Where Claude Code keeps its account and its login, under whatever `CLAUDE_CONFIG_DIR` and
-    // `CLAUDE_SECURESTORAGE_CONFIG_DIR` say: resolved once, for both reads below.
-    let dirs = match claude_store::native_dirs(home) {
-        Ok(dirs) => dirs,
-        Err(why) => {
-            let message = format!("Could not read the stored login: {why}");
-            return finish(
-                AgentId::Claude,
-                LimitsStatus::Failed,
-                Some(message),
-                Parsed::default(),
-            );
-        }
-    };
-    let selected_identity = read_claude_identity(&dirs.config_file(home));
-    let account = selected_identity
-        .as_ref()
-        .map(|identity| identity.account.clone())
-        .unwrap_or_else(default_account);
-    // Reading the Claude login includes renewing it: an access token lives eight hours and Claude
-    // Code renews it only while it is running, so a longer gap is the ordinary case rather than a
-    // broken login. Keeping that inside the read means the memo stores the renewed login like any
-    // other, and the rejected-token retry below gets the renewal too.
-    let storage = dirs.storage();
-    let read_credential = || claude_renew::current_login(&storage, &keychain, now_ms, claude.token);
-    let attempt = |lookup| claude_limits(lookup, &selected_identity, claude.profile, claude.usage);
-    let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);
-    let mut loaded = attempt(lookup);
-    // Claude Code rotates the access token before the expiry it records, which leaves the memo
-    // holding one the endpoint has already stopped accepting. That rejection says nothing about
-    // the login, so read the stored login again and try once more before reporting one —
-    // otherwise a signed-in user is told to sign in again until the next poll.
-    //
-    // A re-read that hands back no login leaves the rejection standing, because the rejection is
-    // the accurate answer and the alternatives are louder falsehoods: `Missing` would report
-    // "Sign in with `claude`" at a user who is signed in, and `Unreadable` a Keychain failure
-    // when the prompt this retry raised went unanswered. `Expired` is the one where the discarded
-    // message would have been gentler ("send a prompt to renew it"), but it describes a login
-    // this attempt never sent; reporting what the endpoint actually refused is the honest answer.
-    if source == LoginSource::Memo && loaded.failure == Some(LoadFailureKind::Unauthorized) {
-        if let Some(fresh) = memo.refreshed(&account.id, now_ms, read_credential) {
-            loaded = attempt(CredentialLookup::Found(fresh));
-        }
-    }
-    if loaded.dto.status == LimitsStatus::Unauthenticated
-        || loaded.failure == Some(LoadFailureKind::AccountMismatch)
-    {
-        memo.clear();
-    }
-    if let (Some(identity), Some(account)) = (&selected_identity, &mut loaded.dto.account) {
-        if let Some(workspace) = &identity.organization_id {
-            let identity = Identity {
-                provider: AgentId::Claude,
-                user_id: identity.account.id.clone(),
-                workspace_id: workspace.clone(),
-            };
-            *account = scoped_account(&identity, account.label.take());
-        }
-    }
-    loaded.dto
-}
-
-/// Claude: verify the stored token's profile, then read usage with the OAuth beta header. The plan
-/// label comes from the login itself (`subscriptionType` and known Max `rateLimitTier` values).
-fn claude_limits(
-    lookup: CredentialLookup<ClaudeCredential>,
-    selected_identity: &Option<ClaudeIdentity>,
-    profile_url: &str,
-    usage_url: &str,
-) -> ResolveOutcome {
-    let selected_account = selected_identity
-        .as_ref()
-        .map(|identity| identity.account.clone())
-        .unwrap_or_else(default_account);
-    resolve_provider(
-        AgentId::Claude,
-        Some(selected_account),
-        lookup,
-        |credential| {
-            claude_read(
-                credential,
-                selected_identity.as_ref(),
-                profile_url,
-                usage_url,
-            )
-        },
-    )
-}
-
-/// The headers every Claude request on-n-off sends with a login, given its `Authorization` value:
-/// the OAuth beta header Anthropic's OAuth endpoints expect, and no cached answer. The Limits reads
-/// and the account switch's verification (`accounts/claude.rs`) all send these.
-pub(crate) fn claude_headers(authorization: &str) -> [(&'static str, &str); 3] {
-    [
-        ("Authorization", authorization),
-        ("anthropic-beta", "oauth-2025-04-20"),
-        ("Cache-Control", "no-cache"),
-    ]
-}
-
-/// One Claude read with `credential`: its profile, which must be `expected` when an account is
-/// expected, then its usage. The signed-in read expects the account `.claude.json` names, if any;
-/// a saved profile's read and the first usage after a sign-in expect the profile's.
-fn claude_read(
-    credential: &ClaudeCredential,
-    expected: Option<&ClaudeIdentity>,
-    profile_url: &str,
-    usage_url: &str,
-) -> Result<Parsed, ProviderLoadError> {
-    let bearer = format!("Bearer {}", credential.token);
-    let headers = claude_headers(&bearer);
-    let profile_payload = get_json(profile_url, &headers)?;
-    let claude::ClaudeProfile {
-        identity: profile,
-        subscription_status,
-    } = claude::parse_profile(&profile_payload).map_err(HttpError::Parse)?;
-    if expected.is_some_and(|expected| {
-        expected.account.id != profile.account.id
-            || expected.organization_id != profile.organization_id
-    }) {
-        return Err(ProviderLoadError::AccountMismatch);
-    }
-    let usage = claude_usage(usage_url, &headers)?;
-    Ok(Parsed {
-        account: Some(profile.account),
-        reading: Reading {
-            plan: credential.plan(),
-            subscription_status,
-            ..usage
-        },
-    })
-}
-
-/// The account a saved profile's Claude read expects: the profile's user in its workspace.
-fn expected_claude_identity(identity: &Identity) -> ClaudeIdentity {
-    ClaudeIdentity {
-        account: LimitsAccountDto {
-            id: identity.user_id.clone(),
-            label: None,
-            legacy_id: None,
-        },
-        organization_id: Some(identity.workspace_id.clone()),
-    }
-}
-
 /// Why a saved profile's read gave no card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SavedReadError {
@@ -475,55 +263,16 @@ impl From<HttpError> for SavedReadError {
 /// loopback servers in tests.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SavedReadUrls<'a> {
-    pub(crate) claude_profile: &'a str,
-    pub(crate) claude_usage: &'a str,
+    pub(crate) claude: ClaudeEndpoints<'a>,
     pub(crate) codex: CodexEndpoints<'a>,
 }
 
 impl SavedReadUrls<'static> {
     /// The services a saved read asks in the app.
     pub(crate) const LIVE: Self = Self {
-        claude_profile: CLAUDE_PROFILE_URL,
-        claude_usage: CLAUDE_USAGE_URL,
+        claude: CLAUDE,
         codex: codex::CODEX,
     };
-}
-
-/// A saved profile's Claude card, read with its login's `credential`, which must sign in as the
-/// profile's user in its workspace. No CLI is started and nothing is renewed here.
-pub(crate) fn read_saved_claude(
-    identity: &Identity,
-    credential: ClaudeCredential,
-    urls: &SavedReadUrls<'_>,
-) -> Result<ProviderLimitsDto, SavedReadError> {
-    let parsed = claude_read(
-        &credential,
-        Some(&expected_claude_identity(identity)),
-        urls.claude_profile,
-        urls.claude_usage,
-    )
-    .map_err(|error| match error {
-        ProviderLoadError::Http(error) => SavedReadError::Http(error),
-        ProviderLoadError::AccountMismatch => SavedReadError::OtherAccount,
-    })?;
-    saved_card(identity, parsed)
-}
-
-/// A saved profile's Codex card, read over HTTP with its login's access `token` (`codex::read_wham`).
-/// No CLI is started and nothing is renewed here.
-pub(crate) fn read_saved_codex(
-    identity: &Identity,
-    token: AccessToken,
-    urls: &SavedReadUrls<'_>,
-) -> Result<ProviderLimitsDto, SavedReadError> {
-    let reading = codex::read_wham(identity, token, urls.codex)?;
-    saved_card(
-        identity,
-        Parsed {
-            account: None,
-            reading,
-        },
-    )
 }
 
 /// A saved profile's read as its card: known by the profile's observation key, never the signed-in
@@ -556,52 +305,6 @@ fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDt
         } else {
             identity.user_id.clone()
         }),
-    }
-}
-
-/// Claude's usage read with its saved resets. The resets are optional, so a refusal of the reset
-/// query never decides the read: any answer other than a transport failure retries the plain URL,
-/// whose answer (a rejected login included) stands, with the resets unknown. A transport failure
-/// is not retried, since the plain read would only wait on the same network.
-fn claude_usage(usage_url: &str, headers: &[(&str, &str)]) -> Result<Reading, HttpError> {
-    let payload = match get_json(&format!("{usage_url}?{CLAUDE_USAGE_QUERY}"), headers) {
-        Err(HttpError::Network(error)) => return Err(HttpError::Network(error)),
-        Err(_) => get_json(usage_url, headers)?,
-        Ok(payload) => payload,
-    };
-    Ok(claude::parse_usage(&payload, Utc::now()))
-}
-
-/// Codex owns login, token refresh and usage requests through its documented app-server APIs.
-fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
-    match codex_app_server::read(home, force) {
-        Ok(parsed) => finish(AgentId::Codex, LimitsStatus::Ok, None, parsed),
-        Err(codex_app_server::AppServerFailure::SignedOut) => finish(
-            AgentId::Codex,
-            LimitsStatus::SignedOut,
-            Some("Sign in with `codex` to see subscription limits.".to_string()),
-            Parsed::default(),
-        ),
-        Err(codex_app_server::AppServerFailure::Unsupported(message)) => finish(
-            AgentId::Codex,
-            LimitsStatus::Unsupported,
-            Some(message),
-            Parsed::default(),
-        ),
-        Err(codex_app_server::AppServerFailure::Failed(message)) => finish(
-            AgentId::Codex,
-            LimitsStatus::Failed,
-            Some(message),
-            Parsed::default(),
-        ),
-    }
-}
-
-fn default_account() -> LimitsAccountDto {
-    LimitsAccountDto {
-        legacy_id: None,
-        id: DEFAULT_ACCOUNT.to_string(),
-        label: None,
     }
 }
 

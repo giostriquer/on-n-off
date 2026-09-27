@@ -71,10 +71,12 @@ fn claude_read_skips_the_network_when_expired_or_signed_out() {
         false,
         Sources {
             home: &rig.home,
-            memo: &rig.memo,
-            keychain: |_| Ok(None),
-            claude: refused_endpoints(&refused),
             now_ms: 1787022473402 + 1,
+            claude: ClaudeSources {
+                memo: &rig.memo,
+                keychain: |_| Ok(None),
+                endpoints: refused_endpoints(&refused),
+            },
         },
     );
     assert_eq!(expired[0].status, LimitsStatus::Unauthenticated);
