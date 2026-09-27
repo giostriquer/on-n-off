@@ -30,11 +30,11 @@ const ENV_END: &str = "__ON_N_OFF_ENV_END__";
 /// Every directory searched for agent CLIs, in priority order, computed once per process.
 pub fn cli_search_path() -> &'static [PathBuf] {
     static SEARCH_PATH: OnceLock<Vec<PathBuf>> = OnceLock::new();
-    SEARCH_PATH.get_or_init(|| search_path_under(user_home().ok().as_deref()))
+    SEARCH_PATH.get_or_init(|| search_path_for(user_home().ok().as_deref()))
 }
 
 /// [`cli_search_path`] for a user whose home is `home`; without one there is no well-known tier.
-fn search_path_under(home: Option<&Path>) -> Vec<PathBuf> {
+fn search_path_for(home: Option<&Path>) -> Vec<PathBuf> {
     merge_search_path(
         env::var_os("PATH"),
         environment_path_dirs(),
