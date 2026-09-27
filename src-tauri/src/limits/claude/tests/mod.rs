@@ -86,17 +86,19 @@ impl Rig {
             force,
             Sources {
                 home: &self.home,
-                memo: &self.memo,
-                keychain: |_| {
-                    self.probes.set(self.probes.get() + 1);
-                    self.keychain.clone()
-                },
-                claude: ClaudeEndpoints {
-                    token: &self.token_url,
-                    profile,
-                    usage,
-                },
                 now_ms: NOW_MS,
+                claude: ClaudeSources {
+                    memo: &self.memo,
+                    keychain: |_| {
+                        self.probes.set(self.probes.get() + 1);
+                        self.keychain.clone()
+                    },
+                    endpoints: ClaudeEndpoints {
+                        token: &self.token_url,
+                        profile,
+                        usage,
+                    },
+                },
             },
         )
     }
@@ -267,10 +269,12 @@ fn an_expired_access_token_with_a_live_refresh_token_asks_only_for_a_cli_run() {
         false,
         Sources {
             home: &rig.home,
-            memo: &rig.memo,
-            keychain: |_| Ok(None),
-            claude: refused_endpoints(&refused),
             now_ms: 1787022473402 + 1,
+            claude: ClaudeSources {
+                memo: &rig.memo,
+                keychain: |_| Ok(None),
+                endpoints: refused_endpoints(&refused),
+            },
         },
     );
     assert_eq!(dtos[0].status, LimitsStatus::Unauthenticated);
@@ -300,10 +304,12 @@ fn an_expired_access_token_without_a_usable_refresh_token_asks_for_a_new_sign_in
         false,
         Sources {
             home: &rig.home,
-            memo: &rig.memo,
-            keychain: |_| Ok(None),
-            claude: refused_endpoints(&refused),
             now_ms: 1787022473402 + 1,
+            claude: ClaudeSources {
+                memo: &rig.memo,
+                keychain: |_| Ok(None),
+                endpoints: refused_endpoints(&refused),
+            },
         },
     );
     assert_eq!(dtos[0].status, LimitsStatus::Unauthenticated);

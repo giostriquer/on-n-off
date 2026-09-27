@@ -37,12 +37,12 @@ use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 
-use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
+use crate::accounts::claude_store::{KeychainProbe, StorageDir};
 use crate::accounts::model::Identity;
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
 use crate::paths;
-use credentials::{ClaudeLoginMemo, CLAUDE_LOGIN};
+use claude::ClaudeSources;
 use pipeline::finish;
 #[cfg(test)]
 use pipeline::resolve;
@@ -103,14 +103,12 @@ pub(crate) fn signed_in_card(
     )
 }
 
-/// Everything `read_limits` needs that tests replace: where the homes/snapshots live, the Claude
-/// Keychain probe and memo, and the Claude endpoints.
+/// Everything `read_limits` needs that tests replace: where the homes and snapshots live, the clock,
+/// and what the Claude read needs.
 struct Sources<'a, P: Fn(&StorageDir) -> KeychainProbe> {
     home: &'a Path,
-    memo: &'a ClaudeLoginMemo,
-    keychain: P,
-    claude: ClaudeEndpoints<'a>,
     now_ms: i64,
+    claude: ClaudeSources<'a, P>,
 }
 
 /// Current subscription limits for one provider, followed by remembered observations for its other
@@ -136,10 +134,8 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
         force,
         Sources {
             home: &home,
-            memo: &CLAUDE_LOGIN,
-            keychain: claude_store::keychain_probe,
-            claude: CLAUDE,
             now_ms: Utc::now().timestamp_millis(),
+            claude: ClaudeSources::live(),
         },
     )
 }

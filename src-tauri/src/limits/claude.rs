@@ -11,7 +11,8 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use super::credentials::{
-    read_claude_identity, ClaudeCredential, ClaudeIdentity, CredentialLookup, LoginSource,
+    read_claude_identity, ClaudeCredential, ClaudeIdentity, ClaudeLoginMemo, CredentialLookup,
+    LoginSource, CLAUDE_LOGIN,
 };
 use super::json::{humanize, optional_string, percent, window};
 use super::pipeline::{
@@ -257,6 +258,25 @@ pub(crate) const CLAUDE: ClaudeEndpoints<'static> = ClaudeEndpoints {
     usage: CLAUDE_USAGE_URL,
 };
 
+/// What the signed-in Claude read needs that tests replace: the login memoised for the app run, the
+/// Keychain probe, and the services it asks.
+pub(super) struct ClaudeSources<'a, P: Fn(&StorageDir) -> KeychainProbe> {
+    memo: &'a ClaudeLoginMemo,
+    keychain: P,
+    endpoints: ClaudeEndpoints<'a>,
+}
+
+impl ClaudeSources<'static, fn(&StorageDir) -> KeychainProbe> {
+    /// The app's: the login memoised for the run, the store Claude Code reads, the live services.
+    pub(super) fn live() -> Self {
+        Self {
+            memo: &CLAUDE_LOGIN,
+            keychain: claude_store::keychain_probe,
+            endpoints: CLAUDE,
+        }
+    }
+}
+
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
 /// login may be reused; otherwise the Keychain (or the credentials file) is read. A rejected token
 /// evicts the memo so the next read goes back to the Keychain.
@@ -266,11 +286,13 @@ pub(super) fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
 ) -> ProviderLimitsDto {
     let Sources {
         home,
-        memo,
-        keychain,
-        claude,
         now_ms,
-        ..
+        claude:
+            ClaudeSources {
+                memo,
+                keychain,
+                endpoints,
+            },
     } = sources;
     // Where Claude Code keeps its account and its login, under whatever `CLAUDE_CONFIG_DIR` and
     // `CLAUDE_SECURESTORAGE_CONFIG_DIR` say: resolved once, for both reads below.
@@ -296,8 +318,16 @@ pub(super) fn claude_current<P: Fn(&StorageDir) -> KeychainProbe>(
     // broken login. Keeping that inside the read means the memo stores the renewed login like any
     // other, and the rejected-token retry below gets the renewal too.
     let storage = dirs.storage();
-    let read_credential = || claude_renew::current_login(&storage, &keychain, now_ms, claude.token);
-    let attempt = |lookup| claude_limits(lookup, &selected_identity, claude.profile, claude.usage);
+    let read_credential =
+        || claude_renew::current_login(&storage, &keychain, now_ms, endpoints.token);
+    let attempt = |lookup| {
+        claude_limits(
+            lookup,
+            &selected_identity,
+            endpoints.profile,
+            endpoints.usage,
+        )
+    };
     let (lookup, source) = memo.lookup(force, &account.id, now_ms, read_credential);
     let mut loaded = attempt(lookup);
     // Claude Code rotates the access token before the expiry it records, which leaves the memo

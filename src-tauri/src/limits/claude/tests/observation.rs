@@ -72,10 +72,12 @@ impl ClaudeObservationRig {
             false,
             Sources {
                 home: &self.home,
-                memo: &self.memo,
-                keychain: |_| Ok(None),
-                claude: refused_endpoints(&refused),
                 now_ms: LOGIN_EXPIRES_AT_MS + 1,
+                claude: ClaudeSources {
+                    memo: &self.memo,
+                    keychain: |_| Ok(None),
+                    endpoints: refused_endpoints(&refused),
+                },
             },
         )
     }
@@ -163,14 +165,16 @@ fn verified_claude_read_supersedes_its_legacy_user_card() {
         false,
         Sources {
             home: &rig.home,
-            memo: &rig.memo,
-            keychain: |_| Ok(None),
-            claude: ClaudeEndpoints {
-                token: &refused_url(),
-                profile: &profile,
-                usage: &usage,
-            },
             now_ms: LOGIN_EXPIRES_AT_MS - 1000,
+            claude: ClaudeSources {
+                memo: &rig.memo,
+                keychain: |_| Ok(None),
+                endpoints: ClaudeEndpoints {
+                    token: &refused_url(),
+                    profile: &profile,
+                    usage: &usage,
+                },
+            },
         },
     );
     profile_request.join().unwrap();
