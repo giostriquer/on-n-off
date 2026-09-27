@@ -3,7 +3,7 @@
 //! which ids Forget and an unarchived account take out of it.
 
 use super::super::tests::snapshot;
-use super::super::{is_snapshot_file, SnapshotStore};
+use super::super::{file_name, is_snapshot_file, SnapshotStore};
 use super::ARCHIVE_FILE;
 use crate::dto::{AgentId, LimitsAccountDto};
 use crate::paths::scratch_dir;
@@ -212,6 +212,45 @@ fn forgetting_an_account_unarchives_every_id_it_deletes() {
     // A profile with no snapshot of its own is forgotten by its id all the same.
     store.forget(AgentId::Codex, "profile:other").unwrap();
     assert!(store.archived(AgentId::Codex).is_empty());
+    let _ = fs::remove_dir_all(home);
+}
+
+/// Legacy history is forgotten by its email, and unarchived, only while it still names the email the
+/// card confirmed. Another email, or history that cannot be read, is refused and stays archived.
+#[test]
+fn forgetting_legacy_history_by_its_email_unarchives_it_only_while_the_email_matches() {
+    let home = scratch_dir("limits-archive-forget-by-email");
+    let store = SnapshotStore::for_home(&home);
+    store
+        .save(&snapshot(
+            AgentId::Codex,
+            "legacy-b",
+            "b@example.com",
+            "2026-09-10T10:00:00Z",
+        ))
+        .unwrap();
+    fs::create_dir_all(store.dir().join(file_name(AgentId::Codex, "unreadable"))).unwrap();
+    store
+        .set_archived(AgentId::Codex, &ids(&["legacy-b", "unreadable"]), true)
+        .unwrap();
+
+    assert!(store
+        .forget_matching_email(AgentId::Codex, "legacy-b", "c@example.com")
+        .is_err());
+    assert!(store
+        .forget_matching_email(AgentId::Codex, "unreadable", "b@example.com")
+        .is_err());
+    assert_eq!(
+        store.archived(AgentId::Codex),
+        set(&["legacy-b", "unreadable"])
+    );
+    assert_eq!(store.load(AgentId::Codex).len(), 1, "nothing forgotten");
+
+    store
+        .forget_matching_email(AgentId::Codex, "legacy-b", " B@Example.com ")
+        .unwrap();
+    assert_eq!(store.archived(AgentId::Codex), set(&["unreadable"]));
+    assert!(store.load(AgentId::Codex).is_empty());
     let _ = fs::remove_dir_all(home);
 }
 

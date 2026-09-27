@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
-use super::{read_stored, SnapshotStore, SNAPSHOT_WRITES};
+use super::{file_name, read_stored, replaces, SnapshotStore, SNAPSHOT_WRITES};
 use crate::dto::{AgentId, LimitsAccountDto};
 use crate::usage::cache_io::atomic_write;
 
@@ -52,9 +52,9 @@ impl SnapshotStore {
     }
 
     /// Unarchives `account`, which the user signed in to or added again: its own id, and the legacy
-    /// id its history was kept under only while that history names the same email. In a shared
-    /// workspace a legacy id can hold another member's history, which stays archived. Whether the
-    /// file changed.
+    /// id its history was kept under only while that history is the one `account` replaced, by the
+    /// rule that hides it (`replaces`). Another member's history under the same legacy id stays
+    /// archived. Whether the file changed.
     pub fn unarchive_account(
         &self,
         provider: AgentId,
@@ -66,9 +66,10 @@ impl SnapshotStore {
         let archived = self.archived(provider);
         let mut ids = vec![account.id.clone()];
         if let Some(legacy) = account.legacy_id.as_ref().filter(|legacy| {
-            account.id.starts_with("profile:")
-                && archived.contains(*legacy)
-                && self.history_names(provider, legacy, account.label.as_deref())
+            archived.contains(*legacy)
+                && read_stored(&self.dir.join(file_name(provider, legacy))).is_some_and(|stored| {
+                    stored.provider == provider && replaces(account, &stored.account)
+                })
         }) {
             ids.push(legacy.clone());
         }
@@ -84,25 +85,6 @@ impl SnapshotStore {
         self.edit_archive(provider, |set| {
             ids.iter()
                 .fold(false, |changed, id| changed | set.remove(id))
-        })
-    }
-
-    /// Whether the snapshot of `legacy_id` is legacy history labelled `email`.
-    fn history_names(&self, provider: AgentId, legacy_id: &str, email: Option<&str>) -> bool {
-        let Some(email) = email.map(str::trim).filter(|email| !email.is_empty()) else {
-            return false;
-        };
-        if legacy_id.starts_with("profile:") {
-            return false;
-        }
-        read_stored(&self.dir.join(super::file_name(provider, legacy_id))).is_some_and(|stored| {
-            stored.provider == provider
-                && stored.account.id == legacy_id
-                && stored
-                    .account
-                    .label
-                    .as_deref()
-                    .is_some_and(|label| label.trim().eq_ignore_ascii_case(email))
         })
     }
 

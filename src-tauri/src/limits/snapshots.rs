@@ -330,22 +330,26 @@ fn fnv1a(input: &str) -> u32 {
 /// New scoped observations supersede the old card only when both its provider-specific legacy
 /// key and email match. Keep the old file until Forget; never import its unscoped quota windows.
 fn supersedes(scoped: &ProviderLimitsDto, legacy: &ProviderLimitsDto) -> bool {
-    if legacy.current_account
-        || scoped.provider != legacy.provider
-        || scoped.status != LimitsStatus::Ok
+    !legacy.current_account
+        && scoped.provider == legacy.provider
+        && scoped.status == LimitsStatus::Ok
+        && matches!(
+            (&scoped.account, &legacy.account),
+            (Some(new), Some(old)) if replaces(new, old)
+        )
+}
+
+/// Whether `legacy` is the history the scoped account `scoped` replaced: the scoped account's
+/// legacy key names it, and both name the same email. In a shared workspace the legacy key alone
+/// can name another member's history, which the email tells apart.
+fn replaces(scoped: &LimitsAccountDto, legacy: &LimitsAccountDto) -> bool {
+    if !scoped.id.starts_with("profile:")
+        || legacy.id.starts_with("profile:")
+        || scoped.legacy_id.as_deref() != Some(legacy.id.as_str())
     {
         return false;
     }
-    let (Some(new), Some(old)) = (&scoped.account, &legacy.account) else {
-        return false;
-    };
-    if !new.id.starts_with("profile:")
-        || old.id.starts_with("profile:")
-        || new.legacy_id.as_deref() != Some(old.id.as_str())
-    {
-        return false;
-    }
-    match (&new.label, &old.label) {
+    match (&scoped.label, &legacy.label) {
         (Some(new), Some(old)) => {
             !new.trim().is_empty() && new.trim().eq_ignore_ascii_case(old.trim())
         }
