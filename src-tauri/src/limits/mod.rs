@@ -24,7 +24,7 @@ mod reading;
 mod renewal;
 mod snapshots;
 
-pub(crate) use claude::{claude_headers, read_saved_claude, ClaudeEndpoints};
+pub(crate) use claude::{claude_headers, read_saved_claude, ClaudeEndpoints, CLAUDE};
 #[cfg(test)]
 pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
@@ -138,7 +138,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             home: &home,
             memo: &CLAUDE_LOGIN,
             keychain: claude_store::keychain_probe,
-            claude: claude::CLAUDE,
+            claude: CLAUDE,
             now_ms: Utc::now().timestamp_millis(),
         },
     )
@@ -268,7 +268,7 @@ pub(crate) struct SavedReadUrls<'a> {
 impl SavedReadUrls<'static> {
     /// The services a saved read asks in the app.
     pub(crate) const LIVE: Self = Self {
-        claude: claude::CLAUDE,
+        claude: CLAUDE,
         codex: codex::CODEX,
     };
 }

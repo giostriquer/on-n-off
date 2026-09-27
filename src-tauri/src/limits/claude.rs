@@ -249,8 +249,9 @@ pub(crate) struct ClaudeEndpoints<'a> {
     pub(crate) usage: &'a str,
 }
 
-/// The services a Claude read asks in the app.
-pub(super) const CLAUDE: ClaudeEndpoints<'static> = ClaudeEndpoints {
+/// The services a Claude read asks in the app. The account switch verifies a login against the same
+/// profile endpoint (`accounts/claude.rs`).
+pub(crate) const CLAUDE: ClaudeEndpoints<'static> = ClaudeEndpoints {
     token: claude_renew::TOKEN_URL,
     profile: CLAUDE_PROFILE_URL,
     usage: CLAUDE_USAGE_URL,
