@@ -39,6 +39,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   const [confirmation, setConfirmation] = useState<"remove" | "removeLogin" | "signOut" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [clients, setClients] = useState<string[] | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const useButton = useRef<HTMLButtonElement>(null);
@@ -83,10 +84,19 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     } catch (error) { setError(parseInvokeError(error).message); }
     finally { setRemoving(false); }
   }
+  /**
+   * Archive account from the menu or the footer, once at a time. While it runs both are
+   * aria-disabled rather than disabled, which would drop a keyboard user's focus to the page.
+   */
+  function archive() {
+    if (archiving) return;
+    setArchiving(true);
+    void onArchive().finally(() => setArchiving(false));
+  }
   /** The footer's one primary action, the first that applies. */
   function primaryAction(): ReactNode {
     if (signingIn) return <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button>;
-    if (archiveInsteadOfUse) return <button className={button} disabled={disabled} onClick={() => void onArchive()}>Archive account</button>;
+    if (archiveInsteadOfUse) return <button className={button} disabled={disabled} aria-disabled={archiving || undefined} aria-busy={archiving || undefined} onClick={archive}>Archive account</button>;
     if (!profile) return <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>;
     if (current && !profile.pendingActivation) return null;
     return <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : startSwitch(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>;
@@ -104,7 +114,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setCategory(profile.category ?? ""); setEditing(true); }}>Edit category</button>}
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void add(profile.id, accountId); }}>Sign in again</button>}
       {current && profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("removeLogin"); }}>Remove saved login</button>}
-      {!current && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void onArchive(); }}>Archive account</button>}
+      {!current && <button className={`${button} border-transparent text-left`} disabled={disabled} aria-disabled={archiving || undefined} aria-busy={archiving || undefined} onClick={() => { close(); archive(); }}>Archive account</button>}
       {current ? <button className={`${button} border-transparent text-left`} disabled={disabled || !nativeMatches} onClick={() => { setMenuOpen(false); setConfirmation("signOut"); }}>Sign out</button>
         : <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("remove"); }}>Remove account</button>}
     </div>

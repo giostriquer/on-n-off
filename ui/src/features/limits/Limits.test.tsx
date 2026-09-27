@@ -848,4 +848,37 @@ describe("archiving", () => {
     expect(focused).toHaveFocus();
     expect(screen.getByRole("button", { name: "Archived (1)" })).toBeInTheDocument();
   });
+
+  it("offers Archive account nothing more while it runs, and again once it fails", async () => {
+    const archiving = deferred<void>();
+    setLimitsArchived.mockReturnValue(archiving.promise);
+    answerLapsed();
+    renderLimits();
+    const region = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    const footer = await within(region).findByRole("button", { name: "Archive account" });
+
+    footer.focus();
+    fireEvent.click(footer);
+    // aria-disabled, not disabled: a browser drops focus to the page from a button that disables.
+    expect(footer).toHaveAttribute("aria-disabled", "true");
+    expect(footer).toHaveAttribute("aria-busy", "true");
+    expect(footer).toBeEnabled();
+    fireEvent.click(footer);
+    fireEvent.click(within(region).getByRole("button", { name: "More actions for personal@codex.example" }));
+    const item = within(screen.getByRole("group", { name: "Actions for personal@codex.example" })).getByRole("button", { name: "Archive account" });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(item);
+    expect(setLimitsArchived, "a second click never sends it again").toHaveBeenCalledTimes(1);
+
+    await act(async () => { archiving.reject({ kind: "message", message: "disk full", path: null }); });
+
+    expect(await screen.findByText("Could not archive that account: disk full")).toBeInTheDocument();
+    for (const button of [footer, item]) {
+      expect(button).not.toHaveAttribute("aria-disabled");
+      expect(button).not.toHaveAttribute("aria-busy");
+    }
+    fireEvent.click(footer);
+    expect(setLimitsArchived, "offered again").toHaveBeenCalledTimes(2);
+  });
 });
