@@ -20,9 +20,10 @@ export function removeAccountQuestion(label: string): string {
 
 export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
-  onForget?: (id: string) => Promise<void>;
+  /** Drops the account's history for Remove account, after its saved login, if any, is removed. */
+  onForget: () => Promise<void>;
   /** Archive account, offered on every card but the signed-in one; it asks nothing and deletes nothing. */
-  onArchive?: () => Promise<void>;
+  onArchive: () => Promise<void>;
   /** The footer offers Archive account in place of Use account (`LimitCard.archiveInsteadOfUse`, which is never the current card's). */
   archiveInsteadOfUse?: boolean;
   header: (menu: ReactNode) => ReactNode;
@@ -77,7 +78,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     try {
       if (confirmation === "signOut") await action("signOut");
       else if (confirmation === "removeLogin" && profile) await action("remove", profile.id);
-      else await removeAccount(profile?.id, () => onForget?.(accountId) ?? Promise.resolve());
+      else await removeAccount(profile?.id, onForget);
       complete();
     } catch (error) { setError(parseInvokeError(error).message); }
     finally { setRemoving(false); }
@@ -85,7 +86,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   /** The footer's one primary action, the first that applies. */
   function primaryAction(): ReactNode {
     if (signingIn) return <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button>;
-    if (archiveInsteadOfUse && onArchive) return <button className={button} disabled={disabled} onClick={() => void onArchive()}>Archive account</button>;
+    if (archiveInsteadOfUse) return <button className={button} disabled={disabled} onClick={() => void onArchive()}>Archive account</button>;
     if (!profile) return <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>;
     if (current && !profile.pendingActivation) return null;
     return <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : startSwitch(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>;
@@ -103,9 +104,9 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setCategory(profile.category ?? ""); setEditing(true); }}>Edit category</button>}
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void add(profile.id, accountId); }}>Sign in again</button>}
       {current && profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("removeLogin"); }}>Remove saved login</button>}
-      {!current && onArchive && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void onArchive(); }}>Archive account</button>}
+      {!current && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void onArchive(); }}>Archive account</button>}
       {current ? <button className={`${button} border-transparent text-left`} disabled={disabled || !nativeMatches} onClick={() => { setMenuOpen(false); setConfirmation("signOut"); }}>Sign out</button>
-        : onForget && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("remove"); }}>Remove account</button>}
+        : <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("remove"); }}>Remove account</button>}
     </div>
     {editing && profile && <form role="group" aria-label="Edit account category" className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void action("category", profile.id, category).then(complete).catch(() => {}); }}>
       <input aria-label="Category (optional)" placeholder="Category (optional)" maxLength={100} value={category} onChange={event => setCategory(event.target.value)} className="w-full min-w-0 rounded border border-[var(--hair)] bg-transparent px-2 py-1.5 text-[12px]" />
