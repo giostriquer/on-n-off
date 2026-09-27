@@ -1,8 +1,8 @@
-import { createRef, useRef } from "react";
+import { useRef } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
-import { ArchivedAccounts, type ArchivedAccountsHandle } from "./ArchivedAccounts";
+import { ArchivedAccounts } from "./ArchivedAccounts";
 import { limitColumn, type CardAccount, type LimitCard } from "./limitCards";
 import { NOW, okCodex, staleCodex } from "./readingFixtures";
 
@@ -34,25 +34,6 @@ describe("the archived accounts list", () => {
   it("shows nothing while no account is archived", () => {
     const { container } = render(<ArchivedAccounts provider="codex" cards={[]} blocked={false} onUnarchive={vi.fn()} onRemove={vi.fn()} />);
     expect(container).toBeEmptyDOMElement();
-  });
-
-  it("takes focus on its disclosure when asked, once there is one, and stays collapsed", () => {
-    const list = createRef<ArchivedAccountsHandle>();
-    const props = { provider: "codex" as const, blocked: false, onUnarchive: vi.fn(), onRemove: vi.fn() };
-    const { rerender } = render(<ArchivedAccounts ref={list} cards={[]} {...props} />);
-    rerender(<ArchivedAccounts ref={list} cards={archived()} {...props} />);
-    expect(screen.getByRole("button", { name: "Archived (2)" }), "never unasked, as the list first shows or its count changes").not.toHaveFocus();
-    rerender(<ArchivedAccounts ref={list} cards={[]} {...props} />);
-
-    act(() => list.current?.focus());
-    rerender(<ArchivedAccounts ref={list} cards={archived()} {...props} />);
-
-    const disclosure = screen.getByRole("button", { name: "Archived (2)" });
-    expect(disclosure, "the request waits for the card to join the list").toHaveFocus();
-    expect(disclosure).toHaveAttribute("aria-expanded", "false");
-    act(() => disclosure.blur());
-    act(() => list.current?.focus());
-    expect(disclosure).toHaveFocus();
   });
 
   it("stays collapsed behind a disclosure that counts the archived accounts, and lists them without meters when opened", () => {

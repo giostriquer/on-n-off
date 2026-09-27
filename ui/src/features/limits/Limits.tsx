@@ -6,12 +6,12 @@ import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import type { AccountsReading } from "$lib/accountTypes";
 import { displayError, parseInvokeError } from "$lib/error";
-import { holdFocus, useFocusHandoff } from "$lib/focusHandoff";
+import { useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { ArchivedAccounts, type ArchivedAccountsHandle } from "./ArchivedAccounts";
+import { ArchivedAccounts } from "./ArchivedAccounts";
 import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
@@ -86,13 +86,14 @@ function ProviderColumn({
   const manager = useAccountManagement();
   const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], now });
   const [forgetError, setForgetError] = useState<string | null>(null);
-  const archivedList = useRef<ArchivedAccountsHandle>(null);
+  const archivedDisclosure = useRef<HTMLButtonElement | null>(null);
   const menus = useRef(new Map<string, HTMLButtonElement>());
   const visibleKeys = column?.visible.map(card => card.key) ?? [];
   const menu = (key: string | undefined) => (key === undefined ? undefined : menus.current.get(key));
-  // A card removed from its menu hands focus to the next card's More actions, else the previous one's.
-  const handOffCard = useFocusHandoff<void>(visibleKeys, index =>
-    [menu(visibleKeys[index]), menu(visibleKeys[index - 1]), addAccount.current]);
+  // A card leaving hands focus to the archived list if it was archived, else to the next card's More
+  // actions, else the previous one's.
+  const handOffCard = useFocusHandoff<"archive" | "remove">(visibleKeys, (index, action) =>
+    [action === "archive" ? archivedDisclosure.current : null, menu(visibleKeys[index]), menu(visibleKeys[index - 1]), addAccount.current]);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
   const blocked = manager?.blocked ?? false;
 
@@ -111,21 +112,20 @@ function ProviderColumn({
     }
   }
 
-  /** Archive from a card: focus follows it to the archived list, unless the user moved focus while it waited. */
-  async function archive(account: CardAccount) {
-    const unmoved = holdFocus();
+  /** Archive from a card's menu or footer; once the card goes, focus follows it to the archived list. */
+  async function archive(key: string, account: CardAccount) {
     try {
       await setArchived(account, true);
     } catch {
       return; // setArchived says why
     }
-    if (unmoved()) archivedList.current?.focus();
+    handOffCard(key, "archive");
   }
 
   /** Remove account from a card's menu, whose last step drops the card; focus then goes on to its neighbour. */
   async function forgetCard(key: string, account: CardAccount) {
     await forget(account);
-    handOffCard(key);
+    handOffCard(key, "remove");
   }
 
   async function remove(account: CardAccount) {
@@ -178,15 +178,16 @@ function ProviderColumn({
           now={now}
           error={index === 0 ? error : null}
           onForget={(account) => forgetCard(card.key, account)}
-          onArchive={archive}
+          onArchive={(account) => archive(card.key, account)}
           menuButtonRef={(node) => {
             if (node) menus.current.set(card.key, node);
             else menus.current.delete(card.key);
           }}
         />
       ))}
-      <ArchivedAccounts ref={archivedList} provider={provider} cards={column.archived} blocked={blocked}
-        onUnarchive={(account) => setArchived(account, false)} onRemove={remove} focusWhenEmpty={() => menu(visibleKeys[0])} />
+      <ArchivedAccounts provider={provider} cards={column.archived} blocked={blocked}
+        onUnarchive={(account) => setArchived(account, false)} onRemove={remove} focusWhenEmpty={() => menu(visibleKeys[0])}
+        disclosureRef={(node) => { archivedDisclosure.current = node; }} />
     </div>
   );
 }

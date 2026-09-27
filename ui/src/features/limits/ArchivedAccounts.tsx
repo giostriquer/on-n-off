@@ -1,4 +1,4 @@
-import { useId, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import { useId, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { removeAccountQuestion } from "@/features/accounts/AccountCardActions";
 import { accountButton as button } from "@/features/accounts/AccountManager";
@@ -8,9 +8,6 @@ import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import type { CardAccount, LimitCard } from "./limitCards";
 
-/** `focus` moves focus to the "Archived (n)" disclosure, once there is one, without opening or closing the list. */
-export type ArchivedAccountsHandle = { focus: () => void };
-
 /** A row's actions, each of which takes the row out of the list once it goes through. */
 type RowAction = "unarchive" | "remove";
 
@@ -19,8 +16,7 @@ type RowAction = "unarchive" | "remove";
  * Each row names the account, shows no usage, and offers Unarchive and Remove account; archived
  * accounts are never used from here.
  */
-export function ArchivedAccounts({ ref, provider, cards, blocked, onUnarchive, onRemove, focusWhenEmpty }: {
-  ref?: Ref<ArchivedAccountsHandle>;
+export function ArchivedAccounts({ provider, cards, blocked, onUnarchive, onRemove, focusWhenEmpty, disclosureRef }: {
   provider: AgentId;
   /** The column's archived cards (`limitColumn`), in card order. */
   cards: LimitCard[];
@@ -31,9 +27,10 @@ export function ArchivedAccounts({ ref, provider, cards, blocked, onUnarchive, o
   onRemove: (account: CardAccount) => Promise<void>;
   /** Where focus goes once a row's action empties the list: the column's first card's actions. */
   focusWhenEmpty?: () => HTMLElement | null | undefined;
+  /** Receives the "Archived (n)" disclosure, where focus goes after a card is archived. */
+  disclosureRef?: (node: HTMLButtonElement | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [focusRequested, setFocusRequested] = useState(false);
   const disclosure = useRef<HTMLButtonElement>(null);
   const rowButtons = useRef(new Map<string, HTMLButtonElement>());
   const list = useId();
@@ -42,19 +39,11 @@ export function ArchivedAccounts({ ref, provider, cards, blocked, onUnarchive, o
   // A row that leaves hands focus to the next row's same button, else the previous row's.
   const handOff = useFocusHandoff<RowAction>(keys, (index, action) =>
     [rowButton(action, keys[index]), rowButton(action, keys[index - 1]), disclosure.current, focusWhenEmpty?.()]);
-  useImperativeHandle(ref, () => ({ focus: () => setFocusRequested(true) }), []);
-  // The card just archived can join the list a render after the request, so a request waits for
-  // the disclosure to exist; it lands in the same commit, before the card's absence is painted.
-  useLayoutEffect(() => {
-    if (!focusRequested || !disclosure.current) return;
-    disclosure.current.focus();
-    setFocusRequested(false);
-  }, [focusRequested, cards.length]);
   if (cards.length === 0) return null;
   const name = providerLabel(provider);
   return (
     <section aria-label={`${name} archived accounts`} className="flex flex-col gap-2">
-      <button ref={disclosure} type="button" aria-expanded={open} aria-controls={list} onClick={() => setOpen(!open)}
+      <button ref={node => { disclosure.current = node; disclosureRef?.(node); }} type="button" aria-expanded={open} aria-controls={list} onClick={() => setOpen(!open)}
         className="inline-flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-[12px] font-medium text-[var(--mute)] hover:bg-[var(--wash)] hover:text-[var(--silkscreen)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)]">
         <ChevronRight aria-hidden="true" className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
         Archived ({cards.length})

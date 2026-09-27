@@ -72,6 +72,23 @@ describe("focus as an account leaves", () => {
     expect(screen.getByRole("button", { name: target })).toHaveFocus();
   });
 
+  it("goes to the archived list when an archive resolves after the user tabbed within its card", async () => {
+    const archiving = deferred<void>();
+    setLimitsArchived.mockReturnValue(archiving.promise);
+    answer([okClaude()], [okCodex(), staleCodex()]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+    // Tab from the card's ••• to its footer while the archive waits.
+    within(screen.getByRole("region", { name: "Codex limits · personal@codex.example" })).getByRole("button", { name: "Sign in" }).focus();
+
+    await act(async () => { archiving.resolve(); });
+
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
+    expect(document.body, "the card took focus with it").not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Archived (1)" })).toHaveFocus();
+  });
+
   it("stays where the user moved it while the removal waited", async () => {
     const forgetting = deferred<void>();
     forgetLimitsSnapshot.mockReturnValue(forgetting.promise);
