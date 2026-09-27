@@ -63,10 +63,12 @@ impl SnapshotStore {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let archived = self.archived(provider);
         let mut ids = vec![account.id.clone()];
         if let Some(legacy) = account.legacy_id.as_ref().filter(|legacy| {
-            self.history_names(provider, legacy, account.label.as_deref())
-                && account.id.starts_with("profile:")
+            account.id.starts_with("profile:")
+                && archived.contains(*legacy)
+                && self.history_names(provider, legacy, account.label.as_deref())
         }) {
             ids.push(legacy.clone());
         }
