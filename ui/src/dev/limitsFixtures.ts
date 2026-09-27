@@ -418,7 +418,6 @@ const OK = { claude: () => CLAUDE, codex: () => CODEX };
 export function limitsScenario(name: string) {
   const chosen: LimitsScenario = Object.hasOwn(LIMITS_SCENARIOS, name) ? LIMITS_SCENARIOS[name]() : {};
   const provider = (agent: unknown) => (agent === "claude" || agent === "codex" ? agent : null);
-  // What Remove account dropped: forgotten snapshots by account id, removed saved logins by profile id.
   const forgotten: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set() };
   const removedLogins: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set() };
   return {
@@ -451,7 +450,6 @@ export function limitsScenario(name: string) {
       forgotten[which].add(accountId);
       chosen.setArchived?.(which, [accountId], false);
     },
-    /** `account_action` `remove`: the saved login goes. */
     removeLogin(agent: unknown, profileId: unknown) {
       const which = provider(agent);
       if (which && typeof profileId === "string") removedLogins[which].add(profileId);
