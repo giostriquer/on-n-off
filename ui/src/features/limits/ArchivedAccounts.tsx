@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { ChevronRight } from "lucide-react";
 import { removeAccountQuestion } from "@/features/accounts/AccountCardActions";
 import { accountButton as button } from "@/features/accounts/AccountManager";
@@ -7,12 +7,16 @@ import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import type { CardAccount, LimitCard } from "./limitCards";
 
+/** `focus` moves focus to the "Archived (n)" disclosure, once there is one, without opening or closing the list. */
+export type ArchivedAccountsHandle = { focus: () => void };
+
 /**
  * A provider's archived accounts: a collapsed "Archived (n)" list, absent while there are none.
  * Each row names the account, shows no usage, and offers Unarchive and Remove account; archived
  * accounts are never used from here.
  */
-export function ArchivedAccounts({ provider, cards, blocked, onUnarchive, onRemove }: {
+export function ArchivedAccounts({ ref, provider, cards, blocked, onUnarchive, onRemove }: {
+  ref?: Ref<ArchivedAccountsHandle>;
   provider: AgentId;
   /** The column's archived cards (`limitColumn`), in card order. */
   cards: LimitCard[];
@@ -23,12 +27,22 @@ export function ArchivedAccounts({ provider, cards, blocked, onUnarchive, onRemo
   onRemove: (account: CardAccount) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [focusRequested, setFocusRequested] = useState(false);
+  const disclosure = useRef<HTMLButtonElement>(null);
   const list = useId();
+  useImperativeHandle(ref, () => ({ focus: () => setFocusRequested(true) }), []);
+  // The card just archived can join the list a render after the request, so a request waits for
+  // the disclosure to exist; it lands in the same commit, before the card's absence is painted.
+  useLayoutEffect(() => {
+    if (!focusRequested || !disclosure.current) return;
+    disclosure.current.focus();
+    setFocusRequested(false);
+  }, [focusRequested, cards.length]);
   if (cards.length === 0) return null;
   const name = providerLabel(provider);
   return (
     <section aria-label={`${name} archived accounts`} className="flex flex-col gap-2">
-      <button type="button" aria-expanded={open} aria-controls={list} onClick={() => setOpen(!open)}
+      <button ref={disclosure} type="button" aria-expanded={open} aria-controls={list} onClick={() => setOpen(!open)}
         className="inline-flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-[12px] font-medium text-[var(--mute)] hover:bg-[var(--wash)] hover:text-[var(--silkscreen)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)]">
         <ChevronRight aria-hidden="true" className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
         Archived ({cards.length})

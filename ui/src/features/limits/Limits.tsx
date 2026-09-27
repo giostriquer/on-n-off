@@ -1,6 +1,6 @@
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
@@ -10,7 +10,7 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { ArchivedAccounts } from "./ArchivedAccounts";
+import { ArchivedAccounts, type ArchivedAccountsHandle } from "./ArchivedAccounts";
 import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
@@ -83,6 +83,7 @@ function ProviderColumn({
   const manager = useAccountManagement();
   const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], now });
   const [forgetError, setForgetError] = useState<string | null>(null);
+  const archivedList = useRef<ArchivedAccountsHandle>(null);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
   const blocked = manager?.blocked ?? false;
 
@@ -151,10 +152,11 @@ function ProviderColumn({
           now={now}
           error={index === 0 ? error : null}
           onForget={allowForget ? forget : undefined}
-          onArchive={allowForget ? (account) => setArchived(account, true).catch(() => {}) : undefined}
+          // The archived card unmounts; focus follows it to the list instead of dropping to the page.
+          onArchive={allowForget ? (account) => setArchived(account, true).then(() => archivedList.current?.focus(), () => {}) : undefined}
         />
       ))}
-      <ArchivedAccounts provider={provider} cards={column.archived} blocked={blocked}
+      <ArchivedAccounts ref={archivedList} provider={provider} cards={column.archived} blocked={blocked}
         onUnarchive={(account) => setArchived(account, false)} onRemove={remove} />
     </div>
   );
