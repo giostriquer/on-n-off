@@ -679,6 +679,23 @@ describe("archiving", () => {
     expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
   });
 
+  it("leaves focus where the user moved it while the archive waited", async () => {
+    const archiving = deferred<void>();
+    setLimitsArchived.mockReturnValue(archiving.promise);
+    answer([okClaude()], [okCodex(), staleCodex(), staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } })]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+    const elsewhere = screen.getByRole("button", { name: "More actions for spare@codex.example" });
+    elsewhere.focus();
+
+    await act(async () => { archiving.resolve(); });
+
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Archived (1)" })).toBeInTheDocument();
+    expect(elsewhere).toHaveFocus();
+  });
+
   it("archives and unarchives a saved login no read answers for, through the account list it comes from", async () => {
     const unread = { id: "unread", observationId: "profile:unread", identity: { provider: "codex" as const, userId: "unread", workspaceId: "team" }, email: "unread@codex.example", label: "unread@codex.example", savedAt: NOW, active: false, needsLogin: false };
     answer([okClaude()], [okCodex()]);

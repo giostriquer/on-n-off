@@ -6,6 +6,7 @@ import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import type { AccountsReading } from "$lib/accountTypes";
 import { displayError, parseInvokeError } from "$lib/error";
+import { holdFocus } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
@@ -100,6 +101,17 @@ function ProviderColumn({
     }
   }
 
+  /** Archive from a card: focus follows it to the archived list, unless the user moved focus while it waited. */
+  async function archive(account: CardAccount) {
+    const unmoved = holdFocus();
+    try {
+      await setArchived(account, true);
+    } catch {
+      return; // setArchived says why
+    }
+    if (unmoved()) archivedList.current?.focus();
+  }
+
   async function remove(account: CardAccount) {
     if (manager) await manager.removeAccount(account.profile?.id, () => forget(account));
     else await forget(account);
@@ -150,8 +162,7 @@ function ProviderColumn({
           now={now}
           error={index === 0 ? error : null}
           onForget={forget}
-          // The archived card unmounts; focus follows it to the list instead of dropping to the page.
-          onArchive={(account) => setArchived(account, true).then(() => archivedList.current?.focus(), () => {})}
+          onArchive={archive}
         />
       ))}
       <ArchivedAccounts ref={archivedList} provider={provider} cards={column.archived} blocked={blocked}
