@@ -419,11 +419,24 @@ fn a_throttled_claude_read_says_it_is_rate_limited() {
     );
 }
 
+/// A test build has no user home, so `read_limits` reads nothing and says why.
+#[test]
+fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
+    let dtos = read_limits(AgentId::Cursor, false);
+    assert_eq!(dtos.len(), 1);
+    assert_eq!(dtos[0].provider, AgentId::Cursor);
+    assert_eq!(dtos[0].status, LimitsStatus::Failed);
+    assert_eq!(
+        dtos[0].message.as_deref(),
+        Some("Could not read the stored login: a test build has no user home")
+    );
+}
+
 #[test]
 fn providers_without_a_subscription_are_unsupported() {
-    let rig = Rig::new("limits-unsupported");
+    let home = scratch_dir("limits-unsupported");
     for provider in [AgentId::Cursor, AgentId::Antigravity] {
-        let dtos = rig.read(provider, false, &refused_url(), &refused_url());
+        let dtos = read_limits_at(provider, false, &home);
         assert_eq!(dtos.len(), 1);
         assert_eq!(dtos[0].provider, provider);
         assert_eq!(dtos[0].status, LimitsStatus::Unsupported);
@@ -653,26 +666,10 @@ fn probe_real_home_limits() {
     print_real_home_limits();
 }
 
-/// What [`read_limits`] reads, under the probed home rather than the user home.
 fn print_real_home_limits() {
     let home = crate::paths::probe_home();
     for provider in [AgentId::Claude, AgentId::Codex] {
-        let dtos = read_limits_in(
-            provider,
-            false,
-            Sources {
-                home: &home,
-                memo: &CLAUDE_LOGIN,
-                keychain: claude_store::keychain_probe,
-                claude: ClaudeEndpoints {
-                    token: claude_renew::TOKEN_URL,
-                    profile: CLAUDE_PROFILE_URL,
-                    usage: CLAUDE_USAGE_URL,
-                },
-                now_ms: Utc::now().timestamp_millis(),
-            },
-        );
-        for dto in dtos {
+        for dto in read_limits_at(provider, false, &home) {
             println!(
                     "{:?}: current_account={} account={:?} status={:?} plan={:?} message={:?} credits={:?}",
                     provider,
