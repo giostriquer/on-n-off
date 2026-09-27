@@ -100,6 +100,8 @@ describe("the archived accounts list", () => {
     expect(remove).toHaveFocus();
 
     fireEvent.click(remove);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Confirm removal" }), { key: "Tab" });
+    expect(screen.getByRole("group", { name: "Confirm account action" }), "only Escape closes it").toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("button", { name: "Confirm removal" }), { key: "Escape" });
     expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
     expect(remove).toHaveFocus();

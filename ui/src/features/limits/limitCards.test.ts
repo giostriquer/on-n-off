@@ -494,6 +494,7 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["Claude: payment due", false, claudeSaved("past_due"), profileOf("claude")],
     ["Claude: no status read", false, claudeSaved(null), profileOf("claude")],
     ["the signed-in account", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex", { active: true })],
+    ["signed in by the read, before the account list marks it active", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex")],
     ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf("codex", { active: true })],
     ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
     ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf("codex", { needsLogin: true })],

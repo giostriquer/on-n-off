@@ -658,12 +658,14 @@ it("shows the copy the card model gives an empty card", async () => {
 describe("archiving", () => {
   it("archives a card from its menu without asking and lists it under the column's archived accounts", async () => {
     const spare = staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } });
-    answer([okClaude()], [okCodex(), staleCodex(), spare]);
+    // Codex is signed out, so its current entry names no account for the archive to look at.
+    const signedOut = statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.");
+    answer([okClaude()], [signedOut, staleCodex(), spare]);
     renderLimits();
     await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
-    fireEvent.click(screen.getByRole("button", { name: "More actions for work@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for me@claude.example" }));
     expect(screen.queryByRole("button", { name: "Archive account" }), "never the signed-in card").toBeNull();
-    fireEvent.keyDown(screen.getByRole("button", { name: "More actions for work@codex.example" }), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "More actions for me@claude.example" }), { key: "Escape" });
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for personal@codex.example" }));
     fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
