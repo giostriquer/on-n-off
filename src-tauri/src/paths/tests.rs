@@ -111,25 +111,36 @@ fn a_running_app_takes_its_home_from_on_n_off_home_then_userprofile_then_home() 
 /// build, where [`user_home`] has none.
 #[test]
 fn only_the_paths_module_reads_the_process_home() {
-    // Where another file may name those variables, and why. An entry allows only the lines that
-    // contain its text, so a new read in the same file still fails.
-    const ALLOWED: [(&str, &str, &str); 3] = [
+    // Where another file may name those variables, and why. An entry allows exactly the lines it
+    // lists, compared trimmed, so any other line in the same file that names them still fails,
+    // and so does an entry whose line is gone.
+    const ALLOWED: [(&str, &str, &[&str]); 2] = [
         (
             "accounts/claude.rs",
-            "command.env(",
             "hands a Claude child a disposable OS home: sets, never reads",
+            &[
+                r#"command.env("HOME", home);"#,
+                r#"command.env("USERPROFILE", home);"#,
+            ],
         ),
         (
             "accounts/claude/tests/native_store.rs",
-            "env.get(",
             "reads the environment a child command was handed",
-        ),
-        (
-            "accounts/claude/tests/native_store.rs",
-            "env.contains_key(",
-            "reads the environment a child command was handed",
+            &[
+                r#"env.get(std::ffi::OsStr::new("HOME")),"#,
+                r#"!env.contains_key(std::ffi::OsStr::new("HOME")),"#,
+                r#"assert!(!env.contains_key(std::ffi::OsStr::new("USERPROFILE")));"#,
+                r#"assert!(!env.contains_key("HOME") && !env.contains_key("USERPROFILE"));"#,
+                r#"env.get("HOME"),"#,
+                r#"env.get("USERPROFILE"),"#,
+                r#"assert_eq!(env.get("HOME").cloned(), home);"#,
+            ],
         ),
     ];
+    let mut unmatched: std::collections::BTreeSet<(&str, &str)> = ALLOWED
+        .iter()
+        .flat_map(|(file, _why, lines)| lines.iter().map(move |line| (*file, *line)))
+        .collect();
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut found = Vec::new();
     let mut pending = vec![src.clone()];
@@ -159,11 +170,18 @@ fn only_the_paths_module_reads_the_process_home() {
                 let names_the_home = ["\"HOME\"", "\"USERPROFILE\"", "home_dir("]
                     .iter()
                     .any(|needle| line.contains(needle));
-                let allowed = ALLOWED
-                    .iter()
-                    .any(|(allowed, text, _why)| *allowed == file && line.contains(text));
-                if names_the_home && !allowed {
-                    found.push(format!("{file}:{}: {}", index + 1, line.trim()));
+                if !names_the_home {
+                    continue;
+                }
+                let allowed = ALLOWED.iter().find_map(|(allowed, _why, lines)| {
+                    let listed = lines.iter().find(|listed| **listed == line.trim())?;
+                    (*allowed == file).then_some((*allowed, *listed))
+                });
+                match allowed {
+                    Some(entry) => {
+                        unmatched.remove(&entry);
+                    }
+                    None => found.push(format!("{file}:{}: {}", index + 1, line.trim())),
                 }
             }
         }
@@ -172,5 +190,9 @@ fn only_the_paths_module_reads_the_process_home() {
         found.is_empty(),
         "the process home is read outside paths.rs:\n{}",
         found.join("\n")
+    );
+    assert!(
+        unmatched.is_empty(),
+        "allowed lines no file holds any more: {unmatched:?}"
     );
 }
