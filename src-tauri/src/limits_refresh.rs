@@ -190,21 +190,21 @@ pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<()
         ids,
         archived,
         || crate::limits::set_archived(agent, ids, archived),
-        || {
-            let _ = read_limits(agent, true);
+        |force| {
+            let _ = read_limits(agent, force);
         },
     )
 }
 
-/// [`set_archived`] with its archive `write` and the provider's forced `reread` given. Each
-/// announcement is of a replacement, made outside the lock: the entries to the other window, and
-/// the archive to the account list, which reads it for the profiles no entry answers for.
+/// [`set_archived`] with its archive `write` and the provider's `reread`, told whether to force it.
+/// Each announcement is of a replacement, made outside the lock: the entries to the other window,
+/// and the archive to the account list, which reads it for the profiles no entry answers for.
 fn set_archived_with(
     cache: &Cache,
     ids: &[String],
     archived: bool,
     write: impl FnOnce() -> Result<bool, String>,
-    reread: impl FnOnce(),
+    reread: impl FnOnce(bool),
 ) -> Result<(), String> {
     if ids.is_empty() {
         return Err("No account to archive.".to_string());
@@ -215,7 +215,7 @@ fn set_archived_with(
         read_revision::announce(Source::Accounts);
     }
     if !archived {
-        reread();
+        reread(true);
     }
     Ok(())
 }

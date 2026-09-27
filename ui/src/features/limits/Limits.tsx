@@ -108,7 +108,7 @@ function ProviderColumn({
 
   /**
    * Archive or unarchive every id the card stands for, its merged legacy history included; the card
-   * moves at once. Unarchiving reads the provider again in the backend, which this then picks up.
+   * moves at once. Unarchiving also reads the provider again in the backend, which announces it.
    */
   async function setArchived({ forget: steps }: CardAccount, archived: boolean) {
     setForgetError(null);
@@ -126,7 +126,6 @@ function ProviderColumn({
       ...current,
       profiles: current.profiles.map((profile) => ids.includes(profile.observationId) ? { ...profile, archived } : profile),
     });
-    if (!archived) await queryClient.invalidateQueries({ queryKey: ["limits", provider] });
   }
 
   if (!column) {

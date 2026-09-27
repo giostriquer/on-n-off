@@ -315,8 +315,12 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
     ]);
     let _ = read_revision::take_announced();
     let rereads = std::cell::Cell::new(0);
-    let reread = || {
+    let reread = |force: bool| {
         assert!(cache.read.try_lock().is_ok(), "read again outside the lock");
+        assert!(
+            force,
+            "forced, so a held-back poll cannot leave it remembered"
+        );
         rereads.set(rereads.get() + 1);
     };
 

@@ -673,7 +673,7 @@ describe("archiving", () => {
     expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
   });
 
-  it("unarchives an account from the list and reads its provider again", async () => {
+  it("unarchives an account in place, and leaves reading it again to the backend, which announces its forced read", async () => {
     let archived = true;
     readLimits.mockImplementation(async (provider: AgentId) => provider === "codex"
       ? [okCodex(), staleCodex({ archived })] : [okClaude()]);
@@ -686,8 +686,12 @@ describe("archiving", () => {
 
     await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["acct-personal"], false));
     expect(await screen.findByRole("region", { name: "Codex limits · personal@codex.example" })).toBeInTheDocument();
-    expect(readLimits.mock.calls.slice(reads)).toContainEqual(["codex", false]);
     expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(readLimits.mock.calls.slice(reads), "no read of the UI's own").toEqual([]);
+
+    await act(async () => { for (const handler of sharedReadHandlers) handler({ source: "limits:codex" }); });
+    await waitFor(() => expect(readLimits.mock.calls.slice(reads)).toEqual([["codex", false]]));
   });
 
   it("removes an archived account as Remove account does: the saved login, then its history first", async () => {
