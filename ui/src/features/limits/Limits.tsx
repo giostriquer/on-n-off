@@ -1,11 +1,12 @@
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode, type RefCallback, type RefObject } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import type { AccountsReading } from "$lib/accountTypes";
 import { displayError, parseInvokeError } from "$lib/error";
+import { useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
@@ -27,6 +28,7 @@ export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes })
 function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
   // Only Claude and Codex carry a subscription the backend can read; the rest report `unsupported`.
   const { providers, loading, now } = useLimitsProviders(pollMinutes);
+  const addAccount = useRef<HTMLButtonElement | null>(null);
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-[18px] pb-[26px]" data-testid="limits-screen" aria-busy={loading}>
@@ -43,15 +45,15 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
             ) : null}
           </p>
         </div>
-        <AddAccount />
+        <AddAccount buttonRef={node => { addAccount.current = node; }} />
       </header>
 
       <div className="grid items-start gap-3 lg:grid-cols-2">
         {providers.map(({ provider, query }) => (
           <div key={provider} className="flex flex-col gap-3">
             {(provider === "claude" || provider === "codex") ? <AccountManager provider={provider}>
-              <ProviderColumn provider={provider} query={query} now={now} />
-            </AccountManager> : <ProviderColumn provider={provider} query={query} now={now} />}
+              <ProviderColumn provider={provider} query={query} now={now} addAccount={addAccount} />
+            </AccountManager> : <ProviderColumn provider={provider} query={query} now={now} addAccount={addAccount} />}
           </div>
         ))}
       </div>
@@ -70,19 +72,28 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
 function ProviderColumn({
   provider,
   query,
-  allowForget = true,
   now,
+  addAccount,
 }: {
   provider: AgentId;
   query: UseQueryResult<ProviderLimits[]>;
-  allowForget?: boolean;
   now: number;
+  /** The screen's Add account button, where focus goes once no card is left to take it. */
+  addAccount: RefObject<HTMLButtonElement | null>;
 }) {
   const queryClient = useQueryClient();
   const name = providerLabel(provider);
   const manager = useAccountManagement();
   const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], now });
   const [forgetError, setForgetError] = useState<string | null>(null);
+  const archivedDisclosure = useRef<HTMLButtonElement | null>(null);
+  const menus = useRef(new Map<string, HTMLButtonElement>());
+  const visibleKeys = column?.visible.map(card => card.key) ?? [];
+  const menu = (key: string | undefined) => (key === undefined ? undefined : menus.current.get(key));
+  // A card leaving hands focus to the archived list if it was archived, else to the next card's More
+  // actions, else the previous one's.
+  const handOffCard = useFocusHandoff<"archive" | "remove">(visibleKeys, (index, action) =>
+    [action === "archive" ? archivedDisclosure.current : null, menu(visibleKeys[index]), menu(visibleKeys[index - 1]), addAccount.current]);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
   const blocked = manager?.blocked ?? false;
 
@@ -99,6 +110,22 @@ function ProviderColumn({
       setForgetError(`Could not remove that account: ${displayError(parseInvokeError(reason), name)}`);
       throw reason;
     }
+  }
+
+  /** Archive from a card's menu or footer; once the card goes, focus follows it to the archived list. */
+  async function archive(key: string, account: CardAccount) {
+    try {
+      await setArchived(account, true);
+    } catch {
+      return; // setArchived says why
+    }
+    handOffCard(key, "archive");
+  }
+
+  /** Remove account from a card's menu, whose last step drops the card; focus then goes on to its neighbour. */
+  async function forgetCard(key: string, account: CardAccount) {
+    await forget(account);
+    handOffCard(key, "remove");
   }
 
   async function remove(account: CardAccount) {
@@ -150,12 +177,17 @@ function ProviderColumn({
           card={card}
           now={now}
           error={index === 0 ? error : null}
-          onForget={allowForget ? forget : undefined}
-          onArchive={allowForget ? (account) => setArchived(account, true).catch(() => {}) : undefined}
+          onForget={(account) => forgetCard(card.key, account)}
+          onArchive={(account) => archive(card.key, account)}
+          menuButtonRef={(node) => {
+            if (node) menus.current.set(card.key, node);
+            else menus.current.delete(card.key);
+          }}
         />
       ))}
       <ArchivedAccounts provider={provider} cards={column.archived} blocked={blocked}
-        onUnarchive={(account) => setArchived(account, false)} onRemove={remove} />
+        onUnarchive={(account) => setArchived(account, false)} onRemove={remove} focusWhenEmpty={() => menu(visibleKeys[0])}
+        disclosureRef={(node) => { archivedDisclosure.current = node; }} />
     </div>
   );
 }
@@ -195,12 +227,14 @@ function AccountCard({
   error,
   onForget,
   onArchive,
+  menuButtonRef,
 }: {
   card: LimitCard;
   now: number;
   error: string | null;
-  onForget?: (account: CardAccount) => Promise<void>;
-  onArchive?: (account: CardAccount) => Promise<void>;
+  onForget: (account: CardAccount) => Promise<void>;
+  onArchive: (account: CardAccount) => Promise<void>;
+  menuButtonRef: RefCallback<HTMLButtonElement>;
 }) {
   const { provider, identity, freshness, figures, account } = card;
   const codexActions = account?.codexActions ?? null;
@@ -242,8 +276,8 @@ function AccountCard({
       data-status={freshness.readStatus}
     >
       {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined}
-        onForget={onForget ? () => onForget(account) : undefined}
-        onArchive={onArchive ? () => onArchive(account) : undefined} archiveInsteadOfUse={card.archiveInsteadOfUse} header={header}
+        onForget={() => onForget(account)}
+        onArchive={() => onArchive(account)} archiveInsteadOfUse={card.archiveInsteadOfUse} menuButtonRef={menuButtonRef} header={header}
         footer={codexActions ? state => <CodexAccountActions entry={codexActions} label={account.name} now={now} state={state} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}

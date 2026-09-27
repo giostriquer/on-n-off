@@ -72,9 +72,50 @@ describe("limitsScenario", () => {
     expect(archived("codex")).toEqual(["codex-2", "codex-history", "codex-2"]);
     expect(archived("claude")).toEqual(["profile:claude-unread"]);
     expect(scenario.readLimits("claude")[0].archived, "never the signed-in card").toBeFalsy();
-    // Another page's scenario starts clean, and one without archive state ignores it.
+    // Another page's scenario starts clean.
     expect(limitsScenario("archivedAccounts").readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-history"]);
-    limitsScenario("ok").setArchived("codex", ["codex-2"], true);
-    expect(limitsScenario("ok").readLimits("codex").some(entry => entry.archived)).toBe(false);
+  });
+
+  it("follows archive and unarchive under any scenario, for that page alone", () => {
+    const scenario = limitsScenario("ok");
+    scenario.setArchived("codex", ["codex-2"], true);
+    expect(scenario.readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-2"]);
+    expect(scenario.readAccounts("codex").profiles.filter(profile => profile.archived).map(profile => profile.id)).toEqual(["work"]);
+    expect(limitsScenario("ok").readLimits("codex").some(entry => entry.archived), "another page starts clean").toBe(false);
+
+    scenario.setArchived("codex", ["codex-2"], false);
+    expect(scenario.readLimits("codex").some(entry => entry.archived)).toBe(false);
+    expect(scenario.readAccounts("codex").profiles.some(profile => profile.archived)).toBe(false);
+  });
+
+  it("drops what Remove account removes, a snapshot and a saved login, for that page alone", () => {
+    const scenario = limitsScenario("ok");
+    const profiles = (agent: string) => scenario.readAccounts(agent).profiles.map(profile => profile.id);
+    scenario.removeLogin("codex", "work");
+    scenario.forgetSnapshot("codex", "codex-2");
+    expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1"]);
+    expect(profiles("codex")).toEqual(["personal"]);
+    expect(ids(scenario.readLimits("claude")), "only the provider named").toEqual(["claude-1"]);
+    expect(profiles("claude")).toEqual(["personal", "work"]);
+
+    scenario.forgetSnapshot("codex", "codex-1");
+    expect(ids(scenario.readLimits("codex")), "the signed-in card is a live read, not a snapshot").toEqual(["codex-1"]);
+    // Another page's scenario starts clean.
+    expect(ids(limitsScenario("ok").readLimits("codex"))).toEqual(["codex-1", "codex-2"]);
+    expect(limitsScenario("ok").readAccounts("codex").profiles.map(profile => profile.id)).toEqual(["personal", "work"]);
+  });
+
+  it("unarchives what archivedAccounts forgets, as the backend does", () => {
+    const scenario = limitsScenario("archivedAccounts");
+    scenario.forgetSnapshot("codex", "codex-history");
+    expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", "codex-2"]);
+
+    // Remove account removes a saved login before it forgets; forgetting alone leaves the login, unarchived.
+    scenario.forgetSnapshot("claude", "profile:claude-unread");
+    const profiles = scenario.readAccounts("claude").profiles;
+    expect(profiles.map(profile => profile.id)).toEqual(["personal", "work", "unread"]);
+    expect(profiles[2].archived).toBeFalsy();
+    scenario.removeLogin("claude", "unread");
+    expect(scenario.readAccounts("claude").profiles.map(profile => profile.id)).toEqual(["personal", "work"]);
   });
 });

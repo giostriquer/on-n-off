@@ -672,9 +672,28 @@ describe("archiving", () => {
 
     await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["acct-personal"], true));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
-    expect(screen.getByRole("button", { name: "Archived (1)" })).toHaveAttribute("aria-expanded", "false");
+    const disclosure = screen.getByRole("button", { name: "Archived (1)" });
+    expect(disclosure, "focus follows the card instead of dropping to the page").toHaveFocus();
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
     expect(card("Codex limits · spare@codex.example"), "only the card archived moves").toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+  });
+
+  it("leaves focus where the user moved it while the archive waited", async () => {
+    const archiving = deferred<void>();
+    setLimitsArchived.mockReturnValue(archiving.promise);
+    answer([okClaude()], [okCodex(), staleCodex(), staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } })]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+    const elsewhere = screen.getByRole("button", { name: "More actions for spare@codex.example" });
+    elsewhere.focus();
+
+    await act(async () => { archiving.resolve(); });
+
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Archived (1)" })).toBeInTheDocument();
+    expect(elsewhere).toHaveFocus();
   });
 
   it("archives and unarchives a saved login no read answers for, through the account list it comes from", async () => {
@@ -689,6 +708,7 @@ describe("archiving", () => {
     await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["profile:unread"], true));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · unread@codex.example" })).toBeNull());
     expect(archivedFlag()).toBe(true);
+    expect(screen.getByRole("button", { name: "Archived (1)" }), "the account list moved it, not a read").toHaveFocus();
 
     fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
     fireEvent.click(screen.getByRole("button", { name: "Unarchive unread@codex.example" }));
@@ -781,18 +801,84 @@ describe("archiving", () => {
     expect(screen.getByRole("button", { name: "Remove account personal@codex.example" })).toBeDisabled();
   });
 
-  it("offers Archive account in place of Use account once a saved subscription ended without renewing", async () => {
+  /** personal@codex.example as a saved login whose subscription ended without renewing, beside `others`. */
+  function answerLapsed(others: ProviderLimits[] = []) {
     const profile = { id: "lapsed", observationId: "acct-personal", identity: { provider: "codex" as const, userId: "lapsed", workspaceId: "team" }, email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false };
     const lapsed = staleCodex({ savedProfile: true, subscription: { activeUntil: "2026-08-10T00:00:00Z", willRenew: false, checkedAt: NOW } });
-    answer([okClaude()], [okCodex(), lapsed]);
+    answer([okClaude()], [okCodex(), lapsed, ...others]);
     readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+  }
+
+  it("offers Archive account in place of Use account once a saved subscription ended without renewing", async () => {
+    answerLapsed();
     renderLimits();
     const region = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
     const footer = await within(region).findByRole("button", { name: "Archive account" });
     expect(within(region).queryByRole("button", { name: "Use account" })).toBeNull();
 
+    footer.focus();
     fireEvent.click(footer);
 
     await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["acct-personal"], true));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
+    const disclosure = screen.getByRole("button", { name: "Archived (1)" });
+    expect(disclosure, "focus follows the card instead of dropping to the page").toHaveFocus();
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  });
+
+  // An archived list is already there, so focus has somewhere it could wrongly go.
+  it.each(["menu", "footer"] as const)("leaves focus where it was when archiving from the %s fails", async (from) => {
+    setLimitsArchived.mockRejectedValue({ kind: "message", message: "disk full", path: null });
+    answerLapsed([staleCodex({ account: { id: "acct-old", label: "old@codex.example" }, archived: true })]);
+    renderLimits();
+    const region = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    const footer = await within(region).findByRole("button", { name: "Archive account" });
+    const trigger = within(region).getByRole("button", { name: "More actions for personal@codex.example" });
+    if (from === "footer") {
+      footer.focus();
+      fireEvent.click(footer);
+    } else {
+      fireEvent.click(trigger);
+      fireEvent.click(within(screen.getByRole("group", { name: "Actions for personal@codex.example" })).getByRole("button", { name: "Archive account" }));
+    }
+    const focused = from === "footer" ? footer : trigger;
+    expect(focused, "the menu hands focus back to its button as it closes").toHaveFocus();
+
+    expect(await screen.findByText("Could not archive that account: disk full")).toBeInTheDocument();
+    expect(focused).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Archived (1)" })).toBeInTheDocument();
+  });
+
+  it("offers Archive account nothing more while it runs, and again once it fails", async () => {
+    const archiving = deferred<void>();
+    setLimitsArchived.mockReturnValue(archiving.promise);
+    answerLapsed();
+    renderLimits();
+    const region = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    const footer = await within(region).findByRole("button", { name: "Archive account" });
+
+    footer.focus();
+    fireEvent.click(footer);
+    // aria-disabled, not disabled: a browser drops focus to the page from a button that disables.
+    expect(footer).toHaveAttribute("aria-disabled", "true");
+    expect(footer).toHaveAttribute("aria-busy", "true");
+    expect(footer).toBeEnabled();
+    fireEvent.click(footer);
+    fireEvent.click(within(region).getByRole("button", { name: "More actions for personal@codex.example" }));
+    const item = within(screen.getByRole("group", { name: "Actions for personal@codex.example" })).getByRole("button", { name: "Archive account" });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(item);
+    expect(setLimitsArchived, "a second click never sends it again").toHaveBeenCalledTimes(1);
+
+    await act(async () => { archiving.reject({ kind: "message", message: "disk full", path: null }); });
+
+    expect(await screen.findByText("Could not archive that account: disk full")).toBeInTheDocument();
+    for (const button of [footer, item]) {
+      expect(button).not.toHaveAttribute("aria-disabled");
+      expect(button).not.toHaveAttribute("aria-busy");
+    }
+    fireEvent.click(footer);
+    expect(setLimitsArchived, "offered again").toHaveBeenCalledTimes(2);
   });
 });

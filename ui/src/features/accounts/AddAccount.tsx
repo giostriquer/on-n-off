@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefCallback } from "react";
 import { Plus } from "lucide-react";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { accountButton, useAccountControllers } from "./AccountManager";
 import { AutomaticAccountSaving } from "./AccountPreferences";
 
-export function AddAccount() {
+/** `buttonRef` receives the Add account button, where focus can land once no card is left to take it. */
+export function AddAccount({ buttonRef }: { buttonRef?: RefCallback<HTMLButtonElement> }) {
   const controllers = useAccountControllers();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -22,7 +23,7 @@ export function AddAccount() {
   return <div className="relative" ref={root} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }} onKeyDown={event => {
     if (event.key === "Escape") { setOpen(false); trigger.current?.focus(); }
   }}>
-    <button ref={trigger} type="button" className={`${accountButton} inline-flex items-center gap-1.5`} aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(!open)}>
+    <button ref={node => { trigger.current = node; buttonRef?.(node); }} type="button" className={`${accountButton} inline-flex items-center gap-1.5`} aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(!open)}>
       <Plus className="size-3.5" aria-hidden="true" />Add account
     </button>
     {open && <div id={id} role="group" aria-label="Add account" className="absolute right-0 top-full z-20 mt-2 w-72 max-w-[calc(100vw-3rem)] rounded-lg border border-[var(--hair)] bg-[var(--plate)] p-2 shadow-lg">

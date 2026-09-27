@@ -5,7 +5,7 @@ import type { AccountAction, AccountProvider } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
 import { useSharedRead } from "$lib/useSharedRead";
 
-export const accountButton = "rounded-md border border-[var(--hair)] px-2.5 py-1.5 text-[11px] hover:bg-[var(--wash)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)] disabled:opacity-45";
+export const accountButton = "rounded-md border border-[var(--hair)] px-2.5 py-1.5 text-[11px] hover:bg-[var(--wash)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)] disabled:opacity-45 aria-disabled:opacity-45";
 function useController(provider: AccountProvider) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
