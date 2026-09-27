@@ -371,3 +371,15 @@ it("says a provider with no accounts has none saved", async () => {
   const claude = await screen.findByRole("region", { name: "Claude accounts" });
   await waitFor(() => expect(within(claude).getByText("No saved accounts.")).toBeInTheDocument());
 });
+
+it("shows no archived account and does not count one", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
+    ? [limits("claude", "claude-current", "current@claude.example", true), { ...limits("claude", "claude-kept", "kept@claude.example", false), archived: true }]
+    : [limits("codex", "codex-current", "current@codex.example", true)]));
+  renderPopover();
+  const claude = await screen.findByRole("region", { name: "Claude accounts" });
+  await waitFor(() => expect(within(claude).getAllByRole("article")).toHaveLength(1));
+  expect(within(claude).getByRole("article", { name: "Claude limits · current@claude.example" })).toBeInTheDocument();
+  expect(within(claude).getByText("1 account")).toBeInTheDocument();
+  expect(screen.queryByText(/archived/i)).toBeNull();
+});

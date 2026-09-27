@@ -11,7 +11,7 @@ import { applyStoredTheme } from "$lib/theme";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
-import { limitCards, type CardWindow, type LimitCard } from "./limitCards";
+import { limitColumn, type CardWindow, type LimitCard } from "./limitCards";
 import { limitsRefreshMs, useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
@@ -139,7 +139,8 @@ function PopoverProviderSection({
 }) {
   const name = providerLabel(provider);
   // No saved profiles: reading them opens the vault and the native store, which the popover never does.
-  const cards = limitCards({ provider, entries: query.data, profiles: [], now });
+  // Archived accounts are left out entirely, uncounted.
+  const cards = limitColumn({ provider, entries: query.data, profiles: [], now })?.visible ?? null;
   const error = query.error ? displayError(parseInvokeError(query.error), name) : null;
   const errorBanner = error ? (
     <p

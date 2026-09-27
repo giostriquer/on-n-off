@@ -13,9 +13,13 @@ import { accountButton as button, useAccountManagement } from "./AccountManager"
  */
 export type AccountFooterState = { current: boolean; blocked: boolean; unconfirmedCurrent: boolean };
 
-export function AccountCardActions({ accountId, label, current, profile, onForget, header, footer, children }: {
+export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   onForget?: (id: string) => Promise<void>;
+  /** Archive account, offered on every card but the signed-in one; it asks nothing and deletes nothing. */
+  onArchive?: () => Promise<void>;
+  /** The footer offers Archive account in place of Use account (`LimitCard.archiveInsteadOfUse`). */
+  archiveInsteadOfUse?: boolean;
   header: (menu: ReactNode) => ReactNode;
   /** More account actions beside the primary one; see `AccountFooterState`. */
   footer?: (state: AccountFooterState) => ReactNode;
@@ -89,6 +93,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setCategory(profile.category ?? ""); setEditing(true); }}>Edit category</button>}
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void add(profile.id, accountId); }}>Sign in again</button>}
       {current && profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("removeLogin"); }}>Remove saved login</button>}
+      {!current && onArchive && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void onArchive(); }}>Archive account</button>}
       {current ? <button className={`${button} border-transparent text-left`} disabled={disabled || !nativeMatches} onClick={() => { setMenuOpen(false); setConfirmation("signOut"); }}>Sign out</button>
         : onForget && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("remove"); }}>Remove account</button>}
     </div>
@@ -107,7 +112,8 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     {header(menu)}
     {children}
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
-      {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button> : profile ? (!current || profile.pendingActivation) && <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : startSwitch(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
+      {signingIn ? <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button>
+        : archiveInsteadOfUse && onArchive && !current ? <button className={button} disabled={disabled} onClick={() => void onArchive()}>Archive account</button> : profile ? (!current || profile.pendingActivation) && <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : startSwitch(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>
         : <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>}
       {switchingAlongside
         ? <SwitchAlongsideConfirmation product={provider === "codex" ? "Codex" : "Claude"} clients={switchingAlongside.clients} disabled={!!disabled}
