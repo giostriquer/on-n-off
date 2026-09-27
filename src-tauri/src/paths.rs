@@ -27,17 +27,20 @@ pub(crate) fn process_env(name: &str) -> Option<OsString> {
 /// root to a `*_for(home)` or `*_in` function instead.
 #[cfg(not(test))]
 pub fn user_home() -> Result<PathBuf, AdapterError> {
-    if let Ok(root) = env::var("ON_N_OFF_HOME") {
-        return Ok(PathBuf::from(root));
-    }
-    env::var("USERPROFILE")
-        .or_else(|_| env::var("HOME"))
-        .map(PathBuf::from)
-        .map_err(|_| AdapterError::message("home directory not found"))
+    user_home_from(|name| env::var(name).ok())
 }
 #[cfg(test)]
 pub fn user_home() -> Result<PathBuf, AdapterError> {
     Err(AdapterError::message("a test build has no user home"))
+}
+
+/// The home an environment `lookup` describes, in [`user_home`]'s order.
+fn user_home_from(lookup: impl Fn(&str) -> Option<String>) -> Result<PathBuf, AdapterError> {
+    ["ON_N_OFF_HOME", "USERPROFILE", "HOME"]
+        .into_iter()
+        .find_map(lookup)
+        .map(PathBuf::from)
+        .ok_or_else(|| AdapterError::message("home directory not found"))
 }
 
 pub fn claude_root_for(home: &std::path::Path) -> PathBuf {
