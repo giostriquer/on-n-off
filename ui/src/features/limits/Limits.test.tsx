@@ -657,7 +657,8 @@ it("shows the copy the card model gives an empty card", async () => {
 
 describe("archiving", () => {
   it("archives a card from its menu without asking and lists it under the column's archived accounts", async () => {
-    answer([okClaude()], [okCodex(), staleCodex()]);
+    const spare = staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } });
+    answer([okClaude()], [okCodex(), staleCodex(), spare]);
     renderLimits();
     await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
     fireEvent.click(screen.getByRole("button", { name: "More actions for work@codex.example" }));
@@ -670,7 +671,54 @@ describe("archiving", () => {
     await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["acct-personal"], true));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
     expect(screen.getByRole("button", { name: "Archived (1)" })).toHaveAttribute("aria-expanded", "false");
+    expect(card("Codex limits · spare@codex.example"), "only the card archived moves").toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+  });
+
+  it("archives and unarchives a saved login no read answers for, through the account list it comes from", async () => {
+    const unread = { id: "unread", observationId: "profile:unread", identity: { provider: "codex" as const, userId: "unread", workspaceId: "team" }, email: "unread@codex.example", label: "unread@codex.example", savedAt: NOW, active: false, needsLogin: false };
+    answer([okClaude()], [okCodex()]);
+    readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [unread] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+    const { client } = renderLimits();
+    const archivedFlag = () => client.getQueryData<{ profiles: { archived?: boolean }[] }>(["accounts", "codex"])?.profiles[0].archived;
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for unread@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["profile:unread"], true));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · unread@codex.example" })).toBeNull());
+    expect(archivedFlag()).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unarchive unread@codex.example" }));
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["profile:unread"], false));
+    expect(await screen.findByRole("region", { name: "Codex limits · unread@codex.example" })).toBeInTheDocument();
+    expect(archivedFlag()).toBe(false);
+  });
+
+  it("removes an archived history card by forgetting each of its snapshots, with no saved login to remove", async () => {
+    answer([okClaude()], [okCodex(), staleCodex({ archived: true })]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove account personal@codex.example" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove account personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
+
+    await waitFor(() => expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex", "acct-personal", undefined]]));
+    expect(accountAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps the card and says why when archiving it fails", async () => {
+    setLimitsArchived.mockRejectedValue({ kind: "message", message: "disk full", path: null });
+    answer([okClaude()], [okCodex(), staleCodex()]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+
+    expect(await screen.findByText("Could not archive that account: disk full")).toBeInTheDocument();
+    expect(card("Codex limits · personal@codex.example")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
   });
 
   it("unarchives an account in place, and leaves reading it again to the backend, which announces its forced read", async () => {

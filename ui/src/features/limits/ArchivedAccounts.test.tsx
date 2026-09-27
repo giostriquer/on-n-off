@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
 import { ArchivedAccounts } from "./ArchivedAccounts";
@@ -65,6 +65,46 @@ describe("the archived accounts list", () => {
     expect(vi.mocked(onUnarchive).mock.calls[0][0]).toMatchObject({ id: "profile:unread", forget: [{ accountId: "profile:unread" }] });
   });
 
+  it("offers nothing while the account controls are blocked", () => {
+    render(<ArchivedAccounts provider="codex" cards={archived()} blocked onUnarchive={vi.fn()} onRemove={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Archived (2)" }));
+    for (const label of ["history@codex.example", "unread@codex.example"]) {
+      expect(screen.getByRole("button", { name: `Unarchive ${label}` })).toBeDisabled();
+      expect(screen.getByRole("button", { name: `Remove account ${label}` })).toBeDisabled();
+    }
+  });
+
+  it("offers a row nothing more while its unarchive is running", async () => {
+    let finish!: () => void;
+    const onUnarchive = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    renderList(archived(), { onUnarchive });
+    fireEvent.click(screen.getByRole("button", { name: "Archived (2)" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Unarchive history@codex.example" }));
+
+    expect(screen.getByRole("button", { name: "Unarchive history@codex.example" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove account history@codex.example" })).toBeDisabled();
+    await act(async () => { finish(); });
+    expect(screen.getByRole("button", { name: "Unarchive history@codex.example" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Remove account history@codex.example" })).toBeEnabled();
+  });
+
+  it("closes the confirmation on Cancel or Escape, handing focus back to Remove account", () => {
+    renderList(archived());
+    fireEvent.click(screen.getByRole("button", { name: "Archived (2)" }));
+    const remove = screen.getByRole("button", { name: "Remove account history@codex.example" });
+
+    fireEvent.click(remove);
+    fireEvent.click(within(screen.getByRole("group", { name: "Confirm account action" })).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+    expect(remove).toHaveFocus();
+
+    fireEvent.click(remove);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Confirm removal" }), { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+    expect(remove).toHaveFocus();
+  });
+
   it("asks before Remove account as a card does, and says why a removal failed", async () => {
     const onRemove = vi.fn().mockRejectedValueOnce({ kind: "message", message: "disk failed", path: null }).mockResolvedValue(undefined);
     renderList(archived(), { onRemove });
@@ -84,5 +124,6 @@ describe("the archived accounts list", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
     await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull());
+    expect(screen.queryByRole("alert"), "a removal that went through leaves no error").toBeNull();
   });
 });
