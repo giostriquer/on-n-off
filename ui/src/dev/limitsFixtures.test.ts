@@ -81,7 +81,11 @@ describe("limitsScenario", () => {
     scenario.setArchived("codex", ["codex-2"], true);
     expect(scenario.readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-2"]);
     expect(scenario.readAccounts("codex").profiles.filter(profile => profile.archived).map(profile => profile.id)).toEqual(["work"]);
-    expect(limitsScenario("ok").readLimits("codex").some(entry => entry.archived)).toBe(false);
+    expect(limitsScenario("ok").readLimits("codex").some(entry => entry.archived), "another page starts clean").toBe(false);
+
+    scenario.setArchived("codex", ["codex-2"], false);
+    expect(scenario.readLimits("codex").some(entry => entry.archived)).toBe(false);
+    expect(scenario.readAccounts("codex").profiles.some(profile => profile.archived)).toBe(false);
   });
 
   it("drops what Remove account removes, a snapshot and a saved login, for that page alone", () => {
