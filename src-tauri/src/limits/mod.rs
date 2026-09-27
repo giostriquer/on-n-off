@@ -1,8 +1,9 @@
 //! Subscription rate limits aggregated per account from provider-owned clients/endpoints,
 //! remembered snapshots, and account-correlated local observations. Claude's stored login is read by
-//! its reader (`claude.rs`) and renewed in one place only, [`claude_renew`], when its access token
-//! has expired and can still renew itself; Codex owns its authentication and refresh lifecycle
-//! through app-server, which its reader (`codex.rs`) asks.
+//! its reader (`claude.rs`) and renewed in one place only,
+//! [`claude_renew`](crate::accounts::claude_renew), when its access token has expired and can still
+//! renew itself; Codex owns its authentication and refresh lifecycle through app-server, which its
+//! reader (`codex.rs`) asks.
 //!
 //! `read_limits` never fails for provider-side reasons; every outcome is a `ProviderLimitsDto`
 //! whose `status` + `message` tell the UI what to show. Because each CLI stores one login at a
@@ -11,7 +12,6 @@
 
 mod backend_memo;
 mod claude;
-use crate::accounts::claude_renew;
 mod codex;
 mod codex_app_server;
 mod codex_sessions;
@@ -24,7 +24,7 @@ mod reading;
 mod renewal;
 mod snapshots;
 
-pub(crate) use claude::{claude_headers, read_saved_claude};
+pub(crate) use claude::{claude_headers, read_saved_claude, ClaudeEndpoints};
 #[cfg(test)]
 pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
@@ -42,7 +42,6 @@ use crate::accounts::model::Identity;
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
 use crate::paths;
-use claude::ClaudeEndpoints;
 use credentials::{ClaudeLoginMemo, CLAUDE_LOGIN};
 use pipeline::finish;
 #[cfg(test)]
@@ -139,11 +138,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
             home: &home,
             memo: &CLAUDE_LOGIN,
             keychain: claude_store::keychain_probe,
-            claude: ClaudeEndpoints {
-                token: claude_renew::TOKEN_URL,
-                profile: claude::CLAUDE_PROFILE_URL,
-                usage: claude::CLAUDE_USAGE_URL,
-            },
+            claude: claude::CLAUDE,
             now_ms: Utc::now().timestamp_millis(),
         },
     )
@@ -266,16 +261,14 @@ impl From<HttpError> for SavedReadError {
 /// loopback servers in tests.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SavedReadUrls<'a> {
-    pub(crate) claude_profile: &'a str,
-    pub(crate) claude_usage: &'a str,
+    pub(crate) claude: ClaudeEndpoints<'a>,
     pub(crate) codex: CodexEndpoints<'a>,
 }
 
 impl SavedReadUrls<'static> {
     /// The services a saved read asks in the app.
     pub(crate) const LIVE: Self = Self {
-        claude_profile: claude::CLAUDE_PROFILE_URL,
-        claude_usage: claude::CLAUDE_USAGE_URL,
+        claude: claude::CLAUDE,
         codex: codex::CODEX,
     };
 }

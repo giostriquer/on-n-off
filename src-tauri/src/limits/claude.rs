@@ -230,22 +230,31 @@ fn legacy_windows(payload: &Value) -> Vec<LimitWindowDto> {
         .collect()
 }
 
-pub(super) const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 /// Asks the usage read for the saved-reset block too. The query is the one Claude Code sends on
 /// demand for `/limit-reset`; its regular read is the plain URL, which is why [`claude_usage`] falls
 /// back to it. `skip_spend` leaves out the extra-usage spend figures, which on-n-off does not show.
 const CLAUDE_USAGE_QUERY: &str = "cedar_ember=1&skip_spend=1";
-pub(super) const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
+const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 
 /// The three services one Claude read talks to, together so adding a fourth costs one field and
 /// not an edit at every call site.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ClaudeEndpoints<'a> {
-    /// Where a stale access token is renewed, before anything is asked of the other two.
-    pub(super) token: &'a str,
-    pub(super) profile: &'a str,
-    pub(super) usage: &'a str,
+pub(crate) struct ClaudeEndpoints<'a> {
+    /// Where a stale access token is renewed, before anything is asked of the other two. A saved
+    /// profile's read asks only those two: a login on-n-off owns renews before it
+    /// (`accounts/usage.rs`), and one it does not own is never renewed.
+    pub(crate) token: &'a str,
+    pub(crate) profile: &'a str,
+    pub(crate) usage: &'a str,
 }
+
+/// The services a Claude read asks in the app.
+pub(super) const CLAUDE: ClaudeEndpoints<'static> = ClaudeEndpoints {
+    token: claude_renew::TOKEN_URL,
+    profile: CLAUDE_PROFILE_URL,
+    usage: CLAUDE_USAGE_URL,
+};
 
 /// Claude: which account the CLI is signed into (`~/.claude.json`) decides whether the memoised
 /// login may be reused; otherwise the Keychain (or the credentials file) is read. A rejected token
@@ -417,8 +426,8 @@ pub(crate) fn read_saved_claude(
     let parsed = claude_read(
         &credential,
         Some(&expected_claude_identity(identity)),
-        urls.claude_profile,
-        urls.claude_usage,
+        urls.claude.profile,
+        urls.claude.usage,
     )
     .map_err(|error| match error {
         ProviderLoadError::Http(error) => SavedReadError::Http(error),

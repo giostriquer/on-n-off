@@ -22,8 +22,11 @@ fn read_at(
         .map(AccessToken::new)
         .expect("the fixture's access token");
     let urls = SavedReadUrls {
-        claude_profile: "unused",
-        claude_usage: "unused",
+        claude: crate::limits::ClaudeEndpoints {
+            token: "unused",
+            profile: "unused",
+            usage: "unused",
+        },
         codex,
     };
     read_saved_codex(identity, token, &urls)

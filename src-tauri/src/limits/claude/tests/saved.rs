@@ -15,8 +15,11 @@ fn identity(provider: AgentId) -> Identity {
 /// Where a read of these tests asks: `profile` and `usage` for Claude, nowhere for Codex.
 fn urls<'a>(profile: &'a str, usage: &'a str) -> SavedReadUrls<'a> {
     SavedReadUrls {
-        claude_profile: profile,
-        claude_usage: usage,
+        claude: ClaudeEndpoints {
+            token: "unused",
+            profile,
+            usage,
+        },
         codex: CodexEndpoints {
             usage: "unused",
             reset_credits: "unused",
