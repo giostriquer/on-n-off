@@ -9,21 +9,26 @@ account rotation.
 A profile has a random local UUID and a stable provider/user/workspace identity. Email is the account name; an optional free-text category is separate display metadata.
 Neither field is an identity key. Active native storage is authoritative. A saved active credential is a
 non-refreshing shadow; switching away captures the latest native generation. Inactive access-token
-expiry does not discard a renewable login. Limits polls saved Claude and Codex accounts with
-access-only HTTP requests without changing the active native login, each through its provider's
-Limits reader, which the adapter dispatches (`read_usage`). At most two saved reads per provider run
-at once, with per-account backoff and provider retry-after handling. Rejected shared credentials,
-and logins that now sign in as a different account, wait for a changed generation and renew
-nothing; an expired Claude shadow sends no request and is read again once a capture replaces it.
+expiry does not discard a renewable login. A saved Claude account that is not the signed-in one
+keeps its login in its own home (below), where Claude Code renews it; Limits reads it there through
+Claude Code's own usage report, never with the token. Limits polls saved Codex accounts, and any
+Claude login still in the vault, with access-only HTTP requests without changing the active native
+login, each through its provider's Limits reader, which the adapter dispatches (`read_usage`). At
+most two saved reads per provider run at once, with per-account backoff and provider retry-after
+handling. Rejected shared credentials, and logins that now sign in as a different account, wait for
+a changed generation and renew nothing; an expired Claude shadow still in the vault sends no request.
 The previous numeric reading and its observation time remain visible, and every card a poll
 produces is marked as a saved profile's (`saved_profile`), so it never reads as a remembered one.
 
-Only a login created by Add / sign in again in an isolated home has private renewal ownership.
-The flag defaults to false in older vaults. Capturing a native login clears it; activation clears
-it durably before publishing any credential to a native client, including failed activation.
-A private login can renew in the encrypted vault, using the provider's OAuth grant. This is
-separate from native renewal: shared credentials, including inactive native shadows, never renew
-independently. A running client can therefore retain its credential generation.
+Only a Codex login created by Add / sign in again in an isolated home has private renewal
+ownership: a provider renews privately only when its adapter says so (`renews_privately`), and
+Claude's never does, since its saved logins wait in homes. The flag defaults to false in older
+vaults. Capturing a native login clears it; activation clears it durably before publishing any
+credential to a native client, including failed activation. A private login can renew in the
+encrypted vault, using the provider's OAuth grant; a renewal of a provider that does not renew
+privately is refused before anything is recorded. This is separate from native renewal: shared
+credentials, including inactive native shadows, never renew independently. A running client can
+therefore retain its credential generation.
 
 Each private renewal holds a per-profile cross-process lease and first writes an encrypted intent.
 An ambiguous response or crash leaves that intent, preventing another redemption of the same
@@ -38,8 +43,49 @@ runs without the vault lease. Any account change, removal, logout and reauthenti
 rejects late usage.
 
 Ownership covers credentials issued and managed through the app's normal flows. It cannot
-coordinate copies manually exported to an unrelated client or machine. Profiles saved from a
+coordinate copies manually exported to an unrelated client or machine. Codex profiles saved from a
 native login and profiles already activated remain access-only until explicitly signed in again.
+
+## Homes
+
+A saved account's home (`accounts/homes.rs`) is a private store of the provider's own client, kept
+under `.on-n-off/accounts/homes/<id>`, where the account's one login waits while it is not the
+signed-in one. Only Claude has homes (`accounts/claude/home.rs`): a persistent Claude config dir.
+Claude Code renews the login there whenever Limits asks it for the account's usage
+(`limits::claude_cli`), so on-n-off sends no request with that login and sends no grant for it.
+
+Every saved Claude login lives in exactly one Claude Code store at a time: the default one for the
+signed-in account, or the account's home. The issuer replaces a refresh token each time it renews
+one, so a second copy would stop working the first time the other renewed, and switching to it
+would sign the user out. Two moves keep the one copy, each under the home's own Claude Code locks:
+
+- **Checking out**, inside a switch's account change: the target's login comes from its home into
+  the vault, which is persisted, and only then is the home emptied as Claude Code signs out
+  (`claudeAiOauth` emptied, the `oauthAccount` record kept). A home that cannot be emptied stops the
+  switch before anything is replaced. The switch then publishes the login as any saved login.
+- **Checking in**, before every read of saved accounts: each saved account that is not the
+  signed-in one, is not archived and holds a login in the vault gets a home id recorded first, then
+  its login written there and read back, then its vault login cleared. Each vault step is a
+  publication under the read's ticket (the login it moves, the sign-in epoch), so an account change
+  meanwhile leaves the move for the next read. A pending recovery moves nothing.
+
+A crash between the halves of either move leaves both copies, and they are the same login: nothing
+renews a home while its profile still holds a vault login, since only a profile without one is read
+from its home. The next check-in settles it, and the home's copy stands. A home holding another
+account's login is left alone, and its profile keeps its vault login. A login a private renewal of
+an earlier version finished but never published moves in with its renewed login, without another
+grant, and the renewal record goes; one whose outcome is unknown stays in the vault.
+
+On macOS a home's login is its own scoped Keychain entry, `Claude Code-credentials-<hash of its
+config dir>`, created by the first write under Claude Code's own account name
+(`PendingWrite::prove_in_home`); a home that keeps a login in a credentials file takes no new one. On
+Windows it is the home's `.credentials.json`, the file Claude Code keeps any login in there.
+
+A new sign-in (Add or Sign in again) and Remove retire the profile's home in the same change
+(`retired_homes`). Remove tears it down at once when its client does not hold its locks, and every
+read tears down what is left: the home's Keychain entry, then the directory. The teardown never runs
+`claude auth logout`: whether a logout ends only its own login or every login of the account is
+unproven, and a logout that ended the others would sign the user out elsewhere.
 
 The account vault is XChaCha20-Poly1305 authenticated ciphertext, atomically replaced using private
 staging files. A fresh random nonce protects each write. A 32-byte key is stored with the OS:
@@ -170,15 +216,19 @@ the signed-in Codex login only through `codex_store`'s projections.
   cancellation/epoch checks. Usage failure retains the login and previous history. Successful
   publication refreshes the shared Limits reading so the new card appears without waiting for a poll.
   The current CLI login does not change. Reauthentication offers the new generation for activation.
-- **Use** preserves the outgoing login in a durable encrypted journal, publishes the incoming
-  credential and narrow account identity, verifies native readback, then clears the journal.
+  Either retires the profile's home: the new login moves into a new one at the next read.
+- **Use** checks the incoming login out of its home when it has one, preserves the outgoing login in
+  a durable encrypted journal, publishes the incoming credential and narrow account identity,
+  verifies native readback, then clears the journal. The outgoing login moves into its own home at
+  the next read.
 - **Recover** restores a known outgoing credential after an interrupted write. Recovery recognizes
   known credential bytes before interpreting partially written identity metadata. Unknown rotated
   bytes require native verification; unrelated identities are never overwritten.
 - **Sign out** uses the official logout command and invalidates saved logins for the same user
   before revocation. It is intentionally distinct from switching.
 - **Remove** removes the app-owned profile only and excludes that stable identity from automatic
-  remembering until explicitly saved/added again. It does not sign out a native client.
+  remembering until explicitly saved/added again, and retires its home. It does not sign out a
+  native client.
 
 An in-process reservation and a cross-process shared/exclusive activity lease exclude provider
 reads from account activation. A separate lease serializes vault access. Existing vault keys are unlocked before acquiring the shared storage lease, so an OS prompt does
@@ -236,8 +286,8 @@ signed-in card cannot be archived.
   lock and replace the file whole. The file needs no vault key, so the popover and a locked vault
   honour it, and archiving a history card never creates a vault. A missing or malformed file
   archives nothing; the next write replaces a malformed one.
-- **Dormant.** Saved polls skip an archived profile entirely: no usage read and no renewal of any
-  kind. A private renewal runs only inside a poll, so it never runs for an archived login, and the
+- **Dormant.** Saved polls skip an archived profile entirely: no move into a home, no usage read
+  and no renewal of any kind. A private renewal runs only inside a poll, so it never runs for an archived login, and the
   renewal rules above are unchanged. If a provider expires an unused login meanwhile, unarchiving
   shows the usual sign-in-again state.
 - **Shown.** The shared read flags archived cards (`archived`), after the legacy history they
