@@ -34,6 +34,19 @@ pub struct Profile {
     /// signed-in one: `login` is then `None`. The signed-in account's home is empty.
     #[serde(default)]
     pub home: Option<String>,
+    /// Sign out left the profile without a login. Sign out and a version before homes rewriting
+    /// the vault, which drops this field along with `home`, are the only things that leave a profile
+    /// with neither a login nor a home, so a read tells them apart by it and never hands a home back
+    /// to a signed-out account. It is never cleared: once the profile has a login again, nothing
+    /// reads it until the next sign-out sets it anyway.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signed_out: bool,
+}
+impl Profile {
+    /// Whether on-n-off keeps no login for the account anywhere: neither in the vault nor in a home.
+    pub fn needs_login(&self) -> bool {
+        self.login.is_none() && self.home.is_none()
+    }
 }
 #[derive(Default, Serialize, Deserialize)]
 pub struct Database {
@@ -50,10 +63,6 @@ pub struct Database {
     /// a metadata edit waits for.
     #[serde(default)]
     recovery: Option<Recovery>,
-    /// Homes Sign out set aside and has not yet seen torn down: a read tears them down and never
-    /// hands one back to the account it signs in as.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub retired_homes: Vec<String>,
 }
 
 /// Refused while an interrupted switch awaits recovery.
@@ -409,6 +418,7 @@ impl Database {
             pending_activation: false,
             usage_renewal_owned: false,
             home: None,
+            signed_out: false,
         });
         Ok(id)
     }

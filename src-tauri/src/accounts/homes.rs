@@ -18,14 +18,12 @@
 //! away from the account or a save of it, from the native store, which is authoritative: it is the
 //! newer, and it is the one that stays.
 //!
-//! A home an account is signed out of goes then and there, or at the next read if its client holds
-//! it then; the vault lists it as retired until it is gone. One no profile names, because its
-//! account was removed or signed in again, goes at the next read. Its id is recorded in the vault
-//! before anything is written there, so a home found on disk before the vault is read and not named
-//! in it is one nothing will use again, with one exception: a version before homes rewrites the
-//! vault without the field that names them, leaving an account with no login anywhere but its
-//! home. That home is taken back by the account its login signs in as, if that account still has no
-//! login of its own and the home is not a retired one.
+//! A home no profile names, because its account was removed, signed in again or signed out, goes at
+//! the next read. Its id is recorded in the vault before anything is written there, so a home found
+//! on disk before the vault is read and not named in it is one nothing will use again, with one
+//! exception: a version before homes rewrites the vault without the field that names them, leaving
+//! an account with no login anywhere but its home. That home is taken back by the account its login
+//! signs in as, if that account has no login of its own and was not signed out.
 use super::{
     model::Identity,
     store::{Database, Guard, Login, Profile, Store, Ticket},
@@ -106,9 +104,8 @@ pub(super) fn check_out(
 }
 
 /// Before a read of saved `provider` accounts: takes back or tears down every home no profile names
-/// ([`take_back_or_tear_down`]), then moves
-/// the login of every saved account that is not `native`, the signed-in one, and is not archived,
-/// from the vault into its home. `open` opens the vault; `home` resolves a home id. Best effort:
+/// ([`take_back_or_tear_down`]), then moves the login of every saved account that is not `native`,
+/// the signed-in one, and is not archived, from the vault into its home. `open` opens the vault; `home` resolves a home id. Best effort:
 /// whatever fails stays as it is, and the next read tries again.
 pub(super) fn settle(
     root_home: &Path,
@@ -137,13 +134,8 @@ pub(super) fn settle(
         .iter()
         .filter(|id| !db.profiles.iter().any(|p| p.home.as_ref() == Some(*id)))
     {
-        let _ = if db.retired_homes.contains(id) {
-            tear_down(id, home)
-        } else {
-            take_back_or_tear_down(id, &db, &ticket, open, home)
-        };
+        let _ = take_back_or_tear_down(id, &db, &ticket, open, home);
     }
-    let _ = forget_retired(root_home, &db, &ticket, open);
     let archived = crate::limits::archived(root_home, provider);
     for profile in db.profiles.iter().filter(|p| {
         p.identity.provider == provider
@@ -231,8 +223,9 @@ fn held_profile<'db>(db: &'db mut Database, id: &str) -> Result<&'db mut Profile
 }
 
 /// Home `id`, one no profile names: taken back by the saved account its login signs in as, if that
-/// account has neither a login nor a home, since the login is then its only one; torn down
-/// otherwise. A login that cannot be identified is torn down with it, since no read or switch could
+/// account has neither a login nor a home and was not signed out, since the login is then its only
+/// one; torn down under its locks otherwise, what its client filed outside it and then the
+/// directory. A login that cannot be identified is torn down with it, since no read or switch could
 /// use it. A home that cannot be read, or whose client holds its locks, is left for the next read.
 fn take_back_or_tear_down(
     id: &str,
@@ -247,7 +240,7 @@ fn take_back_or_tear_down(
         let identity = home.identify(&login).ok()?;
         db.profiles
             .iter()
-            .find(|p| p.identity == identity && p.login.is_none() && p.home.is_none())
+            .find(|p| p.identity == identity && p.needs_login() && !p.signed_out)
     });
     let Some(owner) = owner else {
         return home.delete(locks);
@@ -255,37 +248,12 @@ fn take_back_or_tear_down(
     drop(locks);
     open()?.publish(ticket, |db| {
         let target = held_profile(db, &owner.id)?;
-        if target.login.is_some() || target.home.is_some() {
+        if !target.needs_login() || target.signed_out {
             return Err("The account changed while its home was taken back.".into());
         }
         target.home = Some(id.to_string());
         Ok(())
     })
-}
-
-/// Drops from the vault's retired homes every one no longer on disk.
-fn forget_retired(
-    root_home: &Path,
-    db: &Database,
-    ticket: &Ticket,
-    open: &dyn Fn() -> Result<Store, String>,
-) -> Result<(), String> {
-    let gone = |id: &String| dir(root_home, id).map_or(true, |dir| !dir.exists());
-    if !db.retired_homes.iter().any(gone) {
-        return Ok(());
-    }
-    open()?.publish(ticket, |db| {
-        db.retired_homes.retain(|id| !gone(id));
-        Ok(())
-    })
-}
-
-/// Tears down home `id` under its locks: what its client filed outside it, then the directory. A
-/// home whose client holds its locks is left as it is.
-pub(super) fn tear_down(id: &str, home: &Resolve<'_>) -> Result<(), String> {
-    let home = home(id)?;
-    let locks = home.lock()?;
-    home.delete(locks)
 }
 
 #[cfg(test)]

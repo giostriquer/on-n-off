@@ -84,25 +84,26 @@ config dir>`, created by the first write under Claude Code's own account name
 (`PendingWrite::prove_in_home`); a home that keeps a login in a credentials file takes no new one. On
 Windows it is the home's `.credentials.json`, the file Claude Code keeps any login in there.
 
-Sign out tears down the home of every saved workspace of the signed-out user then and there; one
-whose client holds it then stays on the vault's list of retired homes, and a later read tears it
-down and takes it off the list. A new sign-in (Add or Sign in again) sets the profile's home aside, and Remove takes the profile with
-it; a home no profile names then goes at the next read. Every read lists the homes on disk before
-it reads the vault, and tears down each one no profile names, under the home's own Claude Code
-locks, its Keychain entry first, then the directory. A home's id is recorded in the vault before
-anything creates it, so one listed first and named nowhere is one nothing will use again; one its
-client holds, or that could not be removed, goes at a later read.
+A new sign-in (Add or Sign in again) and Sign out (for every saved workspace of the signed-out
+user) set the profile's home aside, and Remove takes the profile with it. A home no profile names
+then goes at the next read: every read lists the homes on disk before it reads the vault, and
+tears down each one no profile names, under the home's own Claude Code locks, its Keychain entry
+first, then the directory. A home's id is recorded in the vault before anything creates it, so one
+listed first and named nowhere is one nothing will use again; one its client holds, or that could
+not be removed, goes at a later read.
 
 The exception is a version before homes. It reads a vault with homes, since every field it does
 not know is skipped, but its next write of the vault drops the field that names them, and such
 writes are routine (remembering a renewed native login is one). That leaves a homed account with
 no login anywhere but its home. So the read first looks at what an unnamed home holds: a login
-that signs in as a saved account with neither a login nor a home is that account's only one, and
-the account takes the home back; every other home is torn down. A retired home is never taken
-back, which is why Sign out lists what it sets aside; a home whose login cannot be read right now
-is left for a later read, since it may be the account's only login. The teardown never runs
-`claude auth logout`: whether a logout ends only its own login or every login of the account is
-unproven, and a logout that ended the others would sign the user out elsewhere.
+that signs in as a saved account with neither a login nor a home is taken back by that account,
+unless Sign out left the account so, which it records on the profile (`signed_out`) in the same
+vault change; every other home is torn down. A home whose login cannot be read right now is left
+for a later read, since it may be the account's only login. The rule has one limit: a sign-out
+made by a version before homes records nothing, so after upgrading, the signed-out account takes
+its homes back, and their reads say whether that sign-out ended their logins. The teardown never
+runs `claude auth logout`: whether a logout ends only its own login or every login of the account
+is unproven, and a logout that ended the others would sign the user out elsewhere.
 
 The account vault is XChaCha20-Poly1305 authenticated ciphertext, atomically replaced using private
 staging files. A fresh random nonce protects each write. A 32-byte key is stored with the OS:

@@ -521,7 +521,6 @@ fn signing_out_forgets_the_users_saved_logins_in_their_homes_too() {
 
     harness.accounts().sign_out(AgentId::Claude).unwrap();
 
-    assert!(!home.exists(), "the signed-out user's home stayed");
     let vault = harness.vault();
     let forgotten = vault.profiles.iter().find(|p| p.id == elsewhere).unwrap();
     assert!(forgotten.login.is_none() && forgotten.home.is_none());
@@ -531,6 +530,7 @@ fn signing_out_forgets_the_users_saved_logins_in_their_homes_too() {
         .iter()
         .any(|p| p.id == elsewhere && p.needs_login));
     read(&harness);
+    assert!(!home.exists(), "the signed-out user's home stayed");
     assert_eq!(
         harness.in_home(&b),
         Some("b1".into()),
@@ -538,10 +538,11 @@ fn signing_out_forgets_the_users_saved_logins_in_their_homes_too() {
     );
 }
 
-/// A home sign-out could not tear down, because its client held it, goes at a later read: the
-/// signed-out account never takes it back.
+/// A signed-out account's home whose client holds it at the next read goes at a later one: the
+/// account never takes it back, though it has neither a login nor a home, as after a version before
+/// homes.
 #[test]
-fn a_home_sign_out_could_not_tear_down_goes_at_a_later_read() {
+fn a_signed_out_accounts_home_that_does_not_go_at_once_is_never_taken_back() {
     let harness = Harness::new().with_homes();
     two_accounts(&harness);
     let elsewhere = harness.saved(
@@ -550,16 +551,17 @@ fn a_home_sign_out_could_not_tear_down_goes_at_a_later_read() {
     );
     read(&harness);
     let home = harness.home_of(&elsewhere).unwrap();
+    harness.accounts().sign_out(AgentId::Claude).unwrap();
     harness.homes().busy.lock().unwrap().push(home.clone());
 
-    harness.accounts().sign_out(AgentId::Claude).unwrap();
+    read(&harness);
 
     assert!(home.exists());
+    assert_eq!(harness.home_of(&elsewhere), None);
     harness.homes().busy.lock().unwrap().clear();
     read(&harness);
     assert!(!home.exists(), "the signed-out user's home stayed");
     assert_eq!(harness.home_of(&elsewhere), None);
-    assert!(harness.vault().retired_homes.is_empty());
     assert!(harness
         .accounts()
         .list(AgentId::Claude)
@@ -567,6 +569,33 @@ fn a_home_sign_out_could_not_tear_down_goes_at_a_later_read() {
         .profiles
         .iter()
         .any(|p| p.id == elsewhere && p.needs_login));
+}
+
+/// Signing in again sets the old home aside for the next read; signing out before that read must
+/// not hand the replaced login back.
+#[test]
+fn signing_out_before_a_read_after_signing_in_again_leaves_the_old_home_to_go() {
+    let harness = Harness::new().with_homes();
+    let (_, b) = two_accounts(&harness);
+    read(&harness);
+    let old = harness.home_of(&b).unwrap();
+    *harness.native.signed_in.borrow_mut() = Some(claude("b", "b2"));
+    harness
+        .accounts()
+        .add(
+            AgentId::Claude,
+            uuid::Uuid::new_v4().to_string(),
+            Some(b.clone()),
+        )
+        .unwrap();
+    harness.signed_in(Some(claude("b", "b3")));
+
+    harness.accounts().sign_out(AgentId::Claude).unwrap();
+    read(&harness);
+
+    assert!(!old.exists(), "the replaced home stayed");
+    assert_eq!(harness.home_of(&b), None);
+    assert_eq!(harness.in_vault(&b), None);
 }
 
 #[test]
