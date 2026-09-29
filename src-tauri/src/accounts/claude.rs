@@ -428,17 +428,15 @@ impl IsolatedSignIn for ClaudeNative {
         command
     }
 
-    /// A saved profile's read with the login's own credential, which needs nothing from the
-    /// directory.
+    /// Claude Code's own usage report, run in this sign-in's config dir, which renews its login
+    /// itself if it has to; no request is made with the login here.
     fn first_usage(
         &self,
         _dir: &Path,
-        login: &Login,
+        _login: &Login,
         identity: &Identity,
     ) -> Option<ProviderLimitsDto> {
-        let credential = ClaudeLogin::of(login).credential()?;
-        crate::limits::read_saved_claude(identity, credential, &crate::limits::SavedReadUrls::LIVE)
-            .ok()
+        crate::limits::claude_cli::read_usage(self.command(), &self.config_file, identity).ok()
     }
 
     /// Deletes the sign-in's own scoped Keychain entry, never Claude Code's unscoped one.

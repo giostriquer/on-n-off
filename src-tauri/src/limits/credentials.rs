@@ -39,14 +39,10 @@ pub struct ClaudeCredential {
 
 impl ClaudeCredential {
     pub(super) fn plan(&self) -> Option<String> {
-        match (
+        plan_label(
             self.subscription_type.as_deref(),
             self.rate_limit_tier.as_deref(),
-        ) {
-            (Some("max"), Some("default_claude_max_5x")) => Some("max ×5".to_string()),
-            (Some("max"), Some("default_claude_max_20x")) => Some("max ×20".to_string()),
-            _ => self.subscription_type.clone(),
-        }
+        )
     }
 
     /// Whether Claude Code can renew this login by itself: it holds a refresh token that has not
@@ -54,6 +50,16 @@ impl ClaudeCredential {
     /// login — the next `claude` run mints a new one without any sign-in.
     fn renewable(&self, now_ms: i64) -> bool {
         self.has_refresh_token && self.refresh_expires_at_ms.is_none_or(|at| at > now_ms)
+    }
+}
+
+/// The plan a card shows for a `subscription_type` ("pro", "max", ...) at Claude Code's `tier`: a
+/// recognized Max multiplier, else the subscription type as it is.
+pub(super) fn plan_label(subscription_type: Option<&str>, tier: Option<&str>) -> Option<String> {
+    match (subscription_type, tier) {
+        (Some("max"), Some("default_claude_max_5x")) => Some("max ×5".to_string()),
+        (Some("max"), Some("default_claude_max_20x")) => Some("max ×20".to_string()),
+        _ => subscription_type.map(str::to_string),
     }
 }
 
@@ -137,8 +143,19 @@ pub(crate) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential>
 /// rewrites on every login (`claude_store::Dirs::config_file`). `None` when the file or the fields
 /// are absent.
 pub(crate) fn read_claude_identity(config_file: &Path) -> Option<ClaudeIdentity> {
-    let value = read_json_file(config_file).ok()??;
-    let account = value.get("oauthAccount")?;
+    claude_identity(&read_claude_account(config_file)?)
+}
+
+/// The `oauthAccount` record of the Claude config file at `config_file`, if it holds one.
+pub(super) fn read_claude_account(config_file: &Path) -> Option<Value> {
+    read_json_file(config_file)
+        .ok()??
+        .get("oauthAccount")
+        .cloned()
+}
+
+/// Who an `oauthAccount` record names: its account, labelled by its email, in its organization.
+pub(super) fn claude_identity(account: &Value) -> Option<ClaudeIdentity> {
     Some(ClaudeIdentity {
         account: LimitsAccountDto {
             legacy_id: None,

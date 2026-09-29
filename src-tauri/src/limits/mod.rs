@@ -12,6 +12,7 @@
 
 mod backend_memo;
 mod claude;
+pub(crate) mod claude_cli;
 mod codex;
 mod codex_app_server;
 mod codex_sessions;

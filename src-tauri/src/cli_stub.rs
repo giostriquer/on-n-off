@@ -56,6 +56,7 @@ pub struct CliStub {
     chatty_lines: usize,
     print_env: Option<String>,
     stdout: Option<String>,
+    stdout_file: Option<String>,
     stderr: Option<String>,
     sleep_secs: u32,
     exit: i32,
@@ -96,6 +97,13 @@ impl CliStub {
 
     pub fn stdout(mut self, text: &str) -> Self {
         self.stdout = Some(text.to_string());
+        self
+    }
+
+    /// Print the contents of `file` (relative to the stub's directory) on stdout, for output an
+    /// `echo` cannot carry: several lines, or JSON with characters `cmd` treats as operators.
+    pub fn stdout_file(mut self, file: &str) -> Self {
+        self.stdout_file = Some(file.to_string());
         self
     }
 
@@ -182,6 +190,9 @@ impl CliStub {
         if let Some(text) = &self.stdout {
             lines.push(format!("echo {text}"));
         }
+        if let Some(file) = &self.stdout_file {
+            lines.push(format!("type \"%~dp0{}\"", windows_relative(file)));
+        }
         if let Some(text) = &self.stderr {
             lines.push(format!("echo {text} 1>&2"));
         }
@@ -216,6 +227,9 @@ impl CliStub {
         }
         if let Some(text) = &self.stdout {
             lines.push(format!("printf '%s\\n' '{text}'"));
+        }
+        if let Some(file) = &self.stdout_file {
+            lines.push(format!("cat \"$here/{file}\""));
         }
         if let Some(text) = &self.stderr {
             lines.push(format!("printf '%s\\n' '{text}' >&2"));

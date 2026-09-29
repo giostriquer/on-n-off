@@ -250,8 +250,20 @@ the native app-server reader, which is never started for a saved profile; a body
 for a new login: "This saved login now signs in as a different account. Sign in again." A rate-limited
 saved read waits at least its `Retry-After`. Every card a saved poll produces is marked
 `savedProfile`, so the UI says "Remembered account" only for readings that are neither the signed-in
-account's nor a polled saved profile's. The first usage after a sign-in is a saved profile's read
-for Claude and Codex's app-server in the isolated home for Codex.
+account's nor a polled saved profile's. The first usage after a sign-in is read in the isolated
+home by the provider's own client: Codex's app-server, and for Claude `claude -p /usage
+--no-session-persistence --output-format stream-json --verbose` with `CLAUDE_CONFIG_DIR` set to
+that home (`limits/claude_cli.rs`). Claude Code answers that from `/api/oauth/usage` with no model
+turn, renewing the home's login itself if it has to, and reports it on the assistant event as
+`usage_report.rate_limits.limits[]`, the shape the signed-in read parses. The read runs with stdin
+closed, `DISABLE_AUTOUPDATER=1`, and without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or
+`CLAUDE_CODE_OAUTH_TOKEN`, any of which Claude Code would prefer to the home's login. The home's
+`.claude.json` `oauthAccount` must name the expected user and organization before Claude Code starts
+and after it answers. The plan is its `organizationType` (`claude_<type>`) at its
+`organizationRateLimitTier`. A missing report, a failed exit or no answer within 90 seconds reads as
+unavailable, never as a refused login. **verified** (2026-09-29, Claude Code 2.1.284, on this
+machine): 0 turns, 0 tokens, no API time and no cost; the report, the `oauthAccount` fields and no
+session transcript. The field is not in Anthropic's documentation.
 Native and saved reads order limit windows consistently: weekly, then session, then per-model.
 Renewal uses an encrypted intent/reply journal and blocks activation after an ambiguous outcome. Sign-out can revoke all saved workspace logins for that user; removal
 only removes on-n-off's saved copy. Abandoned isolated-login directories are cleaned only after
