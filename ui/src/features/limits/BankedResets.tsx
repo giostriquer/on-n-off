@@ -6,7 +6,7 @@ import type { LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/
 import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
-import { unexpiredBankedResets, usageLeft } from "./limitPresentation";
+import { latestObservedAt, unexpiredBankedResets, usageLeft } from "./limitPresentation";
 import { SummaryRow } from "./SummaryRow";
 
 /** Below this much usage left a banked reset is doing what it is for, so it is spent without asking. */
@@ -44,6 +44,9 @@ export function BankedResetsRow({ banked, now }: { banked: CardFigures["bankedRe
   return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
 }
 
+/** What one attempt to spend a banked reset came to, and when its answer arrived. */
+type AttemptResult = { role: "status" | "alert"; message: string; answeredAt: number };
+
 /**
  * Spends one banked reset on the signed-in Codex account. Codex applies a reset to whoever is signed
  * in, so only the card that is both the live read and the account controls' current account offers
@@ -53,6 +56,13 @@ export function BankedResetsRow({ banked, now }: { banked: CardFigures["bankedRe
  * One attempt keeps one idempotency key until Codex gives a definite answer: a retry after an error
  * may be retrying a request that already went through, and a new key would spend a second reset.
  * The refreshed limits arrive through the shared read the backend replaces after every attempt.
+ *
+ * What an attempt came to is said until a reading made after its answer replaces the card's: the
+ * backend's refresh is read before the answer comes back, so it keeps the message, and the next
+ * read, which may find a reset granted since, lets it go. The answer is timed by the clock the
+ * backend stamps its readings with, not the screen's `now`, which lags it by up to a minute and
+ * would let the refresh take the message away. A card with no window read at all has nothing to
+ * tell a later reading by, so it keeps the message.
  */
 export function UseBankedReset({ entry, label, current, now, disabled = false }: {
   entry: ProviderLimits;
@@ -64,11 +74,13 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
 }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ role: "status" | "alert"; message: string } | null>(null);
+  const [result, setResult] = useState<AttemptResult | null>(null);
   const attempt = useRef<string | null>(null);
   const accountId = entry.account?.id;
   const offered = current && entry.currentAccount && entry.status === "ok" && unexpiredBankedResets(entry.resetCredits, now) !== null;
-  if (!accountId || (!offered && !result)) return null;
+  const observed = latestObservedAt(entry);
+  const shown = result && (observed === null || observed <= result.answeredAt) ? result : null;
+  if (!accountId || (!offered && !shown)) return null;
   const left = usageLeft(entry, now);
 
   async function spend(account: string) {
@@ -79,9 +91,9 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
     try {
       const outcome = await api.consumeCodexResetCredit(account, attempt.current);
       attempt.current = null;
-      setResult({ role: "status", message: OUTCOME_MESSAGES[outcome] });
+      setResult({ role: "status", message: OUTCOME_MESSAGES[outcome], answeredAt: Date.now() });
     } catch (error) {
-      setResult({ role: "alert", message: parseInvokeError(error).message });
+      setResult({ role: "alert", message: parseInvokeError(error).message, answeredAt: Date.now() });
     } finally {
       setBusy(false);
     }
@@ -105,9 +117,9 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
           {busy ? "Using reset…" : "Use banked reset"}
         </button>
       ) : null}
-      {result ? (
-        <p role={result.role} className={`m-0 min-w-0 basis-full break-words text-[11px] ${result.role === "alert" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
-          {result.message}
+      {shown ? (
+        <p role={shown.role} className={`m-0 min-w-0 basis-full break-words text-[11px] ${shown.role === "alert" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
+          {shown.message}
         </p>
       ) : null}
       {confirming ? (
