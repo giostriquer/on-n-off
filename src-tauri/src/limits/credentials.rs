@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use super::json::optional_string;
 use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
+use crate::accounts::model::Identity;
 use crate::dto::LimitsAccountDto;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,14 +40,10 @@ pub struct ClaudeCredential {
 
 impl ClaudeCredential {
     pub(super) fn plan(&self) -> Option<String> {
-        match (
+        plan_label(
             self.subscription_type.as_deref(),
             self.rate_limit_tier.as_deref(),
-        ) {
-            (Some("max"), Some("default_claude_max_5x")) => Some("max ×5".to_string()),
-            (Some("max"), Some("default_claude_max_20x")) => Some("max ×20".to_string()),
-            _ => self.subscription_type.clone(),
-        }
+        )
     }
 
     /// Whether Claude Code can renew this login by itself: it holds a refresh token that has not
@@ -54,6 +51,16 @@ impl ClaudeCredential {
     /// login — the next `claude` run mints a new one without any sign-in.
     fn renewable(&self, now_ms: i64) -> bool {
         self.has_refresh_token && self.refresh_expires_at_ms.is_none_or(|at| at > now_ms)
+    }
+}
+
+/// The plan a card shows for a `subscription_type` ("pro", "max", ...) at Claude Code's `tier`: a
+/// recognized Max multiplier, else the subscription type as it is.
+fn plan_label(subscription_type: Option<&str>, tier: Option<&str>) -> Option<String> {
+    match (subscription_type, tier) {
+        (Some("max"), Some("default_claude_max_5x")) => Some("max ×5".to_string()),
+        (Some("max"), Some("default_claude_max_20x")) => Some("max ×20".to_string()),
+        _ => subscription_type.map(str::to_string),
     }
 }
 
@@ -137,16 +144,48 @@ pub(crate) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential>
 /// rewrites on every login (`claude_store::Dirs::config_file`). `None` when the file or the fields
 /// are absent.
 pub(crate) fn read_claude_identity(config_file: &Path) -> Option<ClaudeIdentity> {
+    read_claude_config_account(config_file).map(|account| account.identity)
+}
+
+/// What a Claude config file's `oauthAccount` says of its account.
+pub(super) struct ClaudeConfigAccount {
+    pub(super) identity: ClaudeIdentity,
+    /// The plan its organization is on.
+    pub(super) plan: Option<String>,
+}
+
+/// The account the Claude config file at `config_file` names, if it names one.
+pub(super) fn read_claude_config_account(config_file: &Path) -> Option<ClaudeConfigAccount> {
     let value = read_json_file(config_file).ok()??;
     let account = value.get("oauthAccount")?;
-    Some(ClaudeIdentity {
-        account: LimitsAccountDto {
-            legacy_id: None,
-            id: optional_string(account.get("accountUuid"))?,
-            label: optional_string(account.get("emailAddress")),
+    // `organizationType` names the subscription as `claude_<type>`, where `<type>` is what the
+    // stored login's `subscriptionType` says.
+    let organization_type = optional_string(account.get("organizationType"));
+    let tier = optional_string(account.get("organizationRateLimitTier"));
+    Some(ClaudeConfigAccount {
+        identity: ClaudeIdentity {
+            account: LimitsAccountDto {
+                legacy_id: None,
+                id: optional_string(account.get("accountUuid"))?,
+                label: optional_string(account.get("emailAddress")),
+            },
+            organization_id: optional_string(account.get("organizationUuid")),
         },
-        organization_id: optional_string(account.get("organizationUuid")),
+        plan: plan_label(
+            organization_type
+                .as_deref()
+                .and_then(|kind| kind.strip_prefix("claude_")),
+            tier.as_deref(),
+        ),
     })
+}
+
+impl ClaudeIdentity {
+    /// Whether this is `identity`'s user in `identity`'s workspace.
+    pub(super) fn names(&self, identity: &Identity) -> bool {
+        self.account.id == identity.user_id
+            && self.organization_id.as_deref() == Some(identity.workspace_id.as_str())
+    }
 }
 
 /// `Ok(None)` when the file does not exist; `Err` for any other I/O or JSON failure.

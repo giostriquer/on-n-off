@@ -146,6 +146,7 @@ fn a_claude_logins_fingerprint_is_its_token_generation_alone() {
     assert_ne!(fingerprint(&rotated), fingerprint(&claude));
 }
 
+mod first_usage;
 #[cfg(target_os = "macos")]
 mod keychain;
 mod native_store;

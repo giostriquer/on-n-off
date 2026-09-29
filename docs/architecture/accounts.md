@@ -107,7 +107,8 @@ code asks that rather than which provider it has. An adapter:
   the login's renewal is due, which reads as expired without a request; Codex's access token to
   `limits::read_saved_codex`, the `wham/usage` body app-server itself reads, without starting a
   CLI. A login without an access token is refused before either. Claude's first usage after a
-  sign-in is the same read; Codex's runs app-server in the isolated home;
+  sign-in is Claude Code's own report in the isolated home (`limits::claude_cli`); Codex's runs
+  app-server there;
 - renews a never-activated private login at its token endpoint: Claude's grant sent from
   `claude_renew.rs`, Codex's built and folded by its login and sent from `usage_renew.rs`;
 - says how its client processes are recognized and whether they refuse an ordinary switch.
@@ -163,7 +164,7 @@ the signed-in Codex login only through `codex_store`'s projections.
 - **Add / sign in again** launches official CLI authentication in an isolated native home. It checks
   the resulting identity, verifies the expected profile during reauthentication, then saves it.
   Before publication it attempts a usage/plan read using that isolated login: Codex uses app-server
-  without forced renewal; Claude uses its access-only projection and verified profile/usage endpoints.
+  without forced renewal; Claude runs `claude -p /usage` there, which makes no model request.
   It rereads the credential afterward so official-client rotation is not stranded, rejects any
   user/workspace change, and publishes only a matching observation after the vault save and existing
   cancellation/epoch checks. Usage failure retains the login and previous history. Successful

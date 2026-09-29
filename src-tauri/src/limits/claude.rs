@@ -72,7 +72,7 @@ fn parse_usage(payload: &Value, now: DateTime<Utc>) -> Reading {
     }
 }
 
-fn parse_claude(payload: &Value) -> Vec<LimitWindowDto> {
+pub(super) fn parse_claude(payload: &Value) -> Vec<LimitWindowDto> {
     let normalized: Vec<LimitWindowDto> = payload
         .get("limits")
         .and_then(Value::as_array)
@@ -404,7 +404,7 @@ pub(crate) fn claude_headers(authorization: &str) -> [(&'static str, &str); 3] {
 
 /// One Claude read with `credential`: its profile, which must be `expected` when an account is
 /// expected, then its usage. The signed-in read expects the account `.claude.json` names, if any;
-/// a saved profile's read and the first usage after a sign-in expect the profile's.
+/// a saved profile's read expects the profile's.
 fn claude_read(
     credential: &ClaudeCredential,
     expected: Option<&ClaudeIdentity>,

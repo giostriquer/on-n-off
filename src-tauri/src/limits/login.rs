@@ -1,5 +1,6 @@
 //! The first usage reading of an isolated Codex sign-in, before its native home is removed: Codex's
-//! own app-server in that home. A Claude sign-in's is a saved profile's read (`read_saved_claude`).
+//! own app-server in that home. A Claude sign-in's is Claude Code's own report in its config dir
+//! (`claude_cli`).
 //! No saved vault credential is loaded or independently renewed here.
 use super::*;
 

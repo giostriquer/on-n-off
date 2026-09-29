@@ -138,6 +138,14 @@ pub(crate) fn native_dirs(home: &Path) -> Result<Dirs, String> {
 /// The name of the variable that moves Claude Code's storage away from its config dir.
 pub(crate) const SECURE_STORAGE_VAR: &str = "CLAUDE_SECURESTORAGE_CONFIG_DIR";
 
+/// The credentials that override the store's login when set in Claude Code's environment: the
+/// account changes refuse to run beside one, and a usage read runs without them.
+pub(crate) const ENV_CREDENTIALS: [&str; 3] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
+
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` as it was set, and the storage dir it chose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SecureStorage {

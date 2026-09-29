@@ -280,13 +280,8 @@ impl IsolatedSignIn for CodexNative {
         command
     }
 
-    /// Read by Codex's own app-server in `dir`, which needs nothing from the login itself.
-    fn first_usage(
-        &self,
-        dir: &Path,
-        _login: &Login,
-        identity: &Identity,
-    ) -> Option<ProviderLimitsDto> {
+    /// Read by Codex's own app-server in `dir`.
+    fn first_usage(&self, dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
         crate::limits::login::read_codex(dir, identity)
     }
 

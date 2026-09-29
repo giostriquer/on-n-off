@@ -87,14 +87,14 @@ struct PreparedLogin {
 
 fn prepare_login(
     native: &dyn Native,
-    read_usage: impl FnOnce(&store::Login, &Identity) -> Option<crate::dto::ProviderLimitsDto>,
+    read_usage: impl FnOnce(&Identity) -> Option<crate::dto::ProviderLimitsDto>,
 ) -> Result<PreparedLogin, String> {
     native.verify()?;
     let login = native
         .read()?
         .ok_or("Official sign-in returned no reusable login.")?;
     let identity = native.identify(&login)?;
-    let usage = read_usage(&login, &identity);
+    let usage = read_usage(&identity);
     // The official client can rotate its credential while reading usage. Save that latest
     // generation, but never publish a result after a user/workspace change.
     let latest = native
@@ -200,8 +200,8 @@ impl super::Accounts {
             if canceled.load(Ordering::Acquire) {
                 return Err("Sign-in was canceled.".into());
             }
-            let prepared = prepare_login(isolated.as_ref(), |login, identity| {
-                isolated.first_usage(scratch.path(), login, identity)
+            let prepared = prepare_login(isolated.as_ref(), |identity| {
+                isolated.first_usage(scratch.path(), identity)
             })?;
             publish(
                 &LOGIN,

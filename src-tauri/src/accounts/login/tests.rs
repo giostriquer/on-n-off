@@ -76,7 +76,7 @@ fn usage(identity: &Identity) -> ProviderLimitsDto {
 #[test]
 fn sign_in_keeps_usage_with_the_new_profile_and_saves_the_latest_cli_generation() {
     let isolated = IsolatedLogin(RefCell::new(fixture_login("user", "team", "first")));
-    let prepared = prepare_login(&isolated, |_, identity| {
+    let prepared = prepare_login(&isolated, |identity| {
         *isolated.0.borrow_mut() = fixture_login("user", "team", "rotated-by-cli");
         Some(usage(identity))
     })
@@ -96,7 +96,7 @@ fn sign_in_keeps_usage_with_the_new_profile_and_saves_the_latest_cli_generation(
 fn identity_change_during_usage_read_rejects_the_entire_sign_in() {
     for (user, workspace) in [("other-user", "team"), ("user", "other-team")] {
         let isolated = IsolatedLogin(RefCell::new(fixture_login("user", "team", "first")));
-        assert!(prepare_login(&isolated, |_, identity| {
+        assert!(prepare_login(&isolated, |identity| {
             *isolated.0.borrow_mut() = fixture_login(user, workspace, "new");
             Some(usage(identity))
         })
@@ -106,14 +106,14 @@ fn identity_change_during_usage_read_rejects_the_entire_sign_in() {
 #[test]
 fn failed_usage_read_still_keeps_the_successful_login() {
     let isolated = IsolatedLogin(RefCell::new(fixture_login("user", "team", "first")));
-    let prepared = prepare_login(&isolated, |_, _| None).unwrap();
+    let prepared = prepare_login(&isolated, |_| None).unwrap();
     assert!(prepared.usage.is_none());
     assert_eq!(prepared.login.auth["tokens"]["access_token"], "first");
 }
 #[test]
 fn usage_from_another_identity_cannot_attach_by_matching_email() {
     let isolated = IsolatedLogin(RefCell::new(fixture_login("user", "team", "first")));
-    let prepared = prepare_login(&isolated, |_, identity| {
+    let prepared = prepare_login(&isolated, |identity| {
         let mut other = identity.clone();
         other.user_id = "other-user".into();
         Some(usage(&other))

@@ -88,13 +88,6 @@ const BUSY: &str = "Claude is updating its login or configuration. Retry after i
 /// A lock an account change relied on was taken away while it was held.
 const LOST: &str = "Native credential coordination was lost. Protected recovery has been retained.";
 
-/// The credentials that override Claude Code's own login when set in its environment.
-const ENV_CREDENTIALS: [&str; 3] = [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-];
-
 /// Where an administrator's managed Claude Code settings live.
 const MANAGED_SETTINGS: &str = "/Library/Application Support/ClaudeCode/managed-settings.json";
 
@@ -173,7 +166,7 @@ impl ClaudeNative {
             return Err(CUSTOM_HOME.into());
         }
         native::refuse_linked(&self.config_file)?;
-        native::refuse_env_credentials(&ENV_CREDENTIALS, env)?;
+        native::refuse_env_credentials(&claude_store::ENV_CREDENTIALS, env)?;
         for path in [
             self.config_home.join("settings.json"),
             managed_settings.to_path_buf(),
@@ -428,17 +421,10 @@ impl IsolatedSignIn for ClaudeNative {
         command
     }
 
-    /// A saved profile's read with the login's own credential, which needs nothing from the
-    /// directory.
-    fn first_usage(
-        &self,
-        _dir: &Path,
-        login: &Login,
-        identity: &Identity,
-    ) -> Option<ProviderLimitsDto> {
-        let credential = ClaudeLogin::of(login).credential()?;
-        crate::limits::read_saved_claude(identity, credential, &crate::limits::SavedReadUrls::LIVE)
-            .ok()
+    /// Claude Code's own usage report, run in this sign-in's config dir, which renews its login
+    /// itself if it has to; no request is made with the login here.
+    fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
+        crate::limits::claude_cli::read_usage(self.command(), &self.config_file, identity).ok()
     }
 
     /// Deletes the sign-in's own scoped Keychain entry, never Claude Code's unscoped one.

@@ -53,9 +53,11 @@ pub struct CliStub {
     name: String,
     copy: Option<(String, String)>,
     args_log: Option<(String, bool)>,
+    env_log: Option<(String, String)>,
     chatty_lines: usize,
     print_env: Option<String>,
     stdout: Option<String>,
+    stdout_file: Option<String>,
     stderr: Option<String>,
     sleep_secs: u32,
     exit: i32,
@@ -82,6 +84,12 @@ impl CliStub {
         self
     }
 
+    /// Write the value of environment variable `name` to `file` (relative to the stub's directory).
+    pub fn log_env(mut self, name: &str, file: &str) -> Self {
+        self.env_log = Some((name.to_string(), file.to_string()));
+        self
+    }
+
     /// Emit `lines` long lines on both stdout and stderr to fill the pipes.
     pub fn chatty(mut self, lines: usize) -> Self {
         self.chatty_lines = lines;
@@ -96,6 +104,13 @@ impl CliStub {
 
     pub fn stdout(mut self, text: &str) -> Self {
         self.stdout = Some(text.to_string());
+        self
+    }
+
+    /// Print the contents of `file` (relative to the stub's directory) on stdout, for output an
+    /// `echo` cannot carry: several lines, or JSON with characters `cmd` treats as operators.
+    pub fn stdout_file(mut self, file: &str) -> Self {
+        self.stdout_file = Some(file.to_string());
         self
     }
 
@@ -170,6 +185,12 @@ impl CliStub {
                 windows_relative(file)
             ));
         }
+        if let Some((name, file)) = &self.env_log {
+            lines.push(format!(
+                "echo %{name}%> \"%~dp0{}\"",
+                windows_relative(file)
+            ));
+        }
         if self.chatty_lines > 0 {
             lines.push(format!(
                 "for /L %%i in (1,1,{}) do @(echo stdout-%%i-{CHATTY_PAYLOAD}& echo stderr-%%i-{CHATTY_PAYLOAD} 1>&2)",
@@ -181,6 +202,9 @@ impl CliStub {
         }
         if let Some(text) = &self.stdout {
             lines.push(format!("echo {text}"));
+        }
+        if let Some(file) = &self.stdout_file {
+            lines.push(format!("type \"%~dp0{}\"", windows_relative(file)));
         }
         if let Some(text) = &self.stderr {
             lines.push(format!("echo {text} 1>&2"));
@@ -205,6 +229,9 @@ impl CliStub {
             let redirect = if *append { ">>" } else { ">" };
             lines.push(format!("printf '%s\\n' \"$*\" {redirect} \"$here/{file}\""));
         }
+        if let Some((name, file)) = &self.env_log {
+            lines.push(format!("printf '%s\\n' \"${name}\" > \"$here/{file}\""));
+        }
         if self.chatty_lines > 0 {
             lines.push(format!(
                 "i=1; while [ \"$i\" -le {} ]; do echo \"stdout-$i-{CHATTY_PAYLOAD}\"; echo \"stderr-$i-{CHATTY_PAYLOAD}\" >&2; i=$((i + 1)); done",
@@ -216,6 +243,9 @@ impl CliStub {
         }
         if let Some(text) = &self.stdout {
             lines.push(format!("printf '%s\\n' '{text}'"));
+        }
+        if let Some(file) = &self.stdout_file {
+            lines.push(format!("cat \"$here/{file}\""));
         }
         if let Some(text) = &self.stderr {
             lines.push(format!("printf '%s\\n' '{text}' >&2"));

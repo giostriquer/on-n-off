@@ -135,12 +135,11 @@ trait NativeAccount: Native {
 trait IsolatedSignIn: Native {
     /// The official sign-in, ready to spawn in this store.
     fn sign_in(&self) -> std::process::Command;
-    /// The first usage reading of `login`, signed in as `identity` in `dir`, before the directory
-    /// is removed.
+    /// The first usage reading of the sign-in as `identity` in `dir`, made by the provider's own
+    /// client there before the directory is removed; the login itself is never sent.
     fn first_usage(
         &self,
         dir: &Path,
-        login: &store::Login,
         identity: &model::Identity,
     ) -> Option<crate::dto::ProviderLimitsDto>;
     /// Removes anything the sign-in left outside `dir`, such as the scoped Keychain entry a Claude
