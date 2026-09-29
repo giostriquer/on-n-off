@@ -99,9 +99,10 @@ no login anywhere but its home. So the read first looks at what an unnamed home 
 that signs in as a saved account with neither a login nor a home is taken back by that account,
 unless Sign out left the account so, which it records on the profile (`signed_out`) in the same
 vault change; every other home is torn down. A home whose login cannot be read right now is left
-for a later read, since it may be the account's only login. The rule has one limit: a sign-out
-made by a version before homes records nothing, so after upgrading, the signed-out account takes
-its homes back, and their reads say whether that sign-out ended their logins. The teardown never
+for a later read, since it may be the account's only login. The rule has one limit: a version
+before homes drops `signed_out` with `home`, so a sign-out it made, or one whose vault it rewrote
+before the next read, leaves nothing to tell by, and the signed-out account takes its homes back;
+their reads then say whether that sign-out ended their logins. The teardown never
 runs `claude auth logout`: whether a logout ends only its own login or every login of the account
 is unproven, and a logout that ended the others would sign the user out elsewhere.
 
