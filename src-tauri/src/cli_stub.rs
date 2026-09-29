@@ -53,6 +53,7 @@ pub struct CliStub {
     name: String,
     copy: Option<(String, String)>,
     args_log: Option<(String, bool)>,
+    env_log: Option<(String, String)>,
     chatty_lines: usize,
     print_env: Option<String>,
     stdout: Option<String>,
@@ -80,6 +81,12 @@ impl CliStub {
     /// Write the received argv to `file` (relative to the stub's directory).
     pub fn log_args(mut self, file: &str, append: bool) -> Self {
         self.args_log = Some((file.to_string(), append));
+        self
+    }
+
+    /// Write the value of environment variable `name` to `file` (relative to the stub's directory).
+    pub fn log_env(mut self, name: &str, file: &str) -> Self {
+        self.env_log = Some((name.to_string(), file.to_string()));
         self
     }
 
@@ -178,6 +185,12 @@ impl CliStub {
                 windows_relative(file)
             ));
         }
+        if let Some((name, file)) = &self.env_log {
+            lines.push(format!(
+                "echo %{name}%> \"%~dp0{}\"",
+                windows_relative(file)
+            ));
+        }
         if self.chatty_lines > 0 {
             lines.push(format!(
                 "for /L %%i in (1,1,{}) do @(echo stdout-%%i-{CHATTY_PAYLOAD}& echo stderr-%%i-{CHATTY_PAYLOAD} 1>&2)",
@@ -215,6 +228,9 @@ impl CliStub {
         if let Some((file, append)) = &self.args_log {
             let redirect = if *append { ">>" } else { ">" };
             lines.push(format!("printf '%s\\n' \"$*\" {redirect} \"$here/{file}\""));
+        }
+        if let Some((name, file)) = &self.env_log {
+            lines.push(format!("printf '%s\\n' \"${name}\" > \"$here/{file}\""));
         }
         if self.chatty_lines > 0 {
             lines.push(format!(
