@@ -48,7 +48,7 @@ fn asked(harness: &Harness) -> Vec<std::path::PathBuf> {
 }
 
 /// The directory of the home `id` names, whichever profile names it.
-fn home_dir(harness: &Harness, id: &str) -> std::path::PathBuf {
+fn account_home(harness: &Harness, id: &str) -> std::path::PathBuf {
     super::super::homes::dir(harness.path(), id).unwrap()
 }
 
@@ -56,7 +56,7 @@ fn home_dir(harness: &Harness, id: &str) -> std::path::PathBuf {
 fn seeded_home(harness: &Harness, profile: usize, login: super::super::store::Login) -> String {
     let id = uuid::Uuid::new_v4().to_string();
     harness.seed(|db| db.profiles[profile].home = Some(id.clone()));
-    let dir = home_dir(harness, &id);
+    let dir = account_home(harness, &id);
     std::fs::create_dir_all(&dir).unwrap();
     harness.homes().logins.lock().unwrap().insert(dir, login);
     id
@@ -472,7 +472,7 @@ fn a_read_that_finds_the_home_already_named_moves_the_login_into_that_one() {
         .keys()
         .cloned()
         .collect();
-    assert_eq!(held, [home_dir(&harness, &other)]);
+    assert_eq!(held, [account_home(&harness, &other)]);
     assert_eq!(harness.in_home(&b), Some("b1".into()));
     assert_eq!(harness.in_vault(&b), None);
     assert_eq!(harness.home_of(&a), None);
