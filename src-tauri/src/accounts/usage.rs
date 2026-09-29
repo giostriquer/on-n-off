@@ -54,7 +54,8 @@ type Fetch<'a> = dyn Fn(&Profile, &dyn Fn() -> Result<Store, String>) -> FetchRe
 
 impl super::Accounts {
     /// Merges a fresh reading of every saved `provider` account but the one its CLI is signed in
-    /// with into `entries`, each fetched by `fetch`. Nothing is read on a device with no vault.
+    /// with into `entries`, each fetched by `fetch`, or read from its home when it keeps its login
+    /// in one. Nothing is read on a device with no vault.
     pub(super) fn refresh_usage(
         &self,
         provider: AgentId,

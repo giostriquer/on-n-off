@@ -243,8 +243,7 @@ const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ClaudeEndpoints<'a> {
     /// Where a stale access token is renewed, before anything is asked of the other two. A saved
-    /// profile's read asks only those two: a login on-n-off owns renews before it
-    /// (`accounts/usage.rs`), and one it does not own is never renewed.
+    /// profile's read asks only those two, and on-n-off renews no saved Claude login.
     pub(crate) token: &'a str,
     pub(crate) profile: &'a str,
     pub(crate) usage: &'a str,

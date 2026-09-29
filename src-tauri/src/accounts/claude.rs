@@ -74,8 +74,8 @@ impl super::Adapter for Claude {
         let credential = login
             .credential()
             .ok_or(crate::http::HttpError::Unauthorized)?;
-        // Not sent, as the signed-in read does not send an expired login. One on-n-off owns has
-        // renewed before its read (`accounts/usage.rs`), so this is one on-n-off does not renew.
+        // Not sent, as the signed-in read does not send an expired login, and on-n-off renews no
+        // saved Claude login.
         if login.renewal_due(now_ms) {
             return Err(crate::limits::SavedReadError::Expired);
         }
@@ -113,19 +113,22 @@ fn store_error(error: StoreError) -> String {
 }
 
 /// Claude Code's native store as the account switch uses it: the user's own, where the
-/// environment puts it ([`ClaudeNative::resolve`]), or an isolated sign-in's.
+/// environment puts it ([`ClaudeNative::resolve`]), an isolated sign-in's, or the one in a saved
+/// account's home.
 pub(super) struct ClaudeNative {
     config_home: PathBuf,
     /// The file holding the signed-in account record, `oauthAccount`.
     config_file: PathBuf,
-    /// `CLAUDE_CONFIG_DIR` chose the config home, or this is an isolated sign-in's.
+    /// `CLAUDE_CONFIG_DIR` chose the config home, or this is a private store: an isolated
+    /// sign-in's or a saved account's home.
     custom: bool,
     /// Whether the login may be in the Keychain; a disposable `ON_N_OFF_HOME` keeps file fixtures.
     use_keychain: bool,
     /// Where `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved Claude's login and locks; `None` keeps them
     /// in the config home, and keeps the variable away from a `claude` this store starts.
     secure_storage: Option<SecureStorage>,
-    /// A saved account's home, whose login on-n-off files in the home's own Keychain entry.
+    /// A saved account's home, whose login on-n-off files in the home's own Keychain entry on
+    /// macOS.
     in_home: bool,
 }
 

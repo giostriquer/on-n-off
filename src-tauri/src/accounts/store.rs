@@ -411,7 +411,8 @@ impl Database {
         });
         Ok(id)
     }
-    /// Gives profile `id`'s home up for teardown, once a new login replaces the one it keeps.
+    /// Gives profile `id`'s home up for teardown, once a new login replaces the one it keeps or the
+    /// profile is removed.
     pub fn retire_home(&mut self, id: &str) {
         let retired = self
             .profiles
