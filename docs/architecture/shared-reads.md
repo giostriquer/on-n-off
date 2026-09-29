@@ -5,8 +5,8 @@ doc-comment are authoritative.
 
 ## The problem
 
-An expensive read — spawning `codex app-server`, unlocking the Keychain, a GitHub GraphQL round
-trip — is made once per process and shared by every surface that wants it. But those surfaces also
+An expensive read — spawning `claude -p /usage` or `codex app-server`, unlocking the Keychain, a
+GitHub GraphQL round trip — is made once per process and shared by every surface that wants it. But those surfaces also
 each keep their **own copy** of the answer: the notch keeps one per cell so it can draw while a
 read is in flight, and each WebView keeps a TanStack Query cache. A copy cannot tell a cache it
 has already seen from one another surface has just replaced.

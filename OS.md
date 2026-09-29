@@ -52,8 +52,10 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
 - Restricted Windows sandboxes: Vite/esbuild can fail with `spawn EPERM`; rerun in an approved
   context, do not patch code around it.
 - macOS: the built `.app` launched with `open` has the Finder PATH — test CLI resolution that way.
-  Reading agent homes may prompt for Documents/Desktop access; `Limits` triggers a one-time Keychain
-  prompt for `/usr/bin/security`. Limit notifications use the native notification permission;
+  Reading agent homes may prompt for Documents/Desktop access; the account controls on `Limits`
+  trigger a one-time Keychain prompt for `/usr/bin/security` when they read Claude Code's login (the
+  Claude usage read itself is `claude -p /usage` and opens no credential). Limit notifications use
+  the native notification permission;
   the monitor detects sleep/wake from a wall-clock heartbeat because desktop Tauri does not emit
   `RunEvent::Resumed`.
 - Windows: native notifications must be tested from an installed build; a development build can use

@@ -40,8 +40,8 @@ flowchart TB
     subgraph outside["Outside the app"]
         homes[("Agent homes<br/>~/.claude ~/.codex …")]
         own[("~/.on-n-off<br/>settings · snapshots · caches")]
-        clis["Provider CLIs<br/>codex app-server · gh"]
-        net["api.anthropic · chatgpt.com<br/>api.github.com · LiteLLM"]
+        clis["Provider CLIs<br/>claude -p /usage · codex app-server · gh"]
+        net["chatgpt.com · api.github.com<br/>LiteLLM"]
     end
 
     notch["on-n-off-notch<br/><i>bundled SwiftUI helper, macOS only;<br/>Windows paints its own window</i>"]
@@ -72,8 +72,8 @@ Two things to hold onto:
 
 ## Reads, and why they are shared
 
-Almost every screen is a view over an expensive read: spawning `codex app-server`, unlocking the
-Keychain, a GraphQL round trip, or a scan of transcript files. Several surfaces want the same read
+Almost every screen is a view over an expensive read: spawning `claude -p /usage` or
+`codex app-server`, unlocking the Keychain, a GraphQL round trip, or a scan of transcript files. Several surfaces want the same read
 at the same time, so each such read is cached once per process and shared.
 
 ```mermaid
@@ -86,7 +86,7 @@ flowchart LR
     end
 
     cache["limits_refresh<br/><i>one read per provider,<br/>per poll interval</i>"]
-    provider["Keychain + HTTPS<br/>codex app-server"]
+    provider["claude -p /usage · codex app-server<br/>HTTPS · Keychain"]
 
     screen --> cache
     pop --> cache
@@ -123,36 +123,28 @@ refresh in the background. Config, plugins, MCP settings and sessions are preser
 
 ### Limits
 
-Each provider is read the way that provider intends, and active login renewal remains native-store-owned:
+Each provider is read the way that provider intends, and the signed-in login is renewed only by the
+provider's own client:
 
-- **Claude** — read the stored access token from the store Claude Code itself reads
-  (`accounts/claude_store.rs`: in the dirs Claude Code resolves from `CLAUDE_CONFIG_DIR` and
-  `CLAUDE_SECURESTORAGE_CONFIG_DIR`, its macOS Keychain item via `/usr/bin/security` when that
-  parses, else the storage dir's `.credentials.json`), verify it against `/api/oauth/profile`,
-  then read
-  `/api/oauth/usage?cedar_ember=1&skip_spend=1`. The query adds the saved rate-limit resets
-  (`cedar_ember`) to the same answer. It is optional: a refused query falls back to the plain read
-  rather than failing it, and a read that cannot tell keeps the remembered count. The resets are
-  reported, never spent: Claude Code's `/limit-reset` spends the signed-in account's.
+- **Claude** — run Claude Code's own usage report, `claude -p /usage --safe-mode` (with
+  `--no-session-persistence --output-format stream-json --verbose`), for the user's own config dir
+  as Claude Code resolves it from `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR`
+  (`limits/claude.rs`, `limits/claude_cli.rs`). Claude Code reads its own login, renews it when it
+  has to, and asks Anthropic's usage endpoint without a model turn; the read opens no Claude
+  credential, and on-n-off sends nothing to Anthropic. `--safe-mode` keeps the login but starts none of the
+  config dir's CLAUDE.md, skills, plugins, hooks, MCP servers or custom commands, which every poll
+  would otherwise start; a Claude Code too old to know the flag is not run at all, and the card asks
+  for an update. The card is the account the config dir's `.claude.json` `oauthAccount` names
+  before the read, which must still name it after, and its plan comes from that record. When there
+  is no report, `claude auth status --json`, which reads only what is stored, tells a signed-out
+  config dir from a report that could not be had.
 
-  That token lives eight hours and Claude Code renews it only while Claude Code is running, so
-  on-n-off — which runs continuously — renews it too rather than reporting an expired login at a
-  signed-in user. `accounts/claude_renew.rs` is the only place that redeems the refresh token,
-  and it does the same thing Claude Code does, through `accounts/claude_store.rs` for everything
-  about the store: the same refresh lock directories in the same order (`.oauth_refresh.lock`,
-  then the legacy lock beside the config dir's real path), kept fresh while held; the same
-  `.storage-write.lock` around the read and the write, taken by the one writer the account switch
-  uses too; the same grant against the login's own client id; the same stored shape; and a re-read
-  under the locks so a login another process just renewed is used rather than redeemed again.
-
-  The work is ordered around the redemption, because that is the point of no return: the issuer
-  rotates the refresh token, so from the reply until the store is written the only live credential
-  is a value on the stack. Everything that can fail on its own account — resolving the Keychain
-  entry's account, creating a private temporary beside the credentials file, refusing one that is
-  a link — happens *before* the grant, leaving one `security -U` or one synced rename after it. A refresh token the
-  issuer refuses is reported as needing a new sign-in, and not sent again while the store still
-  holds it; a renewal that succeeds and then cannot be stored says exactly that, with the reason,
-  because by then the old token is spent and only signing in again will clear it.
+  Because the read is Claude Code's, so is the renewal. The access token lives eight hours and
+  Claude Code renews it whenever it runs, which each poll does, under its own refresh locks.
+  on-n-off holds no Claude token, takes no refresh lock to renew and sends no grant; the one writer
+  it keeps in `accounts/claude_store.rs` serves the account switch and the saved accounts' homes.
+  Claude Code's report has no saved resets and no subscription status, so a Claude card shows
+  neither.
 - **Codex** — launch the official `codex app-server` and call `account/read` plus
   `account/rateLimits/read`. Codex owns its own login and refresh; on-n-off reads only
   `account_id` metadata from the app-server's confirmed home. The same read reports banked
@@ -164,16 +156,18 @@ Each provider is read the way that provider intends, and active login renewal re
   timed out may still have reached Codex; and the card reuses one idempotency key until Codex gives
   a definite answer, so a retry cannot spend a second reset.
 
-Saved profiles are read beside the signed-in account (`accounts/usage.rs`), each by its provider's
-reader, which the accounts adapter dispatches (`Adapter::read_usage`): Claude's is the signed-in
-read above (`limits/claude.rs`) with the profile's credential and expected identity; Codex's is the
-backend body app-server itself reads, `wham/usage`, asked over HTTP with the profile's access token
-(`limits/codex.rs`), since running app-server for a saved profile would write its credential to
-disk. Neither renews a login itself: a login on-n-off owns renews before its read, and one it does
-not own is never renewed. A saved read tells a refused login, one that now signs in as another
-account, an expired Claude login it does not own and a rate limit apart (`SavedReadError`), and the
-poll backs off accordingly. Every card a saved poll produces says so (`saved_profile`), which is how
-the UI knows a remembered reading from a saved profile read live.
+Saved profiles are read beside the signed-in account (`accounts/usage.rs`). A saved Claude account
+is read in its home ([accounts.md](accounts.md#homes)) by the same Claude Code report, expecting the
+profile's identity (`limits/claude_cli.rs`); a Claude login still in the vault, one the last read
+could not move into its home, is never sent. A saved Codex account is read by Codex's reader, which
+the accounts adapter dispatches (`Adapter::read_usage`): the backend body app-server itself reads,
+`wham/usage`, asked over HTTP with the profile's access token (`limits/codex.rs`), since running
+app-server for a saved profile would write its credential to disk. Neither renews a login itself:
+Claude Code renews a home's login, a Codex login on-n-off owns renews before its read, and one it
+does not own is never renewed. A saved read tells a refused login, one that now signs in as another
+account and a rate limit apart (`SavedReadError`), and the poll backs off accordingly. Every card a
+saved poll produces says so (`saved_profile`), which is how the UI knows a remembered reading from a
+saved profile read live.
 
 Because each CLI stores one login at a time, successful reads are remembered per account (numbers
 only, under `~/.on-n-off/limits/`) so an account the user has switched away from stays visible
@@ -344,11 +338,11 @@ the code today; a change that moves one updates its row.
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Provider.headline` |
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
-| Account details | `plan` and `subscription_status` on `Reading` |
+| Account details | `plan` on `Reading`; a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when it is neither `currentAccount` nor `savedProfile` (`presentLimitAccount`, `ui/src/features/limits/limitPresentation.ts`), and an archived one is listed apart |
 | Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list`; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects) |
-| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs` through its provider's Limits reader (`Adapter::read_usage`: `read_saved_claude` in `limits/claude.rs`, `read_saved_codex` in `limits/codex.rs`), and its card carries `saved_profile` |
+| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs`: a Claude profile's in its home by Claude Code's own report (`Home::read_usage`, `read_usage` in `limits/claude_cli.rs`), a Codex profile's through Codex's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`), and its card carries `saved_profile` |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |
 | Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |
 | Watermark | `Watermark` (`usage/history.rs`) |
