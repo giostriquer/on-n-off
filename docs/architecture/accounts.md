@@ -161,8 +161,8 @@ code asks that rather than which provider it has. An adapter:
 - reads a login through its typed view, `ClaudeLogin` or `CodexLogin` (`accounts::view`), so
   nothing else reads a login's JSON: identity and email, the credential generation's fingerprint
   and whether a saved login is due to renew. A view only reads; the bare credentials document
-  Claude's store holds, without its account record, gives its credential through
-  `ClaudeLogin::credential_in` instead. A `Login` keeps its stored shape, `{auth, account}`, so the vault, the
+  Claude's store holds, without its account record, is read directly once, by `ClaudeNative::read`,
+  which checks that it still holds an access token. A `Login` keeps its stored shape, `{auth, account}`, so the vault, the
   recovery journal and the renewal journal written by earlier versions still load, and
   `model.rs` keeps the one fingerprint layout every version has hashed. Whole documents are still
   written raw: Codex's `auth.json` verbatim, Claude's `claudeAiOauth` merged into its credentials

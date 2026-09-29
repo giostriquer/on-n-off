@@ -103,6 +103,22 @@ fn no_report_from_a_config_dir_still_signed_in_is_a_failed_read() {
     );
 }
 
+/// A report with no window Claude Code's reader knows is no reading: the card fails, and shows
+/// what it remembers, rather than an account with no windows.
+#[test]
+fn a_report_with_no_readable_window_is_a_failed_read() {
+    let output = r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"lunar","group":"lunar","percent":1}]}}}"#;
+    let (dir, cli) = home(&config("user", "team"), output, CliStub::new("claude"));
+
+    let card = signed_in(&dir, &cli);
+
+    assert_eq!(card.status, LimitsStatus::Failed);
+    assert_eq!(
+        card.message.as_deref(),
+        Some("Claude Code reported no usage.")
+    );
+}
+
 #[test]
 fn a_report_after_which_the_config_dir_names_another_account_is_not_shown() {
     let dir = tempfile::tempdir().unwrap();

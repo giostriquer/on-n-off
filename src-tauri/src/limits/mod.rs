@@ -331,8 +331,8 @@ pub(crate) enum SavedReadError {
     Http(HttpError),
     /// The login now signs in as a different account than the profile's.
     OtherAccount,
-    /// No reading could be had, for the reason the card shows as it is: an update the provider's
-    /// client needs, or a login that has not reached its home yet.
+    /// No reading could be had, for the reason the card shows as it is: the provider's client could
+    /// not report or reported nothing, needs an update, or the login has not reached its home yet.
     Unavailable(&'static str),
 }
 
