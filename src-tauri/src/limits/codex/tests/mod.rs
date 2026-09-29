@@ -239,12 +239,13 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
              "grantedAt": 1787000000, "expiresAt": 1790000000, "title": "Full reset", "description": null},
             {"id": "spent", "resetType": "codexRateLimits", "status": "redeemed",
              "grantedAt": 1786000000, "expiresAt": 1788000000, "title": null, "description": null},
-            {"id": "sooner", "resetType": "codexRateLimits", "status": "available",
-             "grantedAt": 1787500000, "expiresAt": 1789000000, "title": null, "description": null},
             {"id": "forever", "resetType": "unknown", "status": "available",
              "grantedAt": 1787500000, "expiresAt": null, "title": null, "description": null},
             {"id": "garbled", "resetType": "codexRateLimits", "status": "available",
-             "grantedAt": 1787500000, "expiresAt": i64::MIN, "title": null, "description": null}
+             "grantedAt": 1787500000, "expiresAt": i64::MIN, "title": null, "description": null},
+            // Listed after more than the count of others: only a sort before the cut keeps it.
+            {"id": "sooner", "resetType": "codexRateLimits", "status": "available",
+             "grantedAt": 1787500000, "expiresAt": 1789000000, "title": null, "description": null}
         ]}
     }))
     .unwrap();
