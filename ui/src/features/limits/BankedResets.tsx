@@ -42,6 +42,7 @@ export function BankedResetsRow({ banked, now }: { banked: CardFigures["bankedRe
   const resets = resetCredits.resets ?? [];
   const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
   const next = expiry(resetCredits.nextExpiresAt, now);
+  // Only Codex lists its resets and only Claude's card has a hint, so a list never hides one.
   const note = resets.length > 1
     ? { label: "Each banked reset", lines: resets.map(reset => describeReset(reset, now)) }
     : [next && `${lead} ${next}`, hint].filter(Boolean).join(" · ");
