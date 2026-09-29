@@ -236,14 +236,28 @@ desktop sessions are not promised immediate adoption.
 
 Saved credentials and interrupted-switch recovery live in an encrypted vault under
 `~/.on-n-off/accounts/`; the vault key is in macOS Keychain or Windows Credential Manager. No
-plaintext fallback exists. Active native credentials are authoritative, and inactive profiles are
-not independently renewed after native activation. Saved-account usage polling reads both Claude
-and Codex with access tokens, each through its provider's Limits reader, which the accounts adapter
-dispatches (`Adapter::read_usage`); only never-activated isolated sign-ins own automatic vault
-renewal. A saved Claude profile is the signed-in Claude read with the profile's credential,
-expecting the profile's user and organization before requesting usage; a login past its
-`expiresAt` that on-n-off does not own sends no request and its card says it expired, until the next
-capture of the native login brings the renewal. Saved Codex profiles use the account-scoped ChatGPT
+plaintext fallback exists for the vault. Active native credentials are authoritative, and inactive
+profiles are not independently renewed by on-n-off after native activation. A saved Claude account
+that is not the signed-in one keeps its login in its own home, a persistent Claude config dir under
+`~/.on-n-off/accounts/homes/` (`accounts/homes.rs`, `accounts/claude/home.rs`; see the Homes
+section of `docs/architecture/accounts.md`): the scoped Keychain entry `Claude Code-credentials-<hash
+of that dir>` on macOS, created by on-n-off's first write there through `/usr/bin/security`, and the
+home's `.credentials.json` on Windows, as Claude Code keeps any login there. Before every read of
+saved accounts, such a login moves from the vault into its home; a switch moves it back out, and
+empties the home, before publishing it. Its usage is Claude Code's own report in the home
+(`limits/claude_cli.rs`, below), and Claude Code renews the login there itself, so on-n-off sends no
+Claude grant for a saved account. When Claude Code reports nothing, its `claude auth status --json`
+in the home tells a home signed out of its login (`loggedIn: false`, the card asking for a new
+sign-in) from a report that could not be had. A Claude login still in the vault, one whose move
+failed, is read with its access token and never renewed: past its `expiresAt` it sends no request
+and its card says it expired. **verified** (2026-09-29, Claude Code 2.1.284, throwaway sign-ins):
+Claude Code reads a home on-n-off built (only `oauthAccount` in `.claude.json`, the login filed by
+`security`) with no onboarding, and a home emptied to Claude Code's signed-out shape answers with no
+report. Claude Code's own logout deletes the home's Keychain entry; whether it also ends the
+account's other logins is unproven, so removing a home never logs out. Saved-account usage polling
+reads Codex with access tokens through its Limits reader, which the accounts adapter dispatches
+(`Adapter::read_usage`); only never-activated isolated Codex sign-ins own automatic vault renewal
+(`Adapter::renews_privately`). Saved Codex profiles use the account-scoped ChatGPT
 usage endpoint (`wham/usage`, read beside app-server's parser in `limits/codex.rs`) separately from
 the native app-server reader, which is never started for a saved profile; a body without an
 `account_id` is accepted. A login that now signs in as a different account renews nothing and waits
