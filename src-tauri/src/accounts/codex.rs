@@ -51,6 +51,10 @@ impl super::Adapter for Codex {
         login.renewed(&reply, now_ms)
     }
 
+    fn homes(&self) -> Option<super::HomeAt> {
+        None
+    }
+
     /// Read whatever the access token's expiry: Codex's backend says whether it still takes it.
     fn read_usage(
         &self,

@@ -127,8 +127,8 @@ fn saved_claude_reads_the_accounts_saved_resets_from_the_same_request() {
     );
 }
 
-/// On this path a rejected login renews the saved profile and spends its refresh token, so a
-/// refusal of the optional reset query must never be read as one.
+/// On this path a rejected login is not read again until a new login replaces it, so a refusal
+/// of the optional reset query must never be read as one.
 #[test]
 fn saved_claude_falls_back_to_the_plain_read_when_the_reset_query_is_refused() {
     let (profile, p) = serve_once(

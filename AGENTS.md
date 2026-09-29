@@ -119,11 +119,16 @@ user data.
 - `accounts/` owns opt-in automatic remembering, the saved-profile vault and explicit native login
   changes. Automatic remembering verifies native logins and never activates a profile. Its encrypted
   vault stores renewable logins; only the small vault key enters the OS credential store. No
-  secret enters DTOs, ordinary config backups, logs or plaintext fallback storage. The active
-  native login remains authoritative. Saved native shadows never refresh independently. Never-activated isolated sign-ins can renew
+  secret enters DTOs, ordinary config backups, logs or plaintext fallback storage. The one
+  exception is a saved Claude account's home on Windows, whose login is the `.credentials.json`
+  Claude Code keeps any login in there (`accounts/homes.rs`); on macOS it is the home's own
+  Keychain entry. The active native login remains authoritative. Saved native shadows never
+  refresh independently; a saved Claude login waits in its home, where Claude Code renews it, and
+  on-n-off sends no grant for it. Never-activated isolated Codex sign-ins can renew
   in the encrypted vault under the saved-account renewal journal. Switching
   captures the latest outgoing native credential before replacement; logout is a separate action
-  that can revoke it. Claude grants live only in `accounts/claude_renew.rs`. Native renewal runs after expiry under
+  that can revoke it. Claude grants live only in `accounts/claude_renew.rs`, and only the
+  signed-in login's is ever sent. Native renewal runs after expiry under
   native refresh locks; private saved renewal requires recorded ownership and its encrypted journal. Account identity
   configuration writes still go through `ConfigIo`, with the protected account journal as their
   backup participant. See [account ownership](docs/architecture/accounts.md).

@@ -6,10 +6,12 @@
 //! `usage_report.rate_limits.limits[]` has the shape `/api/oauth/usage` answers with, so
 //! [`parse_claude`] reads it. Whose answer it is comes from the config dir's `.claude.json`, which
 //! Claude Code writes at sign-in and may rewrite while it runs: it must name the expected account
-//! before Claude Code starts and still name it once Claude Code has answered.
+//! before Claude Code starts and still name it once Claude Code has answered. A config dir signed
+//! out of Claude answers with no report; Claude Code's own `auth status` then tells that apart from
+//! a report that could not be had.
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -21,6 +23,7 @@ use crate::accounts::claude_store::ENV_CREDENTIALS;
 use crate::accounts::model::Identity;
 use crate::dto::{LimitWindowDto, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
+use crate::process::{wait_with_deadline, CommandOutcome};
 
 /// Claude Code's own usage report, printed as structured events, and no session left behind.
 const USAGE_ARGS: [&str; 6] = [
@@ -36,27 +39,36 @@ const USAGE_ARGS: [&str; 6] = [
 /// middle of a renewal could lose the refresh token it was just issued.
 const DEADLINE: Duration = Duration::from_secs(90);
 
-/// The usage of `identity`, reported by `command` (a `claude` for the config dir whose
+/// `auth status` only reads what is stored, and renews nothing.
+const STATUS_DEADLINE: Duration = Duration::from_secs(30);
+
+/// The usage of `identity`, reported by a `claude` from `claude` (one for the config dir whose
 /// `.claude.json` is `config_file`) as its card.
 pub(crate) fn read_usage(
-    command: Command,
+    claude: &dyn Fn() -> Command,
     config_file: &Path,
     identity: &Identity,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    read_usage_within(command, config_file, identity, DEADLINE)
+    read_usage_within(claude, config_file, identity, DEADLINE)
 }
 
 fn read_usage_within(
-    command: Command,
+    claude: &dyn Fn() -> Command,
     config_file: &Path,
     identity: &Identity,
     deadline: Duration,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     config_account(config_file, identity)?;
-    let stdout = crate::accounts::native::run(&mut prepared(command), deadline)
+    let stdout = crate::accounts::native::run(&mut prepared(claude(), &USAGE_ARGS), deadline)
         .map_err(|_| HttpError::Network("Claude Code could not report usage.".into()))?;
-    let windows = report_windows(&stdout)
-        .ok_or_else(|| HttpError::Parse("Claude Code reported no usage.".into()))?;
+    let Some(windows) = report_windows(&stdout) else {
+        return Err(if signed_out(claude) {
+            HttpError::Unauthorized
+        } else {
+            HttpError::Parse("Claude Code reported no usage.".into())
+        }
+        .into());
+    };
     let account = config_account(config_file, identity)?;
     saved_card(
         identity,
@@ -71,14 +83,36 @@ fn read_usage_within(
     )
 }
 
-/// `command` as the usage read runs it.
-fn prepared(mut command: Command) -> Command {
-    command.args(USAGE_ARGS).env("DISABLE_AUTOUPDATER", "1");
+/// `command` as the read runs it, with `args`.
+fn prepared(mut command: Command, args: &[&str]) -> Command {
+    command.args(args).env("DISABLE_AUTOUPDATER", "1");
     // Claude Code would read as any of these credentials' account, not the config dir's.
     for name in ENV_CREDENTIALS {
         command.env_remove(name);
     }
     command
+}
+
+/// Whether Claude Code says the config dir is signed out. Anything else it says, or saying nothing,
+/// is no reason to ask for a new sign-in. Claude Code answers a signed-out `auth status` with exit
+/// status 1, the answer on stdout all the same, so the status is read whatever the exit.
+fn signed_out(claude: &dyn Fn() -> Command) -> bool {
+    let mut command = prepared(claude(), &["auth", "status", "--json"]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let Ok(child) = command.spawn() else {
+        return false;
+    };
+    let Ok(CommandOutcome::Exited { stdout, .. }) = wait_with_deadline(child, STATUS_DEADLINE)
+    else {
+        return false;
+    };
+    serde_json::from_str::<Value>(&stdout)
+        .ok()
+        .and_then(|status| status.get("loggedIn")?.as_bool())
+        == Some(false)
 }
 
 /// The account `config_file` names, when it is `identity`'s.

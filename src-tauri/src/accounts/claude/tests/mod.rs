@@ -14,6 +14,7 @@ fn claude(root: &Path) -> ClaudeNative {
         custom: false,
         use_keychain: false,
         secure_storage: None,
+        in_home: false,
     }
 }
 /// An environment holding exactly `vars`, for `resolve_from`.
@@ -147,6 +148,7 @@ fn a_claude_logins_fingerprint_is_its_token_generation_alone() {
 }
 
 mod first_usage;
+mod home;
 #[cfg(target_os = "macos")]
 mod keychain;
 mod native_store;

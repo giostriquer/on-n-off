@@ -55,8 +55,14 @@ Where a provider's own CLI keeps its signed-in login: a Keychain item or a crede
 _Avoid_: credential source
 
 **Saved profile**:
-A login on-n-off keeps encrypted for a provider account, so the user can switch back to it.
+A login on-n-off keeps for a provider account, so the user can switch back to it: in the encrypted
+vault, or in the account's home.
 _Avoid_: saved account, vault entry
+
+**Account home**:
+A private store of the provider's own client, kept for one saved profile, where its one login waits
+while it is not the signed-in one and where that client renews it. Only Claude has them.
+_Avoid_: shadow, isolated home (that is a sign-in's, removed once it is done)
 
 **Account change**:
 An action that changes which logins are saved or which one the provider's CLI uses: save, remove,

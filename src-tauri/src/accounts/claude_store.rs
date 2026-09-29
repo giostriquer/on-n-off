@@ -570,6 +570,32 @@ impl<'a> PendingWrite<'a> {
             held: self.held,
         })
     }
+
+    /// `prove`, for the home on-n-off keeps for a saved account (`accounts::homes`). On macOS its
+    /// login goes to the home's own scoped Keychain entry, which this write creates when the home
+    /// has none, filed under Claude Code's own account name. It never goes to a plaintext
+    /// credentials file, which Claude Code would read as the login just the same. A home that
+    /// already keeps one in a file is refused rather than written beside it.
+    pub(crate) fn prove_in_home(self) -> Result<CredentialWrite<'a>, BeginError> {
+        #[cfg(target_os = "macos")]
+        if let Ok(ClaudeStore::File(path)) = &self.target {
+            if fs::symlink_metadata(path).is_ok() {
+                return Err(BeginError::Unavailable(
+                    "This account's saved login is in a file, not the Keychain. Remove the account and sign in again."
+                        .into(),
+                ));
+            }
+            return Ok(CredentialWrite {
+                target: WriteTarget::Keychain {
+                    service: self.dir.service(),
+                    account: own_account(),
+                },
+                storage: self.storage,
+                held: self.held,
+            });
+        }
+        self.prove()
+    }
 }
 
 impl CredentialWrite<'_> {

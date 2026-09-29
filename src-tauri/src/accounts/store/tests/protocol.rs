@@ -369,3 +369,62 @@ fn a_gate_applies_the_rule_without_creating_or_writing_a_vault() {
         "the gate releases the lease"
     );
 }
+
+/// A reading made from an account's home publishes only while the vault still says the account's
+/// login is in that home: not after another home, a login back in the vault, an account change or
+/// a pending recovery.
+#[test]
+fn a_reading_from_a_home_holds_only_while_the_account_keeps_its_login_there() {
+    let homed = |home: &Path| {
+        let store = open(home);
+        let mut db = store.load().unwrap();
+        db.profiles[0].home = Some("home-1".into());
+        db.profiles[0].login = None;
+        store.persist(&db).unwrap();
+        drop(store);
+        let db = loaded(home);
+        db.ticket(Guard::SignIn)
+            .unwrap()
+            .holding_home(&db.profiles[0])
+            .unwrap()
+    };
+    let vouches = |home: &Path, ticket: &Ticket| open(home).recheck(ticket).is_ok();
+    type Change = (&'static str, fn(&Path));
+    let changed: [Change; 4] = [
+        ("another home", |home| {
+            let store = open(home);
+            let mut db = store.load().unwrap();
+            db.profiles[0].home = Some("home-2".into());
+            store.persist(&db).unwrap();
+        }),
+        ("a login back in the vault", |home| {
+            let store = open(home);
+            let mut db = store.load().unwrap();
+            db.profiles[0].login = Some(login("a2"));
+            store.persist(&db).unwrap();
+        }),
+        ("an account change", |home| {
+            open(home).change(ChangeKind::Account, |_| Ok(())).unwrap();
+        }),
+        ("a pending recovery", interrupt),
+    ];
+    for (what, change) in changed {
+        let home = seeded("a1");
+        let ticket = homed(home.path());
+        assert!(vouches(home.path(), &ticket), "before {what}");
+
+        change(home.path());
+
+        assert!(!vouches(home.path(), &ticket), "after {what}");
+    }
+}
+
+#[test]
+fn a_profile_without_a_home_has_no_reading_from_one() {
+    let home = seeded("a1");
+    let db = loaded(home.path());
+
+    let ticket = db.ticket(Guard::SignIn).unwrap();
+
+    assert!(ticket.holding_home(&db.profiles[0]).is_none());
+}

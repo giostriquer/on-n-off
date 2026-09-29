@@ -16,6 +16,7 @@ fn account_actions_map_to_their_activation() {
 
 mod archiving;
 mod fixture;
+mod homes;
 mod listing;
 mod profiles;
 mod remembering;
