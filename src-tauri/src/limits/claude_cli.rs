@@ -6,7 +6,8 @@
 //!
 //! The user's own config dir has their hooks, plugins, MCP servers and CLAUDE.md, which every poll
 //! would otherwise start, so each read runs with `--safe-mode`, which leaves them all out and keeps
-//! the login. A Claude Code too old to know the flag is not asked at all.
+//! the login. A Claude Code too old to know the flag refuses it, and is never run again without it:
+//! its card asks for an update instead.
 //!
 //! The answer is the assistant message of `--output-format stream-json`, whose
 //! `usage_report.rate_limits.limits[]` has the shape `/api/oauth/usage` answers with, so

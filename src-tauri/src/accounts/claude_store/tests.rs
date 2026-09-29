@@ -227,7 +227,7 @@ fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
     assert!(!storage_write.exists());
 }
 
-/// The renewed login lands in a file only this user can read.
+/// A written login lands in a file only this user can read.
 #[test]
 fn the_credentials_file_is_written_private() {
     let home = scratch_dir("renew-file");
@@ -308,7 +308,7 @@ fn a_lock_left_behind_by_a_dead_process_is_broken_once_it_goes_stale() {
 }
 
 /// The refresh lock is taken first. When the legacy lock beside the config home is held, the
-/// renewal yields and gives back the one it had already taken.
+/// account change yields and gives back the one it had already taken.
 #[test]
 fn a_held_legacy_lock_yields_and_releases_the_refresh_lock_already_taken() {
     let home = scratch_dir("renew-legacy-held");
@@ -336,8 +336,9 @@ fn fresh(path: &Path) -> bool {
         .is_ok_and(|at| at.elapsed().unwrap_or_default() < Duration::from_secs(60))
 }
 
-/// A renewal can hold the refresh locks past Claude Code's minute: the Keychain prompt alone may
-/// take ninety seconds. Kept fresh while held, the locks are never judged abandoned under it.
+/// An account change can hold the refresh locks past Claude Code's minute: the Keychain prompt
+/// alone may take ninety seconds. Kept fresh while held, the locks are never judged abandoned under
+/// it.
 #[test]
 fn the_refresh_locks_are_kept_fresh_while_held() {
     let home = scratch_dir("renew-heartbeat");

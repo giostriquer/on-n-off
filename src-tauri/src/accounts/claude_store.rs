@@ -29,7 +29,7 @@ use serde_json::Value;
 pub(crate) type KeychainProbe = Result<Option<String>, String>;
 
 /// The name of Claude Code's Keychain entry for its default config dir. Read and write share it: a
-/// second copy that drifted would mean writing a renewed login to an entry nothing reads.
+/// second copy that drifted would mean writing a login to an entry nothing reads.
 ///
 /// Not gated to macOS: [`StorageDir::service`] names the entry on every platform, and on Windows
 /// a write to it is refused before anything is attempted, by `write_account`'s stub.
@@ -392,8 +392,7 @@ fn write_account(service: &str) -> Result<String, String> {
     keychain_account(service)?.ok_or_else(|| "The Claude Code Keychain entry disappeared.".into())
 }
 
-/// Mirrors `keychain_probe`'s stub: these platforms have no such entry, and the file store is the
-/// one their read will have chosen.
+/// These platforms have no such entry, and the file store is the one their read will have chosen.
 #[cfg(not(target_os = "macos"))]
 fn write_account(_service: &str) -> Result<String, String> {
     Err("this platform has no Claude Code Keychain entry".to_string())
@@ -490,10 +489,9 @@ pub(crate) fn begin<'a>(
 }
 
 impl<'a> PendingWrite<'a> {
-    /// Prove the write, before anything is written or redeemed. Refused when the Keychain could
-    /// not be read, since which store Claude Code reads next is then unknown, and when the
-    /// credentials file is a link: replacing it would cut the link and leave the login where
-    /// Claude Code no longer looks.
+    /// Prove the write, before anything is written. Refused when the Keychain could not be read,
+    /// since which store Claude Code reads next is then unknown, and when the credentials file is a
+    /// link: replacing it would cut the link and leave the login where Claude Code no longer looks.
     pub(crate) fn prove(self) -> Result<CredentialWrite<'a>, BeginError> {
         let store = self.target.map_err(BeginError::Unavailable)?;
         let target = match store {
@@ -511,8 +509,8 @@ impl<'a> PendingWrite<'a> {
                     ));
                 }
                 // Created now, private and beside the file, so a directory that will not take it
-                // says so before anything is written, or redeemed. Named for what it is, so one
-                // left behind by a kill between write and rename can be told apart.
+                // says so before anything is written. Named for what it is, so one left behind by
+                // a kill between write and rename can be told apart.
                 let temporary = tempfile::Builder::new()
                     .prefix(".credentials.json.on-n-off.")
                     .tempfile_in(&self.dir.path)

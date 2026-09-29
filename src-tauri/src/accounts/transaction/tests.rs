@@ -438,10 +438,9 @@ fn reads_the_published_login_back_under_the_native_locks() {
     assert_eq!(native.readback_locked.get(), Some(true));
 }
 
-/// Verification renews an expired Claude login, and the renewal takes the native locks itself: run
-/// under them, it would find them busy and fail the account change, while Claude Code waited on
-/// them for as long as verification took. So neither activation nor recovery verifies while it
-/// holds them.
+/// Verification asks the provider's own client, which takes the native locks itself when it renews
+/// the login: run under them, it would wait on on-n-off while on-n-off waited on it. So neither
+/// activation nor recovery verifies while it holds them.
 #[test]
 fn verification_never_runs_under_the_native_locks() {
     let (mut db, native, _, b) = running(Client::default());

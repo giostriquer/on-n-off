@@ -77,7 +77,7 @@ fn isolated_claude_sign_in_keeps_the_os_home_for_keychain_lookup() {
     assert_ne!(native.service(), "Claude Code-credentials");
 }
 
-/// A signed-in store under `root` naming `email` in `org`, and a stand-in `claude` whose
+/// A signed-in store under `root` naming you@example.com in `org-a`, and a stand-in `claude` whose
 /// `auth status` prints `status` and exits with `exit`.
 fn verified(root: &Path, status: &str, exit: i32) -> (ClaudeNative, PathBuf) {
     let native = claude(root);
@@ -591,8 +591,8 @@ fn a_file_backed_claude_command_gets_a_disposable_os_home() {
     assert_eq!(env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR"), Some(&None));
 }
 
-/// A store `CLAUDE_CONFIG_DIR` chose hands that dir to the `claude` it starts. Only on macOS does it
-/// keep the OS home, where the login Keychain is found through it.
+/// A store `CLAUDE_CONFIG_DIR` chose hands that dir to the `claude` it starts, and keeps the user's
+/// own OS home on every platform: it is the user's own store, whose usage read runs there.
 #[test]
 fn a_claude_command_for_a_chosen_config_dir_is_handed_that_dir() {
     let root = tempfile::tempdir().unwrap();
@@ -604,8 +604,18 @@ fn a_claude_command_for_a_chosen_config_dir_is_handed_that_dir() {
         env.get("CLAUDE_CONFIG_DIR"),
         Some(&Some(chosen.clone().into_os_string()))
     );
-    let home =
-        (!cfg!(target_os = "macos")).then(|| Some(chosen.parent().unwrap().as_os_str().to_owned()));
+    assert_eq!(env.get("HOME"), None);
+    assert_eq!(env.get("USERPROFILE"), None);
+}
+
+/// A private store, an isolated sign-in's or a saved account's home, is handed a disposable OS home
+/// off macOS; on macOS it keeps the OS home, where the login Keychain is found through it.
+#[test]
+fn a_claude_command_for_a_private_store_is_handed_its_own_os_home_off_macos() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ClaudeNative::home(root.path());
+    let env = command_env(&store.command());
+    let home = (!cfg!(target_os = "macos")).then(|| Some(root.path().as_os_str().to_owned()));
     assert_eq!(env.get("HOME").cloned(), home);
 }
 

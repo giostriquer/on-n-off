@@ -588,7 +588,7 @@ impl Store {
     }
 
     /// Refuses `kind` now if its rule would, for an operation about to do native work that a
-    /// refused change must never do: verifying a login, which for Claude may renew and rewrite it.
+    /// refused change must never do: verifying a login, which for Codex may renew and rewrite it.
     /// It creates no vault and writes nothing; `change` gates again under its own lease. An
     /// explicit action may retry a vault unlock the OS refused, so this is not `open_existing`.
     pub fn gate(home: &std::path::Path, kind: &ChangeKind<'_>) -> Result<(), String> {

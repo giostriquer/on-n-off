@@ -124,9 +124,7 @@ pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpErr
 ///
 /// The one thing that separates this from `post_json` is that it sends no `Authorization` header:
 /// a grant authenticates by its own contents, and the credential being replaced is exactly the one
-/// the endpoint would refuse. Callers lean on the status taxonomy more than elsewhere — a token
-/// issuer answers 400 to refuse the grant itself, and telling that apart from a transport failure
-/// decides whether the user has to sign in again.
+/// the endpoint would refuse.
 pub fn post_grant(url: &str, body: &Value) -> Result<Value, HttpError> {
     let payload =
         serde_json::to_string(body).map_err(|error| HttpError::Parse(error.to_string()))?;

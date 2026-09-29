@@ -112,7 +112,7 @@ pub enum SubscriptionNote {
 }
 
 /// Banked rate-limit resets: one-time resets saved to the account until used or expired. Codex's
-/// can be spent from on-n-off; Claude's are only reported, and spent with Claude Code's `/limit-reset`.
+/// can be spent from on-n-off.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsResetCreditsDto {
