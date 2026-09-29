@@ -587,6 +587,7 @@ impl Accounts {
                         forgotten.extend(profile.home.take());
                     }
                 }
+                db.retired_homes.extend(forgotten.iter().cloned());
                 Ok(forgotten)
             },
             |forgotten, _, _| {
@@ -600,7 +601,8 @@ impl Accounts {
                 Ok((forgotten, result))
             },
         )??;
-        // Torn down now: left for a read, a home would be taken back by the account it signs in as.
+        // Torn down now, or, when its client holds it, by a later read, which the retired list keeps
+        // from handing it back.
         if let Some(home) = self.account_homes(provider) {
             for id in &forgotten {
                 let _ = homes::tear_down(id, &home);

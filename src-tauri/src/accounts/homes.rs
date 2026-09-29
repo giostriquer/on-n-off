@@ -18,13 +18,14 @@
 //! away from the account or a save of it, from the native store, which is authoritative: it is the
 //! newer, and it is the one that stays.
 //!
-//! A home an account is signed out of goes then and there. One no profile names, because its
+//! A home an account is signed out of goes then and there, or at the next read if its client holds
+//! it then; the vault lists it as retired until it is gone. One no profile names, because its
 //! account was removed or signed in again, goes at the next read. Its id is recorded in the vault
 //! before anything is written there, so a home found on disk before the vault is read and not named
 //! in it is one nothing will use again, with one exception: a version before homes rewrites the
 //! vault without the field that names them, leaving an account with no login anywhere but its
 //! home. That home is taken back by the account its login signs in as, if that account still has no
-//! login of its own.
+//! login of its own and the home is not a retired one.
 use super::{
     model::Identity,
     store::{Database, Guard, Login, Profile, Store, Ticket},
@@ -136,8 +137,13 @@ pub(super) fn settle(
         .iter()
         .filter(|id| !db.profiles.iter().any(|p| p.home.as_ref() == Some(*id)))
     {
-        let _ = take_back_or_tear_down(id, &db, &ticket, open, home);
+        let _ = if db.retired_homes.contains(id) {
+            tear_down(id, home)
+        } else {
+            take_back_or_tear_down(id, &db, &ticket, open, home)
+        };
     }
+    let _ = forget_retired(root_home, &db, &ticket, open);
     let archived = crate::limits::archived(root_home, provider);
     for profile in db.profiles.iter().filter(|p| {
         p.identity.provider == provider
@@ -253,6 +259,23 @@ fn take_back_or_tear_down(
             return Err("The account changed while its home was taken back.".into());
         }
         target.home = Some(id.to_string());
+        Ok(())
+    })
+}
+
+/// Drops from the vault's retired homes every one no longer on disk.
+fn forget_retired(
+    root_home: &Path,
+    db: &Database,
+    ticket: &Ticket,
+    open: &dyn Fn() -> Result<Store, String>,
+) -> Result<(), String> {
+    let gone = |id: &String| dir(root_home, id).map_or(true, |dir| !dir.exists());
+    if !db.retired_homes.iter().any(gone) {
+        return Ok(());
+    }
+    open()?.publish(ticket, |db| {
+        db.retired_homes.retain(|id| !gone(id));
         Ok(())
     })
 }

@@ -84,8 +84,9 @@ config dir>`, created by the first write under Claude Code's own account name
 (`PendingWrite::prove_in_home`); a home that keeps a login in a credentials file takes no new one. On
 Windows it is the home's `.credentials.json`, the file Claude Code keeps any login in there.
 
-Sign out tears down the home of every saved workspace of the signed-out user then and there. A
-new sign-in (Add or Sign in again) sets the profile's home aside, and Remove takes the profile with
+Sign out tears down the home of every saved workspace of the signed-out user then and there; one
+whose client holds it then stays on the vault's list of retired homes, and a later read tears it
+down and takes it off the list. A new sign-in (Add or Sign in again) sets the profile's home aside, and Remove takes the profile with
 it; a home no profile names then goes at the next read. Every read lists the homes on disk before
 it reads the vault, and tears down each one no profile names, under the home's own Claude Code
 locks, its Keychain entry first, then the directory. A home's id is recorded in the vault before
@@ -97,8 +98,9 @@ not know is skipped, but its next write of the vault drops the field that names 
 writes are routine (remembering a renewed native login is one). That leaves a homed account with
 no login anywhere but its home. So the read first looks at what an unnamed home holds: a login
 that signs in as a saved account with neither a login nor a home is that account's only one, and
-the account takes the home back; every other home is torn down. Sign out tears its homes down at
-once for this reason, since left for the read, they would be taken back. The teardown never runs
+the account takes the home back; every other home is torn down. A retired home is never taken
+back, which is why Sign out lists what it sets aside; a home whose login cannot be read right now
+is left for a later read, since it may be the account's only login. The teardown never runs
 `claude auth logout`: whether a logout ends only its own login or every login of the account is
 unproven, and a logout that ended the others would sign the user out elsewhere.
 

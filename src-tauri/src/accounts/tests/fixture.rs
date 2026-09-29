@@ -114,6 +114,8 @@ pub(super) struct Homes {
     pub drops_writes: Mutex<bool>,
     /// Homes that cannot be removed.
     pub undeletable: Mutex<Vec<PathBuf>>,
+    /// Homes a read of fails, as a Keychain that cannot be read right now.
+    pub unreadable: Mutex<Vec<PathBuf>>,
     /// Which homes were read from, emptied and deleted, in order.
     pub read: Mutex<Vec<PathBuf>>,
     pub emptied: Mutex<Vec<PathBuf>>,
@@ -144,6 +146,9 @@ impl Home for FakeHome {
         Ok(Box::new(()))
     }
     fn read(&self) -> Result<Option<Login>, String> {
+        if self.0.unreadable.lock().unwrap().contains(&self.1) {
+            return Err("The home's login could not be read.".into());
+        }
         Ok(self.0.logins.lock().unwrap().get(&self.1).cloned())
     }
     fn identify(&self, login: &Login) -> Result<Identity, String> {

@@ -50,6 +50,10 @@ pub struct Database {
     /// a metadata edit waits for.
     #[serde(default)]
     recovery: Option<Recovery>,
+    /// Homes Sign out set aside and has not yet seen torn down: a read tears them down and never
+    /// hands one back to the account it signs in as.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retired_homes: Vec<String>,
 }
 
 /// Refused while an interrupted switch awaits recovery.

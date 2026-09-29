@@ -345,6 +345,32 @@ fn a_home_an_older_version_forgot_is_taken_back_at_the_next_read() {
         && card.account.as_ref().map(|a| a.id.as_str()) == Some(key("b").as_str())));
 }
 
+/// A forgotten home that cannot be read right now may hold the account's only login: it waits.
+#[test]
+fn a_forgotten_home_that_cannot_be_read_is_left_for_a_later_read() {
+    let harness = Harness::new().with_homes();
+    let (_, b) = two_accounts(&harness);
+    read(&harness);
+    let home = harness.home_of(&b).unwrap();
+    harness.seed(|db| db.profiles[1].home = None);
+    harness
+        .homes()
+        .unreadable
+        .lock()
+        .unwrap()
+        .push(home.clone());
+
+    read(&harness);
+
+    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert!(home.exists());
+    assert_eq!(harness.home_of(&b), None);
+    harness.homes().unreadable.lock().unwrap().clear();
+    read(&harness);
+    assert_eq!(harness.home_of(&b), Some(home));
+    assert_eq!(harness.in_home(&b), Some("b1".into()));
+}
+
 /// Only the account the login signs in as takes a forgotten home back, and only while it has no
 /// login of its own anywhere.
 #[test]
@@ -510,6 +536,37 @@ fn signing_out_forgets_the_users_saved_logins_in_their_homes_too() {
         Some("b1".into()),
         "another user's home went"
     );
+}
+
+/// A home sign-out could not tear down, because its client held it, goes at a later read: the
+/// signed-out account never takes it back.
+#[test]
+fn a_home_sign_out_could_not_tear_down_goes_at_a_later_read() {
+    let harness = Harness::new().with_homes();
+    two_accounts(&harness);
+    let elsewhere = harness.saved(
+        identity(AgentId::Claude, "a", "elsewhere"),
+        claude_in("a", "elsewhere", "e1"),
+    );
+    read(&harness);
+    let home = harness.home_of(&elsewhere).unwrap();
+    harness.homes().busy.lock().unwrap().push(home.clone());
+
+    harness.accounts().sign_out(AgentId::Claude).unwrap();
+
+    assert!(home.exists());
+    harness.homes().busy.lock().unwrap().clear();
+    read(&harness);
+    assert!(!home.exists(), "the signed-out user's home stayed");
+    assert_eq!(harness.home_of(&elsewhere), None);
+    assert!(harness.vault().retired_homes.is_empty());
+    assert!(harness
+        .accounts()
+        .list(AgentId::Claude)
+        .unwrap()
+        .profiles
+        .iter()
+        .any(|p| p.id == elsewhere && p.needs_login));
 }
 
 #[test]
