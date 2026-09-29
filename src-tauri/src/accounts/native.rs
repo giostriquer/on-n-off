@@ -42,10 +42,34 @@ pub(super) fn refuse_env_credentials(
 
 /// The provider's official CLI, `name`, found as a GUI app must find it.
 pub(super) fn cli(provider: AgentId, name: &str) -> Command {
+    #[cfg(test)]
+    if let Some(program) = TEST_CLI.with(|cli| cli.borrow().clone()) {
+        return crate::cli::AgentCli::new(program).command();
+    }
     let binary = crate::cli_locate::resolve_provider_cli(provider, name)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| name.into());
     crate::cli::AgentCli::new(binary).command()
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CLI: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `run` with every official CLI this thread's `cli` finds replaced by `program`, a stub, so a
+/// real store can be driven without a real client.
+#[cfg(test)]
+pub(crate) fn with_test_cli<T>(program: &Path, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_CLI.with(|cli| *cli.borrow_mut() = self.0.take());
+        }
+    }
+    let previous = TEST_CLI.with(|cli| cli.replace(Some(program.to_string_lossy().into_owned())));
+    let _restore = Restore(previous);
+    run()
 }
 
 pub fn read_json(path: &Path) -> Result<Value, String> {

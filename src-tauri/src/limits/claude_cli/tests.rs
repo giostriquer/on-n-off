@@ -6,8 +6,10 @@ use crate::dto::{AgentId, LimitWindowKind, LimitsStatus};
 use std::time::Duration;
 
 /// What `claude -p /usage --output-format stream-json --verbose` prints, trimmed to the lines the
-/// reader looks at: the session's start, the local command's answer and the result.
+/// reader looks at: the session's start, the local command's answer and the result, with a stray
+/// line the reader has to step over.
 const REPORT: &str = r#"{"type":"system","subtype":"init","apiKeySource":"none","claude_code_version":"2.1.284"}
+a line that is not an event
 {"type":"assistant","local_command_run":"usage","message":{"content":"Current session: 12% used"},"usage_report":{"rate_limits":{"limits":[{"kind":"session","group":"session","percent":12,"resets_at":"2026-09-29T18:00:00.006917+00:00","scope":null,"severity":"normal","is_active":true},{"kind":"weekly_all","group":"weekly","percent":34,"resets_at":"2026-10-05T09:00:00.006938+00:00","scope":null,"severity":"normal","is_active":false},{"kind":"weekly_scoped","group":"weekly","percent":5,"resets_at":"2026-10-05T09:00:00+00:00","scope":{"model":{"display_name":"Fable"},"surface":null},"severity":"normal","is_active":false}],"extra_usage":{"is_enabled":false}},"session":{"total_cost_usd":0}}}
 {"type":"result","subtype":"success","is_error":false,"num_turns":0,"duration_api_ms":0,"total_cost_usd":0}"#;
 
@@ -173,13 +175,34 @@ fn a_config_dir_naming_another_account_is_never_asked() {
 }
 
 #[test]
+fn a_config_dir_naming_the_user_in_another_organization_is_never_asked() {
+    // One user in two organizations is two accounts, each with its own card.
+    let (dir, command) = home(
+        &config("user", "other-team"),
+        REPORT,
+        CliStub::new("claude").log_args("args.txt", false),
+    );
+
+    assert_eq!(
+        read(&dir, command).unwrap_err(),
+        SavedReadError::OtherAccount
+    );
+    assert!(!dir.path().join("args.txt").exists(), "claude was started");
+}
+
+#[test]
 fn a_config_dir_naming_no_account_is_a_login_to_sign_in_again() {
-    let (dir, command) = home("{}", REPORT, CliStub::new("claude"));
+    let (dir, command) = home(
+        "{}",
+        REPORT,
+        CliStub::new("claude").log_args("args.txt", false),
+    );
 
     assert_eq!(
         read(&dir, command).unwrap_err(),
         SavedReadError::Http(HttpError::Unauthorized)
     );
+    assert!(!dir.path().join("args.txt").exists(), "claude was started");
 }
 
 #[test]

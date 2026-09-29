@@ -147,6 +147,7 @@ fn a_claude_logins_fingerprint_is_its_token_generation_alone() {
 }
 
 #[cfg(target_os = "macos")]
+mod first_usage;
 mod keychain;
 mod native_store;
 mod secure_storage;

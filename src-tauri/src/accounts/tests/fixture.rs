@@ -180,12 +180,7 @@ impl IsolatedSignIn for FakeIsolated {
             .cli(&self.1.join("bin"))
             .command()
     }
-    fn first_usage(
-        &self,
-        _: &Path,
-        _: &Login,
-        _: &Identity,
-    ) -> Option<crate::dto::ProviderLimitsDto> {
+    fn first_usage(&self, _: &Path, _: &Identity) -> Option<crate::dto::ProviderLimitsDto> {
         None
     }
     fn clean(&self) -> Result<(), String> {
