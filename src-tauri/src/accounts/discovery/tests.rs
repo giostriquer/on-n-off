@@ -203,7 +203,7 @@ fn untouched(home: &Path) -> super::super::Accounts {
         ) -> Result<Box<dyn super::super::IsolatedSignIn>, String> {
             panic!("resolved a native store")
         }
-        fn home(&self, _: AgentId, _: &Path) -> Option<Box<dyn super::super::Home>> {
+        fn homes(&self, _: AgentId) -> Option<Box<super::super::MakeHome<'_>>> {
             panic!("resolved a home")
         }
     }

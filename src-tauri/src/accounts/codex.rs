@@ -51,11 +51,7 @@ impl super::Adapter for Codex {
         login.renewed(&reply, now_ms)
     }
 
-    fn renews_privately(&self) -> bool {
-        true
-    }
-
-    fn home(&self, _: &Path) -> Option<Box<dyn super::Home>> {
+    fn homes(&self) -> Option<super::HomeAt> {
         None
     }
 

@@ -324,14 +324,14 @@ fn publish(
             db.reenroll(&identity);
             let renews_privately = super::adapter(identity.provider)?.renews_privately();
             let saved_id = db.save(identity, login, expected)?;
-            // The new login replaces whatever a home kept for the account; it moves into a new
-            // home at the next read, like any saved login that is not the signed-in one.
-            db.retire_home(&saved_id);
             let profile = db
                 .profiles
                 .iter_mut()
                 .find(|p| p.id == saved_id)
                 .ok_or("Saved profile disappeared.")?;
+            // The new login replaces whatever a home kept for the account; it moves into a new
+            // home at the next read, and the old one, which no profile names then, goes.
+            profile.home = None;
             profile.pending_activation = true;
             profile.usage_renewal_owned = renews_privately;
             Ok((operation, profile.email.clone()))

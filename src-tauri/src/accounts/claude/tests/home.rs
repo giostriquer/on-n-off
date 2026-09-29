@@ -212,8 +212,7 @@ fn deleting_a_home_removes_its_login_and_its_directory() {
     let (read, sent) = keychain(|| {
         let locks = home.lock().unwrap();
         home.put(&login("b1"), locks.as_ref()).unwrap();
-        drop(locks);
-        home.delete().unwrap();
+        home.delete(locks).unwrap();
         home.read().unwrap()
     });
 
@@ -254,4 +253,58 @@ fn a_homes_usage_is_claude_codes_report_asked_in_that_home() {
     assert_eq!(card.account.unwrap().id, identity().observation_key());
     let config_dir = fs::read_to_string(bin.join("config-dir.txt")).unwrap();
     assert_eq!(Path::new(config_dir.trim()), root.path().join(".claude"));
+}
+
+/// A home read back after a write, by a store opened afresh on the same directory, holds the
+/// login and says whose it is, as a later read or switch finds it.
+#[test]
+fn a_homes_login_is_read_back_by_a_later_look_at_the_same_home() {
+    let root = tempfile::tempdir().unwrap();
+
+    let (read, _) = keychain(|| {
+        let home = ClaudeHome::at(root.path());
+        let locks = home.lock().unwrap();
+        home.put(&login("b1"), locks.as_ref()).unwrap();
+        drop(locks);
+        ClaudeHome::at(root.path()).read().unwrap()
+    });
+
+    let read = read.expect("the login the home holds");
+    assert_eq!(read.auth, login("b1").auth);
+    assert_eq!(
+        ClaudeHome::at(root.path()).identify(&read).unwrap(),
+        identity()
+    );
+}
+
+#[test]
+fn deleting_a_home_that_was_never_made_is_done_at_once() {
+    let root = tempfile::tempdir().unwrap();
+    let home = ClaudeHome::at(&root.path().join("never-made"));
+
+    let (result, _) = keychain(|| home.delete(Box::new(())));
+
+    result.unwrap();
+}
+
+/// A home that could not be removed is reported, so it is not forgotten while it still holds a
+/// login.
+#[cfg(unix)]
+#[test]
+fn deleting_a_home_that_cannot_be_removed_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("home");
+    let home = ClaudeHome::at(&dir);
+    keychain(|| {
+        let locks = home.lock().unwrap();
+        home.put(&login("b1"), locks.as_ref()).unwrap();
+    });
+    fs::set_permissions(root.path(), fs::Permissions::from_mode(0o500)).unwrap();
+
+    let (result, _) = keychain(|| home.delete(Box::new(())));
+
+    fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(result.is_err());
+    assert!(dir.exists());
 }

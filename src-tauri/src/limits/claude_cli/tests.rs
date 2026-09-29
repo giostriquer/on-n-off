@@ -298,9 +298,11 @@ fn usage_then_status<'a>(
 fn a_config_dir_claude_code_says_is_signed_out_is_a_login_to_sign_in_again() {
     let (dir, usage) = home(&config("user", "team"), "", CliStub::new("claude"));
     let status_dir = tempfile::tempdir().unwrap();
+    // Claude Code 2.1.284 answers a signed-out `auth status` on stdout with exit status 1.
     let status = CliStub::new("claude")
         .log_args("args.txt", false)
         .stdout(r#"{"loggedIn":false,"authMethod":"none"}"#)
+        .exit(1)
         .cli(status_dir.path());
 
     let result = read_usage_within(
@@ -324,6 +326,28 @@ fn no_report_from_a_config_dir_still_signed_in_reads_as_unavailable() {
     let status_dir = tempfile::tempdir().unwrap();
     let status = CliStub::new("claude")
         .stdout(r#"{"loggedIn":true,"authMethod":"claude.ai"}"#)
+        .cli(status_dir.path());
+
+    let result = read_usage_within(
+        &usage_then_status(&usage, &status),
+        &dir.path().join(".claude.json"),
+        &identity(),
+        ANSWER,
+    );
+
+    assert!(matches!(
+        result,
+        Err(SavedReadError::Http(HttpError::Parse(_)))
+    ));
+}
+
+#[test]
+fn no_report_and_a_status_claude_code_cannot_give_reads_as_unavailable() {
+    let (dir, usage) = home(&config("user", "team"), "", CliStub::new("claude"));
+    let status_dir = tempfile::tempdir().unwrap();
+    let status = CliStub::new("claude")
+        .stdout("not a status")
+        .exit(1)
         .cli(status_dir.path());
 
     let result = read_usage_within(

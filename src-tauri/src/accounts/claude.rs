@@ -55,12 +55,8 @@ impl super::Adapter for Claude {
         Err("Claude Code renews a saved Claude login itself, in the account's home.".into())
     }
 
-    fn renews_privately(&self) -> bool {
-        false
-    }
-
-    fn home(&self, dir: &Path) -> Option<Box<dyn Home>> {
-        Some(Box::new(home::ClaudeHome::at(dir)))
+    fn homes(&self) -> Option<super::HomeAt> {
+        Some(|dir| Box::new(home::ClaudeHome::at(dir)))
     }
 
     fn read_usage(

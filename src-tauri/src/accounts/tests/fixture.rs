@@ -5,7 +5,7 @@ use super::super::{
     model::Identity,
     store::{ChangeKind, Database, Guard, Login, Store, Ticket},
     transaction::{Native, NativeGuard, Recovery},
-    Accounts, Clients, Home, IsolatedSignIn, NativeAccount, NativeStores, Notify,
+    Accounts, Clients, Home, IsolatedSignIn, MakeHome, NativeAccount, NativeStores, Notify,
 };
 use crate::dto::AgentId;
 use serde_json::json;
@@ -110,6 +110,10 @@ pub(super) struct Homes {
     pub busy: Mutex<Vec<PathBuf>>,
     /// Homes a write to fails.
     pub refuses: Mutex<Vec<PathBuf>>,
+    /// Whether a write to a home keeps nothing, as one that went where its client never reads.
+    pub drops_writes: Mutex<bool>,
+    /// Homes that cannot be removed.
+    pub undeletable: Mutex<Vec<PathBuf>>,
     /// Which homes were read from, emptied and deleted, in order.
     pub read: Mutex<Vec<PathBuf>>,
     pub emptied: Mutex<Vec<PathBuf>>,
@@ -131,10 +135,12 @@ impl FakeHome {
     }
 }
 impl Home for FakeHome {
+    /// Taking a home's locks makes its directory, as Claude Code's locks do.
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
         if self.0.busy.lock().unwrap().contains(&self.1) {
             return Err("Claude is busy with this home.".into());
         }
+        std::fs::create_dir_all(&self.1).unwrap();
         Ok(Box::new(()))
     }
     fn read(&self) -> Result<Option<Login>, String> {
@@ -145,6 +151,9 @@ impl Home for FakeHome {
     }
     fn put(&self, login: &Login, _: &dyn NativeGuard) -> Result<Option<Login>, String> {
         self.refused()?;
+        if *self.0.drops_writes.lock().unwrap() {
+            return self.read();
+        }
         self.0
             .logins
             .lock()
@@ -168,9 +177,13 @@ impl Home for FakeHome {
         }
         Ok(weekly_reading(&identity.observation_key()))
     }
-    fn delete(&self) -> Result<(), String> {
+    fn delete(&self, _: Box<dyn NativeGuard>) -> Result<(), String> {
+        if self.0.undeletable.lock().unwrap().contains(&self.1) {
+            return Err("The home could not be removed.".into());
+        }
         self.0.logins.lock().unwrap().remove(&self.1);
         self.0.deleted.lock().unwrap().push(self.1.clone());
+        let _ = std::fs::remove_dir_all(&self.1);
         Ok(())
     }
 }
@@ -249,13 +262,15 @@ impl NativeStores for FakeStores {
             dir.into(),
         )))
     }
-    fn home(&self, provider: AgentId, dir: &Path) -> Option<Box<dyn Home>> {
+    fn homes(&self, provider: AgentId) -> Option<Box<MakeHome<'_>>> {
         let homes = self
             .0
             .homes
             .clone()
             .filter(|_| provider == AgentId::Claude)?;
-        Some(Box::new(FakeHome(homes, dir.into())))
+        Some(Box::new(move |dir| {
+            Box::new(FakeHome(homes.clone(), dir.into())) as Box<dyn Home>
+        }))
     }
 }
 

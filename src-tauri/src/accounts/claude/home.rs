@@ -53,13 +53,17 @@ impl Home for ClaudeHome {
         )
     }
 
-    fn delete(&self) -> Result<(), String> {
+    /// The Keychain entry first, then the directory, which takes Claude Code's lock directories
+    /// with it: releasing the locks then finds nothing left to remove.
+    fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String> {
         IsolatedSignIn::clean(&self.store)?;
-        match fs::remove_dir_all(&self.dir) {
+        let removed = match fs::remove_dir_all(&self.dir) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
                 Err("Cannot remove the saved account's home.".into())
             }
             _ => Ok(()),
-        }
+        };
+        drop(locks);
+        removed
     }
 }

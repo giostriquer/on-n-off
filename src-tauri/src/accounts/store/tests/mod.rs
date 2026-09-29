@@ -419,8 +419,7 @@ fn a_sealed_database_keeps_the_vault_format() {
                 "target_id": id,
                 "outgoing": {"auth": {"refresh": "outgoing"}, "account": null},
                 "outgoing_identity": {"provider": "codex", "userId": "b", "workspaceId": "team"}
-            },
-            "retired_homes": []
+            }
         })
     );
 }
@@ -449,7 +448,6 @@ fn a_vault_from_before_the_later_fields_loads_without_them() {
     assert_eq!(loaded.login_epoch, 0);
     assert!(loaded.recovery.is_none());
     assert!(loaded.ignored_accounts.is_empty() && loaded.ignored_credentials.is_empty());
-    assert!(loaded.retired_homes.is_empty());
     let profile = &loaded.profiles[0];
     assert_eq!(profile.identity, identity("a"));
     assert!(!profile.pending_activation && !profile.usage_renewal_owned);

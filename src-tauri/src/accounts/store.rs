@@ -50,9 +50,6 @@ pub struct Database {
     /// a metadata edit waits for.
     #[serde(default)]
     recovery: Option<Recovery>,
-    /// Homes no profile names any more, still to be torn down (`accounts::homes`).
-    #[serde(default)]
-    pub retired_homes: Vec<String>,
 }
 
 /// Refused while an interrupted switch awaits recovery.
@@ -410,20 +407,6 @@ impl Database {
             home: None,
         });
         Ok(id)
-    }
-    /// Gives profile `id`'s home up for teardown, once a new login replaces the one it keeps or the
-    /// profile is removed.
-    pub fn retire_home(&mut self, id: &str) {
-        let retired = self
-            .profiles
-            .iter_mut()
-            .find(|p| p.id == id)
-            .and_then(|profile| profile.home.take());
-        if let Some(home) = retired {
-            if !self.retired_homes.contains(&home) {
-                self.retired_homes.push(home);
-            }
-        }
     }
 }
 

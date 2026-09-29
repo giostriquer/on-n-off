@@ -71,10 +71,10 @@ impl super::Accounts {
         let native = self
             .native(provider)
             .and_then(|native| native.subscription());
-        let homes = |id: &str| self.home(provider, id);
+        let homes = self.account_homes(provider);
         // Before either read: every saved login that belongs in a home moves there first.
-        if let Ok(native) = &native {
-            super::homes::settle(home, provider, native.as_ref(), &open, &homes);
+        if let (Some(homes), Ok(native)) = (&homes, &native) {
+            super::homes::settle(home, provider, native.as_ref(), &open, homes);
         }
         refresh_with(
             home,
@@ -85,7 +85,9 @@ impl super::Accounts {
             &open,
             &|profile| fetch(profile, &open),
         );
-        refresh_homes(home, provider, force, entries, native, &open, &homes);
+        if let Some(homes) = &homes {
+            refresh_homes(home, provider, force, entries, native, &open, homes);
+        }
     }
 }
 
@@ -296,7 +298,7 @@ fn refresh_homes(
                 && !archived.contains(&p.identity.observation_key())
         })
         .filter_map(|p| {
-            let resolved = homes(p.home.as_deref()?).ok()??;
+            let resolved = homes(p.home.as_deref()?).ok()?;
             Some((p, resolved))
         })
         .collect();

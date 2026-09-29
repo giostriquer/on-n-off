@@ -97,15 +97,16 @@ impl Renewals {
     }
 
     /// Records a renewal of `profile`'s login that finished with `renewed` and was never published,
-    /// as a failure right after the grant leaves it.
+    /// as a failure right after the grant leaves it; with no `renewed`, one whose outcome is unknown,
+    /// as a failure while the grant was in flight leaves it.
     #[cfg(test)]
-    pub(super) fn record_finished(&self, profile: &Profile, renewed: &Login) {
+    pub(super) fn record_finished(&self, profile: &Profile, renewed: Option<&Login>) {
         let source = profile.login.as_ref().expect("a login to renew");
         let journal = Journal {
             fingerprint: super::view(profile.identity.provider, source)
                 .unwrap()
                 .fingerprint(),
-            login: Some(renewed.clone()),
+            login: renewed.cloned(),
         };
         std::fs::create_dir_all(&self.root).unwrap();
         let sealed = self

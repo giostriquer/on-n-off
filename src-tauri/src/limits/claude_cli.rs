@@ -11,7 +11,7 @@
 //! a report that could not be had.
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -23,6 +23,7 @@ use crate::accounts::claude_store::ENV_CREDENTIALS;
 use crate::accounts::model::Identity;
 use crate::dto::{LimitWindowDto, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
+use crate::process::{wait_with_deadline, CommandOutcome};
 
 /// Claude Code's own usage report, printed as structured events, and no session left behind.
 const USAGE_ARGS: [&str; 6] = [
@@ -93,15 +94,24 @@ fn prepared(mut command: Command, args: &[&str]) -> Command {
 }
 
 /// Whether Claude Code says the config dir is signed out. Anything else it says, or saying nothing,
-/// is no reason to ask for a new sign-in.
+/// is no reason to ask for a new sign-in. Claude Code answers a signed-out `auth status` with exit
+/// status 1, the answer on stdout all the same, so the status is read whatever the exit.
 fn signed_out(claude: &dyn Fn() -> Command) -> bool {
-    crate::accounts::native::run(
-        &mut prepared(claude(), &["auth", "status", "--json"]),
-        STATUS_DEADLINE,
-    )
-    .ok()
-    .and_then(|stdout| serde_json::from_str::<Value>(&stdout).ok())
-    .and_then(|status| status.get("loggedIn")?.as_bool())
+    let mut command = prepared(claude(), &["auth", "status", "--json"]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let Ok(child) = command.spawn() else {
+        return false;
+    };
+    let Ok(CommandOutcome::Exited { stdout, .. }) = wait_with_deadline(child, STATUS_DEADLINE)
+    else {
+        return false;
+    };
+    serde_json::from_str::<Value>(&stdout)
+        .ok()
+        .and_then(|status| status.get("loggedIn")?.as_bool())
         == Some(false)
 }
 
