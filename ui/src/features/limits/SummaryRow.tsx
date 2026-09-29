@@ -14,7 +14,7 @@ export function SummaryRow({ label, value, note, list, listLabel }: {
   listLabel?: string;
 }) {
   const labelId = useId();
-  // One name–value group: the label, its value, then the note, laid out so the note sits under the label.
+  // One name–value group: the label, its value, then the note and any list, laid out so the note sits under the label.
   return (
     <dl className="border-t border-[var(--hair)] px-3.5 py-2">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1">

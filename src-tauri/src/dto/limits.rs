@@ -120,8 +120,8 @@ pub struct LimitsResetCreditsDto {
     /// RFC 3339 instant when the soonest-expiring available reset lapses, when the provider says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_expires_at: Option<String>,
-    /// Each available reset the provider lists, soonest to lapse first; empty when it lists none,
-    /// as Claude never does, and in snapshots older than the list.
+    /// Each available reset the provider lists, soonest to lapse first; empty when it lists none
+    /// (Claude never lists them) and in snapshots older than the list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub credits: Vec<LimitsResetCreditDto>,
 }
