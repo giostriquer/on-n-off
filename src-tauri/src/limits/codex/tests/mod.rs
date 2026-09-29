@@ -236,7 +236,7 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
         "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 97, "windowDurationMins": 10080}},
         "rateLimitResetCredits": {"availableCount": 2, "credits": [
             {"id": "later", "resetType": "codexRateLimits", "status": "available",
-             "grantedAt": 1787000000, "expiresAt": 1790000000, "title": null, "description": null},
+             "grantedAt": 1787000000, "expiresAt": 1790000000, "title": "Full reset", "description": null},
             {"id": "spent", "resetType": "codexRateLimits", "status": "redeemed",
              "grantedAt": 1786000000, "expiresAt": 1788000000, "title": null, "description": null},
             {"id": "sooner", "resetType": "codexRateLimits", "status": "available",
@@ -256,8 +256,22 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
             // A redeemed credit's earlier expiry is not the next one to lapse, and an expiry that is
             // not a real instant does not hide the valid ones.
             next_expires_at: expires(1_789_000_000),
+            // Each available one, soonest first; those without a real expiry after them.
+            credits: vec![
+                credit(None, expires(1_789_000_000)),
+                credit(Some("Full reset"), expires(1_790_000_000)),
+                credit(None, None),
+                credit(None, None),
+            ],
         })
     );
+}
+
+fn credit(title: Option<&str>, expires_at: Option<String>) -> crate::dto::LimitsResetCreditDto {
+    crate::dto::LimitsResetCreditDto {
+        title: title.map(str::to_string),
+        expires_at,
+    }
 }
 
 #[test]
@@ -268,6 +282,7 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
         Some(LimitsResetCreditsDto {
             available_count: 0,
             next_expires_at: None,
+            credits: Vec::new(),
         })
     );
 
@@ -282,6 +297,7 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
         Some(LimitsResetCreditsDto {
             available_count: 1,
             next_expires_at: None,
+            credits: Vec::new(),
         })
     );
 

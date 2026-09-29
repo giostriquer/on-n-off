@@ -18,8 +18,8 @@ use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
     AgentId, LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto,
-    LimitsResetCreditsDto, LimitsResetOfferDto, LimitsStatus, LimitsWorkspaceCreditsDto,
-    ProviderLimitsDto, Reading, ResetCreditOutcome,
+    LimitsResetCreditDto, LimitsResetCreditsDto, LimitsResetOfferDto, LimitsStatus,
+    LimitsWorkspaceCreditsDto, ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
@@ -97,6 +97,9 @@ struct RateLimitResetCredit {
     status: String,
     #[serde(default)]
     expires_at: Option<i64>,
+    /// What Codex calls the reset, such as "Full reset".
+    #[serde(default)]
+    title: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -352,20 +355,42 @@ fn price(price: Option<&serde_json::Value>) -> Option<LimitsPriceDto> {
     })
 }
 
-/// The count Codex reports, and when the soonest still-available reset expires.
+/// The count Codex reports, when the soonest still-available reset expires, and each available one,
+/// soonest first, with those whose expiry is not a real instant after them.
 fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCreditsDto> {
     let summary = value?;
-    let next_expires_at = summary
+    let mut available: Vec<(Option<DateTime<Utc>>, Option<String>)> = summary
         .credits
         .iter()
         .flatten()
         .filter(|credit| credit.status == "available")
-        .filter_map(|credit| DateTime::<Utc>::from_timestamp(credit.expires_at?, 0))
-        .min()
-        .map(|at| at.to_rfc3339());
+        .map(|credit| {
+            let expires_at = credit
+                .expires_at
+                .and_then(|at| DateTime::<Utc>::from_timestamp(at, 0));
+            let title = credit
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .map(str::to_string);
+            (expires_at, title)
+        })
+        .collect();
+    // Soonest first, and a reset with no known expiry last, since it lapses no sooner.
+    available.sort_by_key(|(expires_at, _)| (expires_at.is_none(), *expires_at));
     Some(LimitsResetCreditsDto {
         available_count: u32::try_from(summary.available_count).unwrap_or(u32::MAX),
-        next_expires_at,
+        next_expires_at: available
+            .first()
+            .and_then(|(at, _)| at.map(|at| at.to_rfc3339())),
+        credits: available
+            .into_iter()
+            .map(|(expires_at, title)| LimitsResetCreditDto {
+                title,
+                expires_at: expires_at.map(|at| at.to_rfc3339()),
+            })
+            .collect(),
     })
 }
 
@@ -616,7 +641,11 @@ fn wham_reset_credits(summary: &Value, details: Option<&Value>) -> Option<Value>
                             .timestamp(),
                     ),
                 };
-                Some(json!({"status": credit.get("status")?.as_str()?, "expiresAt": expires_at}))
+                Some(json!({
+                    "status": credit.get("status")?.as_str()?,
+                    "expiresAt": expires_at,
+                    "title": credit.get("title").and_then(Value::as_str),
+                }))
             })
             .collect::<Option<Vec<_>>>()?;
         Some(json!({"availableCount": banked_reset_count(details)?, "credits": credits}))

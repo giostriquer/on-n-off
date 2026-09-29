@@ -161,6 +161,7 @@ fn parse_reset_credits(payload: &Value, now: DateTime<Utc>) -> Option<LimitsRese
         return holds_none.then_some(LimitsResetCreditsDto {
             available_count: 0,
             next_expires_at: None,
+            credits: Vec::new(),
         });
     }
     Some(LimitsResetCreditsDto {
@@ -175,6 +176,7 @@ fn parse_reset_credits(payload: &Value, now: DateTime<Utc>) -> Option<LimitsRese
             .filter(|ends_at| *ends_at > now)
             .min()
             .map(|at| at.to_rfc3339()),
+        credits: Vec::new(),
     })
 }
 

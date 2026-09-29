@@ -354,6 +354,7 @@ fn a_successful_read_with_only_banked_resets_is_remembered_and_dated() {
     dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: None,
+        credits: Vec::new(),
     });
 
     store.save(&dto).unwrap();
@@ -379,11 +380,13 @@ fn quota_windows_credits_and_banked_resets_each_count_as_an_observation() {
     dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 0,
         next_expires_at: None,
+        credits: Vec::new(),
     });
     assert!(!dto.reading.has_observations());
     dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: None,
+        credits: Vec::new(),
     });
     assert!(dto.reading.has_observations());
     dto.reading.reset_credits = None;
@@ -433,6 +436,7 @@ fn a_windowless_read_that_reports_no_banked_resets_keeps_the_remembered_windows(
     windowless.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 0,
         next_expires_at: None,
+        credits: Vec::new(),
     });
 
     assert!(store.save(&windowless).is_err());
@@ -497,6 +501,7 @@ fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_an
         Some(crate::dto::LimitsResetCreditsDto {
             available_count,
             next_expires_at: Some("2100-10-01T00:00:00+00:00".to_string()),
+            credits: Vec::new(),
         })
     };
     let mut remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");

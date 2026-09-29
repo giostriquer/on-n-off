@@ -37,6 +37,7 @@ fn a_saved_read_that_cannot_tell_keeps_the_banked_reset_count_and_an_answer_repl
         Some(LimitsResetCreditsDto {
             available_count,
             next_expires_at: None,
+            credits: Vec::new(),
         })
     };
     let answer = |reset_credits| {
@@ -75,6 +76,7 @@ fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_
     let banked = Some(LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: None,
+        credits: Vec::new(),
     });
     let mut reading_with_count = reading(&p);
     reading_with_count.reading.reset_credits.clone_from(&banked);
