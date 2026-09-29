@@ -228,6 +228,67 @@ describe("UseBankedReset", () => {
     expect(screen.queryByRole("button", { name: "Use banked reset" })).toBeNull();
   });
 
+  /**
+   * The backend refreshes the card while the attempt is in flight, so that reading is newer than the
+   * click and than the screen's `now`, and older than the answer: it must not take the message away.
+   */
+  it("keeps the result through the refresh the backend reads while the attempt is in flight", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.parse("2026-08-17T20:00:30Z"));
+      const pending = deferred<string>();
+      consumeCodexResetCredit.mockReturnValue(pending.promise);
+      const { rerender } = render(button({ entry: codex({ windows: [weekly(99)] }) }));
+      fireEvent.click(useReset());
+      const refreshed = { ...weekly(0), observedAt: "2026-08-17T20:00:31Z" };
+      rerender(button({ entry: codex({ windows: [refreshed], resetCredits: { availableCount: 0, nextExpiresAt: null } }) }));
+
+      vi.setSystemTime(Date.parse("2026-08-17T20:00:32Z"));
+      pending.resolve("reset");
+
+      await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Banked reset used."));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says what came of an attempt on a card whose windows were never read", async () => {
+    render(button({ entry: codex({ windows: [] }) }));
+
+    fireEvent.click(useReset());
+    fireEvent.click(screen.getByRole("button", { name: "Use reset anyway" }));
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Banked reset used."));
+  });
+
+  /** A window read `seconds` from now: a reading made after the attempt's answer came back. */
+  function readLater(usedPercent: number, seconds = 60): LimitWindow {
+    return { ...weekly(usedPercent), observedAt: new Date(Date.now() + seconds * 1000).toISOString() };
+  }
+
+  it("lets the result go once a later reading replaces the one the attempt left", async () => {
+    const { rerender } = render(button({ entry: codex({ windows: [weekly(99)] }) }));
+    fireEvent.click(useReset());
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Banked reset used."));
+
+    // A reset granted since: the card offers it, and says nothing of the one already spent.
+    rerender(button({ entry: codex({ windows: [readLater(92)], resetCredits: { availableCount: 1, nextExpiresAt: "2026-08-29T15:00:00Z" } }) }));
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(useReset()).toBeTruthy();
+  });
+
+  it("lets a failure go once a later reading replaces the one it was about", async () => {
+    consumeCodexResetCredit.mockRejectedValue({ kind: "message", message: "Codex app-server timed out." });
+    const { rerender } = render(button({ entry: codex({ windows: [weekly(99)] }) }));
+    fireEvent.click(useReset());
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Codex app-server timed out."));
+
+    rerender(button({ entry: codex({ windows: [readLater(99)] }) }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it.each([
     ["nothingToReset", "Nothing to reset: this account's usage is already at 0%."],
     ["noCredit", "This account has no banked reset left."],
