@@ -3,7 +3,6 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
-import { formatObservedAt } from "$lib/limitsFormat";
 import { refreshLimits } from "./useLimitsProviders";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
@@ -313,22 +312,9 @@ describe("Limits", () => {
     expect(card("Codex limits · personal@codex.example")).toBeTruthy();
   });
 
-  it.each([true, false])("puts Claude's subscription status beside the plan and says when it is only the last known (%s)", async (lastKnown) => {
-    answer([okClaude({ subscriptionStatus: "past_due", ...(lastKnown ? { status: "unauthenticated" as const, message: "Sign in again." } : {}) })], []);
-    renderLimits();
-    const claude = await waitFor(() => card("Claude limits · me@claude.example"));
-    const badge = within(claude).getByRole("button", { name: "Subscription status: Payment due" });
-    expect(badge.closest("header")).toHaveTextContent("Max");
-    fireEvent.focus(badge);
-    const tooltip = screen.getByRole("tooltip");
-    expect(tooltip).toHaveTextContent(`Checked ${formatObservedAt(NOW)}`);
-    if (lastKnown) expect(tooltip).toHaveTextContent("Last known subscription status.");
-    else expect(tooltip).not.toHaveTextContent("Last known");
-  });
-
   it("shows banked resets and a paid offer as rows, and offers the Codex reset beside the account actions", async () => {
     const banked = { availableCount: 2, nextExpiresAt: null };
-    answer([okClaude({ resetCredits: banked })], [okCodex({ resetCredits: banked, resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } } })]);
+    answer([okClaude()], [okCodex({ resetCredits: banked, resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } } })]);
     renderLimits();
 
     const current = await waitFor(() => card("Codex limits · work@codex.example"));
@@ -338,10 +324,8 @@ describe("Limits", () => {
     expect(button).toHaveProperty("disabled", true);
     expect(within(current).getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
     expect(within(current).getByRole("definition", { name: "Paid reset" })).toHaveTextContent("$8.00");
-    // on-n-off spends only Codex resets; the signed-in Claude card says where Claude Code spends its own.
+    // on-n-off spends only Codex resets.
     const claude = card("Claude limits · me@claude.example");
-    expect(within(claude).getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
-    expect(within(claude).getByText("/limit-reset in Claude Code")).toBeTruthy();
     expect(within(claude).queryByRole("button", { name: "Use banked reset" })).toBeNull();
   });
 

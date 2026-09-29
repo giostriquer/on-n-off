@@ -37,12 +37,6 @@
   border-color: #b3261e;
 }
 
-/* A Claude subscription reported as in trouble: the header's outlined tag, drawn in the trip red. */
-.subscription-badge--alert {
-  color: var(--trip);
-  border-color: var(--trip);
-}
-
 /* The label sits above the fill, which grows through the last seven days of a plan that ends. */
 .subscription-badge-fill {
   position: absolute;

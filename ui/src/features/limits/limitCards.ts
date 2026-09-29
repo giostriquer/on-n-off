@@ -14,7 +14,6 @@ import type {
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { accountCards } from "./accountCards";
-import { claudeSubscriptionEnded } from "./claudeSubscriptionStatus";
 import { codexTermEnded } from "./codexSubscriptionTerm";
 import {
   headlineWindow,
@@ -27,12 +26,6 @@ import {
   type LimitAccountPresentation,
   type LimitWindowPresentation,
 } from "./limitPresentation";
-
-/**
- * Where a Claude reset is spent. on-n-off only reports Claude's, and Claude Code spends the reset of
- * whoever it is signed in as, so only the signed-in account's card names the command.
- */
-const CLAUDE_RESET_HINT = "/limit-reset in Claude Code";
 
 /**
  * A quota window as a card shows it. The headline window's `note` is empty when the provider
@@ -50,16 +43,14 @@ export type CardFigures = {
   ownBalance: LimitsCredits | null;
   workspaceShare: LimitsWorkspaceCredits | null;
   creditsSpent: LimitsCreditsSpent | null;
-  /** Unexpired banked resets, with where a reset is spent when this card is where it is spent. */
-  bankedResets: { resetCredits: LimitsResetCredits; hint: string | null } | null;
+  /** Unexpired banked resets. */
+  bankedResets: LimitsResetCredits | null;
   /** A paid reset Codex is offering; Claude offers none. */
   paidOffer: LimitsResetOffer | null;
 };
 
-/** What the card's subscription badge reads: Codex's term and paid-through date, or Claude's status. */
-export type CardSubscription =
-  | { provider: "codex"; accountId: string; current: boolean; term: LimitsSubscription | null }
-  | { provider: "claude"; status: string | null; lastKnown: boolean; checkedAt: string | null };
+/** What the card's subscription badge reads: Codex's term and paid-through date. */
+export type CardSubscription = { provider: "codex"; accountId: string; current: boolean; term: LimitsSubscription | null };
 
 /** One snapshot to forget: an account id, and for a legacy id the email it must still carry. */
 export type ForgetStep = { accountId: string; expectedEmail?: string };
@@ -222,7 +213,7 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
-  const cardSubscription = subscription(provider, account?.id ?? null, current, reading, presentation);
+  const cardSubscription = subscription(provider, account?.id ?? null, current, reading);
   const active = !!account && (profile?.active ?? current);
   return {
     key: `${current ? "current" : "remembered"}-${account?.id ?? index}`,
@@ -262,27 +253,23 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
 
 /**
  * Whether the card's subscription is known to have ended without renewing: Codex's term says it
- * will not renew and its date has passed; Claude's status says it expired.
+ * will not renew and its date has passed. Claude reports no subscription term.
  */
 function subscriptionEnded(subscription: CardSubscription | null, now: number): boolean {
-  if (subscription?.provider === "codex") return codexTermEnded(subscription.term, now);
-  if (subscription?.provider === "claude") return claudeSubscriptionEnded(subscription.status);
-  return false;
+  return subscription !== null && codexTermEnded(subscription.term, now);
 }
 
 /**
  * Codex's badge reads each account's paid-through date, refreshing only the signed-in one's; it needs
- * an account to ask about. Claude's shows the status the read reported, as current as the card is.
+ * an account to ask about. Claude has no badge.
  */
 function subscription(
   provider: AgentId,
   accountId: string | null,
   current: boolean,
   reading: ProviderLimits | null,
-  { lastKnown, updatedAt }: LimitAccountPresentation,
 ): CardSubscription | null {
   if (provider === "codex") return accountId === null ? null : { provider, accountId, current, term: reading?.subscription ?? null };
-  if (provider === "claude") return { provider, status: reading?.subscriptionStatus ?? null, lastKnown, checkedAt: updatedAt };
   return null;
 }
 
@@ -309,7 +296,7 @@ function figures(reading: ProviderLimits, provider: AgentId, now: number): CardF
     ownBalance: credits && (!(share || spent) || credits.unlimited || Number(credits.balance) !== 0) ? credits : null,
     workspaceShare: share,
     creditsSpent: spent,
-    bankedResets: banked ? { resetCredits: banked, hint: provider === "claude" && reading.currentAccount ? CLAUDE_RESET_HINT : null } : null,
+    bankedResets: banked ?? null,
     paidOffer: provider === "codex" ? reading.resetOffer ?? null : null,
   };
 }

@@ -228,22 +228,6 @@ function creditsSpentCodex(): ProviderLimits[] {
 }
 
 /**
- * `?mock=claudeSubscriptionStatus`: the signed-in Claude account behind on payment and a saved one
- * whose subscription was canceled, as the profile's `organization.subscription_status` says.
- */
-function claudeSubscriptionStatusClaude(): ProviderLimits[] {
-  return [
-    { ...CLAUDE[0], subscriptionStatus: "past_due" },
-    { ...CLAUDE[0], account: { id: "claude-2", label: "team@example.com" }, currentAccount: false, savedProfile: true, subscriptionStatus: "canceled" },
-  ];
-}
-
-/** `?mock=bankedResets` on Claude: one saved reset, reported with where Claude Code spends it. */
-function bankedResetsClaude(): ProviderLimits[] {
-  return CLAUDE.map((entry) => ({ ...entry, resetCredits: { availableCount: 1, nextExpiresAt: at(13 * 24 * 60 + 4 * 60) } }));
-}
-
-/**
  * `?mock=sameEmailWorkspaces`: one email signed in to a personal and a business workspace, which
  * the cards tell apart by plan.
  */
@@ -389,11 +373,10 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
     claude: limitsOrderClaude,
     accounts: { claude: () => ({ profiles: [], nativeObservationId: "order-current", nativeAccount: null, recoveryRequired: false, notice: null }) },
   }),
-  bankedResets: () => ({ claude: bankedResetsClaude, codex: bankedResetsCodex }),
+  bankedResets: () => ({ codex: bankedResetsCodex }),
   sameEmailWorkspaces: () => ({ codex: sameEmailWorkspacesCodex, accounts: { codex: sameEmailWorkspacesAccounts } }),
   workspaceCredits: () => ({ codex: workspaceCreditsCodex }),
   creditsSpent: () => ({ codex: creditsSpentCodex }),
-  claudeSubscriptionStatus: () => ({ claude: claudeSubscriptionStatusClaude }),
   accountDuplicate,
   archivedAccounts,
 };

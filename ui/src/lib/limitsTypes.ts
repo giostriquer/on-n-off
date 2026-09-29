@@ -122,8 +122,6 @@ export type ProviderLimits = {
    */
   archived?: boolean;
   plan?: string | null;
-  /** Claude only: the profile's `organization.subscription_status`, as Anthropic writes it. */
-  subscriptionStatus?: string | null;
   windows: LimitWindow[];
   credits?: LimitsCredits | null;
   workspaceCredits?: LimitsWorkspaceCredits | null;

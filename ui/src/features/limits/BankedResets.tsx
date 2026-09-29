@@ -30,22 +30,20 @@ export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
 }
 
 /**
- * The banked reset count as one more row under the windows, with when the next one expires and,
- * when the card is given one, where the reset is spent. When Codex lists more than one, the note
+ * The banked reset count as one more row under the windows, with when the next one expires. When
+ * Codex lists more than one, the note
  * lists each instead, soonest first, by name and expiry, so its first line says what the
  * next-expiry note would. Whether a count is worth showing is the card model's call (`CardFigures`),
  * and it is gone by the time the soonest reset lapses, so every one listed is still ahead.
  */
-export function BankedResetsRow({ banked, now }: { banked: CardFigures["bankedResets"]; now: number }) {
-  if (!banked) return null;
-  const { resetCredits, hint } = banked;
+export function BankedResetsRow({ resetCredits, now }: { resetCredits: CardFigures["bankedResets"]; now: number }) {
+  if (!resetCredits) return null;
   const resets = resetCredits.resets ?? [];
   const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
   const next = expiry(resetCredits.nextExpiresAt, now);
-  // Only Codex lists its resets and only Claude's card has a hint, so a list never hides one.
   const note = resets.length > 1
     ? { label: "Each banked reset", lines: resets.map(reset => describeReset(reset, now)) }
-    : [next && `${lead} ${next}`, hint].filter(Boolean).join(" · ");
+    : next ? `${lead} ${next}` : undefined;
   return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
 }
 
