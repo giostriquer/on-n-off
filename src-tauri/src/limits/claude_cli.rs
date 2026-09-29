@@ -24,7 +24,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::claude::parse_claude;
-use super::credentials::{read_claude_config_account, ClaudeConfigAccount};
+use super::claude_config::{read_claude_config_account, ClaudeConfigAccount};
 use super::pipeline::finish;
 use super::{saved_card, scoped_account, Parsed, SavedReadError, DEFAULT_ACCOUNT};
 use crate::accounts::claude_store::ENV_CREDENTIALS;
@@ -76,9 +76,8 @@ fn read_usage_within(
 ) -> Result<ProviderLimitsDto, SavedReadError> {
     config_account(config_file, identity)?;
     let windows = report(claude, deadline).map_err(|why| match why {
-        NoReport::SignedOut => HttpError::Unauthorized,
-        NoReport::Empty => HttpError::Parse(why.message().into()),
-        NoReport::Unavailable | NoReport::Outdated => HttpError::Network(why.message().into()),
+        NoReport::SignedOut => SavedReadError::Http(HttpError::Unauthorized),
+        _ => SavedReadError::Unavailable(why.message()),
     })?;
     let account = config_account(config_file, identity)?;
     saved_card(
@@ -228,13 +227,15 @@ fn report(
             success: true,
             stdout,
             ..
-        }) => report_windows(&stdout).ok_or_else(|| {
-            if signed_out(claude) {
-                NoReport::SignedOut
-            } else {
-                NoReport::Empty
-            }
-        }),
+        }) => report_windows(&stdout)
+            .filter(|windows| !windows.is_empty())
+            .ok_or_else(|| {
+                if signed_out(claude) {
+                    NoReport::SignedOut
+                } else {
+                    NoReport::Empty
+                }
+            }),
         // Claude Code without the flag says `error: unknown option '--safe-mode'`.
         Ok(CommandOutcome::Exited { stderr, .. })
             if stderr.contains("unknown option") && stderr.contains("--safe-mode") =>

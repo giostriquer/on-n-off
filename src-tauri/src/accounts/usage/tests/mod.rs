@@ -294,6 +294,10 @@ fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
             AttemptOutcome::failed(OTHER, true, Duration::ZERO),
         ),
         (
+            Err(SavedReadError::Unavailable("Update Claude Code.")),
+            AttemptOutcome::failed("Update Claude Code.", false, Duration::ZERO),
+        ),
+        (
             rate(RateLimitReset::RetryAfter(30)),
             AttemptOutcome::failed(RATE, false, Duration::from_secs(30)),
         ),

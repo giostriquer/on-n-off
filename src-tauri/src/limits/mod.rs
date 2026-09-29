@@ -12,10 +12,10 @@
 mod backend_memo;
 mod claude;
 pub(crate) mod claude_cli;
+mod claude_config;
 mod codex;
 mod codex_app_server;
 mod codex_sessions;
-pub(crate) mod credentials;
 pub(crate) mod credits_spent;
 pub(crate) mod json;
 pub(crate) mod login;
@@ -331,6 +331,9 @@ pub(crate) enum SavedReadError {
     Http(HttpError),
     /// The login now signs in as a different account than the profile's.
     OtherAccount,
+    /// No reading could be had, for the reason the card shows as it is: an update the provider's
+    /// client needs, or a login that has not reached its home yet.
+    Unavailable(&'static str),
 }
 
 impl From<HttpError> for SavedReadError {

@@ -106,12 +106,6 @@ pub(crate) struct Dirs {
 }
 
 impl Dirs {
-    /// The storage dir: the config dir, unless `secure_storage` moved it.
-    #[cfg(test)]
-    pub(crate) fn storage(&self) -> StorageDir {
-        StorageDir::of(&self.config, self.custom, self.secure_storage.as_ref())
-    }
-
     /// The file Claude Code keeps its signed-in account in: `.config.json` in the config dir when
     /// an older Claude Code left one, else `.claude.json` in the config dir `CLAUDE_CONFIG_DIR`
     /// chose, or in `home`.

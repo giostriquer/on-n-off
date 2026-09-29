@@ -666,6 +666,29 @@ fn a_failed_read_of_a_home_holds_the_next_one_back() {
     );
 }
 
+/// A read Claude Code could not give says why on the card, as it is: an update it needs is the
+/// user's to make.
+#[test]
+fn a_home_read_claude_code_could_not_give_says_why_on_the_card() {
+    let harness = Harness::new().with_homes();
+    two_accounts(&harness);
+    read(&harness);
+    *harness.homes().answer.lock().unwrap() = Some(crate::limits::SavedReadError::Unavailable(
+        crate::limits::claude_cli::OUTDATED,
+    ));
+
+    let cards = read(&harness);
+
+    let card = cards
+        .iter()
+        .find(|card| card.account.as_ref().unwrap().id == key("b"))
+        .unwrap();
+    assert_eq!(
+        card.message.as_deref(),
+        Some(crate::limits::claude_cli::OUTDATED)
+    );
+}
+
 /// A renewal an earlier version made of a login it owned, finished but never published, moves in
 /// with the login it renewed to, and no grant is sent for it again.
 #[test]

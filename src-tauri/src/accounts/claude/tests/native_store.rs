@@ -120,21 +120,29 @@ fn verification_asks_claude_code_which_account_it_is_signed_in_to() {
 
 #[test]
 fn verification_refuses_a_login_claude_code_reads_as_another_organization_or_email() {
-    for status in [
-        r#"{"loggedIn":true,"email":"you@example.com","orgId":"org-b"}"#,
-        r#"{"loggedIn":true,"email":"someone@example.com","orgId":"org-a"}"#,
-        r#"{"loggedIn":true,"email":"you@example.com"}"#,
+    const ORGANIZATION: &str = "Claude credential and organization identity disagree.";
+    const ACCOUNT: &str = "Claude credential and account identity disagree.";
+    for (status, refusal) in [
+        (
+            r#"{"loggedIn":true,"email":"you@example.com","orgId":"org-b"}"#,
+            ORGANIZATION,
+        ),
+        (
+            r#"{"loggedIn":true,"email":"you@example.com"}"#,
+            ORGANIZATION,
+        ),
+        (
+            r#"{"loggedIn":true,"email":"someone@example.com","orgId":"org-a"}"#,
+            ACCOUNT,
+        ),
+        (r#"{"loggedIn":true,"orgId":"org-a"}"#, ACCOUNT),
     ] {
         let root = tempfile::tempdir().unwrap();
         let (native, stub) = verified(root.path(), status, 0);
 
         let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
 
-        assert_eq!(
-            refused.err().as_deref(),
-            Some("Claude credential and organization identity disagree."),
-            "{status}"
-        );
+        assert_eq!(refused.err().as_deref(), Some(refusal), "{status}");
     }
 }
 
@@ -604,8 +612,7 @@ fn a_claude_command_for_a_chosen_config_dir_is_handed_that_dir() {
         env.get("CLAUDE_CONFIG_DIR"),
         Some(&Some(chosen.clone().into_os_string()))
     );
-    assert_eq!(env.get("HOME"), None);
-    assert_eq!(env.get("USERPROFILE"), None);
+    assert!(!env.contains_key("HOME") && !env.contains_key("USERPROFILE"));
 }
 
 /// A private store, an isolated sign-in's or a saved account's home, is handed a disposable OS home

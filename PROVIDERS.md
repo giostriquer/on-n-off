@@ -166,7 +166,7 @@ Subscription dates share a per-account UI cache that account changes invalidate.
 ID token of the signed-in login or of the saved profile, decoded in process, with no request of its own.
 
 Claude plan labels come from the `oauthAccount` record every Claude usage read already checks
-(`limits/credentials.rs`): `organizationType` names the subscription as `claude_<type>`, and
+(`limits/claude_config.rs`): `organizationType` names the subscription as `claude_<type>`, and
 `claude_max` at `organizationRateLimitTier=default_claude_max_5x` displays **Max ×5**, at
 `default_claude_max_20x` **Max ×20**. Missing or unknown tiers keep **Max**; other subscription
 types keep their own label. This requires no request of its own.

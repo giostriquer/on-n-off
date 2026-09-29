@@ -1,9 +1,6 @@
-//! What a Claude login and a Claude config dir say: the shape of a stored `claudeAiOauth`, which the
-//! account switch reads to tell a login from Claude Code's emptied sign-out, and the account a
-//! config dir's `.claude.json` names, which every Claude usage read checks. Nothing here reads a
-//! store, writes one or sends a token.
+//! The account a Claude config dir's `.claude.json` names, which every Claude usage read checks, and
+//! the plan its organization is on. Nothing here reads a login or sends anything.
 
-use std::fmt;
 use std::path::Path;
 
 use serde_json::Value;
@@ -18,58 +15,14 @@ pub(crate) struct ClaudeIdentity {
     pub(crate) organization_id: Option<String>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct ClaudeCredential {
-    pub token: String,
-    /// `expiresAt` from Claude Code's credential JSON, epoch milliseconds.
-    pub expires_at_ms: Option<i64>,
-    /// A `refreshToken` is stored alongside the access token. Only its presence is carried here;
-    /// the token itself never enters this type.
-    pub has_refresh_token: bool,
-    /// `refreshTokenExpiresAt`, epoch milliseconds, when the login states one.
-    pub refresh_expires_at_ms: Option<i64>,
-    /// `subscriptionType` ("pro", "max", ...).
-    pub subscription_type: Option<String>,
-    /// Claude Code's tier identifier; only recognized Max multipliers affect presentation.
-    pub rate_limit_tier: Option<String>,
-}
-
-/// The plan a card shows for a `subscription_type` ("pro", "max", ...) at Claude Code's `tier`: a
-/// recognized Max multiplier, else the subscription type as it is.
+/// The plan a card shows for a `subscription_type` ("pro", "max", ...) at an organization's rate-limit
+/// `tier`: a recognized Max multiplier, else the subscription type as it is.
 fn plan_label(subscription_type: Option<&str>, tier: Option<&str>) -> Option<String> {
     match (subscription_type, tier) {
         (Some("max"), Some("default_claude_max_5x")) => Some("max ×5".to_string()),
         (Some("max"), Some("default_claude_max_20x")) => Some("max ×20".to_string()),
         _ => subscription_type.map(str::to_string),
     }
-}
-
-// Manual `Debug` so a stray `{:?}` (test panic, log line) can never print a token.
-impl fmt::Debug for ClaudeCredential {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ClaudeCredential")
-            .field("token", &"<redacted>")
-            .field("expires_at_ms", &self.expires_at_ms)
-            .field("has_refresh_token", &self.has_refresh_token)
-            .field("refresh_expires_at_ms", &self.refresh_expires_at_ms)
-            .field("subscription_type", &self.subscription_type)
-            .field("rate_limit_tier", &self.rate_limit_tier)
-            .finish()
-    }
-}
-
-/// `{"claudeAiOauth": {"accessToken", "expiresAt", "refreshTokenExpiresAt", "subscriptionType", ...}}`.
-pub(crate) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential> {
-    let oauth = value.get("claudeAiOauth")?;
-    let token = optional_string(oauth.get("accessToken"))?;
-    Some(ClaudeCredential {
-        token,
-        expires_at_ms: oauth.get("expiresAt").and_then(Value::as_i64),
-        has_refresh_token: optional_string(oauth.get("refreshToken")).is_some(),
-        refresh_expires_at_ms: oauth.get("refreshTokenExpiresAt").and_then(Value::as_i64),
-        subscription_type: optional_string(oauth.get("subscriptionType")),
-        rate_limit_tier: optional_string(oauth.get("rateLimitTier")),
-    })
 }
 
 /// What a Claude config file's `oauthAccount` says of its account.

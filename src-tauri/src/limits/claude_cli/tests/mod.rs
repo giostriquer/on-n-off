@@ -222,7 +222,9 @@ fn output_without_a_usage_report_reads_as_no_card() {
 
     assert!(matches!(
         read(&dir, &cli),
-        Err(SavedReadError::Http(HttpError::Parse(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code reported no usage."
+        ))
     ));
 }
 
@@ -233,7 +235,9 @@ fn a_report_of_windows_it_cannot_read_reads_as_no_card() {
 
     assert!(matches!(
         read(&dir, &cli),
-        Err(SavedReadError::Http(HttpError::Parse(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code reported no usage."
+        ))
     ));
 }
 
@@ -247,7 +251,9 @@ fn claude_code_failing_reads_as_unavailable_not_as_a_refused_login() {
 
     assert!(matches!(
         read(&dir, &cli),
-        Err(SavedReadError::Http(HttpError::Network(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code could not report usage."
+        ))
     ));
 }
 
@@ -263,7 +269,7 @@ fn a_claude_code_too_old_to_leave_customizations_out_says_to_update_it() {
 
     assert_eq!(
         read(&dir, &cli).unwrap_err(),
-        SavedReadError::Http(HttpError::Network(OUTDATED.into()))
+        SavedReadError::Unavailable(OUTDATED)
     );
 }
 
@@ -285,7 +291,9 @@ fn claude_code_that_does_not_answer_in_time_reads_as_unavailable() {
 
     assert!(matches!(
         result,
-        Err(SavedReadError::Http(HttpError::Network(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code could not report usage."
+        ))
     ));
     assert!(
         started.elapsed() < Duration::from_secs(4),
@@ -353,7 +361,9 @@ fn no_report_from_a_config_dir_still_signed_in_reads_as_unavailable() {
 
     assert!(matches!(
         result,
-        Err(SavedReadError::Http(HttpError::Parse(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code reported no usage."
+        ))
     ));
 }
 
@@ -375,7 +385,9 @@ fn no_report_and_a_status_claude_code_cannot_give_reads_as_unavailable() {
 
     assert!(matches!(
         result,
-        Err(SavedReadError::Http(HttpError::Parse(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code reported no usage."
+        ))
     ));
 }
 

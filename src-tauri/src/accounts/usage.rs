@@ -425,6 +425,7 @@ fn attempt_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> Attemp
             true,
             Duration::ZERO,
         ),
+        Err(SavedReadError::Unavailable(why)) => AttemptOutcome::failed(why, false, Duration::ZERO),
         Err(SavedReadError::Http(HttpError::RateLimited(reset))) => {
             let seconds = match reset {
                 RateLimitReset::RetryAfter(s) => *s,

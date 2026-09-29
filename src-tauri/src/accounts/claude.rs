@@ -18,7 +18,6 @@ use super::{
     Home, IsolatedSignIn, NativeAccount,
 };
 use crate::dto::{AgentId, ProviderLimitsDto};
-use crate::limits::credentials::{parse_claude_credential, ClaudeCredential};
 use serde_json::{json, Value};
 use std::{
     ffi::OsString,
@@ -67,11 +66,9 @@ impl super::Adapter for Claude {
         _: i64,
         _: &crate::limits::SavedReadUrls<'_>,
     ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
-        Err(crate::http::HttpError::Network(
-            "This account's login has not moved into its home yet; the next read tries again."
-                .into(),
-        )
-        .into())
+        Err(crate::limits::SavedReadError::Unavailable(
+            "This account's login has not moved into its home yet; the next read tries again.",
+        ))
     }
 
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.
@@ -405,7 +402,8 @@ impl Native for ClaudeNative {
             .get("oauthAccount")
             .cloned()
             .unwrap_or(Value::Null);
-        if ClaudeLogin::credential_in(&auth).is_none() {
+        // Claude Code signs out by emptying `claudeAiOauth` of its access token.
+        if model::string(&auth, "/claudeAiOauth/accessToken").is_err() {
             return Ok(None);
         }
         Ok(Some(Login {
@@ -444,11 +442,12 @@ impl Native for ClaudeNative {
         if status.get("loggedIn").and_then(Value::as_bool) != Some(true) {
             return Err("Claude Code does not report the login as signed in.".into());
         }
-        let email = ClaudeLogin::of(&login).email();
-        if status.get("orgId").and_then(Value::as_str) != Some(identity.workspace_id.as_str())
-            || email.is_some() && status.get("email").and_then(Value::as_str) != email.as_deref()
-        {
+        if status.get("orgId").and_then(Value::as_str) != Some(identity.workspace_id.as_str()) {
             return Err("Claude credential and organization identity disagree.".into());
+        }
+        let email = ClaudeLogin::of(&login).email();
+        if email.is_some() && status.get("email").and_then(Value::as_str) != email.as_deref() {
+            return Err("Claude credential and account identity disagree.".into());
         }
         let current = self
             .read()?
@@ -520,13 +519,6 @@ impl<'a> ClaudeLogin<'a> {
             auth: &login.auth,
             account: &login.account,
         }
-    }
-
-    /// The credential in a Claude credentials document, `auth`, which holds no account record, as
-    /// the store holds it. `None` for a login Claude Code has signed out of, which empties
-    /// `claudeAiOauth` of its access token.
-    pub(crate) fn credential_in(auth: &Value) -> Option<ClaudeCredential> {
-        parse_claude_credential(auth)
     }
 }
 

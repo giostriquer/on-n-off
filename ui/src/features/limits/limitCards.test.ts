@@ -383,10 +383,6 @@ describe("a card's figures", () => {
     ]);
   });
 
-  it("never shows a Claude count an earlier version remembered, since Claude reports none", () => {
-    expect(cards([okClaude({ resetCredits: { availableCount: 1, nextExpiresAt: null } })])[0].figures.bankedResets).toBeNull();
-  });
-
   it.each([
     ["whose soonest expiry has passed", { availableCount: 2, nextExpiresAt: "2026-08-17T19:00:00Z" }],
     ["whose soonest expiry is now", { availableCount: 2, nextExpiresAt: NOW }],

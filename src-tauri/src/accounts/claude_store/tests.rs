@@ -485,6 +485,11 @@ fn env_os(vars: Vec<(&'static str, std::ffi::OsString)>) -> impl Fn(&str) -> Opt
 }
 
 /// The Keychain entry a scoped dir at `path` names, worked out apart from `StorageDir::service`.
+/// The storage dir of `dirs`: the config dir, unless `secure_storage` moved it.
+fn storage_of(dirs: &Dirs) -> StorageDir {
+    StorageDir::of(&dirs.config, dirs.custom, dirs.secure_storage.as_ref())
+}
+
 fn scoped_service(path: &Path) -> String {
     let hash = crate::sha::sha256_hex(path.to_str().unwrap().as_bytes());
     format!("{CLAUDE_KEYCHAIN_SERVICE}-{}", &hash[..8])
@@ -518,11 +523,11 @@ fn the_config_dir_follows_claude_config_dir_on_every_platform() {
         assert_eq!(dirs.config, config, "{value:?}");
         assert!(dirs.custom, "{value:?}");
         assert_eq!(
-            dirs.storage().credentials_file(),
+            storage_of(&dirs).credentials_file(),
             config.join(".credentials.json")
         );
         assert_eq!(
-            dirs.storage().service(),
+            storage_of(&dirs).service(),
             scoped_service(&config),
             "{value:?}"
         );
@@ -531,7 +536,7 @@ fn the_config_dir_follows_claude_config_dir_on_every_platform() {
     let default = dirs(&home, &env_os(vec![])).unwrap();
     assert_eq!(default.config, home.join(".claude"));
     assert!(!default.custom);
-    assert_eq!(default.storage().service(), CLAUDE_KEYCHAIN_SERVICE);
+    assert_eq!(storage_of(&default).service(), CLAUDE_KEYCHAIN_SERVICE);
 }
 
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves the storage and leaves the config dir, on every
@@ -570,11 +575,11 @@ fn the_secure_storage_dir_moves_the_store_on_every_platform() {
         let dirs = dirs(&home, &env_os(vars.clone())).unwrap();
         assert_eq!(dirs.config, config, "{vars:?}");
         assert_eq!(
-            dirs.storage().credentials_file(),
+            storage_of(&dirs).credentials_file(),
             storage.join(".credentials.json"),
             "{vars:?}"
         );
-        assert_eq!(dirs.storage().service(), service, "{vars:?}");
+        assert_eq!(storage_of(&dirs).service(), service, "{vars:?}");
     }
 
     assert_eq!(
@@ -589,7 +594,7 @@ fn the_secure_storage_dir_moves_the_store_on_every_platform() {
         ]),
     )
     .unwrap();
-    assert_eq!(disposable.storage(), StorageDir::default_in(&home));
+    assert_eq!(storage_of(&disposable), StorageDir::default_in(&home));
 }
 
 /// Claude Code 2.1.282's config dir is `CLAUDE_CONFIG_DIR` exactly as set, NFC-normalized, else
@@ -619,14 +624,17 @@ fn the_config_dir_is_claude_config_dir_as_claude_code_reads_it() {
         let dirs = dirs(home, &env(&[("CLAUDE_CONFIG_DIR", value)])).unwrap();
         assert_eq!(dirs.config, PathBuf::from(config), "{value:?}");
         assert!(dirs.custom, "{value:?}");
-        assert_eq!(dirs.storage(), StorageDir::new(PathBuf::from(config), true));
-        assert_eq!(dirs.storage().service(), service, "{value:?}");
+        assert_eq!(
+            storage_of(&dirs),
+            StorageDir::new(PathBuf::from(config), true)
+        );
+        assert_eq!(storage_of(&dirs).service(), service, "{value:?}");
     }
 
     let default = dirs(home, &env(&[])).unwrap();
     assert_eq!(default.config, PathBuf::from("/Users/me/.claude"));
     assert!(!default.custom);
-    assert_eq!(default.storage().service(), "Claude Code-credentials");
+    assert_eq!(storage_of(&default).service(), "Claude Code-credentials");
 }
 
 /// Set but empty is still set: Claude Code would use the empty path, relative to wherever it runs,
@@ -657,7 +665,7 @@ fn a_disposable_home_keeps_the_default_dirs_whatever_the_environment_says() {
     .unwrap();
     assert_eq!(dirs.config, PathBuf::from("/Users/me/.claude"));
     assert!(!dirs.custom);
-    assert_eq!(dirs.storage(), StorageDir::default_in(home));
+    assert_eq!(storage_of(&dirs), StorageDir::default_in(home));
 }
 
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves Claude Code's storage — the credentials file, the lock
@@ -706,11 +714,11 @@ fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
         let dirs = dirs(home, &env(&vars)).unwrap();
         assert_eq!(dirs.config, PathBuf::from(config), "{vars:?}");
         assert_eq!(
-            dirs.storage().credentials_file(),
+            storage_of(&dirs).credentials_file(),
             Path::new(storage).join(".credentials.json"),
             "{vars:?}"
         );
-        assert_eq!(dirs.storage().service(), service, "{vars:?}");
+        assert_eq!(storage_of(&dirs).service(), service, "{vars:?}");
     }
 
     assert_eq!(
@@ -725,7 +733,7 @@ fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
         ]),
     )
     .unwrap();
-    assert_eq!(disposable.storage(), StorageDir::default_in(home));
+    assert_eq!(storage_of(&disposable), StorageDir::default_in(home));
 }
 
 /// A credential write is uncoordinated once any lock it relies on is taken away: the caller's own,

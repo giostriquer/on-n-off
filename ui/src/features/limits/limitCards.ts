@@ -296,8 +296,7 @@ function figures(reading: ProviderLimits, provider: AgentId, now: number): CardF
     ownBalance: credits && (!(share || spent) || credits.unlimited || Number(credits.balance) !== 0) ? credits : null,
     workspaceShare: share,
     creditsSpent: spent,
-    // Only Codex reports its banked resets; a Claude count remembered from an earlier version stays out.
-    bankedResets: provider === "codex" ? banked ?? null : null,
+    bankedResets: banked,
     paidOffer: provider === "codex" ? reading.resetOffer ?? null : null,
   };
 }

@@ -32,7 +32,7 @@ fn a_failed_inactive_read_preserves_its_last_numbers_and_timestamp() {
 fn a_saved_read_that_cannot_tell_keeps_the_banked_reset_count_and_an_answer_replaces_it() {
     use crate::dto::LimitsResetCreditsDto;
     let home = tempfile::tempdir().unwrap();
-    let p = stored(home.path());
+    let p = stored_codex(home.path());
     let banked = |available_count| {
         Some(LimitsResetCreditsDto {
             available_count,
@@ -72,7 +72,7 @@ fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_
     use crate::dto::LimitsResetCreditsDto;
     use crate::limits::{remember, remembered};
     let home = tempfile::tempdir().unwrap();
-    let p = stored(home.path());
+    let p = stored_codex(home.path());
     let banked = Some(LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: None,
@@ -86,7 +86,7 @@ fn a_saved_poll_that_cannot_tell_keeps_the_remembered_banked_reset_count_across_
         .into_iter()
         .enumerate()
     {
-        let mut entries = remembered(home.path(), AgentId::Claude);
+        let mut entries = remembered(home.path(), AgentId::Codex);
         let result = poll_with(
             home.path(),
             &p,

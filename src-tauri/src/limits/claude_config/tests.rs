@@ -1,5 +1,4 @@
-//! What a Claude config dir and a stored Claude login say: the account `.claude.json` names, and a
-//! `claudeAiOauth` that is a login rather than Claude Code's emptied sign-out.
+//! The account a Claude config dir's `.claude.json` names, and the plan its organization is on.
 use super::*;
 use crate::paths::scratch_dir;
 use std::fs;
@@ -55,32 +54,4 @@ fn an_unrecognized_tier_keeps_the_plan_as_its_type_says() {
     let account = read_claude_config_account(&home.join(".claude.json")).expect("the account");
 
     assert_eq!(account.plan.as_deref(), Some("pro"));
-}
-
-#[test]
-fn a_login_emptied_by_claude_codes_own_sign_out_is_no_credential() {
-    let signed_out = serde_json::json!({
-        "claudeAiOauth": {"accessToken": "", "refreshToken": "", "expiresAt": 0}
-    });
-    let signed_in = serde_json::json!({
-        "claudeAiOauth": {"accessToken": "token", "refreshToken": "r", "expiresAt": 1}
-    });
-
-    assert!(parse_claude_credential(&signed_out).is_none());
-    assert!(parse_claude_credential(&signed_in).is_some());
-}
-
-#[test]
-fn debug_output_never_contains_the_token() {
-    let claude = ClaudeCredential {
-        token: "secret-claude".to_string(),
-        expires_at_ms: None,
-        has_refresh_token: true,
-        refresh_expires_at_ms: None,
-        subscription_type: Some("max".to_string()),
-        rate_limit_tier: None,
-    };
-    let printed = format!("{claude:?}");
-    assert!(!printed.contains("secret-"), "{printed}");
-    assert!(printed.contains("<redacted>"));
 }

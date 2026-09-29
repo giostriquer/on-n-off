@@ -72,10 +72,9 @@ fn a_saved_claude_login_in_the_vault_is_never_sent() {
         let fetched = fetch(&p, &refused(&url));
         assert_eq!(
             fetched.result.err(),
-            Some(SavedReadError::Http(HttpError::Network(
+            Some(SavedReadError::Unavailable(
                 "This account's login has not moved into its home yet; the next read tries again."
-                    .into()
-            ))),
+            )),
             "{expires_at}"
         );
     }
