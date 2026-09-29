@@ -281,7 +281,7 @@ fn a_paused_refresh_keeps_the_remembered_reset_credit_count() {
     let reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: None,
-        credits: Vec::new(),
+        resets: Vec::new(),
     });
     let remembered = Reading {
         plan: Some("pro".to_string()),
@@ -315,7 +315,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
     let reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 2,
         next_expires_at: None,
-        credits: Vec::new(),
+        resets: Vec::new(),
     });
     let remembered = Reading {
         plan: Some("pro".to_string()),
@@ -425,7 +425,7 @@ fn a_count_lapses_at_its_expiry_itself() {
     let resets = crate::dto::LimitsResetCreditsDto {
         available_count: 2,
         next_expires_at: Some(expires_at.to_string()),
-        credits: Vec::new(),
+        resets: Vec::new(),
     };
     let at = parse_observed_at(expires_at).unwrap();
     let expiry = resets.next_expires_at.as_deref();

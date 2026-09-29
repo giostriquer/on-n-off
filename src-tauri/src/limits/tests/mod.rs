@@ -260,7 +260,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             reset_credits: Some(LimitsResetCreditsDto {
                 available_count: 1,
                 next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
-                credits: Vec::new(),
+                resets: Vec::new(),
             }),
             reset_offer: Some(LimitsResetOfferDto {
                 price: Some(LimitsPriceDto {

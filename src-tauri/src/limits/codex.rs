@@ -17,8 +17,8 @@ use super::{SavedReadError, SavedReadUrls};
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto,
-    LimitsResetCreditDto, LimitsResetCreditsDto, LimitsResetOfferDto, LimitsStatus,
+    AgentId, LimitWindowDto, LimitWindowKind, LimitsBankedResetDto, LimitsCreditsDto,
+    LimitsPriceDto, LimitsResetCreditsDto, LimitsResetOfferDto, LimitsStatus,
     LimitsWorkspaceCreditsDto, ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
@@ -356,7 +356,8 @@ fn price(price: Option<&serde_json::Value>) -> Option<LimitsPriceDto> {
 }
 
 /// The count Codex reports, when the soonest still-available reset expires, and each available one,
-/// soonest first, with those whose expiry is not a real instant after them.
+/// soonest first, with those whose expiry is not a real instant after them. The list stops at the
+/// count, as Codex's own client stops it: the backend can list resets the count leaves out.
 fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCreditsDto> {
     let summary = value?;
     let mut available: Vec<(Option<DateTime<Utc>>, Option<String>)> = summary
@@ -379,14 +380,16 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
         .collect();
     // Soonest first, and a reset with no known expiry last, since it lapses no sooner.
     available.sort_by_key(|(expires_at, _)| (expires_at.is_none(), *expires_at));
+    let available_count = u32::try_from(summary.available_count).unwrap_or(u32::MAX);
+    available.truncate(usize::try_from(available_count).unwrap_or(usize::MAX));
     Some(LimitsResetCreditsDto {
-        available_count: u32::try_from(summary.available_count).unwrap_or(u32::MAX),
+        available_count,
         next_expires_at: available
             .first()
             .and_then(|(at, _)| at.map(|at| at.to_rfc3339())),
-        credits: available
+        resets: available
             .into_iter()
-            .map(|(expires_at, title)| LimitsResetCreditDto {
+            .map(|(expires_at, title)| LimitsBankedResetDto {
                 title,
                 expires_at: expires_at.map(|at| at.to_rfc3339()),
             })

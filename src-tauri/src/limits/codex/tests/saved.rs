@@ -240,23 +240,14 @@ fn saved_codex_reads_the_banked_reset_count_and_the_soonest_expiry_of_an_availab
         Some(LimitsResetCreditsDto {
             available_count: 3,
             next_expires_at: Some("2026-10-10T12:00:00+00:00".to_owned()),
-            credits: vec![
-                crate::dto::LimitsResetCreditDto {
-                    title: None,
-                    expires_at: Some("2026-10-10T12:00:00+00:00".to_owned()),
-                },
-                crate::dto::LimitsResetCreditDto {
-                    title: Some("Full reset".to_owned()),
-                    expires_at: Some("2026-10-20T00:00:00+00:00".to_owned()),
-                },
-                crate::dto::LimitsResetCreditDto {
-                    title: None,
-                    expires_at: None,
-                },
-                crate::dto::LimitsResetCreditDto {
-                    title: None,
-                    expires_at: None,
-                },
+            // No more of them than the count.
+            resets: vec![
+                super::credit(None, Some("2026-10-10T12:00:00+00:00".to_owned())),
+                super::credit(
+                    Some("Full reset"),
+                    Some("2026-10-20T00:00:00+00:00".to_owned())
+                ),
+                super::credit(None, None),
             ],
         })
     );
@@ -288,7 +279,7 @@ fn saved_codex_keeps_the_count_when_the_expiry_read_fails() {
             Some(LimitsResetCreditsDto {
                 available_count: 2,
                 next_expires_at: None,
-                credits: Vec::new(),
+                resets: Vec::new(),
             }),
             "{detail:?}"
         );
@@ -319,7 +310,7 @@ fn saved_codex_reports_zero_banked_resets_without_asking_for_their_detail() {
         Some(LimitsResetCreditsDto {
             available_count: 0,
             next_expires_at: None,
-            credits: Vec::new(),
+            resets: Vec::new(),
         })
     );
 }

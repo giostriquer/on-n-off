@@ -64,12 +64,15 @@ export type LimitsResetCredits = {
   availableCount: number;
   /** RFC 3339 instant the soonest-expiring available reset lapses, when Codex reports it. */
   nextExpiresAt?: string | null;
-  /** Each available reset Codex lists, soonest to lapse first. Absent when it lists none. */
-  credits?: LimitsResetCredit[];
+  /**
+   * Each available reset Codex lists, soonest to lapse first, never more of them than the count.
+   * Absent when it lists none.
+   */
+  resets?: LimitsBankedReset[];
 };
 
 /** One banked reset: what Codex calls it, such as "Full reset", and when it lapses. */
-export type LimitsResetCredit = {
+export type LimitsBankedReset = {
   title?: string | null;
   expiresAt?: string | null;
 };

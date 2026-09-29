@@ -166,7 +166,7 @@ fn resets(available_count: u32, next_expires_at: Option<&str>) -> Option<LimitsR
     Some(LimitsResetCreditsDto {
         available_count,
         next_expires_at: next_expires_at.map(str::to_string),
-        credits: Vec::new(),
+        resets: Vec::new(),
     })
 }
 

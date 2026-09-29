@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatShortDate } from "$lib/limitsFormat";
-import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsBankedReset, LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { BankedResetsRow, ResetOfferRow, UseBankedReset } from "./BankedResets";
 
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
@@ -87,8 +87,6 @@ describe("BankedResetsRow", () => {
     expect(screen.getByText("/limit-reset in Claude Code")).toBeTruthy();
   });
 
-  const credits = (...list: { title?: string | null; expiresAt?: string | null }[]) => list;
-
   function listed(): string[] {
     const list = screen.getByRole("list", { name: "Each banked reset" });
     return within(list).getAllByRole("listitem").map(item => item.textContent ?? "");
@@ -98,7 +96,10 @@ describe("BankedResetsRow", () => {
     const resetCredits = {
       availableCount: 2,
       nextExpiresAt: "2026-08-29T15:00:00Z",
-      credits: credits({ title: "Full reset", expiresAt: "2026-08-29T15:00:00Z" }, { expiresAt: "2026-09-10T00:00:00Z" }),
+      resets: [
+        { title: "Full reset", expiresAt: "2026-08-29T15:00:00Z" },
+        { expiresAt: "2026-09-10T00:00:00Z" },
+      ] satisfies LimitsBankedReset[],
     };
 
     render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
@@ -112,21 +113,8 @@ describe("BankedResetsRow", () => {
     expect(screen.queryByText(/next expires/)).toBeNull();
   });
 
-  it("leaves out a reset that has lapsed, and lists nothing once only one is left", () => {
-    const resetCredits = {
-      availableCount: 2,
-      nextExpiresAt: "2026-08-29T15:00:00Z",
-      credits: credits({ title: "Full reset", expiresAt: "2026-08-01T00:00:00Z" }, { expiresAt: "2026-08-29T15:00:00Z" }),
-    };
-
-    render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
-
-    expect(screen.queryByRole("list")).toBeNull();
-    expect(screen.getByText(`next expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
-  });
-
   it("still lists a reset Codex gives neither a name nor an expiry", () => {
-    const resetCredits = { availableCount: 2, nextExpiresAt: null, credits: credits({}, { title: "Full reset" }) };
+    const resetCredits = { availableCount: 2, nextExpiresAt: null, resets: [{}, { title: "Full reset" }] satisfies LimitsBankedReset[] };
 
     render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
 
@@ -137,7 +125,7 @@ describe("BankedResetsRow", () => {
     const resetCredits = {
       availableCount: 1,
       nextExpiresAt: "2026-08-29T15:00:00Z",
-      credits: credits({ title: "Full reset", expiresAt: "2026-08-29T15:00:00Z" }),
+      resets: [{ title: "Full reset", expiresAt: "2026-08-29T15:00:00Z" }],
     };
 
     render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);

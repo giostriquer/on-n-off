@@ -184,7 +184,7 @@ function bankedResetsCodex(): ProviderLimits[] {
       ? {
           availableCount: 2,
           nextExpiresAt: at(11 * 24 * 60 + 19 * 60),
-          credits: [
+          resets: [
             { title: "Full reset", expiresAt: at(11 * 24 * 60 + 19 * 60) },
             { title: "Full reset", expiresAt: at(25 * 24 * 60 + 4 * 60) },
           ],
