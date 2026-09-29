@@ -30,6 +30,7 @@ fn remembered_reset_credits_survive_a_reload_and_older_snapshots_load_without_th
     dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: Some("2100-09-01T12:00:00+00:00".to_string()),
+        resets: Vec::new(),
     });
     store.save(&dto).unwrap();
     assert_eq!(
@@ -73,6 +74,7 @@ fn a_remembered_banked_reset_count_past_its_soonest_expiry_loads_as_unknown() {
         dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
             available_count: 2,
             next_expires_at: next_expires_at.map(str::to_owned),
+            resets: Vec::new(),
         });
         store.save(&dto).unwrap();
         dto
@@ -135,6 +137,7 @@ fn forgetting_an_account_whose_count_lapsed_still_removes_the_history_it_replace
     scoped.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 1,
         next_expires_at: Some("2020-01-01T00:00:00+00:00".to_string()),
+        resets: Vec::new(),
     });
     store.save(&scoped).unwrap();
     let ids = |store: &SnapshotStore| {

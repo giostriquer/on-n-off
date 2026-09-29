@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
-import type { LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
+import type { LimitsBankedReset, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
 import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
@@ -31,17 +31,34 @@ export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
 
 /**
  * The banked reset count as one more row under the windows, with when the next one expires and,
- * when the card is given one, where the reset is spent. Whether a count is worth showing is the
- * card model's call (`CardFigures`).
+ * when the card is given one, where the reset is spent. When Codex lists more than one, the note
+ * lists each instead, soonest first, by name and expiry, so its first line says what the
+ * next-expiry note would. Whether a count is worth showing is the card model's call (`CardFigures`),
+ * and it is gone by the time the soonest reset lapses, so every one listed is still ahead.
  */
 export function BankedResetsRow({ banked, now }: { banked: CardFigures["bankedResets"]; now: number }) {
   if (!banked) return null;
   const { resetCredits, hint } = banked;
-  const expiresIn = formatResetIn(resetCredits.nextExpiresAt, now);
+  const resets = resetCredits.resets ?? [];
   const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
-  const expiry = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
-  const note = [expiry, hint].filter(Boolean).join(" · ");
+  const next = expiry(resetCredits.nextExpiresAt, now);
+  // Only Codex lists its resets and only Claude's card has a hint, so a list never hides one.
+  const note = resets.length > 1
+    ? { label: "Each banked reset", lines: resets.map(reset => describeReset(reset, now)) }
+    : [next && `${lead} ${next}`, hint].filter(Boolean).join(" · ");
   return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
+}
+
+/** One banked reset's line: its name and when it expires, each when Codex says. */
+function describeReset(reset: LimitsBankedReset, now: number): string {
+  const when = expiry(reset.expiresAt, now);
+  return [reset.title, when && `expires ${when}`].filter(Boolean).join(" · ") || "Banked reset";
+}
+
+/** "in 11d 19h · Sep 5" for an instant still ahead; `null` for one that is not. */
+function expiry(at: string | null | undefined, now: number): string | null {
+  const left = formatResetIn(at, now);
+  return left ? `in ${left} · ${formatShortDate(at)}` : null;
 }
 
 /** What one attempt to spend a banked reset came to, and when its answer arrived. */

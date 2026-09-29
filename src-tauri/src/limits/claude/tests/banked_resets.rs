@@ -50,6 +50,7 @@ fn the_live_claude_read_asks_for_saved_resets_and_the_card_carries_their_count()
         Some(LimitsResetCreditsDto {
             available_count: 1,
             next_expires_at: Some("2099-10-05T00:00:00+00:00".to_string()),
+            resets: Vec::new(),
         })
     );
 }

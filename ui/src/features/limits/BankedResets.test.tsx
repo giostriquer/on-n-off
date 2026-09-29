@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatShortDate } from "$lib/limitsFormat";
-import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsBankedReset, LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { BankedResetsRow, ResetOfferRow, UseBankedReset } from "./BankedResets";
 
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
@@ -85,6 +85,53 @@ describe("BankedResetsRow", () => {
     render(<BankedResetsRow banked={banked(1, null, "/limit-reset in Claude Code")} now={NOW} />);
 
     expect(screen.getByText("/limit-reset in Claude Code")).toBeTruthy();
+  });
+
+  function listed(): string[] {
+    const list = screen.getByRole("list", { name: "Each banked reset" });
+    return within(list).getAllByRole("listitem").map(item => item.textContent ?? "");
+  }
+
+  it("lists each banked reset, soonest first, with its name and when it expires, when there is more than one", () => {
+    const resetCredits = {
+      availableCount: 2,
+      nextExpiresAt: "2026-08-29T15:00:00Z",
+      resets: [
+        { title: "Full reset", expiresAt: "2026-08-29T15:00:00Z" },
+        { expiresAt: "2026-09-10T00:00:00Z" },
+      ] satisfies LimitsBankedReset[],
+    };
+
+    render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
+
+    expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
+    expect(listed()).toEqual([
+      `Full reset · expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`,
+      `expires in 23d 4h · ${formatShortDate("2026-09-10T00:00:00Z")}`,
+    ]);
+    // The first line already says when the next one expires.
+    expect(screen.queryByText(/next expires/)).toBeNull();
+  });
+
+  it("still lists a reset Codex gives neither a name nor an expiry", () => {
+    const resetCredits = { availableCount: 2, nextExpiresAt: null, resets: [{}, { title: "Full reset" }] satisfies LimitsBankedReset[] };
+
+    render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
+
+    expect(listed()).toEqual(["Banked reset", "Full reset"]);
+  });
+
+  it("keeps a lone banked reset's row as it was", () => {
+    const resetCredits = {
+      availableCount: 1,
+      nextExpiresAt: "2026-08-29T15:00:00Z",
+      resets: [{ title: "Full reset", expiresAt: "2026-08-29T15:00:00Z" }],
+    };
+
+    render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
+
+    expect(screen.queryByRole("list")).toBeNull();
+    expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
   });
 
   // Which counts are worth a row (none, or one past its soonest expiry) is `limitCards.test.ts`'s.

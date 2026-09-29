@@ -42,7 +42,8 @@ fn every_figure() -> ProviderLimitsDto {
                          "updatedAt": "2026-08-17T09:00:00Z"},
         "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
                          "note": "cancelled", "checkedAt": "2026-08-17T10:00:00Z"},
-        "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00"},
+        "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00",
+                         "resets": [{"title": "Full reset", "expiresAt": "2100-09-01T12:00:00+00:00"}]},
         "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
     }))
 }
@@ -78,7 +79,8 @@ fn a_snapshot_file_holds_the_whole_reading_under_its_wire_names() {
                              "updatedAt": "2026-08-17T09:00:00Z"},
             "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
                              "note": "cancelled", "checkedAt": "2026-08-17T10:00:00Z"},
-            "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00"},
+            "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00",
+                         "resets": [{"title": "Full reset", "expiresAt": "2100-09-01T12:00:00+00:00"}]},
             "observedAt": "2026-08-17T11:00:00.000Z"
         })
     );
@@ -159,7 +161,8 @@ fn a_newer_read_that_could_not_tell_keeps_only_the_remembered_figures_in_the_fil
                              "updatedAt": "2026-08-17T09:00:00Z"},
             "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
                              "note": "cancelled", "checkedAt": "2026-08-17T10:00:00Z"},
-            "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00"},
+            "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00",
+                         "resets": [{"title": "Full reset", "expiresAt": "2100-09-01T12:00:00+00:00"}]},
             "observedAt": "2026-08-17T13:00:00.000Z"
         })
     );

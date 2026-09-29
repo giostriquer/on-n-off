@@ -1,11 +1,18 @@
 import { useId, type ReactNode } from "react";
 
+/** A note made of parts, one per line, announced as a list with its own name. */
+export type NoteLines = { label: string; lines: readonly string[] };
+
 /**
  * One more row under a card's windows for an account figure that is not a quota: a small-caps
  * label, an optional note under it, and the value on the right. The value is the label's definition,
- * so it is announced with its name.
+ * so it is announced with its name. A figure made of parts gives its note as lines.
  */
-export function SummaryRow({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
+export function SummaryRow({ label, value, note }: {
+  label: string;
+  value: ReactNode;
+  note?: string | NoteLines;
+}) {
   const labelId = useId();
   // One name–value group: the label, its value, then the note, laid out so the note sits under the label.
   return (
@@ -17,7 +24,15 @@ export function SummaryRow({ label, value, note }: { label: string; value: React
         <dd aria-labelledby={labelId} className="col-start-2 row-span-2 row-start-1 text-right font-mono text-[12px] tabular-nums">
           {value}
         </dd>
-        {note ? <dd className="col-start-1 row-start-2 font-mono text-[11px] leading-snug text-[var(--mute)]">{note}</dd> : null}
+        {note ? (
+          <dd className="col-start-1 row-start-2 font-mono text-[11px] leading-snug text-[var(--mute)]">
+            {typeof note === "string" ? note : (
+              <ul aria-label={note.label} className="m-0 list-none p-0">
+                {note.lines.map((line, index) => <li key={index}>{line}</li>)}
+              </ul>
+            )}
+          </dd>
+        ) : null}
       </div>
     </dl>
   );
