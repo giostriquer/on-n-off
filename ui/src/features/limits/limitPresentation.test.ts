@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, headlineWindow, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, presentWorkspaceShare } from "./limitPresentation";
+import { hasObservations, headlineWindow, latestObservedAt, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, presentWorkspaceShare } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -271,5 +271,22 @@ describe("presentLimitAccount freshness", () => {
     ["a saved read that was refused", { currentAccount: false, status: "unauthenticated" }, true],
   ] as const)("calls what a card shows last known only when its read did not answer: %s", (_case, overrides, lastKnown) => {
     expect(presentLimitAccount(claude(overrides), "unavailable").lastKnown).toBe(lastKnown);
+  });
+});
+
+describe("latestObservedAt", () => {
+  const observedAt = (...times: string[]): ProviderLimits => ({
+    provider: "codex",
+    status: "ok",
+    currentAccount: true,
+    windows: times.map((time, index) => ({ ...window, id: `w${index}`, observedAt: time })),
+  });
+
+  it.each([
+    [["2026-08-17T10:00:00Z", "2026-08-17T12:00:00Z", "2026-08-17T11:00:00Z", ""], Date.parse("2026-08-17T12:00:00Z")],
+    [["", "not a time"], null],
+    [[], null],
+  ])("reads %j as the newest time any window says", (times, newest) => {
+    expect(latestObservedAt(observedAt(...times))).toBe(newest);
   });
 });

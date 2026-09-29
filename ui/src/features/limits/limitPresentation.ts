@@ -191,14 +191,19 @@ export function hasObservations(entry: ProviderLimits): boolean {
   );
 }
 
+/** When the newest window on the card was read, in epoch milliseconds; `null` when none says. */
+export function latestObservedAt(entry: ProviderLimits): number | null {
+  return entry.windows.reduce<number | null>((latest, window) => {
+    const observedAt = parseInstant(window.observedAt);
+    if (observedAt === null) return latest;
+    return latest === null ? observedAt : Math.max(latest, observedAt);
+  }, null);
+}
+
 /** A card's one status and how fresh its reading is. */
 export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
   const observed = hasObservations(entry);
-  const latestObservedAt = entry.windows.reduce<number | null>((latest, window) => {
-    const observedAt = Date.parse(window.observedAt);
-    if (Number.isNaN(observedAt)) return latest;
-    return latest === null ? observedAt : Math.max(latest, observedAt);
-  }, null);
+  const newest = latestObservedAt(entry);
   const savedProfile = entry.savedProfile === true;
   const savedRefreshPaused = savedProfile && observed && (entry.status === "failed" || entry.status === "unauthenticated");
   const detail = entry.message ?? fallbackMessage;
@@ -209,6 +214,6 @@ export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: stri
       : null,
     message: entry.status === "ok" || savedRefreshPaused ? null : detail,
     lastKnown: entry.status !== "ok",
-    updatedAt: latestObservedAt === null ? null : formatObservedAt(new Date(latestObservedAt).toISOString()),
+    updatedAt: newest === null ? null : formatObservedAt(new Date(newest).toISOString()),
   };
 }
