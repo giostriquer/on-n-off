@@ -222,12 +222,33 @@ fn a_home_holding_another_accounts_login_is_left_as_it_is_and_its_profile_read_f
     assert_eq!(harness.in_home(&b), Some("c1".into()));
     assert!(asked(&harness).is_empty(), "read the other account's home");
     assert_eq!(fetched, std::slice::from_ref(&b));
-    // Switching to it publishes the account's own login, from the vault.
+    // Switching to it publishes the account's own login, from the vault, and leaves the home as it
+    // is.
     harness
         .accounts()
         .activate(AgentId::Claude, &b, Activation::Ordinary)
         .unwrap();
     assert_eq!(harness.live(), Some("b1".into()));
+    assert_eq!(harness.in_home(&b), Some("c1".into()));
+}
+
+#[test]
+fn switching_to_an_account_whose_only_login_is_another_accounts_fails_and_leaves_its_home_alone() {
+    let harness = Harness::new().with_homes();
+    let (a, b) = two_accounts(&harness);
+    seeded_home(&harness, 1, claude("c", "c1"));
+    harness.seed(|db| db.profiles[1].login = None);
+
+    let error = harness
+        .accounts()
+        .activate(AgentId::Claude, &b, Activation::Ordinary)
+        .unwrap_err();
+
+    assert!(error.contains("signs in as a different account"), "{error}");
+    assert_eq!(harness.in_home(&b), Some("c1".into()));
+    assert_eq!(harness.in_vault(&b), None);
+    assert_eq!(harness.live(), Some("a2".into()));
+    assert_eq!(harness.in_home(&a), None);
 }
 
 /// A write that did not land, as one filed where Claude Code never reads, must not cost the login:
