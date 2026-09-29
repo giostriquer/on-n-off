@@ -105,8 +105,9 @@ pub(super) fn check_out(
 
 /// Before a read of saved `provider` accounts: takes back or tears down every home no profile names
 /// ([`take_back_or_tear_down`]), then moves the login of every saved account that is not `native`,
-/// the signed-in one, and is not archived, from the vault into its home. `open` opens the vault; `home` resolves a home id. Best effort:
-/// whatever fails stays as it is, and the next read tries again.
+/// the signed-in one, and is not archived, from the vault into its home. `open` opens the vault;
+/// `home` resolves a home id. Best effort: whatever fails stays as it is, and the next read tries
+/// again.
 pub(super) fn settle(
     root_home: &Path,
     provider: AgentId,

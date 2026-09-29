@@ -101,7 +101,7 @@ unless Sign out left the account so, which it records on the profile (`signed_ou
 vault change; every other home is torn down. A home whose login cannot be read right now is left
 for a later read, since it may be the account's only login. The rule has one limit: a version
 before homes drops `signed_out` with `home`, so a sign-out it made, or one whose vault it rewrote
-before the next read, leaves nothing to tell by, and the signed-out account takes its homes back;
+before the signed-out homes went, leaves nothing to tell by, and the signed-out account takes its homes back;
 their reads then say whether that sign-out ended their logins. The teardown never
 runs `claude auth logout`: whether a logout ends only its own login or every login of the account
 is unproven, and a logout that ended the others would sign the user out elsewhere.
