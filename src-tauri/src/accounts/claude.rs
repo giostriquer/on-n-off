@@ -16,7 +16,7 @@ use super::{
     native::{self, CUSTOM_HOME},
     store::Login,
     transaction::{Native, NativeGuard, ReadBack},
-    IsolatedSignIn, NativeAccount,
+    Home, IsolatedSignIn, NativeAccount,
 };
 use crate::dto::{AgentId, ProviderLimitsDto};
 use crate::limits::credentials::{parse_claude_credential, ClaudeCredential, CredentialLookup};
@@ -28,6 +28,8 @@ use std::{
     process::Command,
     time::Duration,
 };
+
+mod home;
 
 pub(super) struct Claude;
 
@@ -48,9 +50,17 @@ impl super::Adapter for Claude {
         claude_renew::TOKEN_URL
     }
 
-    /// The grant is sent from `claude_renew`, where every Claude grant is.
-    fn renew_private(&self, login: &Login, now_ms: i64, token_url: &str) -> Result<Login, String> {
-        claude_renew::renew_private(login, now_ms, token_url)
+    /// Never sent: a saved Claude login waits in its home, where Claude Code renews it.
+    fn renew_private(&self, _: &Login, _: i64, _: &str) -> Result<Login, String> {
+        Err("Claude Code renews a saved Claude login itself, in the account's home.".into())
+    }
+
+    fn renews_privately(&self) -> bool {
+        false
+    }
+
+    fn home(&self, dir: &Path) -> Option<Box<dyn Home>> {
+        Some(Box::new(home::ClaudeHome::at(dir)))
     }
 
     fn read_usage(
@@ -115,6 +125,17 @@ pub(super) struct ClaudeNative {
     /// Where `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved Claude's login and locks; `None` keeps them
     /// in the config home, and keeps the variable away from a `claude` this store starts.
     secure_storage: Option<SecureStorage>,
+    /// A saved account's home, whose login on-n-off files in the home's own Keychain entry.
+    in_home: bool,
+}
+
+/// What one write to Claude's store changes.
+#[derive(Clone, Copy)]
+enum Change<'a> {
+    /// The login and the account record beside it; `None` removes both.
+    Login(Option<&'a Login>),
+    /// The login alone, emptied as Claude Code's own sign-out empties it, the account record kept.
+    SignedOut,
 }
 
 impl ClaudeNative {
@@ -136,6 +157,7 @@ impl ClaudeNative {
             custom: dirs.custom,
             use_keychain: !disposable,
             secure_storage: dirs.secure_storage,
+            in_home: false,
         })
     }
 
@@ -145,12 +167,29 @@ impl ClaudeNative {
         let config_home = dir.join(".claude");
         fs::create_dir_all(&config_home).map_err(|_| "Cannot create isolated login home.")?;
         Ok(Self {
+            in_home: false,
+            ..Self::private(config_home)
+        })
+    }
+
+    /// The store of the home kept for a saved account in `dir`, created by its first write.
+    fn home(dir: &Path) -> Self {
+        Self {
+            in_home: true,
+            ..Self::private(dir.join(".claude"))
+        }
+    }
+
+    /// A private store in `config_home`, its own config home under its own scoped Keychain entry.
+    fn private(config_home: PathBuf) -> Self {
+        Self {
             config_file: config_home.join(".claude.json"),
             config_home,
             custom: true,
             use_keychain: true,
             secure_storage: None,
-        })
+            in_home: false,
+        }
     }
 
     /// `preflight` against the environment `env` reads and the managed settings file at
@@ -296,8 +335,8 @@ impl ClaudeNative {
     }
 
     /// The write itself, under `locks`: Claude's login merged into the store Claude Code reads,
-    /// beside the identity `ConfigIo` patches.
-    fn publish(&self, login: Option<&Login>, locks: &dyn NativeGuard) -> Result<(), String> {
+    /// beside the identity `ConfigIo` patches, or the login alone emptied.
+    fn publish(&self, change: Change<'_>, locks: &dyn NativeGuard) -> Result<(), String> {
         locks.ensure()?;
         // The read, the config patch and the credential write are one change under Claude Code's
         // storage-write lock, going to the store Claude Code's next read uses.
@@ -311,22 +350,39 @@ impl ClaudeNative {
         };
         let (document, pending) =
             claude_store::begin(&self.storage_dir(), &keychain, &held).map_err(begin_error)?;
-        let write = pending.prove().map_err(begin_error)?;
+        if document.is_none() && matches!(change, Change::SignedOut) {
+            return Ok(()); // Nothing is stored, so nothing is signed in to empty.
+        }
+        let write = if self.in_home {
+            pending.prove_in_home()
+        } else {
+            pending.prove()
+        }
+        .map_err(begin_error)?;
         let mut auth = document.unwrap_or_else(|| json!({}));
         let object = auth
             .as_object_mut()
             .ok_or("Malformed Claude credentials.")?;
-        if let Some(login) = login {
-            object.insert(
-                "claudeAiOauth".into(),
-                login
-                    .auth
-                    .get("claudeAiOauth")
-                    .cloned()
-                    .ok_or("Missing Claude login.")?,
-            );
-        } else {
-            object.remove("claudeAiOauth");
+        match change {
+            Change::Login(Some(login)) => {
+                object.insert(
+                    "claudeAiOauth".into(),
+                    login
+                        .auth
+                        .get("claudeAiOauth")
+                        .cloned()
+                        .ok_or("Missing Claude login.")?,
+                );
+            }
+            Change::Login(None) => {
+                object.remove("claudeAiOauth");
+            }
+            Change::SignedOut => {
+                object.insert(
+                    "claudeAiOauth".into(),
+                    json!({"accessToken": "", "refreshToken": "", "expiresAt": 0}),
+                );
+            }
         }
         // The caller's encrypted journal already holds the outgoing OAuth identity and credential.
         // ConfigIo owns atomic config publication/validation/rollback; ordinary backups get no tokens.
@@ -338,11 +394,13 @@ impl ClaudeNative {
             }
         };
         ensure()?;
-        crate::config_io::ConfigIo::patch_account_identity(
-            &self.config_file,
-            login.map(|l| &l.account),
-        )?;
-        ensure()?;
+        if let Change::Login(login) = change {
+            crate::config_io::ConfigIo::patch_account_identity(
+                &self.config_file,
+                login.map(|l| &l.account),
+            )?;
+            ensure()?;
+        }
         write.commit(&auth)
     }
 }
@@ -393,7 +451,7 @@ impl Native for ClaudeNative {
         login: Option<&Login>,
         locks: Box<dyn NativeGuard>,
     ) -> Result<ReadBack, String> {
-        self.publish(login, locks.as_ref())?;
+        self.publish(Change::Login(login), locks.as_ref())?;
         let back = self.read();
         drop(locks);
         Ok(back)
@@ -424,7 +482,7 @@ impl IsolatedSignIn for ClaudeNative {
     /// Claude Code's own usage report, run in this sign-in's config dir, which renews its login
     /// itself if it has to; no request is made with the login here.
     fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
-        crate::limits::claude_cli::read_usage(self.command(), &self.config_file, identity).ok()
+        crate::limits::claude_cli::read_usage(&|| self.command(), &self.config_file, identity).ok()
     }
 
     /// Deletes the sign-in's own scoped Keychain entry, never Claude Code's unscoped one.

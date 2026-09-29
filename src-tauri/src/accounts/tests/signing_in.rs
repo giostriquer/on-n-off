@@ -34,7 +34,13 @@ fn a_sign_in_saves_the_login_the_official_client_left_and_cleans_its_private_hom
         let profile = &vault.profiles[0];
         assert_eq!(profile.identity, identity(provider, "b", "team"));
         assert_eq!(generation(profile.login.as_ref()), Some("b1".into()));
-        assert!(profile.pending_activation && profile.usage_renewal_owned);
+        assert!(profile.pending_activation);
+        // Only a provider whose saved logins stay in the vault renews one privately.
+        assert_eq!(
+            profile.usage_renewal_owned,
+            provider == AgentId::Codex,
+            "{provider:?}"
+        );
         assert_eq!(harness.live(), Some("a1".into()), "the CLI keeps its login");
         assert_eq!(*harness.native.resolved.borrow(), [provider]);
         assert_eq!(harness.native.cleaned.get(), 1);

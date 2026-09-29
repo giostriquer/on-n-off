@@ -292,8 +292,9 @@ fn start(home: &Path, provider: AgentId, expected: Option<&str>) -> Result<store
     Ok(ticket)
 }
 
-/// Publishes a finished sign-in into the vault as a profile awaiting activation that owns its
-/// renewal: an account change, refused if the sign-in was canceled or its ticket no longer holds.
+/// Publishes a finished sign-in into the vault as a profile awaiting activation, which owns its
+/// renewal when its provider renews privately: an account change, refused if the sign-in was
+/// canceled or its ticket no longer holds.
 fn publish(
     registry: &Mutex<Registry>,
     home: &Path,
@@ -321,14 +322,18 @@ fn publish(
                 return Err("Sign-in was canceled.".into());
             }
             db.reenroll(&identity);
+            let renews_privately = super::adapter(identity.provider)?.renews_privately();
             let saved_id = db.save(identity, login, expected)?;
+            // The new login replaces whatever a home kept for the account; it moves into a new
+            // home at the next read, like any saved login that is not the signed-in one.
+            db.retire_home(&saved_id);
             let profile = db
                 .profiles
                 .iter_mut()
                 .find(|p| p.id == saved_id)
                 .ok_or("Saved profile disappeared.")?;
             profile.pending_activation = true;
-            profile.usage_renewal_owned = true;
+            profile.usage_renewal_owned = renews_privately;
             Ok((operation, profile.email.clone()))
         },
         |(operation, email), _, _| {

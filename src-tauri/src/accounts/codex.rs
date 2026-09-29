@@ -51,6 +51,14 @@ impl super::Adapter for Codex {
         login.renewed(&reply, now_ms)
     }
 
+    fn renews_privately(&self) -> bool {
+        true
+    }
+
+    fn home(&self, _: &Path) -> Option<Box<dyn super::Home>> {
+        None
+    }
+
     /// Read whatever the access token's expiry: Codex's backend says whether it still takes it.
     fn read_usage(
         &self,

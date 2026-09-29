@@ -1,8 +1,11 @@
-//! Poll every saved subscription without publishing credentials to a native client. Shared
-//! native shadows are access-only. Only a never-activated isolated sign-in owns renewal.
+//! Poll every saved subscription without publishing credentials to a native client. A saved
+//! account with a home (`homes.rs`) is read there by its provider's own client, which renews its
+//! login itself; the vault holds no login for it. A login still in the vault is read access-only,
+//! and only a never-activated isolated sign-in of a provider that renews privately owns renewal.
 use super::{
     model::Identity,
     store::{Guard, Login, Profile, Store, Ticket},
+    Home,
 };
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
@@ -67,9 +70,21 @@ impl super::Accounts {
         let native = self
             .native(provider)
             .and_then(|native| native.subscription());
-        refresh_with(home, provider, force, entries, native, &open, &|profile| {
-            fetch(profile, &open)
-        });
+        let homes = |id: &str| self.home(provider, id);
+        // Before either read: every saved login that belongs in a home moves there first.
+        if let Ok(native) = &native {
+            super::homes::settle(home, provider, native.as_ref(), &open, &homes);
+        }
+        refresh_with(
+            home,
+            provider,
+            force,
+            entries,
+            native.clone(),
+            &open,
+            &|profile| fetch(profile, &open),
+        );
+        refresh_homes(home, provider, force, entries, native, &open, &homes);
     }
 }
 
@@ -166,45 +181,67 @@ fn poll_with(
     let mut outcome = attempt_outcome(&result);
     // Removal, reauthentication and logout can proceed while HTTP is in flight. Recheck under
     // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
-    let published = (|| {
+    let held = ticket.holding(profile, fingerprint.clone());
+    let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
-        store
-            .recheck(&ticket.holding(profile, fingerprint.clone()))
-            .ok()?;
-        match result {
-            Ok(mut dto) => {
-                if dto
-                    .account
-                    .as_ref()
-                    .is_none_or(|a| a.id != profile.identity.observation_key())
-                {
-                    return None;
-                }
-                if let Some(account) = &mut dto.account {
-                    if account.label.is_none() {
-                        account.label.clone_from(&profile.email);
-                    }
-                }
-                let mut remembered = crate::limits::remember(home, dto);
-                if remembered.saved.is_err() {
-                    // The reading stands, under the failure; only the snapshot is missing, so the
-                    // poll counts as failed and reads again once its backoff passes.
-                    outcome = AttemptOutcome::failed(UNSAVED, false, Duration::ZERO);
-                    remembered.card.status = LimitsStatus::Failed;
-                    remembered.card.message.clone_from(&outcome.error);
-                }
-                Some(Ok(remembered.card))
+        store.recheck(&held).ok()?;
+        Some(store)
+    });
+    hold_back(attempts, key, fingerprint, previous.as_ref(), outcome);
+    published
+}
+
+/// A poll's `result` as `profile`'s card, published while the vault lease `lease` opens still vouches
+/// for what was read, `None` once it does not. A reading is remembered as the profile's card; a
+/// failure is the card's message. A reading that could not be remembered counts as a failure.
+fn publish(
+    home: &Path,
+    profile: &Profile,
+    result: Result<ProviderLimitsDto, SavedReadError>,
+    outcome: &mut AttemptOutcome,
+    lease: &dyn Fn() -> Option<Store>,
+) -> Option<Result<ProviderLimitsDto, String>> {
+    let _lease = lease()?;
+    match result {
+        Ok(mut dto) => {
+            if dto
+                .account
+                .as_ref()
+                .is_none_or(|a| a.id != profile.identity.observation_key())
+            {
+                return None;
             }
-            Err(_) => outcome.error.clone().map(Err),
+            if let Some(account) = &mut dto.account {
+                if account.label.is_none() {
+                    account.label.clone_from(&profile.email);
+                }
+            }
+            let mut remembered = crate::limits::remember(home, dto);
+            if remembered.saved.is_err() {
+                // The reading stands, under the failure; only the snapshot is missing, so the
+                // poll counts as failed and reads again once its backoff passes.
+                *outcome = AttemptOutcome::failed(UNSAVED, false, Duration::ZERO);
+                remembered.card.status = LimitsStatus::Failed;
+                remembered.card.message.clone_from(&outcome.error);
+            }
+            Some(Ok(remembered.card))
         }
-    })();
-    // The next poll of this login is held back until a new login when this one was rejected, else
-    // for the poll interval, doubled for each failure in a row, and at least as long as the
-    // service asked. A poll that could not publish is held back too.
+        Err(_) => outcome.error.clone().map(Err),
+    }
+}
+
+/// Holds the next poll of `key`'s `fingerprint` back until a new login when this one was rejected,
+/// else for the poll interval, doubled for each failure in a row, and at least as long as the
+/// service asked. A poll that could not publish is held back too.
+fn hold_back(
+    attempts: &Mutex<HashMap<String, Attempt>>,
+    key: String,
+    fingerprint: String,
+    previous: Option<&Attempt>,
+    outcome: AttemptOutcome,
+) {
     let failures = if outcome.error.is_some() {
-        previous
-            .as_ref()
-            .map_or(1, |a| a.failures.saturating_add(1))
+        previous.map_or(1, |a| a.failures.saturating_add(1))
     } else {
         0
     };
@@ -224,7 +261,122 @@ fn poll_with(
             },
         );
     }
+}
+
+/// Merges a fresh reading of every saved `provider` account kept in a home, but the signed-in one,
+/// into `entries`, each read by its provider's own client from the home `homes` resolves. At most
+/// two run at once. An archived account is left alone, as in `refresh_with`.
+fn refresh_homes(
+    home: &Path,
+    provider: AgentId,
+    force: bool,
+    entries: &mut Vec<ProviderLimitsDto>,
+    native: Result<Option<Identity>, String>,
+    open: &(dyn Fn() -> Result<Store, String> + Sync),
+    homes: &super::homes::Resolve<'_>,
+) {
+    let Ok(native) = native else {
+        return;
+    };
+    let Ok(db) = open().and_then(|s| s.load()) else {
+        return;
+    };
+    let Ok(ticket) = db.ticket(Guard::SignIn) else {
+        return;
+    };
+    let archived = crate::limits::archived(home, provider);
+    let homed: Vec<(Profile, Box<dyn Home>)> = db
+        .profiles
+        .into_iter()
+        .filter(|p| {
+            p.identity.provider == provider
+                && p.login.is_none()
+                && native.as_ref() != Some(&p.identity)
+                && !archived.contains(&p.identity.observation_key())
+        })
+        .filter_map(|p| {
+            let resolved = homes(p.home.as_deref()?).ok()??;
+            Some((p, resolved))
+        })
+        .collect();
+    for batch in homed.chunks(2) {
+        let results = std::thread::scope(|scope| {
+            let tasks: Vec<_> = batch
+                .iter()
+                .map(|(profile, resolved)| {
+                    let ticket = &ticket;
+                    scope.spawn(move || {
+                        poll_home(home, profile, ticket, force, open, &|profile| {
+                            resolved.read_usage(&profile.identity)
+                        })
+                    })
+                })
+                .collect();
+            tasks
+                .into_iter()
+                .map(|t| t.join().unwrap_or(None))
+                .collect::<Vec<_>>()
+        });
+        for ((profile, _), result) in batch.iter().zip(results) {
+            merge(entries, profile, result);
+        }
+    }
+}
+
+/// `profile`'s poll from its home, read by `read`, held back and published as `poll_with` holds
+/// back and publishes a vault login's. Nothing here is ever refused for good: the home's client
+/// renews its own login, and a new sign-in replaces the home.
+fn poll_home(
+    home: &Path,
+    profile: &Profile,
+    ticket: &Ticket,
+    force: bool,
+    open: &dyn Fn() -> Result<Store, String>,
+    read: &dyn Fn(&Profile) -> Result<ProviderLimitsDto, SavedReadError>,
+) -> Option<Result<ProviderLimitsDto, String>> {
+    let held = ticket.holding_home(profile)?;
+    let generation = profile.home.clone()?;
+    let key = format!("{}:{}", home.display(), profile.id);
+    let attempts = ATTEMPTS.get_or_init(Mutex::default);
+    let previous = attempts
+        .lock()
+        .ok()?
+        .get(&key)
+        .cloned()
+        .filter(|a| a.fingerprint == generation);
+    if let Some(previous) = &previous {
+        if Instant::now() < previous.next && (!force || previous.error.is_some()) {
+            open().ok()?.recheck(&held).ok()?;
+            return previous.error.clone().map(Err);
+        }
+    }
+    let result = read(profile);
+    let mut outcome = home_outcome(&result);
+    let published = publish(home, profile, result, &mut outcome, &|| {
+        let store = open().ok()?;
+        store.recheck(&held).ok()?;
+        Some(store)
+    });
+    hold_back(attempts, key, generation, previous.as_ref(), outcome);
     published
+}
+
+/// How a poll from a home went. Its client renews the login, so no answer waits for a new login:
+/// every failure only backs off.
+fn home_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOutcome {
+    let failed = |error: &str| AttemptOutcome::failed(error, false, Duration::ZERO);
+    match result {
+        Err(SavedReadError::Http(HttpError::Unauthorized)) => {
+            failed("This account's saved login has ended. Sign in again.")
+        }
+        Err(SavedReadError::OtherAccount) => {
+            failed("This account's saved login now signs in as a different account. Sign in again.")
+        }
+        _ => AttemptOutcome {
+            rejected: false,
+            ..attempt_outcome(result)
+        },
+    }
 }
 
 /// What a card says of a reading the snapshot store could not keep.

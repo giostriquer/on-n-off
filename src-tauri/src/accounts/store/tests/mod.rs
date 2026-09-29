@@ -409,7 +409,8 @@ fn a_sealed_database_keeps_the_vault_format() {
                 "saved_at": "<saved at>",
                 "login": {"auth": {"refresh": "fixture-a"}, "account": null},
                 "pending_activation": false,
-                "usage_renewal_owned": false
+                "usage_renewal_owned": false,
+                "home": null
             }],
             "login_epoch": 1,
             "ignored_accounts": [{"provider": "codex", "userId": "removed", "workspaceId": "team"}],
@@ -418,7 +419,8 @@ fn a_sealed_database_keeps_the_vault_format() {
                 "target_id": id,
                 "outgoing": {"auth": {"refresh": "outgoing"}, "account": null},
                 "outgoing_identity": {"provider": "codex", "userId": "b", "workspaceId": "team"}
-            }
+            },
+            "retired_homes": []
         })
     );
 }
@@ -447,9 +449,14 @@ fn a_vault_from_before_the_later_fields_loads_without_them() {
     assert_eq!(loaded.login_epoch, 0);
     assert!(loaded.recovery.is_none());
     assert!(loaded.ignored_accounts.is_empty() && loaded.ignored_credentials.is_empty());
+    assert!(loaded.retired_homes.is_empty());
     let profile = &loaded.profiles[0];
     assert_eq!(profile.identity, identity("a"));
     assert!(!profile.pending_activation && !profile.usage_renewal_owned);
+    assert_eq!(
+        profile.home, None,
+        "an old saved login stays in the vault until it moves"
+    );
     assert_eq!(
         profile.login.as_ref().unwrap().auth["refresh"],
         "old-fixture"

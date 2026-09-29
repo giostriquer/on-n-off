@@ -94,10 +94,14 @@ fn another_providers_profile_is_not_used() {
     assert!(harness.heard().is_empty());
 }
 
+/// Only a provider whose saved logins stay in the vault renews one privately, so a Codex login
+/// stands for any login whose renewal may have spent its refresh token.
 #[test]
 fn a_login_with_an_unfinished_private_renewal_is_not_used() {
     let harness = Harness::new();
-    let (_, b) = two_profiles(&harness);
+    harness.saved(identity(AgentId::Codex, "a", "team"), codex("a", "a1"));
+    let b = harness.saved(identity(AgentId::Codex, "b", "team"), codex("b", "b1"));
+    harness.signed_in(Some(codex("a", "a2")));
     let profile = harness.seed(|db| {
         db.profiles[1].usage_renewal_owned = true;
         db.profiles[1].clone()
@@ -113,7 +117,7 @@ fn a_login_with_an_unfinished_private_renewal_is_not_used() {
 
     let error = harness
         .accounts()
-        .activate(AgentId::Claude, &b, Activation::Ordinary)
+        .activate(AgentId::Codex, &b, Activation::Ordinary)
         .unwrap_err();
 
     assert!(error.contains("unfinished usage renewal"), "{error}");

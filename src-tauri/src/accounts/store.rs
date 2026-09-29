@@ -30,6 +30,10 @@ pub struct Profile {
     /// True only while an isolated app sign-in has never been published to a native client.
     #[serde(default)]
     pub usage_renewal_owned: bool,
+    /// The account's home (`accounts::homes`), which holds its one login while it is not the
+    /// signed-in one: `login` is then `None`. The signed-in account's home is empty.
+    #[serde(default)]
+    pub home: Option<String>,
 }
 #[derive(Default, Serialize, Deserialize)]
 pub struct Database {
@@ -46,6 +50,9 @@ pub struct Database {
     /// a metadata edit waits for.
     #[serde(default)]
     recovery: Option<Recovery>,
+    /// Homes no profile names any more, still to be torn down (`accounts::homes`).
+    #[serde(default)]
+    pub retired_homes: Vec<String>,
 }
 
 /// Refused while an interrupted switch awaits recovery.
@@ -104,6 +111,9 @@ enum Guarded {
     Epoch(u64),
     /// The epoch, and a saved profile still holding the login a usage reading was made with.
     Reading { epoch: u64, held: HeldLogin },
+    /// The epoch, and a saved profile still keeping its login in the home a usage reading was
+    /// made from.
+    HomeReading { epoch: u64, held: HeldHome },
     /// A saved profile still holding the login that was renewed, and still owning its renewal.
     /// There is no epoch to compare: the renewal has spent the refresh token by the time it
     /// publishes, so an account change that left this profile alone must not reject it.
@@ -138,6 +148,24 @@ impl HeldLogin {
     }
 }
 
+#[derive(Clone)]
+struct HeldHome {
+    id: String,
+    identity: Identity,
+    home: String,
+}
+impl HeldHome {
+    /// The saved profile that still keeps its login in this home, if one does.
+    fn in_vault<'db>(&self, db: &'db Database) -> Option<&'db Profile> {
+        db.profiles.iter().find(|profile| {
+            profile.id == self.id
+                && profile.identity == self.identity
+                && profile.home.as_deref() == Some(self.home.as_str())
+                && profile.login.is_none()
+        })
+    }
+}
+
 /// What a ticket guards.
 pub enum Guard<'a> {
     /// The sign-in epoch: any account change since the ticket rejects the publication. A sign-in,
@@ -157,11 +185,29 @@ impl Ticket {
     pub fn holding(&self, profile: &Profile, fingerprint: String) -> Self {
         let held = HeldLogin::of(profile, fingerprint);
         Self(match self.0 {
-            Guarded::Epoch(epoch) | Guarded::Reading { epoch, .. } => {
-                Guarded::Reading { epoch, held }
-            }
+            Guarded::Epoch(epoch)
+            | Guarded::Reading { epoch, .. }
+            | Guarded::HomeReading { epoch, .. } => Guarded::Reading { epoch, held },
             Guarded::Renewal(_) => Guarded::Renewal(held),
         })
+    }
+    /// This ticket, now also rejected once `profile` no longer keeps its login in the home it keeps
+    /// it in now: the one a usage reading is made from. `None` for a profile without one, and for a
+    /// renewal's ticket, which no reading of a home is made under.
+    pub fn holding_home(&self, profile: &Profile) -> Option<Self> {
+        let held = HeldHome {
+            id: profile.id.clone(),
+            identity: profile.identity.clone(),
+            home: profile.home.clone()?,
+        };
+        match self.0 {
+            Guarded::Epoch(epoch)
+            | Guarded::Reading { epoch, .. }
+            | Guarded::HomeReading { epoch, .. } => {
+                Some(Self(Guarded::HomeReading { epoch, held }))
+            }
+            Guarded::Renewal(_) => None,
+        }
     }
 }
 /// The email `login` names by `provider`'s rules.
@@ -287,13 +333,21 @@ impl Database {
             {
                 Err("The account state changed while usage was read.".into())
             }
+            Guarded::HomeReading { epoch, held }
+                if recovering || *epoch != self.login_epoch || held.in_vault(self).is_none() =>
+            {
+                Err("The account state changed while usage was read.".into())
+            }
             Guarded::Renewal(_) if recovering => Err("An account change needs recovery.".into()),
             Guarded::Renewal(held)
                 if !held.in_vault(self).is_some_and(|p| p.usage_renewal_owned) =>
             {
                 Err("The saved login changed during renewal.".into())
             }
-            Guarded::Epoch(_) | Guarded::Reading { .. } | Guarded::Renewal(_) => Ok(()),
+            Guarded::Epoch(_)
+            | Guarded::Reading { .. }
+            | Guarded::HomeReading { .. }
+            | Guarded::Renewal(_) => Ok(()),
         }
     }
     /// Refuses `kind` by its rule, then bumps the sign-in epoch if the kind does.
@@ -353,8 +407,22 @@ impl Database {
             login: Some(login),
             pending_activation: false,
             usage_renewal_owned: false,
+            home: None,
         });
         Ok(id)
+    }
+    /// Gives profile `id`'s home up for teardown, once a new login replaces the one it keeps.
+    pub fn retire_home(&mut self, id: &str) {
+        let retired = self
+            .profiles
+            .iter_mut()
+            .find(|p| p.id == id)
+            .and_then(|profile| profile.home.take());
+        if let Some(home) = retired {
+            if !self.retired_homes.contains(&home) {
+                self.retired_homes.push(home);
+            }
+        }
     }
 }
 

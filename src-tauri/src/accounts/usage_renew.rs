@@ -66,6 +66,56 @@ impl Renewals {
     }
 }
 
+impl Renewals {
+    /// The login a private renewal of `profile`'s login finished with but never published: adopted
+    /// as it is, without another grant. `None` when no renewal of the login it holds is on record.
+    /// Refused when one began and its outcome is unknown, since its refresh token may be spent.
+    pub(super) fn finished(&self, profile: &Profile) -> Result<Option<Login>, String> {
+        let Some(journal) = self.read(&self.journal(profile))? else {
+            return Ok(None);
+        };
+        let held = profile
+            .login
+            .as_ref()
+            .map(|login| super::view(profile.identity.provider, login).map(|v| v.fingerprint()))
+            .transpose()?;
+        if held.as_deref() != Some(journal.fingerprint.as_str()) {
+            return Ok(None); // A record of an earlier login's renewal: its source is spent.
+        }
+        let renewed = journal.login.ok_or(
+            "This login has an unfinished usage renewal. Sign in again to refresh this account.",
+        )?;
+        if super::view(profile.identity.provider, &renewed)?.identity()? != profile.identity {
+            return Err("Renewal returned a different account. Sign in again.".into());
+        }
+        Ok(Some(renewed))
+    }
+
+    /// Drops `profile`'s renewal record once its login has left the vault.
+    pub(super) fn forget(&self, profile: &Profile) {
+        let _ = std::fs::remove_file(self.journal(profile));
+    }
+
+    /// Records a renewal of `profile`'s login that finished with `renewed` and was never published,
+    /// as a failure right after the grant leaves it.
+    #[cfg(test)]
+    pub(super) fn record_finished(&self, profile: &Profile, renewed: &Login) {
+        let source = profile.login.as_ref().expect("a login to renew");
+        let journal = Journal {
+            fingerprint: super::view(profile.identity.provider, source)
+                .unwrap()
+                .fingerprint(),
+            login: Some(renewed.clone()),
+        };
+        std::fs::create_dir_all(&self.root).unwrap();
+        let sealed = self
+            .sealer
+            .seal(&serde_json::to_vec(&journal).unwrap())
+            .unwrap();
+        vault::atomic_write(&self.journal(profile), &sealed).unwrap();
+    }
+}
+
 /// Serializes grants for one profile across threads and app instances, without waiting.
 fn acquire_renewal_lease(root: &Path, id: &str) -> Result<FileLease, String> {
     let file = std::fs::OpenOptions::new()
@@ -86,6 +136,10 @@ pub(super) fn renew_owned(
 ) -> Result<Login, String> {
     if !profile.usage_renewal_owned {
         return Err("This login is owned by a native client.".into());
+    }
+    // Before any record is written: a provider whose saved logins wait in homes sends no grant.
+    if !super::adapter(profile.identity.provider)?.renews_privately() {
+        return Err("This login renews in its own home.".into());
     }
     let source = profile
         .login

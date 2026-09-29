@@ -14,6 +14,8 @@ mod usage_renew;
 
 mod transaction;
 
+mod homes;
+
 pub(crate) mod claude;
 pub(crate) mod claude_store;
 pub(crate) mod codex;
@@ -30,7 +32,7 @@ pub use clients::activation_blockers;
 use crate::dto::AgentId;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use transaction::Native;
+use transaction::{Native, NativeGuard};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDto {
@@ -99,6 +101,11 @@ trait Adapter: Sync {
         now_ms: i64,
         urls: &crate::limits::SavedReadUrls<'_>,
     ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
+    /// Whether a never-activated login of this provider renews in the vault, with the provider's
+    /// grant sent from on-n-off. A provider whose saved logins wait in their homes never does.
+    fn renews_privately(&self) -> bool;
+    /// The home of a saved account in `dir`, for a provider whose saved logins wait in homes.
+    fn home(&self, dir: &Path) -> Option<Box<dyn Home>>;
 }
 
 /// `provider`'s adapter: the one place account code tells the providers apart.
@@ -147,6 +154,32 @@ trait IsolatedSignIn: Native {
     fn clean(&self) -> Result<(), String>;
 }
 
+/// A saved account's home: a private store of the provider's own client, where the account's one
+/// login waits while it is not the signed-in one and where that client renews it (`homes.rs`).
+trait Home: Send + Sync {
+    /// The client's own locks on this home, held until dropped.
+    fn lock(&self) -> Result<Box<dyn NativeGuard>, String>;
+    /// The login the home holds, if it holds one.
+    fn read(&self) -> Result<Option<store::Login>, String>;
+    /// Who `login` signs in as.
+    fn identify(&self, login: &store::Login) -> Result<model::Identity, String>;
+    /// Puts `login` in the home under `locks`, and reads the home back.
+    fn put(
+        &self,
+        login: &store::Login,
+        locks: &dyn NativeGuard,
+    ) -> Result<Option<store::Login>, String>;
+    /// Empties the home's login under `locks`, as the client's own sign-out does.
+    fn clear(&self, locks: &dyn NativeGuard) -> Result<(), String>;
+    /// `identity`'s usage, reported by the client from this home.
+    fn read_usage(
+        &self,
+        identity: &model::Identity,
+    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
+    /// Removes the home: whatever its client filed outside it, then the directory.
+    fn delete(&self) -> Result<(), String>;
+}
+
 /// Running provider clients, which an account change checks for before it touches a native login.
 trait Clients {
     /// Refuses while clients that cannot take a native credential change are running.
@@ -171,6 +204,8 @@ trait NativeStores {
     fn native(&self, provider: AgentId, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
     /// `provider`'s store in `dir`, private to one isolated sign-in, created there.
     fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
+    /// The home of a saved `provider` account in `dir`; `None` for a provider without homes.
+    fn home(&self, provider: AgentId, dir: &Path) -> Option<Box<dyn Home>>;
 }
 
 /// The native stores each provider's adapter resolves.
@@ -181,6 +216,9 @@ impl NativeStores for AdapterStores {
     }
     fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
         adapter(provider)?.isolated(dir)
+    }
+    fn home(&self, provider: AgentId, dir: &Path) -> Option<Box<dyn Home>> {
+        adapter(provider).ok()?.home(dir)
     }
 }
 
@@ -229,6 +267,10 @@ impl Accounts {
     }
     fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
         self.stores.isolated(provider, dir)
+    }
+    /// The home `id` names for a saved `provider` account; `Ok(None)` for a provider without homes.
+    fn home(&self, provider: AgentId, id: &str) -> Result<Option<Box<dyn Home>>, String> {
+        Ok(self.stores.home(provider, &homes::dir(&self.home, id)?))
     }
 }
 
@@ -324,7 +366,7 @@ impl Accounts {
                     email: p.email,
                     category: p.category,
                     saved_at: p.saved_at,
-                    needs_login: p.login.is_none(),
+                    needs_login: p.login.is_none() && p.home.is_none(),
                     pending_activation: p.pending_activation,
                 })
                 .collect(),
@@ -393,9 +435,11 @@ impl Accounts {
         Ok(())
     }
 
+    /// Removes profile `id`, giving its home up for teardown in the same change. The teardown is
+    /// tried at once and otherwise left to the next read, and never signs a native client out.
     fn remove(&self, id: &str) -> Result<(), String> {
         login::cancel_expected(id);
-        let removed =
+        let (removed, retired) =
             store::Store::open(&self.home, false)?.change(store::ChangeKind::Account, |db| {
                 let removed = db.profiles.iter().find(|p| p.id == id).map(|profile| {
                     if !db.ignored_accounts.contains(&profile.identity) {
@@ -403,9 +447,19 @@ impl Accounts {
                     }
                     profile.identity.provider
                 });
+                let retired = db
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == id)
+                    .and_then(|p| p.home.clone());
+                db.retire_home(id);
                 db.profiles.retain(|p| p.id != id);
-                Ok(removed)
+                Ok((removed, retired))
             })?;
+        if let (Some(provider), Some(home)) = (removed, retired) {
+            let open = || store::Store::open_existing(&self.home);
+            let _ = homes::tear_down(&home, &open, &|id| self.home(provider, id));
+        }
         // Its card leaves that provider's Limits now, not at the next poll.
         match removed {
             Some(provider) => self.notify.changed(provider),
@@ -451,9 +505,20 @@ impl Accounts {
                     .iter()
                     .find(|p| p.id == id && p.identity.provider == provider)
                     .ok_or("Profile does not belong to this provider.")?;
-                renewals.activation_ready(target)
+                renewals.activation_ready(target)?;
+                // The target's login comes out of its home into the vault this change persists.
+                homes::check_out(db, id, &|home| self.home(provider, home))
             },
-            |(), db, persist| transaction::activate(db, native, id, alongside_clients, persist),
+            |checked_out, db, persist| {
+                // Emptied only once the vault holding the login is durable, and before the switch
+                // publishes it, so there is one copy of it at every step.
+                if let Some(checked_out) = checked_out {
+                    checked_out.empty().map_err(|error| {
+                        format!("{error} Its login stays in its home; nothing was replaced.")
+                    })?;
+                }
+                transaction::activate(db, native, id, alongside_clients, persist)
+            },
         )?;
         drop(change);
         self.notify.changed(provider);

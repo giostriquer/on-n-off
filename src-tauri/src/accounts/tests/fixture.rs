@@ -5,15 +5,16 @@ use super::super::{
     model::Identity,
     store::{ChangeKind, Database, Guard, Login, Store, Ticket},
     transaction::{Native, NativeGuard, Recovery},
-    Accounts, Clients, IsolatedSignIn, NativeAccount, NativeStores, Notify,
+    Accounts, Clients, Home, IsolatedSignIn, NativeAccount, NativeStores, Notify,
 };
 use crate::dto::AgentId;
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
+    collections::HashMap,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 /// The operations take the process-wide provider reservation, so these tests run one at a time.
@@ -96,6 +97,100 @@ pub(super) struct NativeState {
     /// Which provider's isolated store was made in which directory, and how many were cleaned.
     pub isolated: RefCell<Vec<(AgentId, PathBuf)>>,
     pub cleaned: Cell<usize>,
+    /// Claude's homes, once a test gives Claude homes (`Harness::with_homes`); none before.
+    pub homes: Option<Arc<Homes>>,
+}
+
+/// Every home's state, shared with the homes resolved from it, which are read on other threads.
+#[derive(Default)]
+pub(super) struct Homes {
+    /// The login each home holds, by its directory.
+    pub logins: Mutex<HashMap<PathBuf, Login>>,
+    /// Homes whose client holds their locks.
+    pub busy: Mutex<Vec<PathBuf>>,
+    /// Homes a write to fails.
+    pub refuses: Mutex<Vec<PathBuf>>,
+    /// Which homes were read from, emptied and deleted, in order.
+    pub read: Mutex<Vec<PathBuf>>,
+    pub emptied: Mutex<Vec<PathBuf>>,
+    pub deleted: Mutex<Vec<PathBuf>>,
+    /// What a read of a home answers instead of a reading of the account it holds.
+    pub answer: Mutex<Option<crate::limits::SavedReadError>>,
+}
+
+/// A home over the shared state: a Claude home, reading logins by Claude's rules, whose client
+/// reports a weekly window at 42% for the account it is asked about.
+struct FakeHome(Arc<Homes>, PathBuf);
+impl FakeHome {
+    fn refused(&self) -> Result<(), String> {
+        if self.0.refuses.lock().unwrap().contains(&self.1) {
+            Err("The home refused the write.".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+impl Home for FakeHome {
+    fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
+        if self.0.busy.lock().unwrap().contains(&self.1) {
+            return Err("Claude is busy with this home.".into());
+        }
+        Ok(Box::new(()))
+    }
+    fn read(&self) -> Result<Option<Login>, String> {
+        Ok(self.0.logins.lock().unwrap().get(&self.1).cloned())
+    }
+    fn identify(&self, login: &Login) -> Result<Identity, String> {
+        super::super::view(AgentId::Claude, login)?.identity()
+    }
+    fn put(&self, login: &Login, _: &dyn NativeGuard) -> Result<Option<Login>, String> {
+        self.refused()?;
+        self.0
+            .logins
+            .lock()
+            .unwrap()
+            .insert(self.1.clone(), login.clone());
+        self.read()
+    }
+    fn clear(&self, _: &dyn NativeGuard) -> Result<(), String> {
+        self.refused()?;
+        self.0.logins.lock().unwrap().remove(&self.1);
+        self.0.emptied.lock().unwrap().push(self.1.clone());
+        Ok(())
+    }
+    fn read_usage(
+        &self,
+        identity: &Identity,
+    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError> {
+        self.0.read.lock().unwrap().push(self.1.clone());
+        if let Some(answer) = self.0.answer.lock().unwrap().clone() {
+            return Err(answer);
+        }
+        Ok(weekly_reading(&identity.observation_key()))
+    }
+    fn delete(&self) -> Result<(), String> {
+        self.0.logins.lock().unwrap().remove(&self.1);
+        self.0.deleted.lock().unwrap().push(self.1.clone());
+        Ok(())
+    }
+}
+
+/// A card for the account `key` names with one weekly window at 42%.
+pub(super) fn weekly_reading(key: &str) -> crate::dto::ProviderLimitsDto {
+    crate::dto::ProviderLimitsDto::for_test(AgentId::Claude, key).with_reading(
+        crate::dto::Reading {
+            windows: vec![crate::dto::LimitWindowDto {
+                id: "weekly".into(),
+                label: "Weekly".into(),
+                kind: crate::dto::LimitWindowKind::Weekly,
+                used_percent: 42.0,
+                window_seconds: Some(604_800),
+                resets_at: None,
+                observed_at: "2026-09-19T00:00:00Z".into(),
+            }],
+            ..Default::default()
+        },
+    )
 }
 /// The native store of the provider it was resolved for, reading logins by that provider's rules.
 #[derive(Clone)]
@@ -153,6 +248,14 @@ impl NativeStores for FakeStores {
             FakeNative(self.0.clone(), provider),
             dir.into(),
         )))
+    }
+    fn home(&self, provider: AgentId, dir: &Path) -> Option<Box<dyn Home>> {
+        let homes = self
+            .0
+            .homes
+            .clone()
+            .filter(|_| provider == AgentId::Claude)?;
+        Some(Box::new(FakeHome(homes, dir.into())))
     }
 }
 
@@ -276,6 +379,37 @@ impl Harness {
     }
     pub fn path(&self) -> &Path {
         self.home.path()
+    }
+    /// This harness with homes for Claude, as the app has: a saved Claude login that is not the
+    /// signed-in one moves into its home at the next read, and is read from there.
+    pub fn with_homes(mut self) -> Self {
+        Rc::get_mut(&mut self.native)
+            .expect("homes are given before anything shares the native state")
+            .homes = Some(Arc::default());
+        self
+    }
+    pub fn homes(&self) -> &Homes {
+        self.native.homes.as_deref().expect("a harness with homes")
+    }
+    /// The directory of the home profile `id` keeps its login in, if it has one.
+    pub fn home_of(&self, id: &str) -> Option<PathBuf> {
+        let home = self
+            .vault()
+            .profiles
+            .into_iter()
+            .find(|p| p.id == id)?
+            .home?;
+        Some(super::super::homes::dir(self.path(), &home).unwrap())
+    }
+    /// The generation profile `id`'s home holds, if it holds one.
+    pub fn in_home(&self, id: &str) -> Option<String> {
+        let dir = self.home_of(id)?;
+        generation(self.homes().logins.lock().unwrap().get(&dir))
+    }
+    /// The generation profile `id` holds in the vault, if any.
+    pub fn in_vault(&self, id: &str) -> Option<String> {
+        let db = self.vault();
+        generation(db.profiles.iter().find(|p| p.id == id)?.login.as_ref())
     }
     pub fn accounts(&self) -> Accounts {
         Accounts {
