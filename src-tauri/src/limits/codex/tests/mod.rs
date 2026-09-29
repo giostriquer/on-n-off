@@ -236,15 +236,16 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
         "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 97, "windowDurationMins": 10080}},
         "rateLimitResetCredits": {"availableCount": 2, "credits": [
             {"id": "later", "resetType": "codexRateLimits", "status": "available",
-             "grantedAt": 1787000000, "expiresAt": 1790000000, "title": null, "description": null},
+             "grantedAt": 1787000000, "expiresAt": 1790000000, "title": "Full reset", "description": null},
             {"id": "spent", "resetType": "codexRateLimits", "status": "redeemed",
              "grantedAt": 1786000000, "expiresAt": 1788000000, "title": null, "description": null},
-            {"id": "sooner", "resetType": "codexRateLimits", "status": "available",
-             "grantedAt": 1787500000, "expiresAt": 1789000000, "title": null, "description": null},
             {"id": "forever", "resetType": "unknown", "status": "available",
              "grantedAt": 1787500000, "expiresAt": null, "title": null, "description": null},
             {"id": "garbled", "resetType": "codexRateLimits", "status": "available",
-             "grantedAt": 1787500000, "expiresAt": i64::MIN, "title": null, "description": null}
+             "grantedAt": 1787500000, "expiresAt": i64::MIN, "title": null, "description": null},
+            // Listed after more than the count of others: only a sort before the cut keeps it.
+            {"id": "sooner", "resetType": "codexRateLimits", "status": "available",
+             "grantedAt": 1787500000, "expiresAt": 1789000000, "title": null, "description": null}
         ]}
     }))
     .unwrap();
@@ -256,8 +257,47 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
             // A redeemed credit's earlier expiry is not the next one to lapse, and an expiry that is
             // not a real instant does not hide the valid ones.
             next_expires_at: expires(1_789_000_000),
+            // Each available one, soonest first, and no more of them than the count.
+            resets: vec![
+                credit(None, expires(1_789_000_000)),
+                credit(Some("Full reset"), expires(1_790_000_000)),
+            ],
         })
     );
+}
+
+#[test]
+fn banked_resets_without_a_real_expiry_are_listed_last_and_by_their_trimmed_name() {
+    let payload: RateLimitsResponse = serde_json::from_value(json!({
+        "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 97, "windowDurationMins": 10080}},
+        "rateLimitResetCredits": {"availableCount": 3, "credits": [
+            {"id": "forever", "resetType": "codexRateLimits", "status": "available",
+             "grantedAt": 1787500000, "expiresAt": null, "title": "  ", "description": null},
+            {"id": "garbled", "resetType": "codexRateLimits", "status": "available",
+             "grantedAt": 1787500000, "expiresAt": i64::MIN, "title": "Garbled", "description": null},
+            {"id": "sooner", "resetType": "codexRateLimits", "status": "available",
+             "grantedAt": 1787500000, "expiresAt": 1789000000, "title": " Full reset ", "description": null}
+        ]}
+    }))
+    .unwrap();
+
+    let resets = parse_codex(&payload).reset_credits.unwrap().resets;
+
+    assert_eq!(
+        resets,
+        vec![
+            credit(Some("Full reset"), expires(1_789_000_000)),
+            credit(None, None),
+            credit(Some("Garbled"), None),
+        ]
+    );
+}
+
+fn credit(title: Option<&str>, expires_at: Option<String>) -> crate::dto::LimitsBankedResetDto {
+    crate::dto::LimitsBankedResetDto {
+        title: title.map(str::to_string),
+        expires_at,
+    }
 }
 
 #[test]
@@ -268,6 +308,7 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
         Some(LimitsResetCreditsDto {
             available_count: 0,
             next_expires_at: None,
+            resets: Vec::new(),
         })
     );
 
@@ -282,6 +323,7 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
         Some(LimitsResetCreditsDto {
             available_count: 1,
             next_expires_at: None,
+            resets: Vec::new(),
         })
     );
 

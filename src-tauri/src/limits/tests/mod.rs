@@ -260,6 +260,10 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             reset_credits: Some(LimitsResetCreditsDto {
                 available_count: 1,
                 next_expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
+                resets: vec![crate::dto::LimitsBankedResetDto {
+                    title: Some("Full reset".to_string()),
+                    expires_at: Some("2026-09-01T12:00:00+00:00".to_string()),
+                }],
             }),
             reset_offer: Some(LimitsResetOfferDto {
                 price: Some(LimitsPriceDto {
@@ -282,7 +286,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0, "resetsAt": "2026-10-01T12:00:00+00:00", "reached": true},
             "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7, "updatedAt": "2026-09-24T19:00:00Z"},
             "subscription": {"activeUntil": "2026-09-28T16:22:34Z", "willRenew": false, "note": "cancelled", "checkedAt": "2026-09-25T12:00:00Z"},
-            "resetCredits": {"availableCount": 1, "nextExpiresAt": "2026-09-01T12:00:00+00:00"},
+            "resetCredits": {"availableCount": 1, "nextExpiresAt": "2026-09-01T12:00:00+00:00", "resets": [{"title": "Full reset", "expiresAt": "2026-09-01T12:00:00+00:00"}]},
             "resetOffer": {"price": {"amountMinorUnits": 800, "currency": "USD"}}
         })
     );

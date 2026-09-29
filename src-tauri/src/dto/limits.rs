@@ -120,6 +120,22 @@ pub struct LimitsResetCreditsDto {
     /// RFC 3339 instant when the soonest-expiring available reset lapses, when the provider says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_expires_at: Option<String>,
+    /// Each available reset the provider lists, soonest to lapse first and never more of them than
+    /// `available_count`; empty when it lists none (Claude never lists them) and in snapshots older
+    /// than the list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resets: Vec<LimitsBankedResetDto>,
+}
+
+/// One banked reset: what the provider calls it and when it lapses, each when it says.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsBankedResetDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// RFC 3339 instant it lapses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
 }
 
 /// A paid reset Codex is offering this account right now, read from the backend-owned banner on a
