@@ -194,8 +194,8 @@ export function hasObservations(entry: ProviderLimits): boolean {
 /** When the newest window on the card was read, in epoch milliseconds; `null` when none says. */
 export function latestObservedAt(entry: ProviderLimits): number | null {
   return entry.windows.reduce<number | null>((latest, window) => {
-    const observedAt = Date.parse(window.observedAt);
-    if (Number.isNaN(observedAt)) return latest;
+    const observedAt = parseInstant(window.observedAt);
+    if (observedAt === null) return latest;
     return latest === null ? observedAt : Math.max(latest, observedAt);
   }, null);
 }
