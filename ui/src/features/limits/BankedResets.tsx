@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
-import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
-import type { LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
+import { formatPrice, formatResetIn, formatShortDate, hasElapsed } from "$lib/limitsFormat";
+import type { LimitsResetCredit, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
 import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
@@ -31,17 +31,27 @@ export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
 
 /**
  * The banked reset count as one more row under the windows, with when the next one expires and,
- * when the card is given one, where the reset is spent. Whether a count is worth showing is the
- * card model's call (`CardFigures`).
+ * when the card is given one, where the reset is spent. With more than one reset still to lapse,
+ * each is listed under it, soonest first, by name and expiry, and the first line says what the
+ * next-expiry note would. Whether a count is worth showing is the card model's call (`CardFigures`).
  */
 export function BankedResetsRow({ banked, now }: { banked: CardFigures["bankedResets"]; now: number }) {
   if (!banked) return null;
   const { resetCredits, hint } = banked;
+  const standing = (resetCredits.credits ?? []).filter(credit => !hasElapsed(credit.expiresAt, now));
+  const each = resetCredits.availableCount > 1 && standing.length > 1 ? standing.map(credit => describeReset(credit, now)) : null;
   const expiresIn = formatResetIn(resetCredits.nextExpiresAt, now);
   const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
-  const expiry = expiresIn ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
+  const expiry = expiresIn && !each ? `${lead} in ${expiresIn} · ${formatShortDate(resetCredits.nextExpiresAt)}` : undefined;
   const note = [expiry, hint].filter(Boolean).join(" · ");
-  return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
+  return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} list={each} listLabel="Each banked reset" />;
+}
+
+/** One banked reset's line: its name and when it expires, each when Codex says. */
+function describeReset(credit: LimitsResetCredit, now: number): string {
+  const expiresIn = formatResetIn(credit.expiresAt, now);
+  const parts = [credit.title, expiresIn && `expires in ${expiresIn}`, expiresIn && formatShortDate(credit.expiresAt)];
+  return parts.filter(Boolean).join(" · ") || "Banked reset";
 }
 
 /** What one attempt to spend a banked reset came to, and when its answer arrived. */

@@ -173,14 +173,22 @@ function limitsBandCodex(): ProviderLimits[] {
 }
 
 /**
- * `?mock=bankedResets`: the signed-in Codex account has two banked resets and plenty of usage left,
- * so spending one asks first; the saved account reports the one it had when last read.
+ * `?mock=bankedResets`: the signed-in Codex account has two banked resets, each listed with when it
+ * lapses, and plenty of usage left, so spending one asks first; the saved account reports the one it
+ * had when last read.
  */
 function bankedResetsCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
     ...entry,
     resetCredits: entry.currentAccount
-      ? { availableCount: 2, nextExpiresAt: at(11 * 24 * 60 + 19 * 60) }
+      ? {
+          availableCount: 2,
+          nextExpiresAt: at(11 * 24 * 60 + 19 * 60),
+          credits: [
+            { title: "Full reset", expiresAt: at(11 * 24 * 60 + 19 * 60) },
+            { title: "Full reset", expiresAt: at(25 * 24 * 60 + 4 * 60) },
+          ],
+        }
       : { availableCount: 1, nextExpiresAt: null },
     // Codex offers a paid reset only while an account sits at its limit, so the live card is at 100%.
     windows: entry.currentAccount ? entry.windows.map((window) => ({ ...window, usedPercent: 100 })) : entry.windows,
