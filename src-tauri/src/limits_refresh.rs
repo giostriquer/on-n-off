@@ -413,7 +413,6 @@ pub(crate) fn account_changed(agent: AgentId) {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
-    crate::limits::clear_login_memo();
     let _ = read_limits(agent, false);
 }
 

@@ -645,16 +645,6 @@ fn credits_spent_alone_counts_as_an_observation() {
     assert!(dto.reading.has_observations());
 }
 
-/// A subscription status is metadata, like the plan: on its own it is not an observation worth a card.
-#[test]
-fn a_subscription_status_alone_is_not_an_observation() {
-    let mut dto = snapshot(AgentId::Claude, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.reading.windows.clear();
-    dto.reading.subscription_status = Some("past_due".to_string());
-
-    assert!(!dto.reading.has_observations());
-}
-
 /// Every writer stores its own read, so one that could not tell what was spent must not erase the
 /// figure already on disk; one that answered replaces it.
 #[test]

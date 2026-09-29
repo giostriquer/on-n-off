@@ -174,17 +174,6 @@ fn the_keychain_account_is_read_off_the_entry_rather_than_guessed() {
     assert_eq!(parse_keychain_account("    \"acct\"<blob>=\"\"\n"), None);
 }
 
-#[test]
-fn disposable_home_does_not_read_or_renew_the_real_keychain_login() {
-    let calls = std::cell::Cell::new(0);
-    let result = isolated_keychain(true, || {
-        calls.set(calls.get() + 1);
-        Ok(Some("real-native-credential".into()))
-    });
-    assert_eq!(result, Ok(None));
-    assert_eq!(calls.get(), 0);
-}
-
 /// A prepared write that is never committed takes its temporary with it. Leaving one behind would
 /// park a live refresh token in a file Claude Code neither knows about nor rotates, which is the
 /// same objection that keeps `ConfigIo` out of this module.
@@ -270,8 +259,13 @@ fn the_credentials_file_is_written_private() {
     }
 }
 
+/// The locks an account change takes: the two refresh locks, then the config file's.
 fn refresh_lock(home: &Path, now: SystemTime) -> Result<ClaudeLocks, LockError> {
-    ClaudeLocks::acquire_at(&StorageDir::default_in(home), LockScope::Refresh, now)
+    ClaudeLocks::acquire_at(
+        &StorageDir::default_in(home),
+        LockScope::RefreshAndConfig(&home.join(".claude.json")),
+        now,
+    )
 }
 
 #[test]
@@ -436,11 +430,11 @@ fn claude_codes_own_account_name() {
     assert_eq!(named(&[]), "claude-code-user");
 }
 
-/// The renewal writes back under the account of the item Claude Code reads: its own, when there
-/// is one, not whichever item `security` returns for the service.
+/// A credential write goes back under the account of the item Claude Code reads: its own, when
+/// there is one, not whichever item `security` returns for the service.
 #[cfg(target_os = "macos")]
 #[test]
-fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
+fn a_credential_write_goes_to_the_item_filed_under_claude_codes_own_account() {
     use crate::accounts::keychain::{fake_items, with_test_runner};
     const TWO_ITEMS: &[(&str, &str)] = &[("claude-code-user", "{}"), ("other", "{}")];
 
@@ -449,7 +443,6 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
         let never_lost = || false;
         let keychain = |_: &StorageDir| Ok(Some("{}".to_string()));
         let (_, pending) = begin(&dir, &keychain, &never_lost).unwrap();
-        assert_eq!(pending.source(), &ClaudeStore::Keychain);
         pending
             .prove()
             .unwrap()
@@ -459,7 +452,7 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
     let add = sent
         .iter()
         .find(|command| command.starts_with("add-generic-password"))
-        .expect("the renewal is written to the Keychain");
+        .expect("the write goes to the Keychain");
     assert!(
         add.starts_with(
             "add-generic-password -U -a \"claude-code-user\" -s \"Claude Code-credentials\""
@@ -780,7 +773,6 @@ fn claude_codes_locks_in_its_order_and_with_its_staleness() {
         (PathBuf::from(legacy), Duration::from_secs(60)),
     ];
 
-    assert_eq!(LockScope::Refresh.paths(&dir), refresh);
     let config_file = home.join(".claude.json");
     let mut with_config = refresh.clone();
     with_config.push((home.join(".claude.json.lock"), Duration::from_secs(10)));

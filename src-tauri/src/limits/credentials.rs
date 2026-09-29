@@ -1,17 +1,14 @@
-//! What Limits makes of the CLIs' stored logins. Which store holds Claude's login is
-//! `accounts::claude_store`'s question, and nothing here writes a store or refreshes a token:
-//! [`super::claude_renew`] is the one module that does. Tokens live in memory only: for one
-//! request, plus the Claude access token memoised in-process (`ClaudeLoginMemo`) so the Keychain
-//! prompt is not repeated on every refetch — never the refresh token, never on disk.
+//! What a Claude login and a Claude config dir say: the shape of a stored `claudeAiOauth`, which the
+//! account switch reads to tell a login from Claude Code's emptied sign-out, and the account a
+//! config dir's `.claude.json` names, which every Claude usage read checks. Nothing here reads a
+//! store, writes one or sends a token.
 
 use std::fmt;
 use std::path::Path;
-use std::sync::Mutex;
 
 use serde_json::Value;
 
 use super::json::optional_string;
-use crate::accounts::claude_store::{self, KeychainProbe, StorageDir};
 use crate::accounts::model::Identity;
 use crate::dto::LimitsAccountDto;
 
@@ -27,8 +24,7 @@ pub struct ClaudeCredential {
     /// `expiresAt` from Claude Code's credential JSON, epoch milliseconds.
     pub expires_at_ms: Option<i64>,
     /// A `refreshToken` is stored alongside the access token. Only its presence is carried here;
-    /// the token itself never enters this type, so no consumer of a `ClaudeCredential` can reach
-    /// it. [`super::claude_renew`] reads it straight off the stored document instead.
+    /// the token itself never enters this type.
     pub has_refresh_token: bool,
     /// `refreshTokenExpiresAt`, epoch milliseconds, when the login states one.
     pub refresh_expires_at_ms: Option<i64>,
@@ -36,22 +32,6 @@ pub struct ClaudeCredential {
     pub subscription_type: Option<String>,
     /// Claude Code's tier identifier; only recognized Max multipliers affect presentation.
     pub rate_limit_tier: Option<String>,
-}
-
-impl ClaudeCredential {
-    pub(super) fn plan(&self) -> Option<String> {
-        plan_label(
-            self.subscription_type.as_deref(),
-            self.rate_limit_tier.as_deref(),
-        )
-    }
-
-    /// Whether Claude Code can renew this login by itself: it holds a refresh token that has not
-    /// passed its own expiry. An access token past `expiresAt` is then only stale, not a lost
-    /// login — the next `claude` run mints a new one without any sign-in.
-    fn renewable(&self, now_ms: i64) -> bool {
-        self.has_refresh_token && self.refresh_expires_at_ms.is_none_or(|at| at > now_ms)
-    }
 }
 
 /// The plan a card shows for a `subscription_type` ("pro", "max", ...) at Claude Code's `tier`: a
@@ -78,54 +58,6 @@ impl fmt::Debug for ClaudeCredential {
     }
 }
 
-/// Everything `resolve` needs to know about a provider's login state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CredentialLookup<T> {
-    Found(T),
-    /// No stored login for this provider.
-    Missing,
-    /// A stored login whose access token has passed its own expiry. `renewable` says the CLI can
-    /// mint a new one from its refresh token, so no new sign-in is needed.
-    Expired {
-        renewable: bool,
-    },
-    /// A login may exist but could not be read (Keychain denied, unreadable file).
-    Unreadable(String),
-    /// A renewal redeemed the refresh token and then could not store the result, carrying why. The
-    /// old token is spent, so the CLI cannot renew itself out of this either: only a new sign-in
-    /// will do, and the user is owed the reason on the way there.
-    Stranded(String),
-}
-
-/// The stored login as it is, without renewing it. A token past its own `expiresAt` is reported as
-/// `Expired` without any network call, tagged with whether the login can still renew itself.
-///
-/// Callers outside this module want [`super::claude_renew::current_login`], which is this plus the
-/// renewal; reaching for the non-renewing one is how the expired-login message came back.
-pub(crate) fn read_claude_credential(
-    dir: &StorageDir,
-    keychain: KeychainProbe,
-    now_ms: i64,
-) -> CredentialLookup<ClaudeCredential> {
-    let document = match claude_store::read(dir, keychain) {
-        Ok(claude_store::Stored {
-            document: Some(document),
-            ..
-        }) => document,
-        Ok(_) => return CredentialLookup::Missing,
-        Err(why) => return CredentialLookup::Unreadable(why.to_string()),
-    };
-    let Some(credential) = parse_claude_credential(&document) else {
-        return CredentialLookup::Missing;
-    };
-    if credential.expires_at_ms.is_some_and(|at| at <= now_ms) {
-        return CredentialLookup::Expired {
-            renewable: credential.renewable(now_ms),
-        };
-    }
-    CredentialLookup::Found(credential)
-}
-
 /// `{"claudeAiOauth": {"accessToken", "expiresAt", "refreshTokenExpiresAt", "subscriptionType", ...}}`.
 pub(crate) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential> {
     let oauth = value.get("claudeAiOauth")?;
@@ -138,13 +70,6 @@ pub(crate) fn parse_claude_credential(value: &Value) -> Option<ClaudeCredential>
         subscription_type: optional_string(oauth.get("subscriptionType")),
         rate_limit_tier: optional_string(oauth.get("rateLimitTier")),
     })
-}
-
-/// Which Claude account the CLI is signed into, from `oauthAccount` in the identity file Claude Code
-/// rewrites on every login (`claude_store::Dirs::config_file`). `None` when the file or the fields
-/// are absent.
-pub(crate) fn read_claude_identity(config_file: &Path) -> Option<ClaudeIdentity> {
-    read_claude_config_account(config_file).map(|account| account.identity)
 }
 
 /// What a Claude config file's `oauthAccount` says of its account.
@@ -198,84 +123,6 @@ fn read_json_file(path: &Path) -> Result<Option<Value>, String> {
         Err(error) => Err(format!("{}: {error}", path.display())),
     }
 }
-
-/// Where a looked-up login came from. Claude Code rotates the access token before its recorded
-/// expiry, which invalidates the one the memo is holding while the memo still believes it good —
-/// so a rejected `Memo` credential is worth re-reading the store for, and retrying if that hands
-/// back a login. A rejected `Stored` credential is the login's own problem.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoginSource {
-    Memo,
-    Stored,
-}
-
-/// Process-wide memo of the last good Claude login, keyed by the account it belongs to, so a
-/// user who clicked "Allow" (not "Always Allow") on the Keychain prompt sees it once per app run
-/// rather than on every refetch. A hit needs the same signed-in account and an unexpired token;
-/// `force` (an explicit refresh) always re-reads, and the endpoint rejecting the token clears it.
-pub struct ClaudeLoginMemo(Mutex<Option<(String, ClaudeCredential)>>);
-
-impl ClaudeLoginMemo {
-    pub const fn new() -> Self {
-        Self(Mutex::new(None))
-    }
-
-    /// The login plus where it came from, so a caller can tell a stale memo apart from a stored
-    /// login the provider has actually rejected. `read` is `Fn`, not `FnOnce`: one provider read
-    /// can need two lookups, and the bound is what says so at the signature rather than leaving
-    /// the second call to work by accident.
-    pub(crate) fn lookup(
-        &self,
-        force: bool,
-        account_id: &str,
-        now_ms: i64,
-        read: impl Fn() -> CredentialLookup<ClaudeCredential>,
-    ) -> (CredentialLookup<ClaudeCredential>, LoginSource) {
-        if !force {
-            if let Some((memo_account, credential)) = self.slot().clone() {
-                let expired = credential.expires_at_ms.is_some_and(|at| at <= now_ms);
-                if memo_account == account_id && !expired {
-                    return (CredentialLookup::Found(credential), LoginSource::Memo);
-                }
-            }
-        }
-        let result = read();
-        *self.slot() = match &result {
-            CredentialLookup::Found(credential) => {
-                Some((account_id.to_string(), credential.clone()))
-            }
-            _ => None,
-        };
-        (result, LoginSource::Stored)
-    }
-
-    /// The stored login, read again, when it produced one worth a second attempt — the question
-    /// a caller retrying past a rejected login is actually asking. Whatever it finds replaces
-    /// what the memo holds, a miss included, so the next read starts from the store either way.
-    pub(crate) fn refreshed(
-        &self,
-        account_id: &str,
-        now_ms: i64,
-        read: impl Fn() -> CredentialLookup<ClaudeCredential>,
-    ) -> Option<ClaudeCredential> {
-        match self.lookup(true, account_id, now_ms, read).0 {
-            CredentialLookup::Found(credential) => Some(credential),
-            _ => None,
-        }
-    }
-
-    pub fn clear(&self) {
-        *self.slot() = None;
-    }
-
-    fn slot(&self) -> std::sync::MutexGuard<'_, Option<(String, ClaudeCredential)>> {
-        self.0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-}
-
-pub static CLAUDE_LOGIN: ClaudeLoginMemo = ClaudeLoginMemo::new();
 
 #[cfg(test)]
 mod tests;

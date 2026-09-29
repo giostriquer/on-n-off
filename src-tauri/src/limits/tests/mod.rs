@@ -9,12 +9,9 @@ use crate::dto::{
     LimitWindowDto, LimitWindowKind, LimitsCreditsDto, LimitsPriceDto, LimitsResetCreditsDto,
     LimitsResetOfferDto, LimitsWorkspaceCreditsDto,
 };
-use crate::http::HttpError;
 use crate::paths::scratch_dir;
-use credentials::CredentialLookup;
 use json::window;
 use serde_json::json;
-use std::cell::Cell;
 use std::fs;
 
 #[test]
@@ -29,17 +26,6 @@ fn provider_read_guards_serialize_only_the_same_provider() {
     assert!(provider_read_lock(AgentId::Codex).try_lock().is_ok());
 }
 
-fn parsed(windows: Vec<LimitWindowDto>) -> Parsed {
-    Parsed {
-        account: None,
-        reading: Reading {
-            plan: Some("max".to_string()),
-            windows,
-            ..Reading::default()
-        },
-    }
-}
-
 /// An account known as `id`, labelled `label`, for every test under `limits`.
 pub(super) fn account(id: &str, label: &str) -> LimitsAccountDto {
     LimitsAccountDto {
@@ -47,151 +33,6 @@ pub(super) fn account(id: &str, label: &str) -> LimitsAccountDto {
         id: id.to_string(),
         label: Some(label.to_string()),
     }
-}
-
-#[test]
-fn missing_login_is_signed_out_and_names_the_cli() {
-    let dto = resolve::<()>(AgentId::Claude, None, CredentialLookup::Missing, |_| {
-        unreachable!("no fetch without a login")
-    });
-    assert_eq!(dto.provider, AgentId::Claude);
-    assert_eq!(dto.status, LimitsStatus::SignedOut);
-    assert!(dto.message.as_deref().unwrap().contains("`claude`"));
-    assert!(dto.reading.windows.is_empty());
-}
-
-#[test]
-fn expired_and_unreadable_logins_map_to_their_statuses_without_loading() {
-    let loaded = Cell::new(false);
-    // Captures only `&loaded`, so the closure is `Copy` and can be handed to each call.
-    let load = |_: &&str| {
-        loaded.set(true);
-        Ok(Parsed::default())
-    };
-
-    let expired = resolve(
-        AgentId::Codex,
-        None,
-        CredentialLookup::Expired { renewable: false },
-        load,
-    );
-    assert_eq!(expired.status, LimitsStatus::Unauthenticated);
-    assert!(expired.message.as_deref().unwrap().contains("`codex`"));
-
-    let unreadable = resolve(
-        AgentId::Claude,
-        Some(account("uuid-1", "me@example.com")),
-        CredentialLookup::Unreadable("Keychain denied".to_string()),
-        load,
-    );
-    assert_eq!(unreadable.status, LimitsStatus::Failed);
-    assert!(unreadable
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("Keychain denied"));
-    assert_eq!(
-        unreadable.account,
-        Some(account("uuid-1", "me@example.com")),
-        "a failure still says which account it is about"
-    );
-
-    assert!(!loaded.get());
-}
-
-/// The state on-n-off can put a user into by renewing a login it then could not store. The message
-/// has to own that, name the reason, and send them to the only remedy that works — telling them to
-/// run `claude` to renew it would point at a refresh token that is already spent.
-#[test]
-fn a_stranded_login_says_on_n_off_spent_it_and_asks_for_a_new_sign_in() {
-    let dto = resolve::<()>(
-        AgentId::Claude,
-        Some(account("uuid-1", "me@example.com")),
-        CredentialLookup::Stranded("Keychain write failed (denied)".to_string()),
-        |_| unreachable!("nothing is loaded with a login that was not stored"),
-    );
-    assert_eq!(dto.status, LimitsStatus::Unauthenticated);
-    let message = dto.message.as_deref().unwrap();
-    assert!(message.starts_with("on-n-off renewed"), "{message}");
-    assert!(
-        message.contains("Keychain write failed (denied)"),
-        "{message}"
-    );
-    assert!(message.contains("sign in again"), "{message}");
-    assert!(
-        !message.contains("send a prompt"),
-        "the spent token cannot be renewed by running `claude`: {message}"
-    );
-    assert_eq!(dto.account, Some(account("uuid-1", "me@example.com")));
-}
-
-#[test]
-fn a_rejected_token_is_unauthenticated_and_other_http_failures_are_failed() {
-    let rejected = resolve(
-        AgentId::Claude,
-        None,
-        CredentialLookup::Found("token"),
-        |_| Err(HttpError::Unauthorized),
-    );
-    assert_eq!(rejected.status, LimitsStatus::Unauthenticated);
-
-    let offline = resolve(
-        AgentId::Claude,
-        None,
-        CredentialLookup::Found("token"),
-        |_| Err(HttpError::Network("dns".to_string())),
-    );
-    assert_eq!(offline.status, LimitsStatus::Failed);
-    assert!(offline.message.as_deref().unwrap().contains("dns"));
-
-    let server = resolve(
-        AgentId::Claude,
-        None,
-        CredentialLookup::Found("token"),
-        |_| Err(HttpError::Status(503)),
-    );
-    assert_eq!(server.status, LimitsStatus::Failed);
-    assert!(server.message.as_deref().unwrap().contains("503"));
-}
-
-#[test]
-fn a_successful_load_is_ok_with_windows_ordered_weekly_session_model() {
-    let dto = resolve(
-        AgentId::Claude,
-        None,
-        CredentialLookup::Found("token"),
-        |token| {
-            assert_eq!(*token, "token");
-            Ok(parsed(vec![
-                window("m", "Weekly · Opus", LimitWindowKind::Model, 3.0, None),
-                window(
-                    "s",
-                    "5 hour · all models",
-                    LimitWindowKind::Session,
-                    7.0,
-                    None,
-                ),
-                window(
-                    "w",
-                    "Weekly · all models",
-                    LimitWindowKind::Weekly,
-                    12.0,
-                    None,
-                ),
-                window("m2", "Weekly · Sonnet", LimitWindowKind::Model, 1.0, None),
-            ]))
-        },
-    );
-    assert_eq!(dto.status, LimitsStatus::Ok);
-    assert_eq!(dto.message, None);
-    assert_eq!(dto.reading.plan.as_deref(), Some("max"));
-    let ids: Vec<&str> = dto.reading.windows.iter().map(|w| w.id.as_str()).collect();
-    assert_eq!(ids, ["w", "s", "m", "m2"]);
-    assert!(dto
-        .reading
-        .windows
-        .iter()
-        .all(|window| { chrono::DateTime::parse_from_rfc3339(&window.observed_at).is_ok() }));
 }
 
 /// A test build has no user home, so `read_limits` reads nothing and says why.
@@ -271,7 +112,6 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
                     currency: "USD".to_string(),
                 }),
             }),
-            ..Reading::default()
         });
     assert_eq!(
         serde_json::to_value(&ok).unwrap(),
@@ -387,10 +227,9 @@ fn every_subscription_note_keeps_its_wire_name() {
 /// Live probe against the real home, read-only: one read per provider, printed. A test build has
 /// no user home, so the probe reads the one named in `ON_N_OFF_PROBE_HOME` (`paths::probe_home`).
 ///
-/// Claude reads only the real home's `~/.claude/.credentials.json`: a test build's sealed
-/// environment (`paths::process_env`) treats every home as disposable, so `CLAUDE_CONFIG_DIR`,
-/// `CLAUDE_SECURESTORAGE_CONFIG_DIR` and the Claude Code Keychain entry are out of its reach, and
-/// a login kept in the Keychain reads as signed out here. Codex runs its own `codex app-server`,
+/// Claude runs Claude Code's own usage report with the probe home's config dir: a test build's
+/// sealed environment (`paths::process_env`) treats every home as disposable, so Claude Code is
+/// handed that dir, whose login it reads by its own rules. Codex runs its own `codex app-server`,
 /// and its native store reads a keyring login through the real `security` when its config selects
 /// one, which is what `with_real_keychain` allows.
 ///

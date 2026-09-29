@@ -81,8 +81,9 @@ trait Adapter: Sync {
     fn login<'a>(&self, login: &'a store::Login) -> Box<dyn model::LoginView + 'a>;
     /// How this provider's client processes are told apart, and whether they refuse a switch.
     fn client(&self) -> &'static clients::Client;
-    /// Where the provider's private renewal grant goes.
-    fn token_url(&self) -> &'static str;
+    /// Where the provider's private renewal grant goes; `None` for a provider that never renews
+    /// a login privately (`renews_privately`).
+    fn token_url(&self) -> Option<&'static str>;
     /// Renews a never-activated private `login` with the provider's grant, sent to `token_url`:
     /// the reply folded in, every field it does not name left as it was.
     fn renew_private(
@@ -91,9 +92,10 @@ trait Adapter: Sync {
         now_ms: i64,
         token_url: &str,
     ) -> Result<store::Login, String>;
-    /// The usage of the saved profile `identity`, read at `now_ms` with its `login` by the
-    /// provider's Limits reader, asking `urls` (`SavedReadUrls::LIVE` in the app): access-only
-    /// requests that start no CLI and renew nothing.
+    /// The usage of the saved profile `identity`, read at `now_ms` with its `login` still in the
+    /// vault by the provider's Limits reader, asking `urls` (`SavedReadUrls::LIVE` in the app):
+    /// access-only requests that start no CLI and renew nothing. Claude sends none; its saved
+    /// accounts are read in their homes.
     fn read_usage(
         &self,
         identity: &model::Identity,
@@ -604,8 +606,6 @@ impl Accounts {
         result
     }
 }
-
-pub(crate) mod claude_renew;
 
 mod login;
 pub use login::cancel;

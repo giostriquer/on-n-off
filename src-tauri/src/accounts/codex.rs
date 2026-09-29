@@ -39,8 +39,8 @@ impl super::Adapter for Codex {
         Box::new(CodexLogin::of(login))
     }
 
-    fn token_url(&self) -> &'static str {
-        "https://auth.openai.com/oauth/token"
+    fn token_url(&self) -> Option<&'static str> {
+        Some("https://auth.openai.com/oauth/token")
     }
 
     /// Codex's own JSON refresh grant, built and folded by the login and sent by `usage_renew`.

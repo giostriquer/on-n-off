@@ -21,7 +21,6 @@ fn remembered(plan: &str) -> ProviderLimitsDto {
         "account": {"id": "acct-1", "label": "a@example.com"},
         "currentAccount": true,
         "plan": plan,
-        "subscriptionStatus": "active",
         "windows": [
             {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 40.0,
              "resetsAt": "2026-08-24T10:00:00Z", "observedAt": "2026-08-17T10:00:00.000Z"},
@@ -167,7 +166,6 @@ fn a_failed_read_shows_the_remembered_reading() {
             "account": {"id": "acct-1", "label": "a@example.com"},
             "currentAccount": true,
             "plan": "pro",
-            "subscriptionStatus": "active",
             "windows": [
                 {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
                  "usedPercent": 40.0, "resetsAt": "2026-08-24T10:00:00Z",

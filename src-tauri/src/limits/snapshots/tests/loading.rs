@@ -153,41 +153,33 @@ fn forgetting_an_account_whose_count_lapsed_still_removes_the_history_it_replace
     assert!(ids(&store).is_empty());
 }
 
-/// The subscription status is remembered with the account, and a snapshot written before it existed
-/// still loads, without one.
+/// A snapshot an earlier version wrote with Claude's subscription status, a field this version no
+/// longer has, still loads.
 #[test]
-fn a_remembered_snapshot_keeps_the_subscription_status() {
+fn a_snapshot_with_the_retired_subscription_status_still_loads() {
     let home = scratch_dir("limits-snap-subscription-status");
     let store = SnapshotStore::for_home(&home);
-    let mut dto = snapshot(AgentId::Claude, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
-    dto.reading.subscription_status = Some("past_due".to_string());
-    store.save(&dto).unwrap();
-
-    assert_eq!(
-        store.load(AgentId::Claude)[0]
-            .reading
-            .subscription_status
-            .as_deref(),
-        Some("past_due")
-    );
-
     let old = serde_json::json!({
         "schemaVersion": 2, "provider": "claude",
         "account": {"id": "acct-2", "label": "b@x"},
+        "subscriptionStatus": "past_due",
         "windows": [{"id": "seven_day", "label": "Weekly", "kind": "weekly", "usedPercent": 10.0,
                      "observedAt": "2026-08-17T10:00:00.000Z"}]
     });
+    std::fs::create_dir_all(home.join(".on-n-off/limits")).unwrap();
     std::fs::write(
         home.join(".on-n-off/limits/claude-acct_2-00000000.json"),
         old.to_string(),
     )
     .unwrap();
+
     let loaded = store.load(AgentId::Claude);
+
     let older = loaded
         .iter()
         .find(|dto| dto.account.as_ref().unwrap().id == "acct-2")
-        .expect("a snapshot written before the field loads");
-    assert_eq!(older.reading.subscription_status, None);
+        .expect("a snapshot with the retired field loads");
+    assert_eq!(older.reading.windows.len(), 1);
     let _ = std::fs::remove_dir_all(&home);
 }
 

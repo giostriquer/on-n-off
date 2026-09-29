@@ -27,7 +27,6 @@ fn every_figure() -> ProviderLimitsDto {
         "account": {"id": "profile:acct-1", "legacyId": "acct-1", "label": "a@example.com"},
         "currentAccount": true,
         "plan": "business",
-        "subscriptionStatus": "active",
         "windows": [
             {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 42.0,
              "resetsAt": "2026-08-24T23:34:33+00:00", "windowSeconds": 604800,
@@ -64,7 +63,6 @@ fn a_snapshot_file_holds_the_whole_reading_under_its_wire_names() {
             "provider": "codex",
             "account": {"id": "profile:acct-1", "legacyId": "acct-1", "label": "a@example.com"},
             "plan": "business",
-            "subscriptionStatus": "active",
             "windows": [
                 {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
                  "usedPercent": 42.0, "resetsAt": "2026-08-24T23:34:33+00:00",

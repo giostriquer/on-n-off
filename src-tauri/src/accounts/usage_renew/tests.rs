@@ -412,7 +412,12 @@ fn a_completed_renewal_journal_an_earlier_version_wrote_is_adopted_without_a_gra
 fn a_private_codex_renewal_goes_to_codexs_own_token_endpoint() {
     assert_eq!(
         super::super::adapter(AgentId::Codex).unwrap().token_url(),
-        "https://auth.openai.com/oauth/token"
+        Some("https://auth.openai.com/oauth/token")
+    );
+    // Claude never renews a login privately, so it names no endpoint to send a grant to.
+    assert_eq!(
+        super::super::adapter(AgentId::Claude).unwrap().token_url(),
+        None
     );
 }
 

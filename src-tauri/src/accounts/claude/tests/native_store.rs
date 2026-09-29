@@ -77,11 +77,10 @@ fn isolated_claude_sign_in_keeps_the_os_home_for_keychain_lookup() {
     assert_ne!(native.service(), "Claude Code-credentials");
 }
 
-/// Verification asks the profile endpoint with the one Claude header set the Limits reads send.
-#[test]
-fn verification_sends_the_claude_headers() {
-    let root = tempfile::tempdir().unwrap();
-    let native = claude(root.path());
+/// A signed-in store under `root` naming `email` in `org`, and a stand-in `claude` whose
+/// `auth status` prints `status` and exits with `exit`.
+fn verified(root: &Path, status: &str, exit: i32) -> (ClaudeNative, PathBuf) {
+    let native = claude(root);
     fs::write(
         native.config_home.join(".credentials.json"),
         r#"{"claudeAiOauth":{"accessToken":"test-token","refreshToken":"test-refresh"}}"#,
@@ -89,61 +88,109 @@ fn verification_sends_the_claude_headers() {
     .unwrap();
     fs::write(
         &native.config_file,
-        r#"{"oauthAccount":{"accountUuid":"a","organizationUuid":"org-a"}}"#,
+        r#"{"oauthAccount":{"accountUuid":"a","organizationUuid":"org-a","emailAddress":"you@example.com"}}"#,
     )
     .unwrap();
-    let (url, request) = crate::http::serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"a"},"organization":{"uuid":"org-a"}}"#,
+    let bin = root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let stub = crate::cli_stub::CliStub::new("claude")
+        .log_args("args.txt", false)
+        .stdout(status)
+        .exit(exit)
+        .write(&bin);
+    (native, stub)
+}
+
+/// Verification asks Claude Code what it has stored, and nothing of Anthropic: a login signed in
+/// to the organization and as the email its account names passes.
+#[test]
+fn verification_asks_claude_code_which_account_it_is_signed_in_to() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, stub) = verified(
+        root.path(),
+        r#"{"loggedIn":true,"authMethod":"claude.ai","email":"you@example.com","orgId":"org-a"}"#,
+        0,
     );
-    native.verify_at(&url).unwrap();
-    let head = request.join().unwrap();
-    let header = |name| crate::http::head_header(&head, name);
-    assert_eq!(header("authorization"), Some("Bearer test-token"), "{head}");
-    assert_eq!(header("anthropic-beta"), Some("oauth-2025-04-20"), "{head}");
-    assert_eq!(header("cache-control"), Some("no-cache"), "{head}");
-    assert_eq!(header("content-type"), None, "{head}");
+
+    crate::accounts::native::with_test_cli(&stub, || native.verify()).unwrap();
+
+    let args = fs::read_to_string(root.path().join("bin").join("args.txt")).unwrap();
+    assert_eq!(args.trim(), "auth status --json");
 }
 
 #[test]
-fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
-    let root = tempfile::tempdir().unwrap();
-    let mut native = claude(root.path());
-    native.config_file = native.config_home.join(".config.json");
-    fs::write(
-        &native.config_file,
-        r#"{"oauthAccount":{"accountUuid":"legacy-user","organizationUuid":"team"}}"#,
-    )
-    .unwrap();
-    fs::write(
-        native.config_home.join(".credentials.json"),
-        r#"{"claudeAiOauth":{"accessToken":"test-token","refreshToken":"test-refresh"}}"#,
-    )
-    .unwrap();
-    for alternate in [
-        None,
-        Some(r#"{"oauthAccount":{"accountUuid":"stale-other-user","organizationUuid":"other"}}"#),
+fn verification_refuses_a_login_claude_code_reads_as_another_organization_or_email() {
+    for status in [
+        r#"{"loggedIn":true,"email":"you@example.com","orgId":"org-b"}"#,
+        r#"{"loggedIn":true,"email":"someone@example.com","orgId":"org-a"}"#,
+        r#"{"loggedIn":true,"email":"you@example.com"}"#,
     ] {
-        if let Some(text) = alternate {
-            fs::write(root.path().join(".claude.json"), text).unwrap();
-        }
-        let identity_file = claude_store::native_dirs(root.path())
-            .unwrap()
-            .config_file(root.path());
-        let identity = crate::limits::credentials::read_claude_identity(&identity_file).unwrap();
-        assert_eq!(identity.account.id, "legacy-user");
-        let (url, request) = crate::http::serve_once(
-            "200 OK",
-            r#"{"account":{"uuid":"legacy-user"},"organization":{"uuid":"team"}}"#,
+        let root = tempfile::tempdir().unwrap();
+        let (native, stub) = verified(root.path(), status, 0);
+
+        let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+        assert_eq!(
+            refused.err().as_deref(),
+            Some("Claude credential and organization identity disagree."),
+            "{status}"
         );
-        native.verify_at(&url).unwrap();
-        request.join().unwrap();
-        let (url, request) = crate::http::serve_once(
-            "200 OK",
-            r#"{"account":{"uuid":"wrong-user"},"organization":{"uuid":"team"}}"#,
+    }
+}
+
+/// Claude Code answers a signed-out status with exit status 1.
+#[test]
+fn verification_refuses_a_login_claude_code_reads_as_signed_out() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, stub) = verified(root.path(), r#"{"loggedIn":false,"authMethod":"none"}"#, 1);
+
+    let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("Claude Code does not report the login as signed in.")
+    );
+}
+
+#[test]
+fn verification_refuses_when_claude_code_cannot_say_who_is_signed_in() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, stub) = verified(root.path(), "not a status", 1);
+
+    let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("Claude Code could not say which account it is signed in to.")
+    );
+}
+
+/// The account an older Claude Code left in `.config.json` is the one verified, even beside a
+/// `.claude.json` that names another.
+#[test]
+fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
+    for (org, verifies) in [("team", true), ("other", false)] {
+        let root = tempfile::tempdir().unwrap();
+        let (mut native, stub) = verified(
+            root.path(),
+            &format!(r#"{{"loggedIn":true,"orgId":"{org}"}}"#),
+            0,
         );
-        assert!(native.verify_at(&url).is_err());
-        request.join().unwrap();
+        native.config_file = native.config_home.join(".config.json");
+        fs::write(
+            &native.config_file,
+            r#"{"oauthAccount":{"accountUuid":"legacy-user","organizationUuid":"team"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.path().join(".claude.json"),
+            r#"{"oauthAccount":{"accountUuid":"stale-other-user","organizationUuid":"other"}}"#,
+        )
+        .unwrap();
+
+        let result = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+        assert_eq!(result.is_ok(), verifies, "{org}: {result:?}");
     }
 }
 
@@ -452,32 +499,6 @@ fn an_unreadable_credentials_file_is_an_error_and_nothing_is_written() {
         Some("Cannot read native credentials.")
     );
     assert!(!native.config_file.exists(), "the identity was not patched");
-}
-
-/// A Claude login past its expiry that cannot renew itself fails verification before anything is
-/// asked of the network.
-#[test]
-fn verification_refuses_an_expired_login_that_cannot_renew() {
-    let root = tempfile::tempdir().unwrap();
-    let native = claude(root.path());
-    fs::write(
-        native.config_home.join(".credentials.json"),
-        r#"{"claudeAiOauth":{"accessToken":"old","expiresAt":1}}"#,
-    )
-    .unwrap();
-    fs::write(
-        &native.config_file,
-        r#"{"oauthAccount":{"accountUuid":"a","organizationUuid":"org-a"}}"#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        native
-            .verify_at(&crate::http::refused_url())
-            .err()
-            .as_deref(),
-        Some("Could not renew the native Claude login. Sign in again if it has expired.")
-    );
 }
 
 /// Only a lock another process holds is worth waiting on. One that cannot be created at all is

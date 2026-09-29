@@ -86,7 +86,7 @@ pub struct LimitsCreditsSpentDto {
 
 /// A Codex subscription's term, as ChatGPT's own billing endpoint reports it for the account: the
 /// end of the paid period and whether it renews then (`limits/renewal.rs`). Metadata beside the
-/// plan, like `subscription_status`, never an observation.
+/// plan, never an observation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsSubscriptionDto {
@@ -190,7 +190,7 @@ pub struct LimitsAccountDto {
 
 /// Everything one read reported about one account: its quota windows, its figures (the values
 /// beside them: credit balance, workspace credits, credits spent, banked resets, subscription term,
-/// reset offer) and its account details (plan and subscription status). The card
+/// reset offer) and its account details (its plan). The card
 /// ([`ProviderLimitsDto`]) and the remembered reading on disk (`limits/snapshots.rs`) both flatten
 /// it into their JSON, so its fields are listed once. What a later read keeps of a remembered
 /// reading is decided field by field in `limits/reading.rs`.
@@ -199,10 +199,6 @@ pub struct LimitsAccountDto {
 pub struct Reading {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
-    /// Claude only: `organization.subscription_status` from the profile read (`active`,
-    /// `past_due`, `canceled`, …), as Anthropic writes it. Metadata like `plan`, never an observation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subscription_status: Option<String>,
     pub windows: Vec<LimitWindowDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credits: Option<LimitsCreditsDto>,

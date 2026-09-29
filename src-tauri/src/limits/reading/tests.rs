@@ -385,40 +385,6 @@ fn a_paused_refresh_keeps_the_remembered_credits_spent() {
     );
 }
 
-/// The subscription status is account metadata, like the plan: a read that could not say keeps the
-/// remembered one, and a read that did say wins.
-#[test]
-fn a_paused_refresh_keeps_the_remembered_subscription_status() {
-    let read = |subscription_status: Option<&str>| Reading {
-        subscription_status: subscription_status.map(str::to_string),
-        ..Reading::default()
-    };
-    let remembered = || Reading {
-        windows: vec![observed(
-            "seven_day",
-            "Weekly · all models",
-            LimitWindowKind::Weekly,
-            40.0,
-            None,
-            "2026-08-17T10:00:00.000Z",
-        )],
-        ..read(Some("past_due"))
-    };
-
-    assert_eq!(
-        paused(read(None), remembered())
-            .subscription_status
-            .as_deref(),
-        Some("past_due")
-    );
-    assert_eq!(
-        paused(read(Some("active")), remembered())
-            .subscription_status
-            .as_deref(),
-        Some("active")
-    );
-}
-
 #[test]
 fn a_count_lapses_at_its_expiry_itself() {
     let expires_at = "2026-09-22T12:00:00+00:00";
@@ -531,7 +497,6 @@ fn a_card_keeps_the_term_it_remembers_when_a_read_could_not_tell() {
 fn every_field(tag: &str, used: f64) -> Value {
     json!({
         "plan": tag,
-        "subscriptionStatus": tag,
         "windows": [{"id": tag, "label": tag, "kind": "weekly", "usedPercent": used,
                      "observedAt": "2026-08-17T10:00:00.000Z"},
                     {"id": format!("{tag}-session"), "label": tag, "kind": "session",
@@ -578,10 +543,6 @@ fn the_remember_policy_field_by_field() {
     // renewal, asked both; failed.
     let table = [
         ("plan", [Nothing, Nothing, Nothing, Nothing, Remembered]),
-        (
-            "subscriptionStatus",
-            [Nothing, Nothing, Nothing, Nothing, Remembered],
-        ),
         (
             "windows",
             [
