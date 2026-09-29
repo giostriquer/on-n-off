@@ -69,23 +69,30 @@ would sign the user out. Two moves keep the one copy, each under the home's own 
   publication under the read's ticket (the login it moves, the sign-in epoch), so an account change
   meanwhile leaves the move for the next read. A pending recovery moves nothing.
 
-A crash between the halves of either move leaves both copies, and they are the same login: nothing
-renews a home while its profile still holds a vault login, since only a profile without one is read
-from its home. The next check-in settles it, and the home's copy stands. A home holding another
-account's login is left alone, and its profile keeps its vault login. A login a private renewal of
-an earlier version finished but never published moves in with its renewed login, without another
-grant, and the renewal record goes; one whose outcome is unknown stays in the vault.
+A crash between the halves of either move leaves the one login in both: nothing renews a home
+while its profile still holds a vault login, since only a profile without one is read from its
+home. The next check-in clears the vault's copy. When the two differ, the vault's was put there
+since the home got its copy, by a switch away from the account, a save of it or automatic
+remembering, from the native store, which is authoritative: it replaces the home's, at check-in
+and at check-out alike, and a check-out still empties the home. A home holding another account's
+login is left alone, and its profile keeps its vault login. A login a private renewal of an earlier
+version finished but never published moves in with its renewed login, without another grant, and
+the renewal record goes; one whose outcome is unknown stays in the vault.
 
 On macOS a home's login is its own scoped Keychain entry, `Claude Code-credentials-<hash of its
 config dir>`, created by the first write under Claude Code's own account name
 (`PendingWrite::prove_in_home`); a home that keeps a login in a credentials file takes no new one. On
 Windows it is the home's `.credentials.json`, the file Claude Code keeps any login in there.
 
-A new sign-in (Add or Sign in again) and Remove retire the profile's home in the same change
-(`retired_homes`). Remove tears it down at once when its client does not hold its locks, and every
-read tears down what is left: the home's Keychain entry, then the directory. The teardown never runs
-`claude auth logout`: whether a logout ends only its own login or every login of the account is
-unproven, and a logout that ended the others would sign the user out elsewhere.
+A new sign-in (Add or Sign in again) and Sign out (for every saved workspace of the signed-out
+user) set the profile's home aside, and Remove takes the profile with it. A home no profile names
+then goes at the next read: every read lists the homes on disk before it reads the vault, and
+tears down each one no profile names, under the home's own Claude Code locks, its Keychain entry
+first, then the directory. A home's id is recorded in the vault before anything creates it, so one
+listed first and named nowhere is one nothing will use again; one its client holds, or that could
+not be removed, goes at a later read. The teardown never runs `claude auth logout`: whether a
+logout ends only its own login or every login of the account is unproven, and a logout that ended
+the others would sign the user out elsewhere.
 
 The account vault is XChaCha20-Poly1305 authenticated ciphertext, atomically replaced using private
 staging files. A fresh random nonce protects each write. A 32-byte key is stored with the OS:

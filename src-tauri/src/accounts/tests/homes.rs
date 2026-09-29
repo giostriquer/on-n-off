@@ -206,6 +206,8 @@ fn switching_to_an_account_whose_vault_login_is_newer_publishes_that_one() {
         .unwrap();
 
     assert_eq!(harness.live(), Some("b1".into()));
+    // The signed-in account's home is empty, the older login it held gone with it.
+    assert_eq!(harness.in_home(&b), None);
 }
 
 #[test]

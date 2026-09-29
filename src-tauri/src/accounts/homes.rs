@@ -61,9 +61,9 @@ impl CheckedOut {
 }
 
 /// Brings saved profile `id`'s login out of its home into `db`, for a switch to it, with the home
-/// `home` resolves for an id. `None` when the vault's login is the one to publish: the profile has
-/// no home, an earlier check-out emptied it, the home holds another account's login, or the vault's
-/// is newer than the home's. The caller persists `db`, then empties the home, before anything
+/// `home` resolves for an id, keeping the vault's when it holds one. `None` when there is no home of
+/// this account's to empty: the profile has none, an earlier check-out emptied it, or it holds
+/// another account's login. The caller persists `db`, then empties the home, before anything
 /// publishes the login.
 pub(super) fn check_out(
     db: &mut Database,
@@ -85,10 +85,13 @@ pub(super) fn check_out(
         None => false,
     };
     match (live, &profile.login) {
-        (Some(login), saved) if own && saved.as_ref().is_none_or(|v| v.auth == login.auth) => {
+        (Some(login), None) if own => {
             profile.login = Some(login);
             Ok(Some(CheckedOut { home, locks }))
         }
+        // The home holds this account's own login, the vault's or one the vault's has replaced:
+        // the vault's is published, and the home emptied all the same.
+        (Some(_), Some(_)) if own => Ok(Some(CheckedOut { home, locks })),
         (_, Some(_)) => Ok(None),
         (Some(_), None) => {
             Err("This account's saved login signs in as a different account. Sign in again.".into())
