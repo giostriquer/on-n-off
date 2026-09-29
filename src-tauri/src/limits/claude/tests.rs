@@ -138,3 +138,107 @@ fn empty_limits_array_falls_back_to_legacy_fields() {
     assert_eq!(windows.len(), 1);
     assert_eq!(windows[0].id, "session");
 }
+
+/// The signed-in card is Claude Code's own report for the user's config dir, as the environment
+/// places it: here a test build's disposable home, whose `.claude` the `claude` it starts is handed.
+#[test]
+fn the_signed_in_card_is_claude_codes_report_in_the_users_own_config_dir() {
+    use crate::cli_stub::CliStub;
+    let home = crate::paths::scratch_dir("limits-claude-signed-in");
+    std::fs::write(
+        home.join(".claude.json"),
+        json!({"oauthAccount": {"accountUuid": "user", "organizationUuid": "team",
+                                "emailAddress": "you@example.com"}})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(
+        bin.join("report.jsonl"),
+        r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"weekly_all","group":"weekly","percent":34,"resets_at":"2026-10-05T09:00:00+00:00"}]}}}"#,
+    )
+    .unwrap();
+    let stub = CliStub::new("claude")
+        .log_args("args.txt", false)
+        .log_env("CLAUDE_CONFIG_DIR", "config-dir.txt")
+        .stdout_file("report.jsonl")
+        .write(&bin);
+
+    let cards = crate::accounts::native::with_test_cli(&stub, || {
+        crate::limits::read_limits_at(AgentId::Claude, false, &home)
+    });
+
+    let card = &cards[0];
+    assert_eq!(card.status, LimitsStatus::Ok, "{:?}", card.message);
+    assert!(card.current_account);
+    let identity = crate::accounts::model::Identity {
+        provider: AgentId::Claude,
+        user_id: "user".into(),
+        workspace_id: "team".into(),
+    };
+    assert_eq!(
+        card.account.as_ref().map(|account| account.id.as_str()),
+        Some(identity.observation_key().as_str())
+    );
+    assert_eq!(card.reading.windows.len(), 1);
+    let args = std::fs::read_to_string(bin.join("args.txt")).unwrap();
+    assert!(args.contains("--safe-mode"), "{args}");
+    let config_dir = std::fs::read_to_string(bin.join("config-dir.txt")).unwrap();
+    assert_eq!(
+        std::path::Path::new(config_dir.trim()),
+        home.join(".claude").as_path()
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A user who has not run Claude Code yet has no config dir for it to work in: the read still runs,
+/// and reads the store as signed out.
+#[test]
+fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
+    use crate::cli_stub::CliStub;
+    let home = crate::paths::scratch_dir("limits-claude-no-config-dir");
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    // Signed out, Claude Code prints no report from `/usage`, and says so from `auth status`.
+    let stub = CliStub::new("claude")
+        .stdout(r#"{"loggedIn":false,"authMethod":"none"}"#)
+        .write(&bin);
+    assert!(!home.join(".claude").exists());
+
+    let cards = crate::accounts::native::with_test_cli(&stub, || {
+        crate::limits::read_limits_at(AgentId::Claude, false, &home)
+    });
+
+    assert_eq!(
+        cards[0].status,
+        LimitsStatus::SignedOut,
+        "{:?}",
+        cards[0].message
+    );
+    // Claude Code answered: the card is not the one a missing `claude` gets.
+    assert_eq!(
+        cards[0].message.as_deref(),
+        Some("Sign in with `claude` to see subscription limits.")
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// Without Claude Code there is nothing to read, and the card says what would be.
+#[test]
+fn without_claude_code_the_card_asks_for_it() {
+    let home = crate::paths::scratch_dir("limits-claude-not-installed");
+    let missing = home.join("no-such-claude");
+
+    let cards = crate::accounts::native::with_test_cli(&missing, || {
+        crate::limits::read_limits_at(AgentId::Claude, false, &home)
+    });
+
+    assert_eq!(cards[0].status, LimitsStatus::SignedOut);
+    assert_eq!(
+        cards[0].message.as_deref(),
+        Some("Install Claude Code and sign in with `claude` to see subscription limits.")
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}

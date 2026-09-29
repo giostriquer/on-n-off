@@ -130,6 +130,12 @@ fn read_signed_in_within(
                 "Sign in with `claude` to see subscription limits.",
             )
         }
+        Err(NoReport::NotInstalled) => {
+            return failed(
+                LimitsStatus::SignedOut,
+                "Install Claude Code and sign in with `claude` to see subscription limits.",
+            )
+        }
         Err(why) => return failed(LimitsStatus::Failed, why.message()),
     };
     let after = read_claude_config_account(config_file);
@@ -190,6 +196,8 @@ fn default_account() -> LimitsAccountDto {
 /// Why Claude Code gave no usage report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NoReport {
+    /// There is no `claude` to start.
+    NotInstalled,
     /// It could not be started, failed, or did not answer in time.
     Unavailable,
     /// It does not know `--safe-mode`, so it was not left to run with the user's customizations.
@@ -203,6 +211,7 @@ enum NoReport {
 impl NoReport {
     fn message(self) -> &'static str {
         match self {
+            Self::NotInstalled => "Claude Code is not installed.",
             Self::Unavailable => "Claude Code could not report usage.",
             Self::Outdated => OUTDATED,
             Self::SignedOut => "Claude Code is signed out.",
@@ -221,7 +230,10 @@ fn report(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let child = command.spawn().map_err(|_| NoReport::Unavailable)?;
+    let child = command.spawn().map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => NoReport::NotInstalled,
+        _ => NoReport::Unavailable,
+    })?;
     match wait_with_deadline(child, deadline) {
         Ok(CommandOutcome::Exited {
             success: true,

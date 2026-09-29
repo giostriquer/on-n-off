@@ -95,6 +95,7 @@ fn verified(root: &Path, status: &str, exit: i32) -> (ClaudeNative, PathBuf) {
     fs::create_dir_all(&bin).unwrap();
     let stub = crate::cli_stub::CliStub::new("claude")
         .log_args("args.txt", false)
+        .log_env("CLAUDE_CONFIG_DIR", "config-dir.txt")
         .stdout(status)
         .exit(exit)
         .write(&bin);
@@ -116,6 +117,51 @@ fn verification_asks_claude_code_which_account_it_is_signed_in_to() {
 
     let args = fs::read_to_string(root.path().join("bin").join("args.txt")).unwrap();
     assert_eq!(args.trim(), "auth status --json");
+    // Asked of the store being verified, not whichever one the app's own environment names.
+    let config_dir = fs::read_to_string(root.path().join("bin").join("config-dir.txt")).unwrap();
+    assert_eq!(Path::new(config_dir.trim()), native.config_home.as_path());
+}
+
+/// A status that does not say the login is signed in does not verify it.
+#[test]
+fn verification_refuses_a_status_that_does_not_say_signed_in() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, stub) = verified(
+        root.path(),
+        r#"{"email":"you@example.com","orgId":"org-a"}"#,
+        0,
+    );
+
+    let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("Claude Code does not report the login as signed in.")
+    );
+}
+
+/// A login Claude Code rotated while it was asked is not the one verified: the change is retried.
+#[test]
+fn verification_refuses_a_login_that_changed_while_claude_code_was_asked() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, _) = verified(root.path(), "{}", 0);
+    let bin = root.path().join("bin");
+    fs::write(
+        bin.join("rotated.json"),
+        r#"{"claudeAiOauth":{"accessToken":"rotated-token","refreshToken":"rotated-refresh"}}"#,
+    )
+    .unwrap();
+    let stub = crate::cli_stub::CliStub::new("claude")
+        .copy("rotated.json", "../.claude/.credentials.json")
+        .stdout(r#"{"loggedIn":true,"email":"you@example.com","orgId":"org-a"}"#)
+        .write(&bin);
+
+    let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("Native login changed during verification. Retry the account operation.")
+    );
 }
 
 #[test]

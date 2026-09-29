@@ -133,8 +133,15 @@ impl SignedIn {
         ClaudeNative::resolve(home).map(Self)
     }
 
+    /// A `claude` for this store, working in its config dir, or in the temporary dir while Claude
+    /// Code has not made that one yet: a `claude` asked to work in a dir that is not there does
+    /// not start at all.
     pub(crate) fn command(&self) -> Command {
-        self.0.command()
+        let mut command = self.0.command();
+        if !self.0.config_home.is_dir() {
+            command.current_dir(std::env::temp_dir());
+        }
+        command
     }
 
     /// The file holding the signed-in account record, `oauthAccount`.

@@ -59,6 +59,7 @@ fn a_signed_out_config_dir_asks_for_a_sign_in() {
         card.message.as_deref(),
         Some("Sign in with `claude` to see subscription limits.")
     );
+    assert_eq!(card.account.expect("the account").id, "default");
 }
 
 #[test]
@@ -119,29 +120,50 @@ fn a_report_with_no_readable_window_is_a_failed_read() {
     );
 }
 
+/// The account `.claude.json` names must be the same one after the read, user and organization
+/// alike: one that changed, appeared or went while Claude Code ran is not shown.
 #[test]
 fn a_report_after_which_the_config_dir_names_another_account_is_not_shown() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join(".claude.json"), config("user", "team")).unwrap();
-    std::fs::write(
-        dir.path().join("other.json"),
+    let empty = "{}".to_string();
+    for after in [
         config("someone-else", "team"),
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("report.jsonl"), REPORT).unwrap();
-    let cli = CliStub::new("claude")
-        .copy("other.json", ".claude.json")
-        .stdout_file("report.jsonl")
-        .cli(dir.path());
+        config("user", "other-team"),
+        empty,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".claude.json"), config("user", "team")).unwrap();
+        std::fs::write(dir.path().join("after.json"), &after).unwrap();
+        std::fs::write(dir.path().join("report.jsonl"), REPORT).unwrap();
+        let cli = CliStub::new("claude")
+            .copy("after.json", ".claude.json")
+            .stdout_file("report.jsonl")
+            .cli(dir.path());
+
+        let card = signed_in(&dir, &cli);
+
+        assert_eq!(card.status, LimitsStatus::Failed, "{after}");
+        assert_eq!(
+            card.message.as_deref(),
+            Some("The signed-in Claude account changed while its usage was read."),
+            "{after}"
+        );
+        assert!(
+            card.reading.windows.is_empty(),
+            "showed the report: {after}"
+        );
+    }
+}
+
+/// A config dir that names no account, before and after, is read as the one default account.
+#[test]
+fn a_config_dir_naming_no_account_reads_as_the_default_account() {
+    let (dir, cli) = home("{}", REPORT, CliStub::new("claude"));
 
     let card = signed_in(&dir, &cli);
 
-    assert_eq!(card.status, LimitsStatus::Failed);
-    assert_eq!(
-        card.message.as_deref(),
-        Some("The signed-in Claude account changed while its usage was read.")
-    );
-    assert!(card.reading.windows.is_empty(), "showed the report");
+    assert_eq!(card.status, LimitsStatus::Ok);
+    assert_eq!(card.account.expect("the account").id, "default");
+    assert_eq!(card.reading.windows.len(), 3);
 }
 
 #[test]
@@ -150,6 +172,7 @@ fn a_claude_code_too_old_to_leave_customizations_out_asks_for_an_update() {
         &config("user", "team"),
         REPORT,
         CliStub::new("claude")
+            .log_args("args.txt", true)
             .stderr("error: unknown option --safe-mode")
             .exit(1),
     );
@@ -158,4 +181,27 @@ fn a_claude_code_too_old_to_leave_customizations_out_asks_for_an_update() {
 
     assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(card.message.as_deref(), Some(OUTDATED));
+    // Asked once, with the flag, and never again without it.
+    let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+    let runs: Vec<&str> = args.lines().collect();
+    assert_eq!(runs.len(), 1, "{args}");
+    assert!(runs[0].contains("--safe-mode"), "{args}");
+}
+
+#[test]
+fn another_unknown_option_is_not_read_as_an_outdated_claude_code() {
+    let (dir, cli) = home(
+        &config("user", "team"),
+        REPORT,
+        CliStub::new("claude")
+            .stderr("error: unknown option --verbose")
+            .exit(1),
+    );
+
+    let card = signed_in(&dir, &cli);
+
+    assert_eq!(
+        card.message.as_deref(),
+        Some("Claude Code could not report usage.")
+    );
 }

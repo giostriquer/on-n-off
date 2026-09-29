@@ -263,6 +263,7 @@ fn a_claude_code_too_old_to_leave_customizations_out_says_to_update_it() {
         &config("user", "team"),
         REPORT,
         CliStub::new("claude")
+            .log_args("args.txt", true)
             .stderr("error: unknown option --safe-mode")
             .exit(1),
     );
@@ -270,6 +271,30 @@ fn a_claude_code_too_old_to_leave_customizations_out_says_to_update_it() {
     assert_eq!(
         read(&dir, &cli).unwrap_err(),
         SavedReadError::Unavailable(OUTDATED)
+    );
+    // Asked once, with the flag, and never again without it.
+    let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+    let runs: Vec<&str> = args.lines().collect();
+    assert_eq!(runs.len(), 1, "{args}");
+    assert!(runs[0].contains("--safe-mode"), "{args}");
+}
+
+#[test]
+fn a_claude_code_that_is_not_installed_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".claude.json"), config("user", "team")).unwrap();
+    let missing = dir.path().join("no-such-claude");
+
+    let result = read_usage_within(
+        &|| std::process::Command::new(&missing),
+        &dir.path().join(".claude.json"),
+        &identity(),
+        ANSWER,
+    );
+
+    assert_eq!(
+        result.unwrap_err(),
+        SavedReadError::Unavailable("Claude Code is not installed.")
     );
 }
 
