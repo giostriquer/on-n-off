@@ -268,6 +268,28 @@ fn an_account_archived_once_in_its_home_is_no_longer_read_there() {
     assert_eq!(asked(&harness).len(), 1, "read the archived account's home");
 }
 
+/// An account signed in to outside on-n-off while its login was in its home: the signed-in read is
+/// its card, so its home is not read beside it, nor its login renewed there.
+#[test]
+fn the_signed_in_accounts_home_is_not_read() {
+    let harness = Harness::new().with_homes();
+    let (_, b) = two_accounts(&harness);
+    read(&harness);
+    let home = harness.home_of(&b).unwrap();
+    harness.signed_in(Some(claude("b", "b2")));
+
+    let cards = read(&harness);
+
+    assert!(
+        !asked(&harness)[1..].contains(&home),
+        "read the signed-in account's home"
+    );
+    assert!(cards
+        .iter()
+        .all(|card| card.account.as_ref().unwrap().id != key("b")));
+    assert_eq!(harness.in_home(&b), Some("b1".into()));
+}
+
 #[test]
 fn nothing_moves_while_an_interrupted_switch_awaits_recovery() {
     let harness = Harness::new().with_homes();
