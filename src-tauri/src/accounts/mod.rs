@@ -569,7 +569,7 @@ impl Accounts {
         store::Store::gate(&self.home, &store::ChangeKind::Account)?;
         let current = native.read()?.ok_or("No native account is signed in.")?;
         let identity = native.identify(&current)?;
-        let result = store::Store::open(&self.home, true)?.change_then(
+        let (forgotten, result) = store::Store::open(&self.home, true)?.change_then(
             store::ChangeKind::Account,
             |db| {
                 let fingerprint = view(provider, &current)?.fingerprint();
@@ -577,27 +577,35 @@ impl Accounts {
                     db.ignored_credentials.push(fingerprint);
                 }
                 // Logout may revoke shared refresh lineage. Invalidate every saved workspace for
-                // this user first, homes included: a home no profile names goes at the next read.
+                // this user first, homes included.
+                let mut forgotten = Vec::new();
                 for profile in &mut db.profiles {
                     if profile.identity.provider == provider
                         && profile.identity.user_id == identity.user_id
                     {
                         profile.login = None;
-                        profile.home = None;
+                        forgotten.extend(profile.home.take());
                     }
                 }
-                Ok(())
+                Ok(forgotten)
             },
-            |(), _, _| {
-                native.logout().and_then(|()| {
+            |forgotten, _, _| {
+                let result = native.logout().and_then(|()| {
                     if native.read()?.is_none() {
                         Ok(())
                     } else {
                         Err("The CLI still reports a login after sign-out.".into())
                     }
-                })
+                });
+                Ok((forgotten, result))
             },
-        )?;
+        )??;
+        // Torn down now: left for a read, a home would be taken back by the account it signs in as.
+        if let Some(home) = self.account_homes(provider) {
+            for id in &forgotten {
+                let _ = homes::tear_down(id, &home);
+            }
+        }
         drop(change);
         self.notify.changed(provider);
         result

@@ -18,9 +18,13 @@
 //! away from the account or a save of it, from the native store, which is authoritative: it is the
 //! newer, and it is the one that stays.
 //!
-//! A home no profile names, because its account was removed, signed in again or signed out, goes
-//! at the next read. Its id is recorded in the vault before anything is written there, so a home
-//! found on disk before the vault is read and not named in it is one nothing will use again.
+//! A home an account is signed out of goes then and there. One no profile names, because its
+//! account was removed or signed in again, goes at the next read. Its id is recorded in the vault
+//! before anything is written there, so a home found on disk before the vault is read and not named
+//! in it is one nothing will use again, with one exception: a version before homes rewrites the
+//! vault without the field that names them, leaving an account with no login anywhere but its
+//! home. That home is taken back by the account its login signs in as, if that account still has no
+//! login of its own.
 use super::{
     model::Identity,
     store::{Database, Guard, Login, Profile, Store, Ticket},
@@ -100,7 +104,8 @@ pub(super) fn check_out(
     }
 }
 
-/// Before a read of saved `provider` accounts: tears down every home no profile names, then moves
+/// Before a read of saved `provider` accounts: takes back or tears down every home no profile names
+/// ([`take_back_or_tear_down`]), then moves
 /// the login of every saved account that is not `native`, the signed-in one, and is not archived,
 /// from the vault into its home. `open` opens the vault; `home` resolves a home id. Best effort:
 /// whatever fails stays as it is, and the next read tries again.
@@ -131,7 +136,7 @@ pub(super) fn settle(
         .iter()
         .filter(|id| !db.profiles.iter().any(|p| p.home.as_ref() == Some(*id)))
     {
-        let _ = tear_down(id, home);
+        let _ = take_back_or_tear_down(id, &db, &ticket, open, home);
     }
     let archived = crate::limits::archived(root_home, provider);
     for profile in db.profiles.iter().filter(|p| {
@@ -219,9 +224,42 @@ fn held_profile<'db>(db: &'db mut Database, id: &str) -> Result<&'db mut Profile
         .ok_or_else(|| "Saved profile no longer exists.".into())
 }
 
-/// Tears down home `id`, one no profile names, under its locks: what its client filed outside it,
-/// then the directory. A home whose client holds its locks is left for the next read.
-fn tear_down(id: &str, home: &Resolve<'_>) -> Result<(), String> {
+/// Home `id`, one no profile names: taken back by the saved account its login signs in as, if that
+/// account has neither a login nor a home, since the login is then its only one; torn down
+/// otherwise. A login that cannot be identified is torn down with it, since no read or switch could
+/// use it. A home that cannot be read, or whose client holds its locks, is left for the next read.
+fn take_back_or_tear_down(
+    id: &str,
+    db: &Database,
+    ticket: &Ticket,
+    open: &dyn Fn() -> Result<Store, String>,
+    home: &Resolve<'_>,
+) -> Result<(), String> {
+    let home = home(id)?;
+    let locks = home.lock()?;
+    let owner = home.read()?.and_then(|login| {
+        let identity = home.identify(&login).ok()?;
+        db.profiles
+            .iter()
+            .find(|p| p.identity == identity && p.login.is_none() && p.home.is_none())
+    });
+    let Some(owner) = owner else {
+        return home.delete(locks);
+    };
+    drop(locks);
+    open()?.publish(ticket, |db| {
+        let target = held_profile(db, &owner.id)?;
+        if target.login.is_some() || target.home.is_some() {
+            return Err("The account changed while its home was taken back.".into());
+        }
+        target.home = Some(id.to_string());
+        Ok(())
+    })
+}
+
+/// Tears down home `id` under its locks: what its client filed outside it, then the directory. A
+/// home whose client holds its locks is left as it is.
+pub(super) fn tear_down(id: &str, home: &Resolve<'_>) -> Result<(), String> {
     let home = home(id)?;
     let locks = home.lock()?;
     home.delete(locks)

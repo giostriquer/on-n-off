@@ -325,6 +325,48 @@ fn nothing_moves_while_an_interrupted_switch_awaits_recovery() {
     assert_eq!(harness.home_of(&b), None);
 }
 
+/// A version before homes rewrites the vault without the field that names a home. The login in it
+/// is the account's only one, so the next read takes the home back rather than tearing it down.
+#[test]
+fn a_home_an_older_version_forgot_is_taken_back_at_the_next_read() {
+    let harness = Harness::new().with_homes();
+    let (_, b) = two_accounts(&harness);
+    read(&harness);
+    let home = harness.home_of(&b).unwrap();
+    harness.seed(|db| db.profiles[1].home = None);
+
+    let cards = read(&harness);
+
+    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert_eq!(harness.home_of(&b), Some(home.clone()));
+    assert_eq!(harness.in_home(&b), Some("b1".into()));
+    assert_eq!(asked(&harness).last(), Some(&home));
+    assert!(cards.iter().any(|card| card.status == LimitsStatus::Ok
+        && card.account.as_ref().map(|a| a.id.as_str()) == Some(key("b").as_str())));
+}
+
+/// Only the account the login signs in as takes a forgotten home back, and only while it has no
+/// login of its own anywhere.
+#[test]
+fn a_forgotten_home_whose_account_signed_in_again_goes_at_the_next_read() {
+    let harness = Harness::new().with_homes();
+    let (_, b) = two_accounts(&harness);
+    read(&harness);
+    let home = harness.home_of(&b).unwrap();
+    harness.seed(|db| {
+        db.profiles[1].home = None;
+        db.profiles[1].login = Some(claude("b", "b2"));
+    });
+
+    read(&harness);
+
+    assert_eq!(
+        *harness.homes().deleted.lock().unwrap(),
+        std::slice::from_ref(&home)
+    );
+    assert_eq!(harness.in_home(&b), Some("b2".into()));
+}
+
 #[test]
 fn a_removed_accounts_home_goes_at_the_next_read() {
     let harness = Harness::new().with_homes();
@@ -453,6 +495,7 @@ fn signing_out_forgets_the_users_saved_logins_in_their_homes_too() {
 
     harness.accounts().sign_out(AgentId::Claude).unwrap();
 
+    assert!(!home.exists(), "the signed-out user's home stayed");
     let vault = harness.vault();
     let forgotten = vault.profiles.iter().find(|p| p.id == elsewhere).unwrap();
     assert!(forgotten.login.is_none() && forgotten.home.is_none());
@@ -462,7 +505,6 @@ fn signing_out_forgets_the_users_saved_logins_in_their_homes_too() {
         .iter()
         .any(|p| p.id == elsewhere && p.needs_login));
     read(&harness);
-    assert!(!home.exists(), "the signed-out user's home stayed");
     assert_eq!(
         harness.in_home(&b),
         Some("b1".into()),
