@@ -84,7 +84,7 @@ describe("a Codex account's banked reset alert", () => {
     const form = await openAlert("work@codex.example");
     fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     expect(within(form).getByRole("button", { name: "Notify me" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(within(form).getByRole("button", { name: "Use it automatically" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Use it" }));
     expect(form).toHaveTextContent("on-n-off tells you, waits 10 minutes, then uses the reset unless you cancel it on this card.");
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 

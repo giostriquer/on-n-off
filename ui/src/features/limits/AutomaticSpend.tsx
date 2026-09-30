@@ -1,12 +1,10 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatClock, formatResetIn } from "$lib/limitsFormat";
-import { useSharedRead } from "$lib/useSharedRead";
+import { PENDING_RESET_SPENDS_KEY, usePendingResetSpends } from "$lib/usePendingResetSpends";
 import { accountButton } from "@/features/accounts/AccountManager";
-
-const SPENDS_KEY = ["reset-spends"];
 
 /**
  * The banked reset an automatic alert is waiting to use on this account (`limits_monitor::
@@ -15,8 +13,7 @@ const SPENDS_KEY = ["reset-spends"];
  */
 export function AutomaticSpend({ accountId, now }: { accountId: string; now: number }) {
   const client = useQueryClient();
-  const spends = useQuery({ queryKey: SPENDS_KEY, queryFn: api.pendingResetSpends });
-  useSharedRead("limits:reset-spends");
+  const spends = usePendingResetSpends();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const spend = spends.data?.find(waiting => waiting.accountId === accountId);
@@ -26,7 +23,7 @@ export function AutomaticSpend({ accountId, now }: { accountId: string; now: num
     setProblem(null);
     try {
       if (!(await api.cancelResetSpend(accountId))) setProblem("It was already being used, or no longer waiting.");
-      await client.invalidateQueries({ queryKey: SPENDS_KEY });
+      await client.invalidateQueries({ queryKey: PENDING_RESET_SPENDS_KEY });
     } catch (error) {
       setProblem(parseInvokeError(error).message);
     } finally {

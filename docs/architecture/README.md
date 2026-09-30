@@ -168,12 +168,15 @@ provider's own client:
   weekly window at least the alert's hours from renewing and a banked reset that has not lapsed. It
   offers once per weekly cycle, which a spent reset starts anew, and keeps its state in the
   monitor's own file. An automatic alert's offer (`limits_monitor/auto_spend.rs`) is a notification
-  that the reset will be used in ten minutes; the monitor wakes then, spends it through the same
-  `limits_refresh::consume_codex_reset_credit` a click uses only if the latest read still finds the
-  account low in the same cycle, and says what came of it. Until then the account's card shows the
-  waiting spend with a Cancel (`pending_reset_spends`, `cancel_reset_spend`, announced as the
-  `limits:reset-spends` shared read). A waiting spend lives in memory only, so quitting on-n-off
-  cancels it, and a spend that fails is not tried again.
+  that the reset will be used in ten minutes, scheduled only once the offer is saved. The monitor
+  wakes then, reads Codex afresh, and spends it through the same
+  `limits_refresh::consume_codex_reset_credit` a click uses only if that read still finds the
+  signed-in account low in the same cycle; a read that fails leaves it waiting, and one found more
+  than fifteen minutes late, as after sleep, is kept. It says what came of it either way. Until
+  then the account's card shows the waiting spend with a Cancel (`pending_reset_spends`,
+  `cancel_reset_spend`, announced as the `limits:reset-spends` shared read), and a reset used by
+  hand clears it. A waiting spend lives in memory only, apart from the monitor's saved state, so
+  quitting on-n-off cancels it, and a spend that fails is not tried again.
 
 Saved profiles are read beside the signed-in account (`accounts/usage.rs`). A saved Claude account
 is read in its home ([accounts.md](accounts.md#homes)) by the same Claude Code report, expecting the

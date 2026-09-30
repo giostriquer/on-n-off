@@ -49,6 +49,8 @@ pub(super) struct Offer {
     /// When the weekly window renews by itself.
     pub(super) renews_at: DateTime<Utc>,
     pub(super) available: u32,
+    /// Its alert uses the reset by itself (`auto_spend`) rather than only saying so.
+    pub(super) automatic: bool,
 }
 
 /// Every offer `snapshots` make at `now` for the accounts in `alerts`, with `state` brought up to
@@ -96,6 +98,11 @@ pub(super) fn offer_now(
 ) -> Option<Offer> {
     signed_in_codex(snapshot)?;
     low_reading(snapshot, alert, now).map(|(_, offer)| offer)
+}
+
+/// Whether `snapshot` is the signed-in Codex account's live read ([`signed_in_codex`]).
+pub(super) fn is_signed_in_codex(snapshot: &ProviderLimitsDto) -> bool {
+    signed_in_codex(snapshot).is_some()
 }
 
 /// The account of `snapshot` when it is the signed-in Codex account's live read: a reset lands on
@@ -154,6 +161,7 @@ fn low_reading(
             left_percent: left,
             renews_at,
             available: banked.available_count,
+            automatic: alert.automatic,
         },
     ))
 }

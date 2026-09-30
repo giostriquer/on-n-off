@@ -10,7 +10,7 @@ import { TraySettingsCard } from "./TraySettingsCard";
 import { UsageHistoryCard } from "@/features/usage/UsageHistoryCard";
 import { FOCUS_RING } from "$lib/a11y";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { visibleAgentIds, withResetAlert } from "$lib/appSettings";
+import { RESET_AUTO_SPEND_DELAY_MINUTES, visibleAgentIds, withResetAlert } from "$lib/appSettings";
 import { notificationPermissionProblem } from "$lib/notificationPermission";
 import * as api from "$lib/api";
 import type {
@@ -341,7 +341,7 @@ function ResetAlertsCard({ alerts, onChange }: {
   return (
     <SettingsCard
       title="Banked reset alerts"
-      description="Notifies when a Codex account runs low and one of its banked resets is worth using, or uses the reset automatically ten minutes after saying so, unless you cancel it on the account's card. Turn an alert on from the account's ••• menu on Limits."
+      description={`Notifies when a Codex account runs low and one of its banked resets is worth using, or uses the reset automatically ${RESET_AUTO_SPEND_DELAY_MINUTES} minutes after saying so, unless you cancel it on the account's card. Turn an alert on from the account's ••• menu on Limits.`}
     >
       {entries.length > 0 ? (
         <ul aria-label="Accounts with a banked reset alert" className="m-0 list-none p-0">

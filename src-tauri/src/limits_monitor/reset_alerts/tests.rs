@@ -88,6 +88,7 @@ fn an_account_found_low_on_two_polls_in_a_row_is_offered_its_reset_once() {
             left_percent: 6.0,
             renews_at: instant(RENEWS).unwrap(),
             available: 2,
+            automatic: false,
         }]
     );
     assert!(three.is_empty(), "offered twice in one weekly cycle");
@@ -323,6 +324,7 @@ fn the_notification_names_the_account_what_is_left_and_when_it_renews() {
         left_percent: 6.0,
         renews_at: instant("2026-10-05T15:00:00Z").unwrap(),
         available: 2,
+        automatic: false,
     };
 
     assert_eq!(

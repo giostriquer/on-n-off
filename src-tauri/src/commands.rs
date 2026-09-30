@@ -391,8 +391,14 @@ pub async fn consume_codex_reset_credit(
     idempotency_key: String,
 ) -> Result<ResetCreditOutcome, AdapterError> {
     blocking("banked reset", move || {
-        crate::limits_refresh::consume_codex_reset_credit(&account_id, &idempotency_key)
-            .map_err(AdapterError::message)
+        let outcome =
+            crate::limits_refresh::consume_codex_reset_credit(&account_id, &idempotency_key)
+                .map_err(AdapterError::message)?;
+        // A reset used by hand leaves nothing for an automatic alert to use in its place.
+        if outcome == ResetCreditOutcome::Reset {
+            crate::limits_monitor::auto_spend::cancel_listed(&account_id);
+        }
+        Ok(outcome)
     })
     .await
 }

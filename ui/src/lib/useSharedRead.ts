@@ -3,6 +3,9 @@ import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import type { SharedReadSource } from "$lib/types";
 
+/** The query the banked resets automatic alerts are waiting to use are held under. */
+export const PENDING_RESET_SPENDS_KEY: QueryKey = ["reset-spends"];
+
 /**
  * The queries each shared read backs. Account changes also change whose login a Codex subscription
  * date comes from. Keeping the mapping here rather than at the call sites is
@@ -14,7 +17,7 @@ const QUERY_KEYS: Record<SharedReadSource, readonly QueryKey[]> = {
   "limits:claude": [["limits", "claude"]],
   "limits:codex": [["limits", "codex"]],
   "github:prs": [["github", "prs"]],
-  "limits:reset-spends": [["reset-spends"]],
+  "limits:reset-spends": [PENDING_RESET_SPENDS_KEY],
 };
 
 /**

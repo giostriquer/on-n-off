@@ -18,6 +18,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 /** The share of the current limit left at or under which Codex's own app lets a reset be used. */
 export const CODEX_RESET_MAX_LEFT_PERCENT = 10;
 
+/** How long after saying so an automatic alert uses the reset, for the user to cancel it. The monitor keeps the same wait. */
+export const RESET_AUTO_SPEND_DELAY_MINUTES = 10;
+
 /** The longest wait an alert can ask for before the limit renews by itself: a week, the cycle. */
 export const RESET_ALERT_MAX_HOURS = 7 * 24;
 

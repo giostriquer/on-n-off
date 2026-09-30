@@ -1,7 +1,7 @@
 import { createContext, useContext, useId, useState } from "react";
 import { Segmented } from "@/components/Segmented";
 import { SwitchRow } from "@/components/SettingsCard";
-import { CODEX_RESET_MAX_LEFT_PERCENT, RESET_ALERT_MAX_HOURS, defaultResetAlert, resetSpendLimit } from "$lib/appSettings";
+import { CODEX_RESET_MAX_LEFT_PERCENT, RESET_ALERT_MAX_HOURS, RESET_AUTO_SPEND_DELAY_MINUTES, defaultResetAlert, resetSpendLimit } from "$lib/appSettings";
 import { notificationPermissionProblem } from "$lib/notificationPermission";
 import type { ResetAlert } from "$lib/types";
 
@@ -81,14 +81,14 @@ export function ResetAlertForm({ accountId, label, onDone }: {
     <form role="group" aria-label="Banked reset alert" className="flex flex-col gap-2 text-[12px]"
       onSubmit={event => { event.preventDefault(); if (!enabled || valid) void submit(); }}>
       <SwitchRow label="Tell me when this account's banked reset is worth using" on={enabled} onToggle={() => setEnabled(!enabled)} />
-      <div className="flex flex-col items-start gap-1">
-        <span id={modeId}>When it's worth using</span>
+      <div className="flex items-center gap-2">
+        <span id={modeId} className="min-w-0 flex-1">When it's worth using</span>
         <Segmented
           size="row"
           ariaLabelledBy={modeId}
           options={[
             { value: "notify", label: "Notify me" },
-            { value: "automatic", label: "Use it automatically" },
+            { value: "automatic", label: "Use it" },
           ]}
           pressed={(mode) => (mode === "automatic") === automatic}
           onPress={(mode) => setAutomatic(mode === "automatic")}
@@ -107,7 +107,7 @@ export function ResetAlertForm({ accountId, label, onDone }: {
       </div>
       <p className="m-0 text-[11px] leading-snug text-[var(--mute)]">
         {automatic
-          ? `on-n-off tells you, waits 10 minutes, then uses the reset unless you cancel it on this card. It never uses one with more than ${CODEX_RESET_MAX_LEFT_PERCENT}% of the limit left, and at most once a week.`
+          ? `on-n-off tells you, waits ${RESET_AUTO_SPEND_DELAY_MINUTES} minutes, then uses the reset unless you cancel it on this card. It never uses one with more than ${CODEX_RESET_MAX_LEFT_PERCENT}% of the limit left, and at most once a week.`
           : `You use the reset from this card, and only with ${CODEX_RESET_MAX_LEFT_PERCENT}% or less of the limit left, as in Codex's own app.`}
       </p>
       {enabled && !valid ? (

@@ -59,6 +59,7 @@ fn offer() -> Offer {
         left_percent: 5.0,
         renews_at: at(RENEWS),
         available: 1,
+        automatic: true,
     }
 }
 
@@ -113,20 +114,19 @@ fn at_its_time_a_reset_still_needed_is_spent_and_leaves_the_queue() {
     assert!(pending.is_empty());
 }
 
-/// Whatever changed in the ten minutes, a reset the account no longer needs is not spent.
+/// A reset the live read at its time no longer finds needed is not spent.
 #[test]
 fn at_its_time_a_reset_no_longer_needed_is_not_spent() {
     let later_cycle = "2026-10-08T12:00:00Z";
-    let signed_out = {
-        let mut card = card(96.0, RENEWS);
-        card.current_account = false;
-        card
+    let someone_else = {
+        let mut other = card(96.0, RENEWS);
+        other.account.as_mut().unwrap().id = "other".into();
+        other
     };
     for (why, snapshots) in [
         ("more than its share is left", vec![card(50.0, RENEWS)]),
         ("a new weekly cycle began", vec![card(96.0, later_cycle)]),
-        ("another account is signed in", vec![signed_out]),
-        ("nothing was read", Vec::new()),
+        ("another account is signed in", vec![someone_else]),
     ] {
         let mut pending = scheduled();
         let expected = pending["acct"].clone();
@@ -141,6 +141,64 @@ fn at_its_time_a_reset_no_longer_needed_is_not_spent() {
         assert_eq!(due, [Due::NotNeeded(expected)], "{why}");
         assert!(pending.is_empty(), "{why}");
     }
+}
+
+/// Without a live read of the signed-in account nothing is known about now, so the spend waits for
+/// a read that answers.
+#[test]
+fn without_a_live_read_a_spend_waits() {
+    let failed = {
+        let mut card = card(96.0, RENEWS);
+        card.status = crate::dto::LimitsStatus::Failed;
+        card
+    };
+    for snapshots in [vec![failed], Vec::new()] {
+        let mut pending = scheduled();
+
+        let due = due(
+            &mut pending,
+            &snapshots,
+            &automatic(),
+            minutes_after_now(12),
+        );
+
+        assert!(due.is_empty());
+        assert_eq!(pending.len(), 1);
+    }
+}
+
+/// A spend found more than fifteen minutes past its time, as after the computer slept, is kept
+/// even when the account still needs it: the user was told too long ago.
+#[test]
+fn a_spend_found_late_is_kept() {
+    for snapshots in [vec![card(96.0, RENEWS)], Vec::new()] {
+        let mut pending = scheduled();
+        let expected = pending["acct"].clone();
+
+        let due = due(
+            &mut pending,
+            &snapshots,
+            &automatic(),
+            minutes_after_now(26),
+        );
+
+        assert_eq!(due, [Due::Late(expected)]);
+        assert!(pending.is_empty());
+    }
+}
+
+#[test]
+fn fifteen_minutes_past_its_time_a_spend_is_still_made() {
+    let mut pending = scheduled();
+
+    let due = due(
+        &mut pending,
+        &[card(96.0, RENEWS)],
+        &automatic(),
+        minutes_after_now(25),
+    );
+
+    assert!(matches!(due.as_slice(), [Due::Spend(_)]));
 }
 
 /// An alert turned off, or turned back to notifying only, takes its waiting spend with it.
@@ -161,32 +219,6 @@ fn a_spend_whose_alert_no_longer_spends_is_dropped_without_a_word() {
         assert!(due.is_empty());
         assert!(pending.is_empty());
     }
-}
-
-#[test]
-fn a_cancelled_spend_is_gone_and_a_second_cancel_says_so() {
-    let mut pending = scheduled();
-
-    assert!(cancel(&mut pending, "acct"));
-    assert!(!cancel(&mut pending, "acct"));
-    assert!(due(
-        &mut pending,
-        &[card(96.0, RENEWS)],
-        &automatic(),
-        minutes_after_now(10)
-    )
-    .is_empty());
-}
-
-#[test]
-fn the_monitor_wakes_for_the_soonest_spend() {
-    let mut pending = scheduled();
-    let mut later = schedule(&offer(), minutes_after_now(5));
-    later.account_id = "other".into();
-    pending.insert("other".into(), later);
-
-    assert_eq!(next_due(&pending), Some(minutes_after_now(10)));
-    assert_eq!(next_due(&HashMap::new()), None);
 }
 
 #[test]
@@ -215,22 +247,38 @@ fn the_notifications_say_when_and_what_came_of_it() {
         )
     );
     assert_eq!(
-        not_needed_copy(&spend),
-        (
+        kept_copy(&Due::NotNeeded(spend.clone())),
+        Some((
             "Codex: banked reset not used".to_string(),
             "you@example.com no longer needs it, or is no longer signed in, so it was kept."
                 .to_string()
-        )
+        ))
     );
+    assert_eq!(
+        kept_copy(&Due::Late(spend.clone())),
+        Some((
+            "Codex: banked reset not used".to_string(),
+            "you@example.com could not be checked in time, so it was kept.".to_string()
+        ))
+    );
+    assert_eq!(kept_copy(&Due::Spend(spend)), None);
 }
 
-/// The card lists what is waiting, when it is due, and cancels it; a cancel tells every window.
+/// The waiting spends in this app, one test so no other touches them meanwhile: scheduled once an
+/// offer is saved, listed for the card, woken for, decided, cancelled from the card, and cleared,
+/// each change told to every window and a change of nothing told to none.
 #[test]
-fn the_card_lists_a_waiting_spend_and_cancels_it() {
-    let spend = schedule(&offer(), at(NOW));
-    with_pending(|pending| pending.insert(spend.account_id.clone(), spend));
-    let _ = crate::read_revision::take_announced();
+fn the_waiting_spends_move_through_their_life_and_every_change_is_told() {
+    use crate::read_revision::{take_announced, Source};
+    let _ = take_announced();
+    clear();
+    let _ = take_announced();
 
+    let notices = schedule_all(&[offer()], at(NOW));
+    assert_eq!(notices, [scheduled_copy(&offer())]);
+    assert_eq!(take_announced(), [Source::ResetSpends]);
+    assert!(schedule_all(&[], at(NOW)).is_empty());
+    assert!(take_announced().is_empty(), "announced scheduling nothing");
     assert_eq!(
         listed(),
         [PendingResetSpendDto {
@@ -238,15 +286,32 @@ fn the_card_lists_a_waiting_spend_and_cancels_it() {
             due_at: "2026-10-01T12:10:00Z".into(),
         }]
     );
+    assert_eq!(next_due(), Some(minutes_after_now(10)));
+    assert!(!any_due(minutes_after_now(9)));
+    assert!(any_due(minutes_after_now(10)));
+
+    assert!(take_due(&[card(96.0, RENEWS)], &automatic(), minutes_after_now(9)).is_empty());
+    assert!(take_announced().is_empty(), "announced deciding nothing");
+
     assert!(cancel_listed("acct"));
-    assert_eq!(
-        crate::read_revision::take_announced(),
-        [crate::read_revision::Source::ResetSpends]
-    );
-    assert!(listed().is_empty());
+    assert_eq!(take_announced(), [Source::ResetSpends]);
     assert!(!cancel_listed("acct"));
-    assert!(
-        crate::read_revision::take_announced().is_empty(),
-        "announced a cancel of nothing"
-    );
+    assert!(take_announced().is_empty(), "announced a cancel of nothing");
+    assert!(listed().is_empty());
+
+    schedule_all(&[offer()], at(NOW));
+    let _ = take_announced();
+    assert!(matches!(
+        take_due(&[card(96.0, RENEWS)], &automatic(), minutes_after_now(10)).as_slice(),
+        [Due::Spend(_)]
+    ));
+    assert_eq!(take_announced(), [Source::ResetSpends]);
+    assert_eq!(next_due(), None);
+
+    schedule_all(&[offer()], at(NOW));
+    let _ = take_announced();
+    assert!(clear());
+    assert_eq!(take_announced(), [Source::ResetSpends]);
+    assert!(!clear());
+    assert!(take_announced().is_empty(), "announced clearing nothing");
 }
