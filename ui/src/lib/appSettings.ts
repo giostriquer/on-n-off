@@ -23,7 +23,7 @@ export const RESET_ALERT_MAX_HOURS = 7 * 24;
 
 /** A new alert's defaults: Codex's own share, and a day before the limit renews by itself. */
 export function defaultResetAlert(label: string | null): ResetAlert {
-  return { label, maxLeftPercent: CODEX_RESET_MAX_LEFT_PERCENT, minHoursToRenewal: 24 };
+  return { label, maxLeftPercent: CODEX_RESET_MAX_LEFT_PERCENT, minHoursToRenewal: 24, automatic: false };
 }
 
 /**

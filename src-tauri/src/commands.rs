@@ -3,8 +3,9 @@ use std::sync::Arc;
 use crate::adapter::AgentAdapter;
 use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, GithubPrsDto, InstallItemsRequest,
-    InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto, ProjectDto, ProviderLimitsDto,
-    ResetCreditOutcome, UpdateItemMode, UsageHistoryStatusDto, UsageSummaryDto, UsageSummaryInput,
+    InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto, PendingResetSpendDto, ProjectDto,
+    ProviderLimitsDto, ResetCreditOutcome, UpdateItemMode, UsageHistoryStatusDto, UsageSummaryDto,
+    UsageSummaryInput,
 };
 use crate::flags::FeatureFlags;
 use crate::item_install::ItemService;
@@ -382,7 +383,8 @@ pub async fn read_limits(
 }
 
 /// Spend one banked Codex rate-limit reset on the signed-in account a Limits card names, then
-/// refresh the shared Codex limits. Only an explicit user action in the UI calls this.
+/// refresh the shared Codex limits. Only an explicit user action in the UI calls this; an automatic
+/// alert spends through `limits_refresh` from the limits monitor.
 #[tauri::command]
 pub async fn consume_codex_reset_credit(
     account_id: String,
@@ -393,6 +395,19 @@ pub async fn consume_codex_reset_credit(
             .map_err(AdapterError::message)
     })
     .await
+}
+
+/// The banked resets automatic alerts are waiting to spend, for their accounts' cards.
+#[tauri::command]
+pub fn pending_reset_spends() -> Vec<PendingResetSpendDto> {
+    crate::limits_monitor::auto_spend::listed()
+}
+
+/// Cancel the banked reset an automatic alert is waiting to spend on `account_id`, from its card;
+/// `false` when there was none waiting, or it had already begun.
+#[tauri::command]
+pub fn cancel_reset_spend(account_id: String) -> bool {
+    crate::limits_monitor::auto_spend::cancel_listed(&account_id)
 }
 
 /// Drop one remembered account snapshot (the "Forget" action on a stale card).

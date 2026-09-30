@@ -10,6 +10,7 @@ import type {
   InstallItemsResult,
   ItemStatus,
   MarketplaceInspect,
+  PendingResetSpend,
   ProjectDto,
   ProviderDiagnose,
   SharedReadChanged,
@@ -143,6 +144,16 @@ export function readLimits(agentId: AgentId, force = false): Promise<ProviderLim
 /** Spends one banked Codex reset on the signed-in account `accountId` names; `attemptId` is one user attempt. */
 export function consumeCodexResetCredit(accountId: string, attemptId: string): Promise<ResetCreditOutcome> {
   return invoke("consume_codex_reset_credit", { accountId, idempotencyKey: attemptId });
+}
+
+/** The banked resets automatic alerts are waiting to use, one per account. */
+export function pendingResetSpends(): Promise<PendingResetSpend[]> {
+  return invoke("pending_reset_spends");
+}
+
+/** Keeps the banked reset an automatic alert is waiting to use on `accountId`; `false` when none was waiting. */
+export function cancelResetSpend(accountId: string): Promise<boolean> {
+  return invoke("cancel_reset_spend", { accountId });
 }
 
 export function forgetLimitsSnapshot(agentId: AgentId, accountId: string, expectedEmail?: string): Promise<void> {

@@ -45,14 +45,15 @@ pub struct AppSettings {
     #[serde(default)]
     pub close_to_tray: bool,
     /// Codex accounts whose banked reset on-n-off offers once they run low, by the card's account
-    /// id: an opt-in each. on-n-off never spends one by itself, as Codex's own app never does.
+    /// id: an opt-in each, which spends the reset only when it says so (`ResetAlert::automatic`).
     #[serde(default)]
     pub reset_alerts: HashMap<String, ResetAlert>,
 }
 
 /// When a Codex account's banked reset is offered: with `max_left_percent` or less of its current
 /// limit left, and its own reset at least `min_hours_to_renewal` away, since a reset spent just
-/// before the limit renews anyway is wasted.
+/// before the limit renews anyway is wasted. An `automatic` alert then spends the reset itself,
+/// after a wait the user can cancel it in (`limits_monitor::auto_spend`); otherwise it only tells.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetAlert {
@@ -63,6 +64,8 @@ pub struct ResetAlert {
     pub max_left_percent: u8,
     #[serde(default = "reset_min_hours_default")]
     pub min_hours_to_renewal: u16,
+    #[serde(default)]
+    pub automatic: bool,
 }
 
 /// The share of the current limit left at or under which Codex's own app lets a reset be used.
@@ -194,6 +197,7 @@ fn read_reset_alert(alert: &Value) -> Option<ResetAlert> {
             .map_or_else(reset_max_left_default, |percent| percent as u8),
         min_hours_to_renewal: figure("minHoursToRenewal")
             .map_or_else(reset_min_hours_default, |hours| hours as u16),
+        automatic: alert.get("automatic").and_then(read).unwrap_or(false),
     })
 }
 

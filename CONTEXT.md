@@ -49,11 +49,12 @@ Codex's archived sessions, which Usage reads.
 _Avoid_: hidden, disabled, paused
 
 **Banked reset alert**:
-A Codex account's opt-in to be told when one of its banked resets is worth using: the account has
-run low, at the share the user set or below, and its limit is not about to renew by itself. It is a
-notification only. A banked reset is spent only by the user, from the account's card, and only
-with 10% or less of the limit left, or the alert's lower share.
-_Avoid_: auto-reset, automatic reset
+A Codex account's opt-in to act when one of its banked resets is worth using: the account has run
+low, at the share the user set or below, and its limit is not about to renew by itself. It either
+notifies, or, set to use the reset automatically, says so and uses it ten minutes later unless the
+user cancels it on the account's card. Either way a banked reset is spent only with 10% or less of
+the limit left, or the alert's lower share, and an alert acts at most once a weekly cycle.
+_Avoid_: auto-reset
 
 ### Accounts
 

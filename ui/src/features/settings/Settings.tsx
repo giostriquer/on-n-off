@@ -341,7 +341,7 @@ function ResetAlertsCard({ alerts, onChange }: {
   return (
     <SettingsCard
       title="Banked reset alerts"
-      description="Notifies when a Codex account runs low and one of its banked resets is worth using. on-n-off never uses a reset by itself; you use it from the account's card. Turn an alert on from the account's ••• menu on Limits."
+      description="Notifies when a Codex account runs low and one of its banked resets is worth using, or uses the reset automatically ten minutes after saying so, unless you cancel it on the account's card. Turn an alert on from the account's ••• menu on Limits."
     >
       {entries.length > 0 ? (
         <ul aria-label="Accounts with a banked reset alert" className="m-0 list-none p-0">
@@ -352,7 +352,8 @@ function ResetAlertsCard({ alerts, onChange }: {
                 <SettingRow>
                   <span className={rowLabel}>
                     <span className="font-medium text-[var(--silkscreen)]">{name}</span>
-                    {" "}· {alert.maxLeftPercent}% or less left, {alert.minHoursToRenewal}h or more before it renews
+                    {" "}· {alert.maxLeftPercent}% or less left, {alert.minHoursToRenewal}h or more before it renews ·{" "}
+                    {alert.automatic ? "uses it by itself" : "tells you"}
                   </span>
                   <button
                     type="button"

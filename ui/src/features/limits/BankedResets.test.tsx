@@ -191,7 +191,7 @@ describe("UseBankedReset", () => {
   });
 
   it("keeps the lower share an account's alert names", () => {
-    const alerts = { alerts: { "acct-work": { label: null, maxLeftPercent: 5, minHoursToRenewal: 24 } }, save: async () => undefined };
+    const alerts = { alerts: { "acct-work": { label: null, maxLeftPercent: 5, minHoursToRenewal: 24, automatic: false } }, save: async () => undefined };
     const { rerender } = render(<ResetAlertsContext.Provider value={alerts}>{button({ entry: codex({ windows: [weekly(92)] }) })}</ResetAlertsContext.Provider>);
 
     expect(useReset()).toHaveProperty("disabled", true);

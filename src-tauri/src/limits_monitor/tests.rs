@@ -510,6 +510,7 @@ fn the_monitor_reads_only_what_its_settings_watch() {
         label: None,
         max_left_percent: 10,
         min_hours_to_renewal: 24,
+        automatic: false,
     };
     let settings = |limit_notifications: bool, alerts: bool| crate::settings::AppSettings {
         limit_notifications,
@@ -565,6 +566,7 @@ fn alerts_only() -> crate::settings::AppSettings {
                 label: None,
                 max_left_percent: 10,
                 min_hours_to_renewal: 24,
+                automatic: false,
             },
         )]),
         ..crate::settings::AppSettings::default()
@@ -581,13 +583,13 @@ fn an_alert_offers_its_reset_while_limit_notifications_stay_quiet() {
     let mut state = MonitorState::default();
     let settings = alerts_only();
 
-    let first = observe_poll(
+    let first = notices_of(
         &mut state,
         &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
         &settings,
         now,
     );
-    let second = observe_poll(
+    let second = notices_of(
         &mut state,
         &[codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
         &settings,
@@ -617,13 +619,13 @@ fn with_limit_notifications_on_the_limit_is_notified_too() {
         ..alerts_only()
     };
 
-    observe_poll(
+    notices_of(
         &mut state,
         &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
         &settings,
         now,
     );
-    let notices = observe_poll(
+    let notices = notices_of(
         &mut state,
         &[codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
         &settings,
@@ -649,7 +651,7 @@ fn a_poll_of_nothing_forgets_every_observation() {
         limit_notifications: true,
         ..alerts_only()
     };
-    observe_poll(
+    notices_of(
         &mut state,
         &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
         &on,
@@ -657,7 +659,7 @@ fn a_poll_of_nothing_forgets_every_observation() {
     );
     assert!(!state.providers.is_empty() && !state.reset_alerts.is_empty());
 
-    let notices = observe_poll(
+    let notices = notices_of(
         &mut state,
         &[],
         &crate::settings::AppSettings::default(),
@@ -696,14 +698,14 @@ fn an_offer_is_not_made_again_after_a_restart() {
     let path = root.join("monitor.json");
     let settings = alerts_only();
     let mut state = MonitorState::default();
-    observe_poll(
+    notices_of(
         &mut state,
         &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
         &settings,
         now,
     );
     assert_eq!(
-        observe_poll(
+        notices_of(
             &mut state,
             &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
             &settings,
@@ -716,7 +718,7 @@ fn an_offer_is_not_made_again_after_a_restart() {
 
     let mut reloaded = load_state(&path);
 
-    assert!(observe_poll(
+    assert!(notices_of(
         &mut reloaded,
         &[codex_with_a_reset(97.0, "2026-08-19T12:20:00Z")],
         &settings,
@@ -724,4 +726,192 @@ fn an_offer_is_not_made_again_after_a_restart() {
     )
     .is_empty());
     let _ = fs::remove_dir_all(root);
+}
+
+/// What one poll notifies, for an alert that only notifies: nothing waits to be spent.
+fn notices_of(
+    state: &mut MonitorState,
+    snapshots: &[ProviderLimitsDto],
+    settings: &crate::settings::AppSettings,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<(String, String)> {
+    let outcome = observe_poll(state, &mut HashMap::new(), snapshots, settings, now);
+    assert!(outcome.spends.is_empty());
+    outcome.notices
+}
+
+fn automatic_only() -> crate::settings::AppSettings {
+    let mut settings = alerts_only();
+    settings
+        .reset_alerts
+        .get_mut("acct-codex")
+        .unwrap()
+        .automatic = true;
+    settings
+}
+
+fn at(value: &str) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+}
+
+/// An automatic alert's offer is not the "available" notification: it says the reset will be used
+/// in ten minutes, and the reset waits to be spent then.
+#[test]
+fn an_automatic_alert_schedules_its_reset_instead_of_offering_it() {
+    let now = at("2026-08-19T13:00:00Z");
+    let mut state = MonitorState::default();
+    let mut pending = HashMap::new();
+    let settings = automatic_only();
+
+    observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        &settings,
+        now,
+    );
+    let outcome = observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
+        &settings,
+        now,
+    );
+
+    let titles: Vec<&str> = outcome
+        .notices
+        .iter()
+        .map(|(title, _)| title.as_str())
+        .collect();
+    assert_eq!(titles, ["Codex: using a banked reset in 10 minutes"]);
+    assert!(outcome.spends.is_empty(), "spent at once");
+    assert_eq!(pending["acct-codex"].due_at, at("2026-08-19T13:10:00Z"));
+}
+
+/// Ten minutes on, a poll that still finds the account low hands the reset out to be spent, once.
+#[test]
+fn a_scheduled_reset_is_handed_out_when_its_time_comes() {
+    let now = at("2026-08-19T13:00:00Z");
+    let later = at("2026-08-19T13:10:00Z");
+    let mut state = MonitorState::default();
+    let mut pending = HashMap::new();
+    let settings = automatic_only();
+    observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        &settings,
+        now,
+    );
+    observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
+        &settings,
+        now,
+    );
+    let key = pending["acct-codex"].idempotency_key.clone();
+
+    let outcome = observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(97.0, "2026-08-19T13:10:00Z")],
+        &settings,
+        later,
+    );
+    let after = observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(97.0, "2026-08-19T13:15:00Z")],
+        &settings,
+        later,
+    );
+
+    assert_eq!(outcome.spends.len(), 1);
+    assert_eq!(outcome.spends[0].idempotency_key, key);
+    assert!(outcome.notices.is_empty());
+    assert!(
+        after.spends.is_empty() && after.notices.is_empty(),
+        "spent or offered twice"
+    );
+    assert!(pending.is_empty());
+}
+
+/// Ten minutes on, an account that no longer needs its reset keeps it, and is told so.
+#[test]
+fn a_scheduled_reset_no_longer_needed_is_kept() {
+    let now = at("2026-08-19T13:00:00Z");
+    let later = at("2026-08-19T13:10:00Z");
+    let mut state = MonitorState::default();
+    let mut pending = HashMap::new();
+    let settings = automatic_only();
+    observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        &settings,
+        now,
+    );
+    observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
+        &settings,
+        now,
+    );
+
+    let outcome = observe_poll(
+        &mut state,
+        &mut pending,
+        &[codex_with_a_reset(40.0, "2026-08-19T13:10:00Z")],
+        &settings,
+        later,
+    );
+
+    assert!(outcome.spends.is_empty());
+    let titles: Vec<&str> = outcome
+        .notices
+        .iter()
+        .map(|(title, _)| title.as_str())
+        .collect();
+    assert_eq!(titles, ["Codex: banked reset not used"]);
+}
+
+/// The monitor wakes when a reset is due, not at its next poll, and polls as usual otherwise.
+#[test]
+fn the_monitor_wakes_when_a_reset_is_due() {
+    let now = at("2026-08-19T13:00:00Z");
+    let mut pending = HashMap::new();
+
+    assert_eq!(
+        next_wake(Duration::from_secs(300), &pending, now),
+        Duration::from_secs(300)
+    );
+
+    pending.insert(
+        "acct-codex".to_string(),
+        auto_spend::PendingSpend {
+            account_id: "acct-codex".into(),
+            account_label: None,
+            cycle: "2026-08-24T12:00:00Z".into(),
+            due_at: at("2026-08-19T13:02:00Z"),
+            idempotency_key: "key".into(),
+        },
+    );
+    assert_eq!(
+        next_wake(Duration::from_secs(300), &pending, now),
+        Duration::from_secs(120)
+    );
+
+    // One already due wakes the monitor at once, but not in a loop faster than a second.
+    assert_eq!(
+        next_wake(
+            Duration::from_secs(300),
+            &pending,
+            at("2026-08-19T13:05:00Z")
+        ),
+        Duration::from_secs(1)
+    );
 }

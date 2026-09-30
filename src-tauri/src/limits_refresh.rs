@@ -264,7 +264,9 @@ where
 
 /// Spend one banked Codex reset, then replace the shared Codex read so every surface shows the
 /// renewed windows and the count that is left. An account change in progress refuses the attempt
-/// rather than spend a reset on an account that is being replaced.
+/// rather than spend a reset on an account that is being replaced. A click on the card and an
+/// automatic alert's spend (`limits_monitor::auto_spend`) both come through here, so both keep the
+/// same rules.
 pub fn consume_codex_reset_credit(
     account_id: &str,
     idempotency_key: &str,

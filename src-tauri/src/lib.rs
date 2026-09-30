@@ -133,6 +133,8 @@ pub fn run() {
             commands::forget_limits_snapshot,
             commands::set_limits_archived,
             commands::consume_codex_reset_credit,
+            commands::pending_reset_spends,
+            commands::cancel_reset_spend,
             commands::read_github_prs,
             commands::hide_limits_popover,
             commands::open_limits_window,

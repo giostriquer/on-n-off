@@ -17,7 +17,7 @@ const setLimitsArchived = vi.hoisted(() => vi.fn());
 vi.mock("$lib/api", () => ({
   readLimits, readAccounts, accountAction, forgetLimitsSnapshot, setLimitsArchived,
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
-  addAccount: vi.fn().mockResolvedValue(undefined), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(),
+  addAccount: vi.fn().mockResolvedValue(undefined), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
   onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
 }));
 
