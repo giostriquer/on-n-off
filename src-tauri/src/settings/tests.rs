@@ -464,8 +464,8 @@ fn every_setting_reads_back_as_it_was_written() {
     let defaults = serde_json::to_value(AppSettings::default()).unwrap();
     let alert_defaults = serde_json::to_value(ResetAlert {
         label: None,
-        max_left_percent: 10,
-        min_hours_to_renewal: 24,
+        max_left_percent: reset_max_left_default(),
+        min_hours_to_renewal: reset_min_hours_default(),
     })
     .unwrap();
     // A key left at its default would read back right even if the reader never named it.
