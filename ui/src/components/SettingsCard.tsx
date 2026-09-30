@@ -87,7 +87,7 @@ export function SettingRow({ children, stack = false }: { children: ReactNode; s
 export function SwitchRow({ label, ...toggle }: { label: string } & Omit<RockerProps, "size" | "ariaLabel">) {
   return (
     <div className="flex items-center gap-3">
-      <span className="min-w-0 flex-1">{label}</span>
+      <span className={rowName}>{label}</span>
       <Rocker size="skill" ariaLabel={label} {...toggle} />
     </div>
   );
