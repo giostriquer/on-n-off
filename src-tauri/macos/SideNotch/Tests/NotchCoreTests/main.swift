@@ -150,6 +150,17 @@ final class NotchTests {
     expectEqual(provider(.codex, windows: [], status: "failed").hasObservedValues, false)
   }
 
+  func testAPausedRingSaysItsReadingIsTheLastObserved() {
+    let weekly = [quota("weekly", 46)]
+    // The host keeps the headline for every status whose read did not answer.
+    for status in ["failed", "signedOut", "unauthenticated", "unsupported"] {
+      expectEqual(provider(windows: weekly, status: status, headline: "weekly").ringIsLastObserved, true)
+    }
+    expectEqual(provider(windows: weekly, status: "ok", headline: "weekly").ringIsLastObserved, false)
+    // A ring with nothing to lead with shows the dash, which is no reading at all.
+    expectEqual(provider(windows: weekly, status: "failed").ringIsLastObserved, false)
+  }
+
   func testWindowsRenewIndependentlyAndUnknownResetRemainsUsable() {
     let entry = provider(windows: [
       quota("weekly", 41),
@@ -502,6 +513,7 @@ checks.testTheRingsShowTheWindowsTheHostNamed()
 checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
 checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
 checks.testAPausedAccountWithOnlyAShareStillHasObservedValues()
+checks.testAPausedRingSaysItsReadingIsTheLastObserved()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testSessionAgesReadLikeTheReferenceApp()
 checks.testRailFramesFollowTheSelectedUUIDOnEveryEdge()
@@ -517,5 +529,5 @@ try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("20 native check groups; \(failures) failures")
+print("21 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

@@ -147,10 +147,10 @@ fn a_workspace_share_fills_the_inner_ring_while_the_weekly_stays_the_headline() 
     );
 }
 
-/// A ring shows only what a read just answered. An account that could not be read leads with
-/// nothing and fills no inner ring, while the popover still lists what it remembers.
+/// An account whose refresh is paused keeps leading with the last reading it has, as its card on
+/// Limits does.
 #[test]
-fn an_account_that_cannot_be_read_leads_with_nothing() {
+fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
     for status in [
         LimitsStatus::Failed,
         LimitsStatus::Unauthenticated,
@@ -169,12 +169,33 @@ fn an_account_that_cannot_be_read_leads_with_nothing() {
         card.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
 
         let cell = project(card);
-        assert_eq!(cell.headline_window_id, None, "{status:?}");
-        assert_eq!(cell.inner_ring, None, "{status:?}");
+        assert_eq!(
+            cell.headline_window_id.as_deref(),
+            Some("weekly_all"),
+            "{status:?}"
+        );
+        assert_eq!(
+            cell.inner_ring,
+            Some(InnerRing::Fable {
+                window_id: "weekly_fable".into()
+            }),
+            "{status:?}"
+        );
         assert_eq!(cell.windows.len(), 2, "{status:?}");
         assert!(cell.workspace_credits.is_some(), "{status:?}");
         assert_eq!(cell.message.as_deref(), Some("Paused"));
     }
+
+    // A paused member keeps the share on its inner ring, where no Fable window takes it.
+    let mut member = signed_in(AgentId::Codex, vec![weekly("primary")]);
+    member.status = LimitsStatus::Failed;
+    member.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
+    assert_eq!(project(member).inner_ring, Some(InnerRing::WorkspaceShare));
+
+    // Paused or not, a card without a weekly window leads with nothing, never its session.
+    let mut session_only = signed_in(AgentId::Codex, vec![session("primary")]);
+    session_only.status = LimitsStatus::Failed;
+    assert_eq!(project(session_only).headline_window_id, None);
 }
 
 #[test]
@@ -278,10 +299,4 @@ fn the_named_windows_resolve_for_the_painter() {
         (window.label.as_str(), window.used_percent),
         ("Workspace credits", 32.0)
     );
-
-    let mut paused = signed_in(AgentId::Codex, vec![weekly("primary")]);
-    paused.status = LimitsStatus::Failed;
-    let paused = project(paused);
-    assert!(paused.headline().is_none());
-    assert!(paused.inner_window().is_none());
 }

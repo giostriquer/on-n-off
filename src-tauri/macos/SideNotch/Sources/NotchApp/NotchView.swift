@@ -233,7 +233,8 @@ private struct MeterCell: View {
       ", \($0.name), \($0.quota.text(at: now)) used"
         + ($0.quota.isReached(at: now) ? ", limit reached" : "")
     } ?? ""
-    return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + innerDescription
+    let paused = entry?.ringIsLastObserved == true ? ", refresh paused, last observed" : ""
+    return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + innerDescription + paused
   }
 
   var body: some View {
