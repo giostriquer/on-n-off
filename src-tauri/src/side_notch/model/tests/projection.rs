@@ -147,10 +147,11 @@ fn a_workspace_share_fills_the_inner_ring_while_the_weekly_stays_the_headline() 
     );
 }
 
-/// A ring shows only what a read just answered. An account that could not be read leads with
-/// nothing and fills no inner ring, while the popover still lists what it remembers.
+/// An account whose refresh is paused keeps leading with the last reading it has, as its card on
+/// Limits does, rather than dropping to the empty ring; the popover says the values are the last
+/// observed.
 #[test]
-fn an_account_that_cannot_be_read_leads_with_nothing() {
+fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
     for status in [
         LimitsStatus::Failed,
         LimitsStatus::Unauthenticated,
@@ -169,8 +170,18 @@ fn an_account_that_cannot_be_read_leads_with_nothing() {
         card.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
 
         let cell = project(card);
-        assert_eq!(cell.headline_window_id, None, "{status:?}");
-        assert_eq!(cell.inner_ring, None, "{status:?}");
+        assert_eq!(
+            cell.headline_window_id.as_deref(),
+            Some("weekly_all"),
+            "{status:?}"
+        );
+        assert_eq!(
+            cell.inner_ring,
+            Some(InnerRing::Fable {
+                window_id: "weekly_fable".into()
+            }),
+            "{status:?}"
+        );
         assert_eq!(cell.windows.len(), 2, "{status:?}");
         assert!(cell.workspace_credits.is_some(), "{status:?}");
         assert_eq!(cell.message.as_deref(), Some("Paused"));
@@ -281,7 +292,18 @@ fn the_named_windows_resolve_for_the_painter() {
 
     let mut paused = signed_in(AgentId::Codex, vec![weekly("primary")]);
     paused.status = LimitsStatus::Failed;
+    paused.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
     let paused = project(paused);
-    assert!(paused.headline().is_none());
-    assert!(paused.inner_window().is_none());
+    assert_eq!(
+        paused.headline().map(|window| window.id.as_str()),
+        Some("primary")
+    );
+    assert!(paused.inner_window().is_some());
+
+    // With nothing remembered there is still nothing to lead with.
+    let mut empty = signed_in(AgentId::Codex, Vec::new());
+    empty.status = LimitsStatus::Failed;
+    let empty = project(empty);
+    assert!(empty.headline().is_none());
+    assert!(empty.inner_window().is_none());
 }

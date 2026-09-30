@@ -299,10 +299,11 @@ pub struct NotchProvider {
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
     /// The window the ring and the figure show, by id: the headline window, which is the weekly
-    /// window. None for a card without one, and while the account cannot be read. Private, like
-    /// `inner_ring`, so only `current` decides them and they always name what `windows` holds.
+    /// window. None for a card without one. An account whose refresh is paused keeps its last
+    /// reading here, as its card on Limits does. Private, like `inner_ring`, so only `current`
+    /// decides them and they always name what `windows` holds.
     headline_window_id: Option<String>,
-    /// None while the account cannot be read, or when it has nothing to show there.
+    /// None when the account has nothing to show there.
     inner_ring: Option<InnerRing>,
     pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
 }
@@ -330,17 +331,11 @@ impl NotchProvider {
         let card = entries.into_iter().find(|entry| entry.current_account)?;
         let windows = card.reading.windows;
         let workspace_credits = card.reading.workspace_credits;
-        let (headline_window_id, inner_ring) = if card.status == LimitsStatus::Ok {
-            (
-                windows
-                    .iter()
-                    .find(|window| window.kind == LimitWindowKind::Weekly)
-                    .map(|window| window.id.clone()),
-                inner_ring(card.provider, &windows, workspace_credits.as_ref()),
-            )
-        } else {
-            (None, None)
-        };
+        let headline_window_id = windows
+            .iter()
+            .find(|window| window.kind == LimitWindowKind::Weekly)
+            .map(|window| window.id.clone());
+        let inner_ring = inner_ring(card.provider, &windows, workspace_credits.as_ref());
         Some(Self {
             provider: card.provider,
             status: card.status,

@@ -609,3 +609,29 @@ fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
         "{texts:?}"
     );
 }
+
+/// A paused account's ring keeps its last weekly reading, as its card on Limits does.
+#[test]
+fn a_paused_account_keeps_its_last_reading_on_the_ring() {
+    let mut paused = signed_in(
+        AgentId::Claude,
+        vec![window(
+            "weekly_all",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            46.0,
+        )],
+    );
+    paused.status = LimitsStatus::Failed;
+    paused.message = Some("Claude Code reported no usage.".into());
+
+    match cell_content(&CellData::Provider(projected(paused))) {
+        CellContent::Provider {
+            label, headline, ..
+        } => {
+            assert_eq!(label, "46%");
+            assert!(headline.is_some());
+        }
+        _ => panic!("wrong content kind"),
+    }
+}
