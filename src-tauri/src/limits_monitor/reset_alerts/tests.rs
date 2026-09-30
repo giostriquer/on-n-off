@@ -53,7 +53,7 @@ fn opted_in(account: &str) -> HashMap<String, ResetAlert> {
     )])
 }
 
-/// The offers two polls make, observed ten minutes apart.
+/// The offers two polls in a row make, the first reading `first` and the second `second`.
 fn two_polls(
     first: &ProviderLimitsDto,
     second: &ProviderLimitsDto,

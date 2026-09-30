@@ -100,7 +100,6 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
   const shown = result && (observed === null || observed <= result.answeredAt) ? result : null;
   if (!accountId || (!offered && !shown)) return null;
   const left = usageLeft(entry, now);
-  // Codex's own rule, which the backend keeps too: a reset is used only with this much left or less.
   const limit = resetSpendLimit(alerts, accountId);
   const allowed = left !== null && left <= limit;
 

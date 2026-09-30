@@ -159,7 +159,6 @@ fn is_newer(later: &str, earlier: &str) -> bool {
         .is_some_and(|(later, earlier)| later > earlier)
 }
 
-/// What the notification for `offer` says at `now`.
 pub(super) fn notification_copy(offer: &Offer, now: DateTime<Utc>) -> (String, String) {
     let account = offer
         .account_label
