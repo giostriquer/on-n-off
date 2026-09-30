@@ -41,6 +41,8 @@ async function openAlert(label: string) {
   return screen.getByRole("group", { name: "Banked reset alert" });
 }
 
+const ALERT = "Tell me when this account's banked reset is worth using";
+
 beforeEach(() => {
   readAccounts.mockReset().mockResolvedValue({ profiles: [], nativeAccount: null, recoveryRequired: false, notice: null });
   requestNotificationPermission.mockReset().mockResolvedValue(true);
@@ -54,7 +56,7 @@ describe("a Codex account's banked reset alert", () => {
     const form = await openAlert("work@codex.example");
     expect(within(form).getByLabelText("With this much of the limit left or less (%)")).toHaveProperty("value", "10");
     expect(within(form).getByLabelText("And at least this many hours before it renews by itself")).toHaveProperty("value", "24");
-    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(saved).toHaveBeenCalledWith({
@@ -69,7 +71,7 @@ describe("a Codex account's banked reset alert", () => {
 
     const form = await openAlert("work@codex.example");
 
-    expect(document.activeElement).toBe(within(form).getByRole("checkbox"));
+    expect(document.activeElement).toBe(within(form).getByRole("button", { name: ALERT }));
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "More actions for work@codex.example" }));
     expect(screen.queryByRole("group", { name: "Banked reset alert" })).toBeNull();
@@ -79,7 +81,7 @@ describe("a Codex account's banked reset alert", () => {
     const saved = renderLimits();
 
     const form = await openAlert("work@codex.example");
-    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     fireEvent.change(within(form).getByLabelText("With this much of the limit left or less (%)"), { target: { value: "5" } });
     fireEvent.change(within(form).getByLabelText("And at least this many hours before it renews by itself"), { target: { value: "48" } });
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
@@ -93,7 +95,7 @@ describe("a Codex account's banked reset alert", () => {
     const saved = renderLimits();
 
     const form = await openAlert("work@codex.example");
-    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     fireEvent.change(within(form).getByLabelText("With this much of the limit left or less (%)"), { target: { value: left } });
     fireEvent.change(within(form).getByLabelText("And at least this many hours before it renews by itself"), { target: { value: hours } });
 
@@ -107,7 +109,7 @@ describe("a Codex account's banked reset alert", () => {
     const saved = renderLimits();
 
     const form = await openAlert("work@codex.example");
-    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(within(form).getByRole("alert").textContent).toBe("Notifications are blocked in system settings."));
@@ -119,7 +121,7 @@ describe("a Codex account's banked reset alert", () => {
     const saved = renderLimits();
 
     const form = await openAlert("work@codex.example");
-    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(within(form).getByRole("alert").textContent).toBe("Could not request notification permission."));
@@ -131,7 +133,7 @@ describe("a Codex account's banked reset alert", () => {
     saved.mockRejectedValue(new Error("disk full"));
 
     const form = await openAlert("work@codex.example");
-    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(within(form).getByRole("alert").textContent).toBe("Could not save the alert."));
@@ -142,9 +144,9 @@ describe("a Codex account's banked reset alert", () => {
     const saved = renderLimits({ "acct-work": { label: "work@codex.example", maxLeftPercent: 5, minHoursToRenewal: 48 } });
 
     const form = await openAlert("work@codex.example");
-    expect(within(form).getByRole("checkbox")).toHaveProperty("checked", true);
+    expect(within(form).getByRole("button", { name: ALERT })).toHaveAttribute("aria-pressed", "true");
     expect(within(form).getByLabelText("With this much of the limit left or less (%)")).toHaveProperty("value", "5");
-    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(saved).toHaveBeenCalledWith({}));

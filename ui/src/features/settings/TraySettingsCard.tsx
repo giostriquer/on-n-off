@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Rocker } from "@/features/agents/Rocker";
+import { CardToggle, SettingsCard } from "@/components/SettingsCard";
 import * as api from "$lib/api";
 
 type TraySettingsCardProps = {
@@ -22,30 +22,18 @@ export function TraySettingsCard({ closeToTray, onCloseToTrayChange }: TraySetti
   if (supported.data !== true) return null;
 
   return (
-    <section
-      aria-label="Windows tray"
-      className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
-    >
-      <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[13px] font-semibold">Windows tray</h3>
-          <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
-            on-n-off always keeps an icon in the notification area. Turn this on and closing the
-            window leaves it running there instead of quitting.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
-            Close to tray
-          </span>
-          <Rocker
-            size="skill"
-            on={closeToTray}
-            ariaLabel="Keep on-n-off running in the tray when the window is closed"
-            onToggle={() => onCloseToTrayChange(!closeToTray)}
-          />
-        </div>
-      </div>
-    </section>
+    <SettingsCard
+      label="Windows tray"
+      title="Windows tray"
+      description="on-n-off always keeps an icon in the notification area. Turn this on and closing the window leaves it running there instead of quitting."
+      control={
+        <CardToggle
+          caption="Close to tray"
+          on={closeToTray}
+          ariaLabel="Keep on-n-off running in the tray when the window is closed"
+          onToggle={() => onCloseToTrayChange(!closeToTray)}
+        />
+      }
+    />
   );
 }

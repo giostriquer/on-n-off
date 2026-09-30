@@ -12,7 +12,7 @@ import {
   Webhook,
   type LucideIcon,
 } from "lucide-react";
-import { Rocker } from "@/features/agents/Rocker";
+import { Rocker } from "@/components/Rocker";
 import type { CatalogCounts, Screen } from "$lib/catalog";
 import type { Theme } from "@/features/session/SessionProvider";
 

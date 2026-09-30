@@ -8,8 +8,8 @@ const rockerRender = vi.hoisted(() => vi.fn());
 const filterSkillListCall = vi.hoisted(() => vi.fn());
 const sortPluginsCall = vi.hoisted(() => vi.fn());
 
-vi.mock("@/features/agents/Rocker", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/features/agents/Rocker")>();
+vi.mock("@/components/Rocker", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Rocker")>();
   return {
     Rocker: (props: React.ComponentProps<typeof actual.Rocker>) => {
       rockerRender(props.ariaLabel);

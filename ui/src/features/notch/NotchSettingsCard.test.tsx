@@ -138,14 +138,14 @@ it("toggles providers in rail order and never removes the last one", async () =>
   snapshot.settings.pullRequests = { enabled: false, lists: ["mine"] };
   snapshot.settings.providers = ["claude", "cursor"];
   mount();
-  const cursor = await screen.findByRole("switch", { name: "Show Cursor in the notch" });
+  const cursor = await screen.findByRole("button", { name: "Show Cursor in the notch" });
   await waitFor(() => expect(cursor).not.toBeDisabled());
-  expect(cursor).toHaveAttribute("aria-checked", "true");
-  expect(screen.getByRole("switch", { name: "Show Codex in the notch" })).toHaveAttribute(
-    "aria-checked",
+  expect(cursor).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Show Codex in the notch" })).toHaveAttribute(
+    "aria-pressed",
     "false",
   );
-  fireEvent.click(screen.getByRole("switch", { name: "Show Codex in the notch" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show Codex in the notch" }));
   await waitFor(() =>
     expect(calls.save).toHaveBeenLastCalledWith(
       expect.objectContaining({ providers: ["claude", "codex", "cursor"] }),
@@ -157,14 +157,14 @@ it("toggles providers in rail order and never removes the last one", async () =>
       expect.objectContaining({ providers: ["claude", "codex"] }),
     ),
   );
-  fireEvent.click(screen.getByRole("switch", { name: "Show Codex in the notch" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show Codex in the notch" }));
   await waitFor(() =>
     expect(calls.save).toHaveBeenLastCalledWith(
       expect.objectContaining({ providers: ["claude"] }),
     ),
   );
   await waitFor(() =>
-    expect(screen.getByRole("switch", { name: "Show Claude in the notch" })).toBeDisabled(),
+    expect(screen.getByRole("button", { name: "Show Claude in the notch" })).toBeDisabled(),
   );
 });
 
@@ -196,8 +196,8 @@ it("lays monitors out by physical coordinates instead of API order", () => {
 
 it("shows only the user's own pull requests by default and lets other lists join in order", async () => {
   mount();
-  const toggle = await screen.findByRole("switch", { name: "Show pull requests in the notch" });
-  await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+  const toggle = await screen.findByRole("button", { name: "Show pull requests in the notch" });
+  await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
   const lists = screen.getByRole("group", { name: "Pull request lists" });
   expect(lists).toBeTruthy();
   expect(screen.getByRole("button", { name: "Mine" })).toHaveAttribute("aria-pressed", "true");

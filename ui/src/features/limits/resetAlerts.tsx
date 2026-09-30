@@ -1,4 +1,5 @@
 import { createContext, useContext, useId, useState } from "react";
+import { Rocker } from "@/components/Rocker";
 import { CODEX_RESET_MAX_LEFT_PERCENT, RESET_ALERT_MAX_HOURS, defaultResetAlert, resetSpendLimit } from "$lib/appSettings";
 import { notificationPermissionProblem } from "$lib/notificationPermission";
 import type { ResetAlert } from "$lib/types";
@@ -75,10 +76,10 @@ export function ResetAlertForm({ accountId, label, onDone }: {
   return (
     <form role="group" aria-label="Banked reset alert" className="flex flex-col gap-2 text-[12px]"
       onSubmit={event => { event.preventDefault(); if (!enabled || valid) void submit(); }}>
-      <label className="flex items-start gap-2">
-        <input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} className="mt-0.5" />
-        <span>Tell me when this account's banked reset is worth using</span>
-      </label>
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1">Tell me when this account's banked reset is worth using</span>
+        <Rocker size="skill" on={enabled} ariaLabel="Tell me when this account's banked reset is worth using" onToggle={() => setEnabled(!enabled)} />
+      </div>
       <div className="flex items-center gap-2">
         <label htmlFor={leftId} className="min-w-0 flex-1">With this much of the limit left or less (%)</label>
         <input id={leftId} type="number" inputMode="numeric" min={1} max={CODEX_RESET_MAX_LEFT_PERCENT} step={1}

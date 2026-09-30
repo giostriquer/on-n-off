@@ -1,6 +1,7 @@
 import { memo, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-import { Rocker } from "@/features/agents/Rocker";
+import { Rocker } from "@/components/Rocker";
+import { Segmented } from "@/components/Segmented";
 import { ManagedItemStrip, OriginTag } from "./ManagedItemStrip";
 import { SkillRow } from "./SkillRow";
 import { copy } from "$lib/copy";
@@ -175,21 +176,12 @@ export function ItemList({
         <span className="min-w-0 font-mono text-[12px]/[1.3] text-[var(--mute)]">{subtitle}</span>
         <div className="flex-1" />
         {headerActions}
-        <div className="flex border border-[var(--hair)]" role="group" aria-label="Filter list">
-          {chips.map((next) => (
-            <button
-              key={next}
-              type="button"
-              className={`h-[26px] rounded-none border-0 px-3 text-[11px] font-semibold tracking-[0.03em] uppercase ${
-                chip === next ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
-              }`}
-              aria-pressed={chip === next}
-              onClick={() => setChip(next)}
-            >
-              {next}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          ariaLabel="Filter list"
+          options={chips.map((next) => ({ value: next, label: next }))}
+          pressed={(next) => next === chip}
+          onPress={setChip}
+        />
       </header>
 
       {kind === "plugin" ? (

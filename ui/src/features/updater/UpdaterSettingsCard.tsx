@@ -1,5 +1,5 @@
 import { RefreshCw } from "lucide-react";
-import { Rocker } from "@/features/agents/Rocker";
+import { CardToggle, SettingRow, SettingsCard, cardButton, cardButtonPrimary, rowLabel } from "@/components/SettingsCard";
 import { useUpdater } from "./UpdateProvider";
 
 type UpdaterSettingsCardProps = {
@@ -19,39 +19,32 @@ export function UpdaterSettingsCard({
   const canCheck = updater.buildInfo?.enabled !== false;
 
   return (
-    <section
-      aria-label="Application updates"
-      className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
+    <SettingsCard
+      label="Application updates"
+      title="Application updates"
+      meta={
+        <>
+          Installed <span>{updater.currentVersion ?? "loading…"}</span> · <span>Stable</span>
+          {updater.buildInfo?.installerKind ? ` · ${updater.buildInfo.installerKind.toUpperCase()}` : ""}
+        </>
+      }
+      control={
+        <CardToggle
+          caption="Auto-download"
+          on={automaticUpdates}
+          ariaLabel="Automatically download updates"
+          onToggle={() => onAutomaticUpdatesChange(!automaticUpdates)}
+        />
+      }
     >
-      <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[13px] font-semibold">Application updates</h3>
-          <p className="mt-1 mb-0 font-mono text-[12px] text-[var(--mute)]">
-            Installed <span>{updater.currentVersion ?? "loading…"}</span> · <span>Stable</span>
-            {updater.buildInfo?.installerKind ? ` · ${updater.buildInfo.installerKind.toUpperCase()}` : ""}
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
-            Auto-download
-          </span>
-          <Rocker
-            size="skill"
-            on={automaticUpdates}
-            ariaLabel="Automatically download updates"
-            onToggle={() => onAutomaticUpdatesChange(!automaticUpdates)}
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
-        <div className="min-w-0 flex-1 text-[12px] text-[var(--mute)]" aria-live="polite">
+      <SettingRow>
+        <div className={rowLabel} aria-live="polite">
           <UpdateStatus />
         </div>
         {updater.state.status === "error" ? (
           <button
             type="button"
-            className="h-8 rounded-md border border-[var(--hair)] px-2.5 text-[10px] font-semibold tracking-[0.04em] uppercase"
+            className={cardButton}
             aria-label="Retry update check"
             disabled={!canCheck || busy}
             onClick={() => void updater.checkNow()}
@@ -62,7 +55,7 @@ export function UpdaterSettingsCard({
         {updater.state.status === "ready" ? (
           <button
             type="button"
-            className="h-8 rounded-md border border-[var(--fill)] bg-[var(--fill)] px-2.5 text-[10px] font-semibold tracking-[0.04em] text-[var(--fill-ink)] uppercase"
+            className={cardButtonPrimary}
             onClick={() => void updater.install()}
           >
             Install and restart
@@ -71,7 +64,7 @@ export function UpdaterSettingsCard({
         {updater.state.status !== "error" && updater.state.status !== "ready" ? (
           <button
             type="button"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--hair)] px-2.5 text-[10px] font-semibold tracking-[0.04em] uppercase disabled:opacity-45"
+            className={cardButton}
             disabled={!canCheck || busy}
             onClick={() => void updater.checkNow()}
           >
@@ -79,8 +72,8 @@ export function UpdaterSettingsCard({
             Check now
           </button>
         ) : null}
-      </div>
-    </section>
+      </SettingRow>
+    </SettingsCard>
   );
 }
 

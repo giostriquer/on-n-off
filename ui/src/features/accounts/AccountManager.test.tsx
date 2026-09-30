@@ -113,8 +113,8 @@ it("keeps email as the account name and allows a free-text category to be edited
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "category", "profile-a", ""));
 });
 it("requires opt-in in Settings before automatically saving accounts", async () => {
-  setup({ preferences: true }); const checkbox = await screen.findByRole("checkbox", { name: "Automatically save accounts I sign in to" });
-  await waitFor(() => expect(checkbox).toBeEnabled()); expect(checkbox).not.toBeChecked();
+  setup({ preferences: true }); const checkbox = await screen.findByRole("button", { name: "Automatically save accounts I sign in to" });
+  await waitFor(() => expect(checkbox).toBeEnabled()); expect(checkbox).toHaveAttribute("aria-pressed", "false");
   expect(api.accountAction).not.toHaveBeenCalled(); fireEvent.click(checkbox);
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remember"));
 });
@@ -123,7 +123,7 @@ it("can disable automatic saving even when the profile vault cannot be read", as
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   vi.mocked(api.readAccounts).mockRejectedValue(new Error("Vault unavailable"));
   render(<QueryClientProvider client={client}><AccountPreferences /></QueryClientProvider>);
-  const checkbox = await screen.findByRole("checkbox"); await waitFor(() => expect(checkbox).toBeChecked());
+  const checkbox = await screen.findByRole("button", { name: "Automatically save accounts I sign in to" }); await waitFor(() => expect(checkbox).toHaveAttribute("aria-pressed", "true"));
   fireEvent.click(checkbox);
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "stopRemembering"));
 });

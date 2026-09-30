@@ -1,63 +1,9 @@
-.notch-settings button:focus-visible,
-.notch-settings select:focus-visible {
-  outline: 2px solid #d0bafa;
-  outline-offset: 3px;
-}
-.notch-settings {
-  color: var(--silkscreen);
-}
-.notch-settings.is-page {
-  background: var(--plate);
-  border: 1px solid var(--hair);
-  border-radius: 11px;
-}
-.notch-settings header h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-}
-.notch-settings header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 15px;
-  padding: 14px 16px;
-}
-.notch-settings header p {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: var(--mute);
-}
-.notch-settings-body {
-  padding: 0 16px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.notch-settings select {
-  width: 100%;
-  background: var(--well, #242426);
-  color: var(--silkscreen);
-  border: 1px solid var(--hair, #ffffff20);
-  border-radius: 8px;
-  padding: 7px 8px;
-  font-size: 12px;
-}
-.notch-label-row,
-.notch-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-}
-.notch-label-row {
-  height: 18px;
-}
+/* The display map, the one part of the Side notch card the shared settings pieces do not draw. */
 .notch-display-map {
   position: relative;
   height: 88px;
   padding: 9px;
-  background: var(--well, #202023);
+  background: var(--well);
   border-radius: 9px;
   color: var(--mute);
 }
@@ -82,7 +28,7 @@
   color: currentColor;
 }
 .notch-display-map .selected {
-  color: #ab8bdd;
+  color: var(--fill);
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 .notch-display-map i {
@@ -112,104 +58,4 @@
   top: auto;
   bottom: -2px;
   border-radius: 4px 4px 0 0;
-}
-.notch-settings h4 {
-  margin: 8px 0 0;
-  font-size: 12px;
-  font-weight: 600;
-}
-.notch-providers {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--well, #202023);
-  border-radius: 9px;
-}
-.notch-providers li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  font-size: 12px;
-}
-.notch-providers li + li {
-  border-top: 1px solid var(--hair, #ffffff15);
-}
-.notch-providers li > div {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-}
-.notch-providers small {
-  font-size: 11px;
-  color: var(--mute);
-}
-.notch-lists {
-  margin-top: 6px;
-  align-self: flex-start;
-}
-.notch-lists button {
-  padding: 3px 10px;
-  font-size: 11px;
-}
-.notch-segment {
-  display: flex;
-  padding: 2px;
-  background: var(--well, #252528);
-  border: 1px solid var(--hair, #ffffff15);
-  border-radius: 8px;
-}
-.notch-segment button {
-  padding: 4px 16px;
-  border: 0;
-  border-radius: 5px;
-  font-size: 11px;
-  color: var(--mute);
-  background: transparent;
-}
-.notch-segment button[aria-pressed="true"] {
-  color: var(--silkscreen);
-  background: var(--plate, #424246);
-  box-shadow: 0 1px 3px #0003;
-}
-.notch-switch {
-  width: 36px;
-  height: 22px;
-  border: 1px solid var(--hair, #ffffff20);
-  border-radius: 22px;
-  padding: 2px;
-  background: #666;
-  flex-shrink: 0;
-}
-.notch-switch span {
-  display: block;
-  height: 16px;
-  width: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px #0004;
-  transition: transform 150ms;
-}
-.notch-switch[aria-checked="true"] {
-  background: #9375c7;
-}
-.notch-switch[aria-checked="true"] span {
-  transform: translateX(13px);
-}
-.notch-switch:disabled {
-  opacity: 0.5;
-}
-.notch-error {
-  color: var(--trip);
-  margin: 0;
-  font-size: 11px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .notch-switch span {
-    transition: none;
-  }
 }

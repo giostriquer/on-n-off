@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { SettingRow, SettingsCard, cardButton, rowLabel } from "@/components/SettingsCard";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import type { UsageHistoryStatus } from "$lib/usageTypes";
@@ -7,9 +8,6 @@ import type { UsageHistoryStatus } from "$lib/usageTypes";
 const HISTORY_KEY = ["usage-history"];
 
 const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
-
-const BUTTON =
-  "h-8 rounded-md border border-[var(--hair)] px-2.5 text-[10px] font-semibold tracking-[0.04em] uppercase disabled:opacity-45";
 
 /**
  * The usage on-n-off keeps after the agents delete their transcripts (`usage/history.rs`): how far
@@ -32,30 +30,23 @@ export function UsageHistoryCard() {
   const clearable = current !== undefined && current.state !== "empty";
 
   return (
-    <section
-      aria-label="Usage history"
-      className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
+    <SettingsCard
+      label="Usage history"
+      title="Usage history"
+      description="Claude Code deletes transcripts after 30 days unless told otherwise. Once usage is a week old, on-n-off keeps its numbers, never the conversations, so Usage still counts it after the transcript is gone. A transcript deleted sooner than that is not kept."
     >
-      <div className="px-3.5 py-3">
-        <h3 className="m-0 text-[13px] font-semibold">Usage history</h3>
-        <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
-          Claude Code deletes transcripts after 30 days unless told otherwise. Once usage is a week
-          old, on-n-off keeps its numbers, never the conversations, so Usage still counts it after
-          the transcript is gone. A transcript deleted sooner than that is not kept.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
-        <div className="min-w-0 flex-1 text-[12px] text-[var(--mute)]" aria-live="polite">
+      <SettingRow>
+        <div className={rowLabel} aria-live="polite">
           {current
             ? describe(current)
             : status.error && `Could not read the usage history: ${parseInvokeError(status.error).message}`}
         </div>
         {clearable && !confirming && (
-          <button type="button" className={BUTTON} onClick={() => setConfirming(true)}>
+          <button type="button" className={cardButton} onClick={() => setConfirming(true)}>
             Clear history
           </button>
         )}
-      </div>
+      </SettingRow>
       {confirming && (
         <div
           role="group"
@@ -69,13 +60,13 @@ export function UsageHistoryCard() {
           <div className="flex gap-2">
             <button
               type="button"
-              className={BUTTON}
+              className={cardButton}
               disabled={clear.isPending}
               onClick={() => clear.mutate()}
             >
               Confirm clear
             </button>
-            <button type="button" className={BUTTON} onClick={() => setConfirming(false)}>
+            <button type="button" className={cardButton} onClick={() => setConfirming(false)}>
               Cancel
             </button>
           </div>
@@ -86,7 +77,7 @@ export function UsageHistoryCard() {
           {parseInvokeError(clear.error).message}
         </p>
       )}
-    </section>
+    </SettingsCard>
   );
 }
 

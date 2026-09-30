@@ -154,10 +154,10 @@ describe("InstallSheet marketplace browsing", () => {
     fireEvent.click(within(tree).getByRole("checkbox", { name: /reviewer/ }));
 
     // Drop Claude → agents are no longer allowed.
-    fireEvent.click(screen.getByRole("checkbox", { name: "Claude" }));
+    fireEvent.click(screen.getByRole("button", { name: "Claude" }));
     expect(within(tree).getByRole("checkbox", { name: /reviewer/ })).toBeDisabled();
     expect(screen.getByText(/Subagents only install into Claude/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
 
     fireEvent.click(screen.getByRole("button", { name: /Install 1 item/ }));
     await waitFor(() => expect(onInstallItems).toHaveBeenCalledTimes(1));

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Rocker } from "@/features/agents/Rocker";
+import { Rocker } from "@/components/Rocker";
 import { OverviewUsageCard } from "@/features/usage/OverviewUsageCard";
 import { copy } from "$lib/copy";
 import { driftLine, formatPluginVersion, type CatalogCounts, type DriftRow, type LiveRow } from "$lib/catalog";

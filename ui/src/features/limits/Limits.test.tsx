@@ -504,9 +504,9 @@ it.each(["claude", "codex"])("adds only the %s account selected in the shared pi
   fireEvent.click(add);
   expect(addAccount).not.toHaveBeenCalled();
   const picker = screen.getByRole("group", {name: "Add account"});
-  const preference = within(picker).getByRole("checkbox", {name: "Automatically save accounts I sign in to"});
+  const preference = within(picker).getByRole("button", {name: "Automatically save accounts I sign in to"});
   await waitFor(() => expect(preference).toBeEnabled());
-  expect(preference).not.toBeChecked();
+  expect(preference).toHaveAttribute("aria-pressed", "false");
   fireEvent.click(preference);
   fireEvent.blur(preference, { relatedTarget: null });
   expect(screen.getByRole("group", {name: "Add account"})).toBe(picker);

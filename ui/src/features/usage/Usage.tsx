@@ -16,6 +16,7 @@ import {
 } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
+import { Segmented } from "@/components/Segmented";
 import { providerColor } from "$lib/providerStyle";
 import { LazyUsageChart, preloadUsageChart } from "./LazyUsageChart";
 import { loadUsageWindow, type UsageQueryResult } from "./usageQuery";
@@ -29,42 +30,6 @@ const WINDOWS = [
 ] as const;
 
 type BreakdownMode = "model" | "day";
-
-function Segmented<T extends string>({
-  value,
-  options,
-  ariaLabel,
-  onChange,
-}: {
-  value: T;
-  options: readonly { value: T; label: string }[];
-  ariaLabel: string;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div
-      className="inline-grid grid-flow-col overflow-hidden rounded-md border border-[var(--hair)]"
-      role="group"
-      aria-label={ariaLabel}
-    >
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          className={`h-7 cursor-pointer rounded-none border-0 px-2.5 text-[11px] font-semibold tracking-[0.05em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--fill)] ${
-            value === option.value
-              ? "bg-[var(--fill)] text-[var(--fill-ink)]"
-              : "bg-transparent text-[var(--mute)]"
-          }`}
-          aria-pressed={value === option.value}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export function Usage() {
   const [windowDays, setWindowDays] = useState(30);
@@ -197,9 +162,9 @@ export function Usage() {
         </div>
         <Segmented
           ariaLabel="Window"
-          value={String(windowDays)}
           options={WINDOWS.map((option) => ({ value: String(option.days), label: option.label }))}
-          onChange={(value) => setWindowDays(Number(value))}
+          pressed={(value) => value === String(windowDays)}
+          onPress={(value) => setWindowDays(Number(value))}
         />
         <button
           type="button"
@@ -325,12 +290,12 @@ export function Usage() {
               <div className="flex-1" />
               <Segmented
                 ariaLabel="Breakdown"
-                value={breakdown}
                 options={[
                   { value: "model", label: "Model" },
                   { value: "day", label: "Day" },
                 ]}
-                onChange={setBreakdown}
+                pressed={(value) => value === breakdown}
+                onPress={setBreakdown}
               />
             </div>
 

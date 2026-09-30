@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Rocker } from "@/features/agents/Rocker";
+import { Rocker } from "@/components/Rocker";
+import { Segmented } from "@/components/Segmented";
 import { mcpIsLive, mcpSourcesLabel } from "$lib/catalog";
 import { copy } from "$lib/copy";
 import { projectLabel } from "$lib/project";
@@ -31,21 +32,12 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
           {live} live · {mcpSourcesLabel(tab.mcpServers)} · handshake not probed
         </span>
         <div className="flex-1" />
-        <div className="flex border border-[var(--hair)]" role="group" aria-label="Filter list">
-          {(["all", "on", "off"] as Chip[]).map((next) => (
-            <button
-              key={next}
-              type="button"
-              className={`h-[26px] rounded-none border-0 px-3 text-[11px] font-semibold tracking-[0.03em] uppercase ${
-                chip === next ? "bg-[var(--well)] text-[var(--silkscreen)]" : "bg-transparent text-[var(--mute)]"
-              }`}
-              aria-pressed={chip === next}
-              onClick={() => setChip(next)}
-            >
-              {next}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          ariaLabel="Filter list"
+          options={(["all", "on", "off"] as Chip[]).map((next) => ({ value: next, label: next }))}
+          pressed={(next) => next === chip}
+          onPress={setChip}
+        />
       </header>
 
       {notice ? (

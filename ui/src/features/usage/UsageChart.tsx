@@ -10,6 +10,7 @@ import { buildChartSeries, toChartRows } from "$lib/usageChart";
 import { formatTokens, formatUsd } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
 import type { AgentId } from "$lib/types";
+import { Segmented } from "@/components/Segmented";
 import "./UsageChart.css";
 
 export type UsageChartProps = {
@@ -194,32 +195,15 @@ export function UsageChart({
           {hourly ? "Hourly" : "Daily"} {metric === "cost" ? "cost" : "tokens"}
         </span>
         <div className="flex-1" />
-        <div
-          className="inline-grid grid-flow-col overflow-hidden rounded-md border border-[var(--hair)]"
-          role="group"
-          aria-label="Metric"
-        >
-          {(
-            [
-              ["cost", "Cost"],
-              ["tokens", "Tokens"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              className={`h-7 cursor-pointer rounded-none border-0 px-2.5 text-[11px] font-semibold tracking-[0.05em] uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--fill)] ${
-                metric === value
-                  ? "bg-[var(--fill)] text-[var(--fill-ink)]"
-                  : "bg-transparent text-[var(--mute)]"
-              }`}
-              aria-pressed={metric === value}
-              onClick={() => onMetricChange(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          ariaLabel="Metric"
+          options={[
+            { value: "cost", label: "Cost" },
+            { value: "tokens", label: "Tokens" },
+          ]}
+          pressed={(value) => value === metric}
+          onPress={onMetricChange}
+        />
       </div>
 
       {empty ? (

@@ -23,6 +23,10 @@ of the file — start there, not here.
 **Frontend** — React 19, TypeScript, Vite, Tailwind, TanStack Router/Query/Charts.
 
 - `ui/src/lib/api.ts` — the only place the UI calls Tauri.
+- `ui/src/components/` — the controls every screen shares: `Rocker` (the OFF/ON toggle, the one
+  switch for a setting), `Segmented` (the one segmented control) and `SettingsCard` (a setting's
+  card, its captioned toggle, rows, buttons and selects). A new setting is built from these, not
+  from a checkbox or a switch of its own.
 - `ui/src/features/` — one directory per screen: `agents`, `catalog`, `github`, `limits`, `notch`,
   `scope`, `session`, `settings`, `shell`, `updater`, `usage`.
 - `ui/src/dev/mockIpc.ts` — `?mock[=scenario]` on a dev build swaps Tauri's IPC for synthetic

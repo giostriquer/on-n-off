@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Rocker } from "@/features/agents/Rocker";
+import { CardToggle, SettingRow, SettingsCard, caption, cardButton, cardSelect, rowLabel } from "@/components/SettingsCard";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
 import { NotchSettingsCard } from "@/features/notch/NotchSettingsCard";
 import { TraySettingsCard } from "./TraySettingsCard";
@@ -191,28 +191,21 @@ function GithubSettingsCard({
   }
 
   return (
-    <section aria-label="Pull requests" className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
-      <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[13px] font-semibold">Pull requests</h3>
-          <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
-            Reads GitHub through the `gh` CLI's login; nothing is written to GitHub.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
-            PR notify
-          </span>
-          <Rocker
-            size="skill"
-            on={enabled}
-            busy={requestingPermission}
-            ariaLabel="Notify about CI, review and merge changes"
-            onToggle={() => void toggle()}
-          />
-        </div>
-      </div>
-      <div className="flex flex-col gap-2 border-t border-[var(--hair)] px-3.5 py-2.5">
+    <SettingsCard
+      label="Pull requests"
+      title="Pull requests"
+      description="Reads GitHub through the `gh` CLI's login; nothing is written to GitHub."
+      control={
+        <CardToggle
+          caption="PR notify"
+          on={enabled}
+          busy={requestingPermission}
+          ariaLabel="Notify about CI, review and merge changes"
+          onToggle={() => void toggle()}
+        />
+      }
+    >
+      <SettingRow className="flex-col items-stretch gap-2">
         <div className="flex flex-col gap-1">
           <label htmlFor="github-scope" className="text-[12px] text-[var(--mute)]">
             Scopes
@@ -254,15 +247,15 @@ function GithubSettingsCard({
             }}
           />
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
-        <label htmlFor="github-poll-seconds" className="min-w-0 flex-1 text-[12px] text-[var(--mute)]">
+      </SettingRow>
+      <SettingRow>
+        <label htmlFor="github-poll-seconds" className={rowLabel}>
           Refresh pull requests every
         </label>
         <select
           id="github-poll-seconds"
           aria-label="GitHub polling interval"
-          className="h-8 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 text-[11px] font-semibold"
+          className={cardSelect}
           value={pollSeconds}
           onChange={(event) => onChange({ githubPollSeconds: Number(event.target.value) as GithubPollSeconds })}
         >
@@ -277,8 +270,8 @@ function GithubSettingsCard({
             {permissionMessage}
           </p>
         ) : null}
-      </div>
-    </section>
+      </SettingRow>
+    </SettingsCard>
   );
 }
 
@@ -296,38 +289,28 @@ function LimitNotificationsCard({
   const { requestingPermission, permissionMessage, toggle } = useNotificationGate(enabled, onEnabledChange);
 
   return (
-    <section
-      aria-label="Usage refresh and limit notifications"
-      className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
+    <SettingsCard
+      label="Usage refresh and limit notifications"
+      title="Usage limits"
+      description="Notifies when usage reaches 100% or a limit resets while on-n-off is running."
+      control={
+        <CardToggle
+          caption="Notify"
+          on={enabled}
+          busy={requestingPermission}
+          ariaLabel="Notify about limit changes"
+          onToggle={() => void toggle()}
+        />
+      }
     >
-      <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[13px] font-semibold">Usage limits</h3>
-          <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
-            Notifies when usage reaches 100% or a limit resets while on-n-off is running.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
-            Notify
-          </span>
-          <Rocker
-            size="skill"
-            on={enabled}
-            busy={requestingPermission}
-            ariaLabel="Notify about limit changes"
-            onToggle={() => void toggle()}
-          />
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-3 border-t border-[var(--hair)] px-3.5 py-2.5">
-        <label htmlFor="limits-poll-minutes" className="min-w-0 flex-1 text-[12px] text-[var(--mute)]">
+      <SettingRow>
+        <label htmlFor="limits-poll-minutes" className={rowLabel}>
           Refresh usage across the app every
         </label>
         <select
           id="limits-poll-minutes"
           aria-label="Limits polling interval"
-          className="h-8 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 text-[11px] font-semibold"
+          className={cardSelect}
           value={pollMinutes}
           onChange={(event) => onPollMinutesChange(Number(event.target.value) as LimitsPollMinutes)}
         >
@@ -342,8 +325,8 @@ function LimitNotificationsCard({
             {permissionMessage}
           </p>
         ) : null}
-      </div>
-    </section>
+      </SettingRow>
+    </SettingsCard>
   );
 }
 
@@ -357,41 +340,37 @@ function ResetAlertsCard({ alerts, onChange }: {
 }) {
   const entries = Object.entries(alerts);
   return (
-    <section aria-label="Banked reset alerts" className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
-      <div className="px-3.5 py-3">
-        <h3 className="m-0 text-[13px] font-semibold">Banked reset alerts</h3>
-        <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
-          Notifies when a Codex account runs low and one of its banked resets is worth using. on-n-off
-          never uses a reset by itself; you use it from the account's card. Turn an alert on from the
-          account's ••• menu on Limits.
-        </p>
-      </div>
+    <SettingsCard
+      label="Banked reset alerts"
+      title="Banked reset alerts"
+      description="Notifies when a Codex account runs low and one of its banked resets is worth using. on-n-off never uses a reset by itself; you use it from the account's card. Turn an alert on from the account's ••• menu on Limits."
+    >
       {entries.length > 0 ? (
-        <ul aria-label="Accounts with a banked reset alert" className="m-0 list-none border-t border-[var(--hair)] p-0">
+        <ul aria-label="Accounts with a banked reset alert" className="m-0 list-none p-0">
           {entries.map(([accountId, alert]) => {
             const name = alert.label || "Codex account";
             return (
-              <li key={accountId} className="flex flex-wrap items-center gap-3 px-3.5 py-2.5 text-[12px]">
-                <span className="min-w-0 flex-1">
-                  <span className="font-medium">{name}</span>
-                  <span className="text-[var(--mute)]">
+              <li key={accountId}>
+                <SettingRow>
+                  <span className={rowLabel}>
+                    <span className="font-medium text-[var(--silkscreen)]">{name}</span>
                     {" "}· {alert.maxLeftPercent}% or less left, {alert.minHoursToRenewal}h or more before it renews
                   </span>
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Turn off the banked reset alert for ${name}`}
-                  className="rounded-md border border-[var(--hair)] px-2.5 py-1 text-[11px] hover:bg-[var(--wash)]"
-                  onClick={() => onChange(withResetAlert(alerts, accountId, null))}
-                >
-                  Turn off
-                </button>
+                  <button
+                    type="button"
+                    aria-label={`Turn off the banked reset alert for ${name}`}
+                    className={cardButton}
+                    onClick={() => onChange(withResetAlert(alerts, accountId, null))}
+                  >
+                    Turn off
+                  </button>
+                </SettingRow>
               </li>
             );
           })}
         </ul>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }
 
@@ -433,40 +412,33 @@ function ProviderCard({
   }
 
   return (
-    <article className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
-      <div className="flex flex-wrap items-start gap-3 px-3.5 py-3">
-        <ProviderIcon provider={agent.id} className="mt-0.5 size-5 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold">{agent.displayName}</div>
-          <div className="mt-1 font-mono text-[12px] text-[var(--mute)]">
-            {cliOk ? "CLI found" : "CLI missing"}
-            {" · "}
-            {report?.homePath ?? BINARY_NAME[agent.id]}
-          </div>
-        </div>
-        <span
-          className={`mt-0.5 shrink-0 border px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] ${
-            cliOk ? "border-[var(--live)] text-[var(--live)]" : "border-[var(--trip)] text-[var(--trip)]"
-          }`}
-        >
-          {cliOk ? "OK" : "DOWN"}
-        </span>
-        <div className="flex flex-col items-end gap-1">
-          <span className="text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
-            Show in tabs
+    <SettingsCard
+      as="article"
+      label={agent.displayName}
+      title={agent.displayName}
+      icon={<ProviderIcon provider={agent.id} className="mt-0.5 size-5 shrink-0" />}
+      meta={`${cliOk ? "CLI found" : "CLI missing"} · ${report?.homePath ?? BINARY_NAME[agent.id]}`}
+      control={
+        <>
+          <span
+            className={`mt-0.5 shrink-0 border px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] ${
+              cliOk ? "border-[var(--live)] text-[var(--live)]" : "border-[var(--trip)] text-[var(--trip)]"
+            }`}
+          >
+            {cliOk ? "OK" : "DOWN"}
           </span>
-          <Rocker
-            size="skill"
+          <CardToggle
+            caption="Show in tabs"
             on={shown}
             disabled={lastVisible && shown}
             ariaLabel={`Show ${agent.displayName} in agent tabs`}
             onToggle={() => onToggleVisible(agent.id, shown)}
           />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5">
-        <span className="w-[88px] shrink-0 text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">
+        </>
+      }
+    >
+      <SettingRow className="gap-2">
+        <span className={`w-[88px] shrink-0 ${caption}`}>
           Binary
         </span>
         <input
@@ -491,13 +463,13 @@ function ProviderCard({
         </button>
         <button
           type="button"
-          className="h-8 rounded-md border border-[var(--hair)] px-2.5 text-[10px] font-semibold tracking-[0.04em] uppercase"
+          className={cardButton}
           aria-expanded={openDiagnose}
           onClick={() => setOpenDiagnose((open) => !open)}
         >
           Diagnose
         </button>
-      </div>
+      </SettingRow>
 
       {openDiagnose ? (
         <div className="border-t border-[var(--hair)] px-3.5 py-2.5">
@@ -526,6 +498,6 @@ function ProviderCard({
           )}
         </div>
       ) : null}
-    </article>
+    </SettingsCard>
   );
 }
