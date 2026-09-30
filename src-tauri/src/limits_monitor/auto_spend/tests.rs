@@ -138,8 +138,33 @@ fn at_its_time_a_reset_no_longer_needed_is_not_spent() {
             minutes_after_now(10),
         );
 
-        assert_eq!(due, [Due::NotNeeded(expected)], "{why}");
+        assert_eq!(due, [Due::Kept(expected, Kept::NotNeeded)], "{why}");
         assert!(pending.is_empty(), "{why}");
+    }
+}
+
+/// Codex answering that nobody is signed in, or an account without a subscription, is an answer:
+/// there is no account for the reset to land on, so it is kept.
+#[test]
+fn nobody_signed_in_keeps_the_reset() {
+    for status in [
+        crate::dto::LimitsStatus::SignedOut,
+        crate::dto::LimitsStatus::Unsupported,
+    ] {
+        let mut signed_out = card(96.0, RENEWS);
+        signed_out.status = status;
+        signed_out.account = None;
+        let mut pending = scheduled();
+        let expected = pending["acct"].clone();
+
+        let due = due(
+            &mut pending,
+            &[signed_out],
+            &automatic(),
+            minutes_after_now(10),
+        );
+
+        assert_eq!(due, [Due::Kept(expected, Kept::NotNeeded)], "{status:?}");
     }
 }
 
@@ -182,7 +207,7 @@ fn a_spend_found_late_is_kept() {
             minutes_after_now(26),
         );
 
-        assert_eq!(due, [Due::Late(expected)]);
+        assert_eq!(due, [Due::Kept(expected, Kept::Late)]);
         assert!(pending.is_empty());
     }
 }
@@ -262,21 +287,20 @@ fn the_notifications_say_when_and_what_came_of_it() {
         )
     );
     assert_eq!(
-        kept_copy(&Due::NotNeeded(spend.clone())),
-        Some((
+        kept_copy(&spend, Kept::NotNeeded),
+        (
             "Codex: banked reset not used".to_string(),
             "you@example.com no longer needs it, or is no longer signed in, so it was kept."
                 .to_string()
-        ))
+        )
     );
     assert_eq!(
-        kept_copy(&Due::Late(spend.clone())),
-        Some((
+        kept_copy(&spend, Kept::Late),
+        (
             "Codex: banked reset not used".to_string(),
             "you@example.com could not be checked in time, so it was kept.".to_string()
-        ))
+        )
     );
-    assert_eq!(kept_copy(&Due::Spend(spend)), None);
 }
 
 /// The waiting spends in this app, one test so no other touches them meanwhile: scheduled once an

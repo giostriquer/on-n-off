@@ -782,32 +782,38 @@ fn an_automatic_alerts_offer_is_handed_on_to_be_scheduled() {
     assert_eq!(outcome.automatic_offers[0].account_id, "acct-codex");
 }
 
-/// The monitor wakes when a reset is due, not at its next poll, and polls as usual otherwise;
-/// after a failed poll it keeps its backoff, so a spend that could not be decided never makes it
-/// retry every second.
+/// The monitor wakes when a reset falls due, not at its next poll, and polls as usual otherwise. A
+/// spend its last poll saw and could not decide waits for the next poll, which after a failure is
+/// the backoff, so the monitor never asks every second.
 #[test]
-fn the_monitor_wakes_when_a_reset_is_due_but_keeps_its_backoff_after_a_failure() {
+fn the_monitor_wakes_when_a_reset_falls_due_but_never_every_second() {
     let now = at("2026-08-19T13:00:00Z");
     let poll = Duration::from_secs(300);
 
     assert_eq!(poll, minutes(5));
-    assert_eq!(next_wake(poll, None, now, false), poll);
+    assert_eq!(next_wake(poll, None, now, now), poll);
     assert_eq!(
-        next_wake(poll, Some(at("2026-08-19T13:10:00Z")), now, false),
+        next_wake(poll, Some(at("2026-08-19T13:10:00Z")), now, now),
         poll,
         "a spend due after the next poll skips that poll"
     );
     assert_eq!(
-        next_wake(poll, Some(at("2026-08-19T13:02:00Z")), now, false),
+        next_wake(poll, Some(at("2026-08-19T13:02:00Z")), now, now),
         Duration::from_secs(120)
     );
     assert_eq!(
-        next_wake(poll, Some(at("2026-08-19T12:55:00Z")), now, false),
+        next_wake(
+            poll,
+            Some(at("2026-08-19T13:00:30Z")),
+            now,
+            at("2026-08-19T13:01:00Z")
+        ),
         Duration::from_secs(1),
-        "one already due wakes it at once, but no faster than a second"
+        "one that fell due while the poll ran wakes it at once, but no faster than a second"
     );
     assert_eq!(
-        next_wake(poll, Some(at("2026-08-19T12:55:00Z")), now, true),
-        poll
+        next_wake(poll, Some(at("2026-08-19T12:55:00Z")), now, now),
+        poll,
+        "one the poll saw and could not decide waits for the next poll"
     );
 }

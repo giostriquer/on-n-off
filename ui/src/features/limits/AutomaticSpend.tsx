@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatClock, formatResetIn } from "$lib/limitsFormat";
-import { PENDING_RESET_SPENDS_KEY, usePendingResetSpends } from "$lib/usePendingResetSpends";
+import { usePendingResetSpends } from "$lib/usePendingResetSpends";
+import { PENDING_RESET_SPENDS_KEY } from "$lib/useSharedRead";
 import { accountButton } from "@/features/accounts/AccountManager";
 
 /**

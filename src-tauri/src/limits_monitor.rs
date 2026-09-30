@@ -95,15 +95,17 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             .await
             .unwrap_or_default();
         let watched = watched_providers(&settings);
-        let mut failed = false;
+        let polled_at = chrono::Utc::now();
         let poll_delay = if !watched.is_empty() {
-            failed = match poll_once(&app, &state_path, &mut state, &settings, watched).await {
-                Ok(failed) => failed,
-                Err(error) => {
-                    eprintln!("limits monitor poll failed: {error}");
-                    true
-                }
-            };
+            let failed =
+                match poll_once(&app, &state_path, &mut state, &settings, watched, polled_at).await
+                {
+                    Ok(failed) => failed,
+                    Err(error) => {
+                        eprintln!("limits monitor poll failed: {error}");
+                        true
+                    }
+                };
             if failed {
                 consecutive_failures = consecutive_failures.saturating_add(1);
             } else {
@@ -130,8 +132,8 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
         let delay = next_wake(
             poll_delay,
             auto_spend::next_due(),
+            polled_at,
             chrono::Utc::now(),
-            failed,
         );
         wait_for_wake_or_deadline(&mut wake_receiver, delay).await;
     }
@@ -142,18 +144,17 @@ fn minutes(minutes: u16) -> Duration {
 }
 
 /// How long the monitor sleeps: until its next poll, or until the soonest reset waiting to be
-/// spent is due, whichever comes first, and never less than a second. After a failed poll it keeps
-/// its backoff: a spend that could not be decided waits for a poll that answers.
+/// spent falls due, whichever comes first, and never less than a second. Only a spend falling due
+/// after the poll made at `polled_at` wakes it early: one that poll saw and could not decide waits
+/// for the next poll, which after a failure is the backoff, rather than being asked every second.
 fn next_wake(
     poll_delay: Duration,
     next_due: Option<chrono::DateTime<chrono::Utc>>,
+    polled_at: chrono::DateTime<chrono::Utc>,
     now: chrono::DateTime<chrono::Utc>,
-    failed: bool,
 ) -> Duration {
-    if failed {
-        return poll_delay;
-    }
     next_due
+        .filter(|due| *due > polled_at)
         .map(|due| (due - now).to_std().unwrap_or_default())
         .map_or(poll_delay, |until_due| until_due.min(poll_delay))
         .max(Duration::from_secs(1))
@@ -184,8 +185,8 @@ async fn poll_once(
     state: &mut MonitorState,
     settings: &crate::settings::AppSettings,
     watched: &[AgentId],
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<bool, String> {
-    let now = chrono::Utc::now();
     let snapshots = poll_providers(watched, auto_spend::any_due(now)).await?;
     let provider_failed = snapshots
         .iter()
@@ -215,10 +216,7 @@ async fn poll_once(
                 });
                 auto_spend::outcome_copy(&spend, &spent)
             }
-            kept => match auto_spend::kept_copy(&kept) {
-                Some(copy) => copy,
-                None => continue,
-            },
+            auto_spend::Due::Kept(spend, why) => auto_spend::kept_copy(&spend, why),
         };
         monitor::notify(app, "limits monitor", title, body, Sound::Default);
     }

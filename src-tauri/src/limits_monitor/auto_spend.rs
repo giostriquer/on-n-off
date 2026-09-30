@@ -19,7 +19,7 @@ use std::sync::{LazyLock, Mutex, PoisonError};
 use chrono::{DateTime, Utc};
 
 use super::reset_alerts::{self, Offer};
-use crate::dto::{PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome};
+use crate::dto::{LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome};
 use crate::read_revision::{announce, Source};
 use crate::settings::ResetAlert;
 
@@ -44,10 +44,38 @@ pub(super) struct PendingSpend {
 #[derive(Debug, PartialEq)]
 pub(super) enum Due {
     Spend(PendingSpend),
-    /// The signed-in account's live read no longer finds it low in the same cycle.
-    NotNeeded(PendingSpend),
+    Kept(PendingSpend, Kept),
+}
+
+/// Why a spend whose time has come is not made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Kept {
+    /// Codex's answer now no longer finds the account low in the same cycle, or finds nobody or
+    /// another account signed in.
+    NotNeeded,
     /// Found more than [`GRACE_MINUTES`] past its time.
-    Late(PendingSpend),
+    Late,
+}
+
+/// What Codex says now about who is signed in.
+enum CodexNow<'a> {
+    /// The signed-in account's live read.
+    Live(&'a ProviderLimitsDto),
+    /// Codex answered that nobody is signed in, or signed in without a subscription.
+    NobodySignedIn,
+    /// The read failed, or there is none: nothing is known about now.
+    Unknown,
+}
+
+fn codex_now(snapshots: &[ProviderLimitsDto]) -> CodexNow<'_> {
+    let current = snapshots.iter().find(|snapshot| {
+        snapshot.provider == crate::dto::AgentId::Codex && snapshot.current_account
+    });
+    match current {
+        Some(snapshot) if reset_alerts::is_signed_in_codex(snapshot) => CodexNow::Live(snapshot),
+        Some(snapshot) if snapshot.status != LimitsStatus::Failed => CodexNow::NobodySignedIn,
+        _ => CodexNow::Unknown,
+    }
 }
 
 fn schedule(offer: &Offer, now: DateTime<Utc>) -> PendingSpend {
@@ -61,10 +89,10 @@ fn schedule(offer: &Offer, now: DateTime<Utc>) -> PendingSpend {
 }
 
 /// Every spend in `pending` whose time has come by `now` and can be decided, taken out of it. A
-/// spend is decided by the signed-in Codex account's live read in `snapshots`: spent when that read
-/// still finds its account low in the same cycle, otherwise not needed. Without a live read it
-/// waits, until it is late. A spend whose alert was turned off, or no longer spends by itself, is
-/// dropped without a word.
+/// spend is decided by what Codex says now in `snapshots`: spent when the signed-in account's live
+/// read still finds its account low in the same cycle, otherwise not needed, as when nobody is
+/// signed in. A read that failed, or none, decides nothing, so the spend waits, until it is late.
+/// A spend whose alert was turned off, or no longer spends by itself, is dropped without a word.
 fn due(
     pending: &mut HashMap<String, PendingSpend>,
     snapshots: &[ProviderLimitsDto],
@@ -73,23 +101,25 @@ fn due(
 ) -> Vec<Due> {
     pending.retain(|account, _| alerts.get(account).is_some_and(|alert| alert.automatic));
     let late = |spend: &PendingSpend| spend.due_at + chrono::Duration::minutes(GRACE_MINUTES) < now;
-    let live = snapshots
-        .iter()
-        .find(|snapshot| reset_alerts::is_signed_in_codex(snapshot));
+    let codex = codex_now(snapshots);
+    let decided = !matches!(codex, CodexNow::Unknown);
     pending
-        .extract_if(|_, spend| spend.due_at <= now && (live.is_some() || late(spend)))
+        .extract_if(|_, spend| spend.due_at <= now && (decided || late(spend)))
         .map(|(account, spend)| {
             if late(&spend) {
-                return Due::Late(spend);
+                return Due::Kept(spend, Kept::Late);
             }
-            let still_needed = live
-                .zip(alerts.get(&account))
-                .and_then(|(snapshot, alert)| reset_alerts::offer_now(snapshot, alert, now))
-                .is_some_and(|offer| offer.account_id == account && offer.cycle == spend.cycle);
+            let still_needed = match codex {
+                CodexNow::Live(snapshot) => alerts
+                    .get(&account)
+                    .and_then(|alert| reset_alerts::offer_now(snapshot, alert, now))
+                    .is_some_and(|offer| offer.account_id == account && offer.cycle == spend.cycle),
+                CodexNow::NobodySignedIn | CodexNow::Unknown => false,
+            };
             if still_needed {
                 Due::Spend(spend)
             } else {
-                Due::NotNeeded(spend)
+                Due::Kept(spend, Kept::NotNeeded)
             }
         })
         .collect()
@@ -111,19 +141,18 @@ fn scheduled_copy(offer: &Offer) -> (String, String) {
 }
 
 /// What the notification for a spend that was not made says.
-pub(super) fn kept_copy(due: &Due) -> Option<(String, String)> {
-    let (spend, why) = match due {
-        Due::Spend(_) => return None,
-        Due::NotNeeded(spend) => (spend, "no longer needs it, or is no longer signed in"),
-        Due::Late(spend) => (spend, "could not be checked in time"),
+pub(super) fn kept_copy(spend: &PendingSpend, why: Kept) -> (String, String) {
+    let why = match why {
+        Kept::NotNeeded => "no longer needs it, or is no longer signed in",
+        Kept::Late => "could not be checked in time",
     };
-    Some((
+    (
         "Codex: banked reset not used".to_string(),
         format!(
             "{} {why}, so it was kept.",
             name(spend.account_label.as_deref())
         ),
-    ))
+    )
 }
 
 pub(super) fn outcome_copy(
