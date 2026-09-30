@@ -152,7 +152,10 @@ final class NotchTests {
 
   func testAPausedRingSaysItsReadingIsTheLastObserved() {
     let weekly = [quota("weekly", 46)]
-    expectEqual(provider(windows: weekly, status: "failed", headline: "weekly").ringIsLastObserved, true)
+    // The host keeps the headline for every status whose read did not answer.
+    for status in ["failed", "signedOut", "unauthenticated", "unsupported"] {
+      expectEqual(provider(windows: weekly, status: status, headline: "weekly").ringIsLastObserved, true)
+    }
     expectEqual(provider(windows: weekly, status: "ok", headline: "weekly").ringIsLastObserved, false)
     // A ring with nothing to lead with shows the dash, which is no reading at all.
     expectEqual(provider(windows: weekly, status: "failed").ringIsLastObserved, false)
@@ -526,5 +529,5 @@ try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("20 native check groups; \(failures) failures")
+print("21 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)
