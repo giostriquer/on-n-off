@@ -209,7 +209,6 @@ async fn poll_once(
     Ok(provider_failed)
 }
 
-/// What one poll decides.
 struct PollOutcome {
     notices: Vec<(String, String)>,
     /// The automatic spends whose time has come and whose accounts still need them.

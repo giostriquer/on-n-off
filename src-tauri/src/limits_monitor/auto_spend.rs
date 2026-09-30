@@ -23,7 +23,6 @@ use crate::settings::ResetAlert;
 /// How long after the user is told a reset is spent, for them to cancel it.
 pub(super) const DELAY_MINUTES: i64 = 10;
 
-/// A reset waiting to be spent.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct PendingSpend {
     pub(super) account_id: String,
@@ -42,7 +41,6 @@ pub(super) enum Due {
     NotNeeded(PendingSpend),
 }
 
-/// The spend `offer` becomes at `now`.
 pub(super) fn schedule(offer: &Offer, now: DateTime<Utc>) -> PendingSpend {
     PendingSpend {
         account_id: offer.account_id.clone(),
@@ -86,7 +84,6 @@ pub(super) fn due(
         .collect()
 }
 
-/// Takes `account_id`'s waiting spend out of `pending`; `false` when there was none.
 pub(super) fn cancel(pending: &mut HashMap<String, PendingSpend>, account_id: &str) -> bool {
     pending.remove(account_id).is_some()
 }
