@@ -355,3 +355,142 @@ fn the_share_a_reset_is_spent_at_is_codexs_or_the_accounts_lower_one() {
     assert_eq!(reset_spend_limit(&settings, "acct-a"), 5);
     assert_eq!(reset_spend_limit(&settings, "acct-other"), 10);
 }
+
+/// A hand-edited file can hold a value the app cannot read. That value takes its default; every
+/// other setting is kept.
+#[test]
+fn one_setting_the_app_cannot_read_leaves_every_other_one() {
+    let settings = parse_settings(Some(
+        r#"{
+            "githubScopes": ["org:acme"],
+            "automaticUpdates": false,
+            "closeToTray": true,
+            "limitsPollMinutes": "ten",
+            "githubPollSeconds": 120
+        }"#,
+    ));
+
+    assert_eq!(settings.github_scopes, ["org:acme"]);
+    assert!(!settings.automatic_updates);
+    assert!(settings.close_to_tray);
+    assert_eq!(settings.limits_poll_minutes, 5);
+    assert_eq!(settings.github_poll_seconds, 120);
+}
+
+/// An alert's figure beyond what the app keeps is held to the alert's rule, and the alert, its
+/// neighbours and every other setting stay.
+#[test]
+fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
+    let settings = parse_settings(Some(
+        r#"{
+            "githubScopes": ["org:acme"],
+            "resetAlerts": {
+                "acct-a": {"label": "a@example.com", "maxLeftPercent": 260, "minHoursToRenewal": 100000},
+                "acct-b": {"maxLeftPercent": 4.6, "minHoursToRenewal": -3}
+            }
+        }"#,
+    ));
+
+    assert_eq!(settings.github_scopes, ["org:acme"]);
+    assert_eq!(
+        settings.reset_alerts["acct-a"],
+        ResetAlert {
+            label: Some("a@example.com".into()),
+            max_left_percent: 10,
+            min_hours_to_renewal: 168,
+        }
+    );
+    // Rounded, not cut: 4.6 is 5.
+    assert_eq!(settings.reset_alerts["acct-b"].max_left_percent, 5);
+    assert_eq!(settings.reset_alerts["acct-b"].min_hours_to_renewal, 0);
+}
+
+/// A provider the app does not know drops only its own entry of a list or a map.
+#[test]
+fn an_unknown_provider_drops_only_its_own_entry() {
+    let settings = parse_settings(Some(
+        r#"{
+            "hiddenAgents": ["codex", "gemini"],
+            "binaryPaths": {"claude": "/opt/claude", "gemini": "/opt/gemini"},
+            "githubScopes": ["org:acme", 42],
+            "resetAlerts": {"acct-a": 5, "acct-b": {}}
+        }"#,
+    ));
+
+    assert_eq!(settings.hidden_agents, [AgentId::Codex]);
+    assert_eq!(settings.github_scopes, ["org:acme"]);
+    assert_eq!(
+        settings.binary_paths,
+        HashMap::from([(AgentId::Claude, "/opt/claude".to_string())])
+    );
+    assert_eq!(
+        settings.reset_alerts.keys().collect::<Vec<_>>(),
+        ["acct-b"],
+        "an alert that is not an object is dropped alone"
+    );
+}
+
+/// A file whose top level is not an object has no settings to keep.
+#[test]
+fn a_document_that_is_not_an_object_loads_as_defaults() {
+    assert_eq!(parse_settings(Some("[1, 2]")), AppSettings::default());
+    assert_eq!(parse_settings(Some("null")), AppSettings::default());
+}
+
+/// Every setting, each away from its default, reads back as it was written, so the field-by-field
+/// reader names each key the document holds.
+#[test]
+fn every_setting_reads_back_as_it_was_written() {
+    let settings = AppSettings {
+        hidden_agents: vec![AgentId::Antigravity],
+        binary_paths: HashMap::from([(AgentId::Codex, "/opt/acme/bin/codex".to_string())]),
+        automatic_updates: false,
+        limit_notifications: true,
+        limits_poll_minutes: 15,
+        github_scopes: vec!["org:acme".into()],
+        github_notifications: true,
+        github_poll_seconds: 300,
+        close_to_tray: true,
+        reset_alerts: HashMap::from([(
+            "acct-a".to_string(),
+            ResetAlert {
+                label: Some("a@example.com".into()),
+                max_left_percent: 4,
+                min_hours_to_renewal: 36,
+            },
+        )]),
+    };
+    let written = serde_json::to_value(&settings).unwrap();
+    let defaults = serde_json::to_value(AppSettings::default()).unwrap();
+    let alert_defaults = serde_json::to_value(ResetAlert {
+        label: None,
+        max_left_percent: reset_max_left_default(),
+        min_hours_to_renewal: reset_min_hours_default(),
+    })
+    .unwrap();
+    // A key left at its default would read back right even if the reader never named it.
+    for (key, value) in written.as_object().unwrap() {
+        assert_ne!(Some(value), defaults.get(key), "{key} is at its default");
+    }
+    for (key, value) in written["resetAlerts"]["acct-a"].as_object().unwrap() {
+        assert_ne!(
+            Some(value),
+            alert_defaults.get(key),
+            "resetAlerts.{key} is at its default"
+        );
+    }
+
+    assert_eq!(parse_settings(Some(&written.to_string())), settings);
+}
+
+/// An editor that marks a file's encoding starts it with a byte-order mark, which JSON does not
+/// allow; the settings after it are still read.
+#[test]
+fn a_file_starting_with_a_byte_order_mark_keeps_its_settings() {
+    let settings = parse_settings(Some(
+        "\u{feff}{\"closeToTray\": true, \"githubScopes\": [\"org:acme\"]}",
+    ));
+
+    assert!(settings.close_to_tray);
+    assert_eq!(settings.github_scopes, ["org:acme"]);
+}
