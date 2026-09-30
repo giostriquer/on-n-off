@@ -183,17 +183,7 @@ fn spend_in_session(
     identity(codex_home)
         .and_then(|current| reset_target_matches(current, account_id))
         .map_err(SpendFailure::Refused)?;
-    query_step(
-        QueryStage::RateLimits,
-        transport
-            .send(&serde_json::json!({"id": 3, "method": "account/rateLimits/read", "params": {}})),
-    )?;
-    let rate_limits: super::codex::RateLimitsResponse = receive_response(
-        QueryStage::RateLimits,
-        transport,
-        3,
-        "account/rateLimits/read",
-    )?;
+    let rate_limits = read_rate_limits(transport)?;
     spend_allowed(&super::codex::parse_codex(&rate_limits), max_left_percent)
         .map_err(SpendFailure::Refused)?;
     query_step(
@@ -213,24 +203,12 @@ fn spend_in_session(
     Ok(response.outcome)
 }
 
-/// Whether `reading` has `max_left_percent` or less of its current limit left: its fullest weekly or
-/// five-hour window, as the card and Codex's own app count what is left.
+/// Whether `reading` has `max_left_percent` or less of its current limit left
+/// (`Reading::limit_left_percent`).
 fn spend_allowed(reading: &crate::dto::Reading, max_left_percent: u8) -> Result<(), String> {
-    let used = reading
-        .windows
-        .iter()
-        .filter(|window| {
-            matches!(
-                window.kind,
-                crate::dto::LimitWindowKind::Weekly | crate::dto::LimitWindowKind::Session
-            )
-        })
-        .map(|window| window.used_percent)
-        .reduce(f64::max)
-        .ok_or(
-            "on-n-off can't tell how much of the Codex limit is left, so it won't spend a reset.",
-        )?;
-    let left = (100.0 - used).max(0.0);
+    let left = reading.limit_left_percent().ok_or(
+        "on-n-off can't tell how much of the Codex limit is left, so it won't spend a reset.",
+    )?;
     if left <= f64::from(max_left_percent) {
         return Ok(());
     }
@@ -509,22 +487,29 @@ fn query_app_server(
     transport: &mut impl JsonLineTransport,
 ) -> Result<AppServerResult, QueryError> {
     let (codex_home, account) = handshake(expected_codex_home, force, transport)?;
-    query_step(
-        QueryStage::RateLimits,
-        transport
-            .send(&serde_json::json!({"id": 3, "method": "account/rateLimits/read", "params": {}})),
-    )?;
-    let rate_limits = receive_response(
-        QueryStage::RateLimits,
-        transport,
-        3,
-        "account/rateLimits/read",
-    )?;
+    let rate_limits = read_rate_limits(transport)?;
     Ok(AppServerResult {
         codex_home,
         account,
         rate_limits,
     })
+}
+
+/// `account/rateLimits/read`, the call after the handshake in a read and in a spend.
+fn read_rate_limits(
+    transport: &mut impl JsonLineTransport,
+) -> Result<super::codex::RateLimitsResponse, QueryError> {
+    query_step(
+        QueryStage::RateLimits,
+        transport
+            .send(&serde_json::json!({"id": 3, "method": "account/rateLimits/read", "params": {}})),
+    )?;
+    receive_response(
+        QueryStage::RateLimits,
+        transport,
+        3,
+        "account/rateLimits/read",
+    )
 }
 
 /// `initialize` against the expected home, then `account/read`: the start of every app-server call.

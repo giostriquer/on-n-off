@@ -142,7 +142,7 @@ export type AppSettings = {
  */
 export type ResetAlert = {
   /** The account's email when the alert was turned on, for Settings to name it. */
-  label?: string | null;
+  label: string | null;
   maxLeftPercent: number;
   minHoursToRenewal: number;
 };

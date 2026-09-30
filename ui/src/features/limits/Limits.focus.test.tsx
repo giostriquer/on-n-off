@@ -34,7 +34,7 @@ function answer(claude: ProviderLimits[], codex: ProviderLimits[]) {
 /** The screen, and a way to render it again as a poll or the minute timer would. */
 function renderLimits() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
-  const screenTree = () => <QueryClientProvider client={client}><Limits /></QueryClientProvider>;
+  const screenTree = () => <QueryClientProvider client={client}><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>;
   const view = render(screenTree());
   return { renderAgain: () => view.rerender(screenTree()) };
 }

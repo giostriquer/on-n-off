@@ -501,3 +501,37 @@ fn monitor_state_without_observation_times_is_discarded_instead_of_migrated() {
     assert!(state.providers.is_empty());
     let _ = fs::remove_dir_all(root);
 }
+
+/// A banked reset alert is Codex's alone, so with limit notifications off an alert reads Codex and
+/// never Claude, whose failures would otherwise slow the alert's polls.
+#[test]
+fn the_monitor_reads_only_what_its_settings_watch() {
+    let alert = crate::settings::ResetAlert {
+        label: None,
+        max_left_percent: 10,
+        min_hours_to_renewal: 24,
+    };
+    let settings = |limit_notifications: bool, alerts: bool| crate::settings::AppSettings {
+        limit_notifications,
+        reset_alerts: if alerts {
+            HashMap::from([("acct".to_string(), alert.clone())])
+        } else {
+            HashMap::new()
+        },
+        ..crate::settings::AppSettings::default()
+    };
+
+    assert_eq!(
+        watched_providers(&settings(false, false)),
+        &[] as &[AgentId]
+    );
+    assert_eq!(watched_providers(&settings(false, true)), &[AgentId::Codex]);
+    assert_eq!(
+        watched_providers(&settings(true, false)),
+        &[AgentId::Claude, AgentId::Codex]
+    );
+    assert_eq!(
+        watched_providers(&settings(true, true)),
+        &[AgentId::Claude, AgentId::Codex]
+    );
+}

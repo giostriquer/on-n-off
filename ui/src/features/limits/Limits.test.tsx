@@ -52,7 +52,7 @@ function renderLimits(pollMinutes: LimitsPollMinutes = 5) {
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <Limits pollMinutes={pollMinutes} />
+      <Limits pollMinutes={pollMinutes} resetAlerts={{}} onResetAlertsChange={async () => undefined} />
     </QueryClientProvider>,
   );
   return { ...view, client };

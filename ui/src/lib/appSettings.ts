@@ -18,6 +18,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 /** The share of the current limit left at or under which Codex's own app lets a reset be used. */
 export const CODEX_RESET_MAX_LEFT_PERCENT = 10;
 
+/** The longest wait an alert can ask for before the limit renews by itself: a week, the cycle. */
+export const RESET_ALERT_MAX_HOURS = 7 * 24;
+
 /** A new alert's defaults: Codex's own share, and a day before the limit renews by itself. */
 export function defaultResetAlert(label: string | null): ResetAlert {
   return { label, maxLeftPercent: CODEX_RESET_MAX_LEFT_PERCENT, minHoursToRenewal: 24 };
@@ -30,6 +33,14 @@ export function defaultResetAlert(label: string | null): ResetAlert {
 export function resetSpendLimit(alerts: Record<string, ResetAlert>, accountId: string): number {
   const alert = alerts[accountId];
   return alert ? Math.min(alert.maxLeftPercent, CODEX_RESET_MAX_LEFT_PERCENT) : CODEX_RESET_MAX_LEFT_PERCENT;
+}
+
+/** `alerts` with `accountId`'s alert set to `alert`, or removed when it is `null`. */
+export function withResetAlert(alerts: Record<string, ResetAlert>, accountId: string, alert: ResetAlert | null): Record<string, ResetAlert> {
+  const next = { ...alerts };
+  if (alert) next[accountId] = alert;
+  else delete next[accountId];
+  return next;
 }
 
 export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefined): AppSettings {

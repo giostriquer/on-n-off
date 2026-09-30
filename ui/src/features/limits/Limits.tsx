@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, type ReactNode, type RefCallback, type RefOb
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
+import { withResetAlert } from "$lib/appSettings";
 import type { AccountsReading } from "$lib/accountTypes";
 import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
@@ -22,22 +23,16 @@ import { UsageStatusBadge } from "./UsageStatusBadge";
 import { CreditsRows } from "./Credits";
 import { Meter, MeterRow } from "./Meter";
 
-const NO_ALERTS: Record<string, ResetAlert> = {};
-
-export function Limits({ pollMinutes = 5, resetAlerts = NO_ALERTS, onResetAlertsChange }: {
+export function Limits({ pollMinutes = 5, resetAlerts, onResetAlertsChange }: {
   pollMinutes?: LimitsPollMinutes;
   /** Codex accounts whose banked reset is offered once they run low (`AppSettings.resetAlerts`). */
-  resetAlerts?: Record<string, ResetAlert>;
-  onResetAlertsChange?: (alerts: Record<string, ResetAlert>) => Promise<void>;
+  resetAlerts: Record<string, ResetAlert>;
+  /** Saves the alerts, rejecting when they were not saved. */
+  onResetAlertsChange: (alerts: Record<string, ResetAlert>) => Promise<void>;
 }) {
   const alerts = useMemo(() => ({
     alerts: resetAlerts,
-    save: async (accountId: string, alert: ResetAlert | null) => {
-      const next = { ...resetAlerts };
-      if (alert) next[accountId] = alert;
-      else delete next[accountId];
-      await onResetAlertsChange?.(next);
-    },
+    save: (accountId: string, alert: ResetAlert | null) => onResetAlertsChange(withResetAlert(resetAlerts, accountId, alert)),
   }), [resetAlerts, onResetAlertsChange]);
   return (
     <ResetAlertsContext.Provider value={alerts}>

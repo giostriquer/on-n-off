@@ -10,7 +10,8 @@ import { TraySettingsCard } from "./TraySettingsCard";
 import { UsageHistoryCard } from "@/features/usage/UsageHistoryCard";
 import { FOCUS_RING } from "$lib/a11y";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { visibleAgentIds } from "$lib/appSettings";
+import { visibleAgentIds, withResetAlert } from "$lib/appSettings";
+import { notificationPermissionProblem } from "$lib/notificationPermission";
 import * as api from "$lib/api";
 import type {
   AgentId,
@@ -153,17 +154,10 @@ function useNotificationGate(enabled: boolean, onEnabledChange: (enabled: boolea
     }
     setRequestingPermission(true);
     setPermissionMessage(null);
-    try {
-      if (await api.requestNotificationPermission()) {
-        onEnabledChange(true);
-      } else {
-        setPermissionMessage("Notifications are blocked in system settings.");
-      }
-    } catch {
-      setPermissionMessage("Could not request notification permission.");
-    } finally {
-      setRequestingPermission(false);
-    }
+    const problem = await notificationPermissionProblem();
+    setRequestingPermission(false);
+    if (problem) setPermissionMessage(problem);
+    else onEnabledChange(true);
   }
 
   return { requestingPermission, permissionMessage, toggle };
@@ -388,11 +382,7 @@ function ResetAlertsCard({ alerts, onChange }: {
                   type="button"
                   aria-label={`Turn off the banked reset alert for ${name}`}
                   className="rounded-md border border-[var(--hair)] px-2.5 py-1 text-[11px] hover:bg-[var(--wash)]"
-                  onClick={() => {
-                    const next = { ...alerts };
-                    delete next[accountId];
-                    onChange(next);
-                  }}
+                  onClick={() => onChange(withResetAlert(alerts, accountId, null))}
                 >
                   Turn off
                 </button>

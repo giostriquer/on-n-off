@@ -65,6 +65,17 @@ pub struct ResetAlert {
 /// The share of the current limit left at or under which Codex's own app lets a reset be used.
 pub const CODEX_RESET_MAX_LEFT_PERCENT: u8 = 10;
 
+/// The longest wait an alert can ask for before the limit renews by itself: a week, the cycle.
+pub const RESET_ALERT_MAX_HOURS: u16 = 7 * 24;
+
+impl ResetAlert {
+    /// The share of the current limit left at or under which this account's banked reset may be
+    /// spent: Codex's own 10%, or the lower share the alert names.
+    pub fn spend_limit(&self) -> u8 {
+        self.max_left_percent.min(CODEX_RESET_MAX_LEFT_PERCENT)
+    }
+}
+
 const fn reset_max_left_default() -> u8 {
     CODEX_RESET_MAX_LEFT_PERCENT
 }
@@ -74,14 +85,12 @@ const fn reset_min_hours_default() -> u16 {
 }
 
 /// The share of the current limit left at or under which a banked reset of `account_id` may be
-/// spent: Codex's own 10%, or the lower share the account's alert names.
+/// spent (`ResetAlert::spend_limit`), Codex's own 10% without an alert.
 pub fn reset_spend_limit(settings: &AppSettings, account_id: &str) -> u8 {
     settings
         .reset_alerts
         .get(account_id)
-        .map_or(CODEX_RESET_MAX_LEFT_PERCENT, |alert| {
-            alert.max_left_percent.min(CODEX_RESET_MAX_LEFT_PERCENT)
-        })
+        .map_or(CODEX_RESET_MAX_LEFT_PERCENT, ResetAlert::spend_limit)
 }
 
 const fn automatic_updates_default() -> bool {
@@ -215,7 +224,7 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
         alert.max_left_percent = alert
             .max_left_percent
             .clamp(1, CODEX_RESET_MAX_LEFT_PERCENT);
-        alert.min_hours_to_renewal = alert.min_hours_to_renewal.min(7 * 24);
+        alert.min_hours_to_renewal = alert.min_hours_to_renewal.min(RESET_ALERT_MAX_HOURS);
     }
     settings
 }

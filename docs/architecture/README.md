@@ -161,8 +161,8 @@ provider's own client:
   spend a second reset.
 
   A **banked reset alert** (`settings::ResetAlert`, turned on from a Codex card's menu and listed in
-  Settings) only notifies. `limits_monitor` polls while any alert is on, even with limit
-  notifications off, and `limits_monitor/reset_alerts.rs` offers the reset when two polls in a row,
+  Settings) only notifies. `limits_monitor` polls while any alert is on, reading Codex alone
+  when limit notifications are off (`watched_providers`), and `limits_monitor/reset_alerts.rs` offers the reset when two polls in a row,
   each a newer reading of the signed-in account in the same weekly cycle, find it at the alert's
   share or below, with its weekly window at least the alert's hours from renewing and a banked
   reset that has not lapsed. It offers once per weekly cycle, which a spent reset starts anew, and

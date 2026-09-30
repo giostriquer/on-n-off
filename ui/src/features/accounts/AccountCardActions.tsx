@@ -18,6 +18,10 @@ export function removeAccountQuestion(label: string): string {
   return `Remove ${label} from on-n-off? You will need to sign in to add it again.`;
 }
 
+/** What the menu's panel shows, one at a time: the menu itself, or the panel one of its items opened. */
+type Panel = "menu" | "category" | "extra" | Confirmation;
+type Confirmation = "remove" | "removeLogin" | "signOut";
+
 export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, menuButtonRef, extraAction, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   /** Drops the account's history for Remove account, after its saved login, if any, is removed. */
@@ -37,11 +41,8 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
 }) {
   const manager = useAccountManagement();
   const client = useQueryClient();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [extraOpen, setExtraOpen] = useState(false);
+  const [panel, setPanel] = useState<Panel | null>(null);
   const [category, setCategory] = useState("");
-  const [confirmation, setConfirmation] = useState<"remove" | "removeLogin" | "signOut" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -50,8 +51,9 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   const useButton = useRef<HTMLButtonElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const id = useId();
-  const open = menuOpen || editing || extraOpen || !!confirmation;
-  function dismiss() { setMenuOpen(false); setEditing(false); setExtraOpen(false); setConfirmation(null); setError(null); }
+  const open = panel !== null;
+  const confirmation = panel === "remove" || panel === "removeLogin" || panel === "signOut" ? panel : null;
+  function dismiss() { setPanel(null); setError(null); }
   function close() { dismiss(); trigger.current?.focus(); }
   function complete() {
     if (root.current?.contains(document.activeElement)) close();
@@ -65,7 +67,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     };
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
-  }, [open, editing, confirmation]);
+  }, [panel]);
   if (!manager) return <>{header(null)}{children}</>;
   const { provider, busy, blocked, query, action, removeAccount, use, add, cancel, loginTarget } = manager;
   const nativeMatches = !query.isFetching && query.data?.nativeObservationId === accountId;
@@ -79,7 +81,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     void use(profileId).then(running => setClients(running.length ? running : null)).catch(() => {});
   }
   async function confirm() {
-    if (confirmation === "signOut" && (!current || !nativeMatches || client.getQueryData<AccountsReading>(["accounts", provider])?.nativeObservationId !== accountId)) { setConfirmation(null); return; }
+    if (confirmation === "signOut" && (!current || !nativeMatches || client.getQueryData<AccountsReading>(["accounts", provider])?.nativeObservationId !== accountId)) { setPanel(null); return; }
     setError(null); setRemoving(true);
     try {
       if (confirmation === "signOut") await action("signOut");
@@ -113,22 +115,22 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   }}>
     <button ref={node => { trigger.current = node; menuButtonRef?.(node); }} type="button" aria-label={`More actions for ${label}`} aria-expanded={open} aria-controls={open ? id : undefined}
       className="flex size-6 items-center justify-center rounded-md text-[var(--mute)] hover:bg-[var(--wash)] hover:text-[var(--silkscreen)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)]"
-      onClick={() => open ? close() : setMenuOpen(true)}>•••</button>
+      onClick={() => open ? close() : setPanel("menu")}>•••</button>
     <div id={id} hidden={!open} className="absolute right-0 top-full z-20 mt-2 w-64 max-w-[calc(100vw-3rem)] rounded-lg border border-[var(--hair)] bg-[var(--plate)] p-2 shadow-lg">
-    <div hidden={!menuOpen} role="group" aria-label={`Actions for ${label}`} className={menuOpen ? "flex flex-col gap-1" : "hidden"}>
-      {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setCategory(profile.category ?? ""); setEditing(true); }}>Edit category</button>}
+    <div hidden={panel !== "menu"} role="group" aria-label={`Actions for ${label}`} className={panel === "menu" ? "flex flex-col gap-1" : "hidden"}>
+      {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setCategory(profile.category ?? ""); setPanel("category"); }}>Edit category</button>}
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void add(profile.id, accountId); }}>Sign in again</button>}
-      {current && profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("removeLogin"); }}>Remove saved login</button>}
+      {current && profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => setPanel("removeLogin")}>Remove saved login</button>}
       {!current && <button className={`${button} border-transparent text-left`} disabled={disabled} aria-disabled={archiving || undefined} aria-busy={archiving || undefined} onClick={() => { close(); archive(); }}>Archive account</button>}
-      {extraAction && <button className={`${button} border-transparent text-left`} onClick={() => { setMenuOpen(false); setExtraOpen(true); }}>{extraAction.label}</button>}
-      {current ? <button className={`${button} border-transparent text-left`} disabled={disabled || !nativeMatches} onClick={() => { setMenuOpen(false); setConfirmation("signOut"); }}>Sign out</button>
-        : <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("remove"); }}>Remove account</button>}
+      {extraAction && <button className={`${button} border-transparent text-left`} onClick={() => setPanel("extra")}>{extraAction.label}</button>}
+      {current ? <button className={`${button} border-transparent text-left`} disabled={disabled || !nativeMatches} onClick={() => setPanel("signOut")}>Sign out</button>
+        : <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => setPanel("remove")}>Remove account</button>}
     </div>
-    {editing && profile && <form role="group" aria-label="Edit account category" className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void action("category", profile.id, category).then(complete).catch(() => {}); }}>
+    {panel === "category" && profile && <form role="group" aria-label="Edit account category" className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void action("category", profile.id, category).then(complete).catch(() => {}); }}>
       <input aria-label="Category (optional)" placeholder="Category (optional)" maxLength={100} value={category} onChange={event => setCategory(event.target.value)} className="w-full min-w-0 rounded border border-[var(--hair)] bg-transparent px-2 py-1.5 text-[12px]" />
       <button className={button} disabled={disabled}>Save category</button><button type="button" className={button} onClick={close}>Cancel</button>
     </form>}
-    {extraOpen && extraAction?.render(close)}
+    {panel === "extra" && extraAction?.render(close)}
     {confirmation && <div role="group" aria-label="Confirm account action" className="text-[12px]">
       <p>{confirmation === "remove" ? removeAccountQuestion(label) : confirmation === "removeLogin" ? `Remove the saved login for ${label}? This account stays signed in.` : "Sign out of this account? The provider may also revoke its saved sign-ins."}</p>
       <div className="flex gap-2"><button className={button} disabled={disabled || (confirmation === "signOut" && (!current || !nativeMatches))} onClick={() => void confirm()}>{confirmation === "signOut" ? "Confirm sign out" : "Confirm removal"}</button><button className={button} onClick={close}>Cancel</button></div>

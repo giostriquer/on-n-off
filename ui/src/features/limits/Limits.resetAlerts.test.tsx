@@ -64,6 +64,17 @@ describe("a Codex account's banked reset alert", () => {
     expect(screen.queryByRole("group", { name: "Banked reset alert" })).toBeNull();
   });
 
+  it("takes focus into its form when opened, and Escape gives it back to the menu button", async () => {
+    renderLimits();
+
+    const form = await openAlert("work@codex.example");
+
+    expect(document.activeElement).toBe(within(form).getByRole("checkbox"));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "More actions for work@codex.example" }));
+    expect(screen.queryByRole("group", { name: "Banked reset alert" })).toBeNull();
+  });
+
   it("keeps a lower share and a longer wait", async () => {
     const saved = renderLimits();
 
@@ -101,6 +112,30 @@ describe("a Codex account's banked reset alert", () => {
 
     await waitFor(() => expect(within(form).getByRole("alert").textContent).toBe("Notifications are blocked in system settings."));
     expect(saved).not.toHaveBeenCalled();
+  });
+
+  it("stays open and says so when notification permission could not be asked for", async () => {
+    requestNotificationPermission.mockRejectedValue(new Error("no permission plugin"));
+    const saved = renderLimits();
+
+    const form = await openAlert("work@codex.example");
+    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+
+    await waitFor(() => expect(within(form).getByRole("alert").textContent).toBe("Could not request notification permission."));
+    expect(saved).not.toHaveBeenCalled();
+  });
+
+  it("stays open and says so when the alert could not be saved", async () => {
+    const saved = renderLimits();
+    saved.mockRejectedValue(new Error("disk full"));
+
+    const form = await openAlert("work@codex.example");
+    fireEvent.click(within(form).getByRole("checkbox"));
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+
+    await waitFor(() => expect(within(form).getByRole("alert").textContent).toBe("Could not save the alert."));
+    expect(screen.getByRole("group", { name: "Banked reset alert" })).toBe(form);
   });
 
   it("is turned off by clearing it, which asks for nothing", async () => {

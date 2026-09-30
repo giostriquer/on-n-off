@@ -1,6 +1,6 @@
 import { createContext, useContext, useId, useState } from "react";
-import * as api from "$lib/api";
-import { CODEX_RESET_MAX_LEFT_PERCENT, defaultResetAlert } from "$lib/appSettings";
+import { CODEX_RESET_MAX_LEFT_PERCENT, RESET_ALERT_MAX_HOURS, defaultResetAlert, resetSpendLimit } from "$lib/appSettings";
+import { notificationPermissionProblem } from "$lib/notificationPermission";
 import type { ResetAlert } from "$lib/types";
 
 /**
@@ -12,12 +12,14 @@ type ResetAlerts = {
   save: (accountId: string, alert: ResetAlert | null) => Promise<void>;
 };
 
-const NONE: ResetAlerts = { alerts: {}, save: async () => undefined };
+export const ResetAlertsContext = createContext<ResetAlerts | null>(null);
 
-export const ResetAlertsContext = createContext<ResetAlerts>(NONE);
-
-export function useResetAlerts(): ResetAlerts {
-  return useContext(ResetAlertsContext);
+/**
+ * The share of the current limit left at or under which `accountId`'s banked reset may be spent
+ * (`resetSpendLimit`): Codex's own 10% outside the Limits screen, which holds no alerts.
+ */
+export function useResetSpendLimit(accountId: string): number {
+  return resetSpendLimit(useContext(ResetAlertsContext)?.alerts ?? {}, accountId);
 }
 
 const button = "rounded-md border border-[var(--hair)] px-2.5 py-1 text-[12px] hover:bg-[var(--wash)] disabled:opacity-50";
@@ -34,7 +36,9 @@ export function ResetAlertForm({ accountId, label, onDone }: {
   label: string;
   onDone: () => void;
 }) {
-  const { alerts, save } = useResetAlerts();
+  const context = useContext(ResetAlertsContext);
+  if (!context) throw new Error("ResetAlertForm renders inside the Limits screen, which holds the alerts.");
+  const { alerts, save } = context;
   const existing = alerts[accountId];
   const [enabled, setEnabled] = useState(existing !== undefined);
   const start = existing ?? defaultResetAlert(label);
@@ -47,15 +51,16 @@ export function ResetAlertForm({ accountId, label, onDone }: {
   const leftValue = Number(left);
   const hoursValue = Number(hours);
   const valid = Number.isInteger(leftValue) && leftValue >= 1 && leftValue <= CODEX_RESET_MAX_LEFT_PERCENT
-    && Number.isInteger(hoursValue) && hoursValue >= 0 && hoursValue <= 168;
+    && Number.isInteger(hoursValue) && hoursValue >= 0 && hoursValue <= RESET_ALERT_MAX_HOURS;
 
   async function submit() {
     setBusy(true);
     setProblem(null);
     try {
       // The alert is a notification: without permission to show one, it would never be seen.
-      if (enabled && !(await api.requestNotificationPermission())) {
-        setProblem("Notifications are blocked in system settings.");
+      const denied = enabled ? await notificationPermissionProblem() : null;
+      if (denied) {
+        setProblem(denied);
         return;
       }
       await save(accountId, enabled ? { label, maxLeftPercent: leftValue, minHoursToRenewal: hoursValue } : null);
@@ -81,7 +86,7 @@ export function ResetAlertForm({ accountId, label, onDone }: {
       </div>
       <div className="flex items-center gap-2">
         <label htmlFor={hoursId} className="min-w-0 flex-1">And at least this many hours before it renews by itself</label>
-        <input id={hoursId} type="number" inputMode="numeric" min={0} max={168} step={1}
+        <input id={hoursId} type="number" inputMode="numeric" min={0} max={RESET_ALERT_MAX_HOURS} step={1}
           disabled={!enabled} value={hours} onChange={event => setHours(event.target.value)} className={field} />
       </div>
       <p className="m-0 text-[11px] leading-snug text-[var(--mute)]">
@@ -89,7 +94,7 @@ export function ResetAlertForm({ accountId, label, onDone }: {
       </p>
       {enabled && !valid ? (
         <p role="alert" className="m-0 text-[11px] text-[var(--trip)]">
-          Use 1 to {CODEX_RESET_MAX_LEFT_PERCENT}% left and 0 to 168 hours.
+          Use 1 to {CODEX_RESET_MAX_LEFT_PERCENT}% left and 0 to {RESET_ALERT_MAX_HOURS} hours.
         </p>
       ) : null}
       {problem ? <p role="alert" className="m-0 text-[11px] text-[var(--trip)]">{problem}</p> : null}

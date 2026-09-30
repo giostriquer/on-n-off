@@ -1,6 +1,5 @@
 import { useId, useRef, useState } from "react";
 import * as api from "$lib/api";
-import { resetSpendLimit } from "$lib/appSettings";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
 import type { LimitsBankedReset, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
@@ -8,7 +7,7 @@ import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
 import { latestObservedAt, unexpiredBankedResets, usageLeft } from "./limitPresentation";
-import { useResetAlerts } from "./resetAlerts";
+import { useResetSpendLimit } from "./resetAlerts";
 import { SummaryRow } from "./SummaryRow";
 
 const OUTCOME_MESSAGES: Record<ResetCreditOutcome, string> = {
@@ -93,14 +92,13 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
   const [result, setResult] = useState<AttemptResult | null>(null);
   const attempt = useRef<string | null>(null);
   const ruleId = useId();
-  const { alerts } = useResetAlerts();
   const accountId = entry.account?.id;
+  const limit = useResetSpendLimit(accountId ?? "");
   const offered = current && entry.currentAccount && entry.status === "ok" && unexpiredBankedResets(entry.resetCredits, now) !== null;
   const observed = latestObservedAt(entry);
   const shown = result && (observed === null || observed <= result.answeredAt) ? result : null;
   if (!accountId || (!offered && !shown)) return null;
   const left = usageLeft(entry, now);
-  const limit = resetSpendLimit(alerts, accountId);
   const allowed = left !== null && left <= limit;
 
   async function spend(account: string) {

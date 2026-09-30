@@ -3,8 +3,9 @@
 //! offer is a notification; the reset is still the user's to spend, on the account's card, as in
 //! Codex's own app, which never uses one automatically.
 //!
-//! Low is judged the way the spend itself judges it (`codex_app_server::spend_allowed`): what is
-//! left of the fullest weekly or five-hour window. The offer needs two polls in a row to find the
+//! Low is judged as the spend itself judges it: what is left of the current limit
+//! (`Reading::limit_left_percent`), at the account's share (`ResetAlert::spend_limit`). The offer
+//! needs two polls in a row to find the
 //! account low in the same weekly cycle, each a new read, so one stray reading never offers a
 //! reset; and it is made once per weekly cycle, which a spent reset starts anew.
 
@@ -14,7 +15,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{AgentId, LimitWindowKind, LimitsStatus, ProviderLimitsDto};
-use crate::settings::{ResetAlert, CODEX_RESET_MAX_LEFT_PERCENT};
+use crate::settings::ResetAlert;
 
 /// What the monitor remembers of one account's alert between polls, by the card's account id.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -80,10 +81,7 @@ pub(super) fn observe(
                 let offered = entry.offered_cycle.as_deref() == Some(reading.cycle.as_str());
                 if confirmed && !offered {
                     entry.offered_cycle = Some(reading.cycle.clone());
-                    offers.push(Offer {
-                        account_label: account.label.clone(),
-                        ..offer
-                    });
+                    offers.push(offer);
                 }
                 entry.low = Some(reading);
             }
@@ -100,25 +98,17 @@ fn low_reading(
     alert: &ResetAlert,
     now: DateTime<Utc>,
 ) -> Option<(LowReading, Offer)> {
-    let windows = &snapshot.reading.windows;
-    let used = windows
-        .iter()
-        .filter(|window| {
-            matches!(
-                window.kind,
-                LimitWindowKind::Weekly | LimitWindowKind::Session
-            )
-        })
-        .map(|window| window.used_percent)
-        .reduce(f64::max)?;
-    let left = (100.0 - used).max(0.0);
-    if left > f64::from(alert.max_left_percent.min(CODEX_RESET_MAX_LEFT_PERCENT)) {
+    let left = snapshot.reading.limit_left_percent()?;
+    if left > f64::from(alert.spend_limit()) {
         return None;
     }
-    let weekly = windows
+    let weekly = snapshot
+        .reading
+        .windows
         .iter()
         .find(|window| window.kind == LimitWindowKind::Weekly)?;
-    let renews_at = instant(weekly.resets_at.as_deref()?)?;
+    let cycle = weekly.resets_at.as_deref()?;
+    let renews_at = instant(cycle)?;
     if renews_at - now < chrono::Duration::hours(i64::from(alert.min_hours_to_renewal)) {
         return None;
     }
@@ -133,11 +123,14 @@ fn low_reading(
     }
     Some((
         LowReading {
-            cycle: weekly.resets_at.clone()?,
+            cycle: cycle.to_string(),
             observed_at: weekly.observed_at.clone(),
         },
         Offer {
-            account_label: None,
+            account_label: snapshot
+                .account
+                .as_ref()
+                .and_then(|account| account.label.clone()),
             left_percent: left,
             renews_at,
             available: banked.available_count,
