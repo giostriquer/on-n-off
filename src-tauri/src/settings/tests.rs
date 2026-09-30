@@ -357,7 +357,7 @@ fn the_share_a_reset_is_spent_at_is_codexs_or_the_accounts_lower_one() {
 }
 
 /// A hand-edited file can hold a value the app cannot read. That value takes its default; every
-/// other setting is kept, where the whole file used to load as defaults.
+/// other setting is kept.
 #[test]
 fn one_setting_the_app_cannot_read_leaves_every_other_one() {
     let settings = parse_settings(Some(
@@ -434,8 +434,8 @@ fn a_document_that_is_not_an_object_loads_as_defaults() {
     assert_eq!(parse_settings(Some("null")), AppSettings::default());
 }
 
-/// Every setting, each away from its default, reads back as it was written: the field-by-field
-/// reader names every field the document holds.
+/// Every setting, each away from its default, reads back as it was written, so the field-by-field
+/// reader names each key the document holds.
 #[test]
 fn every_setting_reads_back_as_it_was_written() {
     let settings = AppSettings {
@@ -457,9 +457,37 @@ fn every_setting_reads_back_as_it_was_written() {
             },
         )]),
     };
-    assert_ne!(settings, AppSettings::default());
+    let written = serde_json::to_value(&settings).unwrap();
+    let defaults = serde_json::to_value(AppSettings::default()).unwrap();
+    let alert_defaults = serde_json::to_value(ResetAlert {
+        label: None,
+        max_left_percent: 10,
+        min_hours_to_renewal: 24,
+    })
+    .unwrap();
+    // A key left at its default would read back right even if the reader never named it.
+    for (key, value) in written.as_object().unwrap() {
+        assert_ne!(Some(value), defaults.get(key), "{key} is at its default");
+    }
+    for (key, value) in written["resetAlerts"]["acct-a"].as_object().unwrap() {
+        assert_ne!(
+            Some(value),
+            alert_defaults.get(key),
+            "resetAlerts.{key} is at its default"
+        );
+    }
 
-    let document = serde_json::to_string(&settings).unwrap();
+    assert_eq!(parse_settings(Some(&written.to_string())), settings);
+}
 
-    assert_eq!(parse_settings(Some(&document)), settings);
+/// An editor that marks a file's encoding starts it with a byte-order mark, which JSON does not
+/// allow; the settings after it are still read.
+#[test]
+fn a_file_starting_with_a_byte_order_mark_keeps_its_settings() {
+    let settings = parse_settings(Some(
+        "\u{feff}{\"closeToTray\": true, \"githubScopes\": [\"org:acme\"]}",
+    ));
+
+    assert!(settings.close_to_tray);
+    assert_eq!(settings.github_scopes, ["org:acme"]);
 }

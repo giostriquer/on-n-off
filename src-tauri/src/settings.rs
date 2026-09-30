@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::cli_locate::{
     cli_search_path, login_shell_path_dirs, registered_path_dirs, resolve_provider_cli,
@@ -146,21 +146,23 @@ pub struct ProviderDiagnose {
 }
 
 pub fn parse_settings(json: Option<&str>) -> AppSettings {
-    let Some(value) = json.and_then(|text| serde_json::from_str::<Value>(text).ok()) else {
-        return AppSettings::default();
-    };
-    normalize_settings(read_settings(&value))
+    // An editor that marks a file's encoding starts it with a byte-order mark, which JSON does not
+    // allow. A document that is not a JSON object has no settings to keep.
+    json.and_then(|text| {
+        serde_json::from_str::<Map<String, Value>>(text.trim_start_matches('\u{feff}')).ok()
+    })
+    .map_or_else(AppSettings::default, |document| {
+        normalize_settings(read_settings(&document))
+    })
 }
 
 /// Settings read from a document one field at a time. A hand-edited file can hold a value the app
-/// cannot read, such as a number beyond its type or a provider it does not know: that value, or
-/// that entry of a list or map, takes its default, and every other setting is kept.
-fn read_settings(document: &Value) -> AppSettings {
+/// cannot read, such as a number beyond its type or a provider it does not know: that value takes
+/// its default, an item or entry of a list or map that cannot be read is dropped, and every other
+/// setting is kept.
+fn read_settings(document: &Map<String, Value>) -> AppSettings {
     let defaults = AppSettings::default();
-    let Some(document) = document.as_object() else {
-        return defaults;
-    };
-    let field = |key: &str| document.get(key);
+    let field = |key: &str| document.get(key).unwrap_or(&Value::Null);
     AppSettings {
         hidden_agents: items(field("hiddenAgents")),
         binary_paths: entries(field("binaryPaths"), read),
@@ -175,55 +177,47 @@ fn read_settings(document: &Value) -> AppSettings {
         github_poll_seconds: read(field("githubPollSeconds"))
             .unwrap_or(defaults.github_poll_seconds),
         close_to_tray: read(field("closeToTray")).unwrap_or(defaults.close_to_tray),
-        reset_alerts: entries(field("resetAlerts"), |alert| read_reset_alert(alert?)),
+        reset_alerts: entries(field("resetAlerts"), read_reset_alert),
     }
 }
 
-/// One banked reset alert. Its figures are whole numbers held within their type, so one beyond it
-/// still reaches the alert's own rule in [`normalize_settings`]; an entry that is not an object is
-/// no alert.
+/// One banked reset alert, or none when the entry is not an object. A figure is rounded and held
+/// within its type, a negative one at 0, so one out of range still meets the alert's rule in
+/// [`normalize_settings`].
 fn read_reset_alert(alert: &Value) -> Option<ResetAlert> {
     let alert = alert.as_object()?;
-    let figure = |key: &str| {
-        alert
-            .get(key)
-            .and_then(Value::as_f64)
-            .filter(|number| number.is_finite())
-            .map(|number| number.round().clamp(0.0, f64::from(u16::MAX)) as u16)
-    };
+    // A float's `as` cast saturates at the target type's bounds.
+    let figure = |key: &str| alert.get(key).and_then(Value::as_f64).map(f64::round);
     Some(ResetAlert {
-        label: read(alert.get("label")),
-        max_left_percent: figure("maxLeftPercent").map_or_else(reset_max_left_default, |percent| {
-            u8::try_from(percent).unwrap_or(u8::MAX)
-        }),
-        min_hours_to_renewal: figure("minHoursToRenewal").unwrap_or_else(reset_min_hours_default),
+        label: alert.get("label").and_then(read),
+        max_left_percent: figure("maxLeftPercent")
+            .map_or_else(reset_max_left_default, |percent| percent as u8),
+        min_hours_to_renewal: figure("minHoursToRenewal")
+            .map_or_else(reset_min_hours_default, |hours| hours as u16),
     })
 }
 
-fn read<T: DeserializeOwned>(value: Option<&Value>) -> Option<T> {
-    value.and_then(|value| T::deserialize(value).ok())
+fn read<T: DeserializeOwned>(value: &Value) -> Option<T> {
+    T::deserialize(value).ok()
 }
 
 /// The items of a list that can be read, in order.
-fn items<T: DeserializeOwned>(list: Option<&Value>) -> Vec<T> {
-    list.and_then(Value::as_array)
-        .map(|list| list.iter().filter_map(|item| read(Some(item))).collect())
+fn items<T: DeserializeOwned>(list: &Value) -> Vec<T> {
+    list.as_array()
+        .map(|list| list.iter().filter_map(read).collect())
         .unwrap_or_default()
 }
 
 /// The entries of a map whose key and value can both be read.
 fn entries<K: DeserializeOwned + Eq + Hash, V>(
-    map: Option<&Value>,
-    read_value: impl Fn(Option<&Value>) -> Option<V>,
+    map: &Value,
+    read_value: impl Fn(&Value) -> Option<V>,
 ) -> HashMap<K, V> {
-    map.and_then(Value::as_object)
+    map.as_object()
         .map(|map| {
             map.iter()
                 .filter_map(|(key, value)| {
-                    Some((
-                        read(Some(&Value::String(key.clone())))?,
-                        read_value(Some(value))?,
-                    ))
+                    Some((read(&Value::String(key.clone()))?, read_value(value)?))
                 })
                 .collect()
         })
