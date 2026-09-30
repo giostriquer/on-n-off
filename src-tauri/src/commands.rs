@@ -366,9 +366,9 @@ pub async fn clear_usage_history() -> Result<UsageHistoryStatusDto, AdapterError
     blocking("usage history clear", crate::usage::clear_usage_history).await
 }
 
-/// Live subscription rate limits for one provider (Claude Keychain + HTTPS, or Codex app-server)
+/// Live subscription rate limits for one provider (Claude Code's usage report, or Codex app-server)
 /// followed by remembered snapshots of its other accounts, off the UI thread. Provider-side
-/// problems come back as a `status` on the DTO, not as an `Err`. `force` requests fresh provider
+/// problems come back as a `status` on the DTO, not as an `Err`. `force` requests fresh Codex
 /// authentication through the provider-owned path.
 #[tauri::command]
 pub async fn read_limits(

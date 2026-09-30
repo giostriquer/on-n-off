@@ -124,9 +124,7 @@ pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpErr
 ///
 /// The one thing that separates this from `post_json` is that it sends no `Authorization` header:
 /// a grant authenticates by its own contents, and the credential being replaced is exactly the one
-/// the endpoint would refuse. Callers lean on the status taxonomy more than elsewhere — a token
-/// issuer answers 400 to refuse the grant itself, and telling that apart from a transport failure
-/// decides whether the user has to sign in again.
+/// the endpoint would refuse.
 pub fn post_grant(url: &str, body: &Value) -> Result<Value, HttpError> {
     let payload =
         serde_json::to_string(body).map_err(|error| HttpError::Parse(error.to_string()))?;
@@ -273,32 +271,6 @@ pub(crate) fn serve_sequence(
     responses: &[(&str, &[&str], &str)],
 ) -> (String, std::thread::JoinHandle<Vec<CapturedRequest>>) {
     serve("/graphql", responses, |requests| requests)
-}
-
-/// Like `serve_once_capturing`, but runs `observe` the moment the request has arrived and before
-/// it is answered, so a test can see what the code under test holds while it waits on the reply.
-#[cfg(test)]
-pub(crate) fn serve_once_observing<R: Send + 'static>(
-    status_line: &str,
-    body: &str,
-    observe: impl FnOnce() -> R + Send + 'static,
-) -> (String, std::thread::JoinHandle<(CapturedRequest, R)>) {
-    let observed = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let slot = std::sync::Arc::clone(&observed);
-    let mut observe = Some(observe);
-    serve_with(
-        "/token",
-        &[(status_line, &[], body)],
-        move || {
-            if let Some(observe) = observe.take() {
-                *slot.lock().unwrap() = Some(observe());
-            }
-        },
-        move |mut requests| {
-            let seen = observed.lock().unwrap().take().unwrap();
-            (requests.remove(0), seen)
-        },
-    )
 }
 
 /// The one loopback server behind the fixtures above: it answers one connection per entry at

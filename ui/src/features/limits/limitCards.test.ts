@@ -37,7 +37,7 @@ describe("which cards a provider shows", () => {
       figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
       freshness: { updatedAt: null, lastKnown: false, message: null, readStatus: "ok" },
-      subscription: { provider: "claude", status: null, lastKnown: false, checkedAt: null },
+      subscription: null,
       archived: false, archiveInsteadOfUse: false,
     });
   });
@@ -373,16 +373,13 @@ describe("a card's figures", () => {
     expect(figures).toMatchObject({ ownBalance, workspaceShare: workspaceCredits, creditsSpent });
   });
 
-  it("names where a banked reset is spent only on the signed-in Claude card, and offers to spend one only on Codex", () => {
+  it("shows each Codex card's banked resets, and offers to spend one", () => {
     const one = { availableCount: 1, nextExpiresAt: null };
     const two = { availableCount: 2, nextExpiresAt: null };
-    const claude = cards([okClaude({ resetCredits: two }), okClaude({ account: { id: "uuid-2", label: "other@claude.example" }, currentAccount: false, resetCredits: one })]);
     const codex = cards([okCodex({ resetCredits: two }), staleCodex({ resetCredits: one })]);
-    expect([...claude, ...codex].map(card => [card.identity.label, card.figures.bankedResets, card.account?.codexActions != null])).toEqual([
-      ["me@claude.example", { resetCredits: two, hint: "/limit-reset in Claude Code" }, false],
-      ["other@claude.example", { resetCredits: one, hint: null }, false],
-      ["work@codex.example", { resetCredits: two, hint: null }, true],
-      ["personal@codex.example", { resetCredits: one, hint: null }, true],
+    expect(codex.map(card => [card.identity.label, card.figures.bankedResets, card.account?.codexActions != null])).toEqual([
+      ["work@codex.example", two, true],
+      ["personal@codex.example", one, true],
     ]);
   });
 
@@ -392,7 +389,7 @@ describe("a card's figures", () => {
     ["that count none", { availableCount: 0, nextExpiresAt: null }],
     ["that were never reported", null],
   ] as const)("drops banked resets %s, since what is left is not known", (_case, resetCredits) => {
-    expect(cards([okClaude({ resetCredits })])[0].figures.bankedResets).toBeNull();
+    expect(cards([okCodex({ resetCredits })])[0].figures.bankedResets).toBeNull();
   });
 
   it("shows a paid reset offer on a Codex card that carries one, and never on Claude", () => {
@@ -412,17 +409,8 @@ describe("a card's subscription badge", () => {
     expect(cards([statusOnly("codex", "signedOut", null)])[0].subscription).toBeNull();
   });
 
-  const EARLIER = "2026-08-10T09:30:00Z";
-  it.each([
-    ["a live signed-in card", {}, NOW, false],
-    ["a signed-in card whose refresh failed, showing the remembered status", { status: "unauthenticated", message: "Sign in again." }, NOW, true],
-    ["a saved card read just now", { currentAccount: false }, NOW, false],
-    // A card only remembered from a snapshot answers "ok" like a saved read: its Checked time says how old it is.
-    ["a card remembered from a snapshot", { currentAccount: false }, EARLIER, false],
-  ] as const)("says Claude's status is only the last one known when the read failed: %s", (_case, overrides, observedAt, lastKnown) => {
-    const entry = okClaude({ subscriptionStatus: "past_due", ...overrides });
-    entry.windows = entry.windows.map(window => ({ ...window, observedAt }));
-    expect(cards([entry])[0].subscription).toEqual({ provider: "claude", status: "past_due", lastKnown, checkedAt: formatObservedAt(observedAt) });
+  it("is never on a Claude card: Claude Code reports no subscription term", () => {
+    expect(cards([okClaude()])[0].subscription).toBeNull();
   });
 });
 
@@ -478,8 +466,6 @@ describe("the footer of a saved account whose subscription ended", () => {
   const term = (willRenew: boolean, activeUntil: string) => ({ activeUntil, willRenew, checkedAt: NOW });
   const codexSaved = (subscription: ProviderLimits["subscription"], overrides: Partial<ProviderLimits> = {}) =>
     staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, subscription, ...overrides });
-  const claudeSaved = (subscriptionStatus: string | null) =>
-    okClaude({ account: { id: "profile:saved", label: "saved@claude.example" }, currentAccount: false, savedProfile: true, subscriptionStatus });
   const profileOf = (provider: AgentId, overrides: Partial<SavedProfile> = {}) =>
     saved(provider, "saved", "profile:saved", `saved@${provider}.example`, overrides);
 
@@ -489,10 +475,6 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["Codex: renews, though its date has passed", false, codexSaved(term(true, PASSED)), profileOf("codex")],
     ["Codex: no term read", false, codexSaved(null), profileOf("codex")],
     ["Codex: a term whose date cannot be read", false, codexSaved(term(false, "not a date")), profileOf("codex")],
-    ["Claude: expired", true, claudeSaved("expired"), profileOf("claude")],
-    ["Claude: canceled, which may still run to the end of its period", false, claudeSaved("canceled"), profileOf("claude")],
-    ["Claude: payment due", false, claudeSaved("past_due"), profileOf("claude")],
-    ["Claude: no status read", false, claudeSaved(null), profileOf("claude")],
     ["the signed-in account", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex", { active: true })],
     ["signed in by the read, before the account list marks it active", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex")],
     ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf("codex", { active: true })],

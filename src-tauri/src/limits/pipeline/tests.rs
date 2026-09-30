@@ -84,3 +84,26 @@ fn windows_of_one_kind_keep_the_providers_order() {
     ]);
     assert_eq!(ids(&card), ["weekly", "opus", "fable"]);
 }
+
+/// A read's windows leave as a card dated: one that came without an observation time takes the
+/// card's, which the snapshot store needs to remember the reading, and one that came with its own
+/// keeps it.
+#[test]
+fn every_window_leaves_with_an_observation_time() {
+    let mut dated = window("dated", "Dated", LimitWindowKind::Weekly, 1.0, None);
+    dated.observed_at = "2026-08-17T10:00:00.000Z".into();
+    let undated = window("undated", "Undated", LimitWindowKind::Session, 2.0, None);
+    assert!(undated.observed_at.is_empty());
+
+    let card = card(vec![dated, undated]);
+
+    assert_eq!(
+        card.reading.windows[0].observed_at,
+        "2026-08-17T10:00:00.000Z"
+    );
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&card.reading.windows[1].observed_at).is_ok(),
+        "{}",
+        card.reading.windows[1].observed_at
+    );
+}

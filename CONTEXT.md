@@ -31,8 +31,8 @@ spent, banked resets, the subscription term or a reset offer.
 _Avoid_: metric, extra
 
 **Account details**:
-The plan and subscription status a read reports. They describe the account; a reading that holds
-nothing else has observed nothing.
+The plan a read reports. It describes the account; a reading that holds nothing else has observed
+nothing.
 _Avoid_: metadata
 
 **Remembered reading**:

@@ -9,13 +9,9 @@
 //! user, while this reports the Keychain's failure, because a login may well be behind it and
 //! "sign in again" would be the wrong advice.
 //!
-//! Every on-n-off path that reads or writes Claude's login comes through here — the Limits read,
-//! the renewal in [`super::claude_renew`] and the account switch in [`super::claude`] — so the
-//! three cannot disagree about which store they are talking about or about the locks around it.
-//! A second copy of either is how a renewal redeems the file's refresh token and writes it over a
-//! Keychain entry the next read prefers, or takes a lock another path does not know to wait for.
-//!
-//! The grant that redeems a refresh token is not here: Claude grants live only in `claude_renew`.
+//! Every on-n-off path that reads or writes Claude's login comes through here: the account switch
+//! and the saved accounts' homes in [`super::claude`]. on-n-off never renews a Claude login; Claude
+//! Code does, under the same locks, which is why a write here takes them as Claude Code does.
 
 use std::ffi::OsString;
 use std::fs;
@@ -33,7 +29,7 @@ use serde_json::Value;
 pub(crate) type KeychainProbe = Result<Option<String>, String>;
 
 /// The name of Claude Code's Keychain entry for its default config dir. Read and write share it: a
-/// second copy that drifted would mean writing a renewed login to an entry nothing reads.
+/// second copy that drifted would mean writing a login to an entry nothing reads.
 ///
 /// Not gated to macOS: [`StorageDir::service`] names the entry on every platform, and on Windows
 /// a write to it is refused before anything is attempted, by `write_account`'s stub.
@@ -110,11 +106,6 @@ pub(crate) struct Dirs {
 }
 
 impl Dirs {
-    /// The storage dir: the config dir, unless `secure_storage` moved it.
-    pub(crate) fn storage(&self) -> StorageDir {
-        StorageDir::of(&self.config, self.custom, self.secure_storage.as_ref())
-    }
-
     /// The file Claude Code keeps its signed-in account in: `.config.json` in the config dir when
     /// an older Claude Code left one, else `.claude.json` in the config dir `CLAUDE_CONFIG_DIR`
     /// chose, or in `home`.
@@ -128,11 +119,6 @@ impl Dirs {
             home.join(".claude.json")
         }
     }
-}
-
-/// Claude Code's dirs under `home`, for this process's environment.
-pub(crate) fn native_dirs(home: &Path) -> Result<Dirs, String> {
-    dirs(home, &crate::paths::process_env)
 }
 
 /// The name of the variable that moves Claude Code's storage away from its config dir.
@@ -313,29 +299,6 @@ fn read_document(path: &Path) -> Result<Option<Value>, StoreError> {
         .map_err(|error| StoreError::FileMalformed(format!("{}: {error}", path.display())))
 }
 
-/// Probe the macOS Keychain for the login Claude Code keeps for `dir`, the way Limits reads it. A
-/// disposable `ON_N_OFF_HOME` never reads the real login.
-#[cfg(target_os = "macos")]
-pub(crate) fn keychain_probe(dir: &StorageDir) -> KeychainProbe {
-    isolated_keychain(crate::paths::process_env("ON_N_OFF_HOME").is_some(), || {
-        keychain_secret(&dir.service())
-    })
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn keychain_probe(_dir: &StorageDir) -> KeychainProbe {
-    Ok(None)
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn isolated_keychain(isolated: bool, probe: impl FnOnce() -> KeychainProbe) -> KeychainProbe {
-    if isolated {
-        Ok(None)
-    } else {
-        probe()
-    }
-}
-
 /// The account name Claude Code (2.1.282) files its Keychain entry under: `$USER`, else the login
 /// name, and `claude-code-user` when that is not a plain name `security` takes as it is. Claude
 /// Code asks the OS for the login name; `$LOGNAME`, which a login session and launchd both set,
@@ -423,8 +386,7 @@ fn write_account(service: &str) -> Result<String, String> {
     keychain_account(service)?.ok_or_else(|| "The Claude Code Keychain entry disappeared.".into())
 }
 
-/// Mirrors `keychain_probe`'s stub: these platforms have no such entry, and the file store is the
-/// one their read will have chosen.
+/// These platforms have no such entry, and the file store is the one their read will have chosen.
 #[cfg(not(target_os = "macos"))]
 fn write_account(_service: &str) -> Result<String, String> {
     Err("this platform has no Claude Code Keychain entry".to_string())
@@ -476,7 +438,6 @@ impl From<LockError> for BeginError {
 pub(crate) struct PendingWrite<'a> {
     dir: StorageDir,
     target: Result<ClaudeStore, String>,
-    source: ClaudeStore,
     storage: ClaudeLocks,
     held: &'a dyn Fn() -> bool,
 }
@@ -510,16 +471,11 @@ pub(crate) fn begin<'a>(
 ) -> Result<(Option<Value>, PendingWrite<'a>), BeginError> {
     let storage = ClaudeLocks::acquire(dir, LockScope::StorageWrite)?;
     let stored = read(dir, keychain(dir)).map_err(BeginError::Store)?;
-    let source = stored
-        .target
-        .clone()
-        .unwrap_or_else(|_| ClaudeStore::File(dir.credentials_file()));
     Ok((
         stored.document,
         PendingWrite {
             dir: dir.clone(),
             target: stored.target,
-            source,
             storage,
             held,
         },
@@ -527,15 +483,9 @@ pub(crate) fn begin<'a>(
 }
 
 impl<'a> PendingWrite<'a> {
-    /// The store the document came from: the Keychain entry, or the credentials file.
-    pub(crate) fn source(&self) -> &ClaudeStore {
-        &self.source
-    }
-
-    /// Prove the write, before anything is written or redeemed. Refused when the Keychain could
-    /// not be read, since which store Claude Code reads next is then unknown, and when the
-    /// credentials file is a link: replacing it would cut the link and leave the login where
-    /// Claude Code no longer looks.
+    /// Prove the write, before anything is written. Refused when the Keychain could not be read,
+    /// since which store Claude Code reads next is then unknown, and when the credentials file is a
+    /// link: replacing it would cut the link and leave the login where Claude Code no longer looks.
     pub(crate) fn prove(self) -> Result<CredentialWrite<'a>, BeginError> {
         let store = self.target.map_err(BeginError::Unavailable)?;
         let target = match store {
@@ -553,8 +503,8 @@ impl<'a> PendingWrite<'a> {
                     ));
                 }
                 // Created now, private and beside the file, so a directory that will not take it
-                // says so before anything is written, or redeemed. Named for what it is, so one
-                // left behind by a kill between write and rename can be told apart.
+                // says so before anything is written. Named for what it is, so one left behind by
+                // a kill between write and rename can be told apart.
                 let temporary = tempfile::Builder::new()
                     .prefix(".credentials.json.on-n-off.")
                     .tempfile_in(&self.dir.path)
@@ -664,8 +614,6 @@ const _: () = assert!(HEARTBEAT.as_millis() * 3 <= CLAUDE_CODE_LIVENESS.as_milli
 /// Which of Claude Code's locks to take, in the storage dir.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LockScope<'a> {
-    /// The two refresh locks, around one renewal.
-    Refresh,
     /// The refresh locks and this config file's lock, around an account change that writes both.
     RefreshAndConfig(&'a Path),
     /// `.storage-write.lock`, which Claude Code takes around every change to its credentials, in

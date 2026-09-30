@@ -239,8 +239,11 @@ impl StoredSnapshot {
     /// hidden windows loses them here, by the reader's own rule; the file loses them at its next save.
     fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
         let mut reading = self.reading.known_at(now);
-        if self.provider == AgentId::Codex {
-            super::codex::drop_hidden(&mut reading.windows);
+        match self.provider {
+            AgentId::Codex => super::codex::drop_hidden(&mut reading.windows),
+            // Claude reports no banked resets; a count an earlier version remembered stays out.
+            AgentId::Claude => reading.reset_credits = None,
+            AgentId::Antigravity | AgentId::Cursor => {}
         }
         ProviderLimitsDto {
             provider: self.provider,

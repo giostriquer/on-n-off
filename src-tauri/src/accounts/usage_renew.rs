@@ -202,12 +202,15 @@ pub(super) fn renew_owned(
 /// Renews a private `login` of `provider` with that provider's grant, at its token endpoint.
 pub(super) fn request(provider: AgentId, login: &Login, now_ms: i64) -> Result<Login, String> {
     let adapter = super::adapter(provider)?;
-    adapter.renew_private(login, now_ms, adapter.token_url())
+    let token_url = adapter
+        .token_url()
+        .ok_or("This provider's saved logins are never renewed by on-n-off.")?;
+    adapter.renew_private(login, now_ms, token_url)
 }
 
 /// Sends a private Codex login's refresh `request` to `token_url`, giving back the reply. Native
-/// credentials still renew exclusively through the official app-server path; Claude's grants are
-/// sent only from `claude_renew`.
+/// credentials still renew exclusively through the official app-server path, and on-n-off sends
+/// no Claude grant at all.
 pub(super) fn grant(token_url: &str, request: &Value) -> Result<Value, crate::http::HttpError> {
     crate::http::post_grant(token_url, request)
 }

@@ -11,12 +11,13 @@ Neither field is an identity key. Active native storage is authoritative. A save
 non-refreshing shadow; switching away captures the latest native generation. Inactive access-token
 expiry does not discard a renewable login. A saved Claude account that is not the signed-in one
 keeps its login in its own home (below), where Claude Code renews it; Limits reads it there through
-Claude Code's own usage report, never with the token. Limits polls saved Codex accounts, and any
-Claude login still in the vault, with access-only HTTP requests without changing the active native
-login, each through its provider's Limits reader, which the adapter dispatches (`read_usage`). At
-most two saved reads per provider run at once, with per-account backoff and provider retry-after
-handling. Rejected shared credentials, and logins that now sign in as a different account, wait for
-a changed generation and renew nothing; an expired Claude shadow still in the vault sends no request.
+Claude Code's own usage report, never with the token. A Claude login still in the vault, one the last
+read could not move into its home, is never sent: its read fails until a later read moves it. Limits
+polls saved Codex accounts with access-only HTTP requests without changing the active native login,
+through Codex's Limits reader, which the adapter dispatches (`read_usage`). At most two saved reads
+per provider run at once, with per-account backoff and provider retry-after handling. Rejected shared
+credentials, and logins that now sign in as a different account, wait for a changed generation and
+renew nothing.
 The previous numeric reading and its observation time remain visible, and every card a poll
 produces is marked as a saved profile's (`saved_profile`), so it never reads as a remembered one.
 
@@ -160,22 +161,23 @@ code asks that rather than which provider it has. An adapter:
 - reads a login through its typed view, `ClaudeLogin` or `CodexLogin` (`accounts::view`), so
   nothing else reads a login's JSON: identity and email, the credential generation's fingerprint
   and whether a saved login is due to renew. A view only reads; the bare credentials document
-  Claude's store holds, without its account record, gives its credential through
-  `ClaudeLogin::credential_in` instead. A `Login` keeps its stored shape, `{auth, account}`, so the vault, the
+  Claude's store holds, without its account record, is read directly once, by `ClaudeNative::read`,
+  which checks that it still holds an access token. A `Login` keeps its stored shape, `{auth, account}`, so the vault, the
   recovery journal and the renewal journal written by earlier versions still load, and
   `model.rs` keeps the one fingerprint layout every version has hashed. Whole documents are still
   written raw: Codex's `auth.json` verbatim, Claude's `claudeAiOauth` merged into its credentials
   document beside the `oauthAccount` record `ConfigIo` patches;
-- reads a saved profile's usage with its login (`read_usage`), through the provider's Limits
-  reader, asking the services it is given (`limits::SavedReadUrls`): Claude's credential to
-  `limits::read_saved_claude`, the signed-in Claude read expecting the profile's identity, unless
-  the login's renewal is due, which reads as expired without a request; Codex's access token to
-  `limits::read_saved_codex`, the `wham/usage` body app-server itself reads, without starting a
-  CLI. A login without an access token is refused before either. Claude's first usage after a
-  sign-in is Claude Code's own report in the isolated home (`limits::claude_cli`); Codex's runs
-  app-server there;
-- renews a never-activated private login at its token endpoint: Claude's grant sent from
-  `claude_renew.rs`, Codex's built and folded by its login and sent from `usage_renew.rs`;
+- reads a saved profile's usage with its login still in the vault (`read_usage`), through the
+  provider's Limits reader, asking the services it is given (`limits::SavedReadUrls`): Codex's
+  access token to `limits::read_saved_codex`, the `wham/usage` body app-server itself reads,
+  without starting a CLI, and a login without an access token is refused first. Claude sends
+  nothing: a saved Claude account is read in its home (`Home::read_usage`, Claude Code's own report
+  through `limits::claude_cli`), and one whose login is still in the vault reads as not moved yet,
+  for the next read to try again. Claude's first usage after a sign-in is Claude Code's own report
+  in the isolated home (`limits::claude_cli`); Codex's runs app-server there;
+- renews a never-activated private login at its token endpoint (`token_url`): Codex's grant, built
+  and folded by its login and sent from `usage_renew.rs`. Claude has no token endpoint
+  (`token_url` is `None`) and refuses a private renewal, since it never renews privately;
 - says how its client processes are recognized and whether they refuse an ordinary switch.
 
 Sign-in, the cleanup of abandoned sign-in homes, automatic remembering and the saved accounts'
@@ -185,18 +187,17 @@ the account list once when it saved a login or changed the provider's notice. Va
 generic: a saved Codex profile's claims are found in the vault by `accounts::saved_codex_claims`
 and read through the Codex view.
 
-`accounts/claude_renew.rs` remains the only Claude token-redemption implementation. It keeps the
-existing expiry, native-lock, preflight and stranded-token behavior, writing the active native
-store under its locks. Where Claude's login lives and how it is locked belongs to
-`accounts/claude_store.rs`, which the renewal, Limits and the account switch share: Claude
-Code's dirs as it resolves them (`CLAUDE_CONFIG_DIR` untrimmed and NFC-normalized, with
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` moving the credentials, the locks and the Keychain entry's name),
-the store Claude Code's own read would use (a Keychain item that parses, token or not, else the
-credentials file; an unreadable Keychain refuses every write), the Keychain item under Claude
-Code's own account name first, and one lock protocol. A renewal whose refresh lock the heartbeat
-finds taken away sends no grant. An emptied `claudeAiOauth`, Claude Code's sign-out, is no native
-login. The same grant/parser implementation also serves private vault renewal
-under the saved-account journal. Limits consumes access-only projections. The one projection that
+on-n-off redeems no Claude token and sends no Claude grant: Claude Code renews every Claude login
+itself, the signed-in one whenever it runs and a saved account's in its home. Where Claude's login
+lives and how it is locked belongs to `accounts/claude_store.rs`, which the account operations,
+automatic remembering and the homes share: Claude Code's dirs as it resolves them
+(`CLAUDE_CONFIG_DIR` untrimmed and NFC-normalized, with `CLAUDE_SECURESTORAGE_CONFIG_DIR` moving
+the credentials, the locks and the Keychain entry's name), the store Claude Code's own read would
+use (a Keychain item that parses, token or not, else the credentials file; an unreadable Keychain
+refuses every write), the Keychain item under Claude Code's own account name first, and one lock
+protocol, which a write takes as Claude Code takes it around its own renewals. An emptied
+`claudeAiOauth`, Claude Code's sign-out, is no native login. The Limits readers (`limits/`) read no
+Claude credential at all; for Codex they consume access-only projections. The one projection that
 carries a credential is `codex_store::metadata_and_access`: the signed-in Codex login's identity
 and its access token alone (never its refresh or id token, never the login JSON), wrapped in
 `model::AccessToken`, which has no `Debug`, `Clone` or serialization and reads back only as an
@@ -219,8 +220,10 @@ the signed-in Codex login only through `codex_store`'s projections.
 - **Remember accounts on this device** is off by default. One global opt-in enables a background
   check for native Claude/Codex logins about every 30 seconds, independently of notification settings.
   Unchanged saved logins and pending reauthentication are skipped. A new/changed native login is
-  verified before saving; no native activation occurs. Access expiry can use the existing native
-  renewal owner. Switching again before a check can cause the previous login to be missed.
+  verified before saving; no native activation occurs. Codex's verification can let app-server,
+  the native renewal owner, renew an expired login; Claude's is local and accepts an expired one,
+  which Claude Code renews itself. Switching again before a check can cause the previous login to
+  be missed.
 - **Save current** verifies native readback and saves its latest renewable login. It also explicitly
   reenrolls an account excluded by Remove.
 - **Edit category** accepts optional free text (up to 100 characters). Blank clears it. Categories
@@ -229,7 +232,8 @@ the signed-in Codex login only through `codex_store`'s projections.
 - **Add / sign in again** launches official CLI authentication in an isolated native home. It checks
   the resulting identity, verifies the expected profile during reauthentication, then saves it.
   Before publication it attempts a usage/plan read using that isolated login: Codex uses app-server
-  without forced renewal; Claude runs `claude -p /usage` there, which makes no model request.
+  without forced renewal; Claude runs `claude -p /usage --safe-mode` there, which makes no model
+  request.
   It rereads the credential afterward so official-client rotation is not stranded, rejects any
   user/workspace change, and publishes only a matching observation after the vault save and existing
   cancellation/epoch checks. Usage failure retains the login and previous history. Successful
@@ -255,14 +259,21 @@ not block another provider's file transaction. Initial key/vault creation remain
 Brief contention waits on blocking workers (up to ten seconds); it never bypasses the lease or replaces its lock file. Every account change releases its leases, the vault lease and the provider's activity reservation, before it is announced. Every file lease is a `FileLease` (`file_lease.rs`), which unlocks explicitly when dropped: on Unix the lock belongs to the open file, and a child process that another thread spawns meanwhile shares it until the child execs. Native Claude locks
 (Claude Code's refresh lock, its legacy lock beside the config dir's real path, and the config
 file's lock) cover the outgoing reread, durable journal and publication; the credential write goes
-through `claude_store::begin`, the one writer the renewal uses too, which takes Claude Code's
+through `claude_store::begin`, the one writer of Claude's credentials, which takes Claude Code's
 `.storage-write.lock` and reads the store under it; its proof, made before either half of the
 change is written, refuses a linked credentials file. A lock that cannot be taken at all is reported with its reason;
-only one another process holds reads as Claude being busy. They are released for verification/renewal, while the
+only one another process holds reads as Claude being busy. They are released for verification, while the
 exclusive activity lease remains held through completion or recovery: the locked write consumes
-the lock guard and returns the store as read back under it, so verification, which may renew and
-take the same locks, cannot run while they are held. Every held lock has a heartbeat. Claude verification compares the authenticated
-user and organization with the exact resolved native identity file, including legacy configuration. All network
+the lock guard and returns the store as read back under it, so verification, which runs the
+provider's own client, cannot run while they are held: a client that took the same locks to renew
+would wait on on-n-off while on-n-off waited on it. Every held lock has a heartbeat. Claude verification is local: it
+identifies the published login from the exact resolved native identity file, including legacy
+configuration, then runs `claude auth status --json`, which reads only what is stored and asks
+Anthropic nothing, and requires `loggedIn: true`, that login's organization as `orgId` and, when
+the login names an email, that email as `email`; the store read again must hold the same login. It
+never renews: an expired incoming login is accepted and Claude Code renews it on its next run, and a
+login Anthropic refuses shows as a failed read at the next Limits poll. A local check rather than a
+`/usage` run is the user's decision (2026-09-29). All network
 and filesystem work happens on blocking workers, outside UI/state mutexes. Cancellation is scoped
 to an operation UUID, including cancel-before-start. The persisted sign-in epoch rejects a late
 sign-in publication after any account change in any manager instance, and so does a pending
@@ -295,8 +306,9 @@ announced. A category edit announces only the account list.
 
 Archive account puts a Limits account away without losing it: the saved profile and its remembered
 reading stay, so it comes back without signing in again. Only the user archives an account, from a
-card's menu or, when its subscription is known to have ended without renewing, from the card's
-footer in place of Use account. Nothing archives one on a timer, at expiry, or for disuse. The
+card's menu or, when its Codex subscription is known to have ended without renewing, from the card's
+footer in place of Use account. Claude reports no subscription term, so a Claude card offers it
+only from its menu. Nothing archives one on a timer, at expiry, or for disuse. The
 signed-in card cannot be archived.
 
 - **Storage.** The archived ids live in plaintext in `<home>/.on-n-off/limits/archived.json`,
@@ -331,11 +343,11 @@ The guaranteed target is the default native CLI home. Custom native homes, selec
 profiles, ephemeral/alternate Codex backends, environment credentials and detected forced-login
 policies currently defer to the official client. A Claude home chosen by `CLAUDE_CONFIG_DIR`, and a
 store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved (to another dir, or to a scoped Keychain entry by
-naming the default dir), are such custom homes: account changes refuse them, while Limits and the
-renewal follow them where Claude Code keeps the login. Set but empty, that variable leaves the
+naming the default dir), are such custom homes: account changes refuse them, while Limits follows
+them, running Claude Code's report there. Set but empty, that variable leaves the
 default store in place. Existing model/endpoints/API-key configuration is
 never rewritten to simulate a switch. Native Codex file/keyring/auto backends are selected from
-config; unreadable protected storage is not treated as a missing login. macOS native account reads use the same system `security` reader as Limits, finding
+config; unreadable protected storage is not treated as a missing login. macOS native account reads use the system `security` tool, finding
 Claude Code's item under its own account name before the account a service-only lookup names,
 with a bounded subprocess deadline, and native account writes and
 removals go through the same tool (`accounts/keychain.rs`), never the process's own ad-hoc-signed
@@ -373,7 +385,7 @@ two accounts in one workspace and an outgoing access token within ten minutes of
 Every activation also re-reads the outgoing login once its journal is durable, saving a generation
 a client rotated and refusing to publish over another account; a failure before publication clears
 the journal. It reads the published bytes back under the native locks before verification, which
-refreshes whatever is on disk. When a client replaced them, or verification fails beside running
+reads whatever is on disk. When a client replaced them, or verification fails beside running
 clients, only bytes this change wrote or replaced are restored; anything else, including a login a
 client signed out, keeps the journal for explicit recovery with clients closed. These checks narrow
 the races, not close them: a client whose refresh was already in flight can still write during

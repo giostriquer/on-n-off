@@ -77,11 +77,10 @@ fn isolated_claude_sign_in_keeps_the_os_home_for_keychain_lookup() {
     assert_ne!(native.service(), "Claude Code-credentials");
 }
 
-/// Verification asks the profile endpoint with the one Claude header set the Limits reads send.
-#[test]
-fn verification_sends_the_claude_headers() {
-    let root = tempfile::tempdir().unwrap();
-    let native = claude(root.path());
+/// A signed-in store under `root` naming you@example.com in `org-a`, and a stand-in `claude` whose
+/// `auth status` prints `status` and exits with `exit`.
+fn verified(root: &Path, status: &str, exit: i32) -> (ClaudeNative, PathBuf) {
+    let native = claude(root);
     fs::write(
         native.config_home.join(".credentials.json"),
         r#"{"claudeAiOauth":{"accessToken":"test-token","refreshToken":"test-refresh"}}"#,
@@ -89,61 +88,163 @@ fn verification_sends_the_claude_headers() {
     .unwrap();
     fs::write(
         &native.config_file,
-        r#"{"oauthAccount":{"accountUuid":"a","organizationUuid":"org-a"}}"#,
+        r#"{"oauthAccount":{"accountUuid":"a","organizationUuid":"org-a","emailAddress":"you@example.com"}}"#,
     )
     .unwrap();
-    let (url, request) = crate::http::serve_once(
-        "200 OK",
-        r#"{"account":{"uuid":"a"},"organization":{"uuid":"org-a"}}"#,
+    let bin = root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let stub = crate::cli_stub::CliStub::new("claude")
+        .log_args("args.txt", false)
+        .log_env("CLAUDE_CONFIG_DIR", "config-dir.txt")
+        .stdout(status)
+        .exit(exit)
+        .write(&bin);
+    (native, stub)
+}
+
+/// Verification asks Claude Code what it has stored, and nothing of Anthropic: a login signed in
+/// to the organization and as the email its account names passes.
+#[test]
+fn verification_asks_claude_code_which_account_it_is_signed_in_to() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, stub) = verified(
+        root.path(),
+        r#"{"loggedIn":true,"authMethod":"claude.ai","email":"you@example.com","orgId":"org-a"}"#,
+        0,
     );
-    native.verify_at(&url).unwrap();
-    let head = request.join().unwrap();
-    let header = |name| crate::http::head_header(&head, name);
-    assert_eq!(header("authorization"), Some("Bearer test-token"), "{head}");
-    assert_eq!(header("anthropic-beta"), Some("oauth-2025-04-20"), "{head}");
-    assert_eq!(header("cache-control"), Some("no-cache"), "{head}");
-    assert_eq!(header("content-type"), None, "{head}");
+
+    crate::accounts::native::with_test_cli(&stub, || native.verify()).unwrap();
+
+    let args = fs::read_to_string(root.path().join("bin").join("args.txt")).unwrap();
+    assert_eq!(args.trim(), "auth status --json");
+    // Asked of the store being verified, not whichever one the app's own environment names.
+    let config_dir = fs::read_to_string(root.path().join("bin").join("config-dir.txt")).unwrap();
+    assert_eq!(Path::new(config_dir.trim()), native.config_home.as_path());
+}
+
+/// A status that does not say the login is signed in does not verify it.
+#[test]
+fn verification_refuses_a_status_that_does_not_say_signed_in() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, stub) = verified(
+        root.path(),
+        r#"{"email":"you@example.com","orgId":"org-a"}"#,
+        0,
+    );
+
+    let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("Claude Code does not report the login as signed in.")
+    );
+}
+
+/// A login Claude Code rotated while it was asked is not the one verified: the change is retried.
+#[test]
+fn verification_refuses_a_login_that_changed_while_claude_code_was_asked() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, _) = verified(root.path(), "{}", 0);
+    let bin = root.path().join("bin");
+    fs::write(
+        bin.join("rotated.json"),
+        r#"{"claudeAiOauth":{"accessToken":"rotated-token","refreshToken":"rotated-refresh"}}"#,
+    )
+    .unwrap();
+    let stub = crate::cli_stub::CliStub::new("claude")
+        .copy("rotated.json", "../.claude/.credentials.json")
+        .stdout(r#"{"loggedIn":true,"email":"you@example.com","orgId":"org-a"}"#)
+        .write(&bin);
+
+    let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("Native login changed during verification. Retry the account operation.")
+    );
 }
 
 #[test]
-fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
-    let root = tempfile::tempdir().unwrap();
-    let mut native = claude(root.path());
-    native.config_file = native.config_home.join(".config.json");
-    fs::write(
-        &native.config_file,
-        r#"{"oauthAccount":{"accountUuid":"legacy-user","organizationUuid":"team"}}"#,
-    )
-    .unwrap();
-    fs::write(
-        native.config_home.join(".credentials.json"),
-        r#"{"claudeAiOauth":{"accessToken":"test-token","refreshToken":"test-refresh"}}"#,
-    )
-    .unwrap();
-    for alternate in [
-        None,
-        Some(r#"{"oauthAccount":{"accountUuid":"stale-other-user","organizationUuid":"other"}}"#),
+fn verification_refuses_a_login_claude_code_reads_as_another_organization_or_email() {
+    const ORGANIZATION: &str = "Claude credential and organization identity disagree.";
+    const ACCOUNT: &str = "Claude credential and account identity disagree.";
+    for (status, refusal) in [
+        (
+            r#"{"loggedIn":true,"email":"you@example.com","orgId":"org-b"}"#,
+            ORGANIZATION,
+        ),
+        (
+            r#"{"loggedIn":true,"email":"you@example.com"}"#,
+            ORGANIZATION,
+        ),
+        (
+            r#"{"loggedIn":true,"email":"someone@example.com","orgId":"org-a"}"#,
+            ACCOUNT,
+        ),
+        (r#"{"loggedIn":true,"orgId":"org-a"}"#, ACCOUNT),
     ] {
-        if let Some(text) = alternate {
-            fs::write(root.path().join(".claude.json"), text).unwrap();
-        }
-        let identity_file = claude_store::native_dirs(root.path())
-            .unwrap()
-            .config_file(root.path());
-        let identity = crate::limits::credentials::read_claude_identity(&identity_file).unwrap();
-        assert_eq!(identity.account.id, "legacy-user");
-        let (url, request) = crate::http::serve_once(
-            "200 OK",
-            r#"{"account":{"uuid":"legacy-user"},"organization":{"uuid":"team"}}"#,
+        let root = tempfile::tempdir().unwrap();
+        let (native, stub) = verified(root.path(), status, 0);
+
+        let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+        assert_eq!(refused.err().as_deref(), Some(refusal), "{status}");
+    }
+}
+
+/// Claude Code answers a signed-out status with exit status 1.
+#[test]
+fn verification_refuses_a_login_claude_code_reads_as_signed_out() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, stub) = verified(root.path(), r#"{"loggedIn":false,"authMethod":"none"}"#, 1);
+
+    let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("Claude Code does not report the login as signed in.")
+    );
+}
+
+#[test]
+fn verification_refuses_when_claude_code_cannot_say_who_is_signed_in() {
+    let root = tempfile::tempdir().unwrap();
+    let (native, stub) = verified(root.path(), "not a status", 1);
+
+    let refused = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("Claude Code could not say which account it is signed in to.")
+    );
+}
+
+/// The account an older Claude Code left in `.config.json` is the one verified, even beside a
+/// `.claude.json` that names another.
+#[test]
+fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
+    for (org, verifies) in [("team", true), ("other", false)] {
+        let root = tempfile::tempdir().unwrap();
+        let (mut native, stub) = verified(
+            root.path(),
+            &format!(r#"{{"loggedIn":true,"orgId":"{org}"}}"#),
+            0,
         );
-        native.verify_at(&url).unwrap();
-        request.join().unwrap();
-        let (url, request) = crate::http::serve_once(
-            "200 OK",
-            r#"{"account":{"uuid":"wrong-user"},"organization":{"uuid":"team"}}"#,
-        );
-        assert!(native.verify_at(&url).is_err());
-        request.join().unwrap();
+        native.config_file = native.config_home.join(".config.json");
+        fs::write(
+            &native.config_file,
+            r#"{"oauthAccount":{"accountUuid":"legacy-user","organizationUuid":"team"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.path().join(".claude.json"),
+            r#"{"oauthAccount":{"accountUuid":"stale-other-user","organizationUuid":"other"}}"#,
+        )
+        .unwrap();
+
+        let result = crate::accounts::native::with_test_cli(&stub, || native.verify());
+
+        assert_eq!(result.is_ok(), verifies, "{org}: {result:?}");
     }
 }
 
@@ -454,32 +555,6 @@ fn an_unreadable_credentials_file_is_an_error_and_nothing_is_written() {
     assert!(!native.config_file.exists(), "the identity was not patched");
 }
 
-/// A Claude login past its expiry that cannot renew itself fails verification before anything is
-/// asked of the network.
-#[test]
-fn verification_refuses_an_expired_login_that_cannot_renew() {
-    let root = tempfile::tempdir().unwrap();
-    let native = claude(root.path());
-    fs::write(
-        native.config_home.join(".credentials.json"),
-        r#"{"claudeAiOauth":{"accessToken":"old","expiresAt":1}}"#,
-    )
-    .unwrap();
-    fs::write(
-        &native.config_file,
-        r#"{"oauthAccount":{"accountUuid":"a","organizationUuid":"org-a"}}"#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        native
-            .verify_at(&crate::http::refused_url())
-            .err()
-            .as_deref(),
-        Some("Could not renew the native Claude login. Sign in again if it has expired.")
-    );
-}
-
 /// Only a lock another process holds is worth waiting on. One that cannot be created at all is
 /// reported for what it is, not as Claude being busy.
 #[test]
@@ -570,8 +645,8 @@ fn a_file_backed_claude_command_gets_a_disposable_os_home() {
     assert_eq!(env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR"), Some(&None));
 }
 
-/// A store `CLAUDE_CONFIG_DIR` chose hands that dir to the `claude` it starts. Only on macOS does it
-/// keep the OS home, where the login Keychain is found through it.
+/// A store `CLAUDE_CONFIG_DIR` chose hands that dir to the `claude` it starts, and keeps the user's
+/// own OS home on every platform: it is the user's own store, whose usage read runs there.
 #[test]
 fn a_claude_command_for_a_chosen_config_dir_is_handed_that_dir() {
     let root = tempfile::tempdir().unwrap();
@@ -583,8 +658,17 @@ fn a_claude_command_for_a_chosen_config_dir_is_handed_that_dir() {
         env.get("CLAUDE_CONFIG_DIR"),
         Some(&Some(chosen.clone().into_os_string()))
     );
-    let home =
-        (!cfg!(target_os = "macos")).then(|| Some(chosen.parent().unwrap().as_os_str().to_owned()));
+    assert!(!env.contains_key("HOME") && !env.contains_key("USERPROFILE"));
+}
+
+/// A private store, an isolated sign-in's or a saved account's home, is handed a disposable OS home
+/// off macOS; on macOS it keeps the OS home, where the login Keychain is found through it.
+#[test]
+fn a_claude_command_for_a_private_store_is_handed_its_own_os_home_off_macos() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ClaudeNative::home(root.path());
+    let env = command_env(&store.command());
+    let home = (!cfg!(target_os = "macos")).then(|| Some(root.path().as_os_str().to_owned()));
     assert_eq!(env.get("HOME").cloned(), home);
 }
 

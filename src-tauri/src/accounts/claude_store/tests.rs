@@ -174,17 +174,6 @@ fn the_keychain_account_is_read_off_the_entry_rather_than_guessed() {
     assert_eq!(parse_keychain_account("    \"acct\"<blob>=\"\"\n"), None);
 }
 
-#[test]
-fn disposable_home_does_not_read_or_renew_the_real_keychain_login() {
-    let calls = std::cell::Cell::new(0);
-    let result = isolated_keychain(true, || {
-        calls.set(calls.get() + 1);
-        Ok(Some("real-native-credential".into()))
-    });
-    assert_eq!(result, Ok(None));
-    assert_eq!(calls.get(), 0);
-}
-
 /// A prepared write that is never committed takes its temporary with it. Leaving one behind would
 /// park a live refresh token in a file Claude Code neither knows about nor rotates, which is the
 /// same objection that keeps `ConfigIo` out of this module.
@@ -238,7 +227,7 @@ fn an_abandoned_write_leaves_no_temporary_holding_a_token() {
     assert!(!storage_write.exists());
 }
 
-/// The renewed login lands in a file only this user can read.
+/// A written login lands in a file only this user can read.
 #[test]
 fn the_credentials_file_is_written_private() {
     let home = scratch_dir("renew-file");
@@ -270,8 +259,13 @@ fn the_credentials_file_is_written_private() {
     }
 }
 
+/// The locks an account change takes: the two refresh locks, then the config file's.
 fn refresh_lock(home: &Path, now: SystemTime) -> Result<ClaudeLocks, LockError> {
-    ClaudeLocks::acquire_at(&StorageDir::default_in(home), LockScope::Refresh, now)
+    ClaudeLocks::acquire_at(
+        &StorageDir::default_in(home),
+        LockScope::RefreshAndConfig(&home.join(".claude.json")),
+        now,
+    )
 }
 
 #[test]
@@ -314,7 +308,7 @@ fn a_lock_left_behind_by_a_dead_process_is_broken_once_it_goes_stale() {
 }
 
 /// The refresh lock is taken first. When the legacy lock beside the config home is held, the
-/// renewal yields and gives back the one it had already taken.
+/// account change yields and gives back the one it had already taken.
 #[test]
 fn a_held_legacy_lock_yields_and_releases_the_refresh_lock_already_taken() {
     let home = scratch_dir("renew-legacy-held");
@@ -342,8 +336,9 @@ fn fresh(path: &Path) -> bool {
         .is_ok_and(|at| at.elapsed().unwrap_or_default() < Duration::from_secs(60))
 }
 
-/// A renewal can hold the refresh locks past Claude Code's minute: the Keychain prompt alone may
-/// take ninety seconds. Kept fresh while held, the locks are never judged abandoned under it.
+/// An account change can hold the refresh locks past Claude Code's minute: the Keychain prompt
+/// alone may take ninety seconds. Kept fresh while held, the locks are never judged abandoned under
+/// it.
 #[test]
 fn the_refresh_locks_are_kept_fresh_while_held() {
     let home = scratch_dir("renew-heartbeat");
@@ -436,11 +431,11 @@ fn claude_codes_own_account_name() {
     assert_eq!(named(&[]), "claude-code-user");
 }
 
-/// The renewal writes back under the account of the item Claude Code reads: its own, when there
-/// is one, not whichever item `security` returns for the service.
+/// A credential write goes back under the account of the item Claude Code reads: its own, when
+/// there is one, not whichever item `security` returns for the service.
 #[cfg(target_os = "macos")]
 #[test]
-fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
+fn a_credential_write_goes_to_the_item_filed_under_claude_codes_own_account() {
     use crate::accounts::keychain::{fake_items, with_test_runner};
     const TWO_ITEMS: &[(&str, &str)] = &[("claude-code-user", "{}"), ("other", "{}")];
 
@@ -449,7 +444,6 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
         let never_lost = || false;
         let keychain = |_: &StorageDir| Ok(Some("{}".to_string()));
         let (_, pending) = begin(&dir, &keychain, &never_lost).unwrap();
-        assert_eq!(pending.source(), &ClaudeStore::Keychain);
         pending
             .prove()
             .unwrap()
@@ -459,7 +453,7 @@ fn the_renewal_writes_the_item_filed_under_claude_codes_own_account() {
     let add = sent
         .iter()
         .find(|command| command.starts_with("add-generic-password"))
-        .expect("the renewal is written to the Keychain");
+        .expect("the write goes to the Keychain");
     assert!(
         add.starts_with(
             "add-generic-password -U -a \"claude-code-user\" -s \"Claude Code-credentials\""
@@ -491,6 +485,11 @@ fn env_os(vars: Vec<(&'static str, std::ffi::OsString)>) -> impl Fn(&str) -> Opt
 }
 
 /// The Keychain entry a scoped dir at `path` names, worked out apart from `StorageDir::service`.
+/// The storage dir of `dirs`: the config dir, unless `secure_storage` moved it.
+fn storage_of(dirs: &Dirs) -> StorageDir {
+    StorageDir::of(&dirs.config, dirs.custom, dirs.secure_storage.as_ref())
+}
+
 fn scoped_service(path: &Path) -> String {
     let hash = crate::sha::sha256_hex(path.to_str().unwrap().as_bytes());
     format!("{CLAUDE_KEYCHAIN_SERVICE}-{}", &hash[..8])
@@ -524,11 +523,11 @@ fn the_config_dir_follows_claude_config_dir_on_every_platform() {
         assert_eq!(dirs.config, config, "{value:?}");
         assert!(dirs.custom, "{value:?}");
         assert_eq!(
-            dirs.storage().credentials_file(),
+            storage_of(&dirs).credentials_file(),
             config.join(".credentials.json")
         );
         assert_eq!(
-            dirs.storage().service(),
+            storage_of(&dirs).service(),
             scoped_service(&config),
             "{value:?}"
         );
@@ -537,7 +536,7 @@ fn the_config_dir_follows_claude_config_dir_on_every_platform() {
     let default = dirs(&home, &env_os(vec![])).unwrap();
     assert_eq!(default.config, home.join(".claude"));
     assert!(!default.custom);
-    assert_eq!(default.storage().service(), CLAUDE_KEYCHAIN_SERVICE);
+    assert_eq!(storage_of(&default).service(), CLAUDE_KEYCHAIN_SERVICE);
 }
 
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves the storage and leaves the config dir, on every
@@ -576,11 +575,11 @@ fn the_secure_storage_dir_moves_the_store_on_every_platform() {
         let dirs = dirs(&home, &env_os(vars.clone())).unwrap();
         assert_eq!(dirs.config, config, "{vars:?}");
         assert_eq!(
-            dirs.storage().credentials_file(),
+            storage_of(&dirs).credentials_file(),
             storage.join(".credentials.json"),
             "{vars:?}"
         );
-        assert_eq!(dirs.storage().service(), service, "{vars:?}");
+        assert_eq!(storage_of(&dirs).service(), service, "{vars:?}");
     }
 
     assert_eq!(
@@ -595,7 +594,7 @@ fn the_secure_storage_dir_moves_the_store_on_every_platform() {
         ]),
     )
     .unwrap();
-    assert_eq!(disposable.storage(), StorageDir::default_in(&home));
+    assert_eq!(storage_of(&disposable), StorageDir::default_in(&home));
 }
 
 /// Claude Code 2.1.282's config dir is `CLAUDE_CONFIG_DIR` exactly as set, NFC-normalized, else
@@ -625,14 +624,17 @@ fn the_config_dir_is_claude_config_dir_as_claude_code_reads_it() {
         let dirs = dirs(home, &env(&[("CLAUDE_CONFIG_DIR", value)])).unwrap();
         assert_eq!(dirs.config, PathBuf::from(config), "{value:?}");
         assert!(dirs.custom, "{value:?}");
-        assert_eq!(dirs.storage(), StorageDir::new(PathBuf::from(config), true));
-        assert_eq!(dirs.storage().service(), service, "{value:?}");
+        assert_eq!(
+            storage_of(&dirs),
+            StorageDir::new(PathBuf::from(config), true)
+        );
+        assert_eq!(storage_of(&dirs).service(), service, "{value:?}");
     }
 
     let default = dirs(home, &env(&[])).unwrap();
     assert_eq!(default.config, PathBuf::from("/Users/me/.claude"));
     assert!(!default.custom);
-    assert_eq!(default.storage().service(), "Claude Code-credentials");
+    assert_eq!(storage_of(&default).service(), "Claude Code-credentials");
 }
 
 /// Set but empty is still set: Claude Code would use the empty path, relative to wherever it runs,
@@ -663,7 +665,7 @@ fn a_disposable_home_keeps_the_default_dirs_whatever_the_environment_says() {
     .unwrap();
     assert_eq!(dirs.config, PathBuf::from("/Users/me/.claude"));
     assert!(!dirs.custom);
-    assert_eq!(dirs.storage(), StorageDir::default_in(home));
+    assert_eq!(storage_of(&dirs), StorageDir::default_in(home));
 }
 
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves Claude Code's storage — the credentials file, the lock
@@ -712,11 +714,11 @@ fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
         let dirs = dirs(home, &env(&vars)).unwrap();
         assert_eq!(dirs.config, PathBuf::from(config), "{vars:?}");
         assert_eq!(
-            dirs.storage().credentials_file(),
+            storage_of(&dirs).credentials_file(),
             Path::new(storage).join(".credentials.json"),
             "{vars:?}"
         );
-        assert_eq!(dirs.storage().service(), service, "{vars:?}");
+        assert_eq!(storage_of(&dirs).service(), service, "{vars:?}");
     }
 
     assert_eq!(
@@ -731,7 +733,7 @@ fn the_secure_storage_dir_moves_the_store_and_leaves_the_config_dir() {
         ]),
     )
     .unwrap();
-    assert_eq!(disposable.storage(), StorageDir::default_in(home));
+    assert_eq!(storage_of(&disposable), StorageDir::default_in(home));
 }
 
 /// A credential write is uncoordinated once any lock it relies on is taken away: the caller's own,
@@ -780,7 +782,6 @@ fn claude_codes_locks_in_its_order_and_with_its_staleness() {
         (PathBuf::from(legacy), Duration::from_secs(60)),
     ];
 
-    assert_eq!(LockScope::Refresh.paths(&dir), refresh);
     let config_file = home.join(".claude.json");
     let mut with_config = refresh.clone();
     with_config.push((home.join(".claude.json.lock"), Duration::from_secs(10)));

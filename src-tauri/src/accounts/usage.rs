@@ -425,13 +425,7 @@ fn attempt_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> Attemp
             true,
             Duration::ZERO,
         ),
-        // Not held back like a refusal: the next capture of the login this one was saved from
-        // brings its renewal, and a new login is read at once.
-        Err(SavedReadError::Expired) => AttemptOutcome::failed(
-            "This saved login has expired. Use this account once, or sign in again, to renew it.",
-            false,
-            Duration::ZERO,
-        ),
+        Err(SavedReadError::Unavailable(why)) => AttemptOutcome::failed(why, false, Duration::ZERO),
         Err(SavedReadError::Http(HttpError::RateLimited(reset))) => {
             let seconds = match reset {
                 RateLimitReset::RetryAfter(s) => *s,

@@ -139,7 +139,6 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
     drop_hidden(&mut windows);
     Reading {
         plan: main.plan_type.clone(),
-        subscription_status: None,
         windows,
         credits: credits(main.credits.as_ref()),
         workspace_credits: workspace_credits(

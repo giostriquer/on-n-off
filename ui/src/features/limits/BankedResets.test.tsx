@@ -52,39 +52,26 @@ beforeEach(() => {
 });
 
 describe("BankedResetsRow", () => {
-  const banked = (availableCount: number, nextExpiresAt: string | null, hint: string | null = null) => ({ resetCredits: { availableCount, nextExpiresAt }, hint });
+  const banked = (availableCount: number, nextExpiresAt: string | null) => ({ availableCount, nextExpiresAt });
 
   it("reads as one more row: the count, and when the next banked reset expires", () => {
-    render(<BankedResetsRow banked={banked(2, "2026-08-29T15:00:00Z")} now={NOW} />);
+    render(<BankedResetsRow resetCredits={banked(2, "2026-08-29T15:00:00Z")} now={NOW} />);
 
     expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
     expect(screen.getByText(`next expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
   });
 
   it("says a lone reset expires, not the next one", () => {
-    render(<BankedResetsRow banked={banked(1, "2026-08-29T15:00:00Z")} now={NOW} />);
+    render(<BankedResetsRow resetCredits={banked(1, "2026-08-29T15:00:00Z")} now={NOW} />);
 
     expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
   });
 
   it("drops the note when the expiry is unknown", () => {
-    render(<BankedResetsRow banked={banked(1, null)} now={NOW} />);
+    render(<BankedResetsRow resetCredits={banked(1, null)} now={NOW} />);
 
     expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
     expect(screen.queryByText(/expires/)).toBeNull();
-  });
-
-  it("adds where the reset is spent after its expiry when the card is given one", () => {
-    render(<BankedResetsRow banked={banked(1, "2026-08-29T15:00:00Z", "/limit-reset in Claude Code")} now={NOW} />);
-
-    expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
-    expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")} · /limit-reset in Claude Code`)).toBeTruthy();
-  });
-
-  it("keeps the hint as the whole note when the expiry is unknown", () => {
-    render(<BankedResetsRow banked={banked(1, null, "/limit-reset in Claude Code")} now={NOW} />);
-
-    expect(screen.getByText("/limit-reset in Claude Code")).toBeTruthy();
   });
 
   function listed(): string[] {
@@ -102,7 +89,7 @@ describe("BankedResetsRow", () => {
       ] satisfies LimitsBankedReset[],
     };
 
-    render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
+    render(<BankedResetsRow resetCredits={resetCredits} now={NOW} />);
 
     expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
     expect(listed()).toEqual([
@@ -116,7 +103,7 @@ describe("BankedResetsRow", () => {
   it("still lists a reset Codex gives neither a name nor an expiry", () => {
     const resetCredits = { availableCount: 2, nextExpiresAt: null, resets: [{}, { title: "Full reset" }] satisfies LimitsBankedReset[] };
 
-    render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
+    render(<BankedResetsRow resetCredits={resetCredits} now={NOW} />);
 
     expect(listed()).toEqual(["Banked reset", "Full reset"]);
   });
@@ -128,7 +115,7 @@ describe("BankedResetsRow", () => {
       resets: [{ title: "Full reset", expiresAt: "2026-08-29T15:00:00Z" }],
     };
 
-    render(<BankedResetsRow banked={{ resetCredits, hint: null }} now={NOW} />);
+    render(<BankedResetsRow resetCredits={resetCredits} now={NOW} />);
 
     expect(screen.queryByRole("list")).toBeNull();
     expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
@@ -136,7 +123,7 @@ describe("BankedResetsRow", () => {
 
   // Which counts are worth a row (none, or one past its soonest expiry) is `limitCards.test.ts`'s.
   it("stays out of the card when the card has no banked resets to show", () => {
-    const { container } = render(<BankedResetsRow banked={null} now={NOW} />);
+    const { container } = render(<BankedResetsRow resetCredits={null} now={NOW} />);
     expect(container.innerHTML).toBe("");
   });
 });

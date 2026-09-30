@@ -27,8 +27,8 @@ pub trait Native {
     /// Publish `login` under `guard`, read the store back while still holding it, then release it.
     ///
     /// The guard is consumed, so nothing that follows can run under the locks — `verify` above
-    /// all. Verification renews an expired Claude login, and the renewal takes the same locks: run
-    /// under them it would find them busy and fail the change, while Claude Code waited on them.
+    /// all. Verification asks the provider's own client, which takes the same locks when it renews
+    /// the login: run under them it would wait on on-n-off while on-n-off waited on it.
     fn write_locked(
         &self,
         login: Option<&Login>,
@@ -127,9 +127,9 @@ pub fn activate(
         });
     }
     let publication = native.write_locked(Some(incoming), locks);
-    // Verification refreshes whatever is on disk, so it must not run on a login a client wrote.
-    // The write read the store back before releasing the native locks, which Claude Code's own
-    // refresh honors; that narrows the window. An unreadable store counts as replaced.
+    // Verification reads whatever is on disk, so it must not run on a login a client wrote. The
+    // write read the store back before releasing the native locks, which Claude Code's own refresh
+    // honors; that narrows the window. An unreadable store counts as replaced.
     let replaced = match &publication {
         Ok(Ok(Some(live))) if live.auth == incoming.auth => None,
         Ok(Ok(_)) => Some("A running client replaced the new login."),

@@ -273,8 +273,6 @@ fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
     const SIGN_IN: &str =
         "Usage refresh needs sign-in again or renewal by the client that owns this login.";
     const OTHER: &str = "This saved login now signs in as a different account. Sign in again.";
-    const EXPIRED: &str =
-        "This saved login has expired. Use this account once, or sign in again, to renew it.";
     const RATE: &str = "Usage refresh is rate limited. The last reading is retained.";
     const UNAVAILABLE: &str = "Usage refresh is unavailable. The last reading is retained.";
     let rate = |reset| Err(HttpError::RateLimited(reset).into());
@@ -296,8 +294,8 @@ fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
             AttemptOutcome::failed(OTHER, true, Duration::ZERO),
         ),
         (
-            Err(SavedReadError::Expired),
-            AttemptOutcome::failed(EXPIRED, false, Duration::ZERO),
+            Err(SavedReadError::Unavailable("Update Claude Code.")),
+            AttemptOutcome::failed("Update Claude Code.", false, Duration::ZERO),
         ),
         (
             rate(RateLimitReset::RetryAfter(30)),
@@ -353,11 +351,6 @@ fn a_poll_that_read_nothing_says_why() {
             SavedReadError::OtherAccount,
             "This saved login now signs in as a different account. Sign in again.",
             true,
-        ),
-        (
-            SavedReadError::Expired,
-            "This saved login has expired. Use this account once, or sign in again, to renew it.",
-            false,
         ),
         (
             HttpError::RateLimited(RateLimitReset::RetryAfter(30)).into(),

@@ -6,20 +6,18 @@
 //! read, the write and its verification, and an isolated sign-in. Where the login lives and how it
 //! is locked is `claude_store`'s question; this adapter asks it.
 use super::{
-    claude_renew,
     claude_store::{
         self, BeginError, ClaudeLocks, KeychainProbe, LockError, LockScope, SecureStorage,
         StorageDir, StoreError, Stored,
     },
     clients::Client,
-    model::{self, AccessToken, Identity, LoginView},
+    model::{self, Identity, LoginView},
     native::{self, CUSTOM_HOME},
     store::Login,
     transaction::{Native, NativeGuard, ReadBack},
     Home, IsolatedSignIn, NativeAccount,
 };
 use crate::dto::{AgentId, ProviderLimitsDto};
-use crate::limits::credentials::{parse_claude_credential, ClaudeCredential, CredentialLookup};
 use serde_json::{json, Value};
 use std::{
     ffi::OsString,
@@ -46,8 +44,8 @@ impl super::Adapter for Claude {
         Box::new(ClaudeLogin::of(login))
     }
 
-    fn token_url(&self) -> &'static str {
-        claude_renew::TOKEN_URL
+    fn token_url(&self) -> Option<&'static str> {
+        None
     }
 
     /// Never sent: a saved Claude login waits in its home, where Claude Code renews it.
@@ -59,23 +57,18 @@ impl super::Adapter for Claude {
         Some(|dir| Box::new(home::ClaudeHome::at(dir)))
     }
 
+    /// Never sent: a saved Claude login is read only in its home, by Claude Code. One still in the
+    /// vault is one the last read could not move there, and the next read tries again.
     fn read_usage(
         &self,
-        identity: &Identity,
-        login: &Login,
-        now_ms: i64,
-        urls: &crate::limits::SavedReadUrls<'_>,
+        _: &Identity,
+        _: &Login,
+        _: i64,
+        _: &crate::limits::SavedReadUrls<'_>,
     ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
-        let login = ClaudeLogin::of(login);
-        let credential = login
-            .credential()
-            .ok_or(crate::http::HttpError::Unauthorized)?;
-        // Not sent, as the signed-in read does not send an expired login, and on-n-off renews no
-        // saved Claude login.
-        if login.renewal_due(now_ms) {
-            return Err(crate::limits::SavedReadError::Expired);
-        }
-        crate::limits::read_saved_claude(identity, credential, urls)
+        Err(crate::limits::SavedReadError::Unavailable(
+            "This account's login has not moved into its home yet; the next read tries again.",
+        ))
     }
 
     /// Claude Code handles a native credential change itself, so its clients refuse no switch.
@@ -126,6 +119,35 @@ pub(super) struct ClaudeNative {
     /// A saved account's home, whose login on-n-off files in the home's own Keychain entry on
     /// macOS.
     in_home: bool,
+    /// An isolated sign-in's store or a saved account's home, never the user's own, custom or not.
+    private: bool,
+}
+
+/// The user's own Claude Code store, as the signed-in account's usage read uses it: a `claude`
+/// that works in it and the file naming its account.
+pub(crate) struct SignedIn(ClaudeNative);
+
+impl SignedIn {
+    /// The user's store under `home`, as this process's environment places it.
+    pub(crate) fn resolve(home: &Path) -> Result<Self, String> {
+        ClaudeNative::resolve(home).map(Self)
+    }
+
+    /// A `claude` for this store, working in its config dir, or in the temporary dir while Claude
+    /// Code has not made that one yet: a `claude` asked to work in a dir that is not there does
+    /// not start at all.
+    pub(crate) fn command(&self) -> Command {
+        let mut command = self.0.command();
+        if !self.0.config_home.is_dir() {
+            command.current_dir(std::env::temp_dir());
+        }
+        command
+    }
+
+    /// The file holding the signed-in account record, `oauthAccount`.
+    pub(crate) fn config_file(&self) -> &Path {
+        &self.0.config_file
+    }
 }
 
 /// What one write to Claude's store changes.
@@ -157,6 +179,7 @@ impl ClaudeNative {
             use_keychain: !disposable,
             secure_storage: dirs.secure_storage,
             in_home: false,
+            private: false,
         })
     }
 
@@ -188,6 +211,7 @@ impl ClaudeNative {
             use_keychain: true,
             secure_storage: None,
             in_home: false,
+            private: true,
         }
     }
 
@@ -261,10 +285,11 @@ impl ClaudeNative {
             command.env("CLAUDE_CONFIG_DIR", &self.config_home);
             // macOS locates the login Keychain through HOME. Redirect only Claude's config
             // for real isolated sign-ins; file-backed fixtures still need a disposable OS home.
+            // The user's own config dir, custom or not, keeps the user's own OS home.
             if let Some(home) = self
                 .config_home
                 .parent()
-                .filter(|_| !cfg!(target_os = "macos") || !self.use_keychain)
+                .filter(|_| !self.use_keychain || (self.private && !cfg!(target_os = "macos")))
             {
                 command.env("HOME", home);
                 command.env("USERPROFILE", home);
@@ -287,50 +312,6 @@ impl ClaudeNative {
         let mut command = self.command();
         command.args(["auth", "logout"]);
         command
-    }
-
-    /// `verify` against the profile endpoint at `profile_url`.
-    fn verify_at(&self, profile_url: &str) -> Result<(), String> {
-        if !self.custom {
-            let probe = |_: &StorageDir| self.keychain();
-            let lookup = claude_renew::current_login(
-                &self.storage_dir(),
-                &probe,
-                chrono::Utc::now().timestamp_millis(),
-                claude_renew::TOKEN_URL,
-            );
-            if !matches!(lookup, CredentialLookup::Found(_)) {
-                return Err(
-                    "Could not renew the native Claude login. Sign in again if it has expired."
-                        .into(),
-                );
-            }
-        }
-        let login = self.read()?.ok_or("No native login was found.")?;
-        let identity = self.identify(&login)?;
-        let authorization = ClaudeLogin::of(&login).access_token()?.authorization();
-        let profile =
-            crate::http::get_json(profile_url, &crate::limits::claude_headers(&authorization))
-                .map_err(|_| {
-                    "Could not verify the Claude login. Check connectivity or sign in again."
-                })?;
-        if profile.pointer("/account/uuid").and_then(Value::as_str) != Some(&identity.user_id)
-            || profile
-                .pointer("/organization/uuid")
-                .and_then(Value::as_str)
-                != Some(&identity.workspace_id)
-        {
-            return Err("Claude credential and organization identity disagree.".into());
-        }
-        let current = self
-            .read()?
-            .ok_or("Native login disappeared during verification.")?;
-        if self.identify(&current)? != identity || current.auth != login.auth {
-            return Err(
-                "Native login changed during verification. Retry the account operation.".into(),
-            );
-        }
-        Ok(())
     }
 
     /// The write itself, under `locks`: Claude's login merged into the store Claude Code reads,
@@ -428,7 +409,8 @@ impl Native for ClaudeNative {
             .get("oauthAccount")
             .cloned()
             .unwrap_or(Value::Null);
-        if ClaudeLogin::credential_in(&auth).is_none() {
+        // Claude Code signs out by emptying `claudeAiOauth` of its access token.
+        if model::string(&auth, "/claudeAiOauth/accessToken").is_err() {
             return Ok(None);
         }
         Ok(Some(Login {
@@ -456,8 +438,33 @@ impl Native for ClaudeNative {
         Ok(back)
     }
 
+    /// Claude Code, asked what it has stored, must say it is signed in to the organization the
+    /// login's account names, as its email, and the login must be the same once it has answered.
+    /// Nothing is sent to Anthropic: a login it refuses shows at the next usage read.
     fn verify(&self) -> Result<(), String> {
-        self.verify_at(crate::limits::CLAUDE.profile)
+        let login = self.read()?.ok_or("No native login was found.")?;
+        let identity = self.identify(&login)?;
+        let status = crate::limits::claude_cli::auth_status(&|| self.command())
+            .ok_or("Claude Code could not say which account it is signed in to.")?;
+        if status.get("loggedIn").and_then(Value::as_bool) != Some(true) {
+            return Err("Claude Code does not report the login as signed in.".into());
+        }
+        if status.get("orgId").and_then(Value::as_str) != Some(identity.workspace_id.as_str()) {
+            return Err("Claude credential and organization identity disagree.".into());
+        }
+        let email = ClaudeLogin::of(&login).email();
+        if email.is_some() && status.get("email").and_then(Value::as_str) != email.as_deref() {
+            return Err("Claude credential and account identity disagree.".into());
+        }
+        let current = self
+            .read()?
+            .ok_or("Native login disappeared during verification.")?;
+        if self.identify(&current)? != identity || current.auth != login.auth {
+            return Err(
+                "Native login changed during verification. Retry the account operation.".into(),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -519,23 +526,6 @@ impl<'a> ClaudeLogin<'a> {
             auth: &login.auth,
             account: &login.account,
         }
-    }
-
-    /// What Limits reads with: the access token, its expiry and the plan. `None` for a login Claude
-    /// Code has signed out of, which empties `claudeAiOauth` of its access token.
-    pub(crate) fn credential(&self) -> Option<ClaudeCredential> {
-        Self::credential_in(self.auth)
-    }
-
-    /// The credential in a Claude credentials document, `auth`, which holds no account record, as
-    /// the store holds it.
-    pub(crate) fn credential_in(auth: &Value) -> Option<ClaudeCredential> {
-        parse_claude_credential(auth)
-    }
-
-    /// The access token, for one request header.
-    fn access_token(&self) -> Result<AccessToken, String> {
-        model::string(self.auth, "/claudeAiOauth/accessToken").map(AccessToken::new)
     }
 }
 

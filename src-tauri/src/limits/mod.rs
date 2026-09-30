@@ -1,9 +1,8 @@
 //! Subscription rate limits aggregated per account from provider-owned clients/endpoints,
-//! remembered snapshots, and account-correlated local observations. Claude's stored login is read by
-//! its reader (`claude.rs`) and renewed in one place only,
-//! [`claude_renew`](crate::accounts::claude_renew), when its access token has expired and can still
-//! renew itself; Codex owns its authentication and refresh lifecycle through app-server, which its
-//! reader (`codex.rs`) asks.
+//! remembered snapshots, and account-correlated local observations. Claude Code reports every Claude
+//! account's usage itself (`claude_cli.rs`), renewing its own login as it does, and on-n-off reads
+//! no Claude credential here; Codex owns its authentication and refresh lifecycle through
+//! app-server, which its reader (`codex.rs`) asks.
 //!
 //! `read_limits` never fails for provider-side reasons; every outcome is a `ProviderLimitsDto`
 //! whose `status` + `message` tell the UI what to show. Because each CLI stores one login at a
@@ -13,10 +12,10 @@
 mod backend_memo;
 mod claude;
 pub(crate) mod claude_cli;
+mod claude_config;
 mod codex;
 mod codex_app_server;
 mod codex_sessions;
-pub(crate) mod credentials;
 pub(crate) mod credits_spent;
 pub(crate) mod json;
 pub(crate) mod login;
@@ -25,7 +24,6 @@ mod reading;
 mod renewal;
 mod snapshots;
 
-pub(crate) use claude::{claude_headers, read_saved_claude, ClaudeEndpoints, CLAUDE};
 #[cfg(test)]
 pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
@@ -39,15 +37,11 @@ use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 
-use crate::accounts::claude_store::{KeychainProbe, StorageDir};
 use crate::accounts::model::Identity;
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
 use crate::paths;
-use claude::ClaudeSources;
 use pipeline::finish;
-#[cfg(test)]
-use pipeline::resolve;
 use snapshots::SnapshotStore;
 
 /// Account id used when the CLI stores no identity; keeps single-account behaviour intact.
@@ -105,17 +99,16 @@ pub(crate) fn signed_in_card(
     )
 }
 
-/// Everything `read_limits` needs that tests replace: where the homes and snapshots live, the clock,
-/// and what the Claude read needs.
-struct Sources<'a, P: Fn(&StorageDir) -> KeychainProbe> {
+/// Everything `read_limits` needs that tests replace: where the homes and snapshots live, and the
+/// clock.
+struct Sources<'a> {
     home: &'a Path,
     now_ms: i64,
-    claude: ClaudeSources<'a, P>,
 }
 
 /// Current subscription limits for one provider, followed by remembered observations for its other
-/// accounts. Blocking: runs a Keychain probe and HTTPS requests for Claude or a bounded Codex
-/// app-server process; call it off the UI thread. `force` requests fresh provider authentication.
+/// accounts. Blocking: runs Claude Code's usage report for Claude or a bounded Codex app-server
+/// process; call it off the UI thread. `force` requests fresh Codex authentication.
 pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
     let home = match paths::user_home() {
         Ok(home) => home,
@@ -134,8 +127,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
     read_limits_at(agent, force, &home)
 }
 
-/// [`read_limits`] under `home`, with the live Claude login memo, Keychain probe, endpoints and
-/// clock.
+/// [`read_limits`] under `home`, with the live clock.
 fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> Vec<ProviderLimitsDto> {
     read_limits_in(
         agent,
@@ -143,7 +135,6 @@ fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> Vec<ProviderLimit
         Sources {
             home,
             now_ms: Utc::now().timestamp_millis(),
-            claude: ClaudeSources::live(),
         },
     )
 }
@@ -162,11 +153,7 @@ pub fn forget_snapshot(
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
-fn read_limits_in<P: Fn(&StorageDir) -> KeychainProbe>(
-    agent: AgentId,
-    force: bool,
-    sources: Sources<'_, P>,
-) -> Vec<ProviderLimitsDto> {
+fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<ProviderLimitsDto> {
     let _provider_guard = match agent {
         AgentId::Claude | AgentId::Codex => Some(provider_read_guard(agent)),
         AgentId::Antigravity | AgentId::Cursor => None,
@@ -175,7 +162,7 @@ fn read_limits_in<P: Fn(&StorageDir) -> KeychainProbe>(
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
     let current = match agent {
-        AgentId::Claude => claude::claude_current(force, sources),
+        AgentId::Claude => claude::claude_current(home),
         AgentId::Codex => codex::codex_limits(home, force),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
@@ -344,9 +331,9 @@ pub(crate) enum SavedReadError {
     Http(HttpError),
     /// The login now signs in as a different account than the profile's.
     OtherAccount,
-    /// The login's access token has expired, and on-n-off does not renew this login: the client
-    /// it was saved from does, and the next time that login is captured its renewal comes along.
-    Expired,
+    /// No reading could be had, for the reason the card shows as it is: the provider's client could
+    /// not report or reported nothing, needs an update, or the login has not reached its home yet.
+    Unavailable(&'static str),
 }
 
 impl From<HttpError> for SavedReadError {
@@ -355,18 +342,16 @@ impl From<HttpError> for SavedReadError {
     }
 }
 
-/// Where a saved profile's read asks, for either provider: [`SavedReadUrls::LIVE`] in the app,
-/// loopback servers in tests.
+/// Where a saved profile's read asks: [`SavedReadUrls::LIVE`] in the app, loopback servers in
+/// tests. Only Codex's is sent over HTTP; Claude Code reads a saved Claude account itself.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SavedReadUrls<'a> {
-    pub(crate) claude: ClaudeEndpoints<'a>,
     pub(crate) codex: CodexEndpoints<'a>,
 }
 
 impl SavedReadUrls<'static> {
     /// The services a saved read asks in the app.
     pub(crate) const LIVE: Self = Self {
-        claude: CLAUDE,
         codex: codex::CODEX,
     };
 }
@@ -402,10 +387,6 @@ fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDt
             identity.user_id.clone()
         }),
     }
-}
-
-pub(crate) fn clear_login_memo() {
-    credentials::CLAUDE_LOGIN.clear();
 }
 
 #[cfg(test)]

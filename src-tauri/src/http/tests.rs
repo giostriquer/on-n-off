@@ -353,8 +353,6 @@ fn post_grant_sends_the_body_without_an_authorization_header() {
     );
 }
 
-/// The distinctions the Claude renewal decides on: 400 means the grant itself was refused and the
-/// user has to sign in again, anything else means try later.
 #[test]
 fn post_grant_keeps_a_refused_grant_apart_from_a_transport_failure() {
     let (url, request) =
@@ -393,8 +391,6 @@ fn post_grant_keeps_a_refused_grant_apart_from_a_transport_failure() {
     ));
 }
 
-/// A 2xx whose body is not JSON. The renewal reads that as the token having been rotated behind a
-/// reply it could not parse, so the taxonomy has to keep it out of the retryable bucket.
 #[test]
 fn post_grant_reports_an_unreadable_success_as_a_parse_failure() {
     let (url, request) = serve_once_capturing("200 OK", &[], "<html>gateway</html>");

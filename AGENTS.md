@@ -123,13 +123,14 @@ user data.
   exception is a saved Claude account's home on Windows, whose login is the `.credentials.json`
   Claude Code keeps any login in there (`accounts/homes.rs`); on macOS it is the home's own
   Keychain entry. The active native login remains authoritative. Saved native shadows never
-  refresh independently; a saved Claude login waits in its home, where Claude Code renews it, and
-  on-n-off sends no grant for it. Never-activated isolated Codex sign-ins can renew
+  refresh independently; a saved Claude login waits in its home, where Claude Code renews it.
+  Never-activated isolated Codex sign-ins can renew
   in the encrypted vault under the saved-account renewal journal. Switching
   captures the latest outgoing native credential before replacement; logout is a separate action
-  that can revoke it. Claude grants live only in `accounts/claude_renew.rs`, and only the
-  signed-in login's is ever sent. Native renewal runs after expiry under
-  native refresh locks; private saved renewal requires recorded ownership and its encrypted journal. Account identity
+  that can revoke it. on-n-off sends no Claude grant and no Claude token at all: Claude Code
+  renews every Claude login itself, and every Claude usage read is Claude Code's own
+  `claude -p /usage --safe-mode` (`limits/claude_cli.rs`). Native Codex renewal is app-server's;
+  private saved renewal requires recorded ownership and its encrypted journal. Account identity
   configuration writes still go through `ConfigIo`, with the protected account journal as their
   backup participant. See [account ownership](docs/architecture/accounts.md).
   `github/` never writes to GitHub; `usage/` and `side_notch/` remain read-only.
@@ -195,7 +196,7 @@ user data.
   directory a plain `mod tests;` resolves against, so it pins
   `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
-  `http::{serve_once, serve_once_capturing, serve_once_observing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
+  `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
   `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::sources` counters,
   `github/fixtures.rs`. Single-consumer helpers stay in that module's
   own tests file; adapter test constructors stay in the adapter files, because `item_install`
@@ -272,8 +273,10 @@ create.
   after.
 - Smoke Overview, Plugins, Skills, MCP, Usage, Limits, Pull requests, Agent Config, Settings,
   search/filtering, and every provider switch — without mutating live configuration. Note that
-  Limits makes outbound HTTPS calls, starts `codex app-server`, and on macOS triggers a one-time
-  Keychain prompt for `/usr/bin/security`; Pull requests runs `gh auth token` once and calls
+  Limits runs `claude -p /usage --safe-mode` and `codex app-server` and makes outbound HTTPS calls
+  for Codex; on-n-off itself sends nothing to Anthropic. On macOS the account controls on Limits
+  read Claude Code's Keychain item through `/usr/bin/security`, which can prompt once, though the
+  Claude usage read opens no credential; Pull requests runs `gh auth token` once and calls
   `api.github.com` on every refresh.
 - Verify the window stays interactive while startup work is still running.
 - Stop every dev-server, app and debugger process when QA finishes.

@@ -266,7 +266,7 @@ function AccountCard({
       ) : null}
 
       <CreditsRows figures={figures} provider={provider} now={now} />
-      <BankedResetsRow banked={figures.bankedResets} now={now} />
+      <BankedResetsRow resetCredits={figures.bankedResets} now={now} />
       <ResetOfferRow offer={figures.paidOffer} />
   </>;
   return (

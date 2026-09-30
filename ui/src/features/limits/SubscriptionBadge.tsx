@@ -2,7 +2,6 @@ import { TooltipButton } from "$lib/TooltipButton";
 import { useCodexSubscription } from "$lib/useCodexSubscription";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { LimitsSubscription } from "$lib/limitsTypes";
-import { claudeSubscriptionStatus } from "./claudeSubscriptionStatus";
 import { codexSubscriptionTerm } from "./codexSubscriptionTerm";
 import type { CardSubscription } from "./limitCards";
 import "./SubscriptionBadge.css";
@@ -30,36 +29,10 @@ export function CodexSubscriptionBadge({accountId, current, term, now}: {account
 }
 
 /**
- * Claude's own subscription status beside the plan, when it is anything but active. It carries no
- * dates: the OAuth token on-n-off holds is not given a renewal or expiry date (see PROVIDERS.md).
- */
-export function ClaudeSubscriptionStatusBadge({ status, lastKnown, checkedAt }: {
-  status: string | null | undefined; lastKnown: boolean; checkedAt: string | null;
-}) {
-  const badge = claudeSubscriptionStatus(status);
-  if (!badge) return null;
-  const tooltip = <>
-    <div>Claude reports this subscription as {status?.trim()}</div>
-    {lastKnown && <div>Last known subscription status.</div>}
-    {checkedAt && <div className="mt-1 text-[11px] text-[var(--mute)]">Checked {checkedAt}</div>}
-  </>;
-  return <TooltipButton label={`Subscription status: ${badge.label}`} tooltip={tooltip}
-    className={`type-badge subscription-badge subscription-badge--${badge.tone}`}>
-    <span className="relative">{badge.label}</span>
-  </TooltipButton>;
-}
-
-/**
- * The subscription badge a card's header shows, whichever provider it is: Codex's paid-through
- * date, or Claude's status, from what the card model gathered for it (`CardSubscription`). Claude's
- * says what the card says about how current it is.
+ * The subscription badge a card's header shows: Codex's paid-through date, from what the card model
+ * gathered for it (`CardSubscription`). Claude reports no subscription term, so its cards have none.
  */
 export function AccountSubscriptionBadge({ subscription, now }: { subscription: CardSubscription | null; now: number }) {
-  if (subscription?.provider === "codex") {
-    return <CodexSubscriptionBadge accountId={subscription.accountId} current={subscription.current} term={subscription.term} now={now} />;
-  }
-  if (subscription?.provider === "claude") {
-    return <ClaudeSubscriptionStatusBadge status={subscription.status} lastKnown={subscription.lastKnown} checkedAt={subscription.checkedAt} />;
-  }
-  return null;
+  if (!subscription) return null;
+  return <CodexSubscriptionBadge accountId={subscription.accountId} current={subscription.current} term={subscription.term} now={now} />;
 }

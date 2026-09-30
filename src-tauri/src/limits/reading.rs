@@ -11,7 +11,7 @@
 //!   card that misses it keeps the last one read rather than lead with its session. An answer
 //!   that reports no windows at all keeps none. A failed read keeps its own with the remembered
 //!   ones merged in by id, the newer observation of each winning.
-//! - **Plan, subscription status, credits, workspace credits**: an answer's own, absent included.
+//! - **Plan, credits, workspace credits**: an answer's own, absent included.
 //!   A failed read keeps its own, else the remembered ones.
 //! - **Credits spent, subscription term**: fetched beside the usage read, which may not have been
 //!   able to tell them, so an answer keeps the remembered one where it has none and the card is
@@ -84,7 +84,6 @@ impl Reading {
         };
         let Self {
             plan,
-            subscription_status,
             windows,
             credits,
             workspace_credits,
@@ -95,7 +94,6 @@ impl Reading {
         } = self;
         let Self {
             plan: remembered_plan,
-            subscription_status: remembered_status,
             windows: remembered_windows,
             credits: remembered_credits,
             workspace_credits: remembered_share,
@@ -106,7 +104,6 @@ impl Reading {
         } = remembered;
         Self {
             plan: kept(plan, remembered_plan, failed),
-            subscription_status: kept(subscription_status, remembered_status, failed),
             windows: if failed {
                 merged(windows, remembered_windows)
             } else {

@@ -15,6 +15,7 @@ fn claude(root: &Path) -> ClaudeNative {
         use_keychain: false,
         secure_storage: None,
         in_home: false,
+        private: false,
     }
 }
 /// An environment holding exactly `vars`, for `resolve_from`.

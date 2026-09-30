@@ -129,7 +129,7 @@ fn claude_code_is_asked_for_its_usage_report_and_nothing_else() {
     let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
     assert_eq!(
         args.trim(),
-        "-p /usage --no-session-persistence --output-format stream-json --verbose"
+        "-p /usage --no-session-persistence --safe-mode --output-format stream-json --verbose"
     );
 }
 
@@ -222,7 +222,9 @@ fn output_without_a_usage_report_reads_as_no_card() {
 
     assert!(matches!(
         read(&dir, &cli),
-        Err(SavedReadError::Http(HttpError::Parse(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code reported no usage."
+        ))
     ));
 }
 
@@ -233,7 +235,9 @@ fn a_report_of_windows_it_cannot_read_reads_as_no_card() {
 
     assert!(matches!(
         read(&dir, &cli),
-        Err(SavedReadError::Http(HttpError::Parse(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code reported no usage."
+        ))
     ));
 }
 
@@ -247,8 +251,51 @@ fn claude_code_failing_reads_as_unavailable_not_as_a_refused_login() {
 
     assert!(matches!(
         read(&dir, &cli),
-        Err(SavedReadError::Http(HttpError::Network(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code could not report usage."
+        ))
     ));
+}
+
+#[test]
+fn a_claude_code_too_old_to_leave_customizations_out_says_to_update_it() {
+    let (dir, cli) = home(
+        &config("user", "team"),
+        REPORT,
+        CliStub::new("claude")
+            .log_args("args.txt", true)
+            .stderr("error: unknown option --safe-mode")
+            .exit(1),
+    );
+
+    assert_eq!(
+        read(&dir, &cli).unwrap_err(),
+        SavedReadError::Unavailable(OUTDATED)
+    );
+    // Asked once, with the flag, and never again without it.
+    let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+    let runs: Vec<&str> = args.lines().collect();
+    assert_eq!(runs.len(), 1, "{args}");
+    assert!(runs[0].contains("--safe-mode"), "{args}");
+}
+
+#[test]
+fn a_claude_code_that_is_not_installed_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".claude.json"), config("user", "team")).unwrap();
+    let missing = dir.path().join("no-such-claude");
+
+    let result = read_usage_within(
+        &|| std::process::Command::new(&missing),
+        &dir.path().join(".claude.json"),
+        &identity(),
+        ANSWER,
+    );
+
+    assert_eq!(
+        result.unwrap_err(),
+        SavedReadError::Unavailable("Claude Code is not installed.")
+    );
 }
 
 #[test]
@@ -269,7 +316,9 @@ fn claude_code_that_does_not_answer_in_time_reads_as_unavailable() {
 
     assert!(matches!(
         result,
-        Err(SavedReadError::Http(HttpError::Network(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code could not report usage."
+        ))
     ));
     assert!(
         started.elapsed() < Duration::from_secs(4),
@@ -337,7 +386,9 @@ fn no_report_from_a_config_dir_still_signed_in_reads_as_unavailable() {
 
     assert!(matches!(
         result,
-        Err(SavedReadError::Http(HttpError::Parse(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code reported no usage."
+        ))
     ));
 }
 
@@ -359,6 +410,10 @@ fn no_report_and_a_status_claude_code_cannot_give_reads_as_unavailable() {
 
     assert!(matches!(
         result,
-        Err(SavedReadError::Http(HttpError::Parse(_)))
+        Err(SavedReadError::Unavailable(
+            "Claude Code reported no usage."
+        ))
     ));
 }
+
+mod signed_in;
