@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::fs;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::cli_locate::{
     cli_search_path, login_shell_path_dirs, registered_path_dirs, resolve_provider_cli,
@@ -143,10 +146,88 @@ pub struct ProviderDiagnose {
 }
 
 pub fn parse_settings(json: Option<&str>) -> AppSettings {
-    let Some(text) = json else {
+    let Some(value) = json.and_then(|text| serde_json::from_str::<Value>(text).ok()) else {
         return AppSettings::default();
     };
-    normalize_settings(serde_json::from_str(text).unwrap_or_default())
+    normalize_settings(read_settings(&value))
+}
+
+/// Settings read from a document one field at a time. A hand-edited file can hold a value the app
+/// cannot read, such as a number beyond its type or a provider it does not know: that value, or
+/// that entry of a list or map, takes its default, and every other setting is kept.
+fn read_settings(document: &Value) -> AppSettings {
+    let defaults = AppSettings::default();
+    let Some(document) = document.as_object() else {
+        return defaults;
+    };
+    let field = |key: &str| document.get(key);
+    AppSettings {
+        hidden_agents: items(field("hiddenAgents")),
+        binary_paths: entries(field("binaryPaths"), read),
+        automatic_updates: read(field("automaticUpdates")).unwrap_or(defaults.automatic_updates),
+        limit_notifications: read(field("limitNotifications"))
+            .unwrap_or(defaults.limit_notifications),
+        limits_poll_minutes: read(field("limitsPollMinutes"))
+            .unwrap_or(defaults.limits_poll_minutes),
+        github_scopes: items(field("githubScopes")),
+        github_notifications: read(field("githubNotifications"))
+            .unwrap_or(defaults.github_notifications),
+        github_poll_seconds: read(field("githubPollSeconds"))
+            .unwrap_or(defaults.github_poll_seconds),
+        close_to_tray: read(field("closeToTray")).unwrap_or(defaults.close_to_tray),
+        reset_alerts: entries(field("resetAlerts"), |alert| read_reset_alert(alert?)),
+    }
+}
+
+/// One banked reset alert. Its figures are whole numbers held within their type, so one beyond it
+/// still reaches the alert's own rule in [`normalize_settings`]; an entry that is not an object is
+/// no alert.
+fn read_reset_alert(alert: &Value) -> Option<ResetAlert> {
+    let alert = alert.as_object()?;
+    let figure = |key: &str| {
+        alert
+            .get(key)
+            .and_then(Value::as_f64)
+            .filter(|number| number.is_finite())
+            .map(|number| number.round().clamp(0.0, f64::from(u16::MAX)) as u16)
+    };
+    Some(ResetAlert {
+        label: read(alert.get("label")),
+        max_left_percent: figure("maxLeftPercent").map_or_else(reset_max_left_default, |percent| {
+            u8::try_from(percent).unwrap_or(u8::MAX)
+        }),
+        min_hours_to_renewal: figure("minHoursToRenewal").unwrap_or_else(reset_min_hours_default),
+    })
+}
+
+fn read<T: DeserializeOwned>(value: Option<&Value>) -> Option<T> {
+    value.and_then(|value| T::deserialize(value).ok())
+}
+
+/// The items of a list that can be read, in order.
+fn items<T: DeserializeOwned>(list: Option<&Value>) -> Vec<T> {
+    list.and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(|item| read(Some(item))).collect())
+        .unwrap_or_default()
+}
+
+/// The entries of a map whose key and value can both be read.
+fn entries<K: DeserializeOwned + Eq + Hash, V>(
+    map: Option<&Value>,
+    read_value: impl Fn(Option<&Value>) -> Option<V>,
+) -> HashMap<K, V> {
+    map.and_then(Value::as_object)
+        .map(|map| {
+            map.iter()
+                .filter_map(|(key, value)| {
+                    Some((
+                        read(Some(&Value::String(key.clone())))?,
+                        read_value(Some(value))?,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub fn load_settings() -> AppSettings {
