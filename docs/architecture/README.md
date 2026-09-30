@@ -161,13 +161,22 @@ provider's own client:
   spend a second reset.
 
   A **banked reset alert** (`settings::ResetAlert`, turned on from a Codex card's menu and listed in
-  Settings) only notifies. `limits_monitor` polls while any alert is on, reading Codex alone when
-  limit notifications are off (`watched_providers`), and `limits_monitor/reset_alerts.rs` offers
-  the reset when two polls in a row, each a newer reading of the signed-in account in the same
-  weekly cycle, find it at the alert's share or below, with its weekly window at least the alert's
-  hours from renewing and a banked reset that has not lapsed. It offers once per weekly cycle,
-  which a spent reset starts anew, and keeps its state in the monitor's own file. on-n-off never
-  spends a reset by itself.
+  Settings) notifies, or uses the reset automatically. `limits_monitor` polls while any alert is on,
+  reading Codex alone when limit notifications are off (`watched_providers`), and
+  `limits_monitor/reset_alerts.rs` offers the reset when two polls in a row, each a newer reading of
+  the signed-in account in the same weekly cycle, find it at the alert's share or below, with its
+  weekly window at least the alert's hours from renewing and a banked reset that has not lapsed. It
+  offers once per weekly cycle, which a spent reset starts anew, and keeps its state in the
+  monitor's own file. An automatic alert's offer (`limits_monitor/auto_spend.rs`) is a notification
+  that the reset will be used in ten minutes, scheduled only once the offer is saved. The monitor
+  wakes then, reads Codex afresh, and spends it through the same
+  `limits_refresh::consume_codex_reset_credit` a click uses only if that read still finds the
+  signed-in account low in the same cycle; a read that fails leaves it waiting, and one found more
+  than fifteen minutes late, as after sleep, is kept. It says what came of it either way. Until
+  then the account's card shows the waiting spend with a Cancel (`pending_reset_spends`,
+  `cancel_reset_spend`, announced as the `limits:reset-spends` shared read), and a reset used by
+  hand clears it. A waiting spend lives in memory only, apart from the monitor's saved state, so
+  quitting on-n-off cancels it, and a spend that fails is not tried again.
 
 Saved profiles are read beside the signed-in account (`accounts/usage.rs`). A saved Claude account
 is read in its home ([accounts.md](accounts.md#homes)) by the same Claude Code report, expecting the
@@ -354,7 +363,7 @@ the code today; a change that moves one updates its row.
 | Account details | `plan` on `Reading`; a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when it is neither `currentAccount` nor `savedProfile` (`presentLimitAccount`, `ui/src/features/limits/limitPresentation.ts`), and an archived one is listed apart |
 | Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list`; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
-| Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id (`settings.rs`); offered by `limits_monitor/reset_alerts.rs`; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the spend rule both sides keep is `settings::reset_spend_limit` and `resetSpendLimit` (`ui/src/lib/appSettings.ts`) |
+| Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id (`settings.rs`); offered by `limits_monitor/reset_alerts.rs`, and spent by `limits_monitor/auto_spend.rs` when `automatic`; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the spend rule both sides keep is `settings::reset_spend_limit` and `resetSpendLimit` (`ui/src/lib/appSettings.ts`) |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects) |
 | Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs`: a Claude profile's in its home by Claude Code's own report (`Home::read_usage`, `read_usage` in `limits/claude_cli.rs`), a Codex profile's through Codex's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`), and its card carries `saved_profile` |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |

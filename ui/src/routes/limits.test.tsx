@@ -25,7 +25,7 @@ vi.mock("@/features/limits/Limits", () => ({
   },
 }));
 
-const alert: ResetAlert = { label: "you@example.com", maxLeftPercent: 5, minHoursToRenewal: 48 };
+const alert: ResetAlert = { label: "you@example.com", maxLeftPercent: 5, minHoursToRenewal: 48, automatic: false };
 
 function onResetAlertsChange() {
   render(<LimitsRoute />);

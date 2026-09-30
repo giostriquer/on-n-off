@@ -6,6 +6,8 @@ import { CodexAccountActions } from "./CodexAccountActions";
 
 const api = vi.hoisted(() => ({
   consumeCodexResetCredit: vi.fn(),
+  pendingResetSpends: vi.fn().mockResolvedValue([]),
+  cancelResetSpend: vi.fn(),
   readCodexSubscription: vi.fn(),
   onSharedReadChanged: vi.fn(() => Promise.resolve(() => undefined)),
 }));
@@ -45,6 +47,13 @@ describe("CodexAccountActions", () => {
     renderActions({ current: true, blocked: false, unconfirmedCurrent: true });
 
     expect(screen.getByRole("button", { name: "Use banked reset" })).toHaveProperty("disabled", true);
+  });
+
+  it("puts the Cancel of a waiting automatic reset on the card of the account it is for", async () => {
+    api.pendingResetSpends.mockResolvedValueOnce([{ accountId: "acct-work", dueAt: "2026-08-17T20:08:00Z" }]);
+    renderActions({ current: true, blocked: false, unconfirmedCurrent: false });
+
+    expect(await screen.findByRole("button", { name: "Cancel the automatic banked reset" })).toBeTruthy();
   });
 
   it("blocks the banked reset while the account controls cannot act", async () => {

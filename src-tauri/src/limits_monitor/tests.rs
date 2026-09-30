@@ -510,6 +510,7 @@ fn the_monitor_reads_only_what_its_settings_watch() {
         label: None,
         max_left_percent: 10,
         min_hours_to_renewal: 24,
+        automatic: false,
     };
     let settings = |limit_notifications: bool, alerts: bool| crate::settings::AppSettings {
         limit_notifications,
@@ -565,6 +566,7 @@ fn alerts_only() -> crate::settings::AppSettings {
                 label: None,
                 max_left_percent: 10,
                 min_hours_to_renewal: 24,
+                automatic: false,
             },
         )]),
         ..crate::settings::AppSettings::default()
@@ -581,13 +583,13 @@ fn an_alert_offers_its_reset_while_limit_notifications_stay_quiet() {
     let mut state = MonitorState::default();
     let settings = alerts_only();
 
-    let first = observe_poll(
+    let first = notices_of(
         &mut state,
         &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
         &settings,
         now,
     );
-    let second = observe_poll(
+    let second = notices_of(
         &mut state,
         &[codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
         &settings,
@@ -617,13 +619,13 @@ fn with_limit_notifications_on_the_limit_is_notified_too() {
         ..alerts_only()
     };
 
-    observe_poll(
+    notices_of(
         &mut state,
         &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
         &settings,
         now,
     );
-    let notices = observe_poll(
+    let notices = notices_of(
         &mut state,
         &[codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
         &settings,
@@ -649,7 +651,7 @@ fn a_poll_of_nothing_forgets_every_observation() {
         limit_notifications: true,
         ..alerts_only()
     };
-    observe_poll(
+    notices_of(
         &mut state,
         &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
         &on,
@@ -657,7 +659,7 @@ fn a_poll_of_nothing_forgets_every_observation() {
     );
     assert!(!state.providers.is_empty() && !state.reset_alerts.is_empty());
 
-    let notices = observe_poll(
+    let notices = notices_of(
         &mut state,
         &[],
         &crate::settings::AppSettings::default(),
@@ -696,14 +698,14 @@ fn an_offer_is_not_made_again_after_a_restart() {
     let path = root.join("monitor.json");
     let settings = alerts_only();
     let mut state = MonitorState::default();
-    observe_poll(
+    notices_of(
         &mut state,
         &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
         &settings,
         now,
     );
     assert_eq!(
-        observe_poll(
+        notices_of(
             &mut state,
             &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
             &settings,
@@ -716,7 +718,7 @@ fn an_offer_is_not_made_again_after_a_restart() {
 
     let mut reloaded = load_state(&path);
 
-    assert!(observe_poll(
+    assert!(notices_of(
         &mut reloaded,
         &[codex_with_a_reset(97.0, "2026-08-19T12:20:00Z")],
         &settings,
@@ -724,4 +726,94 @@ fn an_offer_is_not_made_again_after_a_restart() {
     )
     .is_empty());
     let _ = fs::remove_dir_all(root);
+}
+
+/// What one poll notifies, for an alert that only notifies: nothing is offered to be spent.
+fn notices_of(
+    state: &mut MonitorState,
+    snapshots: &[ProviderLimitsDto],
+    settings: &crate::settings::AppSettings,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<(String, String)> {
+    let outcome = observe_poll(state, snapshots, settings, now);
+    assert!(outcome.automatic_offers.is_empty());
+    outcome.notices
+}
+
+fn automatic_only() -> crate::settings::AppSettings {
+    let mut settings = alerts_only();
+    settings
+        .reset_alerts
+        .get_mut("acct-codex")
+        .unwrap()
+        .automatic = true;
+    settings
+}
+
+fn at(value: &str) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+}
+
+/// An automatic alert's offer is not the "available" notification: it is handed on to be
+/// scheduled, once it is saved.
+#[test]
+fn an_automatic_alerts_offer_is_handed_on_to_be_scheduled() {
+    let now = at("2026-08-19T13:00:00Z");
+    let mut state = MonitorState::default();
+    let settings = automatic_only();
+
+    observe_poll(
+        &mut state,
+        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        &settings,
+        now,
+    );
+    let outcome = observe_poll(
+        &mut state,
+        &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
+        &settings,
+        now,
+    );
+
+    assert!(outcome.notices.is_empty(), "offered as well as scheduled");
+    assert_eq!(outcome.automatic_offers.len(), 1);
+    assert_eq!(outcome.automatic_offers[0].account_id, "acct-codex");
+}
+
+/// The monitor wakes when a reset falls due, not at its next poll, and polls as usual otherwise. A
+/// spend its last poll saw and could not decide waits for the next poll, which after a failure is
+/// the backoff, so the monitor never asks every second.
+#[test]
+fn the_monitor_wakes_when_a_reset_falls_due_but_never_every_second() {
+    let now = at("2026-08-19T13:00:00Z");
+    let poll = Duration::from_secs(300);
+
+    assert_eq!(poll, minutes(5));
+    assert_eq!(next_wake(poll, None, now, now), poll);
+    assert_eq!(
+        next_wake(poll, Some(at("2026-08-19T13:10:00Z")), now, now),
+        poll,
+        "a spend due after the next poll skips that poll"
+    );
+    assert_eq!(
+        next_wake(poll, Some(at("2026-08-19T13:02:00Z")), now, now),
+        Duration::from_secs(120)
+    );
+    assert_eq!(
+        next_wake(
+            poll,
+            Some(at("2026-08-19T13:00:30Z")),
+            now,
+            at("2026-08-19T13:01:00Z")
+        ),
+        Duration::from_secs(1),
+        "one that fell due while the poll ran wakes it at once, but no faster than a second"
+    );
+    assert_eq!(
+        next_wake(poll, Some(at("2026-08-19T12:55:00Z")), now, now),
+        poll,
+        "one the poll saw and could not decide waits for the next poll"
+    );
 }

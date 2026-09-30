@@ -21,7 +21,7 @@ const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string
 });
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
 
-vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, setLimitsArchived, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit }));
+vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, setLimitsArchived, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit, pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn() }));
 
 type Deferred<T> = {
   promise: Promise<T>;

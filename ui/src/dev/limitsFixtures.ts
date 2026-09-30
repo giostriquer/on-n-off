@@ -374,6 +374,7 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
     accounts: { claude: () => ({ profiles: [], nativeObservationId: "order-current", nativeAccount: null, recoveryRequired: false, notice: null }) },
   }),
   bankedResets: () => ({ codex: bankedResetsCodex }),
+  bankedResetsAuto: () => ({ codex: bankedResetsCodex }),
   bankedResetsEarly: () => ({
     codex: () => bankedResetsCodex().map((entry) => entry.currentAccount
       ? { ...entry, windows: entry.windows.map((window) => ({ ...window, usedPercent: 40 })), resetOffer: null }

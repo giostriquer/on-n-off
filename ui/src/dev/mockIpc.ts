@@ -7,7 +7,7 @@
  * a screen that reaches for something unmocked says so instead of hanging.
  */
 
-import type { AppSettings, AgentInfo, AgentId, AgentTabDto } from "$lib/types";
+import type { AppSettings, AgentInfo, AgentId, AgentTabDto, PendingResetSpend } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
 import { limitsScenario } from "./limitsFixtures";
@@ -56,8 +56,18 @@ let settings: AppSettings = {
   githubNotifications: false,
   githubPollSeconds: 60,
   closeToTray: false,
-  resetAlerts: {},
+  resetAlerts: scenario === "bankedResetsAuto"
+    ? { "codex-1": { label: "you@example.com", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: true } }
+    : {},
 };
+
+/**
+ * `?mock=bankedResetsAuto`: `bankedResets`, with the signed-in Codex account's automatic alert
+ * waiting to use a reset eight minutes after the fixtures' clock.
+ */
+let pendingSpends: PendingResetSpend[] = scenario === "bankedResetsAuto"
+  ? [{ accountId: "codex-1", dueAt: "2026-08-24T20:08:00Z" }]
+  : [];
 
 const emptyTab = (): AgentTabDto => ({ plugins: [], userSkills: [], mcpServers: [], hooks: [] });
 
@@ -274,6 +284,12 @@ const handlers: Record<string, Handler> = {
   forget_limits_snapshot: (args) => limits.forgetSnapshot(args.agentId, args.accountId),
   read_codex_subscription: (args) => limits.readCodexSubscription(args.accountId),
   consume_codex_reset_credit: () => "reset",
+  pending_reset_spends: () => pendingSpends,
+  cancel_reset_spend: (args) => {
+    const before = pendingSpends.length;
+    pendingSpends = pendingSpends.filter((spend) => spend.accountId !== args.accountId);
+    return pendingSpends.length < before;
+  },
   usage_summary: (args) => usageSummaryFor(args.input as { sinceDay: string; untilDay: string; timeZone: string }),
   usage_history_status: () => usageHistory,
   clear_usage_history: () => {

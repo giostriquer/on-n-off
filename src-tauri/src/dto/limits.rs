@@ -175,6 +175,15 @@ pub enum ResetCreditOutcome {
     Unknown,
 }
 
+/// A banked reset an automatic alert will spend at `due_at` unless it is cancelled on the account's
+/// card (`limits_monitor::auto_spend`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingResetSpendDto {
+    pub account_id: String,
+    pub due_at: String,
+}
+
 /// Which subscription account a limits snapshot belongs to. `id` is the provider's stable account
 /// id (or `default` when the CLI stores none); `label` is the human name (email) when known.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

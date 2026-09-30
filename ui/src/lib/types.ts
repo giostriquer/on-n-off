@@ -145,6 +145,14 @@ export type ResetAlert = {
   label: string | null;
   maxLeftPercent: number;
   minHoursToRenewal: number;
+  /** Uses the reset by itself, ten minutes after saying so, unless it is cancelled on the card. */
+  automatic: boolean;
+};
+
+/** A banked reset an automatic alert will use at `dueAt` unless it is cancelled on the account's card. */
+export type PendingResetSpend = {
+  accountId: string;
+  dueAt: string;
 };
 
 export type DiagnoseCheck = {
@@ -276,7 +284,7 @@ export type UpdateItemMode = "overwrite" | "dismiss";
  * the announcement is how the rest find out. These strings are the contract with `Source::name`
  * in `src-tauri/src/read_revision.rs`; change the two together.
  */
-export type SharedReadSource = "accounts" | "limits:claude" | "limits:codex" | "github:prs";
+export type SharedReadSource = "accounts" | "limits:claude" | "limits:codex" | "github:prs" | "limits:reset-spends";
 
 /** Sent once per replacement of a shared read, never for a read that changed nothing. */
 export type SharedReadChanged = {

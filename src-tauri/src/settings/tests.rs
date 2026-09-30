@@ -327,6 +327,7 @@ fn reset_alerts_stay_within_codexs_rule() {
             label: Some("a@example.com".into()),
             max_left_percent: 5,
             min_hours_to_renewal: 48,
+            automatic: false,
         }
     );
     assert_eq!(alert("acct-b").max_left_percent, 10);
@@ -340,6 +341,7 @@ fn reset_alerts_stay_within_codexs_rule() {
             label: None,
             max_left_percent: 10,
             min_hours_to_renewal: 24,
+            automatic: false,
         }
     );
 }
@@ -386,7 +388,7 @@ fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
             "githubScopes": ["org:acme"],
             "resetAlerts": {
                 "acct-a": {"label": "a@example.com", "maxLeftPercent": 260, "minHoursToRenewal": 100000},
-                "acct-b": {"maxLeftPercent": 4.6, "minHoursToRenewal": -3}
+                "acct-b": {"maxLeftPercent": 4.6, "minHoursToRenewal": -3, "automatic": "yes"}
             }
         }"#,
     ));
@@ -398,10 +400,13 @@ fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
             label: Some("a@example.com".into()),
             max_left_percent: 10,
             min_hours_to_renewal: 168,
+            automatic: false,
         }
     );
     // Rounded, not cut: 4.6 is 5.
     assert_eq!(settings.reset_alerts["acct-b"].max_left_percent, 5);
+    // An unreadable mode is the safe one: an alert that only tells.
+    assert!(!settings.reset_alerts["acct-b"].automatic);
     assert_eq!(settings.reset_alerts["acct-b"].min_hours_to_renewal, 0);
 }
 
@@ -457,6 +462,7 @@ fn every_setting_reads_back_as_it_was_written() {
                 label: Some("a@example.com".into()),
                 max_left_percent: 4,
                 min_hours_to_renewal: 36,
+                automatic: true,
             },
         )]),
     };
@@ -466,6 +472,7 @@ fn every_setting_reads_back_as_it_was_written() {
         label: None,
         max_left_percent: reset_max_left_default(),
         min_hours_to_renewal: reset_min_hours_default(),
+        automatic: false,
     })
     .unwrap();
     // A key left at its default would read back right even if the reader never named it.

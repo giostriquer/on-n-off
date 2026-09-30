@@ -95,38 +95,69 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             .await
             .unwrap_or_default();
         let watched = watched_providers(&settings);
-        let delay_minutes = if !watched.is_empty() {
-            let failed = match poll_once(&app, &state_path, &mut state, &settings, watched).await {
-                Ok(failed) => failed,
-                Err(error) => {
-                    eprintln!("limits monitor poll failed: {error}");
-                    true
-                }
-            };
+        let polled_at = chrono::Utc::now();
+        let poll_delay = if !watched.is_empty() {
+            let failed =
+                match poll_once(&app, &state_path, &mut state, &settings, watched, polled_at).await
+                {
+                    Ok(failed) => failed,
+                    Err(error) => {
+                        eprintln!("limits monitor poll failed: {error}");
+                        true
+                    }
+                };
             if failed {
                 consecutive_failures = consecutive_failures.saturating_add(1);
             } else {
                 consecutive_failures = 0;
             }
-            poll_delay_minutes(settings.limits_poll_minutes, consecutive_failures)
+            minutes(poll_delay_minutes(
+                settings.limits_poll_minutes,
+                consecutive_failures,
+            ))
         } else {
             consecutive_failures = 0;
+            // With nothing watched no alert is left, so nothing waits to be spent either.
+            auto_spend::clear();
             if !state.providers.is_empty() || !state.reset_alerts.is_empty() {
-                // With nothing watched, a poll of nothing forgets every observation.
+                // A poll of nothing forgets every observation.
                 observe_poll(&mut state, &[], &settings, chrono::Utc::now());
                 if let Err(error) = monitor::persist_state(&state_path, &state).await {
                     eprintln!("limits monitor could not clear its state: {error}");
                 }
             }
-            DISABLED_WAKE_MINUTES
+            minutes(DISABLED_WAKE_MINUTES)
         };
 
-        wait_for_wake_or_deadline(
-            &mut wake_receiver,
-            Duration::from_secs(u64::from(delay_minutes) * 60),
-        )
-        .await;
+        let delay = next_wake(
+            poll_delay,
+            auto_spend::next_due(),
+            polled_at,
+            chrono::Utc::now(),
+        );
+        wait_for_wake_or_deadline(&mut wake_receiver, delay).await;
     }
+}
+
+fn minutes(minutes: u16) -> Duration {
+    Duration::from_secs(u64::from(minutes) * 60)
+}
+
+/// How long the monitor sleeps: until its next poll, or until the soonest reset waiting to be
+/// spent falls due, whichever comes first, and never less than a second. Only a spend falling due
+/// after the poll made at `polled_at` wakes it early: one that poll saw and could not decide waits
+/// for the next poll, which after a failure is the backoff, rather than being asked every second.
+fn next_wake(
+    poll_delay: Duration,
+    next_due: Option<chrono::DateTime<chrono::Utc>>,
+    polled_at: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Duration {
+    next_due
+        .filter(|due| *due > polled_at)
+        .map(|due| (due - now).to_std().unwrap_or_default())
+        .map_or(poll_delay, |until_due| until_due.min(poll_delay))
+        .max(Duration::from_secs(1))
 }
 
 /// The providers the monitor reads under `settings`: both while limit notifications are on, Codex
@@ -141,70 +172,115 @@ fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [Agent
     }
 }
 
-/// One poll of `watched`: limit notifications when they are on, and a banked reset offered to every
-/// opted-in account that needs one. The state is saved before anything is shown, so a notification
-/// that failed to save is not shown again and again.
+/// One poll of `watched`: limit notifications when they are on, a banked reset offered to every
+/// opted-in account that needs one, and every automatic spend whose time has come.
+///
+/// A spend whose time has come reads Codex afresh, so it is decided by what Codex says now. It is
+/// taken out of the waiting ones before anything else, which is what stops it being handed out
+/// twice, and is decided whether or not the state saves. An offer is saved before it is shown or
+/// scheduled, so one that failed to save is not shown again and again, nor spent.
 async fn poll_once(
     app: &AppHandle,
     state_path: &Path,
     state: &mut MonitorState,
     settings: &crate::settings::AppSettings,
     watched: &[AgentId],
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<bool, String> {
-    let snapshots = poll_providers(watched).await?;
+    let snapshots = poll_providers(watched, auto_spend::any_due(now)).await?;
     let provider_failed = snapshots
         .iter()
         .any(|snapshot| snapshot.current_account && snapshot.status == LimitsStatus::Failed);
+    let due = auto_spend::take_due(&snapshots, &settings.reset_alerts, now);
     let previous = state.clone();
-    let notices = observe_poll(state, &snapshots, settings, chrono::Utc::now());
-    if let Err(error) = monitor::persist_state(state_path, state).await {
+    let outcome = observe_poll(state, &snapshots, settings, now);
+    let saved = monitor::persist_state(state_path, state).await;
+    if saved.is_err() {
         *state = previous;
-        return Err(format!("could not save state: {error}"));
+    } else {
+        // Counted from when the user is told, not from before the read, so the wait is the whole
+        // ten minutes.
+        let scheduled = auto_spend::schedule_all(&outcome.automatic_offers, chrono::Utc::now());
+        for (title, body) in outcome.notices.into_iter().chain(scheduled) {
+            monitor::notify(app, "limits monitor", title, body, Sound::Default);
+        }
     }
-    for (title, body) in notices {
+    for due in due {
+        let (title, body) = match due {
+            auto_spend::Due::Spend(spend) => {
+                let (account_id, key) = (spend.account_id.clone(), spend.idempotency_key.clone());
+                let spent = async_runtime::spawn_blocking(move || {
+                    crate::limits_refresh::consume_codex_reset_credit(&account_id, &key)
+                })
+                .await
+                .unwrap_or_else(|error| {
+                    Err(format!("The banked reset could not be used: {error}"))
+                });
+                auto_spend::outcome_copy(&spend, &spent)
+            }
+            auto_spend::Due::Kept(spend, why) => auto_spend::kept_copy(&spend, why),
+        };
         monitor::notify(app, "limits monitor", title, body, Sound::Default);
     }
+    saved.map_err(|error| format!("could not save state: {error}"))?;
     Ok(provider_failed)
 }
 
-/// What one poll's `snapshots` notify under `settings` at `now`, with `state` brought up to date:
-/// limit changes only while limit notifications are on, whose baselines are forgotten while they
-/// are off, and every banked reset an opted-in account is offered.
+/// What one poll's readings call for.
+struct PollOutcome {
+    notices: Vec<(String, String)>,
+    /// Offers whose alerts use the reset by themselves, to be scheduled once they are saved.
+    automatic_offers: Vec<reset_alerts::Offer>,
+}
+
+/// What one poll's `snapshots` call for under `settings` at `now`, with `state` brought up to
+/// date: limit changes only while limit notifications are on, whose baselines are forgotten while
+/// they are off, and every banked reset an opted-in account is offered, which an automatic alert
+/// schedules instead of only saying so.
 fn observe_poll(
     state: &mut MonitorState,
     snapshots: &[ProviderLimitsDto],
     settings: &crate::settings::AppSettings,
     now: chrono::DateTime<chrono::Utc>,
-) -> Vec<(String, String)> {
+) -> PollOutcome {
     let events = if settings.limit_notifications {
         observe(state, snapshots)
     } else {
         state.providers.clear();
         Vec::new()
     };
-    let offers = reset_alerts::observe(
+    let mut notices: Vec<(String, String)> = events.iter().map(notification_copy).collect();
+    let (automatic_offers, offers): (Vec<_>, Vec<_>) = reset_alerts::observe(
         &mut state.reset_alerts,
         snapshots,
         &settings.reset_alerts,
         now,
+    )
+    .into_iter()
+    .partition(|offer| offer.automatic);
+    notices.extend(
+        offers
+            .iter()
+            .map(|offer| reset_alerts::notification_copy(offer, now)),
     );
-    events
-        .iter()
-        .map(notification_copy)
-        .chain(
-            offers
-                .iter()
-                .map(|offer| reset_alerts::notification_copy(offer, now)),
-        )
-        .collect()
+    PollOutcome {
+        notices,
+        automatic_offers,
+    }
 }
 
-async fn poll_providers(watched: &[AgentId]) -> Result<Vec<ProviderLimitsDto>, String> {
+/// Reads `watched`, Codex afresh when `fresh_codex`: a spend whose time has come is decided by what
+/// Codex says now, not by a cached read, which can be the one that made the offer.
+async fn poll_providers(
+    watched: &[AgentId],
+    fresh_codex: bool,
+) -> Result<Vec<ProviderLimitsDto>, String> {
     let tasks: Vec<_> = watched
         .iter()
         .map(|&provider| {
+            let force = fresh_codex && provider == AgentId::Codex;
             async_runtime::spawn_blocking(move || {
-                crate::limits_refresh::read_limits(provider, false)
+                crate::limits_refresh::read_limits(provider, force)
             })
         })
         .collect();
@@ -361,6 +437,7 @@ fn load_state(path: &Path) -> MonitorState {
     })
 }
 
+pub mod auto_spend;
 mod reset_alerts;
 
 #[cfg(test)]

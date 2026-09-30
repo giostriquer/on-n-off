@@ -84,6 +84,8 @@ pub enum Source {
     LimitsClaude,
     LimitsCodex,
     GithubPrs,
+    /// The banked resets automatic alerts are waiting to spend (`limits_monitor::auto_spend`).
+    ResetSpends,
 }
 
 impl Source {
@@ -95,6 +97,7 @@ impl Source {
             Self::LimitsClaude => "limits:claude",
             Self::LimitsCodex => "limits:codex",
             Self::GithubPrs => "github:prs",
+            Self::ResetSpends => "limits:reset-spends",
         }
     }
 }

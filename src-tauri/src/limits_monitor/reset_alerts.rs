@@ -1,7 +1,7 @@
 //! When to offer a banked Codex reset: an account the user opted in (`settings::ResetAlert`) that
 //! has run low, long enough before its limit renews by itself that a reset is worth spending. The
-//! offer is a notification; the reset is still the user's to spend, on the account's card, as in
-//! Codex's own app, which never uses one automatically.
+//! offer is a notification, and the reset the user's to spend on the account's card, unless the
+//! alert uses it automatically (`auto_spend`), after a wait the user can cancel it in.
 //!
 //! Low is judged as the spend itself judges it: what is left of the current limit
 //! (`Reading::limit_left_percent`), at the account's share (`ResetAlert::spend_limit`). The offer
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{AgentId, LimitWindowKind, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto};
 use crate::settings::ResetAlert;
 
 /// What the monitor remembers of one account's alert between polls, by the card's account id.
@@ -40,12 +40,17 @@ struct LowReading {
 /// A banked reset worth offering.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Offer {
+    pub(super) account_id: String,
     pub(super) account_label: Option<String>,
+    /// The weekly cycle it is made for, by the weekly window's reset instant.
+    pub(super) cycle: String,
     /// What is left of the current limit, 0 to 100.
     pub(super) left_percent: f64,
     /// When the weekly window renews by itself.
     pub(super) renews_at: DateTime<Utc>,
     pub(super) available: u32,
+    /// Its alert uses the reset by itself (`auto_spend`) rather than only saying so.
+    pub(super) automatic: bool,
 }
 
 /// Every offer `snapshots` make at `now` for the accounts in `alerts`, with `state` brought up to
@@ -59,18 +64,12 @@ pub(super) fn observe(
     state.retain(|account, _| alerts.contains_key(account));
     let mut offers = Vec::new();
     for snapshot in snapshots {
-        let Some(account) = snapshot.account.as_ref() else {
+        let Some(account) = signed_in_codex(snapshot) else {
             continue;
         };
         let Some(alert) = alerts.get(&account.id) else {
             continue;
         };
-        if snapshot.provider != AgentId::Codex
-            || !snapshot.current_account
-            || snapshot.status != LimitsStatus::Ok
-        {
-            continue;
-        }
         let entry = state.entry(account.id.clone()).or_default();
         match low_reading(snapshot, alert, now) {
             None => entry.low = None,
@@ -88,6 +87,32 @@ pub(super) fn observe(
         }
     }
     offers
+}
+
+/// The offer `snapshot` makes for `alert` at `now` on its own, without the second poll in a row an
+/// offer waits for: what an automatic spend checks again when its time comes.
+pub(super) fn offer_now(
+    snapshot: &ProviderLimitsDto,
+    alert: &ResetAlert,
+    now: DateTime<Utc>,
+) -> Option<Offer> {
+    signed_in_codex(snapshot)?;
+    low_reading(snapshot, alert, now).map(|(_, offer)| offer)
+}
+
+/// Whether `snapshot` is the signed-in Codex account's live read ([`signed_in_codex`]).
+pub(super) fn is_signed_in_codex(snapshot: &ProviderLimitsDto) -> bool {
+    signed_in_codex(snapshot).is_some()
+}
+
+/// The account of `snapshot` when it is the signed-in Codex account's live read: a reset lands on
+/// whoever is signed in, and a card that failed or is remembered says nothing new about now.
+fn signed_in_codex(snapshot: &ProviderLimitsDto) -> Option<&LimitsAccountDto> {
+    let account = snapshot.account.as_ref()?;
+    (snapshot.provider == AgentId::Codex
+        && snapshot.current_account
+        && snapshot.status == LimitsStatus::Ok)
+        .then_some(account)
 }
 
 /// The low reading `snapshot` makes for `alert` at `now`, and the offer it would be, when all hold:
@@ -127,13 +152,16 @@ fn low_reading(
             observed_at: weekly.observed_at.clone(),
         },
         Offer {
+            account_id: snapshot.account.as_ref()?.id.clone(),
             account_label: snapshot
                 .account
                 .as_ref()
                 .and_then(|account| account.label.clone()),
+            cycle: cycle.to_string(),
             left_percent: left,
             renews_at,
             available: banked.available_count,
+            automatic: alert.automatic,
         },
     ))
 }

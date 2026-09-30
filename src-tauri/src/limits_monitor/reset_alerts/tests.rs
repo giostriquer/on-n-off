@@ -49,6 +49,7 @@ fn opted_in(account: &str) -> HashMap<String, ResetAlert> {
             label: None,
             max_left_percent: 10,
             min_hours_to_renewal: 24,
+            automatic: false,
         },
     )])
 }
@@ -81,10 +82,13 @@ fn an_account_found_low_on_two_polls_in_a_row_is_offered_its_reset_once() {
     assert_eq!(
         two,
         [Offer {
+            account_id: "acct".into(),
             account_label: Some("you@example.com".into()),
+            cycle: RENEWS.into(),
             left_percent: 6.0,
             renews_at: instant(RENEWS).unwrap(),
             available: 2,
+            automatic: false,
         }]
     );
     assert!(three.is_empty(), "offered twice in one weekly cycle");
@@ -314,10 +318,13 @@ fn an_account_turned_off_is_forgotten() {
 #[test]
 fn the_notification_names_the_account_what_is_left_and_when_it_renews() {
     let offer = Offer {
+        account_id: "acct".into(),
         account_label: Some("you@example.com".into()),
+        cycle: RENEWS.into(),
         left_percent: 6.0,
         renews_at: instant("2026-10-05T15:00:00Z").unwrap(),
         available: 2,
+        automatic: false,
     };
 
     assert_eq!(

@@ -16,7 +16,7 @@ vi.mock("$lib/api", () => ({
   readLimits, readAccounts, requestNotificationPermission,
   accountAction: vi.fn(), forgetLimitsSnapshot: vi.fn(), setLimitsArchived: vi.fn(),
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
-  addAccount: vi.fn(), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(),
+  addAccount: vi.fn(), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
   onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
 }));
 
@@ -61,7 +61,7 @@ describe("a Codex account's banked reset alert", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(saved).toHaveBeenCalledWith({
-      "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24 },
+      "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: false },
     }));
     expect(requestNotificationPermission).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("group", { name: "Banked reset alert" })).toBeNull();
@@ -78,6 +78,40 @@ describe("a Codex account's banked reset alert", () => {
     expect(screen.queryByRole("group", { name: "Banked reset alert" })).toBeNull();
   });
 
+  it("can use the reset by itself, ten minutes after saying so", async () => {
+    const saved = renderLimits();
+
+    const form = await openAlert("work@codex.example");
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
+    expect(within(form).getByRole("button", { name: "Notify me" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(form).getByRole("button", { name: "Use it" }));
+    expect(within(form).getByRole("button", { name: "Use it" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(form).getByRole("button", { name: "Notify me" })).toHaveAttribute("aria-pressed", "false");
+    expect(form).toHaveTextContent("on-n-off tells you, waits 10 minutes, then uses the reset unless you cancel it on this card.");
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({
+      "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: true },
+    }));
+  });
+
+  it("opens an alert that uses the reset by itself as such, and can be turned back to notifying", async () => {
+    const saved = renderLimits({ "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: true } });
+
+    const form = await openAlert("work@codex.example");
+    expect(within(form).getByRole("button", { name: "Use it" })).toHaveAttribute("aria-pressed", "true");
+    expect(form).toHaveTextContent("waits 10 minutes");
+    fireEvent.click(within(form).getByRole("button", { name: "Notify me" }));
+    expect(within(form).getByRole("button", { name: "Notify me" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(form).getByRole("button", { name: "Use it" })).toHaveAttribute("aria-pressed", "false");
+    expect(form).toHaveTextContent("You use the reset from this card");
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({
+      "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: false },
+    }));
+  });
+
   it("keeps a lower share and a longer wait", async () => {
     const saved = renderLimits();
 
@@ -88,11 +122,11 @@ describe("a Codex account's banked reset alert", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(saved).toHaveBeenCalledWith({
-      "acct-work": { label: "work@codex.example", maxLeftPercent: 5, minHoursToRenewal: 48 },
+      "acct-work": { label: "work@codex.example", maxLeftPercent: 5, minHoursToRenewal: 48, automatic: false },
     }));
   });
 
-  it.each([["1", "0"], ["10", "168"]])("keeps %s%% left and %s hours, the ends of what it allows", async (left, hours) => {
+  it.each([["1", "0"], ["10", "168"]])("keeps %s percent left and %s hours, the ends of what it allows", async (left, hours) => {
     const saved = renderLimits();
 
     const form = await openAlert("work@codex.example");
@@ -102,11 +136,11 @@ describe("a Codex account's banked reset alert", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(saved).toHaveBeenCalledWith({
-      "acct-work": { label: "work@codex.example", maxLeftPercent: Number(left), minHoursToRenewal: Number(hours) },
+      "acct-work": { label: "work@codex.example", maxLeftPercent: Number(left), minHoursToRenewal: Number(hours), automatic: false },
     }));
   });
 
-  it.each([["11", "24"], ["0", "24"], ["10", "169"], ["2.5", "24"], ["5", "-1"], ["5", "24.5"]])("refuses %s%% left and %s hours", async (left, hours) => {
+  it.each([["11", "24"], ["0", "24"], ["10", "169"], ["2.5", "24"], ["5", "-1"], ["5", "24.5"]])("refuses %s percent left and %s hours", async (left, hours) => {
     const saved = renderLimits();
 
     const form = await openAlert("work@codex.example");
@@ -152,7 +186,7 @@ describe("a Codex account's banked reset alert", () => {
   });
 
   it("keeps every other account's alert when one is turned on or off", async () => {
-    const other: ResetAlert = { label: "side@codex.example", maxLeftPercent: 3, minHoursToRenewal: 12 };
+    const other: ResetAlert = { label: "side@codex.example", maxLeftPercent: 3, minHoursToRenewal: 12, automatic: false };
     const saved = renderLimits({ "acct-side": other });
 
     let form = await openAlert("work@codex.example");
@@ -160,11 +194,11 @@ describe("a Codex account's banked reset alert", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
     await waitFor(() => expect(saved).toHaveBeenCalledWith({
       "acct-side": other,
-      "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24 },
+      "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: false },
     }));
 
     cleanup();
-    const again = renderLimits({ "acct-side": other, "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24 } });
+    const again = renderLimits({ "acct-side": other, "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: false } });
     form = await openAlert("work@codex.example");
     fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
@@ -181,7 +215,7 @@ describe("a Codex account's banked reset alert", () => {
     const { rerender } = render(tree({}));
     await screen.findByRole("button", { name: "More actions for work@codex.example" });
 
-    rerender(tree({ "acct-work": { label: "work@codex.example", maxLeftPercent: 4, minHoursToRenewal: 36 } }));
+    rerender(tree({ "acct-work": { label: "work@codex.example", maxLeftPercent: 4, minHoursToRenewal: 36, automatic: false } }));
     const form = await openAlert("work@codex.example");
 
     expect(within(form).getByRole("button", { name: ALERT })).toHaveAttribute("aria-pressed", "true");
@@ -213,7 +247,7 @@ describe("a Codex account's banked reset alert", () => {
   });
 
   it("is turned off by clearing it, which asks for nothing", async () => {
-    const saved = renderLimits({ "acct-work": { label: "work@codex.example", maxLeftPercent: 5, minHoursToRenewal: 48 } });
+    const saved = renderLimits({ "acct-work": { label: "work@codex.example", maxLeftPercent: 5, minHoursToRenewal: 48, automatic: false } });
 
     const form = await openAlert("work@codex.example");
     expect(within(form).getByRole("button", { name: ALERT })).toHaveAttribute("aria-pressed", "true");
