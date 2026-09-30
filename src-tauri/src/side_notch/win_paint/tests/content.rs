@@ -1,8 +1,8 @@
 use super::*;
 
 /// The label of a cell whose account reports `windows`.
-fn ring_label(provider: AgentId, windows: Vec<LimitWindowDto>) -> String {
-    match cell_content(&CellData::Provider(projected(signed_in(provider, windows)))) {
+fn ring_label(card: ProviderLimitsDto) -> String {
+    match cell_content(&CellData::Provider(projected(card))) {
         CellContent::Provider { label, .. } => label,
         _ => panic!("wrong content kind"),
     }
@@ -23,11 +23,11 @@ fn claudes_ring_leads_with_its_weekly_over_its_session() {
         73.0,
     );
     assert_eq!(
-        ring_label(AgentId::Claude, vec![weekly, session.clone()]),
+        ring_label(signed_in(AgentId::Claude, vec![weekly, session.clone()])),
         "41%"
     );
     assert_eq!(
-        ring_label(AgentId::Claude, vec![session]),
+        ring_label(signed_in(AgentId::Claude, vec![session])),
         "—",
         "without a weekly window the ring leads with nothing, never the session"
     );
@@ -49,24 +49,14 @@ fn codexs_ring_leads_with_its_weekly_over_its_session() {
             20.0,
         ),
     ];
-    assert_eq!(ring_label(AgentId::Codex, windows.clone()), "10%");
-    assert_eq!(ring_label(AgentId::Codex, windows[1..].to_vec()), "—");
-}
-#[test]
-fn unreadable_providers_fall_back_to_the_dash_label() {
-    let mut failed = signed_in(AgentId::Cursor, vec![session_window(50.0)]);
-    failed.status = LimitsStatus::Failed;
-    failed.message = Some("Could not read usage.".into());
-    let content = cell_content(&CellData::Provider(projected(failed)));
-    match content {
-        CellContent::Provider {
-            label, headline, ..
-        } => {
-            assert_eq!(label, "—");
-            assert!(headline.is_none());
-        }
-        _ => panic!("wrong content kind"),
-    }
+    assert_eq!(
+        ring_label(signed_in(AgentId::Codex, windows.clone())),
+        "10%"
+    );
+    assert_eq!(
+        ring_label(signed_in(AgentId::Codex, windows[1..].to_vec())),
+        "—"
+    );
 }
 #[test]
 fn reset_notes_never_double_space_the_hour() {
@@ -501,9 +491,6 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
         }),
         "a share past its reset has renewed, as a window has"
     );
-    let mut unreadable = codex_member_card(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
-    unreadable.status = LimitsStatus::Failed;
-    assert!(inner_ring(projected(unreadable)).is_none());
 }
 
 /// Claude's Fable window takes the same inner ring, in its own terracotta.
@@ -610,28 +597,38 @@ fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
     );
 }
 
-/// A paused account's ring keeps its last weekly reading, as its card on Limits does.
+/// A paused account's ring keeps its last reading, as its card on Limits does: its weekly figure
+/// and its inner ring. Without a weekly window it still shows the dash, never its session.
 #[test]
 fn a_paused_account_keeps_its_last_reading_on_the_ring() {
-    let mut paused = signed_in(
-        AgentId::Claude,
-        vec![window(
-            "weekly_all",
-            "Weekly · all models",
-            LimitWindowKind::Weekly,
-            46.0,
-        )],
+    let paused = |mut card: ProviderLimitsDto| {
+        card.status = LimitsStatus::Failed;
+        card.message = Some("Claude Code reported no usage.".into());
+        card
+    };
+    let weekly = window(
+        "weekly_all",
+        "Weekly · all models",
+        LimitWindowKind::Weekly,
+        46.0,
     );
-    paused.status = LimitsStatus::Failed;
-    paused.message = Some("Claude Code reported no usage.".into());
 
-    match cell_content(&CellData::Provider(projected(paused))) {
-        CellContent::Provider {
-            label, headline, ..
-        } => {
-            assert_eq!(label, "46%");
-            assert!(headline.is_some());
-        }
-        _ => panic!("wrong content kind"),
-    }
+    assert_eq!(
+        ring_label(paused(signed_in(AgentId::Claude, vec![weekly]))),
+        "46%"
+    );
+    assert!(inner_ring(projected(paused(codex_member_card(share(
+        "8000",
+        32.0,
+        false,
+        "2099-01-01T12:00:00Z"
+    )))))
+    .is_some());
+    assert_eq!(
+        ring_label(paused(signed_in(
+            AgentId::Cursor,
+            vec![session_window(50.0)]
+        ))),
+        "—"
+    );
 }

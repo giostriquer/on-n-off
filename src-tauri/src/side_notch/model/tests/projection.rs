@@ -148,8 +148,7 @@ fn a_workspace_share_fills_the_inner_ring_while_the_weekly_stays_the_headline() 
 }
 
 /// An account whose refresh is paused keeps leading with the last reading it has, as its card on
-/// Limits does, rather than dropping to the empty ring; the popover says the values are the last
-/// observed.
+/// Limits does.
 #[test]
 fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
     for status in [
@@ -289,21 +288,4 @@ fn the_named_windows_resolve_for_the_painter() {
         (window.label.as_str(), window.used_percent),
         ("Workspace credits", 32.0)
     );
-
-    let mut paused = signed_in(AgentId::Codex, vec![weekly("primary")]);
-    paused.status = LimitsStatus::Failed;
-    paused.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
-    let paused = project(paused);
-    assert_eq!(
-        paused.headline().map(|window| window.id.as_str()),
-        Some("primary")
-    );
-    assert!(paused.inner_window().is_some());
-
-    // With nothing remembered there is still nothing to lead with.
-    let mut empty = signed_in(AgentId::Codex, Vec::new());
-    empty.status = LimitsStatus::Failed;
-    let empty = project(empty);
-    assert!(empty.headline().is_none());
-    assert!(empty.inner_window().is_none());
 }

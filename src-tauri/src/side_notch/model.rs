@@ -299,11 +299,12 @@ pub struct NotchProvider {
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
     /// The window the ring and the figure show, by id: the headline window, which is the weekly
-    /// window. None for a card without one. An account whose refresh is paused keeps its last
-    /// reading here, as its card on Limits does. Private, like `inner_ring`, so only `current`
-    /// decides them and they always name what `windows` holds.
+    /// window. None for a card without one. Chosen whatever the card's status, as the Limits card's
+    /// headline is: a paused card's windows are the ones it last observed (`limits/reading.rs`).
+    /// Private, like `inner_ring`, so only `current` decides them and they always name what
+    /// `windows` holds.
     headline_window_id: Option<String>,
-    /// None when the account has nothing to show there.
+    /// None without a Fable window or a workspace share.
     inner_ring: Option<InnerRing>,
     pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
 }
