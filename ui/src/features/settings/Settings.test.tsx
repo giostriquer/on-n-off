@@ -291,7 +291,7 @@ describe("Settings", () => {
     });
 
     const list = screen.getByRole("list", { name: "Accounts with a banked reset alert" });
-    expect(list).toHaveTextContent("work@example.com · 10% or less left, 24h or more before it renews");
+    expect(list).toHaveTextContent("work@example.com · 10% or less left, 24h or more before it renews · tells you");
     expect(list).toHaveTextContent("Codex account · 5% or less left, 48h or more before it renews · uses it by itself");
 
     await user.click(screen.getByRole("button", { name: "Turn off the banked reset alert for work@example.com" }));

@@ -790,7 +790,13 @@ fn the_monitor_wakes_when_a_reset_is_due_but_keeps_its_backoff_after_a_failure()
     let now = at("2026-08-19T13:00:00Z");
     let poll = Duration::from_secs(300);
 
+    assert_eq!(poll, minutes(5));
     assert_eq!(next_wake(poll, None, now, false), poll);
+    assert_eq!(
+        next_wake(poll, Some(at("2026-08-19T13:10:00Z")), now, false),
+        poll,
+        "a spend due after the next poll skips that poll"
+    );
     assert_eq!(
         next_wake(poll, Some(at("2026-08-19T13:02:00Z")), now, false),
         Duration::from_secs(120)

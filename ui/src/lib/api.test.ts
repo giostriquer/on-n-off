@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import { clearUsageHistory, setLimitsArchived, usageHistoryStatus } from "./api";
+import { cancelResetSpend, clearUsageHistory, pendingResetSpends, setLimitsArchived, usageHistoryStatus } from "./api";
 
 beforeEach(() => {
   invoke.mockReset();
@@ -15,6 +15,13 @@ it("reads and clears the usage history through the commands lib.rs registers", a
   await clearUsageHistory();
 
   expect(invoke.mock.calls).toEqual([["usage_history_status"], ["clear_usage_history"]]);
+});
+
+it("lists and cancels waiting automatic resets through the commands lib.rs registers", async () => {
+  await pendingResetSpends();
+  await cancelResetSpend("acct-work");
+
+  expect(invoke.mock.calls).toEqual([["pending_reset_spends"], ["cancel_reset_spend", { accountId: "acct-work" }]]);
 });
 
 it("archives the accounts a card names through the command lib.rs registers", async () => {

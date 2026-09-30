@@ -239,6 +239,21 @@ fn the_notifications_say_when_and_what_came_of_it() {
             "you@example.com's usage is back to 0%.".to_string()
         )
     );
+    for (outcome, body) in [
+        (ResetCreditOutcome::NothingToReset, "you@example.com's usage was already at 0%."),
+        (ResetCreditOutcome::NoCredit, "you@example.com has no banked reset left."),
+        (ResetCreditOutcome::AlreadyRedeemed, "That banked reset was already used."),
+        (
+            ResetCreditOutcome::Unknown,
+            "Codex answered with a result on-n-off doesn't recognize. Check the reset count on the card.",
+        ),
+    ] {
+        assert_eq!(
+            outcome_copy(&spend, &Ok(outcome)),
+            ("Codex: banked reset not used".to_string(), body.to_string()),
+            "{outcome:?}"
+        );
+    }
     assert_eq!(
         outcome_copy(&spend, &Err("Codex is not signed in.".to_string())),
         (

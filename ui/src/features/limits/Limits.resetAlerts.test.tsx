@@ -85,11 +85,30 @@ describe("a Codex account's banked reset alert", () => {
     fireEvent.click(within(form).getByRole("button", { name: ALERT }));
     expect(within(form).getByRole("button", { name: "Notify me" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(within(form).getByRole("button", { name: "Use it" }));
+    expect(within(form).getByRole("button", { name: "Use it" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(form).getByRole("button", { name: "Notify me" })).toHaveAttribute("aria-pressed", "false");
     expect(form).toHaveTextContent("on-n-off tells you, waits 10 minutes, then uses the reset unless you cancel it on this card.");
     fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
 
     await waitFor(() => expect(saved).toHaveBeenCalledWith({
       "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: true },
+    }));
+  });
+
+  it("opens an alert that uses the reset by itself as such, and can be turned back to notifying", async () => {
+    const saved = renderLimits({ "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: true } });
+
+    const form = await openAlert("work@codex.example");
+    expect(within(form).getByRole("button", { name: "Use it" })).toHaveAttribute("aria-pressed", "true");
+    expect(form).toHaveTextContent("waits 10 minutes");
+    fireEvent.click(within(form).getByRole("button", { name: "Notify me" }));
+    expect(within(form).getByRole("button", { name: "Notify me" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(form).getByRole("button", { name: "Use it" })).toHaveAttribute("aria-pressed", "false");
+    expect(form).toHaveTextContent("You use the reset from this card");
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({
+      "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: false },
     }));
   });
 
