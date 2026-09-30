@@ -1,4 +1,4 @@
-import type { AgentId, AppSettings, GithubPollSeconds, LimitsPollMinutes } from "./types";
+import type { AgentId, AppSettings, GithubPollSeconds, LimitsPollMinutes, ResetAlert } from "./types";
 
 export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity", "cursor"];
 
@@ -12,7 +12,25 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   githubNotifications: false,
   githubPollSeconds: 60,
   closeToTray: false,
+  resetAlerts: {},
 };
+
+/** The share of the current limit left at or under which Codex's own app lets a reset be used. */
+export const CODEX_RESET_MAX_LEFT_PERCENT = 10;
+
+/** A new alert's defaults: Codex's own share, and a day before the limit renews by itself. */
+export function defaultResetAlert(label: string | null): ResetAlert {
+  return { label, maxLeftPercent: CODEX_RESET_MAX_LEFT_PERCENT, minHoursToRenewal: 24 };
+}
+
+/**
+ * The share of the current limit left at or under which `accountId`'s banked reset may be spent:
+ * Codex's own 10%, or the lower share its alert names. The backend keeps the same rule.
+ */
+export function resetSpendLimit(alerts: Record<string, ResetAlert>, accountId: string): number {
+  const alert = alerts[accountId];
+  return alert ? Math.min(alert.maxLeftPercent, CODEX_RESET_MAX_LEFT_PERCENT) : CODEX_RESET_MAX_LEFT_PERCENT;
+}
 
 export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefined): AppSettings {
   return {
@@ -25,6 +43,7 @@ export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefine
     githubNotifications: overlay?.githubNotifications ?? false,
     githubPollSeconds: normalizeGithubPollSeconds(overlay?.githubPollSeconds),
     closeToTray: overlay?.closeToTray ?? false,
+    resetAlerts: overlay?.resetAlerts ?? {},
   };
 }
 

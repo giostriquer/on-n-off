@@ -18,7 +18,7 @@ export function removeAccountQuestion(label: string): string {
   return `Remove ${label} from on-n-off? You will need to sign in to add it again.`;
 }
 
-export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, menuButtonRef, header, footer, children }: {
+export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, menuButtonRef, extraAction, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   /** Drops the account's history for Remove account, after its saved login, if any, is removed. */
   onForget: () => Promise<void>;
@@ -28,6 +28,8 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   archiveInsteadOfUse?: boolean;
   /** Receives the More actions button, where focus can land when a neighbouring card goes. */
   menuButtonRef?: RefCallback<HTMLButtonElement>;
+  /** One more menu item, whose panel takes the menu's place until it closes it. */
+  extraAction?: { label: string; render: (close: () => void) => ReactNode };
   header: (menu: ReactNode) => ReactNode;
   /** More account actions beside the primary one; see `AccountFooterState`. */
   footer?: (state: AccountFooterState) => ReactNode;
@@ -37,6 +39,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   const client = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [extraOpen, setExtraOpen] = useState(false);
   const [category, setCategory] = useState("");
   const [confirmation, setConfirmation] = useState<"remove" | "removeLogin" | "signOut" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +50,8 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   const useButton = useRef<HTMLButtonElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const id = useId();
-  const open = menuOpen || editing || !!confirmation;
-  function dismiss() { setMenuOpen(false); setEditing(false); setConfirmation(null); setError(null); }
+  const open = menuOpen || editing || extraOpen || !!confirmation;
+  function dismiss() { setMenuOpen(false); setEditing(false); setExtraOpen(false); setConfirmation(null); setError(null); }
   function close() { dismiss(); trigger.current?.focus(); }
   function complete() {
     if (root.current?.contains(document.activeElement)) close();
@@ -117,6 +120,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
       {profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { close(); void add(profile.id, accountId); }}>Sign in again</button>}
       {current && profile && <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("removeLogin"); }}>Remove saved login</button>}
       {!current && <button className={`${button} border-transparent text-left`} disabled={disabled} aria-disabled={archiving || undefined} aria-busy={archiving || undefined} onClick={() => { close(); archive(); }}>Archive account</button>}
+      {extraAction && <button className={`${button} border-transparent text-left`} onClick={() => { setMenuOpen(false); setExtraOpen(true); }}>{extraAction.label}</button>}
       {current ? <button className={`${button} border-transparent text-left`} disabled={disabled || !nativeMatches} onClick={() => { setMenuOpen(false); setConfirmation("signOut"); }}>Sign out</button>
         : <button className={`${button} border-transparent text-left`} disabled={disabled} onClick={() => { setMenuOpen(false); setConfirmation("remove"); }}>Remove account</button>}
     </div>
@@ -124,6 +128,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
       <input aria-label="Category (optional)" placeholder="Category (optional)" maxLength={100} value={category} onChange={event => setCategory(event.target.value)} className="w-full min-w-0 rounded border border-[var(--hair)] bg-transparent px-2 py-1.5 text-[12px]" />
       <button className={button} disabled={disabled}>Save category</button><button type="button" className={button} onClick={close}>Cancel</button>
     </form>}
+    {extraOpen && extraAction?.render(close)}
     {confirmation && <div role="group" aria-label="Confirm account action" className="text-[12px]">
       <p>{confirmation === "remove" ? removeAccountQuestion(label) : confirmation === "removeLogin" ? `Remove the saved login for ${label}? This account stays signed in.` : "Sign out of this account? The provider may also revoke its saved sign-ins."}</p>
       <div className="flex gap-2"><button className={button} disabled={disabled || (confirmation === "signOut" && (!current || !nativeMatches))} onClick={() => void confirm()}>{confirmation === "signOut" ? "Confirm sign out" : "Confirm removal"}</button><button className={button} onClick={close}>Cancel</button></div>

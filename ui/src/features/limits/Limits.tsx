@@ -1,6 +1,6 @@
 import { AccountCardActions } from "@/features/accounts/AccountCardActions";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
-import { useRef, useState, type ReactNode, type RefCallback, type RefObject } from "react";
+import { useMemo, useRef, useState, type ReactNode, type RefCallback, type RefObject } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
@@ -9,7 +9,7 @@ import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import type { AgentId, LimitsPollMinutes } from "$lib/types";
+import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { ArchivedAccounts } from "./ArchivedAccounts";
 import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
@@ -17,12 +17,33 @@ import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
+import { ResetAlertForm, ResetAlertsContext } from "./resetAlerts";
 import { UsageStatusBadge } from "./UsageStatusBadge";
 import { CreditsRows } from "./Credits";
 import { Meter, MeterRow } from "./Meter";
 
-export function Limits({ pollMinutes = 5 }: { pollMinutes?: LimitsPollMinutes }) {
-  return <AccountControllers><LimitsContent pollMinutes={pollMinutes} /></AccountControllers>;
+const NO_ALERTS: Record<string, ResetAlert> = {};
+
+export function Limits({ pollMinutes = 5, resetAlerts = NO_ALERTS, onResetAlertsChange }: {
+  pollMinutes?: LimitsPollMinutes;
+  /** Codex accounts whose banked reset is offered once they run low (`AppSettings.resetAlerts`). */
+  resetAlerts?: Record<string, ResetAlert>;
+  onResetAlertsChange?: (alerts: Record<string, ResetAlert>) => Promise<void>;
+}) {
+  const alerts = useMemo(() => ({
+    alerts: resetAlerts,
+    save: async (accountId: string, alert: ResetAlert | null) => {
+      const next = { ...resetAlerts };
+      if (alert) next[accountId] = alert;
+      else delete next[accountId];
+      await onResetAlertsChange?.(next);
+    },
+  }), [resetAlerts, onResetAlertsChange]);
+  return (
+    <ResetAlertsContext.Provider value={alerts}>
+      <AccountControllers><LimitsContent pollMinutes={pollMinutes} /></AccountControllers>
+    </ResetAlertsContext.Provider>
+  );
 }
 
 function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
@@ -278,6 +299,10 @@ function AccountCard({
       {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined}
         onForget={() => onForget(account)}
         onArchive={() => onArchive(account)} archiveInsteadOfUse={card.archiveInsteadOfUse} menuButtonRef={menuButtonRef} header={header}
+        extraAction={provider === "codex" ? {
+          label: "Banked reset alert",
+          render: close => <ResetAlertForm accountId={account.id} label={account.name} onDone={close} />,
+        } : undefined}
         footer={codexActions ? state => <CodexAccountActions entry={codexActions} label={account.name} now={now} state={state} /> : undefined}>
         {content}
       </AccountCardActions> : <>{header(null)}{content}</>}

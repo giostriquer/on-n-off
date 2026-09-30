@@ -346,6 +346,7 @@ describe("Limits", () => {
     const button = await within(current).findByRole("button", { name: "Use banked reset" });
     await waitFor(() => expect(button).toHaveProperty("disabled", false));
     fireEvent.click(button);
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Use this reset?" })).getByRole("button", { name: "Use reset" }));
 
     await waitFor(() => expect(within(current).queryByRole("definition", { name: "Banked resets" })).toBeNull());
     expect(within(current).getByRole("status").textContent).toBe("Banked reset used.");

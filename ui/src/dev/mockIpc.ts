@@ -56,6 +56,7 @@ let settings: AppSettings = {
   githubNotifications: false,
   githubPollSeconds: 60,
   closeToTray: false,
+  resetAlerts: {},
 };
 
 const emptyTab = (): AgentTabDto => ({ plugins: [], userSkills: [], mcpServers: [], hooks: [] });

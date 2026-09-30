@@ -19,6 +19,7 @@ import type {
   GithubPollSeconds,
   LimitsPollMinutes,
   ProviderDiagnose,
+  ResetAlert,
 } from "$lib/types";
 
 type SettingsProps = {
@@ -92,6 +93,11 @@ export function Settings({
         pollMinutes={settings.limitsPollMinutes}
         onEnabledChange={onLimitNotificationsChange}
         onPollMinutesChange={onLimitsPollMinutesChange}
+      />
+
+      <ResetAlertsCard
+        alerts={settings.resetAlerts}
+        onChange={(resetAlerts) => onSettingsChange({ resetAlerts })}
       />
 
       <TraySettingsCard
@@ -343,6 +349,58 @@ function LimitNotificationsCard({
           </p>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+/**
+ * The Codex accounts whose banked reset on-n-off offers once they run low. An alert is turned on
+ * from the account's card on Limits, where its label is; here it can be read and turned off.
+ */
+function ResetAlertsCard({ alerts, onChange }: {
+  alerts: Record<string, ResetAlert>;
+  onChange: (alerts: Record<string, ResetAlert>) => void;
+}) {
+  const entries = Object.entries(alerts);
+  return (
+    <section aria-label="Banked reset alerts" className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
+      <div className="px-3.5 py-3">
+        <h3 className="m-0 text-[13px] font-semibold">Banked reset alerts</h3>
+        <p className="mt-1 mb-0 text-[12px] text-[var(--mute)]">
+          Notifies when a Codex account runs low and one of its banked resets is worth using. on-n-off
+          never uses a reset by itself; you use it from the account's card. Turn an alert on from the
+          account's ••• menu on Limits.
+        </p>
+      </div>
+      {entries.length > 0 ? (
+        <ul aria-label="Accounts with a banked reset alert" className="m-0 list-none border-t border-[var(--hair)] p-0">
+          {entries.map(([accountId, alert]) => {
+            const name = alert.label || "Codex account";
+            return (
+              <li key={accountId} className="flex flex-wrap items-center gap-3 px-3.5 py-2.5 text-[12px]">
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium">{name}</span>
+                  <span className="text-[var(--mute)]">
+                    {" "}· {alert.maxLeftPercent}% or less left, {alert.minHoursToRenewal}h or more before it renews
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Turn off the banked reset alert for ${name}`}
+                  className="rounded-md border border-[var(--hair)] px-2.5 py-1 text-[11px] hover:bg-[var(--wash)]"
+                  onClick={() => {
+                    const next = { ...alerts };
+                    delete next[accountId];
+                    onChange(next);
+                  }}
+                >
+                  Turn off
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </section>
   );
 }

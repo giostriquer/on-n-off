@@ -101,12 +101,14 @@ function renderSettings({
   onLimitsPollMinutesChange = () => undefined,
   onSettingsChange = () => undefined,
   githubScopes = [],
+  resetAlerts = {},
 }: {
   onToggleVisible?: (id: AgentInfo["id"], hidden: boolean) => void;
   onLimitNotificationsChange?: (enabled: boolean) => void;
   onLimitsPollMinutesChange?: (minutes: LimitsPollMinutes) => void;
   onSettingsChange?: (patch: Partial<AppSettings>) => void;
   githubScopes?: string[];
+  resetAlerts?: AppSettings["resetAlerts"];
 } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -124,6 +126,7 @@ function renderSettings({
             githubNotifications: false,
             githubPollSeconds: 60,
             closeToTray: false,
+            resetAlerts,
           }}
           onToggleVisible={onToggleVisible}
           onSaveBinary={() => undefined}
@@ -275,5 +278,33 @@ describe("Settings", () => {
       }),
     );
     expect(onSettingsChange).toHaveBeenCalledWith({ closeToTray: true });
+  });
+  it("lists each banked reset alert and turns one off", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({
+      onSettingsChange,
+      resetAlerts: {
+        "acct-work": { label: "work@example.com", maxLeftPercent: 10, minHoursToRenewal: 24 },
+        "acct-side": { label: null, maxLeftPercent: 5, minHoursToRenewal: 48 },
+      },
+    });
+
+    const list = screen.getByRole("list", { name: "Accounts with a banked reset alert" });
+    expect(list).toHaveTextContent("work@example.com · 10% or less left, 24h or more before it renews");
+    expect(list).toHaveTextContent("Codex account · 5% or less left, 48h or more before it renews");
+
+    await user.click(screen.getByRole("button", { name: "Turn off the banked reset alert for work@example.com" }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith({
+      resetAlerts: { "acct-side": { label: null, maxLeftPercent: 5, minHoursToRenewal: 48 } },
+    });
+  });
+
+  it("lists no account while no banked reset alert is on", () => {
+    renderSettings();
+
+    expect(screen.getByRole("region", { name: "Banked reset alerts" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Accounts with a banked reset alert" })).toBeNull();
   });
 });
