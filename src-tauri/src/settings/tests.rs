@@ -385,8 +385,8 @@ fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
         r#"{
             "githubScopes": ["org:acme"],
             "resetAlerts": {
-                "acct-a": {"label": "a@example.com", "maxLeftPercent": 300, "minHoursToRenewal": 100000},
-                "acct-b": {"maxLeftPercent": 5, "minHoursToRenewal": -3}
+                "acct-a": {"label": "a@example.com", "maxLeftPercent": 260, "minHoursToRenewal": 100000},
+                "acct-b": {"maxLeftPercent": 4.6, "minHoursToRenewal": -3}
             }
         }"#,
     ));
@@ -400,6 +400,7 @@ fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
             min_hours_to_renewal: 168,
         }
     );
+    // Rounded, not cut: 4.6 is 5.
     assert_eq!(settings.reset_alerts["acct-b"].max_left_percent, 5);
     assert_eq!(settings.reset_alerts["acct-b"].min_hours_to_renewal, 0);
 }
@@ -411,11 +412,13 @@ fn an_unknown_provider_drops_only_its_own_entry() {
         r#"{
             "hiddenAgents": ["codex", "gemini"],
             "binaryPaths": {"claude": "/opt/claude", "gemini": "/opt/gemini"},
+            "githubScopes": ["org:acme", 42],
             "resetAlerts": {"acct-a": 5, "acct-b": {}}
         }"#,
     ));
 
     assert_eq!(settings.hidden_agents, [AgentId::Codex]);
+    assert_eq!(settings.github_scopes, ["org:acme"]);
     assert_eq!(
         settings.binary_paths,
         HashMap::from([(AgentId::Claude, "/opt/claude".to_string())])
