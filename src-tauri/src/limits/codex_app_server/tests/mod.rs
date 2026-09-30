@@ -1,4 +1,5 @@
 mod normalize;
+mod spend_rule;
 
 use super::*;
 use crate::cli_stub::ANSWER_DEADLINE;
@@ -356,7 +357,18 @@ fn windows_home_comparison_is_case_and_separator_insensitive() {
     ));
 }
 
+/// A spend's app-server session: the handshake, the account, the weekly window at 95% used, and
+/// `consume_reply` to the spend itself.
 fn consume_transport(account: Value, consume_reply: Option<Value>) -> FakeTransport {
+    consume_transport_at(account, 95.0, consume_reply)
+}
+
+/// [`consume_transport`] with the weekly window at `used_percent`.
+fn consume_transport_at(
+    account: Value,
+    used_percent: f64,
+    consume_reply: Option<Value>,
+) -> FakeTransport {
     let mut received = VecDeque::from([
         json!({"id": 1, "result": {
             "userAgent": "on_n_off/0.154.0",
@@ -365,6 +377,10 @@ fn consume_transport(account: Value, consume_reply: Option<Value>) -> FakeTransp
             "platformOs": "macos"
         }}),
         json!({"id": 2, "result": account}),
+        json!({"id": 3, "result": {"rateLimits": {
+            "limitId": "codex",
+            "primary": {"usedPercent": used_percent, "windowDurationMins": 10080}
+        }}}),
     ]);
     received.extend(consume_reply);
     FakeTransport {
@@ -381,10 +397,20 @@ fn signed_in_as(id: &str) -> Result<Option<(String, Value)>, String> {
     Ok(Some((id.to_string(), json!({}))))
 }
 
-/// Spend through the real checks with a fake app-server; the transport comes back for inspection,
-/// or `None` when the checks refused before starting one.
+/// Spend through the real checks with a fake app-server, allowed at 10% or less left; the transport
+/// comes back for inspection, or `None` when the checks refused before starting one.
 fn spend(
     card: &str,
+    identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
+    transport: FakeTransport,
+) -> (Result<ResetCreditOutcome, String>, Option<FakeTransport>) {
+    spend_within(card, 10, identity, transport)
+}
+
+/// [`spend`], allowed at `max_left_percent` or less left.
+fn spend_within(
+    card: &str,
+    max_left_percent: u8,
     identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
     transport: FakeTransport,
 ) -> (Result<ResetCreditOutcome, String>, Option<FakeTransport>) {
@@ -406,9 +432,14 @@ fn spend(
             None
         }
     }
-    let result = spend_reset_credit(&codex_home, card, "attempt-1", identity, |_| {
-        Ok(Recording(transport, &spawned))
-    });
+    let result = spend_reset_credit(
+        &codex_home,
+        card,
+        "attempt-1",
+        max_left_percent,
+        identity,
+        |_| Ok(Recording(transport, &spawned)),
+    );
     (result, spawned.into_inner())
 }
 
@@ -427,7 +458,7 @@ fn spending_a_reset_credit_completes_the_handshake_then_redeems_exactly_one() {
         |_| signed_in_as("acct-1"),
         consume_transport(
             chatgpt_account(),
-            Some(json!({"id": 3, "result": {"outcome": "reset"}})),
+            Some(json!({"id": 4, "result": {"outcome": "reset"}})),
         ),
     );
 
@@ -441,7 +472,9 @@ fn spending_a_reset_credit_completes_the_handshake_then_redeems_exactly_one() {
             json!({"method": "initialized", "params": {}}),
             // Spending a reset never forces a token refresh of its own.
             json!({"id": 2, "method": "account/read", "params": {"refreshToken": false}}),
-            json!({"id": 3, "method": "account/rateLimitResetCredit/consume",
+            // How much is left is read in the same session, just before the reset is spent.
+            json!({"id": 3, "method": "account/rateLimits/read", "params": {}}),
+            json!({"id": 4, "method": "account/rateLimitResetCredit/consume",
                    "params": {"idempotencyKey": "attempt-1"}}),
         ]
     );
@@ -462,7 +495,7 @@ fn every_consume_outcome_reaches_the_caller_and_a_new_one_is_not_a_failure() {
             |_| signed_in_as("acct-1"),
             consume_transport(
                 chatgpt_account(),
-                Some(json!({"id": 3, "result": {"outcome": wire}})),
+                Some(json!({"id": 4, "result": {"outcome": wire}})),
             ),
         );
         assert_eq!(outcome, Ok(expected), "{wire}");
@@ -514,7 +547,7 @@ fn a_login_that_changes_while_the_app_server_starts_is_caught_before_the_request
         },
         consume_transport(
             chatgpt_account(),
-            Some(json!({"id": 3, "result": {"outcome": "reset"}})),
+            Some(json!({"id": 4, "result": {"outcome": "reset"}})),
         ),
     );
 
@@ -547,7 +580,7 @@ fn a_cli_without_banked_resets_is_asked_to_update() {
         |_| signed_in_as("acct-1"),
         consume_transport(
             chatgpt_account(),
-            Some(json!({"id": 3, "error": {"code": -32601, "message": "Method not found"}})),
+            Some(json!({"id": 4, "error": {"code": -32601, "message": "Method not found"}})),
         ),
     );
 
