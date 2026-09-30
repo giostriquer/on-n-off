@@ -181,6 +181,7 @@ describe("UseBankedReset", () => {
     expect(useReset()).toHaveProperty("disabled", !usable);
     if (usable) {
       expect(useReset().getAttribute("aria-describedby")).toBeNull();
+      expect(screen.queryByText(/Usable once/)).toBeNull();
     } else {
       expect(useReset()).toHaveAccessibleDescription("Usable once 10% or less of the limit is left");
       fireEvent.click(useReset());
@@ -201,7 +202,8 @@ describe("UseBankedReset", () => {
   });
 
   it("asks every time, naming the account, what is left and when the limit renews by itself", async () => {
-    render(button({ entry: codex({ windows: [weekly(96)] }), label: "saved@codex.example" }));
+    // The five-hour window comes first, so the renewal read is the weekly window's, not the first one's.
+    render(button({ entry: codex({ windows: [session(12), weekly(96)] }), label: "saved@codex.example" }));
 
     fireEvent.click(useReset());
     const dialog = screen.getByRole("alertdialog", { name: "Use this reset?" });

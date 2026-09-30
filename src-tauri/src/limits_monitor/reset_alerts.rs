@@ -5,9 +5,9 @@
 //!
 //! Low is judged as the spend itself judges it: what is left of the current limit
 //! (`Reading::limit_left_percent`), at the account's share (`ResetAlert::spend_limit`). The offer
-//! needs two polls in a row to find the
-//! account low in the same weekly cycle, each a new read, so one stray reading never offers a
-//! reset; and it is made once per weekly cycle, which a spent reset starts anew.
+//! needs two polls in a row to find the account low in the same weekly cycle, each a new read, so
+//! one stray reading never offers a reset; and it is made once per weekly cycle, which a spent
+//! reset starts anew.
 
 use std::collections::HashMap;
 

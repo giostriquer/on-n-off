@@ -112,8 +112,8 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
         } else {
             consecutive_failures = 0;
             if !state.providers.is_empty() || !state.reset_alerts.is_empty() {
-                state.providers.clear();
-                state.reset_alerts.clear();
+                // With nothing watched, a poll of nothing forgets every observation.
+                observe_poll(&mut state, &[], &settings, chrono::Utc::now());
                 if let Err(error) = monitor::persist_state(&state_path, &state).await {
                     eprintln!("limits monitor could not clear its state: {error}");
                 }
@@ -156,32 +156,47 @@ async fn poll_once(
         .iter()
         .any(|snapshot| snapshot.current_account && snapshot.status == LimitsStatus::Failed);
     let previous = state.clone();
-    let events = if settings.limit_notifications {
-        observe(state, &snapshots)
-    } else {
-        state.providers.clear();
-        Vec::new()
-    };
-    let now = chrono::Utc::now();
-    let offers = reset_alerts::observe(
-        &mut state.reset_alerts,
-        &snapshots,
-        &settings.reset_alerts,
-        now,
-    );
+    let notices = observe_poll(state, &snapshots, settings, chrono::Utc::now());
     if let Err(error) = monitor::persist_state(state_path, state).await {
         *state = previous;
         return Err(format!("could not save state: {error}"));
     }
-    let notices = events.iter().map(notification_copy).chain(
-        offers
-            .iter()
-            .map(|offer| reset_alerts::notification_copy(offer, now)),
-    );
     for (title, body) in notices {
         monitor::notify(app, "limits monitor", title, body, Sound::Default);
     }
     Ok(provider_failed)
+}
+
+/// What one poll's `snapshots` notify under `settings` at `now`, with `state` brought up to date:
+/// limit changes only while limit notifications are on, whose baselines are forgotten while they
+/// are off, and every banked reset an opted-in account is offered.
+fn observe_poll(
+    state: &mut MonitorState,
+    snapshots: &[ProviderLimitsDto],
+    settings: &crate::settings::AppSettings,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<(String, String)> {
+    let events = if settings.limit_notifications {
+        observe(state, snapshots)
+    } else {
+        state.providers.clear();
+        Vec::new()
+    };
+    let offers = reset_alerts::observe(
+        &mut state.reset_alerts,
+        snapshots,
+        &settings.reset_alerts,
+        now,
+    );
+    events
+        .iter()
+        .map(notification_copy)
+        .chain(
+            offers
+                .iter()
+                .map(|offer| reset_alerts::notification_copy(offer, now)),
+        )
+        .collect()
 }
 
 async fn poll_providers(watched: &[AgentId]) -> Result<Vec<ProviderLimitsDto>, String> {

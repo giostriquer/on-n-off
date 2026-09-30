@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, ResetAlert } from "$lib/types";
@@ -91,7 +91,21 @@ describe("a Codex account's banked reset alert", () => {
     }));
   });
 
-  it.each([["11", "24"], ["0", "24"], ["10", "169"], ["2.5", "24"]])("refuses %s%% left and %s hours", async (left, hours) => {
+  it.each([["1", "0"], ["10", "168"]])("keeps %s%% left and %s hours, the ends of what it allows", async (left, hours) => {
+    const saved = renderLimits();
+
+    const form = await openAlert("work@codex.example");
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
+    fireEvent.change(within(form).getByLabelText("With this much of the limit left or less (%)"), { target: { value: left } });
+    fireEvent.change(within(form).getByLabelText("And at least this many hours before it renews by itself"), { target: { value: hours } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({
+      "acct-work": { label: "work@codex.example", maxLeftPercent: Number(left), minHoursToRenewal: Number(hours) },
+    }));
+  });
+
+  it.each([["11", "24"], ["0", "24"], ["10", "169"], ["2.5", "24"], ["5", "-1"], ["5", "24.5"]])("refuses %s%% left and %s hours", async (left, hours) => {
     const saved = renderLimits();
 
     const form = await openAlert("work@codex.example");
@@ -104,7 +118,7 @@ describe("a Codex account's banked reset alert", () => {
     expect(saved).not.toHaveBeenCalled();
   });
 
-  it("is not turned on when notifications are blocked, since it would never be seen", async () => {
+  it("is not turned on when notifications are blocked, since it would never be seen, and can be tried again", async () => {
     requestNotificationPermission.mockResolvedValue(false);
     const saved = renderLimits();
 
@@ -114,6 +128,63 @@ describe("a Codex account's banked reset alert", () => {
 
     await waitFor(() => expect(within(form).getByRole("alert").textContent).toBe("Notifications are blocked in system settings."));
     expect(saved).not.toHaveBeenCalled();
+    expect(within(form).getByRole("button", { name: "Save alert" })).toBeEnabled();
+
+    requestNotificationPermission.mockResolvedValue(true);
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+    await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+  });
+
+  it("offers its figures only while it is on", async () => {
+    renderLimits();
+
+    const form = await openAlert("work@codex.example");
+    const share = within(form).getByLabelText("With this much of the limit left or less (%)");
+    const wait = within(form).getByLabelText("And at least this many hours before it renews by itself");
+    expect(share).toBeDisabled();
+    expect(wait).toBeDisabled();
+
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
+
+    expect(share).toBeEnabled();
+    expect(wait).toBeEnabled();
+  });
+
+  it("keeps every other account's alert when one is turned on or off", async () => {
+    const other: ResetAlert = { label: "side@codex.example", maxLeftPercent: 3, minHoursToRenewal: 12 };
+    const saved = renderLimits({ "acct-side": other });
+
+    let form = await openAlert("work@codex.example");
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({
+      "acct-side": other,
+      "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24 },
+    }));
+
+    cleanup();
+    const again = renderLimits({ "acct-side": other, "acct-work": { label: "work@codex.example", maxLeftPercent: 10, minHoursToRenewal: 24 } });
+    form = await openAlert("work@codex.example");
+    fireEvent.click(within(form).getByRole("button", { name: ALERT }));
+    fireEvent.click(within(form).getByRole("button", { name: "Save alert" }));
+    await waitFor(() => expect(again).toHaveBeenCalledWith({ "acct-side": other }));
+  });
+
+  it("shows the alerts it is given once they change", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    const tree = (alerts: Record<string, ResetAlert>) => (
+      <QueryClientProvider client={client}>
+        <Limits resetAlerts={alerts} onResetAlertsChange={async () => undefined} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree({}));
+    await screen.findByRole("button", { name: "More actions for work@codex.example" });
+
+    rerender(tree({ "acct-work": { label: "work@codex.example", maxLeftPercent: 4, minHoursToRenewal: 36 } }));
+    const form = await openAlert("work@codex.example");
+
+    expect(within(form).getByRole("button", { name: ALERT })).toHaveAttribute("aria-pressed", "true");
+    expect(within(form).getByLabelText("With this much of the limit left or less (%)")).toHaveProperty("value", "4");
   });
 
   it("stays open and says so when notification permission could not be asked for", async () => {

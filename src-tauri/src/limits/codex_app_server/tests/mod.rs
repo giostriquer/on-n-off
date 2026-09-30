@@ -369,6 +369,22 @@ fn consume_transport_at(
     used_percent: f64,
     consume_reply: Option<Value>,
 ) -> FakeTransport {
+    consume_transport_reading(
+        account,
+        json!({"rateLimits": {
+            "limitId": "codex",
+            "primary": {"usedPercent": used_percent, "windowDurationMins": 10080}
+        }}),
+        consume_reply,
+    )
+}
+
+/// A spend's session whose rate-limits read answers `rate_limits`.
+fn consume_transport_reading(
+    account: Value,
+    rate_limits: Value,
+    consume_reply: Option<Value>,
+) -> FakeTransport {
     let mut received = VecDeque::from([
         json!({"id": 1, "result": {
             "userAgent": "on_n_off/0.154.0",
@@ -377,10 +393,7 @@ fn consume_transport_at(
             "platformOs": "macos"
         }}),
         json!({"id": 2, "result": account}),
-        json!({"id": 3, "result": {"rateLimits": {
-            "limitId": "codex",
-            "primary": {"usedPercent": used_percent, "windowDurationMins": 10080}
-        }}}),
+        json!({"id": 3, "result": rate_limits}),
     ]);
     received.extend(consume_reply);
     FakeTransport {

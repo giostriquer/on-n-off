@@ -315,7 +315,8 @@ fn reset_alerts_stay_within_codexs_rule() {
         r#"{"resetAlerts": {
             "acct-a": {"label": "a@example.com", "maxLeftPercent": 5, "minHoursToRenewal": 48},
             "acct-b": {"maxLeftPercent": 40, "minHoursToRenewal": 1000},
-            "acct-c": {"maxLeftPercent": 0}
+            "acct-c": {"maxLeftPercent": 0},
+            "acct-d": {}
         }}"#,
     ));
 
@@ -332,6 +333,15 @@ fn reset_alerts_stay_within_codexs_rule() {
     assert_eq!(alert("acct-b").min_hours_to_renewal, 168);
     assert_eq!(alert("acct-c").max_left_percent, 1);
     assert_eq!(alert("acct-c").min_hours_to_renewal, 24);
+    // An alert saved without its figures has Codex's own share and a day's wait.
+    assert_eq!(
+        alert("acct-d"),
+        ResetAlert {
+            label: None,
+            max_left_percent: 10,
+            min_hours_to_renewal: 24,
+        }
+    );
 }
 
 /// A reset is spent at 10% or less left, the rule Codex's own app keeps, or at the lower share an

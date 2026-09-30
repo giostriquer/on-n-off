@@ -193,23 +193,105 @@ fn a_new_weekly_cycle_can_be_offered_again() {
     let alerts = opted_in("acct");
     let later = "2026-10-08T12:00:00Z";
     let mut state = HashMap::new();
-    let mut offered = 0;
-    for (renews, observed_at) in [
+    let offered: Vec<usize> = [
         (RENEWS, "2026-10-01T11:40:00Z"),
         (RENEWS, "2026-10-01T11:50:00Z"),
         (later, "2026-10-01T12:00:00Z"),
         (later, "2026-10-01T12:10:00Z"),
-    ] {
-        offered += observe(
+    ]
+    .into_iter()
+    .map(|(renews, observed_at)| {
+        observe(
             &mut state,
             &[card("acct", 95.0, renews, observed_at, 1)],
             &alerts,
             now(),
         )
-        .len();
-    }
+        .len()
+    })
+    .collect();
 
-    assert_eq!(offered, 2);
+    // The new cycle's first low reading is a first reading again, which offers nothing on its own.
+    assert_eq!(offered, [0, 1, 0, 1]);
+}
+
+/// A reset whose soonest expiry has passed may be gone, so it is not offered; one still ahead is.
+#[test]
+fn a_reset_that_may_have_lapsed_is_not_offered() {
+    let alerts = opted_in("acct");
+    for (expires, offers) in [("2026-10-01T11:00:00Z", 0), ("2026-10-03T00:00:00Z", 1)] {
+        let lapsing = |observed_at| {
+            let mut card = card("acct", 95.0, RENEWS, observed_at, 1);
+            card.reading.reset_credits.as_mut().unwrap().next_expires_at = Some(expires.into());
+            card
+        };
+        let first = lapsing("2026-10-01T11:50:00Z");
+        let second = lapsing("2026-10-01T12:00:00Z");
+
+        assert_eq!(
+            two_polls(&first, &second, &alerts).1.len(),
+            offers,
+            "{expires}"
+        );
+    }
+}
+
+/// An account's lower share is the one its alert waits for.
+#[test]
+fn an_alerts_lower_share_is_the_one_kept() {
+    let mut alerts = opted_in("acct");
+    alerts.get_mut("acct").unwrap().max_left_percent = 5;
+    for (used, offers) in [(92.0, 0), (96.0, 1)] {
+        let first = card("acct", used, RENEWS, "2026-10-01T11:50:00Z", 1);
+        let second = card("acct", used, RENEWS, "2026-10-01T12:00:00Z", 1);
+
+        assert_eq!(
+            two_polls(&first, &second, &alerts).1.len(),
+            offers,
+            "{used}% used"
+        );
+    }
+}
+
+/// A limit renewing by itself exactly the alert's wait away is still worth a reset.
+#[test]
+fn exactly_the_wait_before_renewal_is_offered() {
+    let alerts = opted_in("acct");
+    let a_day_away = "2026-10-02T12:00:00Z";
+    let first = card("acct", 95.0, a_day_away, "2026-10-01T11:50:00Z", 1);
+    let second = card("acct", 95.0, a_day_away, "2026-10-01T12:00:00Z", 1);
+
+    assert_eq!(two_polls(&first, &second, &alerts).1.len(), 1);
+}
+
+/// What is left is judged as the spend judges it: the fullest of the weekly and five-hour windows,
+/// never one model's own limit.
+#[test]
+fn the_fullest_main_window_decides_and_a_models_own_limit_never_does() {
+    let alerts = opted_in("acct");
+    for (kind, offers) in [(LimitWindowKind::Session, 1), (LimitWindowKind::Model, 0)] {
+        let with_window = |observed_at: &str| {
+            let mut card = card("acct", 40.0, RENEWS, observed_at, 1);
+            card.reading.windows.push(LimitWindowDto {
+                id: "other".into(),
+                label: "Other".into(),
+                kind,
+                used_percent: 96.0,
+                resets_at: Some("2026-10-01T15:00:00Z".into()),
+                window_seconds: Some(18_000),
+                observed_at: observed_at.into(),
+            });
+            card
+        };
+        let first = with_window("2026-10-01T11:50:00Z");
+        let second = with_window("2026-10-01T12:00:00Z");
+
+        assert_eq!(
+            two_polls(&first, &second, &alerts).1.len(),
+            offers,
+            "{kind:?}"
+        );
+    }
 }
 
 #[test]
