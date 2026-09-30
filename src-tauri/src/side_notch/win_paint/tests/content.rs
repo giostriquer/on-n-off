@@ -1,6 +1,6 @@
 use super::*;
 
-/// The label of a cell whose account reports `windows`.
+/// The label `card`'s cell shows.
 fn ring_label(card: ProviderLimitsDto) -> String {
     match cell_content(&CellData::Provider(projected(card))) {
         CellContent::Provider { label, .. } => label,
