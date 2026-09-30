@@ -150,6 +150,14 @@ final class NotchTests {
     expectEqual(provider(.codex, windows: [], status: "failed").hasObservedValues, false)
   }
 
+  func testAPausedRingSaysItsReadingIsTheLastObserved() {
+    let weekly = [quota("weekly", 46)]
+    expectEqual(provider(windows: weekly, status: "failed", headline: "weekly").ringIsLastObserved, true)
+    expectEqual(provider(windows: weekly, status: "ok", headline: "weekly").ringIsLastObserved, false)
+    // A ring with nothing to lead with shows the dash, which is no reading at all.
+    expectEqual(provider(windows: weekly, status: "failed").ringIsLastObserved, false)
+  }
+
   func testWindowsRenewIndependentlyAndUnknownResetRemainsUsable() {
     let entry = provider(windows: [
       quota("weekly", 41),
@@ -502,6 +510,7 @@ checks.testTheRingsShowTheWindowsTheHostNamed()
 checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
 checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
 checks.testAPausedAccountWithOnlyAShareStillHasObservedValues()
+checks.testAPausedRingSaysItsReadingIsTheLastObserved()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testSessionAgesReadLikeTheReferenceApp()
 checks.testRailFramesFollowTheSelectedUUIDOnEveryEdge()

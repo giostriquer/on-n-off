@@ -233,8 +233,7 @@ private struct MeterCell: View {
       ", \($0.name), \($0.quota.text(at: now)) used"
         + ($0.quota.isReached(at: now) ? ", limit reached" : "")
     } ?? ""
-    // A paused account's ring shows its last reading, which the label says, as the card does.
-    let paused = entry?.status != "ok" ? ", refresh paused, last observed" : ""
+    let paused = entry?.ringIsLastObserved == true ? ", refresh paused, last observed" : ""
     return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + innerDescription + paused
   }
 

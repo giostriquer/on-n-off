@@ -238,6 +238,10 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
   /// Whether the popover shows any remembered value: windows or a credit share. A paused account that
   /// has some says they are the last observed.
   public var hasObservedValues: Bool { !windows.isEmpty || workspaceCredits != nil }
+
+  /// Whether the ring shows a reading an unfinished refresh left: a headline on an account whose
+  /// read did not answer this time, which the rail's label says is the last observed.
+  public var ringIsLastObserved: Bool { status != "ok" && headline != nil }
 }
 
 public enum Edge: String, Codable, Sendable {
