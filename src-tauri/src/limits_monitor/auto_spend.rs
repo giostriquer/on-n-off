@@ -257,8 +257,16 @@ pub fn listed() -> Vec<PendingResetSpendDto> {
     })
 }
 
-/// Cancels `account_id`'s waiting spend, from its card or once it was used by hand; `false` when
-/// there was none, or it had already begun.
+/// A reset used by hand on `account_id` leaves nothing for its automatic alert to use in its place;
+/// an attempt that used nothing leaves the waiting spend as it was.
+pub fn used_by_hand(account_id: &str, outcome: ResetCreditOutcome) {
+    if outcome == ResetCreditOutcome::Reset {
+        cancel_listed(account_id);
+    }
+}
+
+/// Cancels `account_id`'s waiting spend, from its card; `false` when there was none, or it had
+/// already begun.
 pub fn cancel_listed(account_id: &str) -> bool {
     let cancelled = with_pending(|pending| pending.remove(account_id).is_some());
     if cancelled {

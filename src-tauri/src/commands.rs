@@ -394,10 +394,7 @@ pub async fn consume_codex_reset_credit(
         let outcome =
             crate::limits_refresh::consume_codex_reset_credit(&account_id, &idempotency_key)
                 .map_err(AdapterError::message)?;
-        // A reset used by hand leaves nothing for an automatic alert to use in its place.
-        if outcome == ResetCreditOutcome::Reset {
-            crate::limits_monitor::auto_spend::cancel_listed(&account_id);
-        }
+        crate::limits_monitor::auto_spend::used_by_hand(&account_id, outcome);
         Ok(outcome)
     })
     .await

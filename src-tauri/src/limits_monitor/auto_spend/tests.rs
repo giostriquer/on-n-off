@@ -143,6 +143,30 @@ fn at_its_time_a_reset_no_longer_needed_is_not_spent() {
     }
 }
 
+/// Codex's signed-in card is found among the others a poll reads: Claude's signed-in card and a
+/// remembered Codex account listed before it decide nothing.
+#[test]
+fn the_signed_in_codex_card_decides_among_the_others() {
+    let claude = ProviderLimitsDto::for_test(AgentId::Claude, "claude-acct")
+        .with_reading(Reading::default());
+    let remembered = {
+        let mut card = card(20.0, RENEWS);
+        card.account.as_mut().unwrap().id = "remembered".into();
+        card.current_account = false;
+        card
+    };
+    let mut pending = scheduled();
+
+    let due = due(
+        &mut pending,
+        &[claude, remembered, card(96.0, RENEWS)],
+        &automatic(),
+        minutes_after_now(10),
+    );
+
+    assert!(matches!(due.as_slice(), [Due::Spend(_)]), "{due:?}");
+}
+
 /// Codex answering that nobody is signed in, or an account without a subscription, is an answer:
 /// there is no account for the reset to land on, so it is kept.
 #[test]
@@ -353,4 +377,13 @@ fn the_waiting_spends_move_through_their_life_and_every_change_is_told() {
     assert_eq!(take_announced(), [Source::ResetSpends]);
     assert!(!clear());
     assert!(take_announced().is_empty(), "announced clearing nothing");
+
+    // A reset used by hand takes the waiting one with it; an attempt that used nothing does not.
+    schedule_all(&[offer()], at(NOW));
+    let _ = take_announced();
+    used_by_hand("acct", ResetCreditOutcome::NothingToReset);
+    assert_eq!(listed().len(), 1);
+    used_by_hand("acct", ResetCreditOutcome::Reset);
+    assert!(listed().is_empty());
+    assert_eq!(take_announced(), [Source::ResetSpends]);
 }
