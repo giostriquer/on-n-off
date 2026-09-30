@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 
 /**
- * How big the control is, by where it sits: `header` beside a screen's title, `row` in a card's row,
- * where it matches the OFF/ON toggle (`Rocker`'s `skill` size) beside it. Each is a whole set of
- * classes, never one appended to the other, since Tailwind settles a conflict by stylesheet order.
+ * How big the control is, by where it sits: `header`, the default, beside a screen's or a section's
+ * title or under a form field's caption; `row` in a settings card's row, where it matches the OFF/ON
+ * toggle (`Rocker`'s `skill` size) beside it. Each is a whole set of classes, never one appended to
+ * the other, since Tailwind settles a conflict by stylesheet order.
  */
 const SIZES = {
   header: { group: "rounded-md", option: "h-7 px-2.5 text-[11px] tracking-[0.05em]" },
