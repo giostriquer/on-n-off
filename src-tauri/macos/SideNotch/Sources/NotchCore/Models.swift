@@ -214,8 +214,8 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     self.workspaceCredits = workspaceCredits
   }
 
-  /// The window the ring and the figure show: the one the host named, which it names only for an
-  /// account it could read.
+  /// The window the ring and the figure show: the one the host named, the weekly window, whatever the
+  /// account's status, so a paused account keeps its last reading.
   public var headline: Quota? {
     headlineWindowId.flatMap { id in windows.first { $0.id == id } }
   }

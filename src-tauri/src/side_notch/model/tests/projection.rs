@@ -185,6 +185,17 @@ fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
         assert!(cell.workspace_credits.is_some(), "{status:?}");
         assert_eq!(cell.message.as_deref(), Some("Paused"));
     }
+
+    // A paused member keeps the share on its inner ring, where no Fable window takes it.
+    let mut member = signed_in(AgentId::Codex, vec![weekly("primary")]);
+    member.status = LimitsStatus::Failed;
+    member.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
+    assert_eq!(project(member).inner_ring, Some(InnerRing::WorkspaceShare));
+
+    // Paused or not, a card without a weekly window leads with nothing, never its session.
+    let mut session_only = signed_in(AgentId::Codex, vec![session("primary")]);
+    session_only.status = LimitsStatus::Failed;
+    assert_eq!(project(session_only).headline_window_id, None);
 }
 
 #[test]
