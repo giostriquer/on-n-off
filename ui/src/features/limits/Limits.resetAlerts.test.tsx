@@ -54,6 +54,7 @@ describe("a Codex account's banked reset alert", () => {
     const saved = renderLimits();
 
     const form = await openAlert("work@codex.example");
+    expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
     expect(within(form).getByLabelText("With this much of the limit left or less (%)")).toHaveProperty("value", "10");
     expect(within(form).getByLabelText("And at least this many hours before it renews by itself")).toHaveProperty("value", "24");
     fireEvent.click(within(form).getByRole("button", { name: ALERT }));

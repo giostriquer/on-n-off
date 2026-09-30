@@ -19,9 +19,10 @@ function Cards() {
     <AccountCardActions accountId={profile.observationId} label={profile.email!} current={profile.active} profile={profile} onForget={forget} onArchive={archive} header={menu => <header>{menu}</header>} />
   </section>)}</>;
 }
-function setup({ preferences = false, onCommit }: { preferences?: boolean; onCommit?: () => void } = {}) {
+/** `signedIn` makes the one saved account the signed-in one, confirmed as the native login. */
+function setup({ preferences = false, onCommit, signedIn = false }: { preferences?: boolean; onCommit?: () => void; signedIn?: boolean } = {}) {
   vi.mocked(api.readAccountPreferences).mockResolvedValue(false);
-  vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: false, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], nativeAccount: null, recoveryRequired: false, notice: null });
+  vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: signedIn, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], ...(signedIn ? { nativeObservationId: "profile:billing-a" } : {}), nativeAccount: null, recoveryRequired: false, notice: null });
   vi.mocked(api.accountAction).mockResolvedValue();
   vi.mocked(api.readAccountActivationBlockers).mockResolvedValue([]);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -96,6 +97,25 @@ it("removes saved login and its card only after confirmation without signing out
   await waitFor(() => expect(forget).toHaveBeenCalledTimes(1));
   expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a", undefined);
   expect(api.accountAction).not.toHaveBeenCalledWith("codex", "signOut", expect.anything(), expect.anything());
+});
+it("asks nothing while the menu or one of its panels is open", async () => {
+  setup(); await screen.findByText("person@example.com");
+  fireEvent.click(screen.getByText("•••"));
+  expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Edit category" }));
+  expect(screen.getByRole("group", { name: "Edit account category" })).toBeTruthy();
+  expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+});
+it("asks before removing the signed-in account's saved login, which leaves it signed in", async () => {
+  setup({ signedIn: true }); await screen.findByText("person@example.com");
+  fireEvent.click(screen.getByText("•••"));
+  fireEvent.click(screen.getByRole("button", { name: "Remove saved login" }));
+  const confirm = screen.getByRole("group", { name: "Confirm account action" });
+  expect(confirm).toHaveTextContent("Remove the saved login for person@example.com? This account stays signed in.");
+  expect(api.accountAction).not.toHaveBeenCalled();
+  fireEvent.click(within(confirm).getByRole("button", { name: "Confirm removal" }));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a", undefined));
+  expect(forget).not.toHaveBeenCalled();
 });
 it("keeps email as the account name and allows a free-text category to be edited or cleared", async () => {
   setup(); await screen.findByText("person@example.com");
