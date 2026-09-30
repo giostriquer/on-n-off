@@ -129,6 +129,7 @@ export function NotchSettingsCard() {
       <SettingRow>
         <span id="notch-show-label" className={rowLabel}>Show</span>
         <Segmented
+          size="row"
           ariaLabelledBy="notch-show-label"
           options={SHOW_OPTIONS.map(([value, label]) => ({ value, label, disabled: value !== "hide" && !canShow }))}
           pressed={(value) => choice === value}
@@ -139,6 +140,7 @@ export function NotchSettingsCard() {
       <SettingRow>
         <span id="notch-edge-label" className={rowLabel}>Edge</span>
         <Segmented
+          size="row"
           ariaLabelledBy="notch-edge-label"
           options={EDGE_OPTIONS.map(([value, label]) => ({ value, label }))}
           pressed={(value) => settings?.edge === value}
@@ -212,6 +214,7 @@ export function NotchSettingsCard() {
       <SettingRow>
         <span id="notch-size-label" className={rowLabel}>Size</span>
         <Segmented
+          size="row"
           ariaLabelledBy="notch-size-label"
           options={(["compact", "standard", "large"] as const).map((size) => ({
             value: size,
@@ -254,6 +257,7 @@ export function NotchSettingsCard() {
             <span className={rowName}>Pull requests</span>
             {settings?.pullRequests.enabled && (
               <Segmented
+                size="row"
                 ariaLabel="Pull request lists"
                 options={GITHUB_LIST_IDS.map((list) => ({
                   value: list,
