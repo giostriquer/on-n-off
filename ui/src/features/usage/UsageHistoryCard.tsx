@@ -31,7 +31,6 @@ export function UsageHistoryCard() {
 
   return (
     <SettingsCard
-      label="Usage history"
       title="Usage history"
       description="Claude Code deletes transcripts after 30 days unless told otherwise. Once usage is a week old, on-n-off keeps its numbers, never the conversations, so Usage still counts it after the transcript is gone. A transcript deleted sooner than that is not kept."
     >

@@ -23,7 +23,6 @@ export function TraySettingsCard({ closeToTray, onCloseToTrayChange }: TraySetti
 
   return (
     <SettingsCard
-      label="Windows tray"
       title="Windows tray"
       description="on-n-off always keeps an icon in the notification area. Turn this on and closing the window leaves it running there instead of quitting."
       control={

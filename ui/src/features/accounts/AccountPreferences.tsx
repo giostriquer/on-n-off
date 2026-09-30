@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Rocker } from "@/components/Rocker";
-import { CardToggle, SettingRow, SettingsCard, rowLabel } from "@/components/SettingsCard";
+import { CardToggle, SettingRow, SettingsCard, SwitchRow } from "@/components/SettingsCard";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { useSharedRead } from "$lib/useSharedRead";
@@ -12,7 +11,6 @@ export function AccountPreferences() {
   const saving = useAutomaticAccountSaving();
   return (
     <SettingsCard
-      label="Accounts"
       title="Accounts"
       description="Saves each account you sign in to, so Limits can switch back to it."
       control={<CardToggle caption="Auto-save" on={saving.on} disabled={saving.locked} ariaLabel={LABEL} onToggle={saving.toggle} />}
@@ -26,10 +24,7 @@ export function AccountPreferences() {
 export function AutomaticAccountSaving() {
   const saving = useAutomaticAccountSaving();
   return <>
-    <div className="flex items-center gap-3">
-      <span className={rowLabel}>{LABEL}</span>
-      <Rocker size="skill" on={saving.on} disabled={saving.locked} ariaLabel={LABEL} onToggle={saving.toggle} />
-    </div>
+    <SwitchRow label={LABEL} on={saving.on} disabled={saving.locked} onToggle={saving.toggle} />
     {saving.problem && <p role="alert" className="text-[12px] text-[var(--trip)]">{saving.problem}</p>}
   </>;
 }

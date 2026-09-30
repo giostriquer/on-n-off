@@ -8,7 +8,7 @@ import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { Rocker } from "@/components/Rocker";
 import { Segmented } from "@/components/Segmented";
-import { SettingRow, SettingsCard, caption, cardButton, cardSelect, rowLabel } from "@/components/SettingsCard";
+import { SettingRow, SettingsCard, caption, cardIconButton, cardSelect, rowLabel, rowName } from "@/components/SettingsCard";
 import { useNotchState } from "./useNotchState";
 import "./side-notch.css";
 
@@ -146,12 +146,12 @@ export function NotchSettingsCard() {
           disabled={busy}
         />
       </SettingRow>
-      <SettingRow className="flex-col items-stretch gap-2">
+      <SettingRow stack>
         <div className="flex items-center gap-3">
           <label htmlFor="notch-display" className={rowLabel}>Display</label>
           <button
             type="button"
-            className={`${cardButton} size-8 px-0`}
+            className={cardIconButton}
             aria-label="Refresh displays"
             disabled={state.isFetching}
             onClick={() => void state.refetch()}
@@ -233,7 +233,7 @@ export function NotchSettingsCard() {
             <li key={id}>
               <SettingRow>
                 <ProviderIcon provider={id} className="size-4 shrink-0" title="" />
-                <span className={`${rowLabel} text-[var(--silkscreen)]`}>{providerLabel(id)}</span>
+                <span className={rowName}>{providerLabel(id)}</span>
                 <Rocker
                   size="skill"
                   on={shown}
@@ -251,7 +251,7 @@ export function NotchSettingsCard() {
         <li>
           <SettingRow>
             <GitPullRequest className="size-4 shrink-0" aria-hidden="true" />
-            <span className={`${rowLabel} text-[var(--silkscreen)]`}>Pull requests</span>
+            <span className={rowName}>Pull requests</span>
             {settings?.pullRequests.enabled && (
               <Segmented
                 ariaLabel="Pull request lists"

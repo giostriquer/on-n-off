@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { CardToggle, SettingRow, SettingsCard, caption, cardButton, cardSelect, rowLabel } from "@/components/SettingsCard";
+import { CardToggle, SettingRow, SettingsCard, caption, cardButton, cardIconButton, cardSelect, rowLabel } from "@/components/SettingsCard";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
 import { NotchSettingsCard } from "@/features/notch/NotchSettingsCard";
 import { TraySettingsCard } from "./TraySettingsCard";
@@ -192,7 +192,6 @@ function GithubSettingsCard({
 
   return (
     <SettingsCard
-      label="Pull requests"
       title="Pull requests"
       description="Reads GitHub through the `gh` CLI's login; nothing is written to GitHub."
       control={
@@ -205,7 +204,7 @@ function GithubSettingsCard({
         />
       }
     >
-      <SettingRow className="flex-col items-stretch gap-2">
+      <SettingRow stack>
         <div className="flex flex-col gap-1">
           <label htmlFor="github-scope" className="text-[12px] text-[var(--mute)]">
             Scopes
@@ -341,7 +340,6 @@ function ResetAlertsCard({ alerts, onChange }: {
   const entries = Object.entries(alerts);
   return (
     <SettingsCard
-      label="Banked reset alerts"
       title="Banked reset alerts"
       description="Notifies when a Codex account runs low and one of its banked resets is worth using. on-n-off never uses a reset by itself; you use it from the account's card. Turn an alert on from the account's ••• menu on Limits."
     >
@@ -414,7 +412,6 @@ function ProviderCard({
   return (
     <SettingsCard
       as="article"
-      label={agent.displayName}
       title={agent.displayName}
       icon={<ProviderIcon provider={agent.id} className="mt-0.5 size-5 shrink-0" />}
       meta={`${cliOk ? "CLI found" : "CLI missing"} · ${report?.homePath ?? BINARY_NAME[agent.id]}`}
@@ -437,7 +434,7 @@ function ProviderCard({
         </>
       }
     >
-      <SettingRow className="gap-2">
+      <SettingRow>
         <span className={`w-[88px] shrink-0 ${caption}`}>
           Binary
         </span>
@@ -455,7 +452,7 @@ function ProviderCard({
         />
         <button
           type="button"
-          className="inline-flex size-8 items-center justify-center rounded-md border border-[var(--hair)] bg-[var(--well)]"
+          className={cardIconButton}
           aria-label={`Browse ${agent.displayName} CLI`}
           onClick={() => void pickBinary()}
         >

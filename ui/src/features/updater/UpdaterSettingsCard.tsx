@@ -20,7 +20,6 @@ export function UpdaterSettingsCard({
 
   return (
     <SettingsCard
-      label="Application updates"
       title="Application updates"
       meta={
         <>
