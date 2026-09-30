@@ -52,7 +52,7 @@ function renderLimits(pollMinutes: LimitsPollMinutes = 5) {
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <Limits pollMinutes={pollMinutes} />
+      <Limits pollMinutes={pollMinutes} resetAlerts={{}} onResetAlertsChange={async () => undefined} />
     </QueryClientProvider>,
   );
   return { ...view, client };
@@ -346,6 +346,7 @@ describe("Limits", () => {
     const button = await within(current).findByRole("button", { name: "Use banked reset" });
     await waitFor(() => expect(button).toHaveProperty("disabled", false));
     fireEvent.click(button);
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Use this reset?" })).getByRole("button", { name: "Use reset" }));
 
     await waitFor(() => expect(within(current).queryByRole("definition", { name: "Banked resets" })).toBeNull());
     expect(within(current).getByRole("status").textContent).toBe("Banked reset used.");
@@ -503,9 +504,9 @@ it.each(["claude", "codex"])("adds only the %s account selected in the shared pi
   fireEvent.click(add);
   expect(addAccount).not.toHaveBeenCalled();
   const picker = screen.getByRole("group", {name: "Add account"});
-  const preference = within(picker).getByRole("checkbox", {name: "Automatically save accounts I sign in to"});
+  const preference = within(picker).getByRole("button", {name: "Automatically save accounts I sign in to"});
   await waitFor(() => expect(preference).toBeEnabled());
-  expect(preference).not.toBeChecked();
+  expect(preference).toHaveAttribute("aria-pressed", "false");
   fireEvent.click(preference);
   fireEvent.blur(preference, { relatedTarget: null });
   expect(screen.getByRole("group", {name: "Add account"})).toBe(picker);

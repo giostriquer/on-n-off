@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
@@ -7,10 +7,8 @@ import { accountButton } from "@/features/accounts/AccountManager";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
 import { latestObservedAt, unexpiredBankedResets, usageLeft } from "./limitPresentation";
+import { useResetSpendLimit } from "./resetAlerts";
 import { SummaryRow } from "./SummaryRow";
-
-/** Below this much usage left a banked reset is doing what it is for, so it is spent without asking. */
-const SPEND_WITHOUT_ASKING_BELOW = 5;
 
 const OUTCOME_MESSAGES: Record<ResetCreditOutcome, string> = {
   reset: "Banked reset used.",
@@ -65,8 +63,10 @@ type AttemptResult = { role: "status" | "alert"; message: string; answeredAt: nu
 /**
  * Spends one banked reset on the signed-in Codex account. Codex applies a reset to whoever is signed
  * in, so only the card that is both the live read and the account controls' current account offers
- * it. With less than 5% of usage left it spends straight away; otherwise it asks first, naming the
- * account and what is left, because a reset used early is a reset wasted.
+ * it. As in Codex's own app, it is usable only with 10% or less of the limit left (or the lower share
+ * the account's alert names), and every use asks first, naming the account, what is left and when
+ * the limit renews by itself, because a reset used early is a reset wasted. The backend refuses a
+ * spend above that share too.
  *
  * One attempt keeps one idempotency key until Codex gives a definite answer: a retry after an error
  * may be retrying a request that already went through, and a new key would spend a second reset.
@@ -91,12 +91,15 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AttemptResult | null>(null);
   const attempt = useRef<string | null>(null);
+  const ruleId = useId();
   const accountId = entry.account?.id;
+  const limit = useResetSpendLimit(accountId ?? "");
   const offered = current && entry.currentAccount && entry.status === "ok" && unexpiredBankedResets(entry.resetCredits, now) !== null;
   const observed = latestObservedAt(entry);
   const shown = result && (observed === null || observed <= result.answeredAt) ? result : null;
   if (!accountId || (!offered && !shown)) return null;
   const left = usageLeft(entry, now);
+  const allowed = left !== null && left <= limit;
 
   async function spend(account: string) {
     setConfirming(false);
@@ -114,23 +117,23 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
     }
   }
 
-  function request(account: string) {
-    if (busy) return;
-    if (left !== null && left < SPEND_WITHOUT_ASKING_BELOW) void spend(account);
-    else setConfirming(true);
-  }
-
-  // A non-breaking hyphen keeps "5-hour" on one line in the dialog.
-  const effect = "A banked reset puts the 5\u2011hour and weekly windows back to 0% and moves your weekly reset date. It can't be undone.";
-  const body = left === null
-    ? `on-n-off can't tell how much Codex usage ${label} has left. ${effect}`
-    : `${label} still has ${Math.round(left)}% of its Codex usage left, so a reset is worth more once you run out. ${effect}`;
+  const weekly = entry.windows.find(window => window.kind === "weekly");
+  const renewsIn = formatResetIn(weekly?.resetsAt, now);
+  const renews = renewsIn ? ` and renews by itself in ${renewsIn}` : "";
+  const body = `${label} has ${Math.round(left ?? 0)}% of its Codex limit left${renews}. A banked reset puts its usage back to 0% and moves its weekly reset date. It can't be undone.`;
   return (
     <>
       {offered ? (
-        <button type="button" className={accountButton} disabled={disabled || busy} onClick={() => request(accountId)}>
+        <button type="button" className={accountButton} disabled={disabled || busy || !allowed}
+          aria-describedby={allowed ? undefined : ruleId}
+          onClick={() => { if (!busy && allowed) setConfirming(true); }}>
           {busy ? "Using reset…" : "Use banked reset"}
         </button>
+      ) : null}
+      {offered && !allowed ? (
+        <span id={ruleId} className="text-[11px] text-[var(--mute)]">
+          Usable once {limit}% or less of the limit is left
+        </span>
       ) : null}
       {shown ? (
         <p role={shown.role} className={`m-0 min-w-0 basis-full break-words text-[11px] ${shown.role === "alert" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
@@ -139,9 +142,9 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
       ) : null}
       {confirming ? (
         <ConfirmDialog
-          title="Use a banked reset now?"
+          title="Use this reset?"
           body={body}
-          confirmLabel="Use reset anyway"
+          confirmLabel="Use reset"
           busy={busy}
           onCancel={() => setConfirming(false)}
           onConfirm={() => void spend(accountId)}

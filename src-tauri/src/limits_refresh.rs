@@ -269,10 +269,12 @@ pub fn consume_codex_reset_credit(
     account_id: &str,
     idempotency_key: &str,
 ) -> Result<ResetCreditOutcome, String> {
+    let max_left_percent =
+        crate::settings::reset_spend_limit(&crate::settings::load_settings(), account_id);
     spend_then_refresh(
         idempotency_key,
         || crate::accounts::activity::read(AgentId::Codex),
-        || crate::limits::consume_codex_reset_credit(account_id, idempotency_key),
+        || crate::limits::consume_codex_reset_credit(account_id, idempotency_key, max_left_percent),
         || {
             let _ = read_limits(AgentId::Codex, true);
         },

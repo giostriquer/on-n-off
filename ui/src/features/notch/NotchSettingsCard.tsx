@@ -6,6 +6,9 @@ import type { NotchDisplay, NotchEdge, NotchSettings } from "$lib/notchTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
+import { Rocker } from "@/components/Rocker";
+import { Segmented } from "@/components/Segmented";
+import { SettingRow, SettingsCard, caption, cardIconButton, cardSelect, rowLabel, rowName } from "@/components/SettingsCard";
 import { useNotchState } from "./useNotchState";
 import "./side-notch.css";
 
@@ -118,63 +121,47 @@ export function NotchSettingsCard() {
       void state.save({ ...settings, ...patch }).catch(() => undefined);
   }
   return (
-    <section
-      aria-label="Side notch settings"
-      className="notch-settings is-page"
+    <SettingsCard
+      label="Side notch settings"
+      title="Side notch"
+      description="Usage rings at the edge of one display, with details on hover. macOS and Windows 11."
     >
-      <header>
-        <div>
-          <h3>Side notch</h3>
-          <p>Usage rings at the edge of one display, with details on hover. macOS and Windows 11.</p>
-        </div>
-      </header>
-      <div className="notch-settings-body">
-        <div className="notch-row">
-          <span id="notch-show-label">Show</span>
-          <div role="group" aria-labelledby="notch-show-label" className="notch-segment">
-            {SHOW_OPTIONS.map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                disabled={busy || (value !== "hide" && !canShow)}
-                aria-pressed={choice === value}
-                onClick={() => change(showPatch(value))}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="notch-row">
-          <span id="notch-edge-label">Edge</span>
-          <div role="group" aria-labelledby="notch-edge-label" className="notch-segment">
-            {EDGE_OPTIONS.map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                disabled={busy}
-                aria-pressed={settings?.edge === value}
-                onClick={() => change({ edge: value })}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="notch-label-row">
-          <label htmlFor="notch-display">Display</label>
+      <SettingRow>
+        <span id="notch-show-label" className={rowLabel}>Show</span>
+        <Segmented
+          ariaLabelledBy="notch-show-label"
+          options={SHOW_OPTIONS.map(([value, label]) => ({ value, label, disabled: value !== "hide" && !canShow }))}
+          pressed={(value) => choice === value}
+          onPress={(value) => change(showPatch(value))}
+          disabled={busy}
+        />
+      </SettingRow>
+      <SettingRow>
+        <span id="notch-edge-label" className={rowLabel}>Edge</span>
+        <Segmented
+          ariaLabelledBy="notch-edge-label"
+          options={EDGE_OPTIONS.map(([value, label]) => ({ value, label }))}
+          pressed={(value) => settings?.edge === value}
+          onPress={(edge) => change({ edge })}
+          disabled={busy}
+        />
+      </SettingRow>
+      <SettingRow stack>
+        <div className="flex items-center gap-3">
+          <label htmlFor="notch-display" className={rowLabel}>Display</label>
           <button
             type="button"
-            className="notch-icon-button"
+            className={cardIconButton}
             aria-label="Refresh displays"
             disabled={state.isFetching}
             onClick={() => void state.refetch()}
           >
-            <RefreshCw size={13} />
+            <RefreshCw className="size-3.5" aria-hidden="true" />
           </button>
         </div>
         <select
           id="notch-display"
+          className={`${cardSelect} w-full`}
           value={settings?.displayId ?? ""}
           disabled={busy}
           onChange={(event) =>
@@ -221,112 +208,96 @@ export function NotchSettingsCard() {
             </span>
           ))}
         </div>
-        <div className="notch-row">
-          <span id="notch-size-label">Size</span>
-          <div
-            role="group"
-            aria-labelledby="notch-size-label"
-            className="notch-segment"
-          >
-            {(["compact", "standard", "large"] as const).map((size) => (
-              <button
-                key={size}
-                type="button"
-                disabled={busy}
-                aria-pressed={settings?.size === size}
-                onClick={() => change({ size })}
-              >
-                {size[0].toUpperCase() + size.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-        <h4 id="notch-providers-label">Integrations</h4>
-        <ul className="notch-providers" aria-labelledby="notch-providers-label">
-          {ALL_AGENTS.map((id) => {
-            const shown = settings?.providers.includes(id) ?? false;
-            const last = shown && cells === 1;
-            return (
-              <li key={id}>
+      </SettingRow>
+      <SettingRow>
+        <span id="notch-size-label" className={rowLabel}>Size</span>
+        <Segmented
+          ariaLabelledBy="notch-size-label"
+          options={(["compact", "standard", "large"] as const).map((size) => ({
+            value: size,
+            label: size[0].toUpperCase() + size.slice(1),
+          }))}
+          pressed={(size) => settings?.size === size}
+          onPress={(size) => change({ size })}
+          disabled={busy}
+        />
+      </SettingRow>
+      <SettingRow>
+        <h4 id="notch-providers-label" className={`m-0 ${caption}`}>Integrations</h4>
+      </SettingRow>
+      <ul className="m-0 list-none p-0" aria-labelledby="notch-providers-label">
+        {ALL_AGENTS.map((id) => {
+          const shown = settings?.providers.includes(id) ?? false;
+          const last = shown && cells === 1;
+          return (
+            <li key={id}>
+              <SettingRow>
                 <ProviderIcon provider={id} className="size-4 shrink-0" title="" />
-                <div>
-                  <span>{providerLabel(id)}</span>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={shown}
-                  aria-label={`Show ${providerLabel(id)} in the notch`}
-                  className="notch-switch"
+                <span className={rowName}>{providerLabel(id)}</span>
+                <Rocker
+                  size="skill"
+                  on={shown}
                   disabled={busy || last}
-                  onClick={() =>
+                  ariaLabel={`Show ${providerLabel(id)} in the notch`}
+                  onToggle={() =>
                     settings &&
                     change({ providers: toggleNotchProvider(settings.providers, id, !shown) })
                   }
-                >
-                  <span />
-                </button>
-              </li>
-            );
-          })}
-          <li>
+                />
+              </SettingRow>
+            </li>
+          );
+        })}
+        <li>
+          <SettingRow>
             <GitPullRequest className="size-4 shrink-0" aria-hidden="true" />
-            <div>
-              <span>Pull requests</span>
-              {settings?.pullRequests.enabled && (
-                <div
-                  role="group"
-                  aria-label="Pull request lists"
-                  className="notch-segment notch-lists"
-                >
-                  {GITHUB_LIST_IDS.map((list) => {
-                    const shown = settings.pullRequests.lists.includes(list);
-                    return (
-                      <button
-                        key={list}
-                        type="button"
-                        disabled={busy || (shown && settings.pullRequests.lists.length === 1)}
-                        aria-pressed={shown}
-                        onClick={() =>
-                          change({
-                            pullRequests: {
-                              ...settings.pullRequests,
-                              lists: toggleNotchList(settings.pullRequests.lists, list, !shown),
-                            },
-                          })
-                        }
-                      >
-                        {LIST_LABEL[list]}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings?.pullRequests.enabled ?? false}
-              aria-label="Show pull requests in the notch"
-              className="notch-switch"
+            <span className={rowName}>Pull requests</span>
+            {settings?.pullRequests.enabled && (
+              <Segmented
+                ariaLabel="Pull request lists"
+                options={GITHUB_LIST_IDS.map((list) => ({
+                  value: list,
+                  label: LIST_LABEL[list],
+                  disabled: settings.pullRequests.lists.includes(list) && settings.pullRequests.lists.length === 1,
+                }))}
+                pressed={(list) => settings.pullRequests.lists.includes(list)}
+                onPress={(list) =>
+                  change({
+                    pullRequests: {
+                      ...settings.pullRequests,
+                      lists: toggleNotchList(
+                        settings.pullRequests.lists,
+                        list,
+                        !settings.pullRequests.lists.includes(list),
+                      ),
+                    },
+                  })
+                }
+                disabled={busy}
+              />
+            )}
+            <Rocker
+              size="skill"
+              on={settings?.pullRequests.enabled ?? false}
               disabled={busy || (settings?.pullRequests.enabled === true && cells === 1)}
-              onClick={() =>
+              ariaLabel="Show pull requests in the notch"
+              onToggle={() =>
                 settings &&
                 change({
                   pullRequests: { ...settings.pullRequests, enabled: !settings.pullRequests.enabled },
                 })
               }
-            >
-              <span />
-            </button>
-          </li>
-        </ul>
-        {message && (
-          <p role="alert" className="notch-error">
+            />
+          </SettingRow>
+        </li>
+      </ul>
+      {message && (
+        <SettingRow>
+          <p role="alert" className="m-0 text-[12px] text-[var(--trip)]">
             {message}
           </p>
-        )}
-      </div>
-    </section>
+        </SettingRow>
+      )}
+    </SettingsCard>
   );
 }

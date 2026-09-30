@@ -1,4 +1,4 @@
-import { Rocker } from "@/features/agents/Rocker";
+import { Rocker } from "@/components/Rocker";
 import { copy } from "$lib/copy";
 import { isProjectOrigin } from "$lib/project";
 import type { SkillDto } from "$lib/types";

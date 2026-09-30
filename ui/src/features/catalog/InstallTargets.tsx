@@ -1,3 +1,4 @@
+import { Segmented } from "@/components/Segmented";
 import { copy } from "$lib/copy";
 import { previewPath } from "$lib/marketplaceSelection";
 import type { AgentId, AgentInfo, ItemScope, ProjectDto } from "$lib/types";
@@ -24,26 +25,14 @@ export function ProviderChips({
   return (
     <div className="flex flex-col gap-1.5">
       <span className={LABEL}>{copy.targetsProviders}</span>
-      <div className="flex flex-wrap gap-1.5">
-        {visibleAgents.map((agent) => (
-          <label
-            key={agent.id}
-            className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] ${
-              providers.includes(agent.id)
-                ? "border-[var(--fill)] bg-[var(--well)] text-[var(--silkscreen)]"
-                : "border-[var(--hair)] text-[var(--mute)]"
-            }`}
-          >
-            <input
-              type="checkbox"
-              aria-label={agent.displayName}
-              checked={providers.includes(agent.id)}
-              disabled={disabled}
-              onChange={() => toggle(agent.id)}
-            />
-            {agent.displayName}
-          </label>
-        ))}
+      <div className="flex">
+        <Segmented
+          ariaLabel={copy.targetsProviders}
+          options={visibleAgents.map((agent) => ({ value: agent.id, label: agent.displayName }))}
+          pressed={(id) => providers.includes(id)}
+          onPress={toggle}
+          disabled={disabled}
+        />
       </div>
       {warning ? <p className="text-[11px] text-[var(--warn)]">{warning}</p> : null}
     </div>
@@ -66,9 +55,6 @@ export function ScopePicker({
   onPickFolder: () => Promise<string | null>;
   disabled: boolean;
 }) {
-  const segment = (on: boolean) =>
-    `h-7 px-2.5 text-[12px] ${on ? "bg-[var(--fill)] text-[var(--fill-ink)]" : "text-[var(--silkscreen)]"}`;
-
   function pickFolder() {
     void onPickFolder().then((dir) => {
       if (dir) {
@@ -81,40 +67,28 @@ export function ScopePicker({
     <div className="flex flex-col gap-1.5">
       <span className={LABEL}>{copy.targetsScope}</span>
       <div className="flex items-center gap-1.5">
-        <div
-          className="inline-flex overflow-hidden rounded-md border border-[var(--hair)]"
-          role="group"
-          aria-label="Install scope"
-        >
-          <button
-            type="button"
-            className={segment(scope.kind === "global")}
-            aria-pressed={scope.kind === "global"}
-            disabled={disabled}
-            onClick={() => onChange({ kind: "global" })}
-          >
-            {copy.scopeGlobal}
-          </button>
-          <button
-            type="button"
-            className={`border-l border-[var(--hair)] ${segment(scope.kind === "project")}`}
-            aria-pressed={scope.kind === "project"}
-            disabled={disabled}
-            onClick={() => {
-              if (scope.kind === "project") {
-                return;
-              }
-              const first = projects[0]?.path;
-              if (first) {
-                onChange({ kind: "project", projectPath: first });
-              } else {
-                pickFolder();
-              }
-            }}
-          >
-            {copy.scopeProject}
-          </button>
-        </div>
+        <Segmented
+          ariaLabel="Install scope"
+          options={[
+            { value: "global", label: copy.scopeGlobal },
+            { value: "project", label: copy.scopeProject },
+          ]}
+          pressed={(kind) => kind === scope.kind}
+          onPress={(kind) => {
+            if (kind === scope.kind) return;
+            if (kind === "global") {
+              onChange({ kind: "global" });
+              return;
+            }
+            const first = projects[0]?.path;
+            if (first) {
+              onChange({ kind: "project", projectPath: first });
+            } else {
+              pickFolder();
+            }
+          }}
+          disabled={disabled}
+        />
         {scope.kind === "project" ? (
           <>
             <select

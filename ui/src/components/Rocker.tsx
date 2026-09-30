@@ -2,7 +2,7 @@ import "./Rocker.css";
 
 type Size = "tab" | "plugin" | "skill" | "master" | "theme";
 
-type RockerProps = {
+export type RockerProps = {
   on: boolean;
   size?: Size;
   busy?: boolean;

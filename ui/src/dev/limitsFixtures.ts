@@ -174,8 +174,8 @@ function limitsBandCodex(): ProviderLimits[] {
 
 /**
  * `?mock=bankedResets`: the signed-in Codex account has two banked resets, each listed with when it
- * lapses, and plenty of usage left, so spending one asks first; the saved account reports the one it
- * had when last read.
+ * lapses, and its limit used up, so one can be spent; the saved account reports the one it had when
+ * last read. `?mock=bankedResetsEarly` is the same with 60% of the week left, so none can be yet.
  */
 function bankedResetsCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
@@ -374,6 +374,11 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
     accounts: { claude: () => ({ profiles: [], nativeObservationId: "order-current", nativeAccount: null, recoveryRequired: false, notice: null }) },
   }),
   bankedResets: () => ({ codex: bankedResetsCodex }),
+  bankedResetsEarly: () => ({
+    codex: () => bankedResetsCodex().map((entry) => entry.currentAccount
+      ? { ...entry, windows: entry.windows.map((window) => ({ ...window, usedPercent: 40 })), resetOffer: null }
+      : entry),
+  }),
   sameEmailWorkspaces: () => ({ codex: sameEmailWorkspacesCodex, accounts: { codex: sameEmailWorkspacesAccounts } }),
   workspaceCredits: () => ({ codex: workspaceCreditsCodex }),
   creditsSpent: () => ({ codex: creditsSpentCodex }),

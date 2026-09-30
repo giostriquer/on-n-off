@@ -501,3 +501,227 @@ fn monitor_state_without_observation_times_is_discarded_instead_of_migrated() {
     assert!(state.providers.is_empty());
     let _ = fs::remove_dir_all(root);
 }
+
+/// A banked reset alert is Codex's alone, so with limit notifications off an alert reads Codex and
+/// never Claude, whose failures would otherwise slow the alert's polls.
+#[test]
+fn the_monitor_reads_only_what_its_settings_watch() {
+    let alert = crate::settings::ResetAlert {
+        label: None,
+        max_left_percent: 10,
+        min_hours_to_renewal: 24,
+    };
+    let settings = |limit_notifications: bool, alerts: bool| crate::settings::AppSettings {
+        limit_notifications,
+        reset_alerts: if alerts {
+            HashMap::from([("acct".to_string(), alert.clone())])
+        } else {
+            HashMap::new()
+        },
+        ..crate::settings::AppSettings::default()
+    };
+
+    assert_eq!(
+        watched_providers(&settings(false, false)),
+        &[] as &[AgentId]
+    );
+    assert_eq!(watched_providers(&settings(false, true)), &[AgentId::Codex]);
+    assert_eq!(
+        watched_providers(&settings(true, false)),
+        &[AgentId::Claude, AgentId::Codex]
+    );
+    assert_eq!(
+        watched_providers(&settings(true, true)),
+        &[AgentId::Claude, AgentId::Codex]
+    );
+}
+
+/// A signed-in Codex card at `used` observed `at`, with a banked reset to spend.
+fn codex_with_a_reset(used: f64, at: &str) -> ProviderLimitsDto {
+    let mut card = observed_at(
+        snapshot(
+            AgentId::Codex,
+            "acct-codex",
+            "you@example.com",
+            used,
+            Some("2026-08-24T12:00:00Z"),
+        ),
+        at,
+    );
+    card.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
+        available_count: 1,
+        next_expires_at: None,
+        resets: Vec::new(),
+    });
+    card
+}
+
+fn alerts_only() -> crate::settings::AppSettings {
+    crate::settings::AppSettings {
+        limit_notifications: false,
+        reset_alerts: HashMap::from([(
+            "acct-codex".to_string(),
+            crate::settings::ResetAlert {
+                label: None,
+                max_left_percent: 10,
+                min_hours_to_renewal: 24,
+            },
+        )]),
+        ..crate::settings::AppSettings::default()
+    }
+}
+
+/// With limit notifications off, an alert still offers its reset, and a limit reaching 100% on the
+/// same reads notifies nothing.
+#[test]
+fn an_alert_offers_its_reset_while_limit_notifications_stay_quiet() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let mut state = MonitorState::default();
+    let settings = alerts_only();
+
+    let first = observe_poll(
+        &mut state,
+        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        &settings,
+        now,
+    );
+    let second = observe_poll(
+        &mut state,
+        &[codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
+        &settings,
+        now,
+    );
+
+    assert!(first.is_empty());
+    assert_eq!(
+        second
+            .iter()
+            .map(|(title, _)| title.as_str())
+            .collect::<Vec<_>>(),
+        ["Codex: a banked reset is available"]
+    );
+    assert!(state.providers.is_empty(), "limit baselines kept while off");
+}
+
+/// With limit notifications on, the same reads notify the limit reached as well.
+#[test]
+fn with_limit_notifications_on_the_limit_is_notified_too() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let mut state = MonitorState::default();
+    let settings = crate::settings::AppSettings {
+        limit_notifications: true,
+        ..alerts_only()
+    };
+
+    observe_poll(
+        &mut state,
+        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        &settings,
+        now,
+    );
+    let notices = observe_poll(
+        &mut state,
+        &[codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
+        &settings,
+        now,
+    );
+
+    let titles: Vec<&str> = notices.iter().map(|(title, _)| title.as_str()).collect();
+    assert_eq!(
+        titles,
+        ["Codex limit reached", "Codex: a banked reset is available"]
+    );
+}
+
+/// With nothing watched the monitor reads nothing, and that poll of nothing forgets everything it
+/// observed, so turning a notification back on starts from a fresh baseline.
+#[test]
+fn a_poll_of_nothing_forgets_every_observation() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let mut state = MonitorState::default();
+    let on = crate::settings::AppSettings {
+        limit_notifications: true,
+        ..alerts_only()
+    };
+    observe_poll(
+        &mut state,
+        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        &on,
+        now,
+    );
+    assert!(!state.providers.is_empty() && !state.reset_alerts.is_empty());
+
+    let notices = observe_poll(
+        &mut state,
+        &[],
+        &crate::settings::AppSettings::default(),
+        now,
+    );
+
+    assert!(notices.is_empty());
+    assert!(state.providers.is_empty() && state.reset_alerts.is_empty());
+}
+
+/// A state file written before banked reset alerts existed still loads, limit baselines and all.
+#[test]
+fn a_state_written_before_alerts_keeps_its_limit_baselines() {
+    let root = scratch_dir("limits-monitor-before-alerts");
+    let path = root.join("monitor.json");
+    fs::write(
+        &path,
+        r#"{"schema_version":2,"providers":{"claude":{"account_id":"account-a","windows":{"weekly":{"used_percent":50,"resets_at":"2026-08-24T12:00:00Z","observed_at":"2026-08-19T12:00:00Z","exhausted":false}}}}}"#,
+    )
+    .unwrap();
+
+    let state = load_state(&path);
+
+    assert_eq!(state.providers[&AgentId::Claude].account_id, "account-a");
+    assert!(state.reset_alerts.is_empty());
+    let _ = fs::remove_dir_all(root);
+}
+
+/// An offer made before a restart is not made again after it.
+#[test]
+fn an_offer_is_not_made_again_after_a_restart() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let root = scratch_dir("limits-monitor-offer-restart");
+    let path = root.join("monitor.json");
+    let settings = alerts_only();
+    let mut state = MonitorState::default();
+    observe_poll(
+        &mut state,
+        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        &settings,
+        now,
+    );
+    assert_eq!(
+        observe_poll(
+            &mut state,
+            &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
+            &settings,
+            now
+        )
+        .len(),
+        1
+    );
+    monitor::save_state(&path, &state).unwrap();
+
+    let mut reloaded = load_state(&path);
+
+    assert!(observe_poll(
+        &mut reloaded,
+        &[codex_with_a_reset(97.0, "2026-08-19T12:20:00Z")],
+        &settings,
+        now
+    )
+    .is_empty());
+    let _ = fs::remove_dir_all(root);
+}

@@ -131,6 +131,20 @@ export type AppSettings = {
   githubPollSeconds: GithubPollSeconds;
   /** Windows only: closing the main window hides it into the tray instead of quitting. */
   closeToTray: boolean;
+  /** Codex accounts whose banked reset is offered once they run low, by the card's account id. */
+  resetAlerts: Record<string, ResetAlert>;
+};
+
+/**
+ * When a Codex account's banked reset is offered: with `maxLeftPercent` or less of its current limit
+ * left (at most Codex's own 10%), and its own reset at least `minHoursToRenewal` away. on-n-off never
+ * spends one by itself.
+ */
+export type ResetAlert = {
+  /** The account's email when the alert was turned on, for Settings to name it. */
+  label: string | null;
+  maxLeftPercent: number;
+  minHoursToRenewal: number;
 };
 
 export type DiagnoseCheck = {

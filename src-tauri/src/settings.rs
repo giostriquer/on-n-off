@@ -41,6 +41,56 @@ pub struct AppSettings {
     /// Windows only: closing the main window hides it and leaves the app in the tray.
     #[serde(default)]
     pub close_to_tray: bool,
+    /// Codex accounts whose banked reset on-n-off offers once they run low, by the card's account
+    /// id: an opt-in each. on-n-off never spends one by itself, as Codex's own app never does.
+    #[serde(default)]
+    pub reset_alerts: HashMap<String, ResetAlert>,
+}
+
+/// When a Codex account's banked reset is offered: with `max_left_percent` or less of its current
+/// limit left, and its own reset at least `min_hours_to_renewal` away, since a reset spent just
+/// before the limit renews anyway is wasted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetAlert {
+    /// The account's email when it was turned on, for Settings to name it.
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default = "reset_max_left_default")]
+    pub max_left_percent: u8,
+    #[serde(default = "reset_min_hours_default")]
+    pub min_hours_to_renewal: u16,
+}
+
+/// The share of the current limit left at or under which Codex's own app lets a reset be used.
+pub const CODEX_RESET_MAX_LEFT_PERCENT: u8 = 10;
+
+/// The longest wait an alert can ask for before the limit renews by itself: a week, the cycle.
+pub const RESET_ALERT_MAX_HOURS: u16 = 7 * 24;
+
+impl ResetAlert {
+    /// The share of the current limit left at or under which this account's banked reset may be
+    /// spent: Codex's own 10%, or the lower share the alert names.
+    pub fn spend_limit(&self) -> u8 {
+        self.max_left_percent.min(CODEX_RESET_MAX_LEFT_PERCENT)
+    }
+}
+
+const fn reset_max_left_default() -> u8 {
+    CODEX_RESET_MAX_LEFT_PERCENT
+}
+
+const fn reset_min_hours_default() -> u16 {
+    24
+}
+
+/// The share of the current limit left at or under which a banked reset of `account_id` may be
+/// spent (`ResetAlert::spend_limit`), Codex's own 10% without an alert.
+pub fn reset_spend_limit(settings: &AppSettings, account_id: &str) -> u8 {
+    settings
+        .reset_alerts
+        .get(account_id)
+        .map_or(CODEX_RESET_MAX_LEFT_PERCENT, ResetAlert::spend_limit)
 }
 
 const fn automatic_updates_default() -> bool {
@@ -67,6 +117,7 @@ impl Default for AppSettings {
             github_notifications: false,
             github_poll_seconds: github_poll_seconds_default(),
             close_to_tray: false,
+            reset_alerts: HashMap::new(),
         }
     }
 }
@@ -169,6 +220,12 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     let mut seen = std::collections::HashSet::new();
     scopes.retain(|scope| seen.insert(scope.clone()));
     settings.github_scopes = scopes;
+    for alert in settings.reset_alerts.values_mut() {
+        alert.max_left_percent = alert
+            .max_left_percent
+            .clamp(1, CODEX_RESET_MAX_LEFT_PERCENT);
+        alert.min_hours_to_renewal = alert.min_hours_to_renewal.min(RESET_ALERT_MAX_HOURS);
+    }
     settings
 }
 

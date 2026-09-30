@@ -240,6 +240,22 @@ impl Reading {
             .as_ref()
             .is_some_and(|resets| resets.available_count > 0)
     }
+
+    /// What is left of the current limit, 0 to 100: what its fullest weekly or five-hour window has
+    /// left, as the card and Codex's own app count it. A banked reset is spent, and offered, by it.
+    pub fn limit_left_percent(&self) -> Option<f64> {
+        self.windows
+            .iter()
+            .filter(|window| {
+                matches!(
+                    window.kind,
+                    LimitWindowKind::Weekly | LimitWindowKind::Session
+                )
+            })
+            .map(|window| window.used_percent)
+            .reduce(f64::max)
+            .map(|used| (100.0 - used).max(0.0))
+    }
 }
 
 /// Subscription rate-limit snapshot for one provider account. Provider-side problems are encoded

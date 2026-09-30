@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { visibleAgentIds, setAgentHidden, ALL_AGENTS, mergeAppSettings } from "./appSettings";
+import { visibleAgentIds, setAgentHidden, ALL_AGENTS, mergeAppSettings, resetSpendLimit } from "./appSettings";
 
 describe("appSettings", () => {
   it("defaults to every provider visible", () => {
@@ -68,5 +68,23 @@ describe("appSettings", () => {
       (mergeAppSettings(JSON.parse('{"closeToTray":true}')) as unknown as Record<string, unknown>)
         .closeToTray,
     ).toBe(true);
+  });
+  it("keeps no banked reset alert by default and keeps the ones saved", () => {
+    const saved = { "acct-work": { label: "you@example.com", maxLeftPercent: 5, minHoursToRenewal: 48 } };
+
+    expect(mergeAppSettings(null).resetAlerts).toEqual({});
+    expect(mergeAppSettings({ resetAlerts: saved }).resetAlerts).toEqual(saved);
+  });
+
+  it("lets a banked reset be spent at Codex's 10% left, or at an account's lower share", () => {
+    const alerts = {
+      low: { label: null, maxLeftPercent: 4, minHoursToRenewal: 24 },
+      // Settings from a hand-edited file are clamped by the backend; the UI never spends above 10%.
+      high: { label: null, maxLeftPercent: 40, minHoursToRenewal: 24 },
+    };
+
+    expect(resetSpendLimit(alerts, "none")).toBe(10);
+    expect(resetSpendLimit(alerts, "low")).toBe(4);
+    expect(resetSpendLimit(alerts, "high")).toBe(10);
   });
 });

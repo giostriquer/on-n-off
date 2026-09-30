@@ -119,23 +119,27 @@ pub(super) fn consume_reset_credit(
     home: &Path,
     account_id: &str,
     idempotency_key: &str,
+    max_left_percent: u8,
 ) -> Result<ResetCreditOutcome, String> {
     spend_reset_credit(
         &home.join(".codex"),
         account_id,
         idempotency_key,
+        max_left_percent,
         crate::accounts::codex_store::metadata,
         ProcessTransport::spawn,
     )
 }
 
 /// Every check before a reset is spent, in order: the native login is the card's account before
-/// the app-server starts, the app-server is signed in with ChatGPT, and the native login is still the
-/// card's account once the app-server has loaded it. Only then is the request sent.
+/// the app-server starts, the app-server is signed in with ChatGPT, the native login is still the
+/// card's account once the app-server has loaded it, and the current limit has `max_left_percent`
+/// or less left, the rule Codex's own app keeps. Only then is the request sent.
 fn spend_reset_credit<T: JsonLineTransport>(
     codex_home: &Path,
     account_id: &str,
     idempotency_key: &str,
+    max_left_percent: u8,
     identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
     spawn: impl FnOnce(&Path) -> Result<T, String>,
 ) -> Result<ResetCreditOutcome, String> {
@@ -145,6 +149,7 @@ fn spend_reset_credit<T: JsonLineTransport>(
         codex_home,
         account_id,
         idempotency_key,
+        max_left_percent,
         &identity,
         &mut transport,
     );
@@ -159,6 +164,7 @@ fn spend_in_session(
     codex_home: &Path,
     account_id: &str,
     idempotency_key: &str,
+    max_left_percent: u8,
     identity: &impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
     transport: &mut impl JsonLineTransport,
 ) -> Result<ResetCreditOutcome, SpendFailure> {
@@ -177,10 +183,13 @@ fn spend_in_session(
     identity(codex_home)
         .and_then(|current| reset_target_matches(current, account_id))
         .map_err(SpendFailure::Refused)?;
+    let rate_limits = read_rate_limits(transport)?;
+    spend_allowed(&super::codex::parse_codex(&rate_limits), max_left_percent)
+        .map_err(SpendFailure::Refused)?;
     query_step(
         QueryStage::ResetCredit,
         transport.send(&serde_json::json!({
-            "id": 3,
+            "id": 4,
             "method": "account/rateLimitResetCredit/consume",
             "params": {"idempotencyKey": idempotency_key},
         })),
@@ -188,10 +197,25 @@ fn spend_in_session(
     let response: ConsumeResetCreditResponse = receive_response(
         QueryStage::ResetCredit,
         transport,
-        3,
+        4,
         "account/rateLimitResetCredit/consume",
     )?;
     Ok(response.outcome)
+}
+
+/// Whether `reading` has `max_left_percent` or less of its current limit left
+/// (`Reading::limit_left_percent`).
+fn spend_allowed(reading: &crate::dto::Reading, max_left_percent: u8) -> Result<(), String> {
+    let left = reading.limit_left_percent().ok_or(
+        "on-n-off can't tell how much of the Codex limit is left, so it won't spend a reset.",
+    )?;
+    if left <= f64::from(max_left_percent) {
+        return Ok(());
+    }
+    Err(format!(
+        "A banked reset can be used once {max_left_percent}% or less of the current limit is left, and {}% is left.",
+        left.round()
+    ))
 }
 
 /// A reset lands on whoever is signed in, so the native login must be the account the card names.
@@ -463,22 +487,29 @@ fn query_app_server(
     transport: &mut impl JsonLineTransport,
 ) -> Result<AppServerResult, QueryError> {
     let (codex_home, account) = handshake(expected_codex_home, force, transport)?;
-    query_step(
-        QueryStage::RateLimits,
-        transport
-            .send(&serde_json::json!({"id": 3, "method": "account/rateLimits/read", "params": {}})),
-    )?;
-    let rate_limits = receive_response(
-        QueryStage::RateLimits,
-        transport,
-        3,
-        "account/rateLimits/read",
-    )?;
+    let rate_limits = read_rate_limits(transport)?;
     Ok(AppServerResult {
         codex_home,
         account,
         rate_limits,
     })
+}
+
+/// `account/rateLimits/read`, the call after the handshake in a read and in a spend.
+fn read_rate_limits(
+    transport: &mut impl JsonLineTransport,
+) -> Result<super::codex::RateLimitsResponse, QueryError> {
+    query_step(
+        QueryStage::RateLimits,
+        transport
+            .send(&serde_json::json!({"id": 3, "method": "account/rateLimits/read", "params": {}})),
+    )?;
+    receive_response(
+        QueryStage::RateLimits,
+        transport,
+        3,
+        "account/rateLimits/read",
+    )
 }
 
 /// `initialize` against the expected home, then `account/read`: the start of every app-server call.

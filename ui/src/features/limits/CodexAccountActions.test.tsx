@@ -17,7 +17,7 @@ const entry: ProviderLimits = {
   status: "ok",
   currentAccount: true,
   account: { id: "acct-work", label: "work@codex.example" },
-  windows: [{ id: "secondary", label: "Weekly · all models", kind: "weekly", usedPercent: 40, resetsAt: "2026-08-22T00:00:00Z", observedAt: "2026-08-17T20:00:00Z" }],
+  windows: [{ id: "secondary", label: "Weekly · all models", kind: "weekly", usedPercent: 95, resetsAt: "2026-08-22T00:00:00Z", observedAt: "2026-08-17T20:00:00Z" }],
   resetCredits: { availableCount: 1, nextExpiresAt: null },
 };
 

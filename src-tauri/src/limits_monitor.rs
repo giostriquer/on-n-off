@@ -19,6 +19,9 @@ pub struct LimitsMonitor;
 struct MonitorState {
     schema_version: u8,
     providers: HashMap<AgentId, ProviderObservation>,
+    /// Banked reset alerts, by the card's account id (`reset_alerts`).
+    #[serde(default)]
+    reset_alerts: HashMap<String, reset_alerts::AlertState>,
 }
 
 impl Default for MonitorState {
@@ -26,6 +29,7 @@ impl Default for MonitorState {
         Self {
             schema_version: MONITOR_STATE_SCHEMA_VERSION,
             providers: HashMap::new(),
+            reset_alerts: HashMap::new(),
         }
     }
 }
@@ -90,8 +94,9 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
         let settings = async_runtime::spawn_blocking(crate::settings::load_settings)
             .await
             .unwrap_or_default();
-        let delay_minutes = if settings.limit_notifications {
-            let failed = match poll_once(&app, &state_path, &mut state).await {
+        let watched = watched_providers(&settings);
+        let delay_minutes = if !watched.is_empty() {
+            let failed = match poll_once(&app, &state_path, &mut state, &settings, watched).await {
                 Ok(failed) => failed,
                 Err(error) => {
                     eprintln!("limits monitor poll failed: {error}");
@@ -106,8 +111,9 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             poll_delay_minutes(settings.limits_poll_minutes, consecutive_failures)
         } else {
             consecutive_failures = 0;
-            if !state.providers.is_empty() {
-                state.providers.clear();
+            if !state.providers.is_empty() || !state.reset_alerts.is_empty() {
+                // With nothing watched, a poll of nothing forgets every observation.
+                observe_poll(&mut state, &[], &settings, chrono::Utc::now());
                 if let Err(error) = monitor::persist_state(&state_path, &state).await {
                     eprintln!("limits monitor could not clear its state: {error}");
                 }
@@ -123,32 +129,85 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
     }
 }
 
+/// The providers the monitor reads under `settings`: both while limit notifications are on, Codex
+/// alone while only banked reset alerts are, and none otherwise.
+fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [AgentId] {
+    if settings.limit_notifications {
+        &MONITORED_PROVIDERS
+    } else if !settings.reset_alerts.is_empty() {
+        &[AgentId::Codex]
+    } else {
+        &[]
+    }
+}
+
+/// One poll of `watched`: limit notifications when they are on, and a banked reset offered to every
+/// opted-in account that needs one. The state is saved before anything is shown, so a notification
+/// that failed to save is not shown again and again.
 async fn poll_once(
     app: &AppHandle,
     state_path: &Path,
     state: &mut MonitorState,
+    settings: &crate::settings::AppSettings,
+    watched: &[AgentId],
 ) -> Result<bool, String> {
-    let snapshots = poll_providers().await?;
+    let snapshots = poll_providers(watched).await?;
     let provider_failed = snapshots
         .iter()
         .any(|snapshot| snapshot.current_account && snapshot.status == LimitsStatus::Failed);
     let previous = state.clone();
-    let events = observe(state, &snapshots);
+    let notices = observe_poll(state, &snapshots, settings, chrono::Utc::now());
     if let Err(error) = monitor::persist_state(state_path, state).await {
         *state = previous;
         return Err(format!("could not save state: {error}"));
     }
-    for event in events {
-        let (title, body) = notification_copy(&event);
+    for (title, body) in notices {
         monitor::notify(app, "limits monitor", title, body, Sound::Default);
     }
     Ok(provider_failed)
 }
 
-async fn poll_providers() -> Result<Vec<ProviderLimitsDto>, String> {
-    let tasks = MONITORED_PROVIDERS.map(|provider| {
-        async_runtime::spawn_blocking(move || crate::limits_refresh::read_limits(provider, false))
-    });
+/// What one poll's `snapshots` notify under `settings` at `now`, with `state` brought up to date:
+/// limit changes only while limit notifications are on, whose baselines are forgotten while they
+/// are off, and every banked reset an opted-in account is offered.
+fn observe_poll(
+    state: &mut MonitorState,
+    snapshots: &[ProviderLimitsDto],
+    settings: &crate::settings::AppSettings,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<(String, String)> {
+    let events = if settings.limit_notifications {
+        observe(state, snapshots)
+    } else {
+        state.providers.clear();
+        Vec::new()
+    };
+    let offers = reset_alerts::observe(
+        &mut state.reset_alerts,
+        snapshots,
+        &settings.reset_alerts,
+        now,
+    );
+    events
+        .iter()
+        .map(notification_copy)
+        .chain(
+            offers
+                .iter()
+                .map(|offer| reset_alerts::notification_copy(offer, now)),
+        )
+        .collect()
+}
+
+async fn poll_providers(watched: &[AgentId]) -> Result<Vec<ProviderLimitsDto>, String> {
+    let tasks: Vec<_> = watched
+        .iter()
+        .map(|&provider| {
+            async_runtime::spawn_blocking(move || {
+                crate::limits_refresh::read_limits(provider, false)
+            })
+        })
+        .collect();
     let mut snapshots = Vec::new();
     for task in tasks {
         snapshots.extend(
@@ -301,6 +360,8 @@ fn load_state(path: &Path) -> MonitorState {
         state.schema_version == MONITOR_STATE_SCHEMA_VERSION
     })
 }
+
+mod reset_alerts;
 
 #[cfg(test)]
 mod tests;
