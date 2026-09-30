@@ -198,7 +198,9 @@ async fn poll_once(
     if saved.is_err() {
         *state = previous;
     } else {
-        let scheduled = auto_spend::schedule_all(&outcome.automatic_offers, now);
+        // Counted from when the user is told, not from before the read, so the wait is the whole
+        // ten minutes.
+        let scheduled = auto_spend::schedule_all(&outcome.automatic_offers, chrono::Utc::now());
         for (title, body) in outcome.notices.into_iter().chain(scheduled) {
             monitor::notify(app, "limits monitor", title, body, Sound::Default);
         }
