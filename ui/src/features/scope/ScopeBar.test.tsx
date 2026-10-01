@@ -12,9 +12,9 @@ const projects = [
     mcpCount: 1,
   },
   {
-    id: "e:/dev/conoswiki",
-    label: "conoswiki",
-    path: String.raw`E:\dev\conoswiki`,
+    id: "e:/dev/acme",
+    label: "acme",
+    path: String.raw`E:\dev\acme`,
     branch: "",
     skillCount: 0,
     mcpCount: 0,
@@ -47,7 +47,7 @@ describe("ScopeBar", () => {
     expect(screen.getByText("7 global items")).toBeTruthy();
     expect(screen.getByText("on-n-off")).toBeTruthy();
     expect(screen.getByText("main")).toBeTruthy();
-    expect(screen.getByText("conoswiki")).toBeTruthy();
+    expect(screen.getByText("acme")).toBeTruthy();
     await fireEvent.click(screen.getByText("on-n-off"));
     expect(onSelect).toHaveBeenCalledWith(String.raw`E:\dev\on-n-off`);
   });
@@ -69,8 +69,8 @@ describe("ScopeBar", () => {
     );
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     const search = screen.getByPlaceholderText("Search projects, or paste a folder path…");
-    await fireEvent.input(search, { target: { value: "cono" } });
-    expect(screen.getByText("conoswiki")).toBeTruthy();
+    await fireEvent.input(search, { target: { value: "acm" } });
+    expect(screen.getByText("acme")).toBeTruthy();
     expect(screen.getAllByText("on-n-off")).toHaveLength(1);
     await fireEvent.input(search, { target: { value: String.raw`D:\tmp\scratch` } });
     expect(screen.getByText("Open scratch")).toBeTruthy();

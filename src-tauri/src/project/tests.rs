@@ -1,40 +1,5 @@
 use super::*;
 
-#[cfg(test)]
-pub fn projects_from_paths(paths: Vec<String>) -> Vec<ProjectDto> {
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for path in paths {
-        let trimmed = path.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let id = normalize_project_key(trimmed);
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        out.push(ProjectDto {
-            id,
-            label: project_label(trimmed),
-            path: trimmed.to_string(),
-            branch: String::new(),
-            skill_count: 0,
-            mcp_count: 0,
-        });
-    }
-    out.sort_by(|a, b| {
-        a.label
-            .to_ascii_lowercase()
-            .cmp(&b.label.to_ascii_lowercase())
-            .then_with(|| {
-                a.path
-                    .to_ascii_lowercase()
-                    .cmp(&b.path.to_ascii_lowercase())
-            })
-    });
-    out
-}
-
 #[test]
 fn normalizes_windows_project_keys() {
     assert_eq!(
@@ -56,18 +21,36 @@ fn parses_claude_and_codex_recognized_projects() {
     );
     assert_eq!(claude.len(), 2);
     let codex = parse_codex_projects(
-        "[projects.'E:\\dev\\on-n-off']\ntrust_level = \"trusted\"\n\n[projects.'E:\\dev\\conoswiki']\ntrust_level = \"trusted\"\n",
+        "[projects.'E:\\dev\\on-n-off']\ntrust_level = \"trusted\"\n\n[projects.'E:\\dev\\acme']\ntrust_level = \"trusted\"\n",
     );
     assert!(codex.iter().any(|path| path.contains("on-n-off")));
-    assert!(codex.iter().any(|path| path.contains("conoswiki")));
-    let projects = projects_from_paths(vec![
-        r"E:\dev\on-n-off".into(),
-        r"E:\dev\on-n-off\".into(),
-        r"E:\dev\conoswiki".into(),
-    ]);
-    assert_eq!(projects.len(), 2);
-    assert_eq!(projects[0].label, "conoswiki");
-    assert_eq!(projects[1].label, "on-n-off");
+    assert!(codex.iter().any(|path| path.contains("acme")));
+}
+
+#[test]
+fn inspecting_projects_keeps_one_per_folder_sorted_by_label() {
+    let root = crate::paths::scratch_dir("on-n-off-inspect-projects");
+    let on_n_off = root.join("on-n-off");
+    let acme = root.join("acme");
+    let path = |dir: &Path| dir.to_string_lossy().into_owned();
+    let projects = inspect_projects(
+        vec![
+            path(&on_n_off),
+            format!("{}{}", path(&on_n_off), std::path::MAIN_SEPARATOR),
+            "  ".into(),
+            path(&acme),
+        ],
+        AgentId::Codex,
+    );
+    let listed: Vec<_> = projects
+        .iter()
+        .map(|project| (project.label.as_str(), project.path.clone()))
+        .collect();
+    assert_eq!(
+        listed,
+        [("acme", path(&acme)), ("on-n-off", path(&on_n_off))]
+    );
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

@@ -126,19 +126,6 @@ impl<T: Clone> PerAccount<T> {
         self.entries().remove(account);
     }
 
-    /// Backoff state for an account, as if its `count`th failure's wait had already run out.
-    pub(super) fn failed_before(&self, account: &str, count: u32) {
-        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
-        self.entries()
-            .entry(account.to_string())
-            .or_default()
-            .failure = Some((expired, count));
-    }
-
-    pub(super) fn backoff_of(&self, account: &str) -> Option<(Instant, u32)> {
-        self.entries().get(account).and_then(|entry| entry.failure)
-    }
-
     /// Make the account's standing answer `by` older than it is.
     pub(super) fn age_answer(&self, account: &str, by: Duration) {
         if let Some(entry) = self.entries().get_mut(account) {
