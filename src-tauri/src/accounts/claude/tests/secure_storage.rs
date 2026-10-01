@@ -133,3 +133,17 @@ fn the_usage_read_works_in_its_own_config_dir_and_signs_in_from_the_users_store(
         Some(own.as_path())
     );
 }
+
+#[test]
+fn a_disposable_homes_usage_read_signs_in_from_that_home_never_the_users() {
+    let root = tempfile::tempdir().unwrap();
+    let own = root.path().join("usage");
+    let disposable = [("ON_N_OFF_HOME", PathBuf::from("disposable"))];
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&disposable)).unwrap();
+
+    let env = command_env(&SignedIn(store).command_in(&own));
+
+    assert_eq!(env[SECURE_STORAGE], Some(std::ffi::OsString::new()));
+    assert_eq!(env["HOME"], Some(root.path().into()));
+    assert_eq!(env["USERPROFILE"], Some(root.path().into()));
+}
