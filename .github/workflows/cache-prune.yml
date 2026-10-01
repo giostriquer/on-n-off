@@ -1,5 +1,16 @@
 name: Prune caches
 
+# GitHub caps Actions cache at 10 GB for the whole repository and evicts least-recently-used
+# entries once that is reached. Each Rust key generation costs roughly 2.7 GB across the six
+# shared keys, so a few compiler rolls or lockfile changes are enough to start evicting caches
+# that jobs are still restoring from. On 2026-08-20 the store sat at 9.85 GB across 20 entries.
+# The macOS jobs' Swift build caches (v0-swiftpm-*, one debug and one release family) add a
+# generation whenever the Swift toolchain or a Swift package input changes.
+#
+# This keeps the newest generations per shared key and deletes the rest. Two are kept, not one:
+# both caches fall back to a restore key that drops the last component (the lockfile, or the
+# Swift package inputs), so the previous generation still does useful work after a change.
+
 on:
   schedule:
     - cron: "17 4 * * *"
@@ -27,6 +38,7 @@ defaults:
     shell: pwsh
 
 jobs:
+  # Pinned like every other workflow's runner, and bumped deliberately (see ci.yml).
   prune:
     name: prune
     runs-on: ubuntu-24.04
@@ -65,12 +77,19 @@ jobs:
           $totalBytes = ($caches | Measure-Object -Property size_in_bytes -Sum).Sum
           Write-Output ("Store holds {0} entries, {1:N2} GB." -f $caches.Count, ($totalBytes / 1GB))
 
+          # Only the rust-cache and Swift build cache entries are managed here. Anything else in the
+          # store (setup-bun's own cache, for one) is small and owned by another action, so leave it
+          # alone.
           $managed = @($caches | Where-Object { $_.key -like 'v0-rust-*' -or $_.key -like 'v0-swiftpm-*' })
           if ($managed.Count -eq 0) {
             Write-Output "No rust-cache or Swift build cache entries found; nothing to prune."
             exit 0
           }
 
+          # A key is v0-rust-<shared-key>-<os>-<arch>-<environment>-<lockfiles>, or v0-swiftpm-
+          # <configuration>-<os>-<arch>-<toolchain>-<package inputs>. The two trailing hashes are the
+          # generation and every field before them names the group, so a shared key may be two
+          # fields (bundle-macos) or three (verify-lint-macos) without two jobs' keys sharing a group.
           $doomed = @()
           foreach ($group in $managed | Group-Object { $fields = $_.key -split '-'; $fields[0..($fields.Count - 3)] -join '-' }) {
             $ordered = @($group.Group | Sort-Object { [datetime]$_.last_accessed_at } -Descending)
@@ -93,6 +112,8 @@ jobs:
             if (-not $dryRun) {
               gh api --method DELETE "repos/$repository/actions/caches/$($cache.id)" --silent
               if ($LASTEXITCODE -ne 0) {
+                # A cache can disappear between listing and deletion; that is the outcome we
+                # wanted anyway, so do not fail the run over it.
                 Write-Output "    already gone"
               }
             }

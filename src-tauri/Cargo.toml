@@ -9,9 +9,15 @@ repository = "https://github.com/giostriquer/on-n-off"
 homepage = "https://github.com/giostriquer/on-n-off"
 
 [lints.rust]
+# Unsafe stays opt-in per module: the Windows side notch needs raw Win32 calls, and each
+# such module carries an explicit `#![allow(unsafe_code)]` next to its cfg gate.
 unsafe_code = "deny"
 
 [features]
+# `tauri dev` builds with --no-default-features, and that is what turns single-instance
+# off there: the plugin keys its mutex on the bundle identifier alone, which a dev build
+# shares with the installed app and with every other worktree. Declared as a feature
+# rather than gated on `debug_assertions` so `--all-features` still lints the branch.
 default = ["single-instance"]
 single-instance = []
 
@@ -51,6 +57,11 @@ tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"
+# `winreg` and `windows` are held at the versions the tauri/tao tree already resolves, for the
+# same reason `tao` is: a second copy of `windows` is the largest codegen unit in the Windows
+# tree, and every duplicated generation counts against the 10 GB Actions cache cap that
+# cache-prune.yml exists to defend. 0.62 and 0.56 change none of the Win32 functions, DirectWrite
+# methods or registry APIs this crate calls, so the bump would be cost without gain.
 winreg = "0.55"
 tao = "0.35"
 tiny-skia = "0.12"

@@ -1,13 +1,17 @@
+# Normalize repository text independently of each contributor's Git settings.
 * text=auto eol=lf
 
+# Keep Windows-native scripts compatible with their native tooling.
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 *.psd1 text eol=crlf
 *.psm1 text eol=crlf
 
+# Keep Unix entry points executable and free of carriage returns.
 *.sh text eol=lf
 
+# Images and application icons.
 *.bmp binary
 *.gif binary
 *.icns binary
@@ -17,12 +21,14 @@
 *.png binary
 *.webp binary
 
+# Fonts.
 *.eot binary
 *.otf binary
 *.ttf binary
 *.woff binary
 *.woff2 binary
 
+# Archives, installers, and compiled artifacts.
 *.7z binary
 *.dll binary
 *.dmg binary
@@ -32,6 +38,7 @@
 *.tgz binary
 *.zip binary
 
+# Documents and media.
 *.avi binary
 *.mov binary
 *.mp3 binary
