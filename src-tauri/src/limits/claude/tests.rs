@@ -181,7 +181,7 @@ fn the_signed_in_card_is_claude_codes_report_read_in_a_config_dir_without_histor
     let config_dir = std::fs::read_to_string(bin.join("config-dir.txt")).unwrap();
     assert_eq!(
         std::path::Path::new(config_dir.trim()),
-        super::usage_config_dir(&home).as_path()
+        home.join(".on-n-off").join("claude-usage").as_path()
     );
     let _ = std::fs::remove_dir_all(&home);
 }

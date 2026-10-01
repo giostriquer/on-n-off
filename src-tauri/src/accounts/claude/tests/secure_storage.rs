@@ -122,7 +122,8 @@ fn the_usage_read_works_in_its_own_config_dir_and_signs_in_from_the_users_store(
         assert_eq!(env[SECURE_STORAGE], Some(storage), "{variable:?}");
         assert_eq!(
             command.get_current_dir(),
-            Some(std::env::temp_dir().as_path())
+            Some(std::env::temp_dir().as_path()),
+            "{variable:?}"
         );
     }
 
