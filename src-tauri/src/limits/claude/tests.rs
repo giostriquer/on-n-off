@@ -179,9 +179,10 @@ fn the_signed_in_card_is_claude_codes_report_read_in_a_config_dir_without_histor
     let args = std::fs::read_to_string(bin.join("args.txt")).unwrap();
     assert!(args.contains("--safe-mode"), "{args}");
     let config_dir = std::fs::read_to_string(bin.join("config-dir.txt")).unwrap();
-    let own = home.join(".on-n-off").join("claude-usage");
-    assert_eq!(std::path::Path::new(config_dir.trim()), own.as_path());
-    assert!(own.is_dir());
+    assert_eq!(
+        std::path::Path::new(config_dir.trim()),
+        super::usage_config_dir(&home).as_path()
+    );
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -194,7 +195,7 @@ fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
     let stub = CliStub::new("claude")
         .stdout(r#"{"loggedIn":false,"authMethod":"none"}"#)
         .write(&bin);
-    assert!(!home.join(".claude").exists());
+    assert!(!super::usage_config_dir(&home).exists());
 
     let cards = crate::accounts::native::with_test_cli(&stub, || {
         crate::limits::read_limits_at(AgentId::Claude, false, &home)

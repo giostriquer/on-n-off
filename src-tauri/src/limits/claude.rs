@@ -1,6 +1,4 @@
-use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -14,15 +12,8 @@ use crate::dto::{AgentId, LimitWindowDto, LimitWindowKind, LimitsStatus, Provide
 pub(super) fn claude_current(home: &Path) -> ProviderLimitsDto {
     match SignedIn::resolve(home) {
         Ok(claude) => {
-            let own = home.join(".on-n-off").join("claude-usage");
-            let without_history = || claude.usage_command(&own);
-            claude_cli::read_signed_in(
-                &|| claude.command(),
-                fs::create_dir_all(&own)
-                    .is_ok()
-                    .then_some(&without_history as &dyn Fn() -> Command),
-                claude.config_file(),
-            )
+            let config_dir = usage_config_dir(home);
+            claude_cli::read_signed_in(&|| claude.command_in(&config_dir), claude.config_file())
         }
         Err(why) => finish(
             AgentId::Claude,
@@ -31,6 +22,10 @@ pub(super) fn claude_current(home: &Path) -> ProviderLimitsDto {
             Parsed::default(),
         ),
     }
+}
+
+pub(super) fn usage_config_dir(home: &Path) -> PathBuf {
+    home.join(".on-n-off").join("claude-usage")
 }
 
 pub(super) fn parse_claude(payload: &Value) -> Vec<LimitWindowDto> {

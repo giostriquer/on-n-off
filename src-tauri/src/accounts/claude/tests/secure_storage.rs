@@ -111,7 +111,7 @@ fn the_usage_read_works_in_its_own_config_dir_and_signs_in_from_the_users_store(
             .collect();
         let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
 
-        let command = SignedIn(store).usage_command(&own);
+        let command = SignedIn(store).command_in(&own);
 
         let env = command_env(&command);
         assert_eq!(
@@ -120,6 +120,16 @@ fn the_usage_read_works_in_its_own_config_dir_and_signs_in_from_the_users_store(
             "{variable:?}"
         );
         assert_eq!(env[SECURE_STORAGE], Some(storage), "{variable:?}");
-        assert_eq!(command.get_current_dir(), Some(own.as_path()));
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::env::temp_dir().as_path())
+        );
     }
+
+    fs::create_dir_all(&own).unwrap();
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&[])).unwrap();
+    assert_eq!(
+        SignedIn(store).command_in(&own).get_current_dir(),
+        Some(own.as_path())
+    );
 }

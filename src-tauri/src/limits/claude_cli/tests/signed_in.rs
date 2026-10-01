@@ -1,12 +1,7 @@
 use super::*;
 
 fn signed_in(dir: &tempfile::TempDir, cli: &AgentCli) -> ProviderLimitsDto {
-    read_signed_in_within(
-        &|| cli.command(),
-        None,
-        &dir.path().join(".claude.json"),
-        ANSWER,
-    )
+    read_signed_in_within(&|| cli.command(), &dir.path().join(".claude.json"), ANSWER)
 }
 
 #[test]
@@ -50,7 +45,6 @@ fn a_signed_out_config_dir_asks_for_a_sign_in() {
 
     let card = read_signed_in_within(
         &usage_then_status(&usage, &status),
-        None,
         &dir.path().join(".claude.json"),
         ANSWER,
     );
@@ -94,7 +88,6 @@ fn no_report_from_a_config_dir_still_signed_in_is_a_failed_read() {
 
     let card = read_signed_in_within(
         &usage_then_status(&usage, &status),
-        None,
         &dir.path().join(".claude.json"),
         ANSWER,
     );
@@ -199,77 +192,5 @@ fn another_unknown_option_is_not_read_as_an_outdated_claude_code() {
     assert_eq!(
         card.message.as_deref(),
         Some("Claude Code could not report usage.")
-    );
-}
-
-#[test]
-fn a_report_from_a_config_dir_without_history_needs_nothing_from_the_users() {
-    let (dir, users) = home(
-        &config("user", "team"),
-        REPORT,
-        CliStub::new("claude").log_args("args.txt", false),
-    );
-    let (_own_dir, own) = home("{}", REPORT, CliStub::new("claude"));
-
-    let card = read_signed_in_within(
-        &|| users.command(),
-        Some(&|| own.command()),
-        &dir.path().join(".claude.json"),
-        ANSWER,
-    );
-
-    assert_eq!(card.status, LimitsStatus::Ok);
-    assert_eq!(card.reading.windows.len(), 3);
-    assert!(
-        !dir.path().join("args.txt").exists(),
-        "the user's config dir was read"
-    );
-}
-
-#[test]
-fn a_claude_code_signed_out_in_a_config_dir_without_history_is_read_in_the_users() {
-    let (dir, users) = home(&config("user", "team"), REPORT, CliStub::new("claude"));
-    let (_own_dir, own_usage) = home("{}", "", CliStub::new("claude"));
-    let status_dir = tempfile::tempdir().unwrap();
-    let own_status = CliStub::new("claude")
-        .stdout(r#"{"loggedIn":false,"authMethod":"none"}"#)
-        .exit(1)
-        .cli(status_dir.path());
-
-    let card = read_signed_in_within(
-        &|| users.command(),
-        Some(&usage_then_status(&own_usage, &own_status)),
-        &dir.path().join(".claude.json"),
-        ANSWER,
-    );
-
-    assert_eq!(card.status, LimitsStatus::Ok);
-    assert_eq!(card.reading.windows.len(), 3);
-}
-
-#[test]
-fn a_read_that_fails_in_a_config_dir_without_history_is_not_read_again_in_the_users() {
-    let (dir, users) = home(
-        &config("user", "team"),
-        REPORT,
-        CliStub::new("claude").log_args("args.txt", false),
-    );
-    let (_own_dir, own) = home("{}", REPORT, CliStub::new("claude").exit(1));
-
-    let card = read_signed_in_within(
-        &|| users.command(),
-        Some(&|| own.command()),
-        &dir.path().join(".claude.json"),
-        ANSWER,
-    );
-
-    assert_eq!(card.status, LimitsStatus::Failed);
-    assert_eq!(
-        card.message.as_deref(),
-        Some("Claude Code could not report usage.")
-    );
-    assert!(
-        !dir.path().join("args.txt").exists(),
-        "the user's config dir was read"
     );
 }

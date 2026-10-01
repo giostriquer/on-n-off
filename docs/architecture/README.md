@@ -130,13 +130,14 @@ provider's own client:
   `--no-session-persistence --output-format stream-json --verbose`), for the user's own login as
   Claude Code resolves it from `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR`, but in a
   config dir of on-n-off's own (`~/.on-n-off/claude-usage`), because the report also scans every
-  transcript its config dir kept that week (`limits/claude.rs`, `limits/claude_cli.rs`). Claude Code reads its own login, renews it when it
-  has to, and asks Anthropic's usage endpoint without a model turn; the read opens no Claude
-  credential, and on-n-off sends nothing to Anthropic. `--safe-mode` keeps the login but starts none of the
-  config dir's CLAUDE.md, skills, plugins, hooks, MCP servers or custom commands, which every poll
-  would otherwise start; a Claude Code too old to know the flag is not run at all, and the card asks
-  for an update. The card is the account the config dir's `.claude.json` `oauthAccount` names
-  before the read, which must still name it after, and its plan comes from that record. When there
+  transcript its config dir kept that week (`limits/claude.rs`, `limits/claude_cli.rs`). Claude
+  Code reads its own login, renews it when it has to, and asks Anthropic's usage endpoint without a
+  model turn; the read opens no Claude credential, and on-n-off sends nothing to Anthropic.
+  `--safe-mode` keeps the login but starts none of the user's CLAUDE.md, skills, plugins, hooks,
+  MCP servers or custom commands, which every poll would otherwise start; a Claude Code too old to
+  know the flag is not run at all, and the card asks for an update. The card is the account the
+  user's own `.claude.json` `oauthAccount` names before the read, which must still name it after,
+  and its plan comes from that record, not from the copy Claude Code keeps in on-n-off's dir. When there
   is no report, `claude auth status --json`, which reads only what is stored, tells a signed-out
   config dir from a report that could not be had.
 

@@ -68,15 +68,13 @@ fn read_usage_within(
 
 pub(crate) fn read_signed_in(
     claude: &dyn Fn() -> Command,
-    without_history: Option<&dyn Fn() -> Command>,
     config_file: &Path,
 ) -> ProviderLimitsDto {
-    read_signed_in_within(claude, without_history, config_file, DEADLINE)
+    read_signed_in_within(claude, config_file, DEADLINE)
 }
 
 fn read_signed_in_within(
     claude: &dyn Fn() -> Command,
-    without_history: Option<&dyn Fn() -> Command>,
     config_file: &Path,
     deadline: Duration,
 ) -> ProviderLimitsDto {
@@ -93,11 +91,7 @@ fn read_signed_in_within(
             },
         )
     };
-    let read = match without_history.map(|claude| report(claude, deadline)) {
-        None | Some(Err(NoReport::SignedOut)) => report(claude, deadline),
-        Some(read) => read,
-    };
-    let windows = match read {
+    let windows = match report(claude, deadline) {
         Ok(windows) => windows,
         Err(NoReport::SignedOut) => {
             return failed(
