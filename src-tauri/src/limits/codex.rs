@@ -540,7 +540,7 @@ pub(crate) fn read_saved_codex(
 /// login is never polled. Using the native login's access token for these read-only GETs is the
 /// user's decision (2026-09-24, extended to the term on 2026-09-25), an exception to Codex alone
 /// making requests for the signed-in account.
-pub(super) fn backend_figures(
+fn backend_figures(
     card: &mut Parsed,
     access: Option<&CodexAccess>,
     urls: CodexEndpoints<'_>,

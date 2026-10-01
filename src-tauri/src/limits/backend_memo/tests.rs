@@ -1,6 +1,21 @@
 use super::*;
 use std::cell::Cell;
 
+impl<T: Clone> PerAccount<T> {
+    /// Backoff state for an account, as if its `count`th failure's wait had already run out.
+    fn failed_before(&self, account: &str, count: u32) {
+        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        self.entries()
+            .entry(account.to_string())
+            .or_default()
+            .failure = Some((expired, count));
+    }
+
+    fn backoff_of(&self, account: &str) -> Option<(Instant, u32)> {
+        self.entries().get(account).and_then(|entry| entry.failure)
+    }
+}
+
 /// A read that answers what the test says and counts how often it was asked.
 fn reads(answer: Option<u8>) -> (impl Fn() -> Option<u8>, std::rc::Rc<Cell<u32>>) {
     let asked = std::rc::Rc::new(Cell::new(0));
@@ -47,11 +62,15 @@ fn a_failure_holds_the_account_back_doubling_each_time_and_a_success_clears_it()
     assert_eq!(count, 1);
 
     memo.failed_before("a", 2);
+    let before = Instant::now();
     assert_eq!(memo.read_backed_off("a", &fail), None);
-    assert_eq!(
-        memo.backoff_of("a").unwrap().1,
-        3,
-        "another failure once the wait ran out counts on"
+    let after = Instant::now();
+    let (until, count) = memo.backoff_of("a").unwrap();
+    assert_eq!(count, 3, "another failure once the wait ran out counts on");
+    let wait = backoff_delay(3, crate::limits_refresh::poll_interval());
+    assert!(
+        until >= before + wait && until <= after + wait,
+        "and waits the longer delay from then"
     );
 
     // Another account is not held back by this one's failures.

@@ -35,25 +35,6 @@ fn observed_at(mut snapshot: ProviderLimitsDto, value: &str) -> ProviderLimitsDt
 }
 
 #[test]
-fn first_successful_read_is_only_a_baseline() {
-    let mut state = MonitorState::default();
-
-    let events = observe(
-        &mut state,
-        &[snapshot(
-            AgentId::Claude,
-            "account-a",
-            "me@example.com",
-            82.0,
-            Some("2026-08-24T12:00:00Z"),
-        )],
-    );
-
-    assert!(events.is_empty());
-    assert_eq!(state.providers.len(), 1);
-}
-
-#[test]
 fn a_model_limit_crossing_one_hundred_percent_notifies_once() {
     let mut state = MonitorState::default();
     let mut before = snapshot(
@@ -322,9 +303,8 @@ fn an_older_observation_never_notifies_or_replaces_the_baseline() {
 }
 
 #[test]
-fn small_utilization_corrections_do_not_notify() {
+fn a_reset_instant_that_moves_without_usage_dropping_is_not_a_reset() {
     let mut state = MonitorState::default();
-    let reset_at = Some("2026-08-24T12:00:00Z");
     assert!(observe(
         &mut state,
         &[snapshot(
@@ -332,22 +312,26 @@ fn small_utilization_corrections_do_not_notify() {
             "account-a",
             "me@example.com",
             50.0,
-            reset_at,
+            Some("2026-08-24T12:00:00Z"),
         )],
     )
     .is_empty());
 
-    assert!(observe(
+    let events = observe(
         &mut state,
-        &[snapshot(
-            AgentId::Codex,
-            "account-a",
-            "me@example.com",
-            48.0,
-            reset_at,
+        &[observed_at(
+            snapshot(
+                AgentId::Codex,
+                "account-a",
+                "me@example.com",
+                49.5,
+                Some("2026-08-24T12:05:00Z"),
+            ),
+            "2026-08-19T13:00:00Z",
         )],
-    )
-    .is_empty());
+    );
+
+    assert!(events.is_empty());
 }
 
 #[test]

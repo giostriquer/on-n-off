@@ -1,8 +1,6 @@
 use super::*;
 use crate::http::{never_asked, was_asked};
-use crate::limits::backend_memo;
 use serde_json::json;
-use std::time::Instant;
 
 fn now() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-09-24T12:00:00Z")
@@ -149,6 +147,21 @@ fn workspace_plans_are_the_ones_codex_counts_as_workspace_accounts() {
     }
 }
 
+/// "team" is a Claude plan too; only a Codex workspace card is ever asked what it spent.
+#[test]
+fn only_a_codex_workspace_card_is_asked_what_it_spent() {
+    let mut card = ProviderLimitsDto::for_test(AgentId::Codex, "acct-a");
+    card.reading.plan = Some("self_serve_business_prolite".to_string());
+    assert!(asks_what_was_spent(&card));
+
+    card.reading.plan = Some("pro".to_string());
+    assert!(!asks_what_was_spent(&card));
+
+    card.provider = AgentId::Claude;
+    card.reading.plan = Some("team".to_string());
+    assert!(!asks_what_was_spent(&card));
+}
+
 /// A key no other test uses, so the backoff one test records never skips another's read.
 fn account(name: &str) -> String {
     format!("test-account:{name}:{:?}", std::thread::current().id())
@@ -237,46 +250,4 @@ fn projection(key: &str) -> CodexAccess {
         workspace_id: "team".to_string(),
         token: AccessToken::new("t"),
     }
-}
-
-fn failed_before(key: &str, count: u32) {
-    MEMO.failed_before(key, count);
-}
-
-fn backoff_of(key: &str) -> Option<(Instant, u32)> {
-    MEMO.backoff_of(key)
-}
-
-/// Another failure once the wait has run out counts toward a longer one.
-#[test]
-fn a_further_failure_waits_longer() {
-    let key = account("escalates");
-    failed_before(&key, 2);
-
-    let before = Instant::now();
-    assert_eq!(
-        read_backed_off(&projection(&key), &crate::http::refused_url(), now()),
-        None
-    );
-    let after = Instant::now();
-
-    let (until, count) = backoff_of(&key).unwrap();
-    let wait = backend_memo::backoff_delay(3, crate::limits_refresh::poll_interval());
-    assert_eq!(count, 3);
-    assert!(until >= before + wait && until <= after + wait);
-}
-
-/// A success after failures clears the account's backoff, so its next failure starts from one
-/// interval again.
-#[test]
-fn a_success_after_failures_clears_the_accounts_backoff() {
-    let key = account("recovers");
-    failed_before(&key, 3);
-    let (url, request) =
-        crate::http::serve_once("200 OK", &breakdown(&[("2026-09-24", &[1.0])]).to_string());
-
-    assert!(read_backed_off(&projection(&key), &url, now()).is_some());
-    request.join().unwrap();
-
-    assert_eq!(backoff_of(&key), None);
 }
