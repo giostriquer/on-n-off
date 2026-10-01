@@ -127,9 +127,10 @@ Each provider is read the way that provider intends, and the signed-in login is 
 provider's own client:
 
 - **Claude** — run Claude Code's own usage report, `claude -p /usage --safe-mode` (with
-  `--no-session-persistence --output-format stream-json --verbose`), for the user's own config dir
-  as Claude Code resolves it from `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR`
-  (`limits/claude.rs`, `limits/claude_cli.rs`). Claude Code reads its own login, renews it when it
+  `--no-session-persistence --output-format stream-json --verbose`), for the user's own login as
+  Claude Code resolves it from `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR`, but in a
+  config dir of on-n-off's own (`~/.on-n-off/claude-usage`), because the report also scans every
+  transcript its config dir kept that week (`limits/claude.rs`, `limits/claude_cli.rs`). Claude Code reads its own login, renews it when it
   has to, and asks Anthropic's usage endpoint without a model turn; the read opens no Claude
   credential, and on-n-off sends nothing to Anthropic. `--safe-mode` keeps the login but starts none of the
   config dir's CLAUDE.md, skills, plugins, hooks, MCP servers or custom commands, which every poll

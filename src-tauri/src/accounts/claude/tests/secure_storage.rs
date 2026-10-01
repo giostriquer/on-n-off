@@ -99,3 +99,43 @@ fn account_changes_defer_to_the_official_client_for_a_moved_store() {
         "set but empty, the store is the default one"
     );
 }
+
+/// The signed-in usage read works in a config dir of its own, whose `projects` holds none of the
+/// transcripts Claude Code's usage report scans, and signs in from the user's store all the same:
+/// the default store, the empty variable included, is the empty variable; a store a variable chose
+/// is that dir, whose hash scopes its Keychain entry as before.
+#[test]
+fn the_usage_read_works_in_its_own_config_dir_and_signs_in_from_the_users_store() {
+    let root = tempfile::tempdir().unwrap();
+    let own = root.path().join("usage");
+    let custom = root.path().join("custom");
+    let secure = root.path().join("secure");
+    let empty = std::ffi::OsString::new();
+    for (variable, value, storage) in [
+        (None, PathBuf::new(), empty.clone()),
+        (
+            Some("CLAUDE_CONFIG_DIR"),
+            custom.clone(),
+            custom.clone().into(),
+        ),
+        (Some(SECURE_STORAGE), secure.clone(), secure.clone().into()),
+        (Some(SECURE_STORAGE), PathBuf::new(), empty.clone()),
+    ] {
+        let env: Vec<_> = variable
+            .map(|name| (name, value.clone()))
+            .into_iter()
+            .collect();
+        let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
+
+        let command = SignedIn(store).usage_command(&own);
+
+        let env = command_env(&command);
+        assert_eq!(
+            env["CLAUDE_CONFIG_DIR"],
+            Some(own.clone().into()),
+            "{variable:?}"
+        );
+        assert_eq!(env[SECURE_STORAGE], Some(storage), "{variable:?}");
+        assert_eq!(command.get_current_dir(), Some(own.as_path()));
+    }
+}

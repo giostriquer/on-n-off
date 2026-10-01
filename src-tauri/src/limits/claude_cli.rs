@@ -1,8 +1,15 @@
 //! A Claude account's usage as Claude Code itself reports it: `claude -p /usage`, run with the
 //! account's own config dir, answers from Anthropic's usage endpoint without a model turn, and
 //! renews that dir's login when it has to. on-n-off sends no request and reads no credential here.
-//! It reads both the signed-in account, in the user's own config dir ([`read_signed_in`]), and a
-//! saved account in its home ([`read_usage`]).
+//! It reads both the signed-in account, from the user's own store ([`read_signed_in`]), and a saved
+//! account in its home ([`read_usage`]).
+//!
+//! The report also scans every transcript its config dir kept this week, to say what used the
+//! limits; there is no cache, and no switch but an organization's policy. In a busy config dir that
+//! is gigabytes on every poll, so the signed-in read runs in a config dir of on-n-off's own, which
+//! keeps none, signed in from the user's store all the same. A Claude Code that cannot be told to
+//! sign in from a store outside its config dir says it is signed out there, and is asked again in
+//! the user's own.
 //!
 //! The user's own config dir has their hooks, plugins, MCP servers and CLAUDE.md, which every poll
 //! would otherwise start, so each read runs with `--safe-mode`, which leaves them all out and keeps
@@ -99,13 +106,15 @@ fn read_usage_within(
 /// remembers stands in.
 pub(crate) fn read_signed_in(
     claude: &dyn Fn() -> Command,
+    without_history: Option<&dyn Fn() -> Command>,
     config_file: &Path,
 ) -> ProviderLimitsDto {
-    read_signed_in_within(claude, config_file, DEADLINE)
+    read_signed_in_within(claude, without_history, config_file, DEADLINE)
 }
 
 fn read_signed_in_within(
     claude: &dyn Fn() -> Command,
+    without_history: Option<&dyn Fn() -> Command>,
     config_file: &Path,
     deadline: Duration,
 ) -> ProviderLimitsDto {
@@ -122,7 +131,13 @@ fn read_signed_in_within(
             },
         )
     };
-    let windows = match report(claude, deadline) {
+    let read = match without_history.map(|claude| report(claude, deadline)) {
+        // A Claude Code that does not know `CLAUDE_SECURESTORAGE_CONFIG_DIR` looks for the login
+        // in the config dir without history and finds none: the user's own config dir answers.
+        None | Some(Err(NoReport::SignedOut)) => report(claude, deadline),
+        Some(read) => read,
+    };
+    let windows = match read {
         Ok(windows) => windows,
         Err(NoReport::SignedOut) => {
             return failed(

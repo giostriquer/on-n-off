@@ -139,10 +139,11 @@ fn empty_limits_array_falls_back_to_legacy_fields() {
     assert_eq!(windows[0].id, "session");
 }
 
-/// The signed-in card is Claude Code's own report for the user's config dir, as the environment
-/// places it: here a test build's disposable home, whose `.claude` the `claude` it starts is handed.
+/// The signed-in card is Claude Code's own report for the user's login, as the environment places
+/// it (here a test build's disposable home), read in a config dir of on-n-off's own, which holds
+/// none of the transcripts the report would otherwise scan.
 #[test]
-fn the_signed_in_card_is_claude_codes_report_in_the_users_own_config_dir() {
+fn the_signed_in_card_is_claude_codes_report_read_in_a_config_dir_without_history() {
     use crate::cli_stub::CliStub;
     let home = crate::paths::scratch_dir("limits-claude-signed-in");
     std::fs::write(
@@ -186,10 +187,9 @@ fn the_signed_in_card_is_claude_codes_report_in_the_users_own_config_dir() {
     let args = std::fs::read_to_string(bin.join("args.txt")).unwrap();
     assert!(args.contains("--safe-mode"), "{args}");
     let config_dir = std::fs::read_to_string(bin.join("config-dir.txt")).unwrap();
-    assert_eq!(
-        std::path::Path::new(config_dir.trim()),
-        home.join(".claude").as_path()
-    );
+    let own = home.join(".on-n-off").join("claude-usage");
+    assert_eq!(std::path::Path::new(config_dir.trim()), own.as_path());
+    assert!(own.is_dir());
     let _ = std::fs::remove_dir_all(&home);
 }
 

@@ -60,6 +60,17 @@ impl StorageDir {
         )
     }
 
+    /// The `CLAUDE_SECURESTORAGE_CONFIG_DIR` that keeps Claude Code's login in this dir whatever
+    /// its config dir: empty for the default dir's unscoped entry, else the dir itself, whose hash
+    /// scopes the entry as before.
+    pub(crate) fn secure_storage_var(&self) -> OsString {
+        if self.scoped {
+            self.path.clone().into_os_string()
+        } else {
+            OsString::new()
+        }
+    }
+
     pub(crate) fn credentials_file(&self) -> PathBuf {
         self.path.join(".credentials.json")
     }

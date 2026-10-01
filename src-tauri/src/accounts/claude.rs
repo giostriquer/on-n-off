@@ -144,6 +144,21 @@ impl SignedIn {
         command
     }
 
+    /// A `claude` that works in `config_home`, a config dir of its own, and signs in from this
+    /// store. Claude Code's usage report scans every transcript the config dir it works in kept
+    /// this week, gigabytes in a busy one; `config_home` keeps none.
+    pub(crate) fn usage_command(&self, config_home: &Path) -> Command {
+        let mut command = self.0.command();
+        command
+            .env("CLAUDE_CONFIG_DIR", config_home)
+            .env(
+                claude_store::SECURE_STORAGE_VAR,
+                self.0.storage_dir().secure_storage_var(),
+            )
+            .current_dir(config_home);
+        command
+    }
+
     /// The file holding the signed-in account record, `oauthAccount`.
     pub(crate) fn config_file(&self) -> &Path {
         &self.0.config_file
