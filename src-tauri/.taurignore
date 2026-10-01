@@ -1,1 +1,4 @@
+# The Swift helper builds into its own `.build` directory during a cargo build; watching it
+# would restart `tauri dev` on each build, including the manual `swift build` runs and the
+# native checks.
 macos/*/.build/

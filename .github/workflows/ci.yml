@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its running check. A push to main queues behind the
+# running main run instead of cancelling it, so a merge keeps its verdict and its chance to save the
+# cache (GitHub still drops a run that is only queued when a newer one queues behind it).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -20,21 +23,35 @@ defaults:
     shell: pwsh
 
 jobs:
+  # Platform-neutral frontend checks. Neither vitest nor tsc can fail on one platform and pass on
+  # another, so running them once on Linux keeps roughly 40s off both native legs and off the
+  # Windows and macOS runner queues. `bun run build` stays on the native legs: tauri-build needs
+  # ui/dist to exist before the Rust steps run.
+  #
+  # Runner labels are pinned to exact images, like the compiler in rust-toolchain.toml, and bumped
+  # deliberately on their own pull request: a `-latest` label moves to a new OS on GitHub's schedule.
+  # scripts/workflows.test.mjs holds the one image per OS that every workflow uses, so a bump changes
+  # them all.
   frontend:
     name: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install frontend dependencies
         id: install
         run: bun install --frozen-lockfile
 
+      # The three checks are independent: once dependencies are installed, each one reports even
+      # when an earlier one failed, so a single push shows every failure.
+      # The tests run east of UTC on purpose. vitest.config.ts pins every worker to UTC, and fixtures
+      # such as 15:00Z fall on the next day in Tokyo, so losing the pin fails here and not only on a
+      # developer's machine east of UTC. See ui/src/test-environment.test.ts.
       - name: Test frontend
         run: bun run test
         env:
@@ -48,6 +65,9 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
+  # The native legs, one call of verify.yml per OS: a lint job and a test job each, in parallel.
+  # Their check runs are `windows / lint`, `windows / test` and so on; no job here or in verify.yml
+  # is named like a required check apart from frontend and the two below.
   windows:
     name: windows
     uses: ./.github/workflows/verify.yml
@@ -62,6 +82,10 @@ jobs:
       platform: macos
       os: macos-26
 
+  # The required checks are named verify-windows and verify-macos, from when each OS ran one job,
+  # and the ruleset still asks for exactly those names. Each one needs only its own OS's jobs, runs
+  # even when they failed or were cancelled, and fails unless every one of them succeeded: a
+  # skipped required check counts as passing, so this job must never be skipped itself.
   verify-windows:
     name: verify-windows
     needs: windows
@@ -69,6 +93,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      # bash and jq, not the workflow's pwsh: pwsh's first start on a fresh ubuntu runner took 4-16 s,
+      # and this step is the last one of every run.
       - &require-success
         name: Require every needed job to succeed
         shell: bash
