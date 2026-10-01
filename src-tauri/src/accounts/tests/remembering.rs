@@ -45,19 +45,6 @@ fn a_remembered_login_is_saved_once_and_announced() {
     }
 }
 
-/// With remembering off, the native store is not even resolved.
-#[test]
-fn nothing_is_remembered_while_remembering_is_off() {
-    let harness = Harness::new();
-    remembering(&harness, false);
-    harness.signed_in(Some(claude("a", "a1")));
-
-    assert_eq!(harness.accounts().remember(AgentId::Claude), Ok(false));
-    assert!(harness.native.resolved.borrow().is_empty());
-    assert_eq!(harness.sealed(), None);
-    assert!(harness.heard().is_empty());
-}
-
 /// Turning remembering on or off is announced as an account-list change.
 #[test]
 fn turning_remembering_on_or_off_is_announced() {

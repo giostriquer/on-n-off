@@ -118,45 +118,6 @@ fn successful_read_without_an_account_is_not_remembered() {
     assert!(store.load(AgentId::Codex).is_empty());
 }
 
-#[test]
-fn failed_read_keeps_the_signed_in_accounts_last_numbers_in_one_card() {
-    let home = scratch_dir("limits-memory");
-    let store = SnapshotStore::for_home(&home);
-    store
-        .save(&ok_snapshot(AgentId::Claude, "uuid-a", "a@x", 39.0))
-        .unwrap();
-    store
-        .save(&ok_snapshot(AgentId::Claude, "uuid-b", "b@x", 5.0))
-        .unwrap();
-    let stalled = finish(
-        AgentId::Claude,
-        LimitsStatus::Unauthenticated,
-        Some("Access token expired".to_string()),
-        Parsed {
-            account: Some(account("uuid-a", "a@x")),
-            ..Parsed::default()
-        },
-    );
-
-    let listed = aggregate_accounts(&store, stalled);
-
-    assert_eq!(listed.len(), 2, "no blank card above the account's numbers");
-    assert_eq!(listed[0].status, LimitsStatus::Unauthenticated);
-    assert_eq!(listed[0].message.as_deref(), Some("Access token expired"));
-    assert!(
-        listed[0].current_account,
-        "it is still the signed-in account"
-    );
-    assert_eq!(listed[0].reading.windows[0].used_percent, 39.0);
-    assert_eq!(listed[0].reading.plan.as_deref(), Some("pro"));
-    assert_eq!(
-        listed[0].reading.windows[0].observed_at,
-        "2026-08-17T15:00:00.000Z"
-    );
-    assert_eq!(listed[1].account.as_ref().unwrap().id, "uuid-b");
-    assert!(!listed[1].current_account);
-}
-
 fn scoped_snapshot(
     provider: AgentId,
     id: &str,

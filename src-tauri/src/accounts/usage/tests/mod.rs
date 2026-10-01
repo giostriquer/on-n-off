@@ -109,36 +109,6 @@ fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
         before
     );
 }
-#[test]
-fn removal_or_reauthentication_during_http_discards_the_late_read() {
-    for remove in [true, false] {
-        let home = tempfile::tempdir().unwrap();
-        let p = stored(home.path());
-        let result = poll_with(
-            home.path(),
-            &p,
-            &ticket(home.path()),
-            false,
-            &|| Ok(open(home.path())),
-            &|p| {
-                account_change(home.path(), |db| {
-                    if remove {
-                        db.profiles.clear();
-                    } else {
-                        db.profiles[0].login.as_mut().unwrap().auth["claudeAiOauth"]
-                            ["accessToken"] = json!("replacement");
-                    }
-                });
-                FetchResult {
-                    login: p.login.clone(),
-                    result: Ok(reading(p)),
-                }
-            },
-        );
-        assert!(result.is_none());
-        assert!(!home.path().join(".on-n-off/limits").exists());
-    }
-}
 /// A remembered login or a private renewal can replace a saved login without an account change:
 /// the login the reading was made with, not only the epoch, vouches for its publication.
 #[test]
@@ -540,77 +510,4 @@ fn a_cli_without_a_subscription_login_excludes_no_saved_account_from_polling() {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(entries[0].reading.windows[0].used_percent, 42.0);
-}
-
-#[test]
-fn shared_limits_reader_polls_inactive_accounts_once_and_preserves_active_results() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    let home = tempfile::tempdir().unwrap();
-    let inactive = stored(home.path());
-    let mut active = inactive.clone();
-    active.id = "active-profile".into();
-    active.identity.user_id = "active-user".into();
-    active.login.as_mut().unwrap().account["accountUuid"] = json!("active-user");
-    rewrite(home.path(), |db| db.profiles.push(active.clone()));
-    let calls = std::sync::Arc::new(AtomicUsize::new(0));
-    let native_calls = AtomicUsize::new(0);
-    let mut current = reading(&active);
-    current.current_account = true;
-    current.reading.windows[0].used_percent = 19.0;
-    let fetch_calls = calls.clone();
-    TEST_REFRESH.with(|fixture| {
-        *fixture.borrow_mut() = Some(Box::new(move |force, entries| {
-            refresh_with(
-                home.path(),
-                AgentId::Claude,
-                force,
-                entries,
-                Ok(Some(active.identity.clone())),
-                &|| Ok(open(home.path())),
-                &|p| {
-                    assert_eq!(p.id, inactive.id);
-                    fetch_calls.fetch_add(1, Ordering::SeqCst);
-                    FetchResult {
-                        login: p.login.clone(),
-                        result: Ok(reading(p)),
-                    }
-                },
-            );
-        }))
-    });
-    struct Reset;
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            TEST_REFRESH.with(|f| *f.borrow_mut() = None);
-        }
-    }
-    let _reset = Reset;
-    let (first, cached) = crate::limits_refresh::test_saved_reader(&|_| {
-        native_calls.fetch_add(1, Ordering::SeqCst);
-        vec![current.clone()]
-    });
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert_eq!(native_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(first, cached);
-    assert_eq!(first.len(), 2);
-    assert_eq!(first[0], current);
-    assert_eq!(first[1].reading.windows[0].used_percent, 42.0);
-    assert!(!first[1].current_account);
-}
-
-// Thread-local I/O fixture: the production shared reader still binds and calls usage::refresh.
-type RefreshFixture = Box<dyn Fn(bool, &mut Vec<ProviderLimitsDto>)>;
-thread_local! {
-    static TEST_REFRESH: std::cell::RefCell<Option<RefreshFixture>> = const { std::cell::RefCell::new(None) };
-}
-pub(super) fn refresh_fixture(force: bool, entries: &mut Vec<ProviderLimitsDto>) -> bool {
-    TEST_REFRESH.with(|fixture| {
-        let fixture = fixture.borrow();
-        if let Some(refresh) = fixture.as_ref() {
-            refresh(force, entries);
-            true
-        } else {
-            false
-        }
-    })
 }

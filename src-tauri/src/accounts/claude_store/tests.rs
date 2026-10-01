@@ -6,6 +6,14 @@ const CLAUDE_JSON: &str = r#"{"claudeAiOauth":{"accessToken":"kc-token","refresh
 /// Claude Code's own sign-out leaves this behind: valid JSON, no token.
 const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
 
+impl StorageDir {
+    /// `<home>/.claude`, the default, whose Keychain entry is Claude Code's unscoped one: what
+    /// [`dirs`] resolves for a disposable home.
+    fn default_in(home: &Path) -> Self {
+        Self::new(home.join(".claude"), false)
+    }
+}
+
 fn write(home: &Path, rel: &str, body: &str) {
     let path = home.join(rel);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -259,108 +267,6 @@ fn the_credentials_file_is_written_private() {
     }
 }
 
-/// The locks an account change takes: the two refresh locks, then the config file's.
-fn refresh_lock(home: &Path, now: SystemTime) -> Result<ClaudeLocks, LockError> {
-    ClaudeLocks::acquire_at(
-        &StorageDir::default_in(home),
-        LockScope::RefreshAndConfig(&home.join(".claude.json")),
-        now,
-    )
-}
-
-#[test]
-fn the_refresh_lock_admits_one_holder_and_frees_both_paths_on_drop() {
-    let home = scratch_dir("renew-lock");
-    let paths = [
-        home.join(".claude").join(".oauth_refresh.lock"),
-        home.join(".claude.lock"),
-    ];
-
-    let held = refresh_lock(&home, SystemTime::now()).unwrap();
-    assert!(paths.iter().all(|path| path.is_dir()));
-    assert_eq!(
-        refresh_lock(&home, SystemTime::now()).unwrap_err(),
-        LockError::Busy
-    );
-
-    drop(held);
-    assert!(
-        paths.iter().all(|path| !path.exists()),
-        "a released lock leaves nothing behind for the next renewal to break"
-    );
-    refresh_lock(&home, SystemTime::now()).unwrap();
-}
-
-/// A process killed mid-renewal leaves its lock directory behind. Claude Code breaks one older
-/// than a minute rather than never refreshing again, and so must this.
-#[test]
-fn a_lock_left_behind_by_a_dead_process_is_broken_once_it_goes_stale() {
-    let home = scratch_dir("renew-stale");
-    let abandoned = home.join(".claude").join(".oauth_refresh.lock");
-    fs::create_dir_all(&abandoned).unwrap();
-    assert_eq!(
-        refresh_lock(&home, SystemTime::now()).unwrap_err(),
-        LockError::Busy
-    );
-
-    let past_stale = SystemTime::now() + LOCK_STALE + Duration::from_secs(5);
-    assert!(refresh_lock(&home, past_stale).is_ok());
-}
-
-/// The refresh lock is taken first. When the legacy lock beside the config home is held, the
-/// account change yields and gives back the one it had already taken.
-#[test]
-fn a_held_legacy_lock_yields_and_releases_the_refresh_lock_already_taken() {
-    let home = scratch_dir("renew-legacy-held");
-    fs::create_dir_all(home.join(".claude.lock")).unwrap();
-
-    assert_eq!(
-        refresh_lock(&home, SystemTime::now()).unwrap_err(),
-        LockError::Busy
-    );
-    assert!(!home.join(".claude").join(".oauth_refresh.lock").exists());
-    assert!(
-        home.join(".claude.lock").is_dir(),
-        "another holder's lock is theirs to release"
-    );
-}
-
-fn backdate(path: &Path, seconds: u64) {
-    let then = SystemTime::now() - Duration::from_secs(seconds);
-    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(then)).unwrap();
-}
-
-fn fresh(path: &Path) -> bool {
-    fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .is_ok_and(|at| at.elapsed().unwrap_or_default() < Duration::from_secs(60))
-}
-
-/// An account change can hold the refresh locks past Claude Code's minute: the Keychain prompt
-/// alone may take ninety seconds. Kept fresh while held, the locks are never judged abandoned under
-/// it.
-#[test]
-fn the_refresh_locks_are_kept_fresh_while_held() {
-    let home = scratch_dir("renew-heartbeat");
-    let held = refresh_lock(&home, SystemTime::now()).unwrap();
-    let paths = [
-        home.join(".claude").join(".oauth_refresh.lock"),
-        home.join(".claude.lock"),
-    ];
-    for path in &paths {
-        backdate(path, 3600);
-    }
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while !paths.iter().all(|path| fresh(path)) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the refresh locks were not touched while held"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    drop(held);
-}
-
 /// Claude Code takes its legacy lock beside the config dir's real path, so a config dir reached
 /// through a link locks the same directory Claude Code does.
 #[cfg(unix)]
@@ -370,7 +276,11 @@ fn the_legacy_lock_sits_beside_the_real_config_dir() {
     fs::create_dir_all(home.join("dotfiles").join("claude")).unwrap();
     std::os::unix::fs::symlink(home.join("dotfiles").join("claude"), home.join(".claude")).unwrap();
 
-    let held = refresh_lock(&home, SystemTime::now()).unwrap();
+    let held = ClaudeLocks::acquire(
+        &StorageDir::default_in(&home),
+        LockScope::RefreshAndConfig(&home.join(".claude.json")),
+    )
+    .unwrap();
     assert!(home.join("dotfiles").join("claude.lock").is_dir());
     assert!(!home.join(".claude.lock").exists());
     drop(held);

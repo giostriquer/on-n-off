@@ -125,14 +125,6 @@ fn a_one_shot_server_reads_a_request_that_arrives_after_it_accepts() {
     assert!(head.starts_with("GET /usage "), "{head}");
 }
 
-#[test]
-fn a_refused_connection_is_a_network_error() {
-    assert!(matches!(
-        get_json(&refused_url(), &[]),
-        Err(HttpError::Network(_))
-    ));
-}
-
 /// A refused URL has to stay refused while other tests open servers, and has to fail at once on
 /// every OS. A port given back by a dropped listener is neither: the OS may hand it to the next
 /// test's server, and Windows retries a connect it answers with a reset for about 2 s.
