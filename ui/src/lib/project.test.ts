@@ -18,15 +18,15 @@ describe("project", () => {
 
   it("merges recognized and picked folders without duplicates", () => {
     const merged = mergeProjects(
-      [projectFromPath("E:\\dev\\on-n-off"), projectFromPath("E:\\dev\\conoswiki")],
+      [projectFromPath("E:\\dev\\on-n-off"), projectFromPath("E:\\dev\\acme")],
       [projectFromPath("E:/dev/on-n-off/"), projectFromPath("D:\\tmp\\scratch")],
     );
-    expect(merged.map((project) => project.label)).toEqual(["conoswiki", "on-n-off", "scratch"]);
+    expect(merged.map((project) => project.label)).toEqual(["acme", "on-n-off", "scratch"]);
   });
 
   it("detects pasted folder paths", () => {
     expect(looksLikeFolderPath(String.raw`E:\dev\on-n-off`)).toBe(true);
     expect(looksLikeFolderPath("~/work/app")).toBe(true);
-    expect(looksLikeFolderPath("conoswiki")).toBe(false);
+    expect(looksLikeFolderPath("acme")).toBe(false);
   });
 });

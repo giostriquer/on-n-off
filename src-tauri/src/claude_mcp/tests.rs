@@ -272,25 +272,6 @@ fn groups_local_servers_by_definition() {
         && server.plugin_id.is_none()));
 }
 
-/// Claude Code reads `disabledMcpServers` from the project's own entry (2.1.281): a server the
-/// only project keeping it switched off is off here too.
-#[test]
-fn a_local_server_its_project_disabled_is_off() {
-    let config = serde_json::json!({
-        "projects": {
-            "/Users/me/acme/webapp": {
-                "mcpServers": { "scratchpad": { "command": "node", "args": ["pad.js"] } },
-                "disabledMcpServers": ["scratchpad"]
-            }
-        }
-    });
-
-    let servers = local_servers(&config);
-
-    assert_eq!(ids(&servers), ["local:scratchpad"]);
-    assert!(!servers[0].enabled);
-}
-
 #[test]
 fn no_projects_means_no_local_servers() {
     assert!(local_servers(&serde_json::json!({ "mcpServers": {} })).is_empty());

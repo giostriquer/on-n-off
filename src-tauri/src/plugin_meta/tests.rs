@@ -84,12 +84,11 @@ fn catalog_uses_release_version_not_commit_sha() {
         hints.get("superpowers").map(|hint| hint.version.as_str()),
         Some("")
     );
-    with_remote_fetch(
-        |url, path, rev| {
-            assert!(url.contains("obra/superpowers"));
-            assert!(path.is_empty());
-            assert_eq!(rev, "b36e0829c6d0140e93cfef2ca599b1b07d4a7797");
-            Some("6.3.0".into())
+    with_fetch_text(
+        |url| {
+            (url
+                == "https://raw.githubusercontent.com/obra/superpowers/b36e0829c6d0140e93cfef2ca599b1b07d4a7797/.claude-plugin/plugin.json")
+                .then(|| r#"{"name":"superpowers","version":"6.3.0"}"#.into())
         },
         || {
             let mut hint = catalog_hints(&root).remove("superpowers").unwrap();
