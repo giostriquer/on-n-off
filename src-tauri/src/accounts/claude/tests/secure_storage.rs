@@ -87,3 +87,64 @@ fn account_changes_defer_to_the_official_client_for_a_moved_store() {
         "set but empty, the store is the default one"
     );
 }
+
+#[test]
+fn the_usage_read_works_in_its_own_config_dir_and_signs_in_from_the_users_store() {
+    let root = tempfile::tempdir().unwrap();
+    let own = root.path().join("usage");
+    let custom = root.path().join("custom");
+    let secure = root.path().join("secure");
+    let empty = std::ffi::OsString::new();
+    for (variable, value, storage) in [
+        (None, PathBuf::new(), empty.clone()),
+        (
+            Some("CLAUDE_CONFIG_DIR"),
+            custom.clone(),
+            custom.clone().into(),
+        ),
+        (Some(SECURE_STORAGE), secure.clone(), secure.clone().into()),
+        (Some(SECURE_STORAGE), PathBuf::new(), empty.clone()),
+    ] {
+        let env: Vec<_> = variable
+            .map(|name| (name, value.clone()))
+            .into_iter()
+            .collect();
+        let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
+
+        let command = SignedIn(store).command_in(&own);
+
+        let env = command_env(&command);
+        assert_eq!(
+            env["CLAUDE_CONFIG_DIR"],
+            Some(own.clone().into()),
+            "{variable:?}"
+        );
+        assert_eq!(env[SECURE_STORAGE], Some(storage), "{variable:?}");
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::env::temp_dir().as_path()),
+            "{variable:?}"
+        );
+    }
+
+    fs::create_dir_all(&own).unwrap();
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&[])).unwrap();
+    assert_eq!(
+        SignedIn(store).command_in(&own).get_current_dir(),
+        Some(own.as_path())
+    );
+}
+
+#[test]
+fn a_disposable_homes_usage_read_signs_in_from_that_home_never_the_users() {
+    let root = tempfile::tempdir().unwrap();
+    let own = root.path().join("usage");
+    let disposable = [("ON_N_OFF_HOME", PathBuf::from("disposable"))];
+    let store = ClaudeNative::resolve_from(root.path(), &environment(&disposable)).unwrap();
+
+    let env = command_env(&SignedIn(store).command_in(&own));
+
+    assert_eq!(env[SECURE_STORAGE], Some(std::ffi::OsString::new()));
+    assert_eq!(env["HOME"], Some(root.path().into()));
+    assert_eq!(env["USERPROFILE"], Some(root.path().into()));
+}

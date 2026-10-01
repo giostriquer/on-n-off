@@ -103,11 +103,19 @@ impl SignedIn {
         ClaudeNative::resolve(home).map(Self)
     }
 
-    pub(crate) fn command(&self) -> Command {
+    pub(crate) fn command_in(&self, config_dir: &Path) -> Command {
         let mut command = self.0.command();
-        if !self.0.config_home.is_dir() {
-            command.current_dir(std::env::temp_dir());
-        }
+        command
+            .env("CLAUDE_CONFIG_DIR", config_dir)
+            .env(
+                claude_store::SECURE_STORAGE_VAR,
+                self.0.storage_dir().secure_storage_var(),
+            )
+            .current_dir(if config_dir.is_dir() {
+                config_dir.to_path_buf()
+            } else {
+                std::env::temp_dir()
+            });
         command
     }
 

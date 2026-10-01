@@ -135,7 +135,7 @@ fn empty_limits_array_falls_back_to_legacy_fields() {
 }
 
 #[test]
-fn the_signed_in_card_is_claude_codes_report_in_the_users_own_config_dir() {
+fn the_signed_in_card_is_claude_codes_report_read_in_a_config_dir_without_history() {
     use crate::cli_stub::CliStub;
     let home = crate::paths::scratch_dir("limits-claude-signed-in");
     std::fs::write(
@@ -181,7 +181,7 @@ fn the_signed_in_card_is_claude_codes_report_in_the_users_own_config_dir() {
     let config_dir = std::fs::read_to_string(bin.join("config-dir.txt")).unwrap();
     assert_eq!(
         std::path::Path::new(config_dir.trim()),
-        home.join(".claude").as_path()
+        home.join(".on-n-off").join("claude-usage").as_path()
     );
     let _ = std::fs::remove_dir_all(&home);
 }
@@ -195,7 +195,7 @@ fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
     let stub = CliStub::new("claude")
         .stdout(r#"{"loggedIn":false,"authMethod":"none"}"#)
         .write(&bin);
-    assert!(!home.join(".claude").exists());
+    assert!(!super::usage_config_dir(&home).exists());
 
     let cards = crate::accounts::native::with_test_cli(&stub, || {
         crate::limits::read_limits_at(AgentId::Claude, false, &home)

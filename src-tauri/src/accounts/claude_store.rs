@@ -31,6 +31,14 @@ impl StorageDir {
         )
     }
 
+    pub(crate) fn secure_storage_var(&self) -> OsString {
+        if self.scoped {
+            self.path.clone().into_os_string()
+        } else {
+            OsString::new()
+        }
+    }
+
     pub(crate) fn credentials_file(&self) -> PathBuf {
         self.path.join(".credentials.json")
     }
