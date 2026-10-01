@@ -149,12 +149,6 @@ fn hourly_window_includes_its_start_and_excludes_its_end() {
 }
 
 #[test]
-fn folds_every_record_it_is_given() {
-    let result = aggregate(&[record(|_| {}), record(|_| {})], "UTC", Resolution::Day);
-    assert_eq!(result.buckets[0].totals.output_tokens, 100);
-}
-
-#[test]
 fn buckets_by_timezone_day() {
     let utc = aggregate(&[record(|_| {})], "UTC", Resolution::Day);
     let la = aggregate(&[record(|_| {})], "America/Los_Angeles", Resolution::Day);

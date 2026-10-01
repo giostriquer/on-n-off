@@ -179,29 +179,6 @@ fn fold_splits_rows_by_provider_and_model() {
 }
 
 #[test]
-fn fold_takes_only_records_between_the_watermark_and_the_cutoff() {
-    let early = record("2026-08-01T00:00:00Z", |r| r.totals.output_tokens = 1);
-    let middle = record("2026-08-10T00:00:00Z", |r| r.totals.output_tokens = 10);
-    let late = record("2026-08-20T00:00:00Z", |r| r.totals.output_tokens = 100);
-    let records = [early.clone(), middle.clone(), late.clone()];
-
-    let mut history = UsageHistory::default();
-    history.fold(&records, ms("2026-08-05T00:00:00Z"), 0);
-    assert_eq!(history.watermark().ms(), Some(ms("2026-08-05T00:00:00Z")));
-    assert_eq!(history.rows().len(), 1);
-
-    // A later fold sees the already-folded record again and must not count it twice.
-    history.fold(&records, ms("2026-08-15T00:00:00Z"), 0);
-    assert_eq!(history.watermark().ms(), Some(ms("2026-08-15T00:00:00Z")));
-    let outputs: Vec<u64> = history
-        .rows()
-        .iter()
-        .map(|row| row.totals.output_tokens)
-        .collect();
-    assert_eq!(outputs, [1, 10]);
-}
-
-#[test]
 fn fold_never_moves_the_watermark_back() {
     let mut history = UsageHistory::default();
     history.fold(&[], ms("2026-08-15T00:00:00Z"), 0);

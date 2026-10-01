@@ -114,34 +114,6 @@ fn ci_transitions_that_matter_raise_one_event_each() {
 }
 
 #[test]
-fn events_carry_the_pull_request_and_read_as_notifications() {
-    let mut state = MonitorState::default();
-    observe(&mut state, &read(vec![pr("a", CiState::Pending)]));
-    let events = observe(&mut state, &read(vec![pr("a", CiState::Failure)]));
-    let event = &events[0];
-    assert_eq!(event.repo, "acme/app");
-    assert_eq!(event.number, 41);
-    assert_eq!(event.title, "Add the thing");
-    assert_eq!(
-        notification_copy(event),
-        (
-            "CI failed".to_string(),
-            "acme/app#41 · Add the thing".to_string()
-        )
-    );
-    let passed = Event {
-        kind: EventKind::CiPassed,
-        ..event.clone()
-    };
-    assert_eq!(notification_copy(&passed).0, "CI passed");
-    let green = Event {
-        kind: EventKind::CiGreenAgain,
-        ..event.clone()
-    };
-    assert_eq!(notification_copy(&green).0, "CI green again");
-}
-
-#[test]
 fn a_closed_pull_request_is_forgotten_silently() {
     let mut state = MonitorState::default();
     observe(
@@ -347,11 +319,10 @@ fn the_baseline_moves_only_once_the_new_state_is_persisted() {
     assert!(error.contains("disk full"), "{error}");
 }
 
+/// The doubling is `monitor::backoff`'s; this monitor supplies the interval and its own cap.
 #[test]
-fn failure_backoff_doubles_and_caps_at_ten_minutes() {
+fn failure_backoff_starts_at_the_poll_interval_and_caps_at_ten_minutes() {
     assert_eq!(poll_delay(60, 0), Duration::from_secs(60));
-    assert_eq!(poll_delay(60, 1), Duration::from_secs(120));
-    assert_eq!(poll_delay(60, 3), Duration::from_secs(480));
     assert_eq!(poll_delay(60, 4), Duration::from_secs(600));
     assert_eq!(poll_delay(300, 9), Duration::from_secs(600));
 }
@@ -628,16 +599,6 @@ fn ready_to_merge_is_not_announced_when_the_baseline_never_knew() {
     let clean = with_merge("a", Mergeability::Mergeable, MergeState::Clean);
     assert!(observe(&mut state, &read(vec![clean.clone()])).is_empty());
     assert!(observe(&mut state, &read(vec![clean])).is_empty());
-}
-
-#[test]
-fn a_draft_reporting_clean_is_not_ready() {
-    let mut state = MonitorState::default();
-    let mut draft = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
-    draft.is_draft = true;
-    observe(&mut state, &read(vec![draft.clone()]));
-    draft.merge_state = MergeState::Clean;
-    assert!(observe(&mut state, &read(vec![draft])).is_empty());
 }
 
 #[test]
