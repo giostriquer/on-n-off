@@ -6,7 +6,7 @@ import { displayError, parseInvokeError } from "$lib/error";
 import type { GithubRepo } from "$lib/installSource";
 import { summarizeOutcomes } from "$lib/itemOutcomes";
 import { ITEM_STATUS_KEY } from "$lib/itemStatus";
-import { agentsAllowed, allKeys, dependencyGaps, entryKey, selectedItems, targetsFor } from "$lib/marketplaceSelection";
+import { agentsAllowed, allKeys, dependencyGaps, emptySelectionState, entryKey, selectedItems, targetsFor } from "$lib/marketplaceSelection";
 import type {
   AgentId,
   AgentInfo,
@@ -60,9 +60,7 @@ export function MarketplaceInstall({
 
   const [selection, setSelection] = useState<MarketplaceSelection>(() => ({
     action: "plugin",
-    keys: new Set(),
-    autoAdded: new Map(),
-    declined: new Set(),
+    ...emptySelectionState(),
     filter: "",
     providers: [currentAgentId],
     scope: currentScopePath ? { kind: "project", projectPath: currentScopePath } : { kind: "global" },

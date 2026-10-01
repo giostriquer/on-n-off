@@ -1,4 +1,4 @@
-import { allSkills, sortHooks, sortMcps, sortPlugins, sortSkills } from "./catalog";
+import { allSkills, sortHooks, sortMcps, sortPlugins } from "./catalog";
 import type { AgentTabDto, HookDto, McpServerDto, PluginDto, SkillDto } from "./types";
 
 function matches(query: string, ...parts: string[]): boolean {
@@ -92,23 +92,10 @@ function filterHookList(tab: AgentTabDto, query: string): HookDto[] {
   );
 }
 
-export function filterSkillList(tab: AgentTabDto, query: string): SkillDto[] {
-  const q = query.trim().toLowerCase();
+/** `query` is already normalised, and `allSkills` already sorts, so filtering keeps the order. */
+function filterSkillList(tab: AgentTabDto, query: string): SkillDto[] {
   const skills = allSkills(tab);
-  if (!q) {
-    return skills;
-  }
-  return sortSkills(
-    skills.filter((skill) => matches(q, skill.name, skill.id, skill.description, skill.pluginId ?? "")),
-    tab.plugins,
-  );
-}
-
-export function filterMcpList(tab: AgentTabDto, query: string): McpServerDto[] {
-  const q = query.trim().toLowerCase();
-  const servers = sortMcps(tab.mcpServers ?? []);
-  if (!q) {
-    return servers;
-  }
-  return servers.filter((server) => matchesMcp(q, server));
+  return query
+    ? skills.filter((skill) => matches(query, skill.name, skill.id, skill.description, skill.pluginId ?? ""))
+    : skills;
 }
