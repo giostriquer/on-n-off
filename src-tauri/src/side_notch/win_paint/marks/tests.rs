@@ -1,16 +1,10 @@
 use super::*;
 
 /// Each glyph, drawn through `provider` with the view box the rail really uses, fills its rect
-/// and stays inside it.
+/// and stays inside it, give or take a pixel of anti-aliasing.
 #[test]
 fn every_provider_mark_draws_inside_its_rect() {
-    use crate::dto::AgentId;
-    for (id, least) in [
-        (AgentId::Claude, 200),
-        (AgentId::Codex, 200),
-        (AgentId::Cursor, 200),
-        (AgentId::Antigravity, 100),
-    ] {
+    for id in crate::side_notch::model::RAIL_ORDER {
         let mut pixmap = Pixmap::new(48, 48).unwrap();
         provider(
             id,
@@ -23,11 +17,11 @@ fn every_provider_mark_draws_inside_its_rect() {
             if px[3] > 0 {
                 ink += 1;
                 let (x, y) = (index % 48, index / 48);
-                assert!((5..43).contains(&x), "{id:?} leaks horizontally at {x}");
-                assert!((5..43).contains(&y), "{id:?} leaks vertically at {y}");
+                assert!((7..41).contains(&x), "{id:?} leaks horizontally at {x}");
+                assert!((7..41).contains(&y), "{id:?} leaks vertically at {y}");
             }
         }
-        assert!(ink > least, "{id:?} draws only {ink} pixels");
+        assert!(ink > 200, "{id:?} draws only {ink} pixels");
     }
 }
 

@@ -9,7 +9,7 @@ fn ring_label(card: ProviderLimitsDto) -> String {
 }
 
 #[test]
-fn claudes_ring_leads_with_its_weekly_over_its_session() {
+fn the_ring_label_is_the_weekly_figure_or_a_dash_never_the_session() {
     let weekly = window(
         "weekly_all",
         "Weekly · all models",
