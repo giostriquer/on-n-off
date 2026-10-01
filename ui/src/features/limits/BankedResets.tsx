@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
@@ -57,15 +57,14 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AttemptResult | null>(null);
   const attempt = useRef<string | null>(null);
-  const ruleId = useId();
   const accountId = entry.account?.id;
   const limit = useResetSpendLimit(accountId ?? "");
   const offered = current && entry.currentAccount && entry.status === "ok" && unexpiredBankedResets(entry.resetCredits, now) !== null;
   const observed = latestObservedAt(entry);
   const shown = result && (observed === null || observed <= result.answeredAt) ? result : null;
   if (!accountId || (!offered && !shown)) return null;
-  const left = usageLeft(entry, now);
-  const allowed = left !== null && left <= limit;
+  const read = usageLeft(entry, now);
+  const left = read === null ? null : Math.round(read);
 
   async function spend(account: string) {
     setConfirming(false);
@@ -85,21 +84,17 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
 
   const weekly = entry.windows.find(window => window.kind === "weekly");
   const renewsIn = formatResetIn(weekly?.resetsAt, now);
-  const renews = renewsIn ? ` and renews by itself in ${renewsIn}` : "";
-  const body = `${label} has ${Math.round(left ?? 0)}% of its Codex limit left${renews}. A banked reset puts its usage back to 0% and moves its weekly reset date. It can't be undone.`;
+  const effect = "A banked reset puts its usage back to 0% and moves its weekly reset date. It can't be undone.";
+  const body = left === null
+    ? `on-n-off can't read how much of ${label}'s Codex limit is left.${renewsIn ? ` It renews by itself in ${renewsIn}.` : ""} ${effect}`
+    : `${label} has ${left}% of its Codex limit left${renewsIn ? ` and renews by itself in ${renewsIn}` : ""}. ${effect}`;
   return (
     <>
       {offered ? (
-        <button type="button" className={accountButton} disabled={disabled || busy || !allowed}
-          aria-describedby={allowed ? undefined : ruleId}
-          onClick={() => { if (!busy && allowed) setConfirming(true); }}>
+        <button type="button" className={accountButton} disabled={disabled || busy}
+          onClick={() => { if (!busy) setConfirming(true); }}>
           {busy ? "Using reset…" : "Use banked reset"}
         </button>
-      ) : null}
-      {offered && !allowed ? (
-        <span id={ruleId} className="text-[11px] text-[var(--mute)]">
-          Usable once {limit}% or less of the limit is left
-        </span>
       ) : null}
       {shown ? (
         <p role={shown.role} className={`m-0 min-w-0 basis-full break-words text-[11px] ${shown.role === "alert" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
@@ -110,6 +105,7 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
         <ConfirmDialog
           title="Use this reset?"
           body={body}
+          warning={spendWarning(left, limit)}
           confirmLabel="Use reset"
           busy={busy}
           onCancel={() => setConfirming(false)}
@@ -118,4 +114,10 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
       ) : null}
     </>
   );
+}
+
+function spendWarning(left: number | null, limit: number): string | null {
+  if (left === null) return `More than ${limit}% of the limit may still be left.`;
+  if (left <= limit) return null;
+  return `More than ${limit}% of the limit is still left: the reset gives back only the ${100 - left}% used so far.`;
 }

@@ -3,6 +3,7 @@ import { copy } from "$lib/copy";
 type ConfirmDialogProps = {
   title: string;
   body: string;
+  warning?: string | null;
   confirmLabel?: string;
   alternate?: { label: string; onClick: () => void };
   busy?: boolean;
@@ -13,6 +14,7 @@ type ConfirmDialogProps = {
 export function ConfirmDialog({
   title,
   body,
+  warning,
   confirmLabel = copy.uninstall,
   alternate,
   busy = false,
@@ -32,7 +34,7 @@ export function ConfirmDialog({
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="confirm-dialog-title"
-          aria-describedby="confirm-dialog-body"
+          aria-describedby={warning ? "confirm-dialog-body confirm-dialog-warning" : "confirm-dialog-body"}
           className="pointer-events-auto w-[410px] max-w-[calc(100vw-32px)] rounded-xl border border-[var(--hair)] bg-[var(--plate)] p-[18px] shadow-[0_24px_60px_rgba(0,0,0,.5)]"
         >
           <h2 id="confirm-dialog-title" className="text-[15px] font-semibold leading-snug">
@@ -41,6 +43,11 @@ export function ConfirmDialog({
           <p id="confirm-dialog-body" className="mt-2 text-[13px] text-[var(--mute)]">
             {body}
           </p>
+          {warning ? (
+            <p id="confirm-dialog-warning" className="mt-2 text-[13px] text-[var(--trip)]">
+              {warning}
+            </p>
+          ) : null}
           <footer className="mt-4 flex justify-end gap-2">
             <button
               type="button"

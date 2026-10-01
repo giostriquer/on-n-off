@@ -282,19 +282,19 @@ describe("Settings", () => {
     renderSettings({
       onSettingsChange,
       resetAlerts: {
-        "acct-work": { label: "work@example.com", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: false },
-        "acct-side": { label: null, maxLeftPercent: 5, minHoursToRenewal: 48, automatic: true },
+        "acct-work": { label: "work@example.com", maxLeftPercent: 5, minHoursToRenewal: 24, automatic: false },
+        "acct-side": { label: null, maxLeftPercent: 3, minHoursToRenewal: 48, automatic: true },
       },
     });
 
     const list = screen.getByRole("list", { name: "Accounts with a banked reset alert" });
-    expect(list).toHaveTextContent("work@example.com · 10% or less left, 24h or more before it renews · tells you");
-    expect(list).toHaveTextContent("Codex account · 5% or less left, 48h or more before it renews · uses it by itself");
+    expect(list).toHaveTextContent("work@example.com · 5% or less left, 24h or more before it renews · tells you");
+    expect(list).toHaveTextContent("Codex account · 3% or less left, 48h or more before it renews · uses it by itself");
 
     await user.click(screen.getByRole("button", { name: "Turn off the banked reset alert for work@example.com" }));
 
     expect(onSettingsChange).toHaveBeenCalledWith({
-      resetAlerts: { "acct-side": { label: null, maxLeftPercent: 5, minHoursToRenewal: 48, automatic: true } },
+      resetAlerts: { "acct-side": { label: null, maxLeftPercent: 3, minHoursToRenewal: 48, automatic: true } },
     });
   });
 

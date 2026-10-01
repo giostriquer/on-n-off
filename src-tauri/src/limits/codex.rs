@@ -396,14 +396,20 @@ pub(crate) fn codex_card(
     super::signed_in_card(AgentId::Codex, account_id, reading)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetSpend {
+    ByHand,
+    Automatic { max_left_percent: u8 },
+}
+
 pub fn consume_codex_reset_credit(
     account_id: &str,
     idempotency_key: &str,
-    max_left_percent: u8,
+    how: ResetSpend,
 ) -> Result<ResetCreditOutcome, String> {
     let home = paths::user_home().map_err(|error| error.message)?;
     let _provider_guard = super::provider_read_guard(AgentId::Codex);
-    codex_app_server::consume_reset_credit(&home, account_id, idempotency_key, max_left_percent)
+    codex_app_server::consume_reset_credit(&home, account_id, idempotency_key, how)
 }
 
 const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";

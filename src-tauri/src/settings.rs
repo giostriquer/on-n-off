@@ -58,7 +58,7 @@ pub struct ResetAlert {
     pub automatic: bool,
 }
 
-pub const CODEX_RESET_MAX_LEFT_PERCENT: u8 = 10;
+pub const CODEX_RESET_MAX_LEFT_PERCENT: u8 = 5;
 
 pub const RESET_ALERT_MAX_HOURS: u16 = 7 * 24;
 
@@ -74,13 +74,6 @@ const fn reset_max_left_default() -> u8 {
 
 const fn reset_min_hours_default() -> u16 {
     24
-}
-
-pub fn reset_spend_limit(settings: &AppSettings, account_id: &str) -> u8 {
-    settings
-        .reset_alerts
-        .get(account_id)
-        .map_or(CODEX_RESET_MAX_LEFT_PERCENT, ResetAlert::spend_limit)
 }
 
 const fn automatic_updates_default() -> bool {

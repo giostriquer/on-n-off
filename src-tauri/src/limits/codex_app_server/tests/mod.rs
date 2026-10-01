@@ -411,12 +411,19 @@ fn spend(
     identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
     transport: FakeTransport,
 ) -> (Result<ResetCreditOutcome, String>, Option<FakeTransport>) {
-    spend_within(card, 10, identity, transport)
+    spend_as(
+        card,
+        ResetSpend::Automatic {
+            max_left_percent: crate::settings::CODEX_RESET_MAX_LEFT_PERCENT,
+        },
+        identity,
+        transport,
+    )
 }
 
-fn spend_within(
+fn spend_as(
     card: &str,
-    max_left_percent: u8,
+    how: ResetSpend,
     identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
     transport: FakeTransport,
 ) -> (Result<ResetCreditOutcome, String>, Option<FakeTransport>) {
@@ -438,14 +445,9 @@ fn spend_within(
             None
         }
     }
-    let result = spend_reset_credit(
-        &codex_home,
-        card,
-        "attempt-1",
-        max_left_percent,
-        identity,
-        |_| Ok(Recording(transport, &spawned)),
-    );
+    let result = spend_reset_credit(&codex_home, card, "attempt-1", how, identity, |_| {
+        Ok(Recording(transport, &spawned))
+    });
     (result, spawned.into_inner())
 }
 

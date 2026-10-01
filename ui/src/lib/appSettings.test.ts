@@ -76,14 +76,14 @@ describe("appSettings", () => {
     expect(mergeAppSettings({ resetAlerts: saved }).resetAlerts).toEqual(saved);
   });
 
-  it("lets a banked reset be spent at Codex's 10% left, or at an account's lower share", () => {
+  it("warns before, and spends automatically only at, 5% left or an account's lower share", () => {
     const alerts = {
       low: { label: null, maxLeftPercent: 4, minHoursToRenewal: 24, automatic: false },
       high: { label: null, maxLeftPercent: 40, minHoursToRenewal: 24, automatic: false },
     };
 
-    expect(resetSpendLimit(alerts, "none")).toBe(10);
+    expect(resetSpendLimit(alerts, "none")).toBe(5);
     expect(resetSpendLimit(alerts, "low")).toBe(4);
-    expect(resetSpendLimit(alerts, "high")).toBe(10);
+    expect(resetSpendLimit(alerts, "high")).toBe(5);
   });
 });
