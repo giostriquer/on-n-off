@@ -155,11 +155,5 @@ pub(super) fn read_backed_off(
     })
 }
 
-/// Drop what is remembered about `account`, so a test starts from nothing.
-#[cfg(test)]
-pub(super) fn forget(account: &str) {
-    MEMO.forget(account);
-}
-
 #[cfg(test)]
 mod tests;

@@ -281,10 +281,6 @@ fn is_version_ref(value: &str) -> bool {
 }
 
 fn remote_plugin_version(url: &str, path: &str, rev: &str) -> Option<String> {
-    #[cfg(test)]
-    if let Some(version) = test_remote_version(url, path, rev) {
-        return version;
-    }
     let key = format!("{url}|{path}|{rev}");
     if let Some(cached) = cache()
         .lock()
@@ -529,29 +525,12 @@ fn usable_sha(value: Option<&str>) -> Option<String> {
 }
 
 #[cfg(test)]
-type RemoteVersionFetch = fn(&str, &str, &str) -> Option<String>;
-
-#[cfg(test)]
 type TextFetch = fn(&str) -> Option<String>;
 
 #[cfg(test)]
 thread_local! {
-    static TEST_REMOTE: std::cell::RefCell<Option<RemoteVersionFetch>> =
-        const { std::cell::RefCell::new(None) };
     static TEST_FETCH: std::cell::RefCell<Option<TextFetch>> =
         const { std::cell::RefCell::new(None) };
-}
-
-#[cfg(test)]
-fn test_remote_version(url: &str, path: &str, rev: &str) -> Option<Option<String>> {
-    TEST_REMOTE.with(|slot| slot.borrow().map(|fetch| fetch(url, path, rev)))
-}
-
-#[cfg(test)]
-fn with_remote_fetch<F: FnOnce()>(fetch: RemoteVersionFetch, run: F) {
-    TEST_REMOTE.with(|slot| *slot.borrow_mut() = Some(fetch));
-    run();
-    TEST_REMOTE.with(|slot| *slot.borrow_mut() = None);
 }
 
 #[cfg(test)]

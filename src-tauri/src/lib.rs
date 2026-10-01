@@ -13,8 +13,6 @@ mod commands;
 mod config_io;
 mod cursor;
 mod dto;
-#[cfg(test)]
-mod fake;
 mod file_lease;
 mod flags;
 mod github;
