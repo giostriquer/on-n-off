@@ -52,8 +52,9 @@ _Avoid_: hidden, disabled, paused
 A Codex account's opt-in to act when one of its banked resets is worth using: the account has run
 low, at the share the user set or below, and its limit is not about to renew by itself. It either
 notifies, or, set to use the reset automatically, says so and uses it ten minutes later unless the
-user cancels it on the account's card. Either way a banked reset is spent only with 10% or less of
-the limit left, or the alert's lower share, and an alert acts at most once a weekly cycle.
+user cancels it on the account's card. An automatic spend happens only with 5% or less of the limit
+left, or the alert's lower share, and an alert acts at most once a weekly cycle. A reset used by
+hand from the card is never refused for what is left; above that share its confirmation warns.
 _Avoid_: auto-reset
 
 ### Accounts

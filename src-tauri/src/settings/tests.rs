@@ -284,10 +284,10 @@ fn settings_without_reset_alerts_load_with_none() {
 }
 
 #[test]
-fn reset_alerts_stay_within_codexs_rule() {
+fn reset_alerts_stay_within_the_spend_rule() {
     let settings = parse_settings(Some(
         r#"{"resetAlerts": {
-            "acct-a": {"label": "a@example.com", "maxLeftPercent": 5, "minHoursToRenewal": 48},
+            "acct-a": {"label": "a@example.com", "maxLeftPercent": 3, "minHoursToRenewal": 48},
             "acct-b": {"maxLeftPercent": 40, "minHoursToRenewal": 1000},
             "acct-c": {"maxLeftPercent": 0},
             "acct-d": {}
@@ -299,12 +299,12 @@ fn reset_alerts_stay_within_codexs_rule() {
         alert("acct-a"),
         ResetAlert {
             label: Some("a@example.com".into()),
-            max_left_percent: 5,
+            max_left_percent: 3,
             min_hours_to_renewal: 48,
             automatic: false,
         }
     );
-    assert_eq!(alert("acct-b").max_left_percent, 10);
+    assert_eq!(alert("acct-b").max_left_percent, 5);
     assert_eq!(alert("acct-b").min_hours_to_renewal, 168);
     assert_eq!(alert("acct-c").max_left_percent, 1);
     assert_eq!(alert("acct-c").min_hours_to_renewal, 24);
@@ -312,7 +312,7 @@ fn reset_alerts_stay_within_codexs_rule() {
         alert("acct-d"),
         ResetAlert {
             label: None,
-            max_left_percent: 10,
+            max_left_percent: 5,
             min_hours_to_renewal: 24,
             automatic: false,
         }
@@ -320,13 +320,17 @@ fn reset_alerts_stay_within_codexs_rule() {
 }
 
 #[test]
-fn the_share_a_reset_is_spent_at_is_codexs_or_the_accounts_lower_one() {
-    let settings = parse_settings(Some(
-        r#"{"resetAlerts": {"acct-a": {"maxLeftPercent": 5}}}"#,
-    ));
+fn an_alert_spends_at_its_own_share_and_never_above_five_percent() {
+    let alert = |max_left_percent| ResetAlert {
+        label: None,
+        max_left_percent,
+        min_hours_to_renewal: 24,
+        automatic: true,
+    };
 
-    assert_eq!(reset_spend_limit(&settings, "acct-a"), 5);
-    assert_eq!(reset_spend_limit(&settings, "acct-other"), 10);
+    assert_eq!(alert(3).spend_limit(), 3);
+    assert_eq!(alert(5).spend_limit(), 5);
+    assert_eq!(alert(10).spend_limit(), 5);
 }
 
 #[test]
@@ -355,7 +359,7 @@ fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
             "githubScopes": ["org:acme"],
             "resetAlerts": {
                 "acct-a": {"label": "a@example.com", "maxLeftPercent": 260, "minHoursToRenewal": 100000},
-                "acct-b": {"maxLeftPercent": 4.6, "minHoursToRenewal": -3, "automatic": "yes"}
+                "acct-b": {"maxLeftPercent": 2.6, "minHoursToRenewal": -3, "automatic": "yes"}
             }
         }"#,
     ));
@@ -365,12 +369,12 @@ fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
         settings.reset_alerts["acct-a"],
         ResetAlert {
             label: Some("a@example.com".into()),
-            max_left_percent: 10,
+            max_left_percent: 5,
             min_hours_to_renewal: 168,
             automatic: false,
         }
     );
-    assert_eq!(settings.reset_alerts["acct-b"].max_left_percent, 5);
+    assert_eq!(settings.reset_alerts["acct-b"].max_left_percent, 3);
     assert!(!settings.reset_alerts["acct-b"].automatic);
     assert_eq!(settings.reset_alerts["acct-b"].min_hours_to_renewal, 0);
 }

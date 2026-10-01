@@ -41,7 +41,7 @@ fn automatic() -> HashMap<String, ResetAlert> {
         "acct".to_string(),
         ResetAlert {
             label: None,
-            max_left_percent: 10,
+            max_left_percent: 5,
             min_hours_to_renewal: 24,
             automatic: true,
         },
@@ -107,8 +107,43 @@ fn at_its_time_a_reset_still_needed_is_spent_and_leaves_the_queue() {
         minutes_after_now(10),
     );
 
-    assert_eq!(due, [Due::Spend(expected)]);
+    assert_eq!(
+        due,
+        [Due::Spend(
+            expected,
+            ResetSpend::Automatic {
+                max_left_percent: 5
+            }
+        )]
+    );
     assert!(pending.is_empty());
+}
+
+#[test]
+fn a_spend_is_held_to_its_alerts_lower_share() {
+    let mut alerts = automatic();
+    alerts.get_mut("acct").unwrap().max_left_percent = 3;
+    let mut pending = scheduled();
+
+    let due = due(
+        &mut pending,
+        &[card(97.0, RENEWS)],
+        &alerts,
+        minutes_after_now(10),
+    );
+
+    assert!(
+        matches!(
+            due.as_slice(),
+            [Due::Spend(
+                _,
+                ResetSpend::Automatic {
+                    max_left_percent: 3
+                }
+            )]
+        ),
+        "{due:?}"
+    );
 }
 
 #[test]
@@ -158,7 +193,7 @@ fn the_signed_in_codex_card_decides_among_the_others() {
         minutes_after_now(10),
     );
 
-    assert!(matches!(due.as_slice(), [Due::Spend(_)]), "{due:?}");
+    assert!(matches!(due.as_slice(), [Due::Spend(..)]), "{due:?}");
 }
 
 #[test]
@@ -235,7 +270,7 @@ fn fifteen_minutes_past_its_time_a_spend_is_still_made() {
         minutes_after_now(25),
     );
 
-    assert!(matches!(due.as_slice(), [Due::Spend(_)]));
+    assert!(matches!(due.as_slice(), [Due::Spend(..)]));
 }
 
 #[test]
@@ -350,7 +385,7 @@ fn the_waiting_spends_move_through_their_life_and_every_change_is_told() {
     let _ = take_announced();
     assert!(matches!(
         take_due(&[card(96.0, RENEWS)], &automatic(), minutes_after_now(10)).as_slice(),
-        [Due::Spend(_)]
+        [Due::Spend(..)]
     ));
     assert_eq!(take_announced(), [Source::ResetSpends]);
     assert_eq!(next_due(), None);

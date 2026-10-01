@@ -495,7 +495,7 @@ fn monitor_state_without_observation_times_is_discarded_instead_of_migrated() {
 fn the_monitor_reads_only_what_its_settings_watch() {
     let alert = crate::settings::ResetAlert {
         label: None,
-        max_left_percent: 10,
+        max_left_percent: 5,
         min_hours_to_renewal: 24,
         automatic: false,
     };
@@ -550,7 +550,7 @@ fn alerts_only() -> crate::settings::AppSettings {
             "acct-codex".to_string(),
             crate::settings::ResetAlert {
                 label: None,
-                max_left_percent: 10,
+                max_left_percent: 5,
                 min_hours_to_renewal: 24,
                 automatic: false,
             },

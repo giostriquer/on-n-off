@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 
 use super::reset_alerts::{self, Offer};
 use crate::dto::{LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome};
+use crate::limits::ResetSpend;
 use crate::read_revision::{announce, Source};
 use crate::settings::ResetAlert;
 
@@ -23,7 +24,7 @@ pub(super) struct PendingSpend {
 
 #[derive(Debug, PartialEq)]
 pub(super) enum Due {
-    Spend(PendingSpend),
+    Spend(PendingSpend, ResetSpend),
     Kept(PendingSpend, Kept),
 }
 
@@ -76,17 +77,22 @@ fn due(
             if late(&spend) {
                 return Due::Kept(spend, Kept::Late);
             }
-            let still_needed = match codex {
-                CodexNow::Live(snapshot) => alerts
-                    .get(&account)
-                    .and_then(|alert| reset_alerts::offer_now(snapshot, alert, now))
-                    .is_some_and(|offer| offer.account_id == account && offer.cycle == spend.cycle),
-                CodexNow::NobodySignedIn | CodexNow::Unknown => false,
+            let deciding_alert = match codex {
+                CodexNow::Live(snapshot) => alerts.get(&account).filter(|alert| {
+                    reset_alerts::offer_now(snapshot, alert, now).is_some_and(|offer| {
+                        offer.account_id == account && offer.cycle == spend.cycle
+                    })
+                }),
+                CodexNow::NobodySignedIn | CodexNow::Unknown => None,
             };
-            if still_needed {
-                Due::Spend(spend)
-            } else {
-                Due::Kept(spend, Kept::NotNeeded)
+            match deciding_alert {
+                Some(alert) => Due::Spend(
+                    spend,
+                    ResetSpend::Automatic {
+                        max_left_percent: alert.spend_limit(),
+                    },
+                ),
+                None => Due::Kept(spend, Kept::NotNeeded),
             }
         })
         .collect()

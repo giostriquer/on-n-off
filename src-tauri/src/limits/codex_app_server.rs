@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 
+use super::codex::ResetSpend;
 use super::Parsed;
 use crate::accounts::codex_store::CodexAccess;
 use crate::cli::AgentCli;
@@ -112,13 +113,13 @@ pub(super) fn consume_reset_credit(
     home: &Path,
     account_id: &str,
     idempotency_key: &str,
-    max_left_percent: u8,
+    how: ResetSpend,
 ) -> Result<ResetCreditOutcome, String> {
     spend_reset_credit(
         &home.join(".codex"),
         account_id,
         idempotency_key,
-        max_left_percent,
+        how,
         crate::accounts::codex_store::metadata,
         ProcessTransport::spawn,
     )
@@ -128,7 +129,7 @@ fn spend_reset_credit<T: JsonLineTransport>(
     codex_home: &Path,
     account_id: &str,
     idempotency_key: &str,
-    max_left_percent: u8,
+    how: ResetSpend,
     identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
     spawn: impl FnOnce(&Path) -> Result<T, String>,
 ) -> Result<ResetCreditOutcome, String> {
@@ -138,7 +139,7 @@ fn spend_reset_credit<T: JsonLineTransport>(
         codex_home,
         account_id,
         idempotency_key,
-        max_left_percent,
+        how,
         &identity,
         &mut transport,
     );
@@ -153,7 +154,7 @@ fn spend_in_session(
     codex_home: &Path,
     account_id: &str,
     idempotency_key: &str,
-    max_left_percent: u8,
+    how: ResetSpend,
     identity: &impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
     transport: &mut impl JsonLineTransport,
 ) -> Result<ResetCreditOutcome, SpendFailure> {
@@ -171,9 +172,11 @@ fn spend_in_session(
     identity(codex_home)
         .and_then(|current| reset_target_matches(current, account_id))
         .map_err(SpendFailure::Refused)?;
-    let rate_limits = read_rate_limits(transport)?;
-    spend_allowed(&super::codex::parse_codex(&rate_limits), max_left_percent)
-        .map_err(SpendFailure::Refused)?;
+    if let ResetSpend::Automatic { max_left_percent } = how {
+        let rate_limits = read_rate_limits(transport)?;
+        spend_allowed(&super::codex::parse_codex(&rate_limits), max_left_percent)
+            .map_err(SpendFailure::Refused)?;
+    }
     query_step(
         QueryStage::ResetCredit,
         transport.send(&serde_json::json!({

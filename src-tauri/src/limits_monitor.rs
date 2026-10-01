@@ -187,10 +187,10 @@ async fn poll_once(
     }
     for due in due {
         let (title, body) = match due {
-            auto_spend::Due::Spend(spend) => {
+            auto_spend::Due::Spend(spend, how) => {
                 let (account_id, key) = (spend.account_id.clone(), spend.idempotency_key.clone());
                 let spent = async_runtime::spawn_blocking(move || {
-                    crate::limits_refresh::consume_codex_reset_credit(&account_id, &key)
+                    crate::limits_refresh::consume_codex_reset_credit(&account_id, &key, how)
                 })
                 .await
                 .unwrap_or_else(|error| {

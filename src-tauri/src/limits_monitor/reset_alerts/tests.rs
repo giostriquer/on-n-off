@@ -41,7 +41,7 @@ fn opted_in(account: &str) -> HashMap<String, ResetAlert> {
         account.to_string(),
         ResetAlert {
             label: None,
-            max_left_percent: 10,
+            max_left_percent: 5,
             min_hours_to_renewal: 24,
             automatic: false,
         },
@@ -62,13 +62,13 @@ fn two_polls(
 #[test]
 fn an_account_found_low_on_two_polls_in_a_row_is_offered_its_reset_once() {
     let alerts = opted_in("acct");
-    let first = card("acct", 93.0, RENEWS, "2026-10-01T11:50:00Z", 2);
-    let second = card("acct", 94.0, RENEWS, "2026-10-01T12:00:00Z", 2);
+    let first = card("acct", 95.0, RENEWS, "2026-10-01T11:50:00Z", 2);
+    let second = card("acct", 96.0, RENEWS, "2026-10-01T12:00:00Z", 2);
     let mut state = HashMap::new();
 
     let one = observe(&mut state, std::slice::from_ref(&first), &alerts, now());
     let two = observe(&mut state, std::slice::from_ref(&second), &alerts, now());
-    let third = card("acct", 95.0, RENEWS, "2026-10-01T12:10:00Z", 2);
+    let third = card("acct", 97.0, RENEWS, "2026-10-01T12:10:00Z", 2);
     let three = observe(&mut state, std::slice::from_ref(&third), &alerts, now());
 
     assert!(one.is_empty(), "offered on one reading");
@@ -78,7 +78,7 @@ fn an_account_found_low_on_two_polls_in_a_row_is_offered_its_reset_once() {
             account_id: "acct".into(),
             account_label: Some("you@example.com".into()),
             cycle: RENEWS.into(),
-            left_percent: 6.0,
+            left_percent: 4.0,
             renews_at: instant(RENEWS).unwrap(),
             available: 2,
             automatic: false,
@@ -101,7 +101,7 @@ fn the_same_reading_twice_is_not_two_polls() {
 fn no_reset_is_offered_while_more_than_the_share_is_left() {
     let alerts = opted_in("acct");
     let first = card("acct", 85.0, RENEWS, "2026-10-01T11:50:00Z", 1);
-    let second = card("acct", 89.0, RENEWS, "2026-10-01T12:00:00Z", 1);
+    let second = card("acct", 94.0, RENEWS, "2026-10-01T12:00:00Z", 1);
 
     assert!(two_polls(&first, &second, &alerts).1.is_empty());
 }
@@ -109,8 +109,8 @@ fn no_reset_is_offered_while_more_than_the_share_is_left() {
 #[test]
 fn exactly_the_share_left_is_low() {
     let alerts = opted_in("acct");
-    let first = card("acct", 90.0, RENEWS, "2026-10-01T11:50:00Z", 1);
-    let second = card("acct", 90.0, RENEWS, "2026-10-01T12:00:00Z", 1);
+    let first = card("acct", 95.0, RENEWS, "2026-10-01T11:50:00Z", 1);
+    let second = card("acct", 95.0, RENEWS, "2026-10-01T12:00:00Z", 1);
 
     assert_eq!(two_polls(&first, &second, &alerts).1.len(), 1);
 }
@@ -228,8 +228,8 @@ fn a_reset_that_may_have_lapsed_is_not_offered() {
 #[test]
 fn an_alerts_lower_share_is_the_one_kept() {
     let mut alerts = opted_in("acct");
-    alerts.get_mut("acct").unwrap().max_left_percent = 5;
-    for (used, offers) in [(92.0, 0), (96.0, 1)] {
+    alerts.get_mut("acct").unwrap().max_left_percent = 3;
+    for (used, offers) in [(96.0, 0), (97.0, 1)] {
         let first = card("acct", used, RENEWS, "2026-10-01T11:50:00Z", 1);
         let second = card("acct", used, RENEWS, "2026-10-01T12:00:00Z", 1);
 

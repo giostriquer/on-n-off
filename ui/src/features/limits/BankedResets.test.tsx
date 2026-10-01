@@ -165,36 +165,59 @@ describe("UseBankedReset", () => {
     expect(consumeCodexResetCredit).not.toHaveBeenCalled();
   });
 
+  const EFFECT = "A banked reset puts its usage back to 0% and moves its weekly reset date. It can't be undone.";
+  const hasLeft = (left: number) => `work@codex.example has ${left}% of its Codex limit left and renews by itself in 4d 4h. ${EFFECT}`;
+
   it.each([
-    ["60% left", [weekly(40), session(12)], false],
-    ["11% left", [weekly(89)], false],
-    ["exactly 10% left", [weekly(90)], true],
-    ["the fuller main window deciding", [weekly(40), session(96)], true],
-    ["no telling how much is left", [], false],
-  ] as const)("with %s the reset is usable: %s", (_, windows, usable) => {
+    ["60% left", [weekly(40), session(12)], `${hasLeft(60)} More than 5% of the limit is still left: the reset gives back only the 40% used so far.`],
+    ["6% left", [weekly(94)], `${hasLeft(6)} More than 5% of the limit is still left: the reset gives back only the 94% used so far.`],
+    ["exactly 5% left", [weekly(95)], hasLeft(5)],
+    ["the fuller main window deciding", [weekly(40), session(96)], hasLeft(4)],
+    ["no telling how much is left, which claims no share", [], `on-n-off can't read how much of work@codex.example's Codex limit is left. ${EFFECT} More than 5% of the limit may still be left.`],
+  ] as const)("with %s the reset can be used, and the confirmation warns only above the share", (_, windows, description) => {
     render(button({ entry: codex({ windows: [...windows] }) }));
 
-    expect(useReset()).toHaveProperty("disabled", !usable);
-    if (usable) {
-      expect(useReset().getAttribute("aria-describedby")).toBeNull();
-      expect(screen.queryByText(/Usable once/)).toBeNull();
-    } else {
-      expect(useReset()).toHaveAccessibleDescription("Usable once 10% or less of the limit is left");
-      fireEvent.click(useReset());
-      expect(screen.queryByRole("alertdialog")).toBeNull();
-    }
+    expect(useReset()).toHaveProperty("disabled", false);
+    expect(useReset().getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.click(useReset());
+    expect(screen.getByRole("alertdialog", { name: "Use this reset?" })).toHaveAccessibleDescription(description);
     expect(consumeCodexResetCredit).not.toHaveBeenCalled();
   });
 
-  it("keeps the lower share an account's alert names", () => {
-    const alerts = { alerts: { "acct-work": { label: null, maxLeftPercent: 5, minHoursToRenewal: 24, automatic: false } }, save: async () => undefined };
-    const { rerender } = render(<ResetAlertsContext.Provider value={alerts}>{button({ entry: codex({ windows: [weekly(92)] }) })}</ResetAlertsContext.Provider>);
+  it("spends the reset once its warning is confirmed", async () => {
+    render(button({ entry: codex({ windows: [weekly(40), session(12)] }) }));
 
-    expect(useReset()).toHaveProperty("disabled", true);
-    expect(useReset()).toHaveAccessibleDescription("Usable once 5% or less of the limit is left");
+    spendNow();
 
-    rerender(<ResetAlertsContext.Provider value={alerts}>{button({ entry: codex({ windows: [weekly(96)] }) })}</ResetAlertsContext.Provider>);
-    expect(useReset()).toHaveProperty("disabled", false);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Banked reset used."));
+    expect(consumeCodexResetCredit).toHaveBeenCalledWith("acct-work", expect.stringMatching(UUID));
+  });
+
+  it.each([
+    [94.6, "has 5% of its Codex limit left", null],
+    [94.4, "has 6% of its Codex limit left", "More than 5% of the limit is still left: the reset gives back only the 94% used so far."],
+  ] as const)("with %s percent used, names one rounded share in the account's line and the warning", (used, line, warning) => {
+    render(button({ entry: codex({ windows: [weekly(used)] }) }));
+
+    fireEvent.click(useReset());
+    const dialog = screen.getByRole("alertdialog", { name: "Use this reset?" });
+    expect(within(dialog).getByText(new RegExp(line))).toBeTruthy();
+    if (warning) expect(within(dialog).getByText(warning)).toBeTruthy();
+    else expect(within(dialog).queryByText(/still left/)).toBeNull();
+  });
+
+  it("warns at the lower share an account's alert names", () => {
+    const alerts = { alerts: { "acct-work": { label: null, maxLeftPercent: 3, minHoursToRenewal: 24, automatic: false } }, save: async () => undefined };
+    const { rerender } = render(<ResetAlertsContext.Provider value={alerts}>{button({ entry: codex({ windows: [weekly(96)] }) })}</ResetAlertsContext.Provider>);
+
+    fireEvent.click(useReset());
+    expect(screen.getByText("More than 3% of the limit is still left: the reset gives back only the 96% used so far.")).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+
+    rerender(<ResetAlertsContext.Provider value={alerts}>{button({ entry: codex({ windows: [weekly(97)] }) })}</ResetAlertsContext.Provider>);
+    fireEvent.click(useReset());
+    expect(within(screen.getByRole("alertdialog")).queryByText(/still left/)).toBeNull();
   });
 
   it("asks every time, naming the account, what is left and when the limit renews by itself", async () => {
@@ -341,14 +364,14 @@ describe("UseBankedReset", () => {
   it("shows why a reset could not be spent", async () => {
     consumeCodexResetCredit.mockRejectedValue({
       kind: "message",
-      message: "A banked reset can be used once 10% or less of the current limit is left, and 15% is left.",
+      message: "The signed-in Codex account changed. Try again on its card.",
     });
     render(button({ entry: codex({ windows: [weekly(99)] }) }));
 
     spendNow();
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toBe("A banked reset can be used once 10% or less of the current limit is left, and 15% is left."),
+      expect(screen.getByRole("alert").textContent).toBe("The signed-in Codex account changed. Try again on its card."),
     );
   });
 });

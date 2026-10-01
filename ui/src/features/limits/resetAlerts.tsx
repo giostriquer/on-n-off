@@ -92,7 +92,7 @@ export function ResetAlertForm({ accountId, label, onDone }: {
       <p className="m-0 text-[11px] leading-snug text-[var(--mute)]">
         {automatic
           ? `on-n-off tells you, waits ${RESET_AUTO_SPEND_DELAY_MINUTES} minutes, then uses the reset unless you cancel it on this card. It never uses one with more than ${CODEX_RESET_MAX_LEFT_PERCENT}% of the limit left, and at most once a week.`
-          : `You use the reset from this card, and only with ${CODEX_RESET_MAX_LEFT_PERCENT}% or less of the limit left, as in Codex's own app.`}
+          : "You use the reset from this card, and it warns you first when more than this share of the limit is left."}
       </p>
       {enabled && !valid ? (
         <p role="alert" className="m-0 text-[11px] text-[var(--trip)]">

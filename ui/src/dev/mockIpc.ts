@@ -48,7 +48,7 @@ let settings: AppSettings = {
   githubPollSeconds: 60,
   closeToTray: false,
   resetAlerts: scenario === "bankedResetsAuto"
-    ? { "codex-1": { label: "you@example.com", maxLeftPercent: 10, minHoursToRenewal: 24, automatic: true } }
+    ? { "codex-1": { label: "you@example.com", maxLeftPercent: 5, minHoursToRenewal: 24, automatic: true } }
     : {},
 };
 
