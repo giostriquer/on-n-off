@@ -127,8 +127,17 @@ fn mcp_toggle_patches_disabled() {
     let adapter = AntigravityAdapter::at(gemini.clone());
     let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
     assert!(!tab.mcp_servers[0].enabled);
-    let text = fs::read_to_string(gemini.join("config").join("mcp_config.json")).unwrap();
-    assert!(text.contains("\"disabled\": true") || text.contains("\"disabled\":true"));
+    let written: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(gemini.join("config").join("mcp_config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        written,
+        serde_json::json!({
+            "mcpServers": { "github": { "command": "npx", "args": ["-y", "gh"], "disabled": true } }
+        }),
+        "only the server's own flag, never a disabledMcpServers list"
+    );
     let _ = fs::remove_dir_all(gemini);
 }
 

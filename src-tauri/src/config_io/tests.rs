@@ -107,50 +107,34 @@ fn json_mcp_toggle_sets_disabled_flag_and_list() {
     let _ = fs::remove_dir_all(root);
 }
 
-#[test]
-fn antigravity_mcp_toggle_sets_disabled_only() {
-    let root = crate::paths::scratch_dir("on-n-off-agy-mcp");
-    let path = root.join("mcp_config.json");
-    fs::write(
-        &path,
-        r#"{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "gh"] } } }"#,
-    )
-    .unwrap();
-    let io = ConfigIo::at(root.join("backups"));
-    io.patch_antigravity_mcp_enabled(AgentId::Antigravity, &path, "github", false)
-        .unwrap();
-    let value: JsonValue = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(value["mcpServers"]["github"]["disabled"], true);
-    assert!(value.get("disabledMcpServers").is_none());
-    let _ = fs::remove_dir_all(root);
+fn toml_at(path: &Path) -> toml::Table {
+    toml::from_str(&fs::read_to_string(path).unwrap()).unwrap()
 }
 
 #[test]
 fn toml_mcp_enable_only_flips_enabled() {
     let root = crate::paths::scratch_dir("on-n-off-toml-mcp");
     let path = root.join("config.toml");
-    fs::write(
-        &path,
-        "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[mcp_servers.github]\ncommand = \"npx\"\nargs = [\"-y\", \"@modelcontextprotocol/server-github\"]\nextra = 1\n\n[mcp_servers.docs]\nurl = \"https://docs.example/mcp\"\nenabled = false\n",
-    )
-    .unwrap();
+    let servers = |github: &str, docs: &str| {
+        format!(
+            "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[mcp_servers.github]\ncommand = \"npx\"\nargs = [\"-y\", \"@modelcontextprotocol/server-github\"]\nextra = 1\n{github}\n[mcp_servers.docs]\nurl = \"https://docs.example/mcp\"\n{docs}"
+        )
+    };
+    fs::write(&path, servers("", "enabled = false\n")).unwrap();
     let io = ConfigIo::at(root.join("backups"));
+
     io.patch_toml_mcp_enabled(AgentId::Codex, &path, "github", false)
         .unwrap();
-    let text = fs::read_to_string(&path).unwrap();
-    assert!(text.contains("[plugins.\"workbench@workshop\"]"), "{text}");
-    assert!(text.contains("extra = 1"), "{text}");
-    assert!(text.contains("[mcp_servers.github]"), "{text}");
-    assert!(text.contains("[mcp_servers.docs]"), "{text}");
-    assert!(text.contains("enabled = false"), "{text}");
+    assert_eq!(
+        toml_at(&path),
+        toml::from_str(&servers("enabled = false\n", "enabled = false\n")).unwrap()
+    );
     io.patch_toml_mcp_enabled(AgentId::Codex, &path, "docs", true)
         .unwrap();
-    let text = fs::read_to_string(&path).unwrap();
-    assert!(
-        text.contains("url = \"https://docs.example/mcp\""),
-        "{text}"
+    assert_eq!(
+        toml_at(&path),
+        toml::from_str(&servers("enabled = false\n", "enabled = true\n")).unwrap()
     );
-    assert_eq!(text.matches("enabled = true").count(), 2, "{text}");
     let err = io
         .patch_toml_mcp_enabled(AgentId::Codex, &path, "missing", false)
         .expect_err("missing");
@@ -162,19 +146,16 @@ fn toml_mcp_enable_only_flips_enabled() {
 fn toml_plugin_enable_only_flips_enabled() {
     let root = crate::paths::scratch_dir("on-n-off-toml-plugin");
     let path = root.join("config.toml");
-    fs::write(
-        &path,
-        "[plugins.\"workbench@workshop\"]\nenabled = true\nextra = 1\n\n[plugins.\"toolkit@workshop\"]\nenabled = false\n",
-    )
-    .unwrap();
+    let plugins = |workbench: bool| {
+        format!(
+            "[plugins.\"workbench@workshop\"]\nenabled = {workbench}\nextra = 1\n\n[plugins.\"toolkit@workshop\"]\nenabled = false\n"
+        )
+    };
+    fs::write(&path, plugins(true)).unwrap();
     let io = ConfigIo::at(root.join("backups"));
     io.patch_toml_plugin_enabled(AgentId::Codex, &path, "workbench@workshop", false)
         .unwrap();
-    let text = fs::read_to_string(&path).unwrap();
-    assert!(text.contains("[plugins.\"workbench@workshop\"]"));
-    assert!(text.contains("[plugins.\"toolkit@workshop\"]"));
-    assert!(text.contains("extra = 1"));
-    assert!(text.contains("enabled = false"));
+    assert_eq!(toml_at(&path), toml::from_str(&plugins(false)).unwrap());
     let _ = fs::remove_dir_all(root);
 }
 
