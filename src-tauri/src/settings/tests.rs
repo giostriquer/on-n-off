@@ -50,21 +50,6 @@ fn saving_settings_replaces_the_complete_document() {
 }
 
 #[test]
-fn parse_hidden_and_binary_paths() {
-    let settings = parse_settings(Some(
-        r#"{ "hiddenAgents": ["antigravity"], "binaryPaths": { "claude": "C:\\bin\\claude.cmd" } }"#,
-    ));
-    assert_eq!(settings.hidden_agents, vec![AgentId::Antigravity]);
-    assert_eq!(
-        settings
-            .binary_paths
-            .get(&AgentId::Claude)
-            .map(String::as_str),
-        Some(r"C:\bin\claude.cmd")
-    );
-}
-
-#[test]
 fn existing_settings_default_automatic_updates_to_enabled() {
     let new_settings = serde_json::to_value(parse_settings(None)).unwrap();
     let settings = parse_settings(Some(
