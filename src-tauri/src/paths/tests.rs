@@ -103,7 +103,7 @@ fn a_running_app_takes_its_home_from_on_n_off_home_then_userprofile_then_home() 
 
 #[test]
 fn only_the_paths_module_reads_the_process_home() {
-    const ALLOWED: [(&str, &str, &[&str]); 2] = [
+    const ALLOWED: [(&str, &str, &[&str]); 3] = [
         (
             "accounts/claude.rs",
             "hands a Claude child a disposable OS home: sets, never reads",
@@ -123,6 +123,14 @@ fn only_the_paths_module_reads_the_process_home() {
                 r#"env.get("HOME"),"#,
                 r#"env.get("USERPROFILE"),"#,
                 r#"assert_eq!(env.get("HOME").cloned(), home);"#,
+            ],
+        ),
+        (
+            "accounts/claude/tests/secure_storage.rs",
+            "reads the environment a child command was handed",
+            &[
+                r#"assert_eq!(env["HOME"], Some(root.path().into()));"#,
+                r#"assert_eq!(env["USERPROFILE"], Some(root.path().into()));"#,
             ],
         ),
     ];
