@@ -87,7 +87,6 @@ fn summary_key_changes_with_the_usage_history() {
     );
 }
 
-/// Two windows that differ in any field are two cache entries, never one.
 #[test]
 fn summary_key_changes_with_every_field_of_the_window() {
     let window = UsageSummaryInput {
