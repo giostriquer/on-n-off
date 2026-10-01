@@ -17,11 +17,6 @@ fn observed(
     }
 }
 
-/// What a paused read shows of `remembered` when it read `own`.
-fn paused(own: Reading, remembered: Reading) -> Reading {
-    own.keeping(remembered, Outcome::Failed)
-}
-
 /// A read that answers without its weekly window keeps the remembered weekly, dated when it was
 /// read, so a card never leads with its session. Its other windows are its own: the remembered
 /// per-model window is not kept.
@@ -168,7 +163,7 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
         ..Reading::default()
     };
 
-    let merged = paused(Reading::default(), remembered);
+    let merged = Reading::default().keeping(remembered, Outcome::Failed);
 
     assert_eq!(merged.reset_credits, reset_credits);
     // The banked count is remembered; a price the provider may already have withdrawn is not.

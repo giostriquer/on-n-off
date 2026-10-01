@@ -302,36 +302,46 @@ fn an_older_observation_never_notifies_or_replaces_the_baseline() {
     );
 }
 
+/// A newer read whose reset instant moved is a reset only when usage dropped by more than half a
+/// point; at half a point or less it is a correction.
 #[test]
-fn a_reset_instant_that_moves_without_usage_dropping_is_not_a_reset() {
-    let mut state = MonitorState::default();
-    assert!(observe(
-        &mut state,
-        &[snapshot(
-            AgentId::Codex,
-            "account-a",
-            "me@example.com",
-            50.0,
-            Some("2026-08-24T12:00:00Z"),
-        )],
-    )
-    .is_empty());
-
-    let events = observe(
-        &mut state,
-        &[observed_at(
-            snapshot(
+fn a_moved_reset_instant_is_a_reset_only_past_half_a_point_of_drop() {
+    for (now, resets) in [(49.5, false), (49.4, true)] {
+        let mut state = MonitorState::default();
+        assert!(observe(
+            &mut state,
+            &[snapshot(
                 AgentId::Codex,
                 "account-a",
                 "me@example.com",
-                49.5,
-                Some("2026-08-24T12:05:00Z"),
-            ),
-            "2026-08-19T13:00:00Z",
-        )],
-    );
+                50.0,
+                Some("2026-08-24T12:00:00Z"),
+            )],
+        )
+        .is_empty());
 
-    assert!(events.is_empty());
+        let events = observe(
+            &mut state,
+            &[observed_at(
+                snapshot(
+                    AgentId::Codex,
+                    "account-a",
+                    "me@example.com",
+                    now,
+                    Some("2026-08-24T12:05:00Z"),
+                ),
+                "2026-08-19T13:00:00Z",
+            )],
+        );
+
+        let kinds: Vec<_> = events.iter().map(|event| event.kind).collect();
+        let expected = if resets {
+            vec![LimitEventKind::Reset]
+        } else {
+            vec![]
+        };
+        assert_eq!(kinds, expected, "50% to {now}%");
+    }
 }
 
 #[test]
