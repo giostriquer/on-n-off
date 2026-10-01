@@ -1,15 +1,6 @@
-// Pure checks behind scripts/verify-release.mjs: every pass/fail decision the verifier makes, from
-// minisign decoding to the feed's notes. Nothing here touches the network, the filesystem, `git`
-// or `gh`; the CLI gathers the inputs and prints the results.
-//
-// Each `check*` group returns `{ checks, warnings }`: `checks` is every `{ ok, message, detail? }`
-// the group decided, and `warnings` the differences an operator accepted with --allow-asset-change.
-
 import { createHash, createPublicKey, verify } from "node:crypto";
 
-/** Ed25519 SubjectPublicKeyInfo prefix, so a raw 32-byte minisign key becomes a Node KeyObject. */
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
-/** `ED` signs the BLAKE2b-512 of the file; `Ed` is legacy minisign, signing the file itself. */
 const SIGNATURE_ALGORITHMS = ["ED", "Ed"];
 
 const pass = (message) => ({ ok: true, message });
@@ -17,19 +8,10 @@ const fail = (message, detail) => ({ ok: false, message, ...(detail ? { detail }
 const sameList = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-/** The failed checks of one or more groups, by message: what the tests assert on. */
 export function failuresOf(...groups) {
   return groups.flatMap((group) => group.checks.filter((check) => !check.ok).map((check) => check.message));
 }
 
-/* -------------------------------------------------------------------------------------------- */
-/* Minisign                                                                                     */
-/* -------------------------------------------------------------------------------------------- */
-
-/**
- * The updater public key Tauri keeps in `tauri.conf.json` under `plugins.updater.pubkey`: a base64
- * minisign public-key file whose second line is `Ed` + 8-byte key id + 32-byte Ed25519 key.
- */
 export function parseUpdaterPublicKey(tauriConfText) {
   const pubkey = JSON.parse(tauriConfText)?.plugins?.updater?.pubkey;
   if (typeof pubkey !== "string") throw new Error("tauri.conf.json has no plugins.updater.pubkey");
@@ -44,11 +26,6 @@ export function parseUpdaterPublicKey(tauriConfText) {
   };
 }
 
-/**
- * A Tauri `.sig` asset: base64 of a minisign signature file (untrusted comment, signature line,
- * trusted comment, global signature). The signature line is a 2-byte algorithm, an 8-byte key id
- * and a 64-byte signature.
- */
 export function parseMinisignSignature(sigAssetText) {
   const lines = Buffer.from(sigAssetText.trim(), "base64").toString("utf8").split(/\r?\n/);
   const signature = Buffer.from(lines[1]?.trim() ?? "", "base64");
@@ -69,10 +46,6 @@ export function parseMinisignSignature(sigAssetText) {
   };
 }
 
-/**
- * Every property a release needs from one signature, each as its own yes/no. `madeWithKey` only
- * compares key ids, which anyone can copy: `signsFile` and `trustedCommentSigned` are the proof.
- */
 export function verifyMinisign(parsed, fileBytes, publicKey) {
   const message = parsed.algorithm === "ED" ? createHash("blake2b512").update(fileBytes).digest() : fileBytes;
   return {
@@ -89,34 +62,19 @@ export function verifyMinisign(parsed, fileBytes, publicKey) {
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/**
- * The names a trusted comment's `file:` may carry for `asset`: the asset itself, or the name Tauri
- * signed before build-bundle.ps1 added `_<version>_<arch>` (`on-n-off.app.tar.gz`).
- */
 export function signedFileNames(asset, version) {
   return [asset, asset.replace(new RegExp(`_${escapeRegExp(version)}_[^.]+`), "")];
 }
 
-/** Whether a trusted comment's `file:` field is exactly one of `signedFileNames`. */
 export function trustedCommentNames(trustedComment, asset, version) {
   const accepted = signedFileNames(asset, version).map((name) => `file:${name}`);
   return trustedComment.split("\t").some((field) => accepted.includes(field));
 }
 
-/* -------------------------------------------------------------------------------------------- */
-/* Groups                                                                                       */
-/* -------------------------------------------------------------------------------------------- */
-
-/** The previous release's asset names with its version replaced by the new one, sorted. */
 export function expectedAssetNames(previousNames, previousVersion, version) {
   return previousNames.map((name) => name.replaceAll(previousVersion, version)).sort();
 }
 
-/**
- * Group 1: the asset set is the previous release's, renamed. With `allowChange` a different set is
- * accepted, and each difference comes back as a warning for the operator to confirm against
- * release.yml, so a missing installer is one short line rather than a gap in a long list.
- */
 export function checkAssetSet(assets, expected, allowChange) {
   const differences = [
     ...expected.filter((name) => !assets.includes(name)).map((name) => `missing asset ${name}`),
@@ -129,11 +87,6 @@ export function checkAssetSet(assets, expected, allowChange) {
   return { checks: [fail("asset set matches the previous release, renamed"), ...differences.map((d) => fail(d))], warnings: [] };
 }
 
-/**
- * `SHA256SUMS.txt` lines (`<64 hex>  <name>`, `*` for binary mode, CRLF from the Windows runner) as
- * name → lowercase hex. Anything else on a non-empty line, or a name listed twice, is refused:
- * `sha256sum -c` would flag it too.
- */
 export function parseSums(text) {
   const sums = new Map();
   text.split(/\r?\n/).forEach((line, index) => {
@@ -146,7 +99,6 @@ export function parseSums(text) {
   return sums;
 }
 
-/** Group 2: SHA256SUMS.txt lists exactly the other assets, each with its own hash. */
 export function checkSums(sumsText, bytesByName) {
   let sums;
   try {
@@ -171,10 +123,6 @@ export function checkSums(sumsText, bytesByName) {
   return { checks, warnings: [] };
 }
 
-/**
- * The updater key installed apps trust is the previous tag's; the new tag must carry the same one,
- * or every installed app would reject this release's signatures.
- */
 export function checkUpdaterKeys(previousConfText, currentConfText) {
   try {
     const trusted = parseUpdaterPublicKey(previousConfText);
@@ -190,7 +138,6 @@ export function checkUpdaterKeys(previousConfText, currentConfText) {
   }
 }
 
-/** Group 3, one signature: all four properties, or the reason it could not be read. */
 export function checkSignature(sigName, sigText, targetBytes, version, publicKey) {
   const target = sigName.slice(0, -".sig".length);
   if (targetBytes === undefined) return [fail(`${sigName} signs an asset of this release`, `no ${target}`)];
@@ -210,7 +157,6 @@ export function checkSignature(sigName, sigText, targetBytes, version, publicKey
   ];
 }
 
-/** Group 3: every `.sig` asset. */
 export function checkSignatures(sigTextByName, bytesByName, version, publicKey) {
   const checks = [...sigTextByName].flatMap(([sigName, sigText]) =>
     checkSignature(sigName, sigText, bytesByName.get(sigName.slice(0, -".sig".length)), version, publicKey),
@@ -218,12 +164,10 @@ export function checkSignatures(sigTextByName, bytesByName, version, publicKey) 
   return { checks, warnings: [] };
 }
 
-/** new-update-feed.ps1 copies the draft body into latest.json with CRLF turned into LF. */
 export function normalizeNotes(text) {
   return String(text ?? "").replace(/\r\n?/g, "\n");
 }
 
-/** The draft body as `gh release view --json body -q .body` prints it: normalised, then its own trailing newline dropped. */
 export function draftBody(ghOutput) {
   return normalizeNotes(ghOutput).replace(/\n$/, "");
 }
@@ -232,11 +176,6 @@ export function notesMatch(latestNotes, body) {
   return normalizeNotes(latestNotes) === normalizeNotes(body);
 }
 
-/**
- * Group 4: latest.json, the feed installed apps read. Its version, the previous release's
- * platforms (differences are warnings under `allowChange`), each platform's URL under this tag and
- * signature equal to that asset's `.sig`, and the draft's notes, which the update prompt shows.
- */
 export function checkFeed(latestText, previousLatestText, { repo, tag, version, assets, sigTextByName, body, allowChange }) {
   let latest;
   let previousLatest;

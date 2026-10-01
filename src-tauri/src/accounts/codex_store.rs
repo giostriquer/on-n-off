@@ -1,16 +1,3 @@
-//! Codex's native store: which backend its `config.toml` selects for the signed-in login
-//! ([`target`]: `auth.json`, the item Codex files in the OS credential store, or `auto` between
-//! them), how that item is named and reached, and the one read of it Limits may make
-//! ([`metadata`], [`metadata_and_access`]).
-//!
-//! It mirrors `claude_store`: every on-n-off path that reads or writes Codex's login finds it here
-//! — the account switch, and the Limits and subscription reads through the projections — so they
-//! cannot disagree about which store holds it. Codex takes no lock around its login, so there is
-//! none to take here.
-//!
-//! On macOS the credential store is the Keychain, reached through `/usr/bin/security`
-//! (`super::keychain`), never this process's own identity; elsewhere it is the `keyring` crate.
-
 use super::{codex::CodexLogin, model, store::Login, vault};
 use serde_json::{json, Value};
 use std::{
@@ -18,16 +5,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Where a Codex login lives.
 enum Target {
-    /// `<codex home>/auth.json`.
     File(PathBuf),
-    /// The item Codex files for one home in the OS credential store.
     Keyring { service: String, account: String },
 }
 
 impl Target {
-    /// The stored document; `None` when nothing is stored there.
     fn read(&self) -> Result<Option<Value>, String> {
         let bytes = match self {
             Self::File(path) => match fs::read(path) {
@@ -63,7 +46,6 @@ impl Target {
         })
     }
 
-    /// Replaces the stored document with `value` verbatim, or removes it for `None`.
     fn write(&self, value: Option<&Value>) -> Result<(), String> {
         let bytes = value
             .map(serde_json::to_vec)
@@ -85,8 +67,6 @@ impl Target {
                 }
             }
             Self::Keyring { service, account } => {
-                // Through `security`, the identity the item already trusts for reads, never this
-                // ad-hoc-signed process: `keychain.rs` says what the latter cost.
                 #[cfg(target_os = "macos")]
                 {
                     match bytes {
@@ -118,7 +98,6 @@ pub(super) fn config_file(config_home: &Path) -> PathBuf {
     config_home.join("config.toml")
 }
 
-/// Codex's configuration for the home `config_home`; an empty table when there is none.
 pub(super) fn config(config_home: &Path) -> Result<toml::Value, String> {
     match fs::read_to_string(config_file(config_home)) {
         Ok(text) => toml::from_str(&text).map_err(|_| "Native configuration is malformed.".into()),
@@ -129,10 +108,6 @@ pub(super) fn config(config_home: &Path) -> Result<toml::Value, String> {
     }
 }
 
-/// Where the login for `config_home` lives, from the backend its config selects:
-/// `cli_auth_credentials_store` is `file` (the default), `keyring`, or `auto`, which uses the
-/// credential-store item when there is one and the file otherwise. Any other backend is refused,
-/// and so is a config that names a `profile`, whose effective backend cannot be verified.
 fn target(config_home: &Path) -> Result<Target, String> {
     let config = config(config_home)?;
     if config.get("profile").is_some() {
@@ -166,8 +141,6 @@ fn target(config_home: &Path) -> Result<Target, String> {
     }
 }
 
-/// The login stored for `config_home`, wherever its config puts it. Codex keeps no account record
-/// beside it.
 pub(super) fn read(config_home: &Path) -> Result<Option<Login>, String> {
     Ok(target(config_home)?.read()?.map(|auth| Login {
         auth,
@@ -175,14 +148,10 @@ pub(super) fn read(config_home: &Path) -> Result<Option<Login>, String> {
     }))
 }
 
-/// Replaces the login stored for `config_home`, wherever its config puts it, with `auth` verbatim,
-/// or removes it for `None`.
 pub(super) fn write(config_home: &Path, auth: Option<&Value>) -> Result<(), String> {
     target(config_home)?.write(auth)
 }
 
-/// The key a Codex card is known by: the user and workspace together when the claims name the
-/// user, the bare workspace otherwise, as older observations were keyed.
 pub(crate) fn observation_key(workspace: &str, claims: &Value) -> String {
     claims
         .get("chatgpt_user_id")
@@ -199,8 +168,6 @@ pub(crate) fn observation_key(workspace: &str, claims: &Value) -> String {
         .unwrap_or_else(|| workspace.into())
 }
 
-/// Metadata projection from the backend selected by native Codex config. No credential leaves
-/// accounts here; `metadata_and_access` is the one projection that carries the access token.
 pub(crate) fn metadata(config_home: &Path) -> Result<Option<Metadata>, String> {
     match read(config_home)? {
         Some(login) => identity(&login),
@@ -208,7 +175,6 @@ pub(crate) fn metadata(config_home: &Path) -> Result<Option<Metadata>, String> {
     }
 }
 
-/// A Codex login's observation key and workspace claims, refusing claims for another workspace.
 fn identity(login: &Login) -> Result<Option<Metadata>, String> {
     let login = CodexLogin::of(login);
     let Some(workspace) = login.workspace() else {
@@ -228,25 +194,14 @@ fn identity(login: &Login) -> Result<Option<Metadata>, String> {
     Ok(Some((observation_key(workspace, &claims), claims)))
 }
 
-/// The signed-in Codex login's access token, beside the identity it belongs to, for the two requests
-/// on-n-off makes with that login itself: a workspace member's spending (`limits/credits_spent.rs`)
-/// and the subscription's term (`limits/renewal.rs`), read-only GETs the user chose to allow on
-/// 2026-09-24 and 2026-09-25. Only the access token leaves accounts.
 pub(crate) struct CodexAccess {
-    /// The same key `metadata` gives, so the caller can match the token to a card.
     pub observation_key: String,
-    /// The `ChatGPT-Account-Id` the request is made for.
     pub workspace_id: String,
     pub token: model::AccessToken,
 }
 
-/// A metadata projection: the observation key and the workspace claims (`metadata`).
 pub(crate) type Metadata = (String, Value);
 
-/// `metadata`, and the login's access projection when it holds an access token, from one read of
-/// the native store: the signed-in read's identity check after the app-server handshake takes it,
-/// so the backend reads cost no read of their own. `None` for no login; the access is `None` for a
-/// login without an access token.
 pub(crate) fn metadata_and_access(
     config_home: &Path,
 ) -> Result<Option<(Metadata, Option<CodexAccess>)>, String> {

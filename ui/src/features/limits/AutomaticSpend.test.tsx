@@ -4,8 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatClock } from "$lib/limitsFormat";
 import { AutomaticSpend } from "./AutomaticSpend";
 
-// The banked reset an automatic alert is waiting to spend, as its account's card shows it.
-
 const pendingResetSpends = vi.hoisted(() => vi.fn());
 const cancelResetSpend = vi.hoisted(() => vi.fn());
 

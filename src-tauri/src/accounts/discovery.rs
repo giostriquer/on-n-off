@@ -1,5 +1,3 @@
-//! Opt-in discovery of verified native logins; never activates an account.
-//! Consent is checked before credential access and again under the publication lease.
 use super::{
     model::Identity,
     store::{ChangeKind, Database, Guard, Login, Store, Ticket},
@@ -41,13 +39,11 @@ fn set_enabled_in(
     open: &dyn Fn(bool) -> Result<Store, String>,
 ) -> Result<(), String> {
     if !remember {
-        // Consent must remain revocable without opening protected credentials.
         let (root, _lease) = Store::lease(home)?;
         return super::vault::atomic_write(&root.join("remembering.json"), b"{\"enabled\":false}");
     }
     let store = open(true)?;
     let consent = store.root.join("remembering.json");
-    // Consent is written only once the bumped epoch is durable, under the same lease.
     store.change_then(
         ChangeKind::Remembering,
         |_| Ok(()),
@@ -55,7 +51,6 @@ fn set_enabled_in(
     )?
 }
 
-/// The provider's notice slot; `None` for a provider without saved profiles, which has none.
 fn index(provider: AgentId) -> Option<usize> {
     PROVIDERS.iter().position(|p| *p == provider)
 }
@@ -65,7 +60,6 @@ pub fn notice(provider: AgentId) -> Option<String> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)[index(provider)?]
     .clone()
 }
-/// Records `message` as the provider's notice; whether that changed it. The caller announces.
 fn update_notice(provider: AgentId, message: Option<String>) -> bool {
     let Some(index) = index(provider) else {
         return false;
@@ -106,8 +100,6 @@ fn candidate(native: &dyn Native, db: &Database) -> Result<Option<Login>, String
     }
     Ok(Some(login))
 }
-/// Saves `login` as a profile once consent, the ticket, the exclusions and the exact native
-/// credential all still hold under the vault lease, holding the native locks through the save.
 fn publish(
     store: Store,
     ticket: &Ticket,
@@ -133,12 +125,10 @@ fn publish(
             db.save(identity, login, None)?;
             Ok(Some(locks))
         },
-        // The native locks cover the save and go before the vault lease.
         |locks, _, _| Ok(locks.is_some()),
     )?
 }
 impl super::Accounts {
-    /// Turns automatic remembering on or off and clears every provider's notice, announced once.
     pub(super) fn set_remembering(&self, remember: bool) -> Result<(), String> {
         let home = &self.home;
         set_enabled_in(home, remember, &|create| Store::open(home, create))?;
@@ -149,9 +139,6 @@ impl super::Accounts {
         Ok(())
     }
 
-    /// One automatic-remembering poll of `provider`: remembers its login if it should, and keeps
-    /// what went wrong as the provider's notice. A saved login and a changed notice are one change
-    /// to the account list, announced once its leases are released.
     pub(super) fn poll_remembering(&self, provider: AgentId) {
         let result = self.remember(provider);
         let saved = result == Ok(true);
@@ -161,8 +148,6 @@ impl super::Accounts {
         }
     }
 
-    /// Saves `provider`'s verified native login as a profile when remembering is on and it is
-    /// one to remember; whether it saved one. The caller announces it.
     pub(super) fn remember(&self, provider: AgentId) -> Result<bool, String> {
         let home = &self.home;
         if !enabled(home)? {
@@ -173,16 +158,12 @@ impl super::Accounts {
         let native = self.native(provider)?;
         native.preflight()?;
         let db = Store::open_existing(home)?.load()?;
-        // Nothing is remembered while an interrupted switch awaits recovery.
         let Ok(ticket) = db.ticket(Guard::SignIn) else {
             return Ok(false);
         };
         let Some(login) = candidate(native.as_ref(), &db)? else {
             return Ok(false);
         };
-        // Network verification holds no vault lease. Recheck consent, epoch, recovery,
-        // exclusions and the exact native credential under the leases before publishing its
-        // protected copy.
         let store = Store::open_existing(home)?;
         let remember = enabled(home)?;
         publish(store, &ticket, native.as_ref(), login, remember)
@@ -202,7 +183,6 @@ async fn run(_app: tauri::AppHandle, mut wake: tauri::async_runtime::Receiver<()
             })
             .await
             .unwrap_or_else(|_| Err("Automatic account remembering could not complete.".into()));
-            // Without a context there is no one else to announce the notice.
             if let Err(message) = polled {
                 if update_notice(provider, Some(message)) {
                     crate::read_revision::announce(crate::read_revision::Source::Accounts);

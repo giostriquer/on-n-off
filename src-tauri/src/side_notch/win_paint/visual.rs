@@ -24,7 +24,6 @@ fn settings() -> NotchSettings {
     }
 }
 
-/// The cell the host projects for the signed-in account's card: `reading`, read as `status` says.
 fn projected(
     provider: AgentId,
     status: LimitsStatus,
@@ -46,9 +45,6 @@ fn data(cells: Vec<CellData>, action_error: Option<String>) -> RailData {
     }
 }
 
-/// Visual harness: renders realistic scenes to PNGs so layout bugs can be seen
-/// without launching the app. Run with:
-/// `cargo test --lib side_notch::win_paint::visual -- --ignored`
 #[ignore]
 #[test]
 fn visual_dump() {
@@ -64,7 +60,6 @@ fn visual_dump() {
     settings.display_id = Some("d1".into());
     settings.providers = RAIL_ORDER.to_vec();
 
-    // Realistic Claude entry with the labels the live API produces, in the card's order.
     let claude = ProviderData {
         cell: projected(
             AgentId::Claude,
@@ -137,7 +132,6 @@ fn visual_dump() {
                     window_seconds: None,
                     observed_at: "2026-09-03T10:00:00Z".into(),
                 }],
-                // A business workspace member: the credit share fills the inner ring.
                 workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
                     limit: "25000".into(),
                     used: "8000".into(),
@@ -206,7 +200,6 @@ fn visual_dump() {
         action_error: None,
     };
 
-    // Scale 2.0 variant: the user runs >100% display scaling.
     let scale2 = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
     let mut s2 = settings.clone();
     s2.display_id = Some("d1".into());
@@ -226,7 +219,6 @@ fn visual_dump() {
     )
     .unwrap();
 
-    // One popover dump per rail cell, plus the plain rail and the collapsed pill.
     for cell in 0..data.cells.len() {
         let hover = Hover {
             active: Some(cell),
@@ -251,7 +243,6 @@ fn visual_dump() {
     )
     .unwrap();
 
-    // The show-mode cap under the pointer, in both pin states.
     for (name, show) in [("pinned", ShowMode::Always), ("hover", ShowMode::OnHover)] {
         let mut capped = settings.clone();
         capped.show = show;
@@ -286,7 +277,6 @@ fn visual_dump() {
     )
     .unwrap();
 
-    // Top edge variant with the popover open.
     let mut top = settings.clone();
     top.edge = Edge::Top;
     let top_data = RailData {
@@ -311,15 +301,6 @@ fn visual_dump() {
     .unwrap();
 }
 
-/// Type specimen: every (size, weight) the notch draws, on the popover ink, one
-/// baseline per row, so the sheet can be diffed against the engine the app's own
-/// window draws with. Write the same rows as HTML — 26 px tall, 12 px in, a zero-width
-/// 20 px inline-block strut to pin each baseline, `ui/src/tokens.css`'s font stack —
-/// and render it with `msedge --headless --window-size=420,234 --screenshot=…`, once
-/// plain and once with `--disable-lcd-text`; the WebView sits between those two. Ink
-/// centroids and advance widths should match outright, total ink to a few per cent.
-///
-/// `cargo test --lib side_notch::win_paint::visual::specimen -- --ignored`
 #[ignore]
 #[test]
 fn specimen() {

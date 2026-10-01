@@ -102,8 +102,6 @@ export function Usage() {
   const days = [...folded.daily]
     .filter((period) => period.costUsd > 0 || period.totalTokens > 0)
     .sort((a, b) => b.day.localeCompare(a.day));
-  // Only the day breakdown opens into models, and expanding a row re-renders the screen:
-  // without this every chevron click would re-walk the window's buckets.
   const modelsByDay = useMemo(
     () => (breakdown === "day" ? foldModelsByDay(summary) : null),
     [breakdown, summary],

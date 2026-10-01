@@ -1,10 +1,3 @@
-//! GitHub tarball download and in-memory unpacking.
-//!
-//! One `codeload.github.com` tarball gives us the whole repository plus the exact commit sha
-//! (in the pax global header GitHub writes) with a single unauthenticated request. The update
-//! check asks the REST API for the ref's sha (`Accept: application/vnd.github.sha`) and only
-//! re-downloads when it moved.
-
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::time::Duration;
@@ -13,14 +6,12 @@ use flate2::read::GzDecoder;
 
 use crate::dto::AdapterError;
 
-/// Compressed download cap; a skills repository is a few hundred kB.
 pub const MAX_TARBALL_BYTES: usize = 50 * 1024 * 1024;
 const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 200 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 pub trait Fetcher: Send + Sync {
-    /// Body bytes for a GET, or a human-readable failure.
     fn get(&self, url: &str, accept: Option<&str>) -> Result<Vec<u8>, String>;
 }
 
@@ -61,7 +52,6 @@ pub fn commit_sha_url(owner: &str, repo: &str, git_ref: &str) -> String {
     format!("https://api.github.com/repos/{owner}/{repo}/commits/{git_ref}")
 }
 
-/// A repository snapshot: files keyed by `/`-separated path relative to the repo root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tarball {
     pub commit_sha: String,
@@ -69,8 +59,6 @@ pub struct Tarball {
 }
 
 impl Tarball {
-    /// `folder/`-prefixed keys, with the prefix removed. `folder` is `/`-separated, no trailing
-    /// slash; the empty string means the whole tree.
     pub fn subtree(&self, folder: &str) -> BTreeMap<String, &[u8]> {
         if folder.is_empty() {
             return self
@@ -199,8 +187,6 @@ pub fn unpack(bytes: &[u8]) -> Result<Tarball, AdapterError> {
     Ok(Tarball { commit_sha, files })
 }
 
-/// Drops the `<repo>-<ref>/` folder GitHub wraps every tarball in and validates the rest.
-/// `Ok(None)` for the folder entry itself; `Err` for anything that could escape a target dir.
 fn strip_top_level(raw: &str) -> Result<Option<String>, AdapterError> {
     let mut parts = raw.split('/').filter(|part| !part.is_empty());
     let Some(top) = parts.next() else {

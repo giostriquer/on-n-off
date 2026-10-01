@@ -10,7 +10,6 @@ final class NotchPanel: NSPanel {
   override func cancelOperation(_ sender: Any?) { collapse?() }
 }
 
-/// A hosting view that reports pointer entry into its surface, whether or not its panel is key.
 final class TrackingHostingView<Content: View>: NSHostingView<Content> {
   var entered: (() -> Void)?
   private var tracking: NSTrackingArea?
@@ -30,16 +29,12 @@ final class TrackingHostingView<Content: View>: NSHostingView<Content> {
 let tailLength = 8.0
 private let hoverOpenDelay = 0.12
 private let hoverCloseGrace = 0.35
-/// Mouse-moved events do not reach a non-activating panel reliably, so while the pointer is on
-/// the rail or its popover the controller samples `NSEvent.mouseLocation` instead.
 private let pointerPollInterval = 0.08
-/// Popover and rail transitions; zero when the user asked macOS to reduce motion.
 private var motionDuration: TimeInterval {
   NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.18
 }
 private let edgeSlide = 10.0
 
-/// Runs AppKit animator changes as one eased group.
 @MainActor
 private func animate(
   _ changes: () -> Void, completion: (@MainActor @Sendable () -> Void)? = nil
@@ -55,7 +50,6 @@ private func animate(
     })
 }
 
-/// The starting frame for a panel that slides in from its screen edge.
 private func slidOut(_ frame: NSRect, edge: NotchCore.Edge) -> NSRect {
   switch edge {
   case .right: return frame.offsetBy(dx: edgeSlide, dy: 0)
@@ -70,7 +64,6 @@ struct PopoverPlacement {
   let frame: CGRect
 }
 
-/// The popover for one cell, measured and placed beside it in top-left display coordinates.
 @MainActor
 func popoverPlacement(
   rail: RailModel, message: HostMessage, cell: RailCell, now: Date,
@@ -105,18 +98,14 @@ func popoverPlacement(
   return PopoverPlacement(view: NotchPopoverView(model: model(tailAt: tailAt)), frame: placed)
 }
 
-/// Owns the three panels (hover pill, rail, popover) and the pointer state machine. Layout is
-/// captured in a `RailModel` once per host message or screen change; views take values.
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
   private var message: HostMessage?
   private var rail: RailModel?
   private var now = Date()
-  /// The cell whose popover is open, hovered or pinned.
   private var activeCell: RailCell?
   private var hovered: RailCell?
   private var pinned: RailCell?
-  /// The pointer is on the rail's cap (the show-mode control).
   private var capHovered = false
   private var railOpen = false
   private var lastSequence: UInt64 = 0
@@ -130,13 +119,10 @@ final class PanelController: NSObject, NSWindowDelegate {
   private var workspaceObservers: [NSObjectProtocol] = []
   private var outsideClick: Any?
   private var clock: Timer?
-  /// The minute the rail and popover were last rendered for; ages and reset notes are
-  /// minute-granular, so nothing is rebuilt until it changes.
   private var shownMinute = 0
   private var pointerPoll: Timer?
   private var openWork: DispatchWorkItem?
   private var lastInside = Date.distantPast
-  /// Bumped on every show/hide so a finished fade-out never hides a popover shown meanwhile.
   private var popoverGeneration = 0
   private var railGeneration = 0
   var emit: (ClientAction) -> Void = { _ in }
@@ -248,7 +234,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     emit(.screensChanged)
   }
 
-  /// Recomputes the rail model from the live screens once, then places every panel.
   private func relayout() {
     rail = message.flatMap { message in
       message.snapshot.error == nil
@@ -256,8 +241,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
     updateFrames()
   }
-
-  // MARK: Pointer
 
   private func pillEntered() {
     guard rail?.settings.show == .onHover, !railOpen else { return }
@@ -285,10 +268,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
   }
 
-  /// One sample of the pointer: tracks the hovered cell, keeps the popover while the pointer is
-  /// on it, and after a short grace closes the popover and (on hover) the rail. While a popover
-  /// is pinned, hovering another cell moves the pin there; leaving keeps it open, and sampling
-  /// stops until `mouseEntered` restarts it.
   private func pollPointer() {
     guard let rail = rail else {
       stopPolling()
@@ -340,14 +319,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     if !inRail, !inPopover, activeCell == nil, !railOpen { stopPolling() }
   }
 
-  /// The rail's pin control: asks the host to flip between always showing the rail and showing
-  /// it on hover; the saved setting comes back in the next message.
   private func toggleShow() {
     emit(.setShow(rail?.settings.show == .always ? .onHover : .always))
   }
 
-  /// Advances the clock the views read; rebuilds them only when the displayed minute changes,
-  /// which is all the ages, reset notes and window expiries can show.
   private func tick() {
     let minute = Int(Date().timeIntervalSinceReferenceDate / 60)
     guard minute != shownMinute else { return }
@@ -356,8 +331,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     refreshRail()
     if activeCell != nil { refreshPopover() }
   }
-
-  // MARK: Selection
 
   private func toggle(_ id: RailCell) {
     if pinned == id {
@@ -390,8 +363,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     dismiss()
     return false
   }
-
-  // MARK: Panels
 
   private enum PopoverTransition { case none, appear, morph }
 
@@ -434,9 +405,6 @@ final class PanelController: NSObject, NSWindowDelegate {
       toggleShow: { [weak self] in self?.toggleShow() })
   }
 
-  /// Rebuilds the popover for the active cell. `.appear` fades a fresh popover in, `.morph`
-  /// crossfades the content and glides the panel from the previous cell to the new one, and
-  /// `.none` refreshes in place (the once-a-second age update).
   private func refreshPopover(transition: PopoverTransition = .none) {
     guard let id = activeCell, let rail = rail, let message = message,
       let placement = popoverPlacement(
@@ -469,7 +437,6 @@ final class PanelController: NSObject, NSWindowDelegate {
       animate { popoverPanel.animator().setFrame(frame, display: true) }
     case .none:
       popoverHost.rootView = placement.view
-      // The once-a-second refresh must not cut a glide short: only move when the target moved.
       if popoverPanel.frame != frame { popoverPanel.setFrame(frame, display: true) }
       if !popoverPanel.isVisible {
         popoverPanel.alphaValue = 1
@@ -513,9 +480,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     if activeCell != nil, railVisible { refreshPopover() } else { hidePopover() }
   }
 
-  /// Slides the rail in from its edge. A rail still fading out (the pointer came straight back
-  /// to the pill) is steered to the resting frame through the same animator, which replaces the
-  /// in-flight conceal instead of fighting it.
   private func revealRail(at frame: NSRect, edge: NotchCore.Edge) {
     railGeneration += 1
     if !railPanel.isVisible {

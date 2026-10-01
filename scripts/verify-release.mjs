@@ -1,23 +1,4 @@
 #!/usr/bin/env node
-// Verifies a GitHub release of on-n-off before (or after) it is published.
-//
-//   bun scripts/verify-release.mjs <vX.Y.Z> <previous vP.Q.R>
-//       [--repo owner/name] [--dir .tmp/release-check] [--no-download] [--allow-asset-change]
-//
-// Downloads the release's assets and body with `gh` (drafts included), plus the previous release's
-// asset names and latest.json, and checks:
-//   1. the asset set is the previous release's, renamed to the new version;
-//   2. SHA256SUMS.txt lists exactly the other assets, each with its own hash;
-//   3. every `.sig` is a minisign signature (Ed25519 over BLAKE2b-512) for the file it names, under
-//      the updater key both tags' src-tauri/tauri.conf.json carry (installed apps trust the old one);
-//   4. latest.json names this version, the previous release's platforms, URLs under this tag,
-//      signatures equal to the `.sig` assets, and the draft's notes (what installed apps show);
-//   5. `gh attestation verify` ties every installer to release.yml running at refs/tags/<tag>.
-// `--no-download` re-checks what an earlier run saved, e.g. after deliberately tampering with a
-// file. `--allow-asset-change` accepts an intentional change to the asset set or platforms, after
-// confirming the new names against release.yml's expected list. Exits 1 on the first failed group.
-// Every pass/fail decision lives in release-verification.mjs, where it is tested; this file only
-// gathers the inputs with `gh` and `git`, reads the files, and prints.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -72,7 +53,6 @@ const print = ({ ok, message, detail }) => {
   console.log(`${ok ? "ok  " : "FAIL"} ${message}${!ok && detail ? `\n       ${detail}` : ""}`);
   if (!ok) failed += 1;
 };
-/** Print one group's checks and accepted differences; stop at the first group that failed. */
 const report = (name, { checks, warnings }) => {
   if (warnings.length > 0) {
     console.log(`warn ${name} differs from ${previousTag}, accepted by --allow-asset-change; confirm each against release.yml:`);
@@ -86,7 +66,6 @@ const report = (name, { checks, warnings }) => {
 };
 const gh = (args, options = {}) => execFileSync("gh", args, { encoding: "utf8", ...options });
 
-// Inputs: this release in full and its draft body; the previous one's asset names and latest.json.
 const dir = join(root, tag);
 const previousDir = join(root, previousTag);
 if (!values["no-download"]) {
@@ -102,19 +81,15 @@ if (!values["no-download"]) {
 }
 const assets = readdirSync(dir).sort();
 const text = (path) => readFileSync(path, "utf8");
-/** A file the run may lack (an asset removed under --allow-asset-change, a partial --no-download directory): its check reports it. */
 const textIfPresent = (path) => (existsSync(path) ? text(path) : "");
 const previousAssets = JSON.parse(text(join(root, `${previousTag}.assets.json`)));
 const bytesByName = new Map(assets.filter((name) => name !== "SHA256SUMS.txt").map((name) => [name, readFileSync(join(dir, name))]));
 const sigTextByName = new Map(assets.filter((name) => name.endsWith(".sig")).map((name) => [name, text(join(dir, name))]));
 
-// 1. Asset set.
 report("asset set", checkAssetSet(assets, expectedAssetNames(previousAssets, previousVersion, version), allowChange));
 
-// 2. SHA256SUMS.txt.
 report("SHA256SUMS", checkSums(assets.includes("SHA256SUMS.txt") ? text(join(dir, "SHA256SUMS.txt")) : "", bytesByName));
 
-// 3. Minisign signatures under the updater key installed apps already trust.
 const configAt = (ref) =>
   execFileSync("git", ["show", `${ref}:src-tauri/tauri.conf.json`], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 let configs;
@@ -127,7 +102,6 @@ const keys = checkUpdaterKeys(...configs);
 report("updater key", keys);
 report("signatures", checkSignatures(sigTextByName, bytesByName, version, keys.publicKey));
 
-// 4. latest.json.
 report(
   "latest.json",
   checkFeed(textIfPresent(join(dir, "latest.json")), textIfPresent(join(previousDir, "latest.json")), {
@@ -141,7 +115,6 @@ report(
   }),
 );
 
-// 5. Build provenance: this repo's Release workflow, at this tag, on GitHub-hosted runners.
 const attestations = [];
 for (const name of assets.filter((name) => /\.(exe|dmg|app\.tar\.gz)$/.test(name))) {
   let error = null;

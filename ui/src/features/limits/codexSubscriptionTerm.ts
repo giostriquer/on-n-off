@@ -6,16 +6,12 @@ const DAY = 86_400_000;
 
 export type TermState = "renews" | "ends" | "ended" | "renewalOverdue" | "tokenOnly";
 
-/** Everything the Codex subscription badge renders, decided once from its two inputs. */
 export type TermPresentation = {
   state: TermState;
-  /** The accessible name of the badge. */
   name: string;
   label: string;
   tone: "neutral" | "warning" | "expired";
-  /** How far through its last seven days a plan that ends is, 0 to 1; 0 otherwise. */
   progress: number;
-  /** The tooltip's first line: the verb and the exact device-local date. */
   headline: string;
   countdown: string | null;
   note: string | null;
@@ -43,13 +39,6 @@ const VERBS: Record<TermState, string> = {
   tokenOnly: "Paid through",
 };
 
-/**
- * The badge's state. The billing endpoint's answer (`term`) names the end of the paid period and
- * whether it renews then: a plan that ends is the one to spend down first, so it warns through its
- * last seven days and turns red once the date has passed. Without a term, the login token's date
- * (`paidThrough`) says how long the plan is paid for and nothing about renewal, and drops out once
- * it has passed: a lapsed period says nothing about the current one.
- */
 export function codexSubscriptionTerm(
   term: LimitsSubscription | null | undefined,
   paidThrough: SubscriptionDate | null | undefined,
@@ -82,10 +71,6 @@ export function codexSubscriptionTerm(
   };
 }
 
-/**
- * Whether the billing endpoint's term says the plan has ended without renewing: it will not renew
- * and its paid period has passed, the badge's `ended`. Without a term nothing says so.
- */
 export function codexTermEnded(term: LimitsSubscription | null | undefined, now: number): boolean {
   return !!term && codexSubscriptionTerm(term, null, now)?.state === "ended";
 }

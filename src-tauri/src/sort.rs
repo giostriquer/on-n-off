@@ -45,9 +45,6 @@ pub fn hook_plugin_key(hook: &HookDto) -> &str {
     hook.plugin_id.as_deref().unwrap_or("")
 }
 
-/// Source, then event, then the row's place in the file it came from. That last key needs no
-/// field of its own: `sort_by` is stable and `hooks` emits rows in file order, so equal keys
-/// keep the order the file has. The plugin id only separates two plugins that share a name.
 pub fn sort_hooks(hooks: &mut [HookDto]) {
     hooks.sort_by(|a, b| {
         cmp_plugin_then_name(&a.source, &a.event, &b.source, &b.event)

@@ -1,12 +1,3 @@
-/**
- * Dev-only stand-in for Tauri's IPC so the UI can run in a plain browser (and under the
- * screenshot harness, `bun run ui:shots`). Loaded by `main.tsx` only in dev builds and only when
- * the page URL carries `?mock[=scenario]`; production bundles never include it.
- *
- * Every command answers with synthetic data. Unknown commands reject with a visible message so
- * a screen that reaches for something unmocked says so instead of hanging.
- */
-
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto, PendingResetSpend } from "$lib/types";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
@@ -61,18 +52,12 @@ let settings: AppSettings = {
     : {},
 };
 
-/**
- * `?mock=bankedResetsAuto`: `bankedResets`, with the signed-in Codex account's automatic alert
- * waiting to use a reset eight minutes after the fixtures' clock.
- */
 let pendingSpends: PendingResetSpend[] = scenario === "bankedResetsAuto"
   ? [{ accountId: "codex-1", dueAt: "2026-08-24T20:08:00Z" }]
   : [];
 
 const emptyTab = (): AgentTabDto => ({ plugins: [], userSkills: [], mcpServers: [], hooks: [] });
 
-// `?mock=catalog`: a real-sized catalog. The Overview's live list is the one surface whose layout
-// only misbehaves once it is long, so an empty tab cannot stand in for it.
 const CATALOG_PLUGINS = [
   "workbench", "mattpocock-skills", "toolkit", "linear", "design", "dataviz", "artifact-design",
   "artifact-capabilities", "update-config", "keybindings-help", "code-review", "simplify",
@@ -98,8 +83,6 @@ const fullTab = (): AgentTabDto => ({
     upstream: `0.${index + 12}.0`,
     enabled: true,
     togglable: true,
-    // The first plugin ships skills of its own. Those rows are not togglable, so they render the
-    // "with plugin" span rather than a Rocker — the variant whose height has to match it.
     skills: index === 0
       ? ["dispatch", "handoff"].map((skill) => ({
           id: `${name}:${skill}`,
@@ -119,7 +102,6 @@ const fullTab = (): AgentTabDto => ({
     enabled: true,
     togglable: true,
   })),
-  // Two are off, so the gauge reads 3 on / 5 installed.
   mcpServers: CATALOG_MCPS.map((name, index) => ({
     id: name,
     name,
@@ -130,8 +112,6 @@ const fullTab = (): AgentTabDto => ({
   })),
 });
 
-// `?mock=mcpSources`: the catalog plus the Claude servers that are not the user's own — one the
-// toolkit plugin brings and two kept for particular projects.
 const mcpSourcesTab = (): AgentTabDto => {
   const tab = fullTab();
   return {
@@ -172,8 +152,6 @@ const mcpSourcesTab = (): AgentTabDto => {
   };
 };
 
-// `?mock=hooks`: the Hooks screen's rows, which are per provider — Antigravity and Cursor get
-// none, and say so rather than reading as unconfigured.
 const catalogTab = (args: Record<string, unknown> = {}): AgentTabDto => {
   const tab = scenario === "catalog" ? fullTab() : scenario === "mcpSources" ? mcpSourcesTab() : emptyTab();
   return scenario === "hooks" ? { ...tab, hooks: hooksFor(args.agentId as AgentId) } : tab;
@@ -197,7 +175,6 @@ let notch: NotchSnapshot = {
   error: null,
 };
 
-/** A month of usage with five-digit model totals, so the Overview's cost columns are exercised. */
 function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: string }): UsageSummary {
   const totals = (output: number) => ({
     uncachedInputTokens: output * 6,
@@ -224,7 +201,6 @@ function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: 
         cacheSavingsUsd: costUsd * 1.3, costSource: "modelPriced", records: 40, unpricedRecords: 0, sessions: 3,
       });
     }
-    // A model the rate table has no price for yet: its tokens count, its cost is unknown.
     buckets.push({
       day, provider: "codex", model: "codex-auto-review", totals: totals(900), costUsd: 0,
       cacheSavingsUsd: 0, costSource: "unpriced", records: 12, unpricedRecords: 12, sessions: 2,
@@ -321,7 +297,6 @@ window.__TAURI_INTERNALS__ = {
   async invoke(cmd, args = {}) {
     const handler = Object.hasOwn(handlers, cmd) ? handlers[cmd] : undefined;
     if (!handler) {
-      // Loud on purpose: the screenshot harness fails a scene on console errors.
       console.error(`[mock] no handler for ${cmd}`);
       throw { kind: "message", message: `mock IPC has no handler for ${cmd}`, path: null };
     }

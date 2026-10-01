@@ -146,7 +146,6 @@ export function AgentConfig({
   const skillCount =
     (tab?.plugins.reduce((sum, plugin) => sum + plugin.skills.length, 0) ?? 0) +
     (tab?.userSkills.length ?? 0);
-  // The row names the provider's MCP config file: only the servers read from it count here.
   const mcpCount = configMcpCount(tab);
   const installModes =
     [agent.installGit ? "git/url" : null, agent.installFolder ? "folder" : null].filter(Boolean).join(" · ") ||

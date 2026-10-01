@@ -2,7 +2,6 @@ use super::*;
 use crate::cli_stub::CliStub;
 use crate::paths::scratch_dir;
 
-/// Windows reports launchers with PATHEXT's casing (`.CMD`), so compare case-insensitively there.
 fn assert_launcher(found: Option<PathBuf>, expected: &Path) {
     let found = found.expect("launcher found");
     let same = if cfg!(windows) {
@@ -22,7 +21,6 @@ fn assert_launcher(found: Option<PathBuf>, expected: &Path) {
 
 #[test]
 fn cursor_ignores_another_products_agent_command() {
-    // `agent` on PATH from an unrelated CLI (e.g. ~/.grok/bin/agent) must not count as Cursor.
     let grok = scratch_dir("on-n-off-grok").join("bin");
     CliStub::new("agent").write(&grok);
     let cursor = scratch_dir("on-n-off-local").join("cursor-agent");
@@ -50,7 +48,6 @@ fn cursor_prefers_the_canonical_agent_next_to_the_legacy_alias() {
 #[cfg(unix)]
 #[test]
 fn cursor_follows_the_installers_symlink_into_its_versions_folder() {
-    // `~/.local/bin/agent -> ~/.local/share/cursor-agent/versions/<v>/cursor-agent`.
     let home = scratch_dir("on-n-off-cursor-home");
     let versions = home
         .join(".local")
@@ -313,12 +310,10 @@ fn probes_the_login_shell_for_path_and_gives_up_on_hangs() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
     };
-    // Stands in for `zsh -i -l -c <cmd>`: rc files put node on PATH, then run the command.
     let shell = write_shell(
         "fakeshell",
         "#!/bin/sh\nPATH=/fake/node/bin:/usr/bin\nexport PATH\neval \"$4\"\n",
     );
-    // Only the hung shell below is about giving up in time.
     assert_eq!(
         probe_login_shell_path(&shell, crate::cli_stub::ANSWER_DEADLINE),
         Some(vec![

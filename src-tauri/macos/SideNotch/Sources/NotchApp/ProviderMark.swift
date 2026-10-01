@@ -1,10 +1,6 @@
 import NotchCore
 import SwiftUI
 
-// Provider marks as native vector paths, converted offline from their SVG sources: Claude and
-// Codex from Simple Icons (24 × 24), Cursor's official 2D cube (466.73 × 532.09), and the
-// Antigravity arch silhouette (viewBox 13 14.5 85 85). Every mark is built once and fitted into
-// the cell the same way.
 struct ProviderMark: Shape {
   let provider: ProviderId
 
@@ -19,7 +15,6 @@ struct ProviderMark: Shape {
     }
   }
 
-  /// `path` scaled uniformly into `rect` and centred, like an SVG with `xMidYMid meet`.
   private func fitted(_ path: Path, box: CGRect, in rect: CGRect) -> Path {
     let scale = min(rect.width / box.width, rect.height / box.height)
     let offset = CGPoint(

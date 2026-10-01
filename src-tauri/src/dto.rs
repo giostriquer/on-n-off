@@ -19,8 +19,6 @@ impl AgentId {
         }
     }
 
-    /// Lowercase id used for directory and file names (`claude`, `codex`, ...); matches the
-    /// serde form.
     pub fn key(self) -> &'static str {
         match self {
             Self::Claude => "claude",
@@ -30,8 +28,6 @@ impl AgentId {
         }
     }
 
-    /// The CLI executable the user types (and that settings/diagnostics resolve). Cursor's is
-    /// `agent`; the legacy `cursor-agent` alias is still accepted as an override.
     pub fn binary_name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
@@ -96,11 +92,6 @@ pub struct AgentInfo {
     pub install_git: bool,
     pub install_folder: bool,
     pub plugin_toggle: bool,
-    /// Whether on-n-off reads this provider's hooks at all. The Hooks screen asks the provider
-    /// rather than keeping a list of its own, so a provider that grows hooks needs no second
-    /// change in the UI — and one that has none says so instead of showing an empty list as if
-    /// nothing were configured. Defaulted, because a snapshot written before it existed has no
-    /// such key and the two that read hooks say so for themselves.
     #[serde(default)]
     pub reads_hooks: bool,
 }
@@ -149,50 +140,29 @@ pub struct McpServerDto {
     pub source: String,
     pub enabled: bool,
     pub togglable: bool,
-    /// `""` for a server the user configured, `"project"` for one a project folder carries,
-    /// `"plugin"` for one an enabled plugin brings, `"local"` for one Claude keeps for particular
-    /// projects (its local scope) when listed outside them.
     #[serde(default)]
     pub origin: String,
-    /// The plugin (`name@marketplace`) that brings a `"plugin"` server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_id: Option<String>,
-    /// The projects, as `~/.claude.json` keys them, that keep a `"local"` server.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub projects: Vec<String>,
 }
 
-/// One hook handler a provider would run: one row on the Hooks screen, which is read-only —
-/// it says what is configured and never switches anything on or off. `event` and `handler`
-/// stay in the provider's own vocabulary (Claude fires `PreToolUse`, Codex `session_start`)
-/// because the two do not agree and a translation would hide what the file actually says.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HookDto {
-    /// Stable within a provider, and unique except where the files themselves collide — two
-    /// event keys that snake_case alike share one key in Codex's own state table too, so both
-    /// rows carry it. `hooks.rs` documents the shape it encodes.
     pub id: String,
     pub event: String,
-    /// `""` when the entry has none, which is the same as matching everything the event fires for.
     #[serde(default)]
     pub matcher: String,
-    /// `command`, `mcp_tool`, `http`, `prompt`, `agent` — or whatever else the file says.
     pub handler: String,
-    /// The command line as written, `${CLAUDE_PLUGIN_ROOT}`, line continuations and all:
-    /// expanding it would show a path that is not in the file, and collapsing its lines would
-    /// leave nothing able to show what runs. The row truncates it; the tooltip has the whole of
-    /// it. `<server> · <tool>` for an `mcp_tool` handler, `""` when the handler names neither.
     #[serde(default)]
     pub command: String,
-    /// Where the row comes from: the plugin's name, or the settings file's name.
     pub source: String,
     #[serde(default)]
     pub plugin_id: Option<String>,
     #[serde(default)]
     pub description: String,
-    /// Codex's `[hooks.state]` can switch one entry off; Claude has no such switch, so its rows
-    /// are always true.
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -285,7 +255,6 @@ pub struct UsageSummaryInput {
     pub since_time: Option<String>,
     #[serde(default)]
     pub until_time: Option<String>,
-    /// When true, bypass the aggregated summary cache and rescan.
     #[serde(default)]
     pub force: bool,
 }
@@ -377,20 +346,15 @@ pub struct UsageSummaryDto {
     pub sources: Vec<UsageSourceDto>,
     pub pricing: UsagePricingDto,
     pub scan_duration_ms: u64,
-    /// True when served from the aggregated summary cache (no transcript walk).
     #[serde(default)]
     pub cache_hit: bool,
 }
 
-/// What the usage history holds (`usage/history.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UsageHistoryState {
-    /// No usage is old enough to have been kept yet.
     Empty,
     Kept,
-    /// The file does not read: usage is counted from the transcripts alone and the file is left
-    /// as it is.
     Unreadable,
 }
 
@@ -398,40 +362,28 @@ pub enum UsageHistoryState {
 #[serde(rename_all = "camelCase")]
 pub struct UsageHistoryStatusDto {
     pub state: UsageHistoryState,
-    /// RFC 3339 start of the oldest usage kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kept_since: Option<String>,
-    /// RFC 3339 instant the history covers up to; transcripts count from here on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folded_through: Option<String>,
     pub bytes: u64,
 }
 
-/// Why the GitHub screen has no fresh data. Every value except `Ok` comes with a `hint` telling
-/// the user what to do; `stale` says whether the last snapshot is being shown meanwhile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GithubStatus {
     Ok,
-    /// The `gh` CLI is not on the search path.
     GhMissing,
-    /// `gh` holds no github.com login (or could not answer).
     GhNotLoggedIn,
-    /// GitHub rejected the token `gh` handed over, twice.
     TokenRejected,
-    /// GitHub's rate limit is exhausted; polling pauses until it resets.
     RateLimited,
-    /// DNS, TLS, timeout, an unexpected status, or an unreadable reply.
     Network,
 }
 
-/// The head commit's status-check rollup, collapsed to what a list row can show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CiState {
-    /// No checks reported (or a state this version does not know).
     None,
-    /// `PENDING` or `EXPECTED`.
     Pending,
     Success,
     Failure,
@@ -445,7 +397,6 @@ pub enum ReviewRequestKind {
     Team,
 }
 
-/// GitHub's `reviewDecision`, on the wire in GitHub's own spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ReviewDecision {
@@ -454,11 +405,6 @@ pub enum ReviewDecision {
     ReviewRequired,
 }
 
-/// GitHub's `mergeable`: whether the head can be merged into the base without conflicts. It
-/// rides beside `MergeState` because the two diverge on drafts: a draft with conflicts reports
-/// `mergeStateStatus: DRAFT`, and only this field says `CONFLICTING`. `Unknown` also covers a
-/// value GitHub has not computed yet (it computes on demand, so the next poll usually knows) and
-/// one this version does not recognise.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mergeability {
@@ -468,50 +414,33 @@ pub enum Mergeability {
     Unknown,
 }
 
-/// GitHub's `mergeStateStatus`, collapsed to what a list row can act on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MergeState {
-    /// Every requirement is met (`CLEAN`, or `HAS_HOOKS`: clean with pre-receive hooks).
     Clean,
-    /// Mergeable, but a non-required check is not passing.
     Unstable,
-    /// Branch protection stops the merge: a missing review, a failing required check, and so on.
     Blocked,
-    /// The head is behind the base and the base requires up-to-date branches.
     Behind,
-    /// Merge conflicts.
     Dirty,
     Draft,
-    /// Not computed yet, or a state this version does not know.
     #[default]
     Unknown,
 }
 
-/// What a row can say about merging, most pressing first. Classified once, in `github::merge`,
-/// from the raw fields below, so the screen and the monitor read the same verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MergeKind {
-    /// The head no longer merges cleanly into the base.
     Conflicts,
-    /// Sitting in the repository's merge queue.
     Queued,
-    /// Auto-merge is on: GitHub merges once the requirements are met.
     AutoMerge,
-    /// Every requirement met and nothing merging it yet; only the merge button is left.
     Ready,
-    /// Behind a base that requires up-to-date branches.
     Behind,
-    /// Branch protection stops the merge for a reason the row does not otherwise show.
     Blocked,
 }
 
-/// The pull request's place in its repository's merge queue.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubMergeQueueDto {
-    /// 1-based position when GitHub reports one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<u64>,
 }
@@ -519,12 +448,10 @@ pub struct GithubMergeQueueDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubPrDto {
-    /// GitHub's node id, stable across renames and pushes.
     pub id: String,
     pub number: u64,
     pub title: String,
     pub url: String,
-    /// `owner/name`.
     pub repo: String,
     pub author: String,
     pub is_draft: bool,
@@ -533,24 +460,17 @@ pub struct GithubPrDto {
     pub ci: CiState,
     pub head_ref: String,
     pub base_ref: String,
-    /// RFC 3339.
     pub updated_at: String,
-    /// Only on the review-requested list: whether the request named the user or one of their teams.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_request: Option<ReviewRequestKind>,
-    /// Defaults keep a snapshot written before these fields existed loadable.
     #[serde(default)]
     pub mergeable: Mergeability,
     #[serde(default)]
     pub merge_state: MergeState,
-    /// Present while the pull request sits in a merge queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_queue: Option<GithubMergeQueueDto>,
-    /// Auto-merge is enabled: GitHub merges once the requirements are met.
     #[serde(default)]
     pub auto_merge: bool,
-    /// The one reading of the four fields above (`github::merge::classify`); `None` when there
-    /// is nothing to say, and on a snapshot written before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_kind: Option<MergeKind>,
 }
@@ -558,7 +478,6 @@ pub struct GithubPrDto {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubPrListDto {
-    /// Matches on GitHub, which can exceed `items.len()` (the query reads one page).
     pub total: u64,
     pub items: Vec<GithubPrDto>,
 }
@@ -567,36 +486,26 @@ pub struct GithubPrListDto {
 #[serde(rename_all = "camelCase")]
 pub struct GithubRateLimitDto {
     pub remaining: u64,
-    /// RFC 3339.
     pub reset_at: String,
 }
 
-/// What one successful read produced: the part that is worth remembering on disk and showing
-/// again while a later read fails.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubPrsData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewer: Option<String>,
-    /// RFC 3339 instant of the read that produced the lists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fetched_at: Option<String>,
-    /// The scope qualifiers applied to `mine`.
     pub scope: Vec<String>,
     pub mine: GithubPrListDto,
     pub review_requested: GithubPrListDto,
     pub assigned: GithubPrListDto,
-    /// The user's most recently merged pull requests, scoped like `mine`; the monitor tells
-    /// "merged" from "closed" by it. The default keeps a snapshot written before it loadable.
     #[serde(default)]
     pub merged: GithubPrListDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<GithubRateLimitDto>,
 }
 
-/// The GitHub screen's answer: an envelope (`status`, `hint`, `stale`, `warnings`) around the
-/// data. Provider-side problems are a `status` + `hint`, never an error; `stale: true` means the
-/// data comes from an earlier successful read.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubPrsDto {
@@ -606,20 +515,12 @@ pub struct GithubPrsDto {
     pub stale: bool,
     #[serde(flatten)]
     pub data: GithubPrsData,
-    /// GraphQL `errors[]` messages that came with usable data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Subscription limits live in `dto/limits.rs`.
-
 mod limits;
 pub use limits::*;
-
-// ---------------------------------------------------------------------------
-// Local items: skills and subagents copied out of a marketplace by on-n-off itself and
-// tracked in `~/.on-n-off/installed-items.json` (see `item_install`).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -638,7 +539,6 @@ pub enum ItemScope {
     },
 }
 
-/// How sure the dependency scanner is that one entry needs another (see `item_install::deps`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DepConfidence {
@@ -646,7 +546,6 @@ pub enum DepConfidence {
     High,
 }
 
-/// Another marketplace entry that this one refers to in its text.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDependencyDto {
@@ -662,15 +561,11 @@ pub struct ItemDependencyDto {
 pub struct MarketplaceEntryDto {
     pub name: String,
     pub description: String,
-    /// Path inside the marketplace repository, `/`-separated (skill folder or agent file).
     pub path: String,
-    /// Sibling entries this one names in its text, best confidence first per target.
     #[serde(default)]
     pub depends_on: Vec<ItemDependencyDto>,
-    /// Paths the text refers to that a local copy of the item will not contain.
     #[serde(default)]
     pub external_refs: Vec<String>,
-    /// The text mentions `CLAUDE_PLUGIN_ROOT`, so it expects to run inside the plugin.
     #[serde(default)]
     pub uses_plugin_root: bool,
 }
@@ -681,13 +576,10 @@ pub struct MarketplacePluginDto {
     pub name: String,
     pub version: Option<String>,
     pub description: String,
-    /// `false` when the plugin source is something on-n-off cannot fetch (a bare URL, npm…).
     pub supported: bool,
-    /// Set when the plugin lives in another GitHub repository than the marketplace itself.
     pub source: Option<ItemSourceDto>,
     pub skills: Vec<MarketplaceEntryDto>,
     pub agents: Vec<MarketplaceEntryDto>,
-    /// Plugin-level assets a local copy never gets: `commands`, `hooks`, `mcp`.
     #[serde(default)]
     pub extras: Vec<String>,
 }
@@ -717,7 +609,6 @@ pub struct ItemPick {
     pub plugin_name: String,
     pub kind: ItemKind,
     pub path: String,
-    /// Overrides the request source for plugins hosted in another repository.
     #[serde(default)]
     pub source: Option<ItemSourceDto>,
 }
@@ -756,7 +647,6 @@ pub struct ItemOutcomeDto {
     pub provider: AgentId,
     pub kind: ItemKind,
     pub name: String,
-    /// The pick this outcome answers, so the UI can map conflicts back without guessing names.
     pub plugin_name: String,
     pub path: String,
     pub target_path: String,
@@ -798,12 +688,9 @@ pub struct ItemStatusDto {
     pub modified: bool,
     pub missing: bool,
     pub upstream: ItemUpstream,
-    /// Where the item was copied from, so the UI can say so and link to it.
     pub source: ItemSourceDto,
     pub plugin_name: String,
-    /// Skill folder or agent file inside the repository, `/`-separated.
     pub upstream_path: String,
-    /// GitHub page of the item at the installed commit.
     pub upstream_url: String,
 }
 

@@ -1,7 +1,3 @@
-//! When a read is served from the summary cache, and when what a read counted is stored there: only
-//! a read that accounted for every transcript, read each to a final parse, counted with a readable
-//! history, and found nothing changed by the time it stored.
-
 use super::super::test_support::*;
 use super::super::*;
 use crate::paths::scratch_dir;
@@ -26,9 +22,6 @@ fn a_forced_read_is_never_served_from_the_cache_but_stores_what_it_counted() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A walk that could not list a directory may have missed transcripts, so its count is neither
-/// served from the cache nor stored: a summary stored while the directory could be listed is not
-/// served once it cannot be, and the count made then does not replace it.
 #[cfg(unix)]
 #[test]
 fn a_read_that_could_not_walk_every_directory_is_neither_served_nor_stored() {
@@ -54,8 +47,6 @@ fn a_read_that_could_not_walk_every_directory_is_neither_served_nor_stored() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A transcript that did not read (here one no longer readable, with no cached parse to stand in)
-/// leaves the count short, so it is not stored, though nothing about the transcripts changed.
 #[cfg(unix)]
 #[test]
 fn a_read_that_could_not_read_a_transcript_is_not_stored() {
@@ -77,8 +68,6 @@ fn a_read_that_could_not_read_a_transcript_is_not_stored() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A transcript written to between the read and the store makes the count stale before it is
-/// stored, so it is not.
 #[test]
 fn a_read_whose_transcripts_changed_before_it_stored_is_not_stored() {
     let _serial = pricing::lock_rates_state();
@@ -103,9 +92,6 @@ fn a_read_whose_transcripts_changed_before_it_stored_is_not_stored() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A read served from the cache after bringing the source index up to date keeps what it parsed
-/// doing so. Here the transcript created after August was stored is July's, outside August, so
-/// August is served; the July read that follows counts it without parsing it again.
 #[test]
 fn a_read_served_after_indexing_a_new_transcript_keeps_its_parse() {
     let _serial = pricing::lock_rates_state();

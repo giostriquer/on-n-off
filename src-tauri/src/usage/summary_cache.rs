@@ -1,6 +1,3 @@
-//! Aggregated UsageSummaryDto cache keyed by window + transcript-source signature.
-//! Avoids reloading/re-aggregating ~100k+ per-file records on every open.
-
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -31,9 +28,6 @@ pub fn summary_cache_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-summary-cache.json")
 }
 
-/// The cache key for one window priced with one rate table and counted with one usage history: a
-/// re-fetched table (a newly listed model, a price change) must not serve yesterday's costs, and
-/// a fold or a clear must not serve a summary of the history before it.
 pub fn summary_key(
     input: &UsageSummaryInput,
     rates_fetched_at_ms: Option<i64>,

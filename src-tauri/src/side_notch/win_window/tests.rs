@@ -56,7 +56,6 @@ fn data(show: ShowMode) -> RailData {
     }
 }
 
-/// A rail of one cell, for hit-testing: the cell sits after the 40 pt ear.
 fn cell_rect(machine: &Machine) -> R {
     machine.plan().expect("plan").cells[0].rect
 }
@@ -83,12 +82,10 @@ fn the_hover_strip_opens_the_rail_and_the_grace_closes_it() {
         "collapsed first"
     );
 
-    // The pointer lands on the strip: the rail opens at once.
     let pill = machine.plan().unwrap().pill.unwrap();
     machine.cursor_at(pill.mid_x(), pill.mid_y(), true, Instant::now());
     assert!(machine.hover.rail_open);
 
-    // Hovering the cell schedules the popover after the open delay.
     let cell = cell_rect(&machine);
     let entered = Instant::now();
     machine.cursor_at(cell.mid_x(), cell.mid_y(), true, entered);
@@ -96,7 +93,6 @@ fn the_hover_strip_opens_the_rail_and_the_grace_closes_it() {
     machine.advance(entered + HOVER_OPEN_DELAY + Duration::from_millis(5));
     assert_eq!(machine.hover.active, Some(0));
 
-    // Leaving and waiting out the grace closes the popover and the rail.
     machine.cursor_left(entered + Duration::from_millis(200));
     machine.advance(entered + Duration::from_millis(200) + HOVER_CLOSE_GRACE);
     assert_eq!(machine.hover.active, None);
@@ -110,22 +106,17 @@ fn a_click_pins_the_popover_until_the_same_cell_is_clicked_again() {
     machine.set_displays(vec![display("d1", false)]);
     let now = Instant::now();
 
-    // A click off the rail pins nothing.
     let cell = cell_rect(&machine);
     assert!(machine
         .clicked(cell.mid_x() + 1000.0, cell.mid_y())
         .is_empty());
     assert_eq!(machine.pinned, None);
 
-    // Pinning opens the popover, which widens the window and shifts every
-    // window-local rect; the test re-reads the plan after each state change.
     let cell = cell_rect(&machine);
     machine.clicked(cell.mid_x(), cell.mid_y());
     assert_eq!(machine.pinned, Some(0));
     assert_eq!(machine.hover.active, Some(0));
 
-    // The popover survives the pointer leaving (a fresh pin is not dropped by
-    // the close grace).
     machine.cursor_left(now);
     machine.advance(now + HOVER_CLOSE_GRACE);
     assert_eq!(
@@ -142,9 +133,6 @@ fn a_click_pins_the_popover_until_the_same_cell_is_clicked_again() {
 
 #[test]
 fn a_click_outside_the_overlay_dismisses_a_pinned_popover() {
-    // What the low-level mouse hook drives. The hook is armed only while something is
-    // pinned and is torn down with the window thread that installed it, so this is the
-    // one path that has to keep working across a restart of that thread.
     let mut machine = Machine::new();
     machine.accept(data(ShowMode::Always));
     machine.set_displays(vec![display("d1", false)]);
@@ -159,14 +147,12 @@ fn a_click_outside_the_overlay_dismisses_a_pinned_popover() {
     assert_eq!(machine.hover.active, None);
     assert!(machine.take_dirty(), "the dismissal asks for a repaint");
 
-    // Nothing pinned and nothing hovered: no repaint to ask for.
     machine.dismiss();
     assert!(!machine.take_dirty(), "an idle dismissal is not a change");
 }
 
 #[test]
 fn clicking_the_cap_asks_for_the_show_mode_to_flip() {
-    // Always -> OnHover: the cap is visible on the open rail.
     let mut machine = Machine::new();
     machine.accept(data(ShowMode::Always));
     machine.set_displays(vec![display("d1", false)]);
@@ -176,7 +162,6 @@ fn clicking_the_cap_asks_for_the_show_mode_to_flip() {
         vec![WinAction::SetShow(ShowMode::OnHover)]
     );
 
-    // OnHover -> Always: the rail must be opened by the strip first.
     let mut machine = Machine::new();
     machine.accept(data(ShowMode::OnHover));
     machine.set_displays(vec![display("d1", false)]);
@@ -192,11 +177,9 @@ fn clicking_the_cap_asks_for_the_show_mode_to_flip() {
 #[test]
 fn the_deadline_never_sleeps_past_the_scheduled_open() {
     let entered = Instant::now();
-    // An idle machine sleeps for the screen poll, not for a frame.
     let idle = Machine::new();
     assert!(idle.deadline(entered) >= entered + Duration::from_millis(100));
 
-    // A hovered cell must wake the loop before the hover-open delay elapses.
     let mut machine = Machine::new();
     machine.accept(data(ShowMode::Always));
     machine.set_displays(vec![display("d1", false)]);
@@ -272,8 +255,6 @@ fn the_overlay_style_drops_the_caption_and_resize_frame() {
     use windows::Win32::UI::WindowsAndMessaging::{
         WS_CAPTION, WS_CLIPSIBLINGS, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
     };
-    // What tao leaves on an undecorated window: a caption and a resize frame, whose
-    // invisible border shrinks the client area the layered surface is clipped to.
     let tao = WS_VISIBLE.0 | WS_CLIPSIBLINGS.0 | WS_CAPTION.0 | WS_THICKFRAME.0;
     let overlay = overlay_style(tao);
     assert_eq!(overlay & WS_CAPTION.0, 0, "no caption");
@@ -289,8 +270,6 @@ fn the_overlay_style_drops_the_caption_and_resize_frame() {
 
 #[test]
 fn the_collapsed_strip_still_gets_pointer_samples() {
-    // tao reports no `CursorMoved` for this non-activating layered window, so the
-    // poll is the only way the hover strip can notice the pointer reaching it.
     let mut machine = Machine::new();
     machine.set_displays(vec![display("d1", false)]);
     machine.accept(data(ShowMode::OnHover));

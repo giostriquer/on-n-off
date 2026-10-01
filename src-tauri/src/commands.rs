@@ -24,7 +24,6 @@ pub struct AppState {
     codex: Arc<dyn AgentAdapter>,
     antigravity: Arc<dyn AgentAdapter>,
     cursor: Arc<dyn AgentAdapter>,
-    /// Local skill/agent installs; `Err` only when no home directory could be resolved.
     items: Result<Arc<ItemService>, AdapterError>,
 }
 
@@ -134,7 +133,6 @@ pub async fn remove_item(
     blocking("item remove", move || items.remove_item(&id)).await
 }
 
-/// Opens an item's upstream page in the default browser; only github.com links are accepted.
 #[tauri::command]
 pub async fn open_url(url: String, app: tauri::AppHandle) -> Result<(), AdapterError> {
     use tauri_plugin_opener::OpenerExt;
@@ -196,7 +194,6 @@ pub async fn save_app_settings(
     })
     .await?;
     crate::limits_refresh::set_poll_minutes(saved.limits_poll_minutes);
-    // The tray reads this on every close; `tray::setup` seeded it, this keeps it current.
     crate::tray::set_close_to_tray(saved.close_to_tray);
     crate::limits_monitor::wake(&app);
     crate::github_monitor::wake(&app);
@@ -355,22 +352,16 @@ pub async fn usage_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, 
     blocking("usage scan", move || crate::usage::read_summary(input)).await
 }
 
-/// How far back the usage kept after transcripts are deleted reaches.
 #[tauri::command]
 pub async fn usage_history_status() -> Result<UsageHistoryStatusDto, AdapterError> {
     blocking("usage history status", crate::usage::usage_history_status).await
 }
 
-/// Forgets the usage kept after transcripts are deleted; transcripts still on disk count again.
 #[tauri::command]
 pub async fn clear_usage_history() -> Result<UsageHistoryStatusDto, AdapterError> {
     blocking("usage history clear", crate::usage::clear_usage_history).await
 }
 
-/// Live subscription rate limits for one provider (Claude Code's usage report, or Codex app-server)
-/// followed by remembered snapshots of its other accounts, off the UI thread. Provider-side
-/// problems come back as a `status` on the DTO, not as an `Err`. `force` requests fresh Codex
-/// authentication through the provider-owned path.
 #[tauri::command]
 pub async fn read_limits(
     agent_id: AgentId,
@@ -382,9 +373,6 @@ pub async fn read_limits(
     .await
 }
 
-/// Spend one banked Codex rate-limit reset on the signed-in account a Limits card names, then
-/// refresh the shared Codex limits. Only an explicit user action in the UI calls this; an automatic
-/// alert spends through `limits_refresh` from the limits monitor.
 #[tauri::command]
 pub async fn consume_codex_reset_credit(
     account_id: String,
@@ -400,20 +388,16 @@ pub async fn consume_codex_reset_credit(
     .await
 }
 
-/// The banked resets automatic alerts are waiting to spend, for their accounts' cards.
 #[tauri::command]
 pub fn pending_reset_spends() -> Vec<PendingResetSpendDto> {
     crate::limits_monitor::auto_spend::listed()
 }
 
-/// Cancel the banked reset an automatic alert is waiting to spend on `account_id`, from its card;
-/// `false` when there was none waiting, or it had already begun.
 #[tauri::command]
 pub fn cancel_reset_spend(account_id: String) -> bool {
     crate::limits_monitor::auto_spend::cancel_listed(&account_id)
 }
 
-/// Drop one remembered account snapshot (the "Forget" action on a stale card).
 #[tauri::command]
 pub async fn forget_limits_snapshot(
     agent_id: AgentId,
@@ -427,8 +411,6 @@ pub async fn forget_limits_snapshot(
     .await
 }
 
-/// Archive or unarchive the accounts a Limits card names: its own id and the legacy ids merged
-/// into it. Only the user's action in the UI calls this; unarchiving reads the provider again.
 #[tauri::command]
 pub async fn set_limits_archived(
     agent_id: AgentId,
@@ -442,9 +424,6 @@ pub async fn set_limits_archived(
     .await
 }
 
-/// The GitHub screen's pull requests (authored, review-requested, assigned) with their CI
-/// rollups, off the UI thread. Auth is borrowed from `gh auth token`; GitHub-side problems come
-/// back as a `status` + `hint` on the DTO, not as an `Err`. `force` skips the in-memory result.
 #[tauri::command]
 pub async fn read_github_prs(force: bool) -> Result<GithubPrsDto, AdapterError> {
     blocking("github read", move || Ok(crate::github::read_prs(force))).await
@@ -460,7 +439,6 @@ pub fn open_limits_window(app: tauri::AppHandle) -> Result<(), AdapterError> {
     crate::tray::open_limits_window(&app).map_err(AdapterError::message)
 }
 
-/// Whether this platform has a notification-area icon for `closeToTray` to hide into.
 #[tauri::command]
 pub fn tray_supported() -> bool {
     cfg!(target_os = "windows")
@@ -503,8 +481,6 @@ pub async fn save_notch_settings(
     Ok(snapshot)
 }
 
-/// The Codex account's paid-through date, from the ID token of the signed-in login or the saved
-/// profile: a local read with no network, no browser and nothing persisted.
 #[tauri::command]
 pub async fn read_codex_subscription(
     account_id: String,

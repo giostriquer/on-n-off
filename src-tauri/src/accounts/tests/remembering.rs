@@ -1,4 +1,3 @@
-//! Automatic remembering of the CLI's own login.
 use super::fixture::{claude, codex, generation, identity, Harness, Heard};
 use crate::dto::AgentId;
 
@@ -10,8 +9,6 @@ fn remembering(harness: &Harness, on: bool) {
     .unwrap();
 }
 
-/// With remembering on, a poll saves the CLI's verified login once, through the provider's store
-/// as the context resolves it, and announces it once saved and its leases released.
 #[test]
 fn a_remembered_login_is_saved_once_and_announced() {
     for (provider, login) in [
@@ -45,7 +42,6 @@ fn a_remembered_login_is_saved_once_and_announced() {
     }
 }
 
-/// Turning remembering on or off is announced as an account-list change.
 #[test]
 fn turning_remembering_on_or_off_is_announced() {
     let harness = Harness::new();
@@ -59,8 +55,6 @@ fn turning_remembering_on_or_off_is_announced() {
     );
 }
 
-/// A sign-out whose logout failed leaves the CLI signed in with the generation it forgot; that
-/// generation, as its own provider fingerprints it, is not remembered again.
 #[test]
 fn a_codex_generation_signed_out_of_is_not_remembered_again() {
     let harness = Harness::new();
@@ -77,13 +71,10 @@ fn a_codex_generation_signed_out_of_is_not_remembered_again() {
     assert!(harness.heard().is_empty());
 }
 
-/// What the account list says about `provider`'s automatic remembering.
 fn notice(harness: &Harness, provider: AgentId) -> Option<String> {
     harness.accounts().list(provider).unwrap().notice
 }
 
-/// A poll that cannot remember the CLI's login says why on the account list, and is heard once;
-/// the same failure again changes nothing and is not heard again.
 #[test]
 fn a_failed_remembering_poll_leaves_its_notice_and_is_heard_once() {
     let harness = Harness::new();
@@ -110,8 +101,6 @@ fn a_failed_remembering_poll_leaves_its_notice_and_is_heard_once() {
     harness.accounts().poll_remembering(AgentId::Claude);
 }
 
-/// A poll that remembers the login clears the notice a failed one left, and the saved login and
-/// the cleared notice are heard as one change.
 #[test]
 fn a_successful_remembering_poll_clears_the_notice_and_is_heard_once() {
     let harness = Harness::new();
@@ -129,7 +118,6 @@ fn a_successful_remembering_poll_clears_the_notice_and_is_heard_once() {
     assert_eq!(harness.vault().profiles.len(), 1);
 }
 
-/// Turning remembering on or off clears every provider's notice, and is heard once.
 #[test]
 fn turning_remembering_on_clears_the_notices_and_is_heard_once() {
     let harness = Harness::new();

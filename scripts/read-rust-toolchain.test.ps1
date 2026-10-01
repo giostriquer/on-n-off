@@ -79,7 +79,6 @@ profile = "minimal"
         $failures += "Expected 'channel=1.98.0', got '$($accepted.Stdout.Trim())'"
     }
 
-    # A trailing comment is ordinary TOML and must not break the reader.
     $commented = Invoke-Reader -Content @'
 [toolchain]
 channel = "1.98.0" # bump deliberately
@@ -88,8 +87,6 @@ channel = "1.98.0" # bump deliberately
         $failures += "A trailing comment should be tolerated, got '$($commented.Stdout.Trim())'"
     }
 
-    # The whole point of the file is a stable rust-cache environment hash, so a floating
-    # channel has to be rejected rather than silently reintroducing the cold-build problem.
     Assert-Rejected -Name "A floating channel" -ExpectedMessage "must pin an exact version" -Result (Invoke-Reader -Content @'
 [toolchain]
 channel = "stable"
@@ -108,7 +105,6 @@ channel = "1.97.1"
 
     Assert-Rejected -Name "A missing file" -ExpectedMessage "is missing at" -Result (Invoke-Reader -Missing)
 
-    # The committed file must satisfy the same contract the workflows rely on.
     $committed = Invoke-Reader -Content ([System.IO.File]::ReadAllText((Join-Path $repositoryRoot "rust-toolchain.toml")))
     if ($committed.ExitCode -ne 0) {
         $failures += "The committed rust-toolchain.toml was rejected. Stderr: $($committed.Stderr)"

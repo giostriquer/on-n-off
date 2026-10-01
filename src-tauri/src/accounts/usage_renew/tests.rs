@@ -6,7 +6,6 @@ use crate::{
 use serde_json::{json, Value};
 use std::cell::Cell;
 
-/// A saved Codex login, whose provider renews a never-activated login privately.
 fn setup(home: &Path, owned: bool) -> Profile {
     saved(home, AgentId::Codex, codex_login("old", "original"), owned)
 }
@@ -19,11 +18,9 @@ fn codex_login(access: &str, refresh: &str) -> Login {
         account: Value::Null,
     }
 }
-/// The refresh token of a Codex login's `auth`.
 fn refresh(auth: &Value) -> &Value {
     &auth["tokens"]["refresh_token"]
 }
-/// Save `login` as the vault's one profile, owning its renewal or not, and give it back.
 fn saved(home: &Path, provider: AgentId, login: Login, owned: bool) -> Profile {
     open(home)
         .change(ChangeKind::Metadata, |db| {
@@ -34,14 +31,12 @@ fn saved(home: &Path, provider: AgentId, login: Login, owned: bool) -> Profile {
         })
         .unwrap()
 }
-/// `provider`'s private renewal of `login` at 1,000 ms, its grant sent to `token_url`.
 fn renew_at(provider: AgentId, login: &Login, token_url: &str) -> Result<Login, String> {
     super::super::adapter(provider)?.renew_private(login, 1000, token_url)
 }
 fn open(home: &Path) -> Store {
     Store::open_with_key(home, true, |_, _| Ok([7; 32])).unwrap()
 }
-/// Change the vault as another account operation would, meanwhile.
 fn meanwhile(home: &Path, kind: ChangeKind<'_>, edit: impl FnOnce(&mut Database)) {
     open(home)
         .change(kind, |db| {
@@ -50,7 +45,6 @@ fn meanwhile(home: &Path, kind: ChangeKind<'_>, edit: impl FnOnce(&mut Database)
         })
         .unwrap();
 }
-/// Whether `profile`'s login may be activated, as `use` asks before it switches.
 fn ready(home: &Path, profile: &Profile) -> Result<(), String> {
     Renewals::of(&open(home)).activation_ready(profile)
 }
@@ -108,7 +102,6 @@ fn interrupted_renewal_never_redeems_the_same_generation_again() {
         .err()
     };
     assert_eq!(renew().as_deref(), Some("connection lost"));
-    // The journal refuses the retry, not a lease the first attempt left behind.
     assert_eq!(
         renew().as_deref(),
         Some("A prior renewal did not finish. Sign in again to refresh this account.")
@@ -137,8 +130,6 @@ fn a_second_renewal_is_refused_while_a_grant_is_in_flight() {
 #[cfg(unix)]
 #[test]
 fn a_finished_renewal_frees_its_lease_while_a_spawned_child_still_shares_it() {
-    // A child that another thread spawns during the grant inherits the lease's descriptor and
-    // keeps it until it execs; the next renewal must not see the lease as still running.
     let root = tempfile::tempdir().unwrap();
     let lease = acquire_renewal_lease(root.path(), "profile").unwrap();
     let inherited = lease.duplicate().unwrap();
@@ -164,9 +155,6 @@ fn removing_profile_during_renewal_does_not_resurrect_it() {
     assert!(open(home.path()).load().unwrap().profiles.is_empty());
 }
 
-/// The renewal has already spent the refresh token when it publishes, so an account change that
-/// left this profile alone (a sign-out of another account, say) must not reject the renewed login:
-/// losing it would strand the profile. The epoch deliberately does not guard this publication.
 #[test]
 fn an_unrelated_account_change_during_renewal_still_publishes_the_renewed_login() {
     let home = tempfile::tempdir().unwrap();
@@ -297,9 +285,6 @@ fn private_codex_grant_retains_identity_when_reply_omits_id_token() {
     assert!(!home.path().join(".codex").exists());
 }
 
-/// A private Codex renewal sends Codex's own refresh grant and folds the reply into the login it
-/// came from: the tokens the reply carries replace their stored ones, the refresh time is stamped,
-/// and every field the reply does not name is left as it was.
 #[test]
 fn a_private_codex_renewal_sends_codexs_grant_and_keeps_every_field_it_does_not_replace() {
     let login = Login {
@@ -339,8 +324,6 @@ fn a_private_codex_renewal_sends_codexs_grant_and_keeps_every_field_it_does_not_
     assert_eq!(renewed.account, login.account);
 }
 
-/// A reply that leaves the refresh or ID token blank keeps the stored one; one without an access
-/// token renews nothing.
 #[test]
 fn a_private_codex_renewal_keeps_the_tokens_a_reply_leaves_blank_and_refuses_one_without_access() {
     let login = Login {
@@ -364,8 +347,6 @@ fn a_private_codex_renewal_keeps_the_tokens_a_reply_leaves_blank_and_refuses_one
     server.join().unwrap();
 }
 
-/// A renewal journal an earlier version left, its reply complete, is adopted without another
-/// grant: the journal's names are its on-disk format, and the login in it keeps the vault's shape.
 #[test]
 fn a_completed_renewal_journal_an_earlier_version_wrote_is_adopted_without_a_grant() {
     let home = tempfile::tempdir().unwrap();
@@ -406,23 +387,18 @@ fn a_completed_renewal_journal_an_earlier_version_wrote_is_adopted_without_a_gra
     );
 }
 
-/// Codex's private renewal redeems at the token endpoint Codex itself redeems at: a refresh token
-/// is issued to one client and refused anywhere else.
 #[test]
 fn a_private_codex_renewal_goes_to_codexs_own_token_endpoint() {
     assert_eq!(
         super::super::adapter(AgentId::Codex).unwrap().token_url(),
         Some("https://auth.openai.com/oauth/token")
     );
-    // Claude never renews a login privately, so it names no endpoint to send a grant to.
     assert_eq!(
         super::super::adapter(AgentId::Claude).unwrap().token_url(),
         None
     );
 }
 
-/// A saved Claude login waits in its home, where Claude Code renews it: even one that owns its
-/// renewal, saved by an earlier version, never has a grant sent or a renewal recorded for it.
 #[test]
 fn a_claude_login_never_renews_privately() {
     let home = tempfile::tempdir().unwrap();

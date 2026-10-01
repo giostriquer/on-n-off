@@ -462,7 +462,6 @@ describe("SessionProvider local-first startup", () => {
     });
     expect(state.events).not.toContain("local:codex:global");
     expect(state.events.filter((event) => event === "agents")).toHaveLength(1);
-    // The sweep's whole point is the providers behind the open tab, so it says which it read.
     await waitFor(() =>
       expect(screen.getByTestId("log")).toHaveTextContent("refreshed Claude, Codex, Antigravity, Cursor"),
     );

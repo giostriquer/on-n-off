@@ -32,7 +32,6 @@ struct Changed {
     snapshot: NotchSnapshot,
 }
 
-/// One provider on the wire: the cell `NotchProvider` projected, with the share already worded.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeProvider {
@@ -48,9 +47,6 @@ struct NativeProvider {
     #[serde(skip_serializing_if = "Option::is_none")]
     workspace_credits: Option<NativeWorkspaceCredits>,
 }
-/// A business workspace member's credit share, which the helper draws on the Codex cell's inner ring:
-/// the reader's meter, the reset, and the amounts already worded (`workspace_share_wording`), so the
-/// helper only picks `renewed` once `resets_at` has passed and formats nothing but the date.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeWorkspaceCredits {
@@ -84,7 +80,6 @@ impl From<NotchProvider> for NativeProvider {
         }
     }
 }
-/// One provider on the wire: its quota snapshot plus the live sessions read on their own cadence.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MessageProvider<'a> {
@@ -93,11 +88,8 @@ struct MessageProvider<'a> {
     sessions: &'a [LiveSession],
 }
 
-/// Rows per list in the popover; the screen shows the rest.
 const MAX_PULL_REQUESTS: usize = 25;
 
-/// The pull-request cell's data: only the selected lists, each capped, with the row fields the
-/// popover shows. No account identifiers beyond the author logins GitHub already displays.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct NativePullRequests {
@@ -132,8 +124,6 @@ struct NativePr {
 }
 
 impl NativePr {
-    /// Only pull requests on github.com reach the helper, which opens rows in the browser and
-    /// copies their links; anything else is dropped here rather than rejected there.
     fn from_dto(pr: &GithubPrDto) -> Option<Self> {
         if !pr.url.starts_with("https://github.com/") {
             return None;
@@ -196,43 +186,30 @@ struct Message<'a> {
 }
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
-/// Live session rows are small local reads; the popover shows "just now" style ages.
 const SESSIONS_INTERVAL: Duration = Duration::from_secs(10);
-/// A read that never reports back (a hung child, a panicked thread) releases its slot after this.
 const READ_DEADLINE: Duration = Duration::from_secs(60);
 const PROVIDER_COUNT: usize = RAIL_ORDER.len();
-/// One in-flight read per provider, plus the sessions read and the pull-request read.
 const READ_SLOTS: usize = PROVIDER_COUNT + 2;
 
 enum Read {
-    /// One provider's current-account quota entry, with the shared cache revision it was taken
-    /// at so the poll can tell a later refresh apart from its own read.
     Limits {
         index: usize,
         revision: u64,
         entry: Option<NativeProvider>,
     },
     Sessions(Vec<Vec<LiveSession>>),
-    /// The screen's whole answer, with the revision it was read at; the selected lists are
-    /// projected when a message is built, so a settings change shows at once instead of after
-    /// the next poll.
     PullRequests {
         revision: u64,
         dto: GithubPrsDto,
     },
 }
 
-/// A value refreshed by a background read: at most one read in flight, refreshed on an
-/// interval, forced on request, and never left "loading" forever.
 struct Poll<T> {
     value: T,
     loading: bool,
     started: Option<Instant>,
     last_read: Option<Instant>,
     force: bool,
-    /// The revision of the shared source this value was read at, so a replacement made through
-    /// another surface can be told from this poll's own read. `0` throughout for a value with no
-    /// shared source.
     read_at: u64,
 }
 
@@ -248,12 +225,6 @@ impl<T> Poll<T> {
         }
     }
 
-    /// Due on its interval, when forced, and — for a value read through a process-wide cache —
-    /// the moment `latest` moves past the revision this poll read at: someone else, the Limits
-    /// screen's refresh button or a monitor, has already fetched fresher numbers, and waiting out
-    /// the interval would leave a user-requested refresh unshown for minutes. That follow-up read
-    /// is served from the same cache, so it costs no provider call. A value with no shared source
-    /// passes `0` and is left with the interval alone.
     fn due(&self, now: Instant, interval: Duration, latest: u64) -> bool {
         !self.loading
             && (self.force
@@ -263,7 +234,6 @@ impl<T> Poll<T> {
                     .is_none_or(|last_read| now.saturating_duration_since(last_read) >= interval))
     }
 
-    /// Marks a read in flight and returns whether it was forced.
     fn start(&mut self, now: Instant) -> bool {
         self.loading = true;
         self.started = Some(now);
@@ -366,7 +336,6 @@ pub fn add_runtime_error(app: &AppHandle, snapshot: &mut NotchSnapshot) {
     }
 }
 
-/// The selected providers' current-account entries in rail order, each with its live sessions.
 fn message_providers<'a>(
     snapshot: &NotchSnapshot,
     providers: &'a [Poll<Option<NativeProvider>>],
@@ -389,7 +358,6 @@ fn message_providers<'a>(
         .collect()
 }
 
-/// Live sessions for the selected providers only, in rail order; hidden cells cost nothing.
 fn read_sessions(selected: &[AgentId]) -> Vec<Vec<LiveSession>> {
     let Ok(home) = crate::paths::user_home() else {
         return vec![Vec::new(); PROVIDER_COUNT];
@@ -521,8 +489,6 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                         delivery.mark_dirty();
                     }
                     Ok(Ok(Action::SetShow { show })) => {
-                        // The same validated save the Settings card uses; the new revision
-                        // reaches the card through the changed event below.
                         let mut settings = snapshot.settings.clone();
                         settings.show = show;
                         match super::save(settings) {
@@ -627,14 +593,11 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                 && pulls.due(now, pulls_interval, crate::github::revision())
             {
                 let force = pulls.start(now);
-                // One settings read per poll keeps the cadence in step with the screen's.
                 pulls_interval = Duration::from_secs(u64::from(
                     crate::settings::load_settings().github_poll_seconds,
                 ));
                 let sender = sender.clone();
                 thread::spawn(move || {
-                    // `read_prs` memoises within the screen's poll window, so this adds no
-                    // GitHub calls beyond what the screen and monitor already make.
                     let (dto, revision) = crate::github::read_prs_revisioned(force);
                     let _ = sender.send(Read::PullRequests { revision, dto });
                 });

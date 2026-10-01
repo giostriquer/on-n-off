@@ -1,7 +1,3 @@
-//! What the signed-in read keeps of the account's remembered reading, whole: on the card it shows
-//! and on disk, after a read that answered and after one that failed. Inputs and expectations are
-//! wire JSON, so they hold whatever Rust types carry the reading.
-
 use super::*;
 use serde_json::Value;
 
@@ -13,7 +9,6 @@ fn wire(dto: &ProviderLimitsDto) -> Value {
     serde_json::to_value(dto).unwrap()
 }
 
-/// `acct-1`'s remembered Codex reading on `plan`, observed at 10:00 with every figure known.
 fn remembered(plan: &str) -> ProviderLimitsDto {
     card(json!({
         "provider": "codex",
@@ -36,7 +31,6 @@ fn remembered(plan: &str) -> ProviderLimitsDto {
     }))
 }
 
-/// A read that answered with its plan, one window and an offer, and nothing else.
 #[test]
 fn an_answered_read_keeps_only_the_remembered_figures_it_could_not_tell() {
     let home = scratch_dir("limits-reading-answered");
@@ -98,8 +92,6 @@ fn an_answered_read_keeps_only_the_remembered_figures_it_could_not_tell() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// A read that answered without a plan says the account has none now: the card and the file lose
-/// the remembered plan, and with it what was spent, which only a workspace plan is asked.
 #[test]
 fn an_answered_read_without_a_plan_drops_the_remembered_plan() {
     let home = scratch_dir("limits-reading-answered-no-plan");
@@ -138,8 +130,6 @@ fn an_answered_read_without_a_plan_drops_the_remembered_plan() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// A failed read shows the remembered reading under its failure. What was spent is kept on any
-/// plan, since the failure could not say the plan changed.
 #[test]
 fn a_failed_read_shows_the_remembered_reading() {
     let home = scratch_dir("limits-reading-failed");
@@ -193,8 +183,6 @@ fn a_failed_read_shows_the_remembered_reading() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// A failed read has no windows of its own, so every remembered window comes back, each by its
-/// own id: two model windows are two meters, not one. Weekly first, then session, then model.
 #[test]
 fn a_failed_read_shows_every_remembered_window() {
     let home = scratch_dir("limits-reading-failed-every-window");
@@ -244,9 +232,6 @@ fn a_failed_read_shows_every_remembered_window() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// A failed read that still carries windows merges them with the remembered ones by id: the newer
-/// observation of each wins, one whose time cannot be read is never replaced, a remembered window
-/// the read lacks is added, and a remembered window without a time takes the reading's newest.
 #[test]
 fn a_failed_read_merges_its_windows_with_the_remembered_ones_by_id() {
     let home = scratch_dir("limits-reading-failed-windows");
@@ -304,8 +289,6 @@ fn a_failed_read_merges_its_windows_with_the_remembered_ones_by_id() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// A remembered reading whose windows carry no time it can be merged by is not shown at all, not
-/// even its plan or its figures.
 #[test]
 fn a_failed_read_shows_nothing_of_a_remembered_reading_it_cannot_date() {
     let home = scratch_dir("limits-reading-failed-undated");
@@ -349,7 +332,6 @@ fn a_failed_read_shows_nothing_of_a_remembered_reading_it_cannot_date() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// The one file of `store` whose account is `id`, as JSON.
 fn file_of(store: &SnapshotStore, id: &str) -> Value {
     fs::read_dir(store.dir())
         .unwrap()
@@ -360,10 +342,6 @@ fn file_of(store: &SnapshotStore, id: &str) -> Value {
         .expect("the account's file")
 }
 
-/// A signed-in card keyed the older way, by the user alone (Claude Code's `.claude.json` names no
-/// account), whose own snapshot a saved profile's scoped snapshot hides from the list. The read
-/// keeps what it could not tell from that account's own file all the same, and the card shows what
-/// the file holds: its weekly window.
 #[test]
 fn a_legacy_keyed_card_keeps_from_its_own_file_even_when_the_list_hides_it() {
     let home = scratch_dir("limits-reading-legacy-keyed");
@@ -421,9 +399,6 @@ fn a_legacy_keyed_card_keeps_from_its_own_file_even_when_the_list_hides_it() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// A Codex file whose only observation, a banked count, has lapsed is not listed: nothing it still
-/// knows is an observation. A read of that account that could not tell the term keeps the file's
-/// term all the same, as it would from any file of its own; the lapsed count stays unknown.
 #[test]
 fn an_answer_keeps_the_term_of_its_own_file_whose_lapsed_count_hides_it() {
     let home = scratch_dir("limits-reading-lapsed-term");

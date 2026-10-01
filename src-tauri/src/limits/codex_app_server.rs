@@ -1,5 +1,3 @@
-//! Bounded client for the official Codex app-server account APIs.
-
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
@@ -69,7 +67,6 @@ struct ConsumeResetCreditResponse {
     outcome: ResetCreditOutcome,
 }
 
-/// Why a reset was not spent: refused before the request was sent, or the session itself failed.
 enum SpendFailure {
     Refused(String),
     Query(QueryError),
@@ -106,15 +103,11 @@ struct TransportError {
 trait JsonLineTransport {
     fn send(&mut self, message: &Value) -> Result<(), TransportError>;
     fn receive(&mut self) -> Result<Value, TransportError>;
-    /// Close the session and report how its process ended, when there is one.
     fn finish(&mut self) -> Option<ExitStatus> {
         None
     }
 }
 
-/// Spend one banked reset on the signed-in Codex account, which must still be `account_id`: Codex
-/// applies a reset to whoever is signed in, so a card must never spend one on another account.
-/// Blocking: runs a bounded app-server process. `idempotency_key` names one user attempt.
 pub(super) fn consume_reset_credit(
     home: &Path,
     account_id: &str,
@@ -131,10 +124,6 @@ pub(super) fn consume_reset_credit(
     )
 }
 
-/// Every check before a reset is spent, in order: the native login is the card's account before
-/// the app-server starts, the app-server is signed in with ChatGPT, the native login is still the
-/// card's account once the app-server has loaded it, and the current limit has `max_left_percent`
-/// or less left, the rule Codex's own app keeps. Only then is the request sent.
 fn spend_reset_credit<T: JsonLineTransport>(
     codex_home: &Path,
     account_id: &str,
@@ -179,7 +168,6 @@ fn spend_in_session(
             }
         })
     })?;
-    // Codex may have loaded a different login than the one checked before it started.
     identity(codex_home)
         .and_then(|current| reset_target_matches(current, account_id))
         .map_err(SpendFailure::Refused)?;
@@ -203,8 +191,6 @@ fn spend_in_session(
     Ok(response.outcome)
 }
 
-/// Whether `reading` has `max_left_percent` or less of its current limit left
-/// (`Reading::limit_left_percent`).
 fn spend_allowed(reading: &crate::dto::Reading, max_left_percent: u8) -> Result<(), String> {
     let left = reading.limit_left_percent().ok_or(
         "on-n-off can't tell how much of the Codex limit is left, so it won't spend a reset.",
@@ -218,7 +204,6 @@ fn spend_allowed(reading: &crate::dto::Reading, max_left_percent: u8) -> Result<
     ))
 }
 
-/// A reset lands on whoever is signed in, so the native login must be the account the card names.
 fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> Result<(), String> {
     match current {
         Some((id, _)) if id == account_id => Ok(()),
@@ -227,9 +212,6 @@ fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> R
     }
 }
 
-/// The signed-in account's card, read by app-server in `home`. `after_identity` runs on the card
-/// once the native login is confirmed to be the account it read, with that login's access
-/// projection; the reader asks its backend figures there (`codex::codex_limits`).
 pub(super) fn read(
     home: &Path,
     force: bool,
@@ -238,7 +220,6 @@ pub(super) fn read(
     read_with(home, force, ProcessTransport::spawn, after_identity)
 }
 
-/// `read`, with the app-server process replaceable for tests.
 fn read_with<T: JsonLineTransport>(
     home: &Path,
     force: bool,
@@ -254,7 +235,6 @@ fn read_with<T: JsonLineTransport>(
     let session = session
         .map_err(|error| AppServerFailure::Failed(classify_query_failure(error, exit_status)))?;
     let (mut parsed, access) = normalize_app_server(session, before)?;
-    // Only now is the card's account confirmed, and `access` was taken by that check.
     after_identity(&mut parsed, access.as_ref());
     Ok(parsed)
 }
@@ -495,7 +475,6 @@ fn query_app_server(
     })
 }
 
-/// `account/rateLimits/read`, the call after the handshake in a read and in a spend.
 fn read_rate_limits(
     transport: &mut impl JsonLineTransport,
 ) -> Result<super::codex::RateLimitsResponse, QueryError> {
@@ -512,7 +491,6 @@ fn read_rate_limits(
     )
 }
 
-/// `initialize` against the expected home, then `account/read`: the start of every app-server call.
 fn handshake(
     expected_codex_home: &Path,
     force: bool,
@@ -628,9 +606,6 @@ fn response_result<T: DeserializeOwned>(message: &Value, method: &str) -> Result
     ))
 }
 
-/// The card for the account app-server read, once the native login is confirmed to be the account
-/// captured before it started, with that login's access projection taken in the same read of the
-/// native store as the check.
 fn normalize_app_server(
     session: AppServerResult,
     before: Option<(String, Value)>,
@@ -650,9 +625,6 @@ fn normalize_app_server(
         .filter(|plan| !plan.is_empty())
         .map(str::to_string)
         .or(reading.plan);
-    // One read of the native store confirms the account and takes the access projection the term
-    // read needs for every card, and the spending read for a workspace plan
-    // (`codex::backend_figures`).
     let (after, access) = crate::accounts::codex_store::metadata_and_access(&session.codex_home)
         .map_err(AppServerFailure::Failed)?
         .map_or((None, None), |(metadata, access)| (Some(metadata), access));
@@ -662,8 +634,6 @@ fn normalize_app_server(
                 .into(),
         ));
     }
-    // The identity captured before spawning owns this response. A token refresh may
-    // change claims, but a different user or workspace must never inherit its usage.
     let metadata = before;
     let legacy_id = metadata.as_ref().and_then(|(id, claims)| {
         let workspace = claims.get("chatgpt_account_id")?.as_str()?;
@@ -688,7 +658,6 @@ fn normalize_app_server(
     Ok((parsed, access))
 }
 
-/// Subscription limits and banked resets exist only for a ChatGPT login.
 fn require_chatgpt(read: &AccountReadResponse) -> Result<&CodexAccount, AppServerFailure> {
     let Some(account) = read.account.as_ref() else {
         return Err(AppServerFailure::SignedOut);

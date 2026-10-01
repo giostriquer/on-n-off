@@ -1,6 +1,3 @@
-//! Usage kept after a transcript is deleted: what a fold keeps, the watermark between folded rows
-//! and live transcripts, what holds a fold back, and a history that does not read.
-
 use super::super::test_support::*;
 use super::super::*;
 use crate::dto::UsageHistoryState;
@@ -14,16 +11,12 @@ use crate::usage::sources::{
 };
 use crate::usage::summary_cache::summary_cache_path_for;
 
-/// Two weeks after the fixtures' 2026-08-07: the fold cutoff is 2026-08-14, so August's first week
-/// is folded and a record from 2026-08-15 on stays in its transcript.
 const AFTER_AUGUST_FIRST_WEEK: &str = "2026-08-21T12:00:00Z";
 
-/// One background check, as the first after launch: no memory of earlier checks.
 fn fold(home: &Path) {
     fold_with(home, &mut FoldChecks::default());
 }
 
-/// One background check that remembers the checks before it.
 fn fold_with(home: &Path, checks: &mut FoldChecks) {
     fold_history_in(home, at(AFTER_AUGUST_FIRST_WEEK), checks).unwrap();
 }
@@ -51,14 +44,12 @@ fn claude_line(message_id: &str, timestamp: &str, output_tokens: u64) -> String 
     )
 }
 
-/// One Claude record, its transcript last written when the record was, as an agent leaves it.
 fn write_record(home: &Path, name: &str, timestamp: &str, output_tokens: u64) -> PathBuf {
     let path = write_single_claude_record(home, name, timestamp, output_tokens);
     set_mtime(&path, timestamp);
     path
 }
 
-/// A transcript of `lines`, last written at `written`.
 fn write_lines(home: &Path, name: &str, lines: &[String], written: &str) -> PathBuf {
     write_claude_lines(home, name, lines);
     let path = home.join(".claude/projects/proj").join(name);
@@ -91,7 +82,6 @@ fn a_deleted_transcript_still_counts_once_its_usage_is_folded() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Reading is not folding: until a fold runs, a deleted transcript's usage is gone from the read.
 #[test]
 fn a_read_never_folds() {
     let _serial = pricing::lock_rates_state();
@@ -123,8 +113,6 @@ fn nothing_is_folded_before_it_is_a_week_old() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A resumed session copies earlier messages into its new transcript under their original
-/// timestamps. Once the original is folded, the copy is below the watermark and not counted again.
 #[test]
 fn a_live_copy_of_a_folded_record_is_not_counted_twice() {
     let _serial = pricing::lock_rates_state();
@@ -185,8 +173,6 @@ fn records_after_the_watermark_are_read_from_their_transcript() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// An agent is almost always writing some transcript. Its records older than the cutoff were
-/// written days ago, so what it holds is enough to fold them.
 #[test]
 fn a_transcript_still_being_written_does_not_hold_the_fold_back() {
     let _serial = pricing::lock_rates_state();
@@ -223,8 +209,6 @@ fn folding_waits_until_every_directory_can_be_walked() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A transcript that cannot be read may just be mid-write: while it was written recently, the
-/// fold waits for it, however many checks it fails.
 #[cfg(unix)]
 #[test]
 fn folding_waits_for_a_recent_transcript_that_cannot_be_read() {
@@ -245,8 +229,6 @@ fn folding_waits_for_a_recent_transcript_that_cannot_be_read() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// One a week past the cutoff that failed on the previous check too never will read; waiting on
-/// it would let the provider delete every other transcript before it is kept.
 #[cfg(unix)]
 #[test]
 fn a_transcript_unreadable_for_a_week_past_the_cutoff_stops_holding_the_fold_back() {
@@ -270,8 +252,6 @@ fn a_transcript_unreadable_for_a_week_past_the_cutoff_stops_holding_the_fold_bac
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// An old transcript that fails to read once (another process held it for a moment) is waited
-/// for, and its usage is kept once it reads.
 #[cfg(unix)]
 #[test]
 fn an_old_transcript_that_fails_to_read_once_is_waited_for() {
@@ -312,8 +292,6 @@ fn a_history_that_does_not_read_is_counted_around_and_never_written_over() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Once folded, a transcript is done: it leaves the scan cache, and even a rebuilt source index
-/// (a parser or index version bump) does not parse it again.
 #[test]
 fn a_folded_transcript_is_never_parsed_again() {
     let _serial = pricing::lock_rates_state();
@@ -331,8 +309,6 @@ fn a_folded_transcript_is_never_parsed_again() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Clearing forgets what only the history held; usage whose transcript is still on disk is
-/// counted again from it, and a summary stored before the clear is not served after it.
 #[test]
 fn clearing_the_history_recounts_what_is_still_on_disk() {
     let _serial = pricing::lock_rates_state();
@@ -355,7 +331,6 @@ fn clearing_the_history_recounts_what_is_still_on_disk() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A fold changes what a read counts from where, so a summary stored before it is not served.
 #[test]
 fn a_summary_stored_before_a_fold_is_not_served_after_it() {
     let _serial = pricing::lock_rates_state();
@@ -372,8 +347,6 @@ fn a_summary_stored_before_a_fold_is_not_served_after_it() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Claude Code sets a replaced transcript aside instead of overwriting it; a turn the rewrite
-/// dropped still counts, and a turn both copies hold counts once.
 #[test]
 fn a_superseded_transcript_keeps_the_turns_its_rewrite_dropped() {
     let _serial = pricing::lock_rates_state();
@@ -434,8 +407,6 @@ fn history_status_says_how_far_back_usage_is_kept() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A transcript whose newest record is folded leaves the scan cache even when it was written
-/// recently, so its mtime alone would keep it.
 #[test]
 fn a_transcript_whose_records_are_all_folded_leaves_the_scan_cache() {
     let _serial = pricing::lock_rates_state();
@@ -451,9 +422,6 @@ fn a_transcript_whose_records_are_all_folded_leaves_the_scan_cache() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Just after the watermark, a transcript still counts from itself: one written six hours after
-/// it, and one whose record is stamped an hour after it by a clock five hours ahead of the
-/// filesystem's. Both are inside the 36-hour allowance.
 #[test]
 fn transcripts_written_around_the_watermark_are_still_read() {
     let _serial = pricing::lock_rates_state();
@@ -471,8 +439,6 @@ fn transcripts_written_around_the_watermark_are_still_read() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// The watermark belongs to the transcripts: a record stamped exactly at it is not folded, and
-/// is counted once, from its transcript.
 #[test]
 fn a_record_exactly_at_the_watermark_counts_once() {
     let _serial = pricing::lock_rates_state();
@@ -488,9 +454,6 @@ fn a_record_exactly_at_the_watermark_counts_once() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A message's copies can sit either side of the watermark in different transcripts (a partial
-/// line in one, the finished message in a resumed session). Copies collapse to the richest before
-/// the watermark splits them, so the message counts once, whole.
 #[test]
 fn a_message_whose_copies_straddle_the_watermark_counts_its_richest_copy_once() {
     let _serial = pricing::lock_rates_state();
@@ -509,7 +472,6 @@ fn a_message_whose_copies_straddle_the_watermark_counts_its_richest_copy_once() 
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Until a fold is due, the background check reads the history file and nothing else.
 #[test]
 fn the_background_check_reads_nothing_else_until_a_fold_is_due() {
     let _serial = pricing::lock_rates_state();
@@ -526,9 +488,6 @@ fn the_background_check_reads_nothing_else_until_a_fold_is_due() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A history file that exists but cannot be opened (another process holds it, its permissions
-/// changed) is not the same as no history: it is neither folded over nor backed up, and reads
-/// count the transcripts around it.
 #[cfg(unix)]
 #[test]
 fn a_history_file_that_cannot_be_opened_is_left_alone() {
@@ -561,8 +520,6 @@ fn a_history_file_that_cannot_be_opened_is_left_alone() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A read made while the history file cannot be opened counts transcripts alone. Its summary is
-/// not stored, so the file reading again brings its usage back rather than a stale undercount.
 #[cfg(unix)]
 #[test]
 fn a_summary_counted_without_the_history_is_not_stored() {
@@ -586,9 +543,6 @@ fn a_summary_counted_without_the_history_is_not_stored() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Something at the history's path that does not read as a file (here a directory, which fails
-/// to read on every platform, as a file another process holds does on Windows) is unreadable:
-/// never folded over or written, and reads count the transcripts around it.
 #[test]
 fn a_history_path_that_cannot_be_read_is_left_alone_on_every_platform() {
     let _serial = pricing::lock_rates_state();

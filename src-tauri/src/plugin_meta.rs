@@ -20,10 +20,8 @@ pub(crate) struct PluginManifest {
     pub(crate) version: Option<String>,
     #[serde(default)]
     pub(crate) description: Option<String>,
-    /// Explicit skill folders (or `SKILL.md` files) relative to the plugin root.
     #[serde(default)]
     pub(crate) skills: Option<Vec<String>>,
-    /// Plugin-level assets declared inline; only their presence matters here.
     #[serde(default)]
     pub(crate) commands: Option<serde_json::Value>,
     #[serde(default)]
@@ -72,7 +70,6 @@ pub(crate) enum MarketplaceSource {
     },
 }
 
-/// Marketplace manifest locations, in the order providers look them up.
 pub(crate) const MARKETPLACE_MANIFESTS: &[&str] = &[
     ".claude-plugin/marketplace.json",
     ".codex-plugin/marketplace.json",
@@ -80,7 +77,6 @@ pub(crate) const MARKETPLACE_MANIFESTS: &[&str] = &[
     ".cursor-plugin/marketplace.json",
 ];
 
-/// Plugin manifest locations, in lookup order.
 pub(crate) const PLUGIN_MANIFESTS: &[&str] = &[
     ".cursor-plugin/plugin.json",
     ".codex-plugin/plugin.json",
@@ -456,7 +452,6 @@ impl MarketplacePlugin {
         }
     }
 
-    /// `{ "source": "github", "repo": "owner/name", "ref"?: ... }` -> `(owner, name, ref)`.
     pub(crate) fn github_source(&self) -> Option<(String, String, Option<String>)> {
         let Some(MarketplaceSource::Object {
             source,

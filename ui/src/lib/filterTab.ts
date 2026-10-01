@@ -5,7 +5,6 @@ function matches(query: string, ...parts: string[]): boolean {
   return parts.join(" ").toLowerCase().includes(query);
 }
 
-/** A server by its name, id, transport, source, the plugin that brings it, or a project keeping it. */
 function matchesMcp(query: string, server: McpServerDto): boolean {
   return matches(
     query,
@@ -68,11 +67,6 @@ export function filterTab(tab: AgentTabDto, query: string): FilteredTab {
   };
 }
 
-/**
- * Hooks match on everything the row shows, plus the plugin that brought them. The id stays out:
- * it is the backend's key, `<plugin>:<source>:<event>:<group>:<index>`, so searching it would let
- * a digit or a snake_cased event match rows that show neither.
- */
 function filterHookList(tab: AgentTabDto, query: string): HookDto[] {
   const hooks = sortHooks(tab.hooks ?? []);
   if (!query) {
@@ -92,7 +86,6 @@ function filterHookList(tab: AgentTabDto, query: string): HookDto[] {
   );
 }
 
-/** `query` is already normalised, and `allSkills` already sorts, so filtering keeps the order. */
 function filterSkillList(tab: AgentTabDto, query: string): SkillDto[] {
   const skills = allSkills(tab);
   return query

@@ -2,7 +2,6 @@ use std::path::Path;
 
 use crate::dto::{AdapterError, AgentInfo, AgentTabDto, ItemScope, ProjectDto};
 
-/// Where a provider keeps user-level skills and (Claude only) subagents for a scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemRoots {
     pub skills: std::path::PathBuf,
@@ -14,9 +13,6 @@ pub trait AgentAdapter: Send + Sync {
     fn supports_accounts(&self) -> bool {
         false
     }
-    /// Whether this adapter fills `AgentTabDto::hooks`. An adapter that does not is not one
-    /// whose user has no hooks configured — it is one on-n-off does not read them for — and
-    /// `info()` carries the difference to the screen (see `hooks.rs`).
     fn reads_hooks(&self) -> bool {
         false
     }
@@ -82,8 +78,6 @@ pub trait AgentAdapter: Send + Sync {
         Err(AdapterError::message("update is not implemented yet"))
     }
 
-    /// Where on-n-off writes user skills (and, when supported, subagents) for a scope. Pure
-    /// path computation; the provider CLI is not involved.
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
         let _ = scope;
         Err(AdapterError::message(

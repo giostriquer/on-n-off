@@ -1,11 +1,3 @@
-//! Claude subscription limits: the signed-in account's card, which Claude Code reports for the
-//! user's own config dir (`limits::claude_cli`), and the parse of the windows in a usage report.
-//! on-n-off sends no request with a Claude login and reads no Claude credential for Limits.
-//!
-//! A usage report carries a normalized `limits[]` array (kind/group/percent/resets_at) plus, in
-//! older answers, the top-level `five_hour` / `seven_day` / `seven_day_<model>` objects. The array
-//! wins when it has usable entries; the legacy keys are the fallback.
-
 use std::path::Path;
 
 use serde_json::Value;
@@ -17,8 +9,6 @@ use super::Parsed;
 use crate::accounts::claude::SignedIn;
 use crate::dto::{AgentId, LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto};
 
-/// The signed-in Claude account's card: Claude Code's own usage report for the user's config dir
-/// under `home`, where the environment puts it.
 pub(super) fn claude_current(home: &Path) -> ProviderLimitsDto {
     match SignedIn::resolve(home) {
         Ok(claude) => claude_cli::read_signed_in(&|| claude.command(), claude.config_file()),
@@ -68,7 +58,6 @@ fn normalized_window(entry: &Value) -> Option<LimitWindowDto> {
     Some(window(id, label, window_kind, used, resets_at))
 }
 
-/// `scope.model.display_name`, else `scope.surface`, for per-model / per-surface windows.
 fn scope_name(scope: Option<&Value>) -> Option<String> {
     let scope = scope?;
     optional_string(

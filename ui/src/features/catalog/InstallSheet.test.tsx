@@ -57,7 +57,6 @@ const INSPECT: MarketplaceInspect = {
   ],
 };
 
-/** Invented names: `build` needs `verify` and `review` (high) and mentions `probe` (medium). */
 function needs(name: string, confidence: "high" | "medium" = "high"): ItemDependency {
   return { pluginName: "acme", kind: "skill", path: `skills/${name}`, name, confidence };
 }
@@ -137,7 +136,6 @@ describe("InstallSheet marketplace browsing", () => {
     const radios = await screen.findAllByRole("radio");
     expect(radios).toHaveLength(3);
     expect(api.inspectMarketplace).toHaveBeenCalledWith("mattpocock", "skills", undefined);
-    // Default stays "Install plugin" so the CLI path is one click away as before.
     expect(screen.getByRole("radio", { name: /Install plugin/ })).toBeChecked();
   });
 
@@ -153,7 +151,6 @@ describe("InstallSheet marketplace browsing", () => {
     fireEvent.click(within(tree).getByRole("checkbox", { name: /grilling/ }));
     fireEvent.click(within(tree).getByRole("checkbox", { name: /reviewer/ }));
 
-    // Drop Claude → agents are no longer allowed.
     fireEvent.click(screen.getByRole("button", { name: "Claude" }));
     expect(within(tree).getByRole("checkbox", { name: /reviewer/ })).toBeDisabled();
     expect(screen.getByText(/Subagents only install into Claude/)).toBeTruthy();
@@ -217,7 +214,6 @@ describe("InstallSheet marketplace browsing", () => {
     typeSource("mattpocock/skills@v1");
     fireEvent.click(await screen.findByRole("radio", { name: /Install selected/ }));
     expect(api.inspectMarketplace).toHaveBeenCalledWith("mattpocock", "skills", "v1");
-    // Scope defaults to the Scope bar's project and can be switched back to Global.
     expect(screen.getByRole("button", { name: "Project" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("E:/dev/app/.claude/skills")).toBeTruthy();
     const tree = screen.getByRole("group", { name: "mattpocock-skills" });
@@ -258,7 +254,6 @@ describe("InstallSheet marketplace browsing", () => {
     typeSource("acme/skills");
     fireEvent.click(await screen.findByRole("radio", { name: /Install selected/ }));
     const tree = screen.getByRole("group", { name: "acme" });
-    // The plugin ships more than skills: say so once, up front.
     expect(within(tree).getByText(/also ships commands and MCP servers/)).toBeTruthy();
 
     fireEvent.click(within(tree).getByRole("checkbox", { name: /^build$/ }));
@@ -269,7 +264,6 @@ describe("InstallSheet marketplace browsing", () => {
     expect(screen.getByRole("button", { name: /Install 3 items/ })).toBeTruthy();
     expect(screen.getByText("1 picked + 2 required · 1 not selected")).toBeTruthy();
 
-    // A medium mention is only a hint, with a one-click add.
     const buildRow = within(tree).getByRole("checkbox", { name: /^build$/ }).closest("li")!;
     expect(within(buildRow).getByText(/needs/)).toBeTruthy();
     expect(within(buildRow).getByText("not selected")).toBeTruthy();
@@ -278,7 +272,6 @@ describe("InstallSheet marketplace browsing", () => {
     expect(screen.getByRole("button", { name: /Install 4 items/ })).toBeTruthy();
     expect(screen.getByText("2 picked + 2 required")).toBeTruthy();
 
-    // Declining an auto-added item sticks; the gap becomes visible on the parent.
     fireEvent.click(within(tree).getByRole("checkbox", { name: /^verify$/ }));
     expect(within(tree).getByRole("checkbox", { name: /^verify$/ })).not.toBeChecked();
     expect(within(tree).getAllByText("required by build")).toHaveLength(1);

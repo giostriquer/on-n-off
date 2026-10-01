@@ -1,10 +1,8 @@
 use super::*;
 use serde_json::json;
 
-/// What account changes say about a native home the environment chose.
 const CUSTOM_HOME: &str = "Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.";
 
-/// A file-backed store under `root`: the default dirs, and no Keychain to consult.
 fn claude(root: &Path) -> ClaudeNative {
     let home = root.join(".claude");
     fs::create_dir_all(&home).unwrap();
@@ -18,7 +16,6 @@ fn claude(root: &Path) -> ClaudeNative {
         private: false,
     }
 }
-/// An environment holding exactly `vars`, for `resolve_from`.
 fn environment<'a>(
     vars: &'a [(&'a str, PathBuf)],
 ) -> impl Fn(&str) -> Option<std::ffi::OsString> + 'a {
@@ -29,7 +26,6 @@ fn environment<'a>(
     }
 }
 
-/// The environment a command reads, as the child will see it: `Some(None)` is a variable removed.
 fn command_env(command: &Command) -> std::collections::HashMap<String, Option<std::ffi::OsString>> {
     command
         .get_envs()
@@ -42,10 +38,8 @@ fn command_env(command: &Command) -> std::collections::HashMap<String, Option<st
         .collect()
 }
 
-/// Claude Code's own sign-out leaves this behind: valid JSON, no token.
 const SIGNED_OUT: &str = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
 
-/// A login the switch publishes.
 fn incoming() -> Login {
     Login {
         auth: json!({"claudeAiOauth":{"accessToken":"incoming"}}),
@@ -78,8 +72,6 @@ fn claude_same_user_different_organizations_are_distinct() {
     assert!(identity_of(credential, json!({"emailAddress":"same@example.com"})).is_err());
 }
 
-/// A Claude profile is the account in its organization, and only a renewable login is one: both
-/// tokens are required, and blank ones count as missing.
 #[test]
 fn a_claude_identity_is_the_account_in_its_organization_and_needs_both_tokens() {
     let account =
@@ -106,7 +98,6 @@ fn a_claude_identity_is_the_account_in_its_organization_and_needs_both_tokens() 
     }
 }
 
-/// A Claude login's email is its account record's, trimmed; a blank or missing one is none.
 #[test]
 fn a_claude_logins_email_is_its_account_records() {
     let email = |account: Value| {
@@ -124,9 +115,6 @@ fn a_claude_logins_email_is_its_account_records() {
     assert_eq!(email(Value::Null), None);
 }
 
-/// A Claude credential generation is its access and refresh tokens and nothing else. The digest
-/// is a literal because a vault's signed-out generations and a renewal journal written by an
-/// earlier version must still match the login they name.
 #[test]
 fn a_claude_logins_fingerprint_is_its_token_generation_alone() {
     let claude = login(
@@ -148,8 +136,6 @@ fn a_claude_logins_fingerprint_is_its_token_generation_alone() {
     assert_ne!(fingerprint(&rotated), fingerprint(&claude));
 }
 
-/// A Claude login is due to renew once its access token's `expiresAt` (ms) is reached, and never
-/// when it states none.
 #[test]
 fn a_claude_login_is_due_to_renew_once_its_expiry_is_reached() {
     for (expires_at, due) in [

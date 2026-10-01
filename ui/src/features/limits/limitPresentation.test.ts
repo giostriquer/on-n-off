@@ -23,9 +23,7 @@ describe("presentLimitWindow", () => {
       color: undefined,
       note: `reset 1h ago · ${formatResetAt(window.resetsAt)}`,
     });
-    // The renewed window is zero; the figure it held before the reset is gone, not recited.
     expect(presented.note).not.toContain("93");
-    // The clock time is the reset's, not the observation's.
     expect(presented.note).not.toContain(formatResetAt(window.observedAt));
   });
 
@@ -149,7 +147,6 @@ describe("hasObservations", () => {
     expect(hasObservations(bare)).toBe(false);
     expect(hasObservations({ ...bare, windows: [window] })).toBe(true);
     expect(hasObservations({ ...bare, credits: { balance: "0", unlimited: false } })).toBe(true);
-    // Every current Codex read reports a count, usually 0; on its own that observed nothing.
     expect(hasObservations({ ...bare, resetCredits: { availableCount: 0, nextExpiresAt: null } })).toBe(false);
     expect(hasObservations({ ...bare, resetCredits: { availableCount: 1, nextExpiresAt: null } })).toBe(true);
   });

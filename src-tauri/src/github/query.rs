@@ -1,17 +1,7 @@
-//! The one GraphQL document the screen and the monitor need, and the search strings that feed
-//! it. Five searches ride in a single request; without a `contexts` connection the whole thing
-//! costs about two rate-limit points, so a 60 s poll spends ~120 of the 5 000 points an hour
-//! GitHub grants. The merge-state fields are scalars and single objects, so they add nothing to
-//! that cost, and the merged search reads a short page.
-
 use serde_json::{json, Value};
 
 pub(super) const GRAPHQL_URL: &str = "https://api.github.com/graphql";
-/// Items per list; the DTO's `total` still reports the full match count.
 pub(super) const PAGE_SIZE: u32 = 50;
-/// Merged pull requests read per poll, latest activity first. Only one merged since the previous
-/// poll matters, so the page stays short; a burst of more than this many in one interval loses
-/// the oldest.
 pub(super) const RECENT_MERGES: u32 = 10;
 
 const DOCUMENT: &str = "\
@@ -34,20 +24,14 @@ fragment pr on PullRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Search {
-    /// Open PRs the user authored, narrowed by the configured scopes.
     Mine,
-    /// Open PRs asking for the user's review, directly or through one of their teams.
     ReviewRequested,
-    /// The subset of `ReviewRequested` that named the user; only used to tag rows.
     DirectReviewRequested,
-    /// Open PRs with the user in the assignee field.
     Assigned,
-    /// The user's merged PRs, latest activity first, narrowed by the configured scopes.
     Merged,
 }
 
 impl Search {
-    /// Whether the configured scopes narrow this search: they describe the user's own work.
     fn is_scoped(self) -> bool {
         matches!(self, Self::Mine | Self::Merged)
     }

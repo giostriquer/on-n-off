@@ -93,7 +93,6 @@ describe("HookList", () => {
     const pool = [shown, hook({ id: "claude:settings.json:Stop:0:0", event: "Stop" }), hook({ id: "off", enabled: false })];
     render(<HookList tab={tabWith(pool)} hooks={[shown]} filterQuery="pretool" />);
 
-    // Two of the three are live, and the filter narrows the rows without moving the tally.
     expect(screen.getByText(/2 active/)).toHaveTextContent("2 active · user settings + plugins · listed, never run");
     expect(screen.getAllByRole("article")).toHaveLength(1);
   });

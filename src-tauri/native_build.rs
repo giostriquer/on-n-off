@@ -27,14 +27,6 @@ pub fn build() {
     let legacy = package.join(format!(
         ".build/{arch}-apple-macosx/{configuration}/on-n-off-notch"
     ));
-    // Package.swift links Info.plist into the helper with a `-sectcreate` flag, and SwiftPM's
-    // native build system does not track a file that only a flag names. After a change to
-    // Info.plist alone it calls the helper up to date and keeps the old plist inside the Mach-O,
-    // while the bundle below gets the new Contents/Info.plist. CI restores `.build` from a cache,
-    // so every release's version bump would hit that. Removing the helper makes the build link
-    // it again, which takes about half a second. Swift Build, the default from Swift 6.4, tracks
-    // the file and puts the helper elsewhere. If an older toolchain left one at this path,
-    // removing it also means `helper_binary`'s fallback can only find a helper this build linked.
     let _ = fs::remove_file(&legacy);
     let output = Command::new("/usr/bin/xcrun")
         .args(["swift", "build", "--package-path"])
@@ -89,20 +81,6 @@ pub fn build() {
     );
 }
 
-/// Where SwiftPM left the product, asked rather than assumed.
-///
-/// Swift 6.4 moved a package build to the Xcode-style layout, so the helper that used to land in
-/// `.build/<arch>-apple-macosx/<configuration>/` now lands in `.build/out/Products/<Configuration>/`.
-/// A hard-coded path meant the build script panicked staging a helper the Swift build had just
-/// produced, which broke every local Rust command on a current toolchain while CI, still on an
-/// older one, stayed green. `--show-bin-path` answers for whichever layout is in force, and it has
-/// to repeat the build's own flags or it answers for a different variant. The old path stays as a
-/// fallback in case a toolchain declines the query, and a failure names both so the next person
-/// does not have to guess which layout they are on.
-///
-/// The fallback still warns: a toolchain that declines the query is one this script was not
-/// written against. `build` removes the helper at the old path before building, so whatever the
-/// fallback finds there was linked by this build, not left behind by an earlier one.
 fn helper_binary(package: &Path, arch: &str, configuration: &str, legacy: PathBuf) -> PathBuf {
     let reported = Command::new("/usr/bin/xcrun")
         .args(["swift", "build", "--package-path"])
@@ -143,8 +121,6 @@ fn helper_binary(package: &Path, arch: &str, configuration: &str, legacy: PathBu
     legacy
 }
 
-/// Unlink before copying: overwriting a helper in place while an app still has it running
-/// leaves a file macOS refuses to launch (killed at exec) until it is recreated.
 fn replace_file(source: &Path, destination: &Path, what: &str) {
     let _ = fs::remove_file(destination);
     fs::copy(source, destination).expect(what);

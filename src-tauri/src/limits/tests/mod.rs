@@ -24,7 +24,6 @@ fn provider_read_guards_serialize_only_the_same_provider() {
     assert!(provider_read_lock(AgentId::Codex).try_lock().is_ok());
 }
 
-/// An account known as `id`, labelled `label`, for every test under `limits`.
 pub(super) fn account(id: &str, label: &str) -> LimitsAccountDto {
     LimitsAccountDto {
         legacy_id: None,
@@ -33,7 +32,6 @@ pub(super) fn account(id: &str, label: &str) -> LimitsAccountDto {
     }
 }
 
-/// A test build has no user home, so `read_limits` reads nothing and says why.
 #[test]
 fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
     let dtos = read_limits(AgentId::Cursor, false);
@@ -149,8 +147,6 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
     assert_eq!(value["currentAccount"], true);
 }
 
-/// A saved profile's card says so over IPC as `savedProfile`; no other card carries the key, and a
-/// card without it reads as not one.
 #[test]
 fn only_a_saved_profiles_card_carries_the_saved_profile_key() {
     let remembered = ProviderLimitsDto {
@@ -177,8 +173,6 @@ fn only_a_saved_profiles_card_carries_the_saved_profile_key() {
     );
 }
 
-/// An archived card says so over IPC as `archived`; no other card carries the key, and a card
-/// without it, as every version before archiving sent, reads as not archived.
 #[test]
 fn only_an_archived_card_carries_the_archived_key() {
     let remembered = ProviderLimitsDto {
@@ -205,7 +199,6 @@ fn only_an_archived_card_carries_the_archived_key() {
     );
 }
 
-/// Every note crosses under the name the UI matches on, and comes back from a snapshot the same way.
 #[test]
 fn every_subscription_note_keeps_its_wire_name() {
     use crate::dto::SubscriptionNote;
@@ -222,16 +215,6 @@ fn every_subscription_note_keeps_its_wire_name() {
     }
 }
 
-/// Live probe against the real home, read-only: one read per provider, printed. A test build has
-/// no user home, so the probe reads the one named in `ON_N_OFF_PROBE_HOME` (`paths::probe_home`).
-///
-/// Claude runs Claude Code's own usage report with the probe home's config dir: a test build's
-/// sealed environment (`paths::process_env`) treats every home as disposable, so Claude Code is
-/// handed that dir, whose login it reads by its own rules. Codex runs its own `codex app-server`,
-/// and its native store reads a keyring login through the real `security` when its config selects
-/// one, which is what `with_real_keychain` allows.
-///
-/// `ON_N_OFF_PROBE_HOME="$HOME" cargo test --manifest-path src-tauri/Cargo.toml probe_real_home_limits -- --ignored --nocapture`
 #[test]
 #[ignore = "real-home network probe; not part of CI"]
 fn probe_real_home_limits() {

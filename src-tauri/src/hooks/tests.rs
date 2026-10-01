@@ -12,7 +12,6 @@ fn commands(hooks: &[HookDto]) -> Vec<&str> {
     hooks.iter().map(|hook| hook.command.as_str()).collect()
 }
 
-/// A `config.toml` fixture, parsed the once the way `codex_hooks` parses the file.
 fn config_hooks(text: &str) -> Vec<HookDto> {
     codex_config_hooks(&parse_toml(text))
 }
@@ -21,8 +20,6 @@ fn apply_state(hooks: &mut [HookDto], config_toml: &str) {
     apply_codex_state(hooks, &parse_toml(config_toml));
 }
 
-/// A plugin folder with a manifest and, optionally, one hook file beside it. The plugin sits one
-/// level under the scratch root so that a test can write a file *above* it.
 fn plugin_dir(prefix: &str, manifest_dir: &str, manifest: &str) -> PathBuf {
     let root = crate::paths::scratch_dir(prefix).join("plugin");
     fs::create_dir_all(root.join(manifest_dir)).unwrap();
@@ -77,7 +74,6 @@ fn claude_user_settings_hooks_become_one_row_per_handler() {
             "acme notify --stop",
         ]
     );
-    // The event stays in Claude's own spelling even though the id is snake_cased.
     assert_eq!(hooks[0].event, "PreToolUse");
     assert_eq!(hooks[0].matcher, "Bash");
     assert_eq!(hooks[0].handler, "command");
@@ -85,7 +81,6 @@ fn claude_user_settings_hooks_become_one_row_per_handler() {
     assert_eq!(hooks[0].plugin_id, None);
     assert_eq!(hooks[0].description, "");
     assert!(hooks[0].enabled);
-    // An entry with no matcher matches everything the event fires for.
     assert_eq!(hooks[2].matcher, "");
 }
 
@@ -120,10 +115,8 @@ fn claude_plugin_hooks_file_is_read_with_its_description() {
     );
     assert_eq!(hooks[0].source, "acme");
     assert_eq!(hooks[0].plugin_id.as_deref(), Some("acme@webapp"));
-    // The hook file's own description wins over the plugin's.
     assert_eq!(hooks[0].description, "Acme terminal notifications");
     assert_eq!(hooks[0].matcher, "startup|resume");
-    // Unexpanded: expanding it would show a path the file does not contain.
     assert_eq!(hooks[0].command, "${CLAUDE_PLUGIN_ROOT}/scripts/start.sh");
 }
 
@@ -134,7 +127,6 @@ fn claude_plugin_manifest_names_one_hook_file() {
         ".claude-plugin",
         r#"{ "name": "acme", "description": "Acme for webapp", "hooks": "./hooks/claude.json" }"#,
     );
-    // The default file exists too and must be ignored once the manifest names another.
     write_hook_file(
         &root,
         "hooks/hooks.json",
@@ -150,7 +142,6 @@ fn claude_plugin_manifest_names_one_hook_file() {
 
     assert_eq!(ids(&hooks), ["acme@webapp:hooks/claude.json:stop:0:0"]);
     assert_eq!(commands(&hooks), ["acme hook Stop"]);
-    // No description in the hook file, so the plugin's own stands in.
     assert_eq!(hooks[0].description, "Acme for webapp");
 }
 
@@ -171,9 +162,6 @@ fn claude_plugin_manifest_names_several_hook_files() {
         "hooks/second.json",
         r#"{ "hooks": { "SessionEnd": [{ "hooks": [{ "type": "command", "command": "acme second" }] }] } }"#,
     );
-    // A real file one level above the plugin, which is what `../escape.json` would reach if `..`
-    // were followed. The path is refused (`plugin_files::plugin_file`), so the file above
-    // contributes nothing.
     fs::write(
         root.parent().unwrap().join("escape.json"),
         r#"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "acme escaped" }] }] } }"#,
@@ -192,9 +180,6 @@ fn claude_plugin_manifest_names_several_hook_files() {
     assert_eq!(commands(&hooks), ["acme first", "acme second"]);
 }
 
-/// On Windows a `C:` segment would take the path out of the plugin to a drive; the manifest
-/// path is refused by its text on every platform. A file of that very name is written inside the
-/// plugin here, where only Unix allows one, so reading it would show.
 #[cfg(unix)]
 #[test]
 fn a_hook_file_named_with_a_drive_is_refused() {
@@ -232,8 +217,6 @@ fn one_hook_file_named_twice_is_read_once() {
         r#"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "acme once" }] }] } }"#,
     );
 
-    // Two spellings of one path resolve to one file and one `<source>` segment, so reading it
-    // twice would list every row twice wearing the first row's ids.
     let hooks = claude_plugin_hooks("acme@webapp", "acme", &root);
     assert_eq!(ids(&hooks), ["acme@webapp:hooks/a.json:stop:0:0"]);
 }
@@ -247,9 +230,6 @@ fn two_event_keys_that_snake_case_alike_share_one_state_key() {
         } }"#,
     );
 
-    // Both rows are listed: dropping one would hide a hook that does run. They share an id
-    // because Codex's own state key collides in exactly the same way — so enablement, looked up
-    // by that key, reaches both of them, here as in Codex.
     assert_eq!(commands(&hooks), ["acme upper", "acme lower"]);
     assert_eq!(
         ids(&hooks),
@@ -341,8 +321,6 @@ fn only_the_providers_with_hook_files_say_they_read_hooks() {
     let antigravity = crate::antigravity::AntigravityAdapter::at(home.join(".gemini"));
     let cursor = crate::cursor::CursorAdapter::at(home.join(".cursor"));
 
-    // The screen asks each provider rather than keeping a list of its own, and an adapter that
-    // does not read hooks is not one whose user has none.
     assert!(claude.reads_hooks() && claude.info().reads_hooks);
     assert!(codex.reads_hooks() && codex.info().reads_hooks);
     assert!(!antigravity.reads_hooks() && !antigravity.info().reads_hooks);
@@ -369,7 +347,6 @@ fn a_disabled_codex_plugin_contributes_no_hooks() {
             ),
         );
     }
-    // Codex keeps plugin enablement in `config.toml`, not in a settings file of its own.
     fs::write(
         root.join("config.toml"),
         "[plugins.\"on@webapp\"]\nenabled = true\n\n[plugins.\"off@webapp\"]\nenabled = false\n",
@@ -429,9 +406,6 @@ command = "npx"
     assert_eq!(hooks[0].source, "config.toml");
     assert_eq!(hooks[0].command, "acme notify --stop");
 
-    // Codex writes `state` as a table of tables, which reads as no event at all. This is the
-    // shape that *does* reach the walker — an array of bare handlers, exactly what an event
-    // looks like — so it is the key, and only the key, that keeps enablement out of the rows.
     assert!(
         config_hooks("[[hooks.state]]\ntype = \"command\"\ncommand = \"acme state\"\n").is_empty()
     );
@@ -453,11 +427,9 @@ fn the_legacy_notify_key_is_a_hook_of_its_own() {
 
 #[test]
 fn notify_can_be_one_string_and_an_empty_one_is_no_row() {
-    // The argv form is the documented one, but a single program is often written as a string.
     let hooks = config_hooks("notify = \"/Users/me/bin/acme-notify\"\n");
     assert_eq!(commands(&hooks), ["/Users/me/bin/acme-notify"]);
 
-    // A key left behind empty is not a hook Codex would run, so it is not a row either.
     assert!(config_hooks("notify = []\n").is_empty());
     assert!(config_hooks("notify = \"   \"\n").is_empty());
     assert!(config_hooks("notify = 7\n").is_empty());
@@ -465,13 +437,10 @@ fn notify_can_be_one_string_and_an_empty_one_is_no_row() {
 
 #[test]
 fn a_bare_toml_handler_is_a_row_and_a_handler_without_a_type_runs_as_a_command() {
-    // The natural TOML spelling of one handler: the entry *is* the handler, with no `hooks`
-    // array wrapped around it, because writing that array out in TOML takes two more tables.
     let bare = config_hooks("[[hooks.Stop]]\ntype = \"command\"\ncommand = \"acme bare\"\n");
     assert_eq!(ids(&bare), [":config.toml:stop:0:0"]);
     assert_eq!(commands(&bare), ["acme bare"]);
 
-    // Inside the array a handler may leave `type` out; both providers then run it as a command.
     let untyped = codex_hooks_file(
         r#"{ "hooks": { "Stop": [{ "hooks": [{ "command": "acme untyped" }] }] } }"#,
     );
@@ -498,13 +467,10 @@ fn a_handler_with_no_command_line_shows_whatever_it_names_instead() {
     assert_eq!(
         rows,
         [
-            // `url` is what an `http` handler has in place of a command line.
             ("http", "https://acme.example/hooks/stop"),
             ("mcp_tool", "acme · turn_ended"),
-            // Half a pair still says more than nothing at all.
             ("mcp_tool", "acme"),
             ("mcp_tool", "turn_ended"),
-            // Neither: the row survives on its event, matcher and source.
             ("mcp_tool", ""),
         ]
     );
@@ -520,8 +486,6 @@ fn rows_keep_the_order_the_file_writes_its_events_in() {
         } }"#,
     );
 
-    // Written out of alphabetical order and read back that way: ordering the rows is
-    // `sort_hooks`'s job, once every source is merged, and nothing here may pre-empt it.
     assert_eq!(commands(&hooks), ["acme stop", "acme pre", "acme notify"]);
 }
 
@@ -532,7 +496,6 @@ fn codex_plugin_manifest_names_a_hook_file() {
         ".codex-plugin",
         r#"{ "name": "acme", "description": "Acme for Codex", "hooks": "./hooks/codex.json" }"#,
     );
-    // The Claude hook file sits beside it and must not be read as Codex's.
     write_hook_file(
         &root,
         "hooks/hooks.json",
@@ -621,7 +584,6 @@ trusted_hash = "sha256:0001"
         .iter()
         .map(|hook| (hook.event.as_str(), hook.enabled))
         .collect();
-    // A state entry without an `enabled` key is trusted, not disabled.
     assert_eq!(state, [("SessionStart", true), ("Stop", false)]);
 }
 
@@ -673,8 +635,6 @@ fn the_codex_tab_merges_every_source_and_applies_the_state() {
             ("hooks.json", "acme user start", true),
         ]
     );
-    // Four sources in one tab, and `[hooks.state]` keys a row by its id, so the ids the whole
-    // tab carries have to be distinct — not only the ones a single file contributes.
     let mut unique = ids(&tab.hooks);
     unique.sort_unstable();
     unique.dedup();
@@ -707,13 +667,11 @@ fn malformed_files_yield_no_rows_instead_of_an_error() {
         "hooks/hooks.json",
         r#"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "acme" }] }] } }"#,
     );
-    // An unreadable manifest still leaves the default file in place.
     assert_eq!(
         ids(&claude_plugin_hooks("acme@webapp", "acme", &broken)),
         ["acme@webapp:hooks/hooks.json:stop:0:0"]
     );
 
-    // A state table that will not parse leaves every row as it was.
     let mut hooks = claude_settings_hooks(
         r#"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "acme" }] }] } }"#,
     );
@@ -756,10 +714,6 @@ fn an_edit_that_moves_no_entry_leaves_every_id_alone() {
         ]
     );
 
-    // The file is edited the way a user edits one: an unrelated event is written in above the
-    // entries and another appended below, and one command changes. None of that moves a `Stop`
-    // entry, so none of it may move a `Stop` id — that is what lets Codex's `[hooks.state]`
-    // survive an edit, and why the id counts within its event rather than across the file.
     write_hook_file(
         &root,
         "hooks/first.json",
@@ -782,7 +736,6 @@ fn an_edit_that_moves_no_entry_leaves_every_id_alone() {
         .filter(|id| id.contains(":stop:"))
         .collect();
     assert_eq!(surviving, before);
-    // The edited command is on the row that kept its id, not on a new one.
     assert_eq!(
         after
             .iter()
@@ -800,13 +753,9 @@ fn a_description_becomes_one_line_and_a_command_keeps_the_one_it_has() {
     }"#;
     let hooks = codex_hooks_file(file);
     assert_eq!(hooks.len(), 1);
-    // A description only labels a row, so it is collapsed to the line the row has room for.
     assert_eq!(
         hooks[0].description,
         "Acme hooks. Aliases: @acme Runs on every turn."
     );
-    // The command is the thing that would run, so it reaches the row exactly as the file spells
-    // it — line continuations and all. The screen truncates the row itself and shows the whole
-    // of it in a tooltip, so collapsing here would only destroy what the tooltip is for.
     assert_eq!(hooks[0].command, "acme run \\\n  --quiet");
 }

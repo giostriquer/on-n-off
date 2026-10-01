@@ -1,8 +1,3 @@
-//! Opt-in saved logins. Native stores own shared generations; only never-activated private
-//! sign-ins can renew in the vault. Saved usage reads never activate an account.
-//!
-//! Every operation runs on the [`Accounts`] context. What differs between Claude and Codex lives
-//! in the provider's [`Adapter`] (`claude.rs`, `codex.rs`), which [`adapter`] alone chooses.
 pub(crate) mod model;
 pub(crate) mod vault;
 
@@ -46,8 +41,6 @@ pub struct ProfileDto {
     active: bool,
     needs_login: bool,
     pending_activation: bool,
-    /// The user archived this account (`limits/snapshots/archive.rs`). Read from the archive,
-    /// never the vault.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     archived: bool,
 }
@@ -65,37 +58,20 @@ fn home() -> Result<PathBuf, String> {
     crate::paths::user_home().map_err(|_| "Cannot resolve account storage home.".into())
 }
 
-/// The providers with saved profiles, each with an adapter.
 const PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 
-/// One provider's half of the accounts seam: `claude::Claude` or `codex::Codex`, each owning
-/// everything account code does differently for its provider. Generic account code asks
-/// [`adapter`] for it rather than asking which provider it has. The catalog's `AgentAdapter`
-/// (`crate::adapter`) is a different seam; accounts touch it only through `supports_accounts`.
 trait Adapter: Sync {
-    /// The provider's native store under `home`, where this process's environment puts it.
     fn native(&self, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
-    /// The provider's store in `dir`, private to one isolated sign-in, created there.
     fn isolated(&self, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
-    /// `login` read by this provider's rules.
     fn login<'a>(&self, login: &'a store::Login) -> Box<dyn model::LoginView + 'a>;
-    /// How this provider's client processes are told apart, and whether they refuse a switch.
     fn client(&self) -> &'static clients::Client;
-    /// Where the provider's private renewal grant goes; `None` for a provider that never renews
-    /// a login privately (`renews_privately`).
     fn token_url(&self) -> Option<&'static str>;
-    /// Renews a never-activated private `login` with the provider's grant, sent to `token_url`:
-    /// the reply folded in, every field it does not name left as it was.
     fn renew_private(
         &self,
         login: &store::Login,
         now_ms: i64,
         token_url: &str,
     ) -> Result<store::Login, String>;
-    /// The usage of the saved profile `identity`, read at `now_ms` with its `login` still in the
-    /// vault by the provider's Limits reader, asking `urls` (`SavedReadUrls::LIVE` in the app):
-    /// access-only requests that start no CLI and renew nothing. Claude sends none; its saved
-    /// accounts are read in their homes.
     fn read_usage(
         &self,
         identity: &model::Identity,
@@ -103,22 +79,15 @@ trait Adapter: Sync {
         now_ms: i64,
         urls: &crate::limits::SavedReadUrls<'_>,
     ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
-    /// How the home of a saved account is made in a directory, for a provider whose saved logins
-    /// wait in homes; `None` for one whose saved logins stay in the vault.
     fn homes(&self) -> Option<HomeAt>;
-    /// Whether a never-activated login renews in the vault, with the provider's grant sent from
-    /// on-n-off: only for a provider whose saved logins keep no homes.
     fn renews_privately(&self) -> bool {
         self.homes().is_none()
     }
 }
 
-/// The home of a saved account in a directory.
 type HomeAt = fn(&Path) -> Box<dyn Home>;
-/// Makes the home of a saved account in a directory, as a store resolves it.
 type MakeHome<'a> = dyn Fn(&Path) -> Box<dyn Home> + 'a;
 
-/// `provider`'s adapter: the one place account code tells the providers apart.
 fn adapter(provider: AgentId) -> Result<&'static dyn Adapter, String> {
     match provider {
         AgentId::Claude => Ok(&claude::Claude),
@@ -127,100 +96,61 @@ fn adapter(provider: AgentId) -> Result<&'static dyn Adapter, String> {
     }
 }
 
-/// `login` read by `provider`'s rules.
 fn view(provider: AgentId, login: &store::Login) -> Result<Box<dyn model::LoginView + '_>, String> {
     adapter(provider).map(|adapter| adapter.login(login))
 }
 
-/// A provider's native store as the account operations use it: the activation transaction's
-/// `Native`, plus the check an operation makes before touching it and the official sign-out.
 trait NativeAccount: Native {
-    /// Refuses a native setup on-n-off leaves to the official client: a custom home, an
-    /// environment credential or a managed login policy.
     fn preflight(&self) -> Result<(), String>;
-    /// Signs the CLI out through its own command.
     fn logout(&self) -> Result<(), String>;
-    /// Who the CLI is signed in as with a subscription, whose saved accounts' usage is read
-    /// beside it: `None` when it is signed out, or signed in some way that has no subscription.
     fn subscription(&self) -> Result<Option<model::Identity>, String> {
         self.read()?.map(|login| self.identify(&login)).transpose()
     }
 }
 
-/// A provider's native store in a private directory, where an isolated sign-in runs the official
-/// client and reads back the login it left.
 trait IsolatedSignIn: Native {
-    /// The official sign-in, ready to spawn in this store.
     fn sign_in(&self) -> std::process::Command;
-    /// The first usage reading of the sign-in as `identity` in `dir`, made by the provider's own
-    /// client there before the directory is removed; the login itself is never sent.
     fn first_usage(
         &self,
         dir: &Path,
         identity: &model::Identity,
     ) -> Option<crate::dto::ProviderLimitsDto>;
-    /// Removes anything the sign-in left outside `dir`, such as the scoped Keychain entry a Claude
-    /// sign-in files on macOS.
     fn clean(&self) -> Result<(), String>;
 }
 
-/// A saved account's home: a private store of the provider's own client, where the account's one
-/// login waits while it is not the signed-in one and where that client renews it (`homes.rs`).
 trait Home: Send + Sync {
-    /// The client's own locks on this home, held until dropped.
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String>;
-    /// The login the home holds, if it holds one.
     fn read(&self) -> Result<Option<store::Login>, String>;
-    /// Who `login` signs in as.
     fn identify(&self, login: &store::Login) -> Result<model::Identity, String>;
-    /// Puts `login` in the home under `locks`, and reads the home back.
     fn put(
         &self,
         login: &store::Login,
         locks: &dyn NativeGuard,
     ) -> Result<Option<store::Login>, String>;
-    /// Empties the home's login under `locks`, as the client's own sign-out does.
     fn clear(&self, locks: &dyn NativeGuard) -> Result<(), String>;
-    /// `identity`'s usage, reported by the client from this home.
     fn read_usage(
         &self,
         identity: &model::Identity,
     ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
-    /// Removes the home under `locks`: whatever its client filed outside it, then the directory,
-    /// and the locks with it.
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String>;
 }
 
-/// Running provider clients, which an account change checks for before it touches a native login.
 trait Clients {
-    /// Refuses while clients that cannot take a native credential change are running.
     fn activation_safe(&self, provider: AgentId) -> Result<(), String>;
-    /// Refuses while any of the provider's clients is running.
     fn closed(&self, provider: AgentId) -> Result<(), String>;
 }
 
-/// Who hears about an account change, once the change has released its leases.
 trait Notify {
-    /// Which login a provider's CLI uses may have changed: Limits replaces its reading, then the
-    /// account list is announced.
     fn changed(&self, provider: AgentId);
-    /// Only the saved profiles changed: the account list is announced.
     fn accounts(&self);
 }
 
-/// Where the account operations find a provider's native stores: the user's own, and the private
-/// one an isolated sign-in runs in.
 trait NativeStores {
-    /// `provider`'s native store under `home`.
     fn native(&self, provider: AgentId, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
-    /// `provider`'s store in `dir`, private to one isolated sign-in, created there.
     fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
-    /// How the home of a saved `provider` account is made in a directory; `None` for a provider
-    /// without homes.
     fn homes(&self, provider: AgentId) -> Option<Box<MakeHome<'_>>>;
 }
 
-/// The native stores each provider's adapter resolves.
 struct AdapterStores;
 impl NativeStores for AdapterStores {
     fn native(&self, provider: AgentId, home: &Path) -> Result<Box<dyn NativeAccount>, String> {
@@ -235,9 +165,6 @@ impl NativeStores for AdapterStores {
     }
 }
 
-/// The account operations over one home, with what they reach outside the vault: the provider's
-/// native stores, its running clients, and whoever hears about a change. `live` builds it from the
-/// real ones; tests build it from a scratch home and fakes.
 struct Accounts {
     home: PathBuf,
     stores: Box<dyn NativeStores>,
@@ -281,8 +208,6 @@ impl Accounts {
     fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String> {
         self.stores.isolated(provider, dir)
     }
-    /// The homes of `provider`'s saved accounts, each found by its id; `None` for a provider whose
-    /// saved logins stay in the vault.
     fn account_homes(
         &self,
         provider: AgentId,
@@ -295,7 +220,6 @@ impl Accounts {
 pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
     Accounts::live()?.list(provider)
 }
-/// Explicitly retry vault authorization without changing profiles or the native CLI login.
 pub fn unlock() -> Result<(), String> {
     let home = home()?;
     if !store::Store::vault_exists(&home) {
@@ -318,24 +242,17 @@ pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Resul
 pub fn sign_out(provider: AgentId) -> Result<(), String> {
     Accounts::live()?.sign_out(provider)
 }
-/// Signs in to `provider` with its official client in an isolated home and saves the login as a
-/// profile awaiting activation. `expected` is the profile a sign-in again is for.
 pub fn add(provider: AgentId, id: String, expected: Option<String>) -> Result<(), String> {
     Accounts::live()?.add(provider, id, expected)
 }
 
-/// How an account change treats provider clients that are still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Activation {
-    /// Refuse while clients that cannot take a native credential change are running.
     Ordinary,
-    /// The person chose to switch beside running clients, which keep the previous account.
     AlongsideClients,
-    /// Explicit crash recovery, which always requires closed clients.
     Recover,
 }
 impl Activation {
-    /// The account action that asks for this change, if it is one.
     pub fn from_action(action: &str) -> Option<Self> {
         match action {
             "use" => Some(Self::Ordinary),
@@ -404,8 +321,6 @@ impl Accounts {
         native.verify()?;
         let (identity, email) = store::Store::open(&self.home, true)?.change_then(
             store::ChangeKind::Account,
-            // Past the gate: a pending recovery refuses the save before the native locks are
-            // taken or the native login is read.
             |db| {
                 let native_locks = native.lock()?;
                 let login = native
@@ -428,18 +343,12 @@ impl Accounts {
                     .and_then(|p| p.email.clone());
                 Ok((native_locks, identity, email))
             },
-            // The native locks cover the save and go before the vault lease, so a publication
-            // waiting on the vault never finds them still held.
             |(native_locks, identity, email), _, _| {
                 drop(native_locks);
                 Ok((identity, email))
             },
         )??;
-        // Saving is an explicit re-add, which unarchives the account as it undoes a Remove. The
-        // save stands whatever the archive does: a failed write leaves the account archived.
         let _ = crate::limits::unarchive_profile(&self.home, &identity, email);
-        // The Limits refresh this starts runs outside the provider reservation, which would
-        // otherwise keep refusing a use or a sign-out for as long as that read takes.
         drop(read);
         self.notify.changed(provider);
         Ok(())
@@ -453,8 +362,6 @@ impl Accounts {
         Ok(())
     }
 
-    /// Removes profile `id`. Its home, which no profile names then, goes at the next read
-    /// (`homes::settle`); removing it never signs a native client out.
     fn remove(&self, id: &str) -> Result<(), String> {
         login::cancel_expected(id);
         let removed =
@@ -468,7 +375,6 @@ impl Accounts {
                 db.profiles.retain(|p| p.id != id);
                 Ok(removed)
             })?;
-        // Its card leaves that provider's Limits now, not at the next poll.
         match removed {
             Some(provider) => self.notify.changed(provider),
             None => self.notify.accounts(),
@@ -476,7 +382,6 @@ impl Accounts {
         Ok(())
     }
 
-    /// The account action a Use or Recover button asks for.
     fn activate(&self, provider: AgentId, id: &str, activation: Activation) -> Result<(), String> {
         match activation {
             Activation::Ordinary => self.use_profile(provider, id, false),
@@ -485,11 +390,6 @@ impl Accounts {
         }
     }
 
-    /// Publishes profile `id`'s login to the provider's CLI. `alongside_clients` is the person's
-    /// choice to switch beside running clients, which then keep the previous account.
-    ///
-    /// Announced once the change is durable, whether the switch then succeeds or fails: a
-    /// rollback may have touched the native login. A sign-in is announced only once published.
     fn use_profile(
         &self,
         provider: AgentId,
@@ -515,15 +415,12 @@ impl Accounts {
                     .find(|p| p.id == id && p.identity.provider == provider)
                     .ok_or("Profile does not belong to this provider.")?;
                 renewals.activation_ready(target)?;
-                // The target's login comes out of its home into the vault this change persists.
                 match &account_homes {
                     Some(account_homes) => homes::check_out(db, id, account_homes),
                     None => Ok(None),
                 }
             },
             |checked_out, db, persist| {
-                // Emptied only once the vault holding the login is durable, and before the switch
-                // publishes it, so there is one copy of it at every step.
                 if let Some(checked_out) = checked_out {
                     checked_out.empty().map_err(|error| {
                         format!("{error} Its login stays in its home; nothing was replaced.")
@@ -537,8 +434,6 @@ impl Accounts {
         result
     }
 
-    /// Restores the outgoing login of an interrupted switch, with every client closed.
-    /// Announced like a use, whether it then succeeds or fails.
     fn recover(&self, provider: AgentId) -> Result<(), String> {
         let change = activity::change(provider)?;
         let native = self.native(provider)?;
@@ -561,8 +456,6 @@ impl Accounts {
         result
     }
 
-    /// Announced once the forgotten logins are durable, whether the logout then succeeds or not:
-    /// a failed logout may still have changed the native login.
     fn sign_out(&self, provider: AgentId) -> Result<(), String> {
         let change = activity::change(provider)?;
         let native = self.native(provider)?;
@@ -578,8 +471,6 @@ impl Accounts {
                 if !db.ignored_credentials.contains(&fingerprint) {
                     db.ignored_credentials.push(fingerprint);
                 }
-                // Logout may revoke shared refresh lineage. Invalidate every saved workspace for
-                // this user first, homes included: a home no profile names goes at the next read.
                 for profile in &mut db.profiles {
                     if profile.identity.provider == provider
                         && profile.identity.user_id == identity.user_id
@@ -612,9 +503,6 @@ pub use login::cancel;
 
 pub(crate) mod discovery;
 
-/// The `https://api.openai.com/auth` claims of a saved Codex profile's ID token: identity and plan
-/// metadata, never its tokens. `None` for an unknown key, a profile without a login, or a device
-/// with no vault; an error when the vault exists and cannot be read right now.
 pub(crate) fn saved_codex_claims(
     home: &Path,
     key: &str,

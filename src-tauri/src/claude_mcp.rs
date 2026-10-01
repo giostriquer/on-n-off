@@ -1,17 +1,3 @@
-//! The Claude MCP servers that live outside the user's own list in `~/.claude.json`: the ones an
-//! enabled plugin brings, and the ones Claude keeps for particular projects (its local scope).
-//!
-//! Both are read-only rows. A plugin's servers come and go with the plugin, so the plugin's own
-//! switch is the one that turns them off everywhere. A local-scope server applies only inside
-//! the projects that list it; outside them it is one row per definition naming those projects,
-//! and a project's own view shows that project's servers as project rows instead.
-//!
-//! What switches a server off inside a project is that project's own `disabledMcpServers` in
-//! `~/.claude.json`: Claude Code 2.1.281 reads no other list, and names a plugin's server there
-//! by its scoped `plugin:<plugin>:<server>` name. So the all-projects view shows a plugin's server
-//! on whenever its plugin is enabled, and a project's view applies that project's list
-//! ([`project_servers`]).
-
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
@@ -22,12 +8,6 @@ use crate::mcp::{claude_disabled_list, claude_servers, ORIGIN_LOCAL, ORIGIN_PLUG
 use crate::plugin_files::{plugin_file, read_json, PluginSource};
 use crate::project::normalize_project_key;
 
-/// Every server the enabled `plugins` bring, named the way Claude names them
-/// (`plugin:<plugin>:<server>`). Placeholders such as `${CLAUDE_PLUGIN_ROOT}` are shown as
-/// written: expanding them would show a path the file does not contain.
-///
-/// Two plugins of one name from two marketplaces give the same scoped name, as they do in Claude
-/// Code itself; each is still its own row.
 pub fn plugin_servers(plugins: &[PluginSource]) -> Vec<McpServerDto> {
     let mut out = Vec::new();
     for plugin in plugins {
@@ -42,9 +22,6 @@ pub fn plugin_servers(plugins: &[PluginSource]) -> Vec<McpServerDto> {
     out
 }
 
-/// One plugin's servers, merged the way Claude Code 2.1.281 merges them: its root `.mcp.json`
-/// first, then each entry of the manifest's `mcpServers` in order (an object inline, a path to a
-/// file, or a list of either), a later server of the same name replacing an earlier one.
 fn plugin_server_map(root: &Path) -> Map<String, Value> {
     let mut merged = Map::new();
     if let Some(file) = read_json(&root.join(".mcp.json")) {
@@ -63,9 +40,6 @@ fn plugin_server_map(root: &Path) -> Map<String, Value> {
     merged
 }
 
-/// One manifest entry's servers. A path outside the plugin is refused (`plugin_file`), and an
-/// MCP bundle (`.mcpb`, or the older `.dxt`) is an archive Claude Code installs, which on-n-off
-/// does not open.
 fn declared_servers(root: &Path, entry: Value) -> Map<String, Value> {
     match entry {
         Value::Object(_) => server_map(entry),
@@ -83,7 +57,6 @@ fn is_bundle(path: &str) -> bool {
     path.ends_with(".mcpb") || path.ends_with(".dxt")
 }
 
-/// A servers file holds `{"mcpServers": {…}}` or is the bare map of servers; both are in use.
 fn server_map(value: Value) -> Map<String, Value> {
     let Value::Object(mut map) = value else {
         return Map::new();
@@ -94,10 +67,6 @@ fn server_map(value: Value) -> Map<String, Value> {
     }
 }
 
-/// The local-scope servers of every project in `~/.claude.json`, one row per definition (name,
-/// transport and source alike), on when any of its projects has it on; `projects` names them.
-/// Ids number a second definition of one name (`local:<name>#2`) in the file's order, so they
-/// can change when a project is added; nothing keys on them.
 pub fn local_servers(claude_json: &Value) -> Vec<McpServerDto> {
     let Some(projects) = claude_json.get("projects").and_then(Value::as_object) else {
         return Vec::new();
@@ -143,10 +112,6 @@ pub fn local_servers(claude_json: &Value) -> Vec<McpServerDto> {
         .collect()
 }
 
-/// A project's view, from its entry in `~/.claude.json`: the all-projects rows for servers kept
-/// for particular projects go, a plugin server the entry's `disabledMcpServers` names by its
-/// scoped name reads off, and the project's own servers come back (off when that list names
-/// them) for the caller to show as project rows.
 pub fn project_servers(
     servers: &mut Vec<McpServerDto>,
     claude_json: &Value,

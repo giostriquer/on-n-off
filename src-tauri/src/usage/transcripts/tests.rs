@@ -52,8 +52,6 @@ fn claude_usage_line(model: &str, usage: serde_json::Value) -> String {
     .to_string()
 }
 
-/// Claude Code splits cache writes by lifetime; a one-hour write costs 2x input against the
-/// five-minute write's 1.25x, so the split has to survive parsing.
 #[test]
 fn parse_claude_keeps_the_one_hour_share_of_cache_writes() {
     let usage = |one_hour: u64| {
@@ -82,8 +80,6 @@ fn parse_claude_keeps_the_one_hour_share_of_cache_writes() {
     assert_eq!(unsplit.totals.cache_creation_1h_tokens, 0);
 }
 
-/// Claude Code writes locally generated assistant lines (API errors, interrupts) as
-/// `<synthetic>` with an all-zero usage object; they are not model usage.
 #[test]
 fn parse_claude_skips_records_without_tokens() {
     let zero = serde_json::json!({
@@ -129,8 +125,6 @@ fn usage_record(
     }
 }
 
-/// A resumed or forked Claude session copies a message into another transcript, sometimes only its
-/// partial first line; whichever file the scan meets first, the billed copy is the one kept.
 #[test]
 fn richest_copies_keeps_one_record_per_message_whichever_file_holds_it_first() {
     let partial = usage_record(
@@ -152,10 +146,6 @@ fn richest_copies_keeps_one_record_per_message_whichever_file_holds_it_first() {
     }
 }
 
-/// Claude Code writes one line per content block, all under one message id and request id, and
-/// the early lines carry a partial `output_tokens` (often 1 for a thinking block): the copy with
-/// the most output is the message as billed. It keeps the first copy's place, and a line with no
-/// key is kept as it is.
 #[test]
 fn richest_copies_keeps_a_messages_billed_line_in_its_first_lines_place() {
     let line = |key: Option<&str>, output: u64| {
@@ -191,10 +181,6 @@ fn richest_copies_breaks_output_ties_by_total_tokens_and_keeps_the_held_copy_on_
     assert_eq!(kept[0].session_id, "richer");
 }
 
-/// Codex rollouts carry no message id. A rollout moved to `archived_sessions/` can be listed under
-/// both roots in one scan (a rename between the two walks, or a stale entry kept after an
-/// incomplete walk); it still counts once, while repeated identical events inside one rollout,
-/// and another session's identical events, stay distinct.
 #[test]
 fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() {
     let event = |timestamp_ms: i64| UsageRecord {

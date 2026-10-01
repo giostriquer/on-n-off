@@ -1,6 +1,3 @@
-//! A saved Claude account's home (`ClaudeHome`): where its login is filed, how it is emptied and
-//! removed, and that its usage is Claude Code's own report there. On macOS a fake `security`
-//! stands in for the Keychain, so no test touches the login Keychain.
 use super::super::home::ClaudeHome;
 use super::*;
 use crate::accounts::Home;
@@ -29,16 +26,12 @@ fn identity() -> Identity {
     }
 }
 
-/// The login's access token, or `None` for none.
 fn token(login: Option<Login>) -> Option<String> {
     login?.auth["claudeAiOauth"]["accessToken"]
         .as_str()
         .map(str::to_string)
 }
 
-/// Runs `run` against a Keychain that keeps what is written to it: on macOS a fake `security`
-/// holding at most one item, whose commands come back with the result; elsewhere, where Claude
-/// Code keeps its login in a file, `run` alone.
 #[cfg(target_os = "macos")]
 fn keychain<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
     use crate::process::CommandOutcome;
@@ -104,9 +97,6 @@ fn a_login_put_in_a_home_reads_back_with_its_account() {
     assert_eq!(home.identify(&back).unwrap(), identity());
 }
 
-/// Claude Code reads a credentials file as the login as readily as the Keychain, so a home's login
-/// never goes to one on macOS: it goes to the home's own scoped entry, filed under Claude Code's
-/// own account name.
 #[cfg(target_os = "macos")]
 #[test]
 fn on_macos_a_homes_login_goes_to_its_own_keychain_entry_never_a_file() {
@@ -133,7 +123,6 @@ fn on_macos_a_homes_login_goes_to_its_own_keychain_entry_never_a_file() {
     assert!(!root.path().join(".claude/.credentials.json").exists());
 }
 
-/// A home that keeps a login in a file was not made by on-n-off; writing beside it would leave two.
 #[cfg(target_os = "macos")]
 #[test]
 fn on_macos_a_home_whose_login_is_in_a_file_takes_no_new_one() {
@@ -184,7 +173,6 @@ fn emptying_a_home_signs_it_out_as_claude_code_does_and_keeps_its_account_record
     });
 
     assert!(emptied.is_none(), "{:?}", token(emptied));
-    // The record says whose home it is; Claude Code's own sign-out keeps it too.
     assert_eq!(config["oauthAccount"], login("b1").account);
 }
 
@@ -225,8 +213,6 @@ fn deleting_a_home_removes_its_login_and_its_directory() {
     }
 }
 
-/// A home's usage is Claude Code's own report, asked in the home's config dir: the one whose
-/// account record names the account.
 #[test]
 fn a_homes_usage_is_claude_codes_report_asked_in_that_home() {
     let root = tempfile::tempdir().unwrap();
@@ -255,8 +241,6 @@ fn a_homes_usage_is_claude_codes_report_asked_in_that_home() {
     assert_eq!(Path::new(config_dir.trim()), root.path().join(".claude"));
 }
 
-/// A home read back after a write, by a store opened afresh on the same directory, holds the
-/// login and says whose it is, as a later read or switch finds it.
 #[test]
 fn a_homes_login_is_read_back_by_a_later_look_at_the_same_home() {
     let root = tempfile::tempdir().unwrap();
@@ -287,8 +271,6 @@ fn deleting_a_home_that_was_never_made_is_done_at_once() {
     result.unwrap();
 }
 
-/// A home that could not be removed is reported, so it is not forgotten while it still holds a
-/// login.
 #[cfg(unix)]
 #[test]
 fn deleting_a_home_that_cannot_be_removed_says_so() {

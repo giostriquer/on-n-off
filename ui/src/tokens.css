@@ -4,17 +4,10 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /*
-   * Native stacks on purpose: bundled webfonts (Instrument Sans, JetBrains Mono until v0.2.0)
-   * rendered fuzzy at the screens' 10–12 px sizes on 1× displays. SF Pro / SF Mono on macOS and
-   * Segoe UI / Cascadia Mono (Consolas before Windows 11) on Windows are hinted for exactly those
-   * sizes; `system-ui` and the generic families catch anything else.
-   */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, Menlo, "Cascadia Mono", Consolas, monospace;
 }
 
-/* Plan and status labels use the app UI face, not the technical-value mono stack. */
 @utility type-badge {
   font-family: var(--font-sans);
   font-size: 10px;
@@ -23,10 +16,6 @@
   letter-spacing: 0.03em;
 }
 
-/*
-  Explicit light/dark tokens — avoid light-dark() in Tauri WebView2,
-  which was resolving inconsistently and breaking fills/contrast.
-*/
 :root {
   color-scheme: light;
   --desk: #e8e8e4;
@@ -94,7 +83,6 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.45;
-  /* Default (subpixel) smoothing: grayscale `antialiased` thins strokes on 1× displays. */
 }
 
 html[data-surface="limits-popover"],
@@ -118,7 +106,6 @@ html[data-surface="limits-popover"] #root {
     font-family: inherit;
   }
 
-  /* Tailwind preflight uses cursor: default on buttons; selectable chrome should show pointer. */
   button:enabled,
   [role="button"]:not([aria-disabled="true"]),
   [role="tab"] {
@@ -157,13 +144,6 @@ html[data-surface="limits-popover"] #root {
   margin: -1px;
 }
 
-/*
-  Viewport lock. The document never scrolls.
-  Only `.app-scroll` is the page scroller. Nested overflow-y:auto on routes
-  recreates the double scrollbar. Dropdowns may scroll internally (.scope-list),
-  and modal sheets use .sheet-scroll / .sheet-tree. Scrollbar appearance and
-  scroll mechanics stay at the platform defaults.
-*/
 .app-frame {
   display: flex;
   height: 100%;
@@ -188,14 +168,11 @@ html[data-surface="limits-popover"] #root {
   overflow-y: auto;
 }
 
-/* The standalone menu-bar window has its own viewport and cannot use AppShell's page scroller. */
 .limits-popover-scroll {
   overflow-x: hidden;
   overflow-y: auto;
 }
 
-/* Modal sheets sit above the page scroller: the sheet body scrolls when it outgrows the
-   viewport, and the marketplace item tree scrolls inside its own box. */
 .sheet-scroll {
   min-height: 0;
   overflow-x: hidden;

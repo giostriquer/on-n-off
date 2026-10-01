@@ -1,8 +1,3 @@
-//! The source index: every transcript under the roots with its size, mtime and the span of its
-//! records, persisted so that an unchanged walk answers without parsing anything. Its
-//! [`SourceSnapshot::signature`] validates cached Usage summaries, and [`prepare_sources`] reads
-//! the records of the transcripts a read needs.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -92,8 +87,6 @@ pub(super) struct PreparedSources {
     pub(super) files: Vec<PreparedSourceFile>,
     pub(super) complete: bool,
     pub(super) scan_cache_dirty: bool,
-    /// The paths and mtimes of files no parse succeeded on and no cached parse stands in for:
-    /// their records are unknown.
     pub(super) unread_files: Vec<(String, i64)>,
 }
 
@@ -139,8 +132,6 @@ pub(super) fn unchanged_snapshot(
     Some(snapshot_from_index(previous, &inventory.roots, true))
 }
 
-/// Brings the index up to date with `inventory`, parsing each new or changed transcript for its
-/// record bounds, except one that holds only records the usage history already has.
 pub(super) fn reconcile_inventory(
     path: &Path,
     inventory: SourceInventory,
@@ -329,7 +320,6 @@ fn retain_previous_under_root(
 }
 
 impl SourceEntry {
-    /// The entry is of the transcript `provider` wrote, as it is now: same size, same mtime.
     fn describes(&self, provider: UsageProvider, size: u64, mtime_ms: i64) -> bool {
         self.provider == provider && self.size == size && self.mtime_ms == mtime_ms
     }
@@ -409,15 +399,12 @@ impl SourceSnapshot {
             .is_some_and(|entry| entry.present)
     }
 
-    /// Every root was walked to the end this time: no transcript can be missing from the index.
     pub(super) fn walked_every_root(&self) -> bool {
         self.roots
             .values()
             .all(|root| self.successfully_walked_roots.contains(&root.path))
     }
 
-    /// What the scan cache is kept for now: the transcripts indexed, under the roots indexed (the
-    /// current roots, each once), those walked to the end this time, and `watermark`.
     pub(super) fn prune_options(&self, watermark: Watermark) -> PruneOptions {
         PruneOptions {
             live_paths: self.entries.keys().cloned().collect(),
@@ -428,8 +415,6 @@ impl SourceSnapshot {
     }
 }
 
-/// The records of every transcript written since `window_start_ms`, except those holding only
-/// records the usage history already has.
 pub(super) fn prepare_sources(
     snapshot: &SourceSnapshot,
     scan_cache: &mut ScanCache,
@@ -445,8 +430,6 @@ pub(super) fn prepare_sources(
         entry.mtime_ms >= window_start_ms
             && !watermark.holds_only_folded(entry.mtime_ms, entry.max_record_ms)
     }) {
-        // A parse of this provider's transcript: current, or stale and kept in reserve for a read
-        // that fails.
         let cached = scan_cache
             .get(&entry.path)
             .filter(|cached| cached.provider == entry.provider);
@@ -475,13 +458,10 @@ pub(super) fn prepare_sources(
                         scan_cache_dirty = true;
                         Some(records)
                     }
-                    // Changed since the inventory, or still being written (a live session): what
-                    // it holds now counts, uncached, and the read is not final.
                     TranscriptRead::Stable { records, .. } | TranscriptRead::Moving(records) => {
                         complete = false;
                         Some(Arc::new(records))
                     }
-                    // Unreadable right now: its last cached parse, if any, for this read only.
                     TranscriptRead::Failed => {
                         complete = false;
                         cached.map(|cached| Arc::clone(&cached.records))
@@ -532,9 +512,6 @@ fn inspect_changed_file(
     scan_cache_dirty: &mut bool,
     watermark: Watermark,
 ) -> (SourceEntry, bool) {
-    // Everything it holds is already folded: its bounds are never needed, so it is not read. This
-    // comes before the scan cache, so the entry, and the signature over it, is the same whether or
-    // not the cache still holds a parse of it.
     if watermark.holds_only_folded(observed.mtime_ms, None) {
         return (
             SourceEntry {
@@ -607,19 +584,14 @@ fn inspect_changed_file(
     )
 }
 
-/// What reading one transcript saw.
 #[derive(Debug)]
 enum TranscriptRead {
-    /// The file held still across a parse: its identity and the records it holds.
     Stable {
         size: u64,
         mtime_ms: i64,
         records: Vec<UsageRecord>,
     },
-    /// The file never held still across a parse (a live session writing), or went away after one:
-    /// the records of the last parse that succeeded, everything the file held up to that point.
     Moving(Vec<UsageRecord>),
-    /// No parse of the file succeeded.
     Failed,
 }
 

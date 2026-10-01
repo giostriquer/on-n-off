@@ -1,8 +1,3 @@
-//! The Windows notch window: one transparent, always-on-top, non-activating layered
-//! window on a dedicated thread, owning the hover/pin state machine (the
-//! `PanelController` port) and presenting plans from `win_paint` through
-//! `UpdateLayeredWindow`.
-
 #![allow(unsafe_code)]
 
 use super::model::{NotchSettings, ShowMode};
@@ -38,8 +33,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOZORDER, ULW_ALPHA,
 };
 
-/// What the window asks the host to do; the macOS `ClientAction` set plus the two
-/// row affordances the macOS helper performs itself (open in browser, copy).
 #[derive(Clone, Debug, PartialEq)]
 pub enum WinAction {
     Refresh,
@@ -50,12 +43,9 @@ pub enum WinAction {
     CopyReviewRequest { title: String, url: String },
 }
 
-/// Messages from the host thread.
 #[derive(Debug)]
 pub enum WindowMsg {
-    /// The full content, when it changed or the heartbeat says it is time.
     Data(RailData),
-    /// The supervisor's liveness probe; carries no payload.
     Ping,
     Shutdown,
 }
@@ -65,21 +55,17 @@ const HOVER_CLOSE_GRACE: Duration = Duration::from_millis(350);
 const POINTER_POLL: Duration = Duration::from_millis(80);
 const SCREEN_POLL: Duration = Duration::from_millis(500);
 
-/// The hover/pin state machine, pure enough to drive from tests with a fake clock.
 #[derive(Debug)]
 pub struct Machine {
     pub data: Option<RailData>,
     pub displays: Vec<Display>,
     pub cursor_inside: bool,
     pub hover: Hover,
-    /// The cell pinned by a click; stays open until re-clicked or the pointer leaves.
     pub pinned: Option<usize>,
-    /// The cell the pointer is over, awaiting the hover-open delay.
     hovered_cell: Option<usize>,
     open_at: Option<Instant>,
     last_inside: Instant,
     suppressed: bool,
-    /// Bumped whenever the presented frame should change.
     dirty: bool,
 }
 
@@ -105,9 +91,6 @@ impl Machine {
         }
     }
 
-    /// A new host snapshot. A layout-affecting settings change drops hover state, like
-    /// the macOS helper does when panels move. Identical payloads are ignored so the
-    /// supervisor's liveness probe can ride the same channel freely.
     pub fn accept(&mut self, data: RailData) {
         if self.data.as_ref() == Some(&data) {
             return;
@@ -153,7 +136,6 @@ impl Machine {
         Some(&self.data.as_ref()?.settings)
     }
 
-    /// The selected display's scale, for converting cursor pixels to points.
     pub fn scale(&self) -> f64 {
         let Some(settings) = self.settings() else {
             return 1.0;
@@ -168,7 +150,6 @@ impl Machine {
             .unwrap_or(1.0)
     }
 
-    /// The plan for the current state, or `None` while hidden.
     pub fn plan(&self) -> Option<Plan> {
         if self.suppressed {
             return None;
@@ -184,10 +165,6 @@ impl Machine {
         std::mem::take(&mut self.dirty)
     }
 
-    /// Closes a pinned popover and the hover behind it, the way a click outside the
-    /// overlay does. Every other transition on this machine is a method with a test, and
-    /// this one has to be too: it is the one the outside-click hook drives, and the hook
-    /// is the part that has already been wrong once.
     pub fn dismiss(&mut self) {
         if self.pinned.is_none() && self.hover.active.is_none() && self.hovered_cell.is_none() {
             return;
@@ -198,14 +175,9 @@ impl Machine {
         self.dirty = true;
     }
 
-    /// One pointer sample, in window-local points. The cursor may be outside the
-    /// window (sampled globally while the rail is open, mirroring the macOS
-    /// controller's `NSEvent.mouseLocation` sampling).
     pub fn cursor_at(&mut self, x: f64, y: f64, inside: bool, now: Instant) {
         self.cursor_inside = inside;
         if !inside {
-            // A pending hover-open must not fire once the pointer is gone, and the
-            // cap's pin fades with it (the mac cap only lights while hovered).
             self.hovered_cell = None;
             self.open_at = None;
             self.clear_cap_highlight();
@@ -220,7 +192,6 @@ impl Machine {
             return;
         };
         if !self.hover.rail_open && plan.pill.is_some() {
-            // The strip was reached: open the rail (the `pillEntered` port).
             self.hover.rail_open = true;
             self.dirty = true;
         }
@@ -236,7 +207,6 @@ impl Machine {
         if cell != self.hovered_cell {
             self.hovered_cell = cell;
             if self.pinned.is_some() {
-                // Hovering another cell while pinned moves the pin there at once.
                 self.pinned = cell;
                 self.hover.active = cell;
                 self.dirty = true;
@@ -246,14 +216,10 @@ impl Machine {
         }
     }
 
-    /// The pointer left the window's surface. State clears through the grace timer,
-    /// not here: present() moves the window, which floods enter/leave pairs, so the
-    /// pointer poll is the source of truth (the macOS controller's approach).
     pub fn cursor_left(&mut self, _now: Instant) {
         self.cursor_inside = false;
     }
 
-    /// Puts the cap's pin out; the highlight only follows a pointer on the ear.
     fn clear_cap_highlight(&mut self) {
         if self.hover.cap_hovered {
             self.hover.cap_hovered = false;
@@ -261,7 +227,6 @@ impl Machine {
         }
     }
 
-    /// Advances the timers: hover-open delay, close grace, pinned-pointer watch.
     pub fn advance(&mut self, now: Instant) {
         if let Some(at) = self.open_at {
             if now >= at {
@@ -278,8 +243,6 @@ impl Machine {
         }
         let elapsed = now.saturating_duration_since(self.last_inside);
         if elapsed > HOVER_CLOSE_GRACE && self.pinned.is_none() {
-            // A pinned popover stays open until an outside click (the low-level mouse
-            // hook below) or a click on its cell; only hover-open popovers close here.
             self.clear_cap_highlight();
             if self.hover.active.is_some() {
                 self.hover.active = None;
@@ -293,7 +256,6 @@ impl Machine {
     }
 
     fn pointer_on_surfaces(&self) -> bool {
-        // The window thread feeds pointer samples; surfaces = the cursor is inside.
         self.cursor_inside
     }
 
@@ -305,15 +267,10 @@ impl Machine {
     fn rail_open(&self) -> bool {
         self.always_shown() || self.hover.rail_open
     }
-    /// Whether the loop should sample the pointer on its short cadence. tao reports no
-    /// `CursorMoved` for this non-activating layered window, so the poll is the only
-    /// pointer news there is: it has to run while the collapsed strip is showing too,
-    /// or reaching the strip never opens the rail.
     pub fn pointer_poll_active(&self) -> bool {
         !self.suppressed && self.settings().is_some_and(|settings| settings.enabled)
     }
 
-    /// A click in window-local points; returns the actions it asks for.
     pub fn clicked(&mut self, x: f64, y: f64) -> Vec<WinAction> {
         let Some(plan) = self.plan() else {
             return Vec::new();
@@ -365,7 +322,6 @@ impl Machine {
                         }
                         None => WinAction::OpenLimits,
                     };
-                    // The macOS helper dismisses after the action.
                     self.pinned = None;
                     self.hover.active = None;
                     self.dirty = true;
@@ -376,7 +332,6 @@ impl Machine {
         Vec::new()
     }
 
-    /// The next instant something can change, for the event loop's `WaitUntil`.
     pub fn deadline(&self, now: Instant) -> Instant {
         let mut deadline = now + SCREEN_POLL;
         if self.pointer_poll_active() {
@@ -393,8 +348,6 @@ impl Machine {
     }
 }
 
-/// Spawns the window thread; the returned sender feeds it, and a dropped receiver on
-/// our side tells the host the thread died.
 pub fn spawn(action_tx: Sender<WinAction>) -> Sender<WindowMsg> {
     let (msg_tx, msg_rx) = std::sync::mpsc::channel::<WindowMsg>();
     thread::Builder::new()
@@ -404,11 +357,6 @@ pub fn spawn(action_tx: Sender<WinAction>) -> Sender<WindowMsg> {
     msg_tx
 }
 
-/// The low-level mouse hook, installed once for the overlay's lifetime: while a
-/// popover is pinned, an outside click dismisses it, the way the macOS helper's
-/// global event monitor does. The procedure stays lock-free — it reads two atomics —
-/// because Windows invokes it synchronously on the window thread for every system
-/// mouse move; a slow hook starves input.
 static OUTSIDE_CLICK_HOOK: Mutex<Option<SendHook>> = Mutex::new(None);
 static OUTSIDE_CLICK_HWND: AtomicIsize = AtomicIsize::new(0);
 static OUTSIDE_CLICK_PENDING: AtomicBool = AtomicBool::new(false);
@@ -416,19 +364,11 @@ static OUTSIDE_CLICK_PENDING: AtomicBool = AtomicBool::new(false);
 struct SendHook(windows::Win32::UI::WindowsAndMessaging::HHOOK);
 unsafe impl Send for SendHook {}
 
-/// Installs the hook, if it is not already installed, and points it at `hwnd`.
-///
-/// Only a pinned popover needs it, and it costs the whole session: Windows calls the
-/// procedure synchronously on this thread for every mouse move anywhere. So it is armed
-/// on the pin and disarmed off it, by the thread that owns the window — a hook belongs to
-/// the thread that installed it, and one left behind by a thread that has since died is
-/// dead with it.
 fn arm_outside_click_hook(hwnd: isize) {
     let mut guard = OUTSIDE_CLICK_HOOK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     if guard.is_none() {
-        // SAFETY: Windows invokes the procedure on this thread while it pumps messages.
         match unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), None, 0) } {
             Ok(hook) => *guard = Some(SendHook(hook)),
             Err(_) => return,
@@ -489,13 +429,10 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
         .expect("build the side notch window");
 
     let hwnd = window.hwnd();
-    // tao rewrites GWL_EXSTYLE whenever its own flags diff, so layering goes last.
     window.set_visible(true);
     window.set_visible(false);
     unsafe { ensure_layered(hwnd) };
     disable_window_chrome(hwnd);
-    // A previous window thread that panicked leaves its handle in the static; Windows has
-    // already torn the hook down with that thread, so clear the record before arming.
     disarm_outside_click_hook();
 
     let mut machine = Machine::new();
@@ -505,7 +442,6 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
     event_loop.run(move |event, _, control| {
         let mut exit = false;
         match event {
-            // Fires on every wake (init, user events, timers) — the periodic slot.
             Event::NewEvents(_) => {
                 while let Ok(msg) = msg_rx.try_recv() {
                     match msg {
@@ -517,7 +453,6 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
                         WindowMsg::Ping => {}
                     }
                 }
-                // Periodic screen work: displays re-enumeration and fullscreen check.
                 if last_poll.elapsed() >= SCREEN_POLL {
                     last_poll = Instant::now();
                     match super::win_displays::read() {
@@ -531,11 +466,6 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
                     }
                     machine.set_suppressed(fullscreen_foreground(&machine, HWND(hwnd as *mut _)));
                 }
-                // Global pointer sampling while the rail shows: the cursor can sit on the
-
-                // popover gap or the window may have just moved, so the poll - not the
-
-                // enter/leave events - decides the hover state.
 
                 if machine.pointer_poll_active() {
                     let scale = machine.scale();
@@ -545,9 +475,6 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
                     }
                 }
                 machine.advance(Instant::now());
-                // The hook exists only while a popover is pinned, which is the only state
-                // an outside click has to reach; it sets a flag, and the dismissal happens
-                // here, on this thread.
                 if machine.pinned.is_some() {
                     arm_outside_click_hook(hwnd);
                 } else {
@@ -588,7 +515,6 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
                     },
                 ..
             } if window_id == window.id() => {
-                // The position of the press is the last known cursor position.
                 let mut point = windows::Win32::Foundation::POINT::default();
                 unsafe {
                     let _ = GetCursorPos(&mut point);
@@ -616,8 +542,6 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
         if machine.take_dirty() {
             match machine.plan() {
                 Some(plan) if !plan.cells.is_empty() => {
-                    // UpdateLayeredWindow carries the new origin and size atomically
-                    // with the pixels; a separate SetWindowPos would flash a frame.
                     present(&window, &plan);
                     if !was_visible {
                         unsafe {
@@ -640,7 +564,6 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
         *control = ControlFlow::WaitUntil(machine.deadline(Instant::now()));
         unsafe {
             if !IsWindowVisible(HWND(hwnd as *mut _)).as_bool() {
-                // Keep the loop light while hidden.
                 *control = ControlFlow::WaitUntil(Instant::now() + SCREEN_POLL);
             }
         }
@@ -677,10 +600,6 @@ fn window_position(hwnd: isize) -> (i32, i32) {
     (rect.left, rect.top)
 }
 
-/// The foreground window covering the notch's own display edge to edge (and not being
-/// the shell) means a fullscreen app: the notch hides instead of floating over it.
-/// Fullscreen activity on other monitors must not hide this rail, which is why the
-/// check is scoped to the selected display.
 fn fullscreen_foreground(machine: &Machine, own: HWND) -> bool {
     let Some(settings) = machine.settings() else {
         return false;
@@ -719,12 +638,6 @@ fn fullscreen_foreground(machine: &Machine, own: HWND) -> bool {
     rect.left <= mx && rect.top <= my && rect.right >= mx + mw && rect.bottom >= my + mh
 }
 
-/// The overlay's window styles. tao leaves an undecorated window with a caption and a
-/// resize frame; Windows then keeps an invisible border on the left, right and bottom,
-/// so the client area — and with it the layered surface — is inset by the border width
-/// and the desktop compositor draws a shadow and a top hairline around the remainder.
-/// A bare popup has no non-client frame, so the rail fills its window rect and reaches
-/// the screen edge.
 pub(super) fn overlay_style(current: u32) -> u32 {
     use windows::Win32::UI::WindowsAndMessaging::{
         WS_BORDER, WS_CAPTION, WS_DLGFRAME, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
@@ -740,8 +653,6 @@ pub(super) fn overlay_style(current: u32) -> u32 {
     (current & !frame) | WS_POPUP.0
 }
 
-/// Re-asserts the layered bit and the popup frame; tao rewrites the style words
-/// whenever its own flags diff, so this runs before every present.
 unsafe fn ensure_layered(hwnd: isize) {
     let window = HWND(hwnd as *mut _);
     let ex = GetWindowLongPtrW(window, GWL_EXSTYLE);
@@ -767,9 +678,6 @@ unsafe fn ensure_layered(hwnd: isize) {
     }
 }
 
-/// Windows 11 rounds every top-level window's corners and draws a 1 px border — on a
-/// transparent overlay that chrome reads as a rounded rectangle floating over the rail.
-/// Square corners and no border, so the silhouette is the only visible shape.
 fn disable_window_chrome(hwnd: isize) {
     use windows::Win32::Graphics::Dwm::{
         DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
@@ -793,7 +701,6 @@ fn disable_window_chrome(hwnd: isize) {
     }
 }
 
-/// Premultiplied RGBA (tiny-skia) -> layered window via UpdateLayeredWindow.
 fn present(window: &Window, plan: &Plan) {
     let pixmap = win_paint::render(plan);
     present_pixmap(window.hwnd(), &pixmap, plan);

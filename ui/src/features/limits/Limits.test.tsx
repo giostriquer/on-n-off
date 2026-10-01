@@ -120,7 +120,6 @@ describe("Limits", () => {
     expect(within(remembered).getByRole("button", { name: "Sign in" })).toBeTruthy();
     fireEvent.click(trigger);
     expect(screen.getByRole("group", {name: "Actions for personal@codex.example"})).toBeTruthy();
-    // The reversible action comes first and takes focus; Remove account, which asks first, is last.
     expect(screen.getByRole("button", {name: "Archive account"})).toHaveFocus();
     expect(screen.getByRole("button", {name: "Remove account"})).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement!, {key: "Escape"});
@@ -160,22 +159,17 @@ describe("Limits", () => {
       (within(codex).getByRole("meter", { name: "Weekly · all models" }).firstElementChild as HTMLElement).style
         .backgroundColor,
     ).toBe("color-mix(in srgb, var(--silkscreen), var(--trip) 44.7%)");
-    // Credits read as a row under the windows, not a chip crowding the header.
     const header = codex.querySelector("header")!;
     expect(within(header).queryByText(/credits/i)).toBeNull();
     expect(header.textContent).not.toContain("12.5");
     expect(within(codex).getByRole("definition", { name: "Credits" }).textContent).toBe("12.5");
-    // A current-account observation is still historical after its own reset instant passes.
     const luna = within(codex).getByRole("meter", { name: "Weekly · GPT-5.6-Luna" });
     expect(luna.getAttribute("aria-valuenow")).toBe("0");
-    // The renewed window reads as the zero it is, in ordinary ink.
     expect(within(codex).getByText("0%").style.color).toBe("");
     expect(within(codex).queryByText("—")).toBeNull();
-    // The reset is a fact worth stating: when it happened. What it held before is not.
     expect(within(codex).getByText(/^reset 1m ago · \w{3} \d\d:\d\d$/)).toBeTruthy();
     expect(within(codex).queryByText(/last seen/)).toBeNull();
     expect(within(codex).queryByText(/Current usage unknown/)).toBeNull();
-    // Every meter simply speaks its percentage; there is no reset voice-over.
     expect(luna.getAttribute("aria-valuetext")).toBeNull();
     expect(weekly.getAttribute("aria-valuetext")).toBeNull();
     expect(within(codex).getAllByText(/Latest observation/)).toHaveLength(1);
@@ -183,13 +177,10 @@ describe("Limits", () => {
     expect(within(codex).getAllByText(/resets in/)).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
     expect(screen.getByRole("heading", { name: "Subscription limits" })).toBeTruthy();
-    // The caption carries the poll interval the user configured, the way Pull requests does.
     expect(screen.getByText("every 5 minutes")).toBeTruthy();
 
   });
 
-  // The fill used to step to `--warn` at 70 %, which is lighter than the accent it replaced. It now
-  // blends toward `--trip`, so a meter inside the band carries a mix and never the amber.
   it("hardens a high-usage fill toward red instead of stepping to amber", async () => {
     answer([okClaude()], [okCodex()]);
     renderLimits();
@@ -267,7 +258,6 @@ describe("Limits", () => {
     fireEvent.click(remove);
     fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
     await waitFor(() => expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex", "acct-personal", undefined));
-    // The card only goes once the backend has actually forgotten it.
     expect(card("Codex limits · personal@codex.example")).toBeTruthy();
     await act(async () => {
       pending.resolve();
@@ -284,7 +274,6 @@ describe("Limits", () => {
     const current = card("Codex limits");
     expect(within(current).getByText("Sign in with `codex` to see subscription limits.")).toBeTruthy();
     expect(current.getAttribute("data-status")).toBe("signedOut");
-    // A read with no account has no account to act on.
     expect(within(current).queryByRole("button", { name: /More actions|Sign in/ })).toBeNull();
   });
 
@@ -320,11 +309,9 @@ describe("Limits", () => {
     const current = await waitFor(() => card("Codex limits · work@codex.example"));
     const button = await within(current).findByRole("button", { name: "Use banked reset" });
     expect(button.closest("footer")).toBe(within(current).getByRole("button", { name: "Save account" }).closest("footer"));
-    // Like Save account, it waits until the native login is confirmed to be this card's account.
     expect(button).toHaveProperty("disabled", true);
     expect(within(current).getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
     expect(within(current).getByRole("definition", { name: "Paid reset" })).toHaveTextContent("$8.00");
-    // on-n-off spends only Codex resets.
     const claude = card("Claude limits · me@claude.example");
     expect(within(claude).queryByRole("button", { name: "Use banked reset" })).toBeNull();
   });
@@ -333,12 +320,10 @@ describe("Limits", () => {
     const spent = okCodex({ windows: okCodex().windows.map((window) => ({ ...window, usedPercent: 99 })), resetCredits: { availableCount: 1, nextExpiresAt: null } });
     answer([okClaude()], [spent]);
     consumeCodexResetCredit.mockImplementation(async () => {
-      // The backend replaces the shared Codex read before it answers, then announces it.
       answer([okClaude()], [okCodex({ windows: okCodex().windows.map((window) => ({ ...window, usedPercent: 0 })), resetCredits: { availableCount: 0, nextExpiresAt: null } })]);
       for (const handler of sharedReadHandlers) handler({ source: "limits:codex" });
       return "reset";
     });
-    // The native login is the card's account, so the account controls leave the button usable.
     readAccounts.mockResolvedValue({ profiles: [], nativeObservationId: "acct-work", nativeAccount: null, recoveryRequired: false, notice: null });
     renderLimits();
 
@@ -390,7 +375,6 @@ describe("Limits", () => {
     expect(claude.getAttribute("data-status")).toBe("ok");
     expect(within(claude).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("12");
 
-    // Force is one-shot: a background refetch after the button goes back to a plain read.
     await act(async () => {
       await view.client.invalidateQueries({ queryKey: ["limits"] });
     });
@@ -546,7 +530,6 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
  fireEvent.click(screen.getByRole("button",{name:"Confirm removal"}));
  await waitFor(()=>expect(accountAction).toHaveBeenCalled());
  await waitFor(()=>expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","profile:user-team",undefined));
- // Legacy history goes first, so a partial failure keeps the scoped observation available.
  expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex","team","shared@example.com"],["codex","profile:user-team",undefined]]);
  await act(async()=>{await client.invalidateQueries({queryKey:["limits","codex"]});});
  expect(screen.queryByRole("region",{name:"Codex limits · shared@example.com"})).toBeNull();
@@ -605,7 +588,6 @@ it("says a remembered reading is a remembered account, and no saved profile's re
   ]);
   renderLimits();
   const remembered = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
-  // Body text, as "Refresh paused." is: the header keeps its room for the account's name.
   const status = within(remembered).getByText("Remembered account.");
   expect(remembered.querySelector("header")!.contains(status)).toBe(false);
   expect(within(card("Codex limits · work@codex.example")).queryByText(/Remembered account/)).toBeNull();
@@ -643,7 +625,6 @@ it("shows the copy the card model gives an empty card", async () => {
 describe("archiving", () => {
   it("archives a card from its menu without asking and lists it under the column's archived accounts", async () => {
     const spare = staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } });
-    // Codex is signed out, so its current entry names no account for the archive to look at.
     const signedOut = statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.");
     answer([okClaude()], [signedOut, staleCodex(), spare]);
     renderLimits();
@@ -768,9 +749,6 @@ describe("archiving", () => {
     expect(setLimitsArchived).not.toHaveBeenCalled();
   });
 
-  // While the account list is pending (a Keychain prompt) or failed (an unreadable vault) no card
-  // knows its saved login, so Remove account would forget the snapshots and leave the login saved,
-  // to come back unarchived once the vault opens. The rows wait, as a card's controls do.
   it.each(["pending", "failed", "recovering"] as const)("keeps an archived row's actions disabled while the account list is %s", async (state) => {
     const denied = { kind: "message", message: "Could not unlock saved accounts.", path: null };
     readAccounts.mockImplementation((provider: AgentId) => state === "pending" ? new Promise(() => {})
@@ -786,7 +764,6 @@ describe("archiving", () => {
     expect(screen.getByRole("button", { name: "Remove account personal@codex.example" })).toBeDisabled();
   });
 
-  /** personal@codex.example as a saved login whose subscription ended without renewing, beside `others`. */
   function answerLapsed(others: ProviderLimits[] = []) {
     const profile = { id: "lapsed", observationId: "acct-personal", identity: { provider: "codex" as const, userId: "lapsed", workspaceId: "team" }, email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false };
     const lapsed = staleCodex({ savedProfile: true, subscription: { activeUntil: "2026-08-10T00:00:00Z", willRenew: false, checkedAt: NOW } });
@@ -811,7 +788,6 @@ describe("archiving", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
   });
 
-  // An archived list is already there, so focus has somewhere it could wrongly go.
   it.each(["menu", "footer"] as const)("leaves focus where it was when archiving from the %s fails", async (from) => {
     setLimitsArchived.mockRejectedValue({ kind: "message", message: "disk full", path: null });
     answerLapsed([staleCodex({ account: { id: "acct-old", label: "old@codex.example" }, archived: true })]);
@@ -844,7 +820,6 @@ describe("archiving", () => {
 
     footer.focus();
     fireEvent.click(footer);
-    // aria-disabled, not disabled: a browser drops focus to the page from a button that disables.
     expect(footer).toHaveAttribute("aria-disabled", "true");
     expect(footer).toHaveAttribute("aria-busy", "true");
     expect(footer).toBeEnabled();

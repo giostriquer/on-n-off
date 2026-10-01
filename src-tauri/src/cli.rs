@@ -41,17 +41,12 @@ impl AgentCli {
         self.run_timed(&refs, timeout)
     }
 
-    /// Build a provider CLI command with the same binary resolution and GUI-safe `PATH` as the
-    /// ordinary bounded runner. Interactive protocols can configure stdio and lifecycle handling
-    /// before spawning it.
     pub(crate) fn command(&self) -> Command {
         let mut command = Command::new(
             resolve_cli_binary(&self.binary)
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_else(|| self.binary.clone()),
         );
-        // Node-based CLIs are `#!/usr/bin/env node` shims: the child needs the same PATH the
-        // CLI was found on, not the (possibly minimal) PATH a GUI app inherited.
         if let Some(path) = cli_search_path_value() {
             command.env("PATH", path);
         }

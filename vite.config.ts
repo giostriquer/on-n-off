@@ -16,8 +16,6 @@ export default defineConfig({
   },
   clearScreen: false,
   optimizeDeps: {
-    // Dynamically imported on demand; listing them avoids a late re-optimisation (and the
-    // "Outdated Optimize Dep" reload) the first time a screen reaches for them.
     include: ["@tauri-apps/api/app", "@tauri-apps/plugin-updater", "@tauri-apps/plugin-process"],
   },
   server: {

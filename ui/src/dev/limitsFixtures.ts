@@ -3,14 +3,6 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
 
-/**
- * Synthetic subscription limits for the UI harness, dated against the harness clock
- * (`FIXTURE_CLOCK` in scripts/ui-shots.mjs): one live account per provider, plus a saved Codex
- * profile whose windows have both reset since it was last observed. A card of a saved profile
- * Limits polls says so (`savedProfile`); one that does not is a remembered reading.
- * `LIMITS_SCENARIOS` holds every `?mock=<scenario>` that changes what the Limits commands answer.
- */
-
 const NOW = Date.parse("2026-08-24T20:00:00Z");
 
 function at(offsetMinutes: number): string {
@@ -62,11 +54,6 @@ const CODEX: ProviderLimits[] = [
   },
 ];
 
-/**
- * `?mock=subscriptionBadges`: one Codex card per state of the term badge, from a plan that renews
- * to one whose end has passed, with each note, and one card the endpoint never answered for, which
- * has only the login token's date.
- */
 function subscriptionBadgesCodex(): ProviderLimits[] {
   const template = { ...CODEX[0], windows: CODEX[0].windows.filter(window => window.kind === "weekly"), credits: null };
   const cases: Array<[string, ProviderLimits["subscription"]]> = [
@@ -88,7 +75,6 @@ function subscriptionBadgesCodex(): ProviderLimits[] {
   }));
 }
 
-/** A saved Claude account whose five-hour session has not started. */
 function claudeWithoutReset(): ProviderLimits[] {
   return [CLAUDE[0], {
     ...CLAUDE[0],
@@ -101,7 +87,6 @@ function claudeWithoutReset(): ProviderLimits[] {
   }];
 }
 
-/** A saved Claude account whose read reported no weekly window: its card leads with nothing. */
 function claudeWithoutWeekly(): ProviderLimits[] {
   return [CLAUDE[0], {
     ...CLAUDE[0],
@@ -112,17 +97,6 @@ function claudeWithoutWeekly(): ProviderLimits[] {
   }];
 }
 
-/**
- * `?mock=limitsBand`: one account per rung of the usage ramp, for both providers.
- *
- * The ordinary fixtures all sit well below 70 %, so the band where a meter hardens toward red is
- * invisible in a capture — which is how an amber step that made a filling meter go paler survived
- * review. These windows walk 50 / 75 / 85 / 95 % so the whole ramp is on screen at once.
- *
- * Codex is here as well as Claude because its accent is the one that flips with the theme
- * (`var(--silkscreen)`: near-white on dark, near-black on light), so it is the arm that shows what
- * the ramp does from each end. Claude's `#d97757` is the same literal in both themes.
- */
 const BAND = [50, 75, 85, 95];
 
 function band(source: ProviderLimits): ProviderLimits[] {
@@ -137,13 +111,6 @@ function band(source: ProviderLimits): ProviderLimits[] {
   }));
 }
 
-/**
- * `?mock=limitsOrder`: five Claude accounts listed in the order the backend hands them over, which
- * the screen must not keep. The active login comes first whatever its usage; then the two with
- * usage left, the Max ×20 at 30% ahead of the untouched-looking Max ×5 because its percentage is
- * worth four times as much; then the two that are out of usage, the one usable again in forty
- * minutes ahead of the one waiting four days for its weekly window.
- */
 function limitsOrderClaude(): ProviderLimits[] {
   const source = CLAUDE[0];
   const rung = (id: string, label: string, plan: string, weekly: number, session: number, weeklyResetsIn: number, sessionResetsIn: number, currentAccount = false): ProviderLimits => ({
@@ -172,11 +139,6 @@ function limitsBandCodex(): ProviderLimits[] {
   return band(CODEX[0]);
 }
 
-/**
- * `?mock=bankedResets`: the signed-in Codex account has two banked resets, each listed with when it
- * lapses, and its limit used up, so one can be spent; the saved account reports the one it had when
- * last read. `?mock=bankedResetsEarly` is the same with 60% of the week left, so none can be yet.
- */
 function bankedResetsCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
     ...entry,
@@ -190,17 +152,11 @@ function bankedResetsCodex(): ProviderLimits[] {
           ],
         }
       : { availableCount: 1, nextExpiresAt: null },
-    // Codex offers a paid reset only while an account sits at its limit, so the live card is at 100%.
     windows: entry.currentAccount ? entry.windows.map((window) => ({ ...window, usedPercent: 100 })) : entry.windows,
     resetOffer: entry.currentAccount ? { price: { currency: "USD", amountMinorUnits: 800 } } : null,
   }));
 }
 
-/**
- * `?mock=workspaceCredits` on Codex: two business workspace members. The live one has used part of
- * its share of the workspace's credits; the saved one has used all of it. Both own balances read 0,
- * as they do in a workspace.
- */
 function workspaceCreditsCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
     ...entry,
@@ -212,10 +168,6 @@ function workspaceCreditsCodex(): ProviderLimits[] {
   }));
 }
 
-/**
- * `?mock=creditsSpent` on Codex: two business workspace members without a per-member cap, so Codex
- * reports no share, only what each spent. Their own balances read 0, which the card leaves out.
- */
 function creditsSpentCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
     ...entry,
@@ -227,10 +179,6 @@ function creditsSpentCodex(): ProviderLimits[] {
   }));
 }
 
-/**
- * `?mock=sameEmailWorkspaces`: one email signed in to a personal and a business workspace, which
- * the cards tell apart by plan.
- */
 function sameEmailWorkspacesCodex(): ProviderLimits[] {
   return [["personal", "prolite"], ["business", "self_serve_business_prolite"]].map(([id, plan], index) => ({
     ...CODEX[0],
@@ -241,7 +189,6 @@ function sameEmailWorkspacesCodex(): ProviderLimits[] {
   }));
 }
 
-/** `?mock=sameEmailWorkspaces`: both workspaces saved under the one email, the personal one in use. */
 function sameEmailWorkspacesAccounts(): AccountsReading {
   return {
     profiles: [["personal", "0d6c1f3e-5b2a-4c8e-9f10-2a7b3c4d5e61"], ["business", "7e9a2b4c-1d3f-4a5b-8c6d-9e0f1a2b3c47"]].map(([id, workspaceId], index) => ({
@@ -252,10 +199,6 @@ function sameEmailWorkspacesAccounts(): AccountsReading {
   };
 }
 
-/**
- * `?mock=savedRefreshPaused`: the live account, and a saved one whose last read failed, so the card
- * keeps its last reading.
- */
 function savedRefreshPaused([live]: ProviderLimits[]): ProviderLimits[] {
   return [live, {
     ...live, currentAccount: false, savedProfile: true, status: "failed", account: { id: `${live.provider}-saved`, label: "other@example.com" },
@@ -263,11 +206,6 @@ function savedRefreshPaused([live]: ProviderLimits[]): ProviderLimits[] {
   }];
 }
 
-/**
- * `?mock=accountDuplicate`: a saved Codex login whose history an older app version wrote under its
- * workspace id, without the legacyId that ties it to the scoped reading. Signing in again
- * (`addAccount`) brings the scoped reading, which the card then merges the history into.
- */
 const DUPLICATE_WORKSPACE = "ca292064-c3f4-453c-b15a-43ef63c46478";
 
 function accountDuplicate(): LimitsScenario {
@@ -281,7 +219,6 @@ function accountDuplicate(): LimitsScenario {
 
 function accountDuplicateCodex(reconnected: boolean): ProviderLimits[] {
   const legacy = { ...CODEX[1], currentAccount: false, savedProfile: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
-  // Older app versions can rewrite the scoped snapshot without its optional legacyId.
   return [CODEX[0], ...(reconnected ? [{ ...legacy,
     account: { id: "profile:shared", label: "shared@example.com" },
     savedProfile: true,
@@ -296,11 +233,6 @@ function accountDuplicateAccounts(): AccountsReading {
   };
 }
 
-/**
- * `?mock=archivedAccounts`: Claude has a saved account and a login that never read archived; Codex a
- * history card no saved login answers for, beside a saved account whose subscription ended without
- * renewing, whose footer offers Archive account. Archive and Unarchive change this page's answers.
- */
 const ARCHIVED_UNREAD: SavedProfile = {
   id: "unread", observationId: "profile:claude-unread", identity: { provider: "claude", userId: "user-former", workspaceId: "Former workspace" },
   label: "former@example.com", email: "former@example.com", category: "Old client", savedAt: "2026-07-01T09:00:00Z", active: false, needsLogin: false,
@@ -327,7 +259,6 @@ function archivedAccounts(): LimitsScenario {
   };
 }
 
-/** The saved accounts every scenario has unless it says otherwise: the live one, and one more. */
 function savedAccounts(agent: AgentId): AccountsReading {
   return {
     profiles: [
@@ -341,7 +272,6 @@ function savedAccounts(agent: AgentId): AccountsReading {
   };
 }
 
-/** Relative to the real clock: the badge hides a date that has passed, whatever the harness clock says. */
 function paidThrough(accountId: string): SubscriptionDate {
   return {
     date: new Date(Date.now() + (accountId === "codex-2" ? 3 : 26) * 86_400_000).toISOString(),
@@ -351,17 +281,13 @@ function paidThrough(accountId: string): SubscriptionDate {
 
 type LimitsProvider = Extract<AgentId, "claude" | "codex">;
 
-/** What one scenario makes the Limits commands answer. Whatever it leaves out answers as `ok` does. */
 export type LimitsScenario = Partial<Record<LimitsProvider, () => ProviderLimits[]>> & {
   accounts?: Partial<Record<LimitsProvider, () => AccountsReading>>;
   codexSubscription?: (accountId: string) => SubscriptionDate | null;
-  /** What starting a sign-in (`add_account`) changes about the scenario's later answers. */
   addAccount?: () => void;
-  /** The accounts the page starts with archived: readings' account ids and saved logins' observation ids. */
   archived?: Partial<Record<LimitsProvider, string[]>>;
 };
 
-/** Each scenario is built afresh per page, so one that changes as it is used starts clean. */
 export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   subscriptionMissing: () => ({ codexSubscription: () => null }),
   subscriptionBadges: () => ({ codex: subscriptionBadgesCodex }),
@@ -389,11 +315,6 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
 
 const OK = { claude: () => CLAUDE, codex: () => CODEX };
 
-/**
- * The Limits commands' answers under `?mock=<name>`; a name that is not a Limits scenario answers as
- * `ok`. Built once per page, which keeps what Archive, Unarchive and Remove account change for that
- * page alone.
- */
 export function limitsScenario(name: string) {
   const chosen: LimitsScenario = Object.hasOwn(LIMITS_SCENARIOS, name) ? LIMITS_SCENARIOS[name]() : {};
   const provider = (agent: unknown) => (agent === "claude" || agent === "codex" ? agent : null);
@@ -405,7 +326,6 @@ export function limitsScenario(name: string) {
       const which = provider(agentId);
       if (!which) return [];
       return (chosen[which] ?? OK[which])().flatMap(entry => {
-        // The signed-in card is a live read, which is never archived and which no forget removes.
         const id = entry.currentAccount ? null : entry.account?.id;
         if (!id) return [entry];
         if (forgotten[which].has(id)) return [];
@@ -436,7 +356,6 @@ export function limitsScenario(name: string) {
         else archived[which].delete(id);
       }
     },
-    /** `forget_limits_snapshot`: the account's snapshot goes, and it is unarchived, as the backend does. */
     forgetSnapshot(agentId: unknown, accountId: unknown) {
       const which = provider(agentId);
       if (!which || typeof accountId !== "string") return;

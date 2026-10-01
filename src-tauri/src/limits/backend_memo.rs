@@ -1,24 +1,15 @@
-//! What a Codex login's reads of ChatGPT's backend remember per account: the last answer, for as
-//! long as one stands, and after a failure when the account may be asked again. `credits_spent`
-//! and `renewal` each keep one, so every such read waits and repeats the same way.
-
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 pub(super) struct PerAccount<T> {
-    /// How long an answer stands before the account is asked again; `None` asks on every read.
     fresh_for: Option<Duration>,
     entries: OnceLock<Mutex<HashMap<String, Entry<T>>>>,
 }
 
 struct Entry<T> {
-    /// The last answer and when it was read.
     fresh: Option<(Instant, T)>,
-    /// When the account may be asked again after a failure, and how many failed in a row.
     failure: Option<(Instant, u32)>,
-    /// How much older a test says the answer is than the clock does. An `Instant` counts from
-    /// boot on Windows, so a test cannot move one back by a day; it adds to the age instead.
     #[cfg(test)]
     aged_by: Duration,
 }
@@ -59,12 +50,6 @@ impl<T: Clone> PerAccount<T> {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// `read`, unless this account's last answer still stands or its last read failed recently.
-    /// The read sits in series with the usage read, and every request is bounded by `http`'s
-    /// timeout, so an endpoint that fails or hangs would otherwise add up to that timeout to every
-    /// refresh. After a failure the account waits a poll interval, doubling with each further
-    /// failure up to an hour, as a saved account's polling does (`accounts/usage.rs`); a success
-    /// clears it. A skipped read is `None`, which the card fills from what it remembers.
     pub(super) fn read_backed_off(
         &self,
         account: &str,
@@ -86,7 +71,6 @@ impl<T: Clone> PerAccount<T> {
                 }
             }
         }
-        // The lock is not held across the request.
         let answer = read();
         let mut entries = self.entries();
         let entry = entries.entry(account.to_string()).or_default();
@@ -111,8 +95,6 @@ impl<T: Clone> PerAccount<T> {
     }
 }
 
-/// How long an account waits after its `count`th failure in a row: one poll interval, doubling with
-/// each further failure up to sixteen intervals, and never more than an hour.
 pub(super) fn backoff_delay(count: u32, interval: Duration) -> Duration {
     interval
         .saturating_mul(1 << count.saturating_sub(1).min(4))
@@ -121,12 +103,10 @@ pub(super) fn backoff_delay(count: u32, interval: Duration) -> Duration {
 
 #[cfg(test)]
 impl<T: Clone> PerAccount<T> {
-    /// Drop what is remembered about `account`, so a test starts from nothing.
     pub(super) fn forget(&self, account: &str) {
         self.entries().remove(account);
     }
 
-    /// Make the account's standing answer `by` older than it is.
     pub(super) fn age_answer(&self, account: &str, by: Duration) {
         if let Some(entry) = self.entries().get_mut(account) {
             entry.aged_by += by;

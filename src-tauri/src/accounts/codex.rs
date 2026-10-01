@@ -1,9 +1,3 @@
-//! The Codex adapter: Codex's half of the accounts seam. It reads a Codex login by Codex's rules
-//! ([`CodexLogin`]): `auth.json` as Codex writes it, whose ID token's claims say who it is. And it
-//! is the account switch's view of Codex's native store ([`CodexNative`]): which home the
-//! environment selects and when account changes defer to the official client, the `codex` it
-//! starts, the read, the write and its verification, and an isolated sign-in. Which backend holds
-//! the login is `codex_store`'s question; this adapter asks it.
 use super::{
     clients::Client,
     codex_store,
@@ -43,7 +37,6 @@ impl super::Adapter for Codex {
         Some("https://auth.openai.com/oauth/token")
     }
 
-    /// Codex's own JSON refresh grant, built and folded by the login and sent by `usage_renew`.
     fn renew_private(&self, login: &Login, now_ms: i64, token_url: &str) -> Result<Login, String> {
         let login = CodexLogin::of(login);
         let reply = usage_renew::grant(token_url, &login.renewal_request()?)
@@ -55,7 +48,6 @@ impl super::Adapter for Codex {
         None
     }
 
-    /// Read whatever the access token's expiry: Codex's backend says whether it still takes it.
     fn read_usage(
         &self,
         identity: &Identity,
@@ -69,7 +61,6 @@ impl super::Adapter for Codex {
         crate::limits::read_saved_codex(identity, token, urls)
     }
 
-    /// Running Codex clients never pick up a replaced login, so they refuse an ordinary switch.
     fn client(&self) -> &'static Client {
         &Client {
             name: "codex",
@@ -79,26 +70,20 @@ impl super::Adapter for Codex {
     }
 }
 
-/// The credentials that override Codex's own login when set in its environment.
 const ENV_CREDENTIALS: [&str; 3] = ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_AUTH_TOKEN"];
 
-/// Where an administrator's managed Codex configuration lives.
 const MANAGED_CONFIG: [&str; 2] = [
     "/etc/codex/requirements.toml",
     "/etc/codex/managed_config.toml",
 ];
 
-/// Codex's native store as the account switch uses it: the user's own, where the environment
-/// puts it ([`CodexNative::resolve`]), or an isolated sign-in's.
 pub(super) struct CodexNative {
     config_home: PathBuf,
     config_file: PathBuf,
-    /// `CODEX_HOME` chose the home, or this is an isolated sign-in's.
     custom: bool,
 }
 
 impl CodexNative {
-    /// The user's store under `home`, as this process's environment places it.
     pub(super) fn resolve(home: &Path) -> Result<Self, String> {
         Self::resolve_from(home, &crate::paths::process_env)
     }
@@ -107,7 +92,6 @@ impl CodexNative {
         home: &Path,
         lookup: &dyn Fn(&str) -> Option<OsString>,
     ) -> Result<Self, String> {
-        // ON_N_OFF_HOME always isolates tests and development from real native homes.
         let disposable = lookup("ON_N_OFF_HOME").is_some();
         let override_home = if disposable {
             None
@@ -128,7 +112,6 @@ impl CodexNative {
         })
     }
 
-    /// A private store in `dir` for one isolated sign-in.
     fn isolated(dir: &Path) -> Result<Self, String> {
         let config_home = dir.join(".codex");
         fs::create_dir_all(&config_home).map_err(|_| "Cannot create isolated login home.")?;
@@ -139,8 +122,6 @@ impl CodexNative {
         })
     }
 
-    /// `preflight` against the environment `env` reads and the managed configuration files at
-    /// `managed`.
     fn preflight_in(
         &self,
         env: &dyn Fn(&str) -> Option<OsString>,
@@ -170,7 +151,6 @@ impl CodexNative {
         Ok(())
     }
 
-    /// A `codex` working in this store's home.
     fn command(&self) -> Command {
         let mut command = native::cli(AgentId::Codex, "codex");
         command.env("CODEX_HOME", &self.config_home);
@@ -178,22 +158,18 @@ impl CodexNative {
         command
     }
 
-    /// `codex logout`.
     fn logout_command(&self) -> Command {
         let mut command = self.command();
         command.arg("logout");
         command
     }
 
-    /// `codex login status`, which succeeds only while a login is signed in.
     fn status_command(&self) -> Command {
         let mut command = self.command();
         command.args(["login", "status"]);
         command
     }
 
-    /// Whether Codex's own signed-in usage read succeeds: its app-server renews and reads the
-    /// login, so on-n-off never renews a native Codex login itself. `force` skips the shared cache.
     fn verify_signed_in(&self, force: bool) -> Result<(), String> {
         let entries = crate::limits::read_limits(AgentId::Codex, force);
         if entries
@@ -208,7 +184,6 @@ impl CodexNative {
 }
 
 impl Native for CodexNative {
-    /// Whatever document the store its config selects holds.
     fn read(&self) -> Result<Option<Login>, String> {
         codex_store::read(&self.config_home)
     }
@@ -221,7 +196,6 @@ impl Native for CodexNative {
         self.write_locked(login, self.lock()?).map(drop)
     }
 
-    /// The login's document, verbatim, to the store its config selects.
     fn write_locked(
         &self,
         login: Option<&Login>,
@@ -267,7 +241,6 @@ impl NativeAccount for CodexNative {
         native::run(&mut self.logout_command(), Duration::from_secs(45)).map(|_| ())
     }
 
-    /// An API-key login has no subscription, so it is no one's: every saved account is read.
     fn subscription(&self) -> Result<Option<Identity>, String> {
         match self.read()? {
             Some(login) if CodexLogin::of(&login).api_key() => Ok(None),
@@ -284,18 +257,15 @@ impl IsolatedSignIn for CodexNative {
         command
     }
 
-    /// Read by Codex's own app-server in `dir`.
     fn first_usage(&self, dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
         crate::limits::login::read_codex(dir, identity)
     }
 
-    /// Codex keeps an isolated login inside its home, so nothing is left outside it.
     fn clean(&self) -> Result<(), String> {
         Ok(())
     }
 }
 
-/// A Codex login read by Codex's rules.
 pub(crate) struct CodexLogin<'a> {
     auth: &'a Value,
     account: &'a Value,
@@ -309,14 +279,12 @@ impl<'a> CodexLogin<'a> {
         }
     }
 
-    /// The access token, for one request header; `None` for a login without one.
     pub(crate) fn access_token(&self) -> Option<AccessToken> {
         model::string(self.auth, "/tokens/access_token")
             .ok()
             .map(AccessToken::new)
     }
 
-    /// Whether this is an API-key login: a subscription login has no key, or a blank one.
     fn api_key(&self) -> bool {
         self.auth
             .get("OPENAI_API_KEY")
@@ -324,7 +292,6 @@ impl<'a> CodexLogin<'a> {
             .is_some_and(|key| !key.trim().is_empty())
     }
 
-    /// The workspace the tokens are for, `tokens.account_id`, when it names one.
     pub(super) fn workspace(&self) -> Option<&'a str> {
         self.auth
             .pointer("/tokens/account_id")
@@ -332,21 +299,14 @@ impl<'a> CodexLogin<'a> {
             .filter(|workspace| !workspace.trim().is_empty())
     }
 
-    /// Whether the login carries an ID token at all, readable or not.
     pub(super) fn has_id_token(&self) -> bool {
         self.auth.pointer("/tokens/id_token").is_some()
     }
 
-    /// The ID token's `https://api.openai.com/auth` claims: who the login is, its workspace and its
-    /// plan, and never a token. `None` when the token has no such claims; an error when there is
-    /// no readable ID token.
     pub(crate) fn auth_claims(&self) -> Result<Option<Value>, String> {
         Ok(self.claims()?.get("https://api.openai.com/auth").cloned())
     }
 
-    /// Whether a running Codex client may renew this login within ten minutes of `now` (Unix
-    /// seconds). Codex renews shortly before expiry, five minutes in its source, and the desktop
-    /// app sooner. An unreadable expiry counts as soon.
     pub(super) fn renews_soon(&self, now: i64) -> bool {
         token_claims(self.auth, "/tokens/access_token")
             .ok()
@@ -354,8 +314,6 @@ impl<'a> CodexLogin<'a> {
             .is_none_or(|expiry| expiry < now + 600)
     }
 
-    /// The grant a private renewal sends: Codex's own JSON refresh grant, as its
-    /// `login/src/oauth/client.rs` sends it.
     pub(super) fn renewal_request(&self) -> Result<Value, String> {
         let token = model::string(self.auth, "/tokens/refresh_token")?;
         Ok(serde_json::json!({
@@ -365,9 +323,6 @@ impl<'a> CodexLogin<'a> {
         }))
     }
 
-    /// This login with the grant's `reply` folded in: the access token, and the refresh and ID
-    /// tokens when the reply carries them, replace the stored ones, `last_refresh` records `now_ms`,
-    /// and every other field is left as it was.
     pub(super) fn renewed(&self, reply: &Value, now_ms: i64) -> Result<Login, String> {
         let mut auth = self.auth.clone();
         let access = model::string(reply, "/access_token")?.to_owned();
@@ -427,7 +382,6 @@ impl LoginView for CodexLogin<'_> {
         })
     }
 
-    /// The ID token's own `email` claim.
     fn email(&self) -> Option<String> {
         self.claims().ok().and_then(|claims| {
             claims
@@ -451,7 +405,6 @@ impl LoginView for CodexLogin<'_> {
     }
 }
 
-/// The payload of the JWT at `pointer`.
 fn token_claims(auth: &Value, pointer: &str) -> Result<Value, String> {
     let token = model::string(auth, pointer)?;
     let encoded = token

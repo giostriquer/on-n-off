@@ -1,36 +1,3 @@
-//! Every hook the providers would run, read out of the files that declare them.
-//!
-//! One module for all of them, the way `mcp.rs` is: the vocabularies differ — Claude fires
-//! `PreToolUse`, Codex `pre_tool_use`, and neither is translated here — but the *shape* is the
-//! same everywhere, `<Event>[] -> { matcher?, hooks: [handler] }`, so one walker serves Claude's
-//! `settings.json`, Codex's `config.toml` and every plugin manifest, and an adapter only says
-//! which plugins are enabled.
-//!
-//! Scope is the user's own configuration and the enabled plugins: `~/.claude/settings.json`,
-//! `~/.codex/hooks.json`, `~/.codex/config.toml`. Project overlays, `settings.local.json` and
-//! managed settings stay out, so a row can never claim a hook that only fires inside one
-//! repository. Claude *merges* hooks across sources rather than letting one override another,
-//! which is why every contributor here simply appends.
-//!
-//! Ids are Codex's `[hooks.state]` key verbatim — `<plugin-id>:<source>:<event>:<group>:<index>`
-//! with the event snake_cased — because Codex keys enablement that way and a second id scheme
-//! would only have to be mapped back to it. Claude's ids have the same shape, with an empty
-//! plugin segment for user settings. A row's id therefore survives every edit that does not move
-//! the entry: it counts within its event, so an event written in above it moves nothing.
-//!
-//! Unique, with one exception the files themselves create: two event keys that snake_case alike
-//! — `Stop` and `stop` in one file — share a key in Codex's own state table too, so they share a
-//! row id here, and switching one off switches both. Both rows are still listed, because
-//! dropping one would hide a hook that does run.
-//!
-//! An adapter calls [`claude_hooks`] or [`codex_hooks`] once, with the enabled plugins it found,
-//! and gets finished rows back; which files that means is this module's business, not the
-//! adapter's. Both run inside the startup scan, so `config.toml` is read once and parsed once
-//! for all three things Codex keeps in it.
-//!
-//! Nothing here fails: a file that will not parse contributes no rows. A screen that cannot be
-//! wrong about one plugin is worth more than one that refuses to draw.
-
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -39,30 +6,20 @@ use serde_json::{Map, Value};
 use crate::dto::HookDto;
 use crate::plugin_files::{plugin_file, read_json, PluginSource};
 
-/// The one Claude settings file in scope (see the module doc).
 const CLAUDE_SETTINGS: &str = "settings.json";
-/// Codex's own hook file, beside `config.toml`.
 const CODEX_HOOKS: &str = "hooks.json";
 const CODEX_CONFIG: &str = "config.toml";
-/// `[hooks.state]` is enablement, not a hook.
 const STATE: &str = "state";
-/// Codex's key for a manifest that holds its events inline instead of naming a file.
 const INLINE: &str = "plugin.json#hooks[0]";
 
-/// What a batch of rows has in common: the segments of their ids that do not vary, and the two
-/// labels the screen shows.
 struct Origin {
     plugin_id: Option<String>,
-    /// The `<source>` segment of every id built here: a plugin-relative file path, or the
-    /// settings file's name.
     key: String,
-    /// Where the row comes from, for a human: the plugin's name, or that same file name.
     label: String,
     description: String,
 }
 
 impl Origin {
-    /// A file the user owns: no plugin, and the file's name serves as both id segment and label.
     fn file(name: &str) -> Self {
         Self {
             plugin_id: None,
@@ -73,10 +30,6 @@ impl Origin {
     }
 }
 
-/// Every hook Claude would run from this home: the user's own `settings.json` first, then each
-/// enabled plugin. Claude *merges* hooks across sources instead of letting one override another,
-/// which is why every contributor appends. There is no state table to apply: Claude has no
-/// per-entry switch.
 pub fn claude_hooks(root: &Path, plugins: &[PluginSource]) -> Vec<HookDto> {
     let mut hooks = claude_settings_hooks(&read_text(&root.join(CLAUDE_SETTINGS)));
     for plugin in plugins {
@@ -85,10 +38,6 @@ pub fn claude_hooks(root: &Path, plugins: &[PluginSource]) -> Vec<HookDto> {
     hooks
 }
 
-/// Every hook Codex would run from this home, with `[hooks.state]` already applied — enablement
-/// is keyed by the row's own id, so it can only be looked up once every source has contributed.
-/// `config.toml` is read once and parsed once here for all three of the things Codex keeps in
-/// it, because this runs inside the startup scan.
 pub fn codex_hooks(root: &Path, plugins: &[PluginSource]) -> Vec<HookDto> {
     let config = parse_toml(&read_text(&root.join(CODEX_CONFIG)));
     let mut hooks = codex_hooks_file(&read_text(&root.join(CODEX_HOOKS)));
@@ -100,19 +49,14 @@ pub fn codex_hooks(root: &Path, plugins: &[PluginSource]) -> Vec<HookDto> {
     hooks
 }
 
-/// A file that is not there, or cannot be read, reads as empty: it contributes no rows, exactly
-/// like one that will not parse.
 fn read_text(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
 
-/// `config.toml` as a value, or `Null` when it will not parse — every reader below asks it for a
-/// key, and `Null` has none of them.
 fn parse_toml(text: &str) -> Value {
     toml::from_str(text).unwrap_or(Value::Null)
 }
 
-/// The `hooks` key of `~/.claude/settings.json`.
 fn claude_settings_hooks(text: &str) -> Vec<HookDto> {
     let Ok(value) = serde_json::from_str::<Value>(text) else {
         return Vec::new();
@@ -123,8 +67,6 @@ fn claude_settings_hooks(text: &str) -> Vec<HookDto> {
     rows(&Origin::file(CLAUDE_SETTINGS), events)
 }
 
-/// One enabled Claude plugin's hooks: the manifest's `hooks` key when it has one, and
-/// `hooks/hooks.json` otherwise, which is where Claude looks when the manifest says nothing.
 fn claude_plugin_hooks(plugin_id: &str, name: &str, root: &Path) -> Vec<HookDto> {
     plugin_hooks(
         plugin_id,
@@ -135,7 +77,6 @@ fn claude_plugin_hooks(plugin_id: &str, name: &str, root: &Path) -> Vec<HookDto>
     )
 }
 
-/// `~/.codex/hooks.json`: a plugin's hook file without a plugin around it.
 fn codex_hooks_file(text: &str) -> Vec<HookDto> {
     let Ok(value) = serde_json::from_str::<Value>(text) else {
         return Vec::new();
@@ -148,8 +89,6 @@ fn codex_hooks_file(text: &str) -> Vec<HookDto> {
     rows(&origin, events)
 }
 
-/// The `[hooks]` table of an already-parsed `~/.codex/config.toml`, plus the legacy top-level
-/// `notify` key.
 fn codex_config_hooks(value: &Value) -> Vec<HookDto> {
     let mut out = Vec::new();
     if let Some(table) = value.get("hooks").and_then(Value::as_object) {
@@ -164,24 +103,10 @@ fn codex_config_hooks(value: &Value) -> Vec<HookDto> {
     out
 }
 
-/// One enabled Codex plugin's hooks, from the manifest's `hooks` key alone. There is no default
-/// file on purpose: a plugin that serves both providers keeps Claude's entries in
-/// `hooks/hooks.json` and names its Codex file separately, so defaulting would list Claude's
-/// events under Codex.
 fn codex_plugin_hooks(plugin_id: &str, name: &str, root: &Path) -> Vec<HookDto> {
     plugin_hooks(plugin_id, name, root, ".codex-plugin", None)
 }
 
-/// Apply `[hooks.state]`, which is where Codex keeps enablement and trust for each entry. It
-/// keys them by `<plugin>:<source>:<event>:<group>:<index>`, which is exactly the id built
-/// above, so this is a lookup rather than a reconstruction.
-///
-/// **verified** for plugin sources on a real machine — both a plugin naming a file
-/// (`<id>:hooks/codex.json:session_start:0:0`) and one holding its events inline
-/// (`<id>:plugin.json#hooks[0]:stop:0:0`); the key Codex writes for `hooks.json` and for the
-/// `[hooks]` table has not been observed, so those rows may
-/// simply never match. That is the safe way round: an entry Codex has no state for runs, so a
-/// miss leaves the row enabled rather than claiming it is off.
 fn apply_codex_state(hooks: &mut [HookDto], value: &Value) {
     let Some(state) = value
         .get("hooks")
@@ -194,7 +119,6 @@ fn apply_codex_state(hooks: &mut [HookDto], value: &Value) {
         let Some(entry) = state.get(&hook.id) else {
             continue;
         };
-        // An entry that only records a trusted hash is trusted, not disabled.
         hook.enabled = entry
             .get("enabled")
             .and_then(Value::as_bool)
@@ -202,9 +126,6 @@ fn apply_codex_state(hooks: &mut [HookDto], value: &Value) {
     }
 }
 
-/// Flatten `<Event>[] -> { matcher?, hooks: [handler] }` into one row per handler, in file
-/// order: `serde_json`'s `preserve_order` keeps a map in the order it was written, so the rows
-/// come out the way the file reads and `sort::sort_hooks` only has to be stable to keep it.
 fn rows(origin: &Origin, events: &Map<String, Value>) -> Vec<HookDto> {
     let mut out = Vec::new();
     for (event, groups) in events {
@@ -217,8 +138,6 @@ fn rows(origin: &Origin, events: &Map<String, Value>) -> Vec<HookDto> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .trim();
-            // An entry is a matcher with its handlers under `hooks`; a bare handler with no list
-            // around it is taken as well, because that is the natural spelling in TOML.
             let handlers = match entry.get("hooks").and_then(Value::as_array) {
                 Some(list) => list.as_slice(),
                 None if entry.get("type").is_some() => std::slice::from_ref(entry),
@@ -240,7 +159,6 @@ fn row(
     index: usize,
     handler: &Value,
 ) -> HookDto {
-    // Both providers run a handler with no `type` as a command, which is what it usually is.
     let kind = field(handler, "type").unwrap_or("command");
     HookDto {
         id: format!(
@@ -260,19 +178,14 @@ fn row(
     }
 }
 
-/// What the row shows as the thing that runs, left exactly as the file spells it.
 fn command_of(kind: &str, handler: &Value) -> String {
     if kind == "mcp_tool" {
-        // An MCP handler names a server and a tool instead of a command line.
         return match (field(handler, "server"), field(handler, "tool")) {
             (Some(server), Some(tool)) => format!("{server} · {tool}"),
             (Some(one), None) | (None, Some(one)) => one.to_string(),
             (None, None) => String::new(),
         };
     }
-    // `url` is what an `http` handler has in place of a command line. A command written across
-    // lines keeps its lines: the row truncates it and the tooltip shows the whole of it, so
-    // collapsing here would destroy the only copy anything can show.
     field(handler, "command")
         .or_else(|| field(handler, "url"))
         .unwrap_or_default()
@@ -287,8 +200,6 @@ fn field<'a>(value: &'a Value, name: &str) -> Option<&'a str> {
         .filter(|found| !found.is_empty())
 }
 
-/// `PreToolUse` -> `pre_tool_use`, which is how Codex spells the same event in its
-/// `[hooks.state]` keys. A name already in snake case comes back unchanged.
 fn snake_case(event: &str) -> String {
     let mut out = String::with_capacity(event.len() + 4);
     for (position, letter) in event.chars().enumerate() {
@@ -300,8 +211,6 @@ fn snake_case(event: &str) -> String {
     out
 }
 
-/// A hook file is `{ description?, hooks: { <Event>: [...] } }`, but the event map on its own is
-/// accepted too: Codex's bundled plugins ship both spellings, one wrapped and one bare.
 fn event_map(value: &Value) -> Option<&Map<String, Value>> {
     let map = value.as_object()?;
     match map.get("hooks").and_then(Value::as_object) {
@@ -310,7 +219,6 @@ fn event_map(value: &Value) -> Option<&Map<String, Value>> {
     }
 }
 
-/// A plugin's own description can run to several lines; a row shows one.
 fn description_of(value: &Value) -> String {
     one_line(field(value, "description").unwrap_or_default())
 }
@@ -319,9 +227,6 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Codex's original hook, from before there were events: `notify = [argv…]`, run when a turn
-/// ends. It has no state entry, no matcher and no event of its own, so it is shown under the
-/// event it stands in for rather than as a row with an empty one.
 fn notify_row(value: &Value) -> Option<HookDto> {
     let command = match value.get("notify")? {
         Value::String(one) => one.trim().to_string(),
@@ -348,10 +253,8 @@ fn notify_row(value: &Value) -> Option<HookDto> {
     })
 }
 
-/// What a plugin manifest's `hooks` key names.
 enum Declared<'a> {
     Files(Vec<String>),
-    /// The events themselves, written into the manifest.
     Inline(&'a Value),
 }
 
@@ -377,9 +280,6 @@ fn plugin_hooks(
                 .unwrap_or_default()
         }
         Some(Declared::Files(files)) => {
-            // One file can be named twice under two spellings (`hooks/a.json` and
-            // `./hooks/a.json`). Both resolve to one key, so reading it twice would list every
-            // row twice under the first row's ids; the second naming names nothing new.
             let mut seen = HashSet::new();
             files
                 .iter()
@@ -390,7 +290,6 @@ fn plugin_hooks(
                 })
                 .collect()
         }
-        // No `hooks` key at all: only Claude has a file it looks for anyway.
         None => default_file
             .and_then(|rel| plugin_file(root, rel))
             .map(|file| file_hooks(plugin_id, name, &file.key, &file.path, &plugin_description))
@@ -414,8 +313,6 @@ fn declared(manifest: Option<&Value>) -> Option<Declared<'_>> {
     }
 }
 
-/// One hook file the manifest named, already resolved to its `[hooks.state]` key and its path
-/// on this machine.
 fn file_hooks(
     plugin_id: &str,
     name: &str,
@@ -434,7 +331,6 @@ fn file_hooks(
         plugin_id: Some(plugin_id.to_string()),
         key: key.to_string(),
         label: name.to_string(),
-        // The hook file describes the hooks; the plugin's own description stands in for it.
         description: if own.is_empty() {
             plugin_description.to_string()
         } else {

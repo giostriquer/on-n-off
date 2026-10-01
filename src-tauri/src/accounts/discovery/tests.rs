@@ -3,7 +3,6 @@ use crate::dto::AgentId;
 use serde_json::json;
 use std::cell::RefCell;
 
-/// A scratch home with an empty vault under a fixture key, one account change old.
 fn vault() -> tempfile::TempDir {
     let home = tempfile::tempdir().unwrap();
     open(home.path())
@@ -17,7 +16,6 @@ fn open(home: &Path) -> Store {
 fn loaded(home: &Path) -> Database {
     open(home).load().unwrap()
 }
-/// A digest of the sealed vault: every write changes it, since every seal takes a new nonce.
 fn sealed(home: &Path) -> String {
     crate::sha::sha256_hex(&std::fs::read(home.join(".on-n-off/accounts/vault.enc")).unwrap())
 }
@@ -132,8 +130,6 @@ fn native_changes_before_publication_do_not_save_the_old_candidate() {
     );
     assert_eq!(sealed(home.path()), before, "nothing persisted");
 }
-/// A candidate no longer eligible once the lease is held, because another app instance saved it
-/// first, publishes nothing and leaves the vault as it was.
 #[test]
 fn an_ineligible_candidate_at_publication_writes_nothing() {
     let native = client();
@@ -169,7 +165,6 @@ fn natural_accounts_are_saved_once_and_pending_reauthentication_is_preserved() {
     assert!(candidate(&native, &loaded).unwrap().is_none());
 }
 
-/// Account operations over `home` that must never reach a native store, a client or a listener.
 fn untouched(home: &Path) -> super::super::Accounts {
     struct Untouched;
     impl super::super::Clients for Untouched {
@@ -272,8 +267,6 @@ fn a_pending_recovery_prevents_late_publication_even_at_the_same_epoch() {
     assert_eq!(sealed(home.path()), before, "published during recovery");
 }
 
-/// Turning remembering on rejects every check made before it, so one from before an opt-out
-/// cannot publish after the opt-in. It changes no login, so a pending recovery does not refuse it.
 #[test]
 fn turning_remembering_on_rejects_earlier_checks_and_is_allowed_during_recovery() {
     let native = client();

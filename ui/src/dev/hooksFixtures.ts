@@ -1,19 +1,5 @@
 import type { AgentId, HookDto } from "$lib/types";
 
-/**
- * Synthetic hooks for the UI harness (`?mock=hooks`). Invented throughout — acme/webapp names, no
- * real path, plugin or address — and shaped to cover the cases the screen has to get right: a
- * plugin hook carrying a description, a plain settings-file hook, an `mcp_tool` handler, a handler
- * with no command at all, a command long enough to need truncating, and a Codex entry switched off
- * in `[hooks.state]`. Claude's and Codex's event names come from different vocabularies on
- * purpose: the screen prints whatever the provider calls it. Ids follow the backend's shape,
- * `<plugin-id>:<source>:<event>:<group>:<index>`, with an empty plugin segment for user settings:
- * a plugin row is keyed by the hook file its manifest names — `hooks/hooks.json` where Claude
- * falls back to its default, `plugin.json#hooks[0]` where a Codex manifest holds its events
- * inline — and the legacy `notify` key, which predates events, keeps the fixed id and the
- * description the backend mints for it.
- */
-
 const CLAUDE: HookDto[] = [
   {
     id: ":settings.json:pre_tool_use:0:0",
@@ -123,6 +109,5 @@ export function hooksFor(agentId: AgentId): HookDto[] {
   if (agentId === "claude") {
     return CLAUDE;
   }
-  // Antigravity and Cursor have none by design: the screen says on-n-off does not read theirs.
   return agentId === "codex" ? CODEX : [];
 }

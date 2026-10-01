@@ -1,8 +1,5 @@
-//! When a saved login renews before or after its read.
 use super::*;
 
-/// A saved Codex login for `user` in `team`, `owned` for private renewal, whose access token
-/// expires at `exp` (s), or cannot be read without one.
 fn codex_login(owned: bool, exp: Option<i64>) -> Profile {
     use base64::Engine;
     let jwt = |value: serde_json::Value| {
@@ -24,12 +21,10 @@ fn codex_login(owned: bool, exp: Option<i64>) -> Profile {
     p
 }
 
-/// An access token long expired at the tests' 1,000,000 ms, or one far from expiring.
 fn expiry(expired: bool) -> Option<i64> {
     Some(if expired { 1 } else { 9_000_000 })
 }
 
-/// Only a login this owns renews: before its read once it expired, or after a refused read.
 #[test]
 fn automatic_renewal_renews_only_an_owned_login_and_never_a_shadow() {
     use std::cell::Cell;
@@ -73,8 +68,6 @@ fn automatic_renewal_renews_only_an_owned_login_and_never_a_shadow() {
     }
 }
 
-/// A saved Codex login is due to renew before it is read within ten minutes of its access token's
-/// `exp` (s), or when that cannot be read: at 1,000,000 ms, 1,599 s is due and 1,600 s is not.
 #[test]
 fn a_saved_login_renews_before_its_read_once_its_access_token_nears_expiry() {
     use std::cell::Cell;
@@ -124,9 +117,6 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
     }
 }
 
-/// Renewal cannot make a login sign in as another account, so a read that found one is not renewed
-/// and read again, as a refused one is: an unexpired login is read once and never renewed, whoever
-/// owns it.
 #[test]
 fn a_login_that_signs_in_as_another_account_is_never_renewed_for_it() {
     use std::cell::Cell;

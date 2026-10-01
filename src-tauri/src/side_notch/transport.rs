@@ -14,7 +14,6 @@ use std::{
 pub fn executable() -> Result<PathBuf, String> {
     let path = std::env::current_exe().map_err(|e| e.to_string())?;
     let folder = path.parent().ok_or("Cannot locate the native notch.")?;
-    // Cargo test executables live one level below the development sidecar.
     let folder = if cfg!(test) && folder.file_name().is_some_and(|n| n == "deps") {
         folder.parent().ok_or("Cannot locate the native notch.")?
     } else {
@@ -46,7 +45,6 @@ struct LifetimeState {
     child: Option<Arc<Mutex<Child>>>,
 }
 
-/// The exit callback owns the child independently of the background supervisor.
 #[derive(Default)]
 pub struct Lifetime(Mutex<LifetimeState>);
 
@@ -66,8 +64,6 @@ impl Lifetime {
     }
 
     pub fn shutdown(&self) {
-        // Serialize spawning with shutdown: no child can appear after exit's
-        // cleanup. Never wait for the supervisor's filesystem/network work.
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         state.stopped = true;
         if let Some(child) = state.child.take() {
@@ -81,7 +77,6 @@ fn stop_child(child: &Mutex<Child>) {
     if matches!(child.try_wait(), Ok(Some(_))) {
         return;
     }
-    // SIGKILL also releases a writer blocked on a hung helper's stdin pipe.
     let _ = child.kill();
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -117,7 +112,6 @@ impl Connection {
                 }
             }
         });
-        // Do not retain or log provider-facing payloads from a child process.
         thread::spawn(move || {
             let _ = std::io::copy(&mut errors, &mut std::io::sink());
         });

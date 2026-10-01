@@ -2,7 +2,6 @@ import { useId } from "react";
 import { usageFillStyle } from "$lib/limitsFormat";
 import type { AgentId } from "$lib/types";
 
-/** A quota bar: the provider's accent, hardening toward red as it fills. */
 export function Meter({
   label,
   percent,
@@ -34,11 +33,6 @@ export function Meter({
   );
 }
 
-/**
- * A compact meter row: small-caps label with its note underneath (never truncated), bar and figure
- * on the right — the same idiom as the Overview's list rows. The bar names the note as its
- * description, so it is announced with what it measures.
- */
 export function MeterRow({
   label,
   note,

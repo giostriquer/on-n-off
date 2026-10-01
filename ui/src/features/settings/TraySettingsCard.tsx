@@ -7,11 +7,6 @@ type TraySettingsCardProps = {
   onCloseToTrayChange: (enabled: boolean) => void;
 };
 
-/**
- * The Windows notification-area icon and what the close button does. macOS has a status item
- * too, but it is the Limits popover and it always hides on close, so this card renders only
- * where the setting means something.
- */
 export function TraySettingsCard({ closeToTray, onCloseToTrayChange }: TraySettingsCardProps) {
   const supported = useQuery({
     queryKey: ["tray-supported"],

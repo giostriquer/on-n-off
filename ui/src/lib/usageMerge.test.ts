@@ -192,8 +192,6 @@ describe("foldModelsByDay", () => {
     expect(first.map((row) => row.model).sort()).toEqual(["claude-fable-5", "gpt-5.6"]);
     const claude = first.find((row) => row.model === "claude-fable-5");
     expect(claude?.costUsd).toBeCloseTo(1.25);
-    // The rows under a day add up to the day row above them, which is what lets the caller
-    // share both levels against the window.
     const day = folded.daily.find((period) => period.day === "2026-08-07");
     expect(first.reduce((total, row) => total + row.costUsd, 0)).toBeCloseTo(day?.costUsd ?? 0);
     expect(first.reduce((total, row) => total + row.totalTokens, 0)).toBe(day?.totalTokens);
@@ -274,8 +272,6 @@ describe("usageFormat", () => {
   });
 
   it("makeWindow counts calendar days in the viewer's zone, not UTC", () => {
-    // Test workers run in UTC (vitest.config.ts), so put the viewer in Tokyo, where 15:00Z is
-    // already the next day.
     const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
     const zone = vi
       .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")

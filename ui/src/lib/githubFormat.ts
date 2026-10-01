@@ -1,5 +1,3 @@
-/** Display formatting for the Pull requests screen (pure). */
-
 import type {
   CiState,
   GithubPr,
@@ -9,7 +7,6 @@ import type {
   ReviewDecision,
 } from "./githubTypes";
 
-/** The app's status tones: `--live` green, `--trip` red, `--warn` amber, `--mute` grey. */
 export type CiTone = "live" | "trip" | "warn" | "mute";
 
 export function ciTone(ci: CiState): CiTone {
@@ -45,10 +42,8 @@ export function ciLabel(ci: CiState): string {
   }
 }
 
-/** Red needs someone now, amber is waiting; green and grey are calm, ready included. */
 const TONE_RANK: Record<CiTone, number> = { trip: 0, warn: 1, live: 2, mute: 2 };
 
-/** How much a row needs someone: the reddest tone among its CI glyph and badges. */
 function attentionRank(pr: GithubPr): number {
   return Math.min(
     TONE_RANK[ciTone(pr.ci)],
@@ -57,21 +52,14 @@ function attentionRank(pr: GithubPr): number {
   );
 }
 
-/** What needs fixing first, then what is waiting, then everything else; newest activity first within a group. */
 export function orderPrs(items: readonly GithubPr[]): GithubPr[] {
   return [...items].sort(
     (a, b) => attentionRank(a) - attentionRank(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
   );
 }
 
-/** One repository's rows; `repo` is GitHub's `owner/name`. */
 export type PrGroup = { repo: string; items: GithubPr[] };
 
-/**
- * Rows grouped by repository so a list from many repositories reads in sections and no row has
- * to repeat where it lives; repositories are alphabetical and each group keeps the order it was
- * given (call after `orderPrs`).
- */
 export function groupPrsByRepo(items: readonly GithubPr[]): PrGroup[] {
   const groups = new Map<string, GithubPr[]>();
   for (const pr of items) {
@@ -88,11 +76,6 @@ function truncated(list: GithubPrList): boolean {
   return list.total > list.items.length;
 }
 
-/**
- * "3", or "50 of 137" when GitHub holds more than the page that was read. With a search on, the
- * denominator is what was actually searched — the loaded page — and says so when that is not
- * everything: "2 of 3", or "2 of 50 loaded".
- */
 export function listCountLabel(list: GithubPrList, matches?: number): string {
   if (matches !== undefined) {
     return `${matches} of ${list.items.length}${truncated(list) ? " loaded" : ""}`;
@@ -100,10 +83,8 @@ export function listCountLabel(list: GithubPrList, matches?: number): string {
   return truncated(list) ? `${list.items.length} of ${list.total}` : String(list.items.length);
 }
 
-/** A small outlined word on a row: the review decision, the merge state. */
 export type RowBadge = { label: string; tone: CiTone };
 
-/** "Review required" is every open PR's default state, so only the other two earn a badge. */
 export function reviewBadge(decision: ReviewDecision | null | undefined): RowBadge | null {
   switch (decision) {
     case "APPROVED":
@@ -115,7 +96,6 @@ export function reviewBadge(decision: ReviewDecision | null | undefined): RowBad
   }
 }
 
-/** One badge per merge kind; the classification itself is the backend's (`mergeKind` on the row). */
 const MERGE_BADGES: Record<MergeKind, RowBadge> = {
   conflicts: { label: "Conflicts", tone: "trip" },
   queued: { label: "Queued", tone: "live" },
@@ -125,7 +105,6 @@ const MERGE_BADGES: Record<MergeKind, RowBadge> = {
   blocked: { label: "Blocked", tone: "warn" },
 };
 
-/** The one merge-state badge a row shows; the queue badge carries the position when known. */
 export function mergeBadge(pr: GithubPr): RowBadge | null {
   const kind = pr.mergeKind;
   if (!kind) return null;
@@ -134,11 +113,6 @@ export function mergeBadge(pr: GithubPr): RowBadge | null {
   return position ? { ...badge, label: `Queued #${position}` } : badge;
 }
 
-/**
- * Case-insensitive substring match over what a row shows: number, title, repository, author,
- * both branches, its badges (draft, team, the review decision, the merge state) and its CI
- * state's label.
- */
 export function filterPrs(items: readonly GithubPr[], query: string): GithubPr[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...items];

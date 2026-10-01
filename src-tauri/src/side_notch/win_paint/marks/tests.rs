@@ -1,7 +1,5 @@
 use super::*;
 
-/// Each glyph, drawn through `provider` with the view box the rail really uses, fills its rect
-/// and stays inside it, give or take a pixel of anti-aliasing.
 #[test]
 fn every_provider_mark_draws_inside_its_rect() {
     for id in crate::side_notch::model::RAIL_ORDER {
@@ -57,16 +55,6 @@ fn stroke_only_marks_draw() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Parity with the Swift originals.
-//
-// The shapes above are hand-transcribed from `ProviderMark.swift`, which is exactly the
-// kind of work a human eye signs off on and gets wrong: the Cursor cube shipped with the
-// endpoint of one curve replaced by the *next* line's point, and every op after it shifted
-// by one. The mark still drew pixels, so the coverage tests above passed. Comparing the two
-// sources op for op is the only thing that makes "ported from the Swift" a claim rather
-// than a hope.
-
 const SWIFT: &str = include_str!("../../../../macos/SideNotch/Sources/NotchApp/ProviderMark.swift");
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -77,7 +65,6 @@ enum Op {
     Close,
 }
 
-/// The declared ops of one `fileprivate static let <name>: Path` in the Swift source.
 fn swift_ops(name: &str) -> Vec<Op> {
     let start = SWIFT
         .find(&format!("static let {name}: Path = {{"))
@@ -86,7 +73,6 @@ fn swift_ops(name: &str) -> Vec<Op> {
     let end = block
         .find("}()")
         .unwrap_or_else(|| panic!("{name}'s declaration closes"));
-    // Swift wraps `addCurve` over three lines; flattening makes one scanner enough.
     let block = block[..end]
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -105,7 +91,6 @@ fn swift_ops(name: &str) -> Vec<Op> {
             ops.push(Op::Line(points[0]));
             rest = next;
         } else if let Some(tail) = rest.strip_prefix("addCurve(") {
-            // Swift names the destination first, then the two controls.
             let (points, next) = points(tail, 3);
             ops.push(Op::Curve {
                 c1: points[1],
@@ -120,7 +105,6 @@ fn swift_ops(name: &str) -> Vec<Op> {
     ops
 }
 
-/// The next `count` `CGPoint(x: … , y: …)` pairs, and the text after them.
 fn points(text: &str, count: usize) -> (Vec<Point>, &str) {
     let mut out = Vec::new();
     let mut rest = text;
@@ -142,7 +126,6 @@ fn points(text: &str, count: usize) -> (Vec<Point>, &str) {
     (out, rest)
 }
 
-/// The same ops, read off the Rust shape.
 fn rust_ops(shape: &Shape) -> Vec<Op> {
     let mut ops = Vec::new();
     for sub in shape.subs {
@@ -162,7 +145,6 @@ fn rust_ops(shape: &Shape) -> Vec<Op> {
     ops
 }
 
-/// The Rust literals carry two decimals where the Swift carries four.
 fn same(left: Op, right: Op) -> bool {
     fn near(a: Point, b: Point) -> bool {
         (a.0 - b.0).abs() <= 0.02 && (a.1 - b.1).abs() <= 0.02

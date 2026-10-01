@@ -1,6 +1,3 @@
-//! What a read counts when a transcript moves or fails under it, and when a cached parse stands in
-//! for reading it.
-
 use super::*;
 
 fn output_tokens(read: &SourceRead) -> Vec<u64> {
@@ -10,15 +7,11 @@ fn output_tokens(read: &SourceRead) -> Vec<u64> {
         .collect()
 }
 
-/// Indexes and caches the transcripts as they are, then forgets their cached parses, so a read of
-/// the unchanged index has to read each transcript itself.
 fn index_then_forget_parse(home: &Path) {
     open_and_finish(home, Watermark::NONE);
     std::fs::remove_file(scan_cache_path_for(home)).unwrap();
 }
 
-/// A parse of a file that never held still neither resolves its index entry nor enters the scan
-/// cache, so the sources are not complete and the next open reads it again.
 #[test]
 fn a_live_transcript_is_left_pending_uncached_and_indexed_again_next_time() {
     let home = scratch_dir("usage-sources-live-open");
@@ -40,13 +33,10 @@ fn a_live_transcript_is_left_pending_uncached_and_indexed_again_next_time() {
     assert!(!pending);
     assert_eq!(pending_cached, None);
     assert!(settled_complete);
-    // msg-1 and msg-live: the lines the live session appended are all copies of msg-live.
     assert_eq!(cached_record_count(&home, &path), Some(2));
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A transcript that changed since the walk, or is still being written while it is read (a live
-/// session), counts what it holds; that parse is never cached, and the read is not final.
 #[test]
 fn a_transcript_changed_or_live_since_the_walk_counts_what_it_holds_uncached_and_not_final() {
     for live in [false, true] {
@@ -97,9 +87,6 @@ fn a_same_size_rewrite_since_the_walk_counts_uncached_and_not_final() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A transcript that cannot be read when the records are (removed, locked) counts its last cached
-/// parse, even one older than the index, for that read only, and that is never final. Here the
-/// scan cache is behind the index because its last save failed.
 #[test]
 fn an_unreadable_transcript_counts_its_last_cached_parse_and_is_not_final() {
     let home = scratch_dir("usage-sources-unreadable");
@@ -147,8 +134,6 @@ fn an_unchanged_transcript_missing_from_the_scan_cache_is_read_cached_and_final(
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// The scan cache holds a parse of the same size as the transcript but an older mtime (its last
-/// save failed after a same-size rewrite): the transcript is read again, not the stale parse.
 #[test]
 fn a_cached_parse_serves_only_while_both_size_and_mtime_match() {
     let home = scratch_dir("usage-sources-cache-hit");
@@ -169,9 +154,6 @@ fn a_cached_parse_serves_only_while_both_size_and_mtime_match() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A read from an instant reads every transcript last written up to 36 hours before it, the
-/// allowance for local days that begin before UTC midnight and clocks that disagree, and none
-/// written earlier.
 #[test]
 fn a_read_from_an_instant_reads_transcripts_written_up_to_36_hours_before_it() {
     let home = scratch_dir("usage-sources-read-slack");

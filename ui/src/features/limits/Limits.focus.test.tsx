@@ -6,8 +6,6 @@ import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 
-// Where focus goes on the Limits screen when an account's card or archived row goes away.
-
 const readAccounts = vi.hoisted(() => vi.fn());
 const accountAction = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
@@ -31,7 +29,6 @@ function answer(claude: ProviderLimits[], codex: ProviderLimits[]) {
   readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : codex));
 }
 
-/** The screen, and a way to render it again as a poll or the minute timer would. */
 function renderLimits() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   const screenTree = () => <QueryClientProvider client={client}><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>;
@@ -84,7 +81,6 @@ describe("focus as an account leaves", () => {
     renderLimits();
     fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
     fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
-    // Tab from the card's ••• to its footer while the archive waits.
     within(screen.getByRole("region", { name: "Codex limits · personal@codex.example" })).getByRole("button", { name: "Sign in" }).focus();
 
     await act(async () => { archiving.resolve(); });

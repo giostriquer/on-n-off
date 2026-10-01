@@ -1,12 +1,3 @@
-//! Background watcher for the user's own pull requests: when, between two reads, the head
-//! commit's CI goes red or green, the review decision lands, conflicts appear or clear, the
-//! pull request becomes ready to merge, or it gets merged, a tray notification says so. Opt-in
-//! (`github_notifications`), polls on the same interval as the screen and shares its in-memory
-//! result, and remembers the last-seen state on disk so a restart never re-notifies. The merge
-//! fields are read through `github::merge`, the same classification the screen shows. Every
-//! notification plays a sound; going green without conflicts and getting merged each have
-//! their own, so the two are told apart without looking.
-
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -22,25 +13,16 @@ use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
 
 const DISABLED_WAKE: Duration = Duration::from_secs(60 * 60);
-/// The Limits monitor, the Keychain probe and the first provider load all run at startup; the
-/// first GitHub poll waits so it does not join that burst. A settings change wakes it sooner.
 const FIRST_POLL_DELAY: Duration = Duration::from_secs(20);
 const MAX_BACKOFF: Duration = Duration::from_secs(10 * 60);
-/// Version 1 kept CI rollups only; an older file is dropped, so the first poll after an upgrade
-/// is a baseline and announces nothing.
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
 
-/// Marker for this monitor's wake channel.
 pub struct GithubMonitor;
 
-/// What was last seen of each own pull request, keyed by GitHub node id.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct MonitorState {
     schema_version: u8,
     seen: HashMap<String, Seen>,
-    /// Pull requests that left the open list on the previous poll without the merged list naming
-    /// them. The two searches are indexed separately, so a merge can leave one before it reaches
-    /// the other; the next poll gets to claim these, and then they are forgotten for good.
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     vanished: HashSet<String>,
 }
@@ -55,9 +37,6 @@ impl Default for MonitorState {
     }
 }
 
-/// The facts about one pull request that the monitor compares between reads. The two merge
-/// facts are `None` while GitHub has not computed them, and a poll that sees `None` keeps the
-/// last computed answer (`or_last_known`), so the baseline only ever moves on facts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Seen {
     ci: CiState,
@@ -70,7 +49,6 @@ struct Seen {
 }
 
 impl Seen {
-    /// The same reading of the merge fields the screen shows (`github::merge`).
     fn of(pr: &GithubPrDto) -> Self {
         Self {
             ci: pr.ci,
@@ -80,9 +58,6 @@ impl Seen {
         }
     }
 
-    /// GitHub recomputes mergeability after every push and answers "unknown" until it is done;
-    /// carrying the previous answer through such a poll keeps "conflicts appeared" and "ready to
-    /// merge" from being lost or repeated around it.
     fn or_last_known(self, before: Option<&Seen>) -> Self {
         let Some(before) = before else {
             return self;
@@ -97,28 +72,18 @@ impl Seen {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EventKind {
-    /// Checks went red (from pending, no checks, or green).
     CiFailed,
-    /// Checks went green without having been red since this pull request was last seen.
     CiPassed,
-    /// Checks went green after being red.
     CiGreenAgain,
-    /// The review decision became "approved".
     Approved,
-    /// The review decision became "changes requested".
     ChangesRequested,
-    /// The head stopped merging cleanly into the base.
     Conflicts,
-    /// The head merges cleanly again.
     ConflictsResolved,
-    /// Everything the base branch asks for is in place; only the merge button is left.
     ReadyToMerge,
-    /// The pull request left the open list and the merged list names it.
     Merged,
 }
 
 impl EventKind {
-    /// Good news that "ready to merge" already implies; announced alone when it arrives together.
     fn is_subsumed_by_ready(self) -> bool {
         matches!(
             self,
@@ -152,7 +117,6 @@ pub fn setup(app: &mut tauri::App) {
     monitor::spawn::<GithubMonitor, _, _>(app, run);
 }
 
-/// Wake the poll loop after a settings change.
 pub fn wake(app: &AppHandle) {
     monitor::wake::<GithubMonitor>(app);
 }
@@ -209,8 +173,6 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
     }
 }
 
-/// One poll; `Ok(true)` when the read did not come back `ok` (drives the backoff). State is
-/// persisted before any notification is shown, so nothing is announced that is not recorded.
 async fn poll_once(
     app: &AppHandle,
     state_path: &Path,
@@ -235,9 +197,6 @@ async fn poll_once(
     Ok(failed)
 }
 
-/// One step of the monitor: the baseline that `prs` implies, persisted through `persist`
-/// before the events it produced are handed back. On a persist failure nothing is returned, so
-/// the caller keeps its old state and never announces a transition it has not recorded.
 fn advance(
     state: &MonitorState,
     prs: &GithubPrsDto,
@@ -267,9 +226,6 @@ fn notification_copy(event: &Event) -> (String, String) {
     )
 }
 
-/// Merging has its own sound, and so does good news that leaves the pull request green with no
-/// known conflicts — which "ready to merge" is by definition, whether or not the repository runs
-/// checks. An approval alone, and every piece of bad news, arrive with the default.
 fn sound_for(kind: EventKind, after: Seen) -> Sound {
     let green = after.ci == CiState::Success && after.conflicts != Some(true);
     match kind {
@@ -282,11 +238,6 @@ fn sound_for(kind: EventKind, after: Seen) -> Sound {
     }
 }
 
-/// Compare a read against what was last seen of the user's own pull requests. Only a fresh,
-/// successful read moves the baseline: a failed or stale one changes nothing. A pull request
-/// that is no longer open is announced once if the merged list names it on this poll or the
-/// next, and forgotten either way, so a merge that happened before it was ever seen open says
-/// nothing.
 fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
     if prs.status != GithubStatus::Ok || prs.stale {
         return Vec::new();
@@ -305,8 +256,6 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
         }
         next.insert(pr.id.clone(), after);
     }
-    // A leftover that is open again this poll is back in `seen`, not a candidate: claiming it
-    // now and again when it next leaves would announce one merge twice.
     let mut vanished: HashSet<String> = state
         .seen
         .keys()
@@ -323,16 +272,12 @@ fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
             ));
         }
     }
-    // Whatever the previous poll's leftovers were, this poll was their last chance.
     vanished.retain(|id| state.seen.contains_key(id));
     state.vanished = vanished;
     state.seen = next;
     events
 }
 
-/// Every transition worth a notification between two sightings of one pull request. A merge
-/// fact that is unknown on either side says nothing, and "ready to merge" speaks for the good
-/// news that arrived with it.
 fn transitions(before: Seen, after: Seen) -> Vec<EventKind> {
     let mut kinds = Vec::new();
     kinds.extend(ci_transition(before.ci, after.ci));

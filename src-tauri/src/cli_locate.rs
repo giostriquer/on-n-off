@@ -1,16 +1,3 @@
-//! Where agent CLIs live.
-//!
-//! GUI apps do not always inherit the PATH a terminal has: on macOS, Finder launches with a
-//! minimal one, so nvm/volta/homebrew shims are invisible; on Windows, an app started before an
-//! installer appended to the registry PATH never sees the new folder. The app therefore
-//! searches one merged list — the process PATH, then the login shell's PATH (probed once) or the
-//! registered user + machine PATH, then well-known install folders — and hands that same list
-//! to spawned CLIs as their PATH, so `#!/usr/bin/env node` launchers keep working wherever they
-//! were found.
-//!
-//! Resolution is per provider: Cursor's CLI is called `agent`, a name other products use too,
-//! so [`resolve_provider_cli`] only accepts an `agent` that provably belongs to Cursor.
-
 use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -22,18 +9,15 @@ use crate::dto::{AgentId, AgentInfo};
 use crate::paths::user_home;
 use crate::process::{wait_with_deadline, CommandOutcome};
 
-/// Upper bound for asking the login shell about its PATH; a hung rc file must not stall the app.
 const SHELL_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const ENV_START: &str = "__ON_N_OFF_ENV_START__";
 const ENV_END: &str = "__ON_N_OFF_ENV_END__";
 
-/// Every directory searched for agent CLIs, in priority order, computed once per process.
 pub fn cli_search_path() -> &'static [PathBuf] {
     static SEARCH_PATH: OnceLock<Vec<PathBuf>> = OnceLock::new();
     SEARCH_PATH.get_or_init(|| search_path_for(user_home().ok().as_deref()))
 }
 
-/// [`cli_search_path`] for a user whose home is `home`; without one there is no well-known tier.
 fn search_path_for(home: Option<&Path>) -> Vec<PathBuf> {
     merge_search_path(
         env::var_os("PATH"),
@@ -42,7 +26,6 @@ fn search_path_for(home: Option<&Path>) -> Vec<PathBuf> {
     )
 }
 
-/// [`cli_search_path`] joined into a PATH value for child processes; `None` if it cannot be joined.
 pub fn cli_search_path_value() -> Option<OsString> {
     env::join_paths(cli_search_path()).ok()
 }
@@ -72,10 +55,6 @@ pub fn binary_on_path(name: &str) -> bool {
     resolve_cli_binary(name).is_some()
 }
 
-/// First launchable CLI file: explicit path, settings override, then [`cli_search_path`].
-///
-/// On Windows, PATHEXT launchers (`.cmd` / `.exe`) win over extensionless npm/nvm shims.
-/// On Unix a candidate must carry the executable bit.
 pub fn resolve_cli_binary(name: &str) -> Option<PathBuf> {
     resolve_cli_binary_in(name, cli_search_path())
 }
@@ -97,8 +76,6 @@ pub(crate) fn find_in_dirs(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     dirs.iter().find_map(|dir| launchable(&dir.join(name)))
 }
 
-/// [`resolve_cli_binary`] for a specific provider: an explicit path or settings override always
-/// wins; otherwise Cursor is located with [`find_cursor_cli`] and every other provider by name.
 pub fn resolve_provider_cli(id: AgentId, name: &str) -> Option<PathBuf> {
     resolve_provider_cli_in(id, name, cli_search_path())
 }
@@ -121,14 +98,6 @@ fn resolve_provider_cli_in(id: AgentId, name: &str, search_path: &[PathBuf]) -> 
 
 const CURSOR_INSTALL_DIR: &str = "cursor-agent";
 
-/// The Cursor CLI: `agent` (canonical) or `cursor-agent` (legacy alias), first match in
-/// `dirs` order — but an `agent` only counts when it provably belongs to Cursor, since other
-/// products (Grok, ...) install a launcher of the same name onto PATH.
-///
-/// Cursor's installers keep everything under a `cursor-agent` folder: `%LOCALAPPDATA%\cursor-agent`
-/// on Windows, `~/.local/share/cursor-agent/versions/<v>/` behind a `~/.local/bin/agent` symlink
-/// elsewhere. So an `agent` qualifies when that folder name appears in its path or in the path
-/// the symlink resolves to.
 pub(crate) fn find_cursor_cli(dirs: &[PathBuf]) -> Option<PathBuf> {
     dirs.iter().find_map(|dir| {
         launchable(&dir.join("agent"))
@@ -172,10 +141,6 @@ fn has_windows_launcher_ext(path: &Path) -> bool {
         .any(|known| known.eq_ignore_ascii_case(ext))
 }
 
-/// The file the OS can actually spawn for `path`, if any.
-///
-/// Windows: prefer a Win32 launcher next to an extensionless nvm/npm shim.
-/// Unix: the file itself, provided it is executable.
 fn launchable(path: &Path) -> Option<PathBuf> {
     if !path.is_file() {
         if cfg!(windows) && path.extension().is_none() {
@@ -216,7 +181,6 @@ fn is_executable(_path: &Path) -> bool {
     true
 }
 
-/// Install folders that commonly hold agent CLIs but are missing from a GUI app's PATH.
 fn well_known_cli_dirs_for(home: &Path) -> Vec<PathBuf> {
     if cfg!(windows) {
         windows_cli_dirs(home)
@@ -229,7 +193,6 @@ fn windows_cli_dirs(home: &Path) -> Vec<PathBuf> {
     windows_cli_dirs_from(home, &|name| env::var_os(name))
 }
 
-/// `lookup` stands in for the environment so tests can describe any machine.
 fn windows_cli_dirs_from(home: &Path, lookup: &dyn Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
     let mut dirs = vec![
         home.join(".local").join("bin"),
@@ -242,14 +205,11 @@ fn windows_cli_dirs_from(home: &Path, lookup: &dyn Fn(&str) -> Option<OsString>)
     if let Some(local) = lookup("LOCALAPPDATA") {
         let local = PathBuf::from(local);
         dirs.push(local.join("Volta").join("bin"));
-        // Native installers: Antigravity (`agy`) and the Cursor CLI (`agent`).
         dirs.push(local.join("agy").join("bin"));
         dirs.push(local.join(CURSOR_INSTALL_DIR));
-        // `winget install GitHub.cli` in user scope.
         dirs.push(local.join("Programs").join("GitHub CLI"));
     }
     if let Some(program_files) = lookup("ProgramFiles") {
-        // The GitHub CLI MSI and machine-scope winget installs.
         dirs.push(PathBuf::from(program_files).join("GitHub CLI"));
     }
     dirs.push(PathBuf::from(r"C:\nvm4w\nodejs"));
@@ -289,7 +249,6 @@ fn unix_cli_dirs(home: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// `~/.nvm/versions/node/<version>/bin`, newest version first.
 fn nvm_node_bins(home: &Path) -> Vec<PathBuf> {
     let root = home.join(".nvm").join("versions").join("node");
     let Ok(entries) = std::fs::read_dir(&root) else {
@@ -318,11 +277,6 @@ fn node_version_key(path: &Path) -> Vec<u64> {
         .collect()
 }
 
-/// The second search tier: what the user's environment adds beyond the process PATH.
-///
-/// Unix: the login shell's PATH ([`login_shell_path_dirs`]). Windows: the PATH registered for
-/// the user and the machine ([`registered_path_dirs`]), which a running app misses when an
-/// installer appended to it after the app (or its parent shell) started.
 fn environment_path_dirs() -> &'static [PathBuf] {
     if cfg!(windows) {
         registered_path_dirs()
@@ -331,10 +285,6 @@ fn environment_path_dirs() -> &'static [PathBuf] {
     }
 }
 
-/// PATH entries from the Windows registry (`HKCU\Environment` then the machine-wide
-/// `Session Manager\Environment`), `%VAR%` tokens expanded, read once per process.
-///
-/// Empty off Windows and in tests (which inject directories explicitly instead).
 pub fn registered_path_dirs() -> &'static [PathBuf] {
     static DIRS: OnceLock<Vec<PathBuf>> = OnceLock::new();
     DIRS.get_or_init(|| {
@@ -374,8 +324,6 @@ fn registered_path_values() -> Vec<OsString> {
     Vec::new()
 }
 
-/// Split registry PATH values into directories, expanding `%NAME%` with `lookup`; entries
-/// that reference an unknown variable are dropped rather than searched literally.
 fn registered_path_dirs_from(
     values: &[OsString],
     lookup: impl Fn(&str) -> Option<OsString>,
@@ -411,9 +359,6 @@ fn expand_percent_vars(text: &str, lookup: &impl Fn(&str) -> Option<OsString>) -
     Some(out)
 }
 
-/// PATH entries as the user's login shell sees them, probed once per process.
-///
-/// Empty on Windows and in tests (which inject directories explicitly instead).
 pub fn login_shell_path_dirs() -> &'static [PathBuf] {
     static DIRS: OnceLock<Vec<PathBuf>> = OnceLock::new();
     DIRS.get_or_init(|| {
@@ -428,7 +373,6 @@ fn login_shell() -> PathBuf {
     login_shell_from(env::var_os("SHELL"))
 }
 
-/// `$SHELL` when it points at a real file, else the platform's default shell.
 fn login_shell_from(shell: Option<OsString>) -> PathBuf {
     shell
         .map(PathBuf::from)
@@ -442,11 +386,6 @@ fn login_shell_from(shell: Option<OsString>) -> PathBuf {
         })
 }
 
-/// Run `shell -i -l -c` to dump the environment between markers and pull PATH out of it.
-///
-/// `-i -l` mirrors a terminal (login + interactive), which is where node version managers
-/// register themselves. Output is read via `/usr/bin/env` so the result does not depend on
-/// how the shell expands `$PATH`.
 fn probe_login_shell_path(shell: &Path, timeout: Duration) -> Option<Vec<PathBuf>> {
     let script = format!("printf '\\n{ENV_START}\\n'; /usr/bin/env; printf '{ENV_END}\\n'");
     let child = Command::new(shell)
@@ -493,8 +432,6 @@ pub fn agent_info(id: AgentId) -> AgentInfo {
             AgentId::Antigravity => cli_ok,
             AgentId::Cursor => false,
         },
-        // Nothing here can tell: whether an adapter reads hooks is the adapter's own answer, and
-        // the two that do overwrite this in their `info()`.
         reads_hooks: false,
     }
 }

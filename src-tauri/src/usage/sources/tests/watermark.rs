@@ -1,14 +1,9 @@
-//! The watermark: a transcript whose records the usage history holds is not read again, and its
-//! parse leaves the scan cache.
-
 use super::*;
 
 fn watermark() -> Watermark {
     Watermark::at(at("2026-08-14T00:00:00Z"))
 }
 
-/// A transcript of one record on 2026-08-01, last written that day: 36 hours and more before the
-/// watermark, so everything it holds is folded.
 fn write_long_folded(home: &Path) -> PathBuf {
     let path = transcript_path(home, "long-folded.jsonl");
     write_records(&path, &[record("2026-08-01T04:05:13.944Z", "msg-1", 20)]);
@@ -32,8 +27,6 @@ fn a_transcript_last_written_well_before_the_watermark_is_indexed_unread() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// Indexing records the same span for a transcript whose records the history holds whether or not
-/// the scan cache still holds its parse, so a summary's signature does not change with the cache.
 #[test]
 fn a_transcript_last_written_well_before_the_watermark_signs_the_same_parsed_or_not() {
     let home = scratch_dir("usage-sources-folded-signature");
@@ -51,7 +44,6 @@ fn a_transcript_last_written_well_before_the_watermark_signs_the_same_parsed_or_
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// Written recently, so its mtime alone would have it read; its newest record is folded.
 #[test]
 fn a_transcript_whose_newest_record_is_folded_is_not_read_however_recently_written() {
     let home = scratch_dir("usage-sources-read-skips-folded");
@@ -78,8 +70,6 @@ fn a_transcript_whose_newest_record_is_folded_is_not_read_however_recently_writt
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// The fold opens the sources with the watermark it found and finishes them with the one it moved
-/// to: a transcript it folded leaves the scan cache then, and one with records after it stays.
 #[test]
 fn finishing_with_a_later_watermark_drops_the_parses_it_folded() {
     let home = scratch_dir("usage-sources-prune-folded");
@@ -98,9 +88,6 @@ fn finishing_with_a_later_watermark_drops_the_parses_it_folded() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A message's copies collapse to the richest before the watermark splits them. Here the billed
-/// copy is folded and a partial copy in a resumed session sits after the watermark: the message
-/// is the history's, and the partial copy is not counted on top of it.
 #[test]
 fn a_read_counts_each_message_once_from_the_watermark_on() {
     let home = scratch_dir("usage-sources-records-from-watermark");
@@ -134,8 +121,6 @@ fn a_read_counts_each_message_once_from_the_watermark_on() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A read uses the watermark the index was brought up to date with, not a second one: the summary
-/// opens the history once.
 #[test]
 fn a_read_after_indexing_uses_the_watermark_the_index_was_brought_up_to_date_with() {
     let home = scratch_dir("usage-sources-read-keeps-watermark");

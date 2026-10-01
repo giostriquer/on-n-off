@@ -1,12 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// Host ↔ helper message version. Bumped with every shape change so a stale helper fails loudly.
 public let protocolVersion = 4
-/// Rows per provider in a message; mirrors `MAX_SESSIONS` on the host.
 public let maxSessions = 12
 
-/// The providers the rail knows, in rail order. Matches the host's `AgentId` wire names.
 public enum ProviderId: String, Codable, CaseIterable, Sendable {
   case claude, codex, antigravity, cursor
 }
@@ -32,8 +29,6 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
     self.observedAt = observedAt
   }
 
-  /// The window's percent now: zero once its reset has passed, since that is where the provider
-  /// restarts the quota; nil only when the reported figure is not a usable percentage.
   public func percent(at now: Date) -> Double? {
     guard usedPercent.isFinite, (0...100).contains(usedPercent) else { return nil }
     if let reset = parseInstant(resetsAt), reset <= now { return 0 }
@@ -49,8 +44,6 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
     percent(at: now).map(formatPercent) ?? "—"
   }
 
-  /// "Resets Tue 8:00 PM" while the window is pending; "Reset Tue 8:00 PM" once it has, without
-  /// the spent cycle's figure; empty when the provider reported no reset.
   public func note(at now: Date) -> String {
     guard let reset = parseInstant(resetsAt) else { return "" }
     let formatter = DateFormatter()
@@ -61,11 +54,6 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
   }
 }
 
-/// A business workspace member's share of the pooled credits (Codex's spend control), as the host
-/// sends it: the reader's meter, the reset, and the amounts already worded
-/// (`workspace_share_wording` in `side_notch/model.rs`) — what is left while the share is current,
-/// and all of it once its reset has passed. The helper picks one by the clock and formats nothing but
-/// the reset's date.
 public struct WorkspaceCredits: Codable, Equatable, Sendable {
   public let usedPercent: Double
   public let resetsAt: String?
@@ -79,23 +67,16 @@ public struct WorkspaceCredits: Codable, Equatable, Sendable {
     self.renewed = renewed
   }
 
-  /// The share as a quota, so the ring, the meter ramp and renewal treat it as they treat a window:
-  /// once its reset has passed it reads as nothing used.
   public var quota: Quota {
     Quota(
       id: "workspace-credits", label: "Workspace credits", kind: "credits",
       usedPercent: usedPercent, resetsAt: resetsAt, observedAt: "")
   }
 
-  /// "17,000 of 25,000 left", "limit reached" or "all 10,000 used" while the share is current; all of
-  /// it again once it has renewed.
   public func amounts(at now: Date) -> String {
     (parseInstant(resetsAt).map { $0 <= now } ?? false) ? renewed : left
   }
 
-  /// "Resets Oct 1" while pending, "Reset Sep 23" once renewed, empty with no reset. A date rather
-  /// than a window's weekday and clock: a share renews monthly, and a weekday would not say which
-  /// week.
   public func note(at now: Date) -> String {
     guard let reset = parseInstant(resetsAt) else { return "" }
     let formatter = DateFormatter()
@@ -128,7 +109,6 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
 
   public var isWorking: Bool { status == "working" }
 
-  /// "just now", "4 min", "2 h", "3 d" since the last activity.
   public func age(at now: Date) -> String {
     guard let instant = parseInstant(lastActiveAt) else { return "" }
     let minutes = Int(now.timeIntervalSince(instant) / 60)
@@ -139,9 +119,6 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
   }
 }
 
-/// What a provider cell's inner ring shows, as the host chose it (`InnerRing` in
-/// `side_notch/model.rs`): Claude's Fable window, named by id, or a business member's workspace
-/// credit share.
 public enum InnerRing: Codable, Equatable, Sendable {
   case fable(windowId: String)
   case workspaceShare
@@ -171,7 +148,6 @@ public enum InnerRing: Codable, Equatable, Sendable {
   }
 }
 
-/// The inner ring's quota: the Fable window, or the workspace share drawn as a window.
 public enum InnerQuota: Equatable, Sendable {
   case fable(Quota)
   case workspaceShare(Quota)
@@ -183,9 +159,6 @@ public enum InnerQuota: Equatable, Sendable {
   }
 }
 
-/// One provider cell as the host projected it (`NotchProvider` in `side_notch/model.rs`): its
-/// windows in the card's order (weekly, session, model), which the popover keeps, the window its
-/// ring leads with and what its inner ring shows. The helper draws these and decides none of them.
 public struct Provider: Codable, Equatable, Identifiable, Sendable {
   public var id: ProviderId { provider }
   public let provider: ProviderId
@@ -214,13 +187,10 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     self.workspaceCredits = workspaceCredits
   }
 
-  /// The window the ring and the figure show: the one the host named, the weekly window, whatever the
-  /// account's status, so a paused account keeps its last reading.
   public var headline: Quota? {
     headlineWindowId.flatMap { id in windows.first { $0.id == id } }
   }
 
-  /// The inner ring's quota, as the host chose it.
   public var inner: InnerQuota? {
     switch innerRing {
     case .fable(let id)?: return windows.first { $0.id == id }.map(InnerQuota.fable)
@@ -229,18 +199,12 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     }
   }
 
-  /// Whether every window the host names is one it sent, and a share it puts on the inner ring came
-  /// with it. A message that names anything else is refused rather than drawn in part.
   public var referencesAreSent: Bool {
     (headlineWindowId == nil || headline != nil) && (innerRing == nil || inner != nil)
   }
 
-  /// Whether the popover shows any remembered value: windows or a credit share. A paused account that
-  /// has some says they are the last observed.
   public var hasObservedValues: Bool { !windows.isEmpty || workspaceCredits != nil }
 
-  /// Whether the ring shows a reading an unfinished refresh left: a headline on an account whose
-  /// read did not answer this time, which the rail's label says is the last observed.
   public var ringIsLastObserved: Bool { status != "ok" && headline != nil }
 }
 
@@ -251,7 +215,6 @@ public enum Edge: String, Codable, Sendable {
 
 public enum ShowMode: String, Codable, Sendable { case always, onHover }
 
-/// The Pull requests screen's three lists, in the order the popover shows them.
 public enum GithubList: String, Codable, CaseIterable, Sendable {
   case mine, reviewRequested, assigned
   public var title: String {
@@ -270,11 +233,9 @@ public struct PullRequestSettings: Codable, Equatable, Sendable {
     self.enabled = enabled
     self.lists = lists
   }
-  /// The selected lists in screen order, without duplicates.
   public var selectedLists: [GithubList] { GithubList.allCases.filter(lists.contains) }
 }
 
-/// One cell on the rail.
 public enum RailCell: Hashable, Sendable {
   case provider(ProviderId)
   case pullRequests
@@ -292,8 +253,6 @@ public enum NotchSize: String, Codable, Sendable {
   }
 }
 
-/// The host's settings document. Every field is present on the wire; legacy documents are
-/// upgraded on the host before they reach the helper.
 public struct Settings: Codable, Equatable, Sendable {
   public var enabled: Bool
   public var displayId: String?
@@ -317,10 +276,8 @@ public struct Settings: Codable, Equatable, Sendable {
     self.pullRequests = pullRequests
   }
 
-  /// The selected providers in rail order, without duplicates.
   public var railProviders: [ProviderId] { railProviderOrder.filter(providers.contains) }
 
-  /// Cells on the rail: one per selected provider, then the pull-request cell when it is on.
   public var railCells: [RailCell] {
     railProviders.map(RailCell.provider) + (pullRequests.enabled ? [.pullRequests] : [])
   }
@@ -355,7 +312,6 @@ public enum ClientAction: Encodable, Sendable {
   case refresh
   case openLimits
   case openPullRequests
-  /// The rail's pin control: always show the rail, or show it on hover.
   case setShow(ShowMode)
 
   private enum CodingKeys: String, CodingKey {
@@ -392,11 +348,8 @@ public struct Snapshot: Codable, Equatable, Sendable {
   public let error: String?
 }
 
-/// Rows per list on the wire; mirrors `MAX_PULL_REQUESTS` on the host.
 public let maxPullRequests = 25
 
-/// Decodes a string-backed enum, mapping values a newer host may send to `unknown` instead of
-/// rejecting the whole message.
 private func decodeLenient<Value: RawRepresentable>(
   _ decoder: Decoder, unknown: Value
 ) throws -> Value where Value.RawValue == String {
@@ -404,7 +357,6 @@ private func decodeLenient<Value: RawRepresentable>(
   return Value(rawValue: raw) ?? unknown
 }
 
-/// The head commit's status-check rollup, in the host's wire spelling.
 public enum CiState: String, Codable, Sendable {
   case none, pending, success, failure, error, unknown
   public init(from decoder: Decoder) throws {
@@ -413,7 +365,6 @@ public enum CiState: String, Codable, Sendable {
   public var failing: Bool { self == .failure || self == .error }
 }
 
-/// GitHub's `reviewDecision`, in GitHub's own spelling.
 public enum ReviewDecision: String, Codable, Sendable {
   case approved = "APPROVED"
   case changesRequested = "CHANGES_REQUESTED"
@@ -424,7 +375,6 @@ public enum ReviewDecision: String, Codable, Sendable {
   }
 }
 
-/// The host's verdict on merging (`github::merge::classify`).
 public enum MergeKind: String, Codable, Sendable {
   case conflicts, queued, autoMerge, ready, behind, blocked, unknown
   public init(from decoder: Decoder) throws {
@@ -463,10 +413,8 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
     self.updatedAt = updatedAt
   }
 
-  /// Identify passing PRs whose ring needs a merge-conflict band.
   public var passingWithConflicts: Bool { ci == .success && mergeKind == .conflicts }
 
-  /// Only GitHub pages ever open from the notch.
   public var link: URL? {
     guard let url = URL(string: url), url.scheme == "https", url.host == "github.com" else {
       return nil
@@ -497,15 +445,11 @@ public struct PullRequests: Codable, Equatable, Sendable {
     self.stale = stale
     self.lists = lists
   }
-  /// A live answer, or the last one while GitHub is unreachable.
   public var readable: Bool { status == "ok" || stale }
-  /// Every listed row across the selected lists, once each (a pull request can be both
-  /// authored and assigned).
   public var rows: [PullRequest] {
     var seen = Set<String>()
     return lists.flatMap(\.items).filter { seen.insert($0.id).inserted }
   }
-  /// Distinct listed pull requests; the popover's per-list "n of total" covers the rest.
   public var count: Int { rows.count }
   public var ready: Int { rows.filter { $0.mergeKind == .ready }.count }
   public var failing: Int { rows.filter(\.ci.failing).count }
@@ -560,27 +504,15 @@ public struct HostMessage: Decodable, Sendable {
 
 public enum ProtocolError: Error { case invalidMessage }
 
-// MARK: - Geometry
-
-/// Every native metric snaps to the target display's pixel grid so text and strokes never land
-/// between pixels on 1x monitors.
 public func pixelAligned(_ value: Double, displayScale: Double) -> Double {
   let scale = displayScale.isFinite && displayScale > 0 ? displayScale : 1
   return (value * scale).rounded() / scale
 }
 
-/// Rail metrics in points for one size preset, one display, and one edge. Cells are 76 wide and
-/// 73 tall on screen whatever the edge (icon slot with the rings, then the percent label): a
-/// vertical rail is 76 thick with cells stacked along it, a horizontal bar is 73 thick with
-/// cells side by side. Each end flares into the screen edge over `ear`
-/// points and the first cell starts after that ear, so `inset == ear`.
 public struct RailLayout: Equatable, Sendable {
   public let thickness: Double
-  /// A cell's extent along the rail's axis.
   public let cellLength: Double
   public let cellSpacing: Double
-  /// Distance from either end to the first cell; also the length of the ear curve. The cells
-  /// are centred as a block, so both ends of the rail read the same.
   public let inset: Double
   public var ear: Double { inset }
   public let cellPadding: Double
@@ -605,7 +537,6 @@ public func railLayout(size: NotchSize, displayScale: Double, edge: Edge) -> Rai
   let cellPadding = value(1)
   let contentSpacing = value(3)
   let iconSlot = value(46)
-  // Tall enough for the 17 pt label at every preset, so the figure never scales to fit.
   let labelHeight = value(22)
   let cellWidth = value(76)
   let cellHeight = iconSlot + labelHeight + contentSpacing + 2 * cellPadding
@@ -618,9 +549,6 @@ public func railLayout(size: NotchSize, displayScale: Double, edge: Edge) -> Rai
     glyphSize: value(24), labelHeight: labelHeight)
 }
 
-/// The rail's frame in top-left display coordinates, or `nil` while the notch must stay hidden:
-/// disabled, no provider, the selected display missing, ambiguous, or mirrored, or a rail that
-/// does not fit the work area. Mirrors `side_notch::model::layout` on the host.
 public func notchRailFrame(settings: Settings, displays: [Display]) -> CGRect? {
   guard settings.enabled, let display = selectedDisplay(settings: settings, displays: displays)
   else { return nil }
@@ -642,8 +570,6 @@ public func notchRailFrame(settings: Settings, displays: [Display]) -> CGRect? {
   return CGRect(x: aligned(x), y: aligned(y), width: length, height: thickness)
 }
 
-/// The collapsed "show on hover" pill: a thin strip centred on the rail's span, flush with the
-/// edge, whose hit area is what opens the rail.
 public func notchPillFrame(settings: Settings, displays: [Display]) -> CGRect? {
   guard let rail = notchRailFrame(settings: settings, displays: displays),
     let display = selectedDisplay(settings: settings, displays: displays)
@@ -667,7 +593,6 @@ public func notchPillFrame(settings: Settings, displays: [Display]) -> CGRect? {
   }
 }
 
-/// Cell frames inside the rail (top-left origin), one per selected provider in rail order.
 public func railCellFrames(edge: Edge, layout: RailLayout, count: Int) -> [CGRect] {
   (0..<max(count, 0)).map { index in
     let offset = layout.inset + Double(index) * (layout.cellLength + layout.cellSpacing)
@@ -681,8 +606,6 @@ public let popoverWidth = 272.0
 public let popoverGap = 2.0
 public let popoverMargin = 8.0
 
-/// Where a popover of `size` sits next to `cell` (a rail cell in top-left display coordinates):
-/// inward from the edge, centred on the cell, and clamped to the display's work area.
 public func popoverFrame(
   cell: CGRect, edge: Edge, size: CGSize, display: Display, scale: Double
 ) -> CGRect {
@@ -731,13 +654,10 @@ private func roundedPercent(_ percent: Double) -> Int {
   Int(percent.rounded())
 }
 
-/// The clipboard's rich-text form of a review request: “review please: <title>” with the title
-/// linked, which Slack and other chat apps paste as a link.
 public func reviewRequestHtml(title: String, url: URL) -> String {
   "review please: <a href=\"\(escapeHtml(url.absoluteString))\">\(escapeHtml(title))</a>"
 }
 
-/// The plain-text fallback for targets that drop rich text.
 public func reviewRequestText(title: String, url: URL) -> String {
   "review please: \(title) \(url.absoluteString)"
 }

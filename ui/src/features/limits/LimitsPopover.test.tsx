@@ -113,7 +113,6 @@ describe("LimitsPopover", () => {
     expect((session.firstElementChild as HTMLElement).style.backgroundColor).not.toBe("var(--trip)");
     expect(within(account).getByText("0%").style.color).toBe("");
     expect(within(account).getByText(/^reset 2m ago · \w{3} \d\d:\d\d$/)).toBeTruthy();
-    // The live window keeps its number.
     const weekly = within(account).getByRole("meter", { name: "Weekly · all models" });
     expect(weekly.getAttribute("aria-valuenow")).toBe("24");
     expect(weekly.getAttribute("aria-valuetext")).toBeNull();
@@ -308,7 +307,6 @@ it("marks saved usage quietly in the popover and exposes its failure on focus", 
   const account = await screen.findByRole("article", {name:"Claude limits · you@example.com"});
   const badge = within(account).getByRole("button", {name:"Usage status: Last known usage"});
   expect(within(account).queryByText(reason)).toBeNull();
-  // One status per card: the last-known badge, not the "Remembered account" pill as well.
   expect(within(account).queryByText("Remembered account")).toBeNull();
   expect(within(account).getByRole("meter")).toBeInTheDocument();
   expect(within(account).getByText(/Latest observation/)).toBeInTheDocument();

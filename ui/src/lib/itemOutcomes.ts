@@ -1,7 +1,5 @@
 import type { AgentId, InstallItemsResult, ItemOutcome } from "./types";
 
-// Kept dependency-free: SessionProvider and AppShell (entry chunk) share it with the lazy sheet.
-
 export type OutcomeSummary = {
   installed: number;
   skipped: number;
@@ -37,7 +35,6 @@ export function summarizeOutcomes(result: InstallItemsResult): OutcomeSummary {
   return { installed, skipped, conflicts, failed, touchedProviders: [...touched] };
 }
 
-/** True when nothing is left for the user to decide: no conflicts, no failures. */
 export function installOutcomeClean(result: InstallItemsResult): boolean {
   const summary = summarizeOutcomes(result);
   return summary.conflicts.length === 0 && summary.failed.length === 0;

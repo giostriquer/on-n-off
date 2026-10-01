@@ -9,8 +9,6 @@ struct NotchMetrics {
     self.backingScale = max(backingScale, 1)
   }
 
-  // Compact and large presets produce fractional points. Snap every native metric to the target
-  // display's pixel grid so text and vector strokes do not land between pixels on 1x monitors.
   func value(_ points: CGFloat) -> CGFloat {
     (points * scale * backingScale).rounded() / backingScale
   }

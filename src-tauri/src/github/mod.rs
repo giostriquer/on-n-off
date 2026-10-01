@@ -1,8 +1,3 @@
-//! The GitHub screen's pull requests: authored, review-requested, and assigned, each with the
-//! head commit's CI rollup. Auth is borrowed from the `gh` CLI (`gh auth token`); on-n-off never
-//! stores a GitHub token and never writes to GitHub. The only on-n-off writes are the last
-//! successful read under `~/.on-n-off/github/`, so the screen has something to show at launch.
-
 mod auth;
 #[cfg(test)]
 mod fixtures;
@@ -28,26 +23,15 @@ use crate::settings::{self, AppSettings};
 use auth::{read_token_with, GhTokenMemo, TokenError, GH_TOKEN, TOKEN_DEADLINE};
 use query::{request_body, GRAPHQL_URL};
 
-/// Below this many remaining points the reader stops polling until GitHub's window resets, so a
-/// runaway elsewhere cannot make this screen the one that exhausts the budget.
 const LOW_BUDGET_POINTS: u64 = 50;
-/// The in-memory result is served for the poll interval minus this margin, so a screen refetch
-/// that lands just before the monitor's poll (or vice versa) still shares one request.
 const CACHE_MARGIN_SECS: i64 = 5;
-/// How long to pause when GitHub says "rate limited" without saying until when.
 const RATE_LIMIT_FALLBACK_SECS: i64 = 60;
 
 static READ_LOCK: Mutex<()> = Mutex::new(());
 static READ_MEMO: ReadMemo = ReadMemo::new();
 
-/// A GitHub-side problem: the status the UI shows and the hint that goes with it.
 type Failure = (GithubStatus, String);
 
-/// Process-wide reader state: the last successful result and when it was read, plus the instant
-/// until which polling is paused for rate-limit reasons. `revision` moves whenever a fetch
-/// replaces that result, so the notch's pull-request cell — the one consumer that keeps its own
-/// copy — notices a refresh made on the screen instead of waiting out its own interval. It sits
-/// outside the mutex so asking costs no lock; see [`Revision`].
 pub struct ReadMemo {
     state: Mutex<ReadMemoState>,
     revision: Revision,
@@ -75,8 +59,6 @@ impl ReadMemo {
     }
 }
 
-/// Everything `read_prs_in` reaches for, so tests can substitute a scratch home, a stub `gh`, a
-/// loopback endpoint, fresh memos, and a fixed clock.
 struct Sources<'a> {
     home: &'a Path,
     settings: &'a AppSettings,
@@ -87,30 +69,18 @@ struct Sources<'a> {
     now_secs: i64,
 }
 
-/// The GitHub screen's pull requests. Never fails: every problem is a `status` + `hint`, backed
-/// by the last successful data when there is any. `force` skips the in-memory result but never
-/// re-runs `gh auth token`; the token is only re-read after GitHub rejects it.
 pub fn read_prs(force: bool) -> GithubPrsDto {
     read_prs_revisioned(force).0
 }
 
-/// `read_prs` plus the revision of the remembered result, for a consumer that caches the answer
-/// itself and needs to notice a refresh made through another surface. On an answer this reader
-/// did not fetch — memory-served, paused, or failed — that is the revision of a result the DTO
-/// may not carry; recording it is still right, because there is nothing newer to pick up and a
-/// consumer must not be sent back to GitHub for a request this reader could not make.
 pub fn read_prs_revisioned(force: bool) -> (GithubPrsDto, u64) {
     let (dto, reading) = read_prs_locked(force);
-    // Outside `READ_LOCK`, so the announcement never delays a read waiting behind it.
     if reading.replaced() {
         crate::read_revision::announce(Source::GithubPrs);
     }
     (dto, reading.revision())
 }
 
-/// The revision of the remembered pull-request result. Never blocks; `0` before the first
-/// successful read. Only the native notch keeps its own copy of a read, so only macOS asks --
-/// and it is the only caller, so the item does not exist elsewhere rather than sitting unused.
 #[cfg(target_os = "macos")]
 pub fn revision() -> u64 {
     READ_MEMO.revision.current()
@@ -147,11 +117,6 @@ fn read_prs_locked(force: bool) -> (GithubPrsDto, Reading) {
     )
 }
 
-/// The answer paired with what this read did to the remembered result. Only a successful fetch
-/// replaces it: unlike the limits cache, which remembers a failed read and can serve it, a
-/// failure here discards the remembered result, so announcing one would send every consumer
-/// holding a copy straight back to GitHub for a request this reader has just been told it
-/// cannot make.
 fn read_prs_in(sources: &Sources<'_>, force: bool) -> (GithubPrsDto, Reading) {
     let window = i64::from(sources.settings.github_poll_seconds) - CACHE_MARGIN_SECS;
     let snapshot_path = paths::github_prs_path_for(sources.home);
@@ -198,8 +163,6 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> (GithubPrsDto, Reading) {
             (dto, reading)
         }
         Err((status, hint)) => {
-            // A failure is never papered over by the result it replaced: the next poll asks
-            // again, and meanwhile the last good data is shown as stale.
             let remembered = sources
                 .read_memo
                 .state()
@@ -246,8 +209,6 @@ fn fetch(sources: &Sources<'_>) -> Result<GithubPrsDto, Failure> {
     })
 }
 
-/// One GraphQL request with the memoised token. A 401 means the memoised token is one `gh` has
-/// since rotated (or revoked): ask `gh` again and retry once; a second 401 is reported.
 fn post_with_token_retry(sources: &Sources<'_>, body: &Value) -> Result<Value, Failure> {
     let read_token = || read_token_with(sources.cli, TOKEN_DEADLINE);
     let mut token = sources
@@ -328,7 +289,6 @@ fn rate_limit_hint(until: i64, now_secs: i64) -> String {
     format!("GitHub rate limit reached — polling resumes in {minutes} min.")
 }
 
-/// A failure with nothing to show but the scope it applies to.
 fn problem(status: GithubStatus, hint: String, settings: &AppSettings) -> GithubPrsDto {
     GithubPrsDto {
         status,
@@ -342,8 +302,6 @@ fn problem(status: GithubStatus, hint: String, settings: &AppSettings) -> Github
     }
 }
 
-/// The failure backed by earlier data when there is any: its lists, viewer, scope and read time,
-/// marked stale.
 fn stale_or(failure: GithubPrsDto, remembered: Option<GithubPrsData>) -> GithubPrsDto {
     match remembered {
         Some(data) => GithubPrsDto {

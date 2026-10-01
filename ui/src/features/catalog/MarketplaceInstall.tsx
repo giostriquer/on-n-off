@@ -35,10 +35,6 @@ export type MarketplaceInstallProps = {
   onPickFolder: () => Promise<string | null>;
 };
 
-/**
- * The GitHub branch of the Install sheet: reads the marketplace, offers the three actions, and
- * owns the selection, targets, result, and footer.
- */
 export function MarketplaceInstall({
   repo,
   agentName,
@@ -111,7 +107,6 @@ export function MarketplaceInstall({
       const next = await onInstallItems(request);
       if (next) {
         setResult(next);
-        // Newly installed items must show their badges at once, not after the status staleTime.
         for (const provider of summarizeOutcomes(next).touchedProviders) {
           void queryClient.invalidateQueries({ queryKey: [ITEM_STATUS_KEY, provider] });
         }

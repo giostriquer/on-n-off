@@ -23,8 +23,6 @@ fn scoped_codex_metadata_keeps_same_workspace_users_separate() {
     assert!(metadata(root.path()).is_err());
 }
 
-/// A Codex login on disk, as the CLI writes it: its tokens under `tokens`, the workspace's claims in
-/// the id token.
 fn codex_login(root: &Path, access_token: Option<&str>) {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     let claims = json!({"https://api.openai.com/auth":{"chatgpt_account_id":"team","chatgpt_user_id":"user"}});
@@ -43,7 +41,6 @@ fn codex_login(root: &Path, access_token: Option<&str>) {
     .unwrap();
 }
 
-/// Only the access token leaves accounts, beside the key the card is known by and its workspace.
 #[test]
 fn the_access_projection_carries_only_the_access_token_with_the_cards_identity() {
     let root = tempfile::tempdir().unwrap();
@@ -71,7 +68,6 @@ fn a_codex_login_without_an_access_token_gives_its_identity_and_no_access() {
         .is_none());
 }
 
-/// Reading the token must not loosen the identity rules `metadata` enforces.
 #[test]
 fn the_access_projection_refuses_a_login_whose_claims_name_another_workspace() {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -88,11 +84,6 @@ fn the_access_projection_refuses_a_login_whose_claims_name_another_workspace() {
     assert!(metadata_and_access(root.path()).is_err());
 }
 
-/// Codex's keyring target on macOS sends `security` exactly the commands the shared writer
-/// builds, and nothing else: the login as one `add-generic-password -U` with the secret
-/// hex-encoded, a removal as one `delete-generic-password` naming account and service. A write
-/// back through the `keyring` crate — this process's own identity, which is what prompted on
-/// every switch — would send nothing here and fail this test.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_keyring_target_writes_and_deletes_through_security() {
@@ -104,9 +95,6 @@ fn the_keyring_target_writes_and_deletes_through_security() {
         stdout: String::new(),
         stderr: String::new(),
     };
-    // Synthetic names on purpose: anyone re-checking this guard by putting the `keyring` crate
-    // back would otherwise file a second item under Claude Code's own service, which the
-    // service-only read could then return instead of the real login.
     let target = Target::Keyring {
         service: "on-n-off seam rehearsal".into(),
         account: "on-n-off-test".into(),
@@ -150,10 +138,6 @@ fn the_keyring_target_writes_and_deletes_through_security() {
     );
 }
 
-/// The same path against the real tool, on a throwaway entry: publish, read back, remove, remove
-/// again. What it proves beyond the test above is the wiring to `security` itself.
-///
-/// `cargo test --manifest-path src-tauri/Cargo.toml rehearse_the_keyring_target -- --ignored`
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "writes a throwaway Keychain entry; not part of CI"]

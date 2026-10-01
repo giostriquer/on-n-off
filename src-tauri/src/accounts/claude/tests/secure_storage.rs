@@ -1,13 +1,7 @@
-//! The account switch under `CLAUDE_SECURESTORAGE_CONFIG_DIR`, which moves Claude Code's login and
-//! locks away from its config dir.
-
 use super::*;
 
 const SECURE_STORAGE: &str = "CLAUDE_SECURESTORAGE_CONFIG_DIR";
 
-/// Under `CLAUDE_SECURESTORAGE_CONFIG_DIR` the switch reads Claude Code's login from that dir and
-/// takes the refresh locks there, while the identity file and its lock stay with the config dir.
-/// The `claude` it starts is handed the same variable, so it works in the same store.
 #[test]
 fn the_switch_works_in_the_secure_storage_dir() {
     let root = tempfile::tempdir().unwrap();
@@ -51,8 +45,6 @@ fn the_switch_works_in_the_secure_storage_dir() {
     );
 }
 
-/// An isolated sign-in stores its login in its own home. A `CLAUDE_SECURESTORAGE_CONFIG_DIR`
-/// inherited from on-n-off's environment would send it to the user's real store instead.
 #[test]
 fn an_isolated_claude_sign_in_never_inherits_a_secure_storage_dir() {
     let root = tempfile::tempdir().unwrap();
@@ -66,10 +58,6 @@ fn an_isolated_claude_sign_in_never_inherits_a_secure_storage_dir() {
     );
 }
 
-/// A store `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved is a custom native home like one
-/// `CLAUDE_CONFIG_DIR` chose, so account changes defer to the official client for it. Named
-/// explicitly, even `~/.claude` moves the login to a scoped Keychain entry. Set but empty, the
-/// variable leaves the default store where it was, and account changes go on as usual.
 #[test]
 fn account_changes_defer_to_the_official_client_for_a_moved_store() {
     let root = tempfile::tempdir().unwrap();

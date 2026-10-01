@@ -229,7 +229,6 @@ describe("Settings", () => {
     expect(onSettingsChange).not.toHaveBeenCalled();
     expect(input).toHaveValue("");
 
-    // Leaving the field keeps the draft: a blur-commit would race the chip's Remove click.
     await user.type(input, "org:other");
     await user.tab();
     expect(onSettingsChange).not.toHaveBeenCalled();
@@ -262,8 +261,6 @@ describe("Settings", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Notifications are blocked in system settings.");
   });
 
-  // The card itself is covered in TraySettingsCard.test.tsx; this pins that Settings mounts it
-  // and routes it through the same patch callback as every other card.
   it("routes the tray card through the shared settings patch", async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();

@@ -2,7 +2,6 @@ use super::*;
 use std::cell::Cell;
 
 impl<T: Clone> PerAccount<T> {
-    /// Backoff state for an account, as if its `count`th failure's wait had already run out.
     fn failed_before(&self, account: &str, count: u32) {
         let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
         self.entries()
@@ -16,7 +15,6 @@ impl<T: Clone> PerAccount<T> {
     }
 }
 
-/// A read that answers what the test says and counts how often it was asked.
 fn reads(answer: Option<u8>) -> (impl Fn() -> Option<u8>, std::rc::Rc<Cell<u32>>) {
     let asked = std::rc::Rc::new(Cell::new(0));
     let counter = asked.clone();
@@ -73,7 +71,6 @@ fn a_failure_holds_the_account_back_doubling_each_time_and_a_success_clears_it()
         "and waits the longer delay from then"
     );
 
-    // Another account is not held back by this one's failures.
     let (read, _) = reads(Some(9));
     assert_eq!(memo.read_backed_off("b", &read), Some(9));
 

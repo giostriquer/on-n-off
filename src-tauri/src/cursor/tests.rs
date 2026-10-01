@@ -95,8 +95,6 @@ fn lists_local_and_cache_plugins_user_skills_and_mcp() {
     assert!(!tab.user_skills[0].togglable);
     assert!(!tab.user_skills.iter().any(|skill| skill.name == "builtin"));
     assert_eq!(tab.mcp_servers.len(), 2);
-    // Cursor keeps on/off in its own state and never reads a `disabled` key, so every
-    // configured server is listed as on and none can be switched from here.
     for server in &tab.mcp_servers {
         assert!(server.enabled, "{} should read as configured/on", server.id);
         assert!(!server.togglable, "{} must not be togglable", server.id);
@@ -106,8 +104,6 @@ fn lists_local_and_cache_plugins_user_skills_and_mcp() {
 
 #[test]
 fn versioned_cache_lists_the_newest_complete_version_once() {
-    // Cursor installs marketplace plugins as cache/<marketplace>/<plugin>/<commit>/, keeping
-    // older checkouts around and marking finished downloads with `.cache-complete`.
     let root = crate::paths::scratch_dir("on-n-off-cursor-versioned");
     let plugin = root
         .join("plugins")

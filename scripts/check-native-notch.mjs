@@ -1,5 +1,3 @@
-// Native protocol/lifetime checks plus an offscreen render of the rail, pill, and popovers.
-// No provider reads or live settings writes.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -9,10 +7,6 @@ import { once } from 'node:events';
 
 const executable = resolve(process.argv[2] ?? 'src-tauri/target/debug/on-n-off-notch');
 
-// Package.swift links Info.plist into the helper's __TEXT,__info_plist section, through a linker
-// flag that SwiftPM does not track as an input. A helper that embeds another Info.plist was linked
-// from older inputs than the ones beside it, which is what a restored Swift build cache gives when
-// nothing forces the link (see native_build.rs).
 const infoPlist = resolve('src-tauri/macos/SideNotch/Info.plist');
 const embedded = spawnSync('/usr/bin/segedit', [executable, '-extract', '__TEXT', '__info_plist', '/dev/stdout'], { maxBuffer: 1 << 20 });
 assert.equal(embedded.status, 0, `segedit could not read the helper's embedded Info.plist: ${embedded.stderr}`);
@@ -22,7 +16,6 @@ const settings = { enabled: false, displayId: null, edge: 'right', size: 'standa
 const snapshot = { version: 4, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
 async function check(name, input, expectedAck, args = []) {
   const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-  // Generous: the check is that the helper exits on EOF, not how fast a busy machine starts it.
   const timer = setTimeout(() => child.kill('SIGKILL'), 20000);
   const messages = [];
   let diagnostics = '';
@@ -57,8 +50,6 @@ await check('parent closes before first snapshot', '', false);
 await check('parent EOF exits with the main queue unresponsive', '', false, ['--check-unresponsive-main']);
 await check('parent EOF exits while a snapshot awaits the main queue', JSON.stringify(snapshot) + '\n', false, ['--check-unresponsive-main']);
 
-// `--render <message.json> <out-dir>` draws every surface from a fixture; look at the PNGs when
-// the rail or popover changes. NOTCH_RENDER_DIR keeps them somewhere else than .tmp/notch-render.
 const now = Date.now();
 const at = offsetMs => new Date(now + offsetMs).toISOString();
 const quota = (id, label, kind, usedPercent, resetHours) => ({ id, label, kind, usedPercent, resetsAt: at(resetHours * 3_600_000), observedAt: at(0) });
@@ -75,9 +66,7 @@ const fixture = edge => ({
     error: null,
   },
   providers: [
-    // The host sends the windows weekly first, as the card orders them, and names the ring's by id.
     { provider: 'claude', status: 'ok', currentAccount: true, windows: [quota('weekly_all', 'Weekly · all models', 'weekly', 7, 100), quota('session', '5 hour · all models', 'session', 32, 3), quota('weekly_scoped:Fable', 'Weekly · Fable', 'model', 13, 100)], headlineWindowId: 'weekly_all', innerRing: { kind: 'fable', windowId: 'weekly_scoped:Fable' }, sessions: [session('a', 'repo-28', 'Desktop', 'repo', 'idle', 0), session('b', 'tool-d2', 'Terminal', 'tool', 'working', 2)] },
-    // Codex reports only its weekly window; a business member's credit share fills the inner ring.
     { provider: 'codex', status: 'ok', currentAccount: true, windows: [quota('primary', 'Weekly · all models', 'weekly', 49, 140)], headlineWindowId: 'primary', innerRing: { kind: 'workspaceShare' }, workspaceCredits: { usedPercent: 32, resetsAt: at(7 * 86_400_000), left: '17,000 of 25,000 left', renewed: '25,000 of 25,000 left' }, sessions: [session('c', 'tool-42', 'Desktop', 'tool', 'working', 0)] },
     { provider: 'antigravity', status: 'unsupported', currentAccount: true, message: 'Antigravity has no subscription limits to show.', windows: [], sessions: [] },
     { provider: 'cursor', status: 'unsupported', currentAccount: true, message: 'Cursor has no subscription limits to show.', windows: [], sessions: [] },
@@ -106,7 +95,6 @@ for (const edge of ['right', 'top']) {
   assert.equal(result.status, 0, `render ${edge}: ${result.stderr}`);
   for (const name of ['rail', 'rail-cap-hovered', 'pill', 'popover-claude', 'popover-codex', 'popover-antigravity', 'popover-cursor', 'popover-pull-requests']) {
     const size = statSync(resolve(dir, `${name}.png`)).size;
-    // The pill is a plain capsule; every other surface carries text and glyphs.
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);
   }
   console.log(`PASS render ${edge} → ${dir}`);

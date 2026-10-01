@@ -24,7 +24,6 @@ export function depKey(dep: ItemDependency): string {
   return entryKey(dep.pluginName, dep.kind, dep.path);
 }
 
-/** Every installable entry (agents included) of every supported plugin, in display order. */
 export function allKeys(inspect: MarketplaceInspect): string[] {
   return inspect.plugins.flatMap((plugin) => [
     ...groupKeys(plugin, "skill"),
@@ -40,12 +39,6 @@ export function groupKeys(plugin: MarketplacePlugin, kind: ItemKind): string[] {
   return entries.map((entry) => entryKey(plugin.name, kind, entry.path));
 }
 
-/**
- * What the user has picked in the marketplace tree. `keys` is the effective selection (what
- * gets installed); `autoAdded` names the keys that were pulled in as dependencies and who
- * required each; `declined` remembers auto-adds the user unchecked so they are not re-added
- * while a parent still wants them.
- */
 export type SelectionState = {
   keys: ReadonlySet<string>;
   autoAdded: ReadonlyMap<string, string[]>;
@@ -58,7 +51,6 @@ export function emptySelectionState(): SelectionState {
 
 type IndexedEntry = { key: string; plugin: MarketplacePlugin; kind: ItemKind; entry: MarketplaceEntry };
 
-/** Supported entries by key, in marketplace order. */
 function indexEntries(inspect: MarketplaceInspect): Map<string, IndexedEntry> {
   const index = new Map<string, IndexedEntry>();
   for (const plugin of inspect.plugins) {
@@ -75,7 +67,6 @@ function indexEntries(inspect: MarketplaceInspect): Map<string, IndexedEntry> {
   return index;
 }
 
-/** Display name of every supported entry, by key. */
 export function entryNames(inspect: MarketplaceInspect): Map<string, string> {
   const names = new Map<string, string>();
   for (const { key, entry } of indexEntries(inspect).values()) {
@@ -84,11 +75,6 @@ export function entryNames(inspect: MarketplaceInspect): Map<string, string> {
   return names;
 }
 
-/**
- * The transitive high-confidence closure of `seeds`: every key they need, directly or through
- * another dependency, mapped to the keys that require it. Seeds are never listed; `declined`
- * keys are neither listed nor traversed; targets the marketplace does not offer are ignored.
- */
 export function requiredClosure(
   inspect: MarketplaceInspect,
   seeds: Iterable<string>,
@@ -130,7 +116,6 @@ export function requiredClosure(
   return closure;
 }
 
-/** Explicit picks are the keys the user checked themselves. */
 function explicitKeys(state: SelectionState): Set<string> {
   const explicit = new Set(state.keys);
   for (const key of state.autoAdded.keys()) {
@@ -144,7 +129,6 @@ function settle(inspect: MarketplaceInspect, explicit: ReadonlySet<string>, decl
   return { keys: new Set([...explicit, ...autoAdded.keys()]), autoAdded, declined };
 }
 
-/** Checks `key` and pulls in what it requires, minus anything the user declined earlier. */
 export function checkWithDeps(state: SelectionState, inspect: MarketplaceInspect, key: string): SelectionState {
   const explicit = explicitKeys(state);
   explicit.add(key);
@@ -153,15 +137,10 @@ export function checkWithDeps(state: SelectionState, inspect: MarketplaceInspect
   return settle(inspect, explicit, declined);
 }
 
-/**
- * Unchecks `key`. Auto-added items that lose their last requirer go with it; if something else
- * still requires `key`, the removal is remembered as declined until that parent is unchecked.
- */
 export function uncheck(state: SelectionState, inspect: MarketplaceInspect, key: string): SelectionState {
   const explicit = explicitKeys(state);
   explicit.delete(key);
   const declined = new Set(state.declined);
-  // Whatever this key had pulled in is released: re-checking it starts fresh.
   for (const child of requiredClosure(inspect, [key]).keys()) {
     declined.delete(child);
   }
@@ -173,7 +152,6 @@ export function uncheck(state: SelectionState, inspect: MarketplaceInspect, key:
   return settle(inspect, explicit, declined);
 }
 
-/** Select all / none for one plugin group, one key at a time through the dependency rules. */
 export function toggleGroup(
   state: SelectionState,
   inspect: MarketplaceInspect,
@@ -190,7 +168,6 @@ export function toggleGroup(
 
 export type DependencyGap = { key: string; name: string; missing: ItemDependency[] };
 
-/** Selected entries whose high or medium dependencies are not selected, in marketplace order. */
 export function dependencyGaps(inspect: MarketplaceInspect, keys: ReadonlySet<string>): DependencyGap[] {
   const index = indexEntries(inspect);
   const gaps: DependencyGap[] = [];
@@ -211,14 +188,11 @@ export function dependencyGaps(inspect: MarketplaceInspect, keys: ReadonlySet<st
 
 export type PluginAdvisory = {
   extras: PluginExtra[];
-  /** Selected entries that mention `CLAUDE_PLUGIN_ROOT`. */
   pluginRoot: string[];
-  /** Selected entries that reach outside their own folder. */
   externalRefs: string[];
   show: boolean;
 };
 
-/** What a local copy of the selected entries of `plugin` will not carry. */
 export function pluginAdvisories(plugin: MarketplacePlugin, keys: ReadonlySet<string>): PluginAdvisory {
   const pluginRoot: string[] = [];
   const externalRefs: string[] = [];
@@ -244,7 +218,6 @@ export function pluginAdvisories(plugin: MarketplacePlugin, keys: ReadonlySet<st
   };
 }
 
-/** Picks for the backend, in marketplace order, carrying the plugin's own repo when it has one. */
 export function selectedItems(inspect: MarketplaceInspect, keys: ReadonlySet<string>): ItemPick[] {
   const picks: ItemPick[] = [];
   for (const plugin of inspect.plugins) {
@@ -273,7 +246,6 @@ export function targetsFor(providers: readonly AgentId[], scope: ItemScope): Ite
   return providers.map((provider) => ({ provider, scope }));
 }
 
-/** Where a provider's skills land for a scope — a preview of `AgentAdapter::item_roots`. */
 export function previewPath(provider: AgentId, scope: ItemScope): string {
   if (scope.kind === "project") {
     const base = scope.projectPath.replace(/[\\/]+$/, "");

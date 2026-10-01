@@ -1,4 +1,3 @@
-//! The account a Claude config dir's `.claude.json` names, and the plan its organization is on.
 use super::*;
 use crate::paths::scratch_dir;
 use std::fs;

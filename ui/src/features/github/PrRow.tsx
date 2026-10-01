@@ -13,7 +13,6 @@ import type { CiState, GithubPr } from "$lib/githubTypes";
 import { formatObservedAt } from "$lib/limitsFormat";
 import { formatAgo } from "$lib/timeFormat";
 
-/** One circular glyph per state with its own distinct mark, so CI is readable without colour. */
 const CI_GLYPH: Record<CiState, LucideIcon> = {
   success: CircleCheck,
   failure: CircleX,
@@ -34,12 +33,6 @@ function Badge({ children, tone = "mute" }: { children: string; tone?: CiTone })
   );
 }
 
-/**
- * One pull request: a CI glyph that opens the checks tab, then the row itself as one button whose
- * accessible name is its content — `#number`, title and badges (draft, review decision, merge
- * state, team) first, author and branches on the second line (the repository is named by the
- * list or group around the row) — and the age with its absolute time in a tooltip.
- */
 export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
   const tone = ciTone(pr.ci);
   const color = ciToneColor(tone);

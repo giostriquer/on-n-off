@@ -1,8 +1,3 @@
-//! Codex subscription limits: the signed-in account's card, normalized from Codex app-server's
-//! `account/rateLimits/read` (`codex_limits`), and a saved profile's, read from the backend body
-//! app-server itself reads (`wham/usage`) with the profile's access token, which starts no CLI and
-//! renews nothing (`read_saved_codex`). Spending a banked reset goes through app-server too.
-
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -26,11 +21,7 @@ use crate::paths;
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
-/// Codex's internal buckets, which it reports like any other limit and no surface shows: matched
-/// by the id this reader gives their windows, `extra:<bucket>` or `extra:<bucket>:<slot>`.
 const HIDDEN_BUCKETS: [&str; 2] = ["base_model_inference", "codex_bengalfox"];
-/// The reserve and the retired Spark preview, matched by the model name a window's label ends with
-/// (after its last `·`, trimmed, in any case), whatever bucket reports them.
 const HIDDEN_NAMES: [&str; 2] = ["gpt-reserve", "gpt-5.3-codex-spark"];
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -39,11 +30,8 @@ pub(super) struct RateLimitsResponse {
     rate_limits: RateLimitBucket,
     #[serde(default)]
     rate_limits_by_limit_id: Option<BTreeMap<String, RateLimitBucket>>,
-    /// Absent from CLIs older than banked resets; `null` when the backend does not report them.
     #[serde(default)]
     rate_limit_reset_credits: Option<RateLimitResetCredits>,
-    /// A banner the backend owns entirely, including whether it is there at all. Kept opaque:
-    /// only the one call to action that names a paid reset is read out of it.
     #[serde(default)]
     rate_limit_upsell: Option<serde_json::Value>,
 }
@@ -61,8 +49,6 @@ struct RateLimitBucket {
     secondary: Option<RateLimitWindow>,
     #[serde(default)]
     credits: Option<RateLimitCredits>,
-    /// A business member's share of the workspace's credits (Codex's spend control). Read loosely:
-    /// the amounts are strings in Codex's protocol, and a share that does not read is not shown.
     #[serde(default)]
     individual_limit: Option<serde_json::Value>,
     #[serde(default)]
@@ -85,7 +71,6 @@ struct RateLimitWindow {
 #[serde(rename_all = "camelCase")]
 struct RateLimitResetCredits {
     available_count: u64,
-    /// Detail rows; `null` when only the count was read, and possibly capped below the count.
     #[serde(default)]
     credits: Option<Vec<RateLimitResetCredit>>,
 }
@@ -97,7 +82,6 @@ struct RateLimitResetCredit {
     status: String,
     #[serde(default)]
     expires_at: Option<i64>,
-    /// What Codex calls the reset, such as "Full reset".
     #[serde(default)]
     title: Option<String>,
 }
@@ -135,7 +119,6 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
             }
         }
     }
-    // Dropped here, so no consumer ever sees them: not the cards, the monitor or the notches.
     drop_hidden(&mut windows);
     Reading {
         plan: main.plan_type.clone(),
@@ -145,18 +128,13 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
             main.individual_limit.as_ref(),
             main.spend_control_reached,
         ),
-        // Spending comes from its own endpoint, asked after this parse for a workspace plan
-        // (`backend_figures`): by the saved read, or after the signed-in read's identity check.
         credits_spent: None,
-        // The term too, for every Codex card.
         subscription: None,
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
         reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
     }
 }
 
-/// `windows` without those no surface shows: Codex's internal buckets, the reserve and Spark. The
-/// reader applies it to every read, and the snapshot store to Codex files written before it did.
 pub(super) fn drop_hidden(windows: &mut Vec<LimitWindowDto>) {
     windows.retain(|window| !is_hidden(window));
 }
@@ -264,11 +242,6 @@ fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
     })
 }
 
-/// The member's share of a business workspace's credits: the amount they may use, what they have
-/// used, how much of it that is, and when it resets. The amounts are kept as the provider writes
-/// them, but only when they read as finite numbers of at least zero, as Codex's own status line
-/// requires; otherwise there is no share to show. `spendControlReached` without a share says a limit was reached without saying
-/// which or how much, and is not shown.
 fn workspace_credits(
     individual_limit: Option<&serde_json::Value>,
     reached: Option<bool>,
@@ -290,8 +263,6 @@ fn workspace_credits(
         .get("remainingPercent")
         .and_then(serde_json::Value::as_f64)
         .filter(|percent| (0.0..=100.0).contains(percent));
-    // Codex's own meter: full once reached, else 100 less what remains (the TUI's status line), else
-    // the amounts' ratio, with a share of nothing full.
     let used_percent = match remaining {
         _ if reached => 100.0,
         Some(remaining) => 100.0 - remaining,
@@ -314,17 +285,10 @@ fn rfc3339_from_epoch(epoch: i64) -> Option<String> {
     DateTime::<Utc>::from_timestamp(epoch, 0).map(|at| at.to_rfc3339())
 }
 
-/// Codex's own name for the paid reset in a banner's calls to action. Anything else the backend
-/// offers there — more credits, a bigger plan — is not this, and is left alone.
 const BUY_RESET: &str = "buy_reset";
 
-/// Well past any reset ever sold, and far below the point where a count stops surviving the trip
-/// through JavaScript intact. A number beyond it is a backend the app does not understand.
 const MAX_MINOR_UNITS: u64 = 1_000_000;
 
-/// The banner is forwarded to clients as the backend wrote it — `rate_limit_upsell` is an untyped
-/// value on the app-server response, so its keys stay snake_case — and only this one call to
-/// action is read out of it.
 fn reset_offer(banner: Option<&serde_json::Value>) -> Option<LimitsResetOfferDto> {
     let cta = banner?
         .get("ctas")?
@@ -340,7 +304,6 @@ fn price(price: Option<&serde_json::Value>) -> Option<LimitsPriceDto> {
     let price = price?;
     let currency = price.get("currency").and_then(serde_json::Value::as_str)?;
     let currency = currency.trim();
-    // ISO 4217 is three letters. Anything else is not a currency this app will put beside a number.
     if currency.len() != 3 || !currency.chars().all(|c| c.is_ascii_alphabetic()) {
         return None;
     }
@@ -354,9 +317,6 @@ fn price(price: Option<&serde_json::Value>) -> Option<LimitsPriceDto> {
     })
 }
 
-/// The count Codex reports, when the soonest still-available reset expires, and each available one,
-/// soonest first, with those whose expiry is not a real instant after them. The list stops at the
-/// count, as Codex's own client stops it: the backend can list resets the count leaves out.
 fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCreditsDto> {
     let summary = value?;
     let mut available: Vec<(Option<DateTime<Utc>>, Option<String>)> = summary
@@ -377,7 +337,6 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
             (expires_at, title)
         })
         .collect();
-    // Soonest first, and a reset with no known expiry last, since it lapses no sooner.
     available.sort_by_key(|(expires_at, _)| (expires_at.is_none(), *expires_at));
     let available_count = u32::try_from(summary.available_count).unwrap_or(u32::MAX);
     available.truncate(usize::try_from(available_count).unwrap_or(usize::MAX));
@@ -396,9 +355,6 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
     })
 }
 
-/// Codex owns login, token refresh and usage requests through its documented app-server APIs. Once
-/// app-server's read has confirmed the account, the card's backend figures are asked with the
-/// native login's access projection (`backend_figures`).
 pub(super) fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
     let figures = |card: &mut Parsed, access: Option<&CodexAccess>| {
         backend_figures(card, access, CODEX, Utc::now());
@@ -426,9 +382,6 @@ pub(super) fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
     }
 }
 
-/// The signed-in Codex card an app-server `account/rateLimits/read` result becomes, each window
-/// observed at `observed_at`: the reader's own parse and card, for tests elsewhere that need what
-/// the reader keeps of a read.
 #[cfg(test)]
 pub(crate) fn codex_card(
     rate_limits: serde_json::Value,
@@ -443,9 +396,6 @@ pub(crate) fn codex_card(
     super::signed_in_card(AgentId::Codex, account_id, reading)
 }
 
-/// Spend one banked Codex reset on the signed-in account `account_id` names, once its current limit
-/// has `max_left_percent` or less left. Blocking: holds the Codex read lock for one bounded
-/// app-server call, so it never overlaps a limits read.
 pub fn consume_codex_reset_credit(
     account_id: &str,
     idempotency_key: &str,
@@ -456,22 +406,15 @@ pub fn consume_codex_reset_credit(
     codex_app_server::consume_reset_credit(&home, account_id, idempotency_key, max_left_percent)
 }
 
-/// Where a saved profile's Codex usage is read: the body app-server reads for the signed-in one.
 const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
-/// Each banked reset's status and expiry; the usage body carries only the count.
 const CODEX_RESET_CREDITS_URL: &str =
     "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 
-/// The services a Codex read talks to over HTTP, together as `ClaudeEndpoints` keeps Claude's, so a
-/// fifth costs one field and not an edit at every call site. A saved read asks all four; the
-/// signed-in read, which app-server makes, only the two backend figures' (`backend_figures`).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CodexEndpoints<'a> {
     pub(crate) usage: &'a str,
     pub(crate) reset_credits: &'a str,
-    /// What a workspace member spent (`credits_spent.rs`); asked only for a workspace plan.
     pub(crate) credit_usage: &'a str,
-    /// The subscription's term (`renewal.rs`); asked for every account.
     pub(crate) subscriptions: &'a str,
 }
 
@@ -482,10 +425,6 @@ pub(super) const CODEX: CodexEndpoints<'static> = CodexEndpoints {
     subscriptions: renewal::CODEX_SUBSCRIPTIONS_URL,
 };
 
-/// A saved profile's Codex card, read over HTTP from the backend body app-server itself reads
-/// (`wham/usage`) with its login's access `token`, for its workspace. A body that names another
-/// workspace is refused; one that names none is accepted. No CLI is started and nothing is renewed
-/// here.
 pub(crate) fn read_saved_codex(
     identity: &Identity,
     token: AccessToken,
@@ -506,19 +445,14 @@ pub(crate) fn read_saved_codex(
     {
         return Err(SavedReadError::OtherAccount);
     }
-    // As in Codex's own app-server, the detail read never decides the read: without it the
-    // count still stands, only without an expiry.
     let details = (banked_reset_count(&payload["rate_limit_reset_credits"])
         .is_some_and(|count| count > 0))
     .then(|| get_json(urls.reset_credits, &headers).ok())
     .flatten();
     let mut card = Parsed {
-        // The profile's account already, for the gate to match the access against; `saved_card`
-        // sets it again, as it does for every saved card.
         account: Some(super::scoped_account(identity, None)),
         reading: parse_codex_usage(&payload, details.as_ref())?,
     };
-    // The profile's own access, so the card's account by construction.
     let access = CodexAccess {
         observation_key: identity.observation_key(),
         workspace_id: identity.workspace_id.clone(),
@@ -528,18 +462,6 @@ pub(crate) fn read_saved_codex(
     saved_card(identity, card)
 }
 
-/// The figures ChatGPT's backend gives a Codex `card` beside its usage, each asked at `urls` with
-/// `access` only when that is the card's own account, so another account's token is never spent
-/// on it: the subscription's term (`renewal.rs`), and on a workspace plan, the only kind that
-/// pools credits, what the member spent (`credits_spent.rs`). Neither decides the read: each is no
-/// figure when it is not asked, fails or is backing off.
-///
-/// A saved read hands over its profile's own access. The signed-in read hands over the projection
-/// its identity check took from the login it confirmed (`codex_app_server::normalize_app_server`):
-/// app-server reads that card without handing over a token, and the saved shadow of the signed-in
-/// login is never polled. Using the native login's access token for these read-only GETs is the
-/// user's decision (2026-09-24, extended to the term on 2026-09-25), an exception to Codex alone
-/// making requests for the signed-in account.
 fn backend_figures(
     card: &mut Parsed,
     access: Option<&CodexAccess>,
@@ -562,9 +484,6 @@ fn backend_figures(
         access.and_then(|access| renewal::read_backed_off(access, urls.subscriptions, now));
 }
 
-/// The HTTP response uses seconds and snake_case; the existing app-server parser uses minutes
-/// and camelCase. Map only the documented quota buckets, the credits, a business member's
-/// workspace-credit share and the banked resets. Missing reset inventory is unknown.
 fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Reading, HttpError> {
     use serde_json::json;
     fn window(value: &Value) -> Value {
@@ -585,7 +504,6 @@ fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<R
             "unlimited":credits["unlimited"].as_bool().unwrap_or(false),
             "balance":credits.get("balance").and_then(|v| v.as_str().map(str::to_owned).or_else(|| v.as_f64().map(|n| n.to_string()))) });
     }
-    // A business member's share of the workspace's credits, in app-server's names.
     if let Some(spend_control) = payload.get("spend_control").filter(|v| v.is_object()) {
         main["spendControlReached"] = json!(spend_control["reached"].as_bool());
         if let Some(share) = spend_control
@@ -621,14 +539,10 @@ fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<R
     Ok(parse_codex(&response))
 }
 
-/// `available_count` as Codex's own client reads it: a whole number, and here at least zero.
 fn banked_reset_count(summary: &Value) -> Option<u64> {
     summary.get("available_count").and_then(Value::as_u64)
 }
 
-/// Banked resets in app-server shape. The usage body's `rate_limit_reset_credits` holds only the
-/// count; the detail read, when it answered in full, holds each reset's status and expiry and wins,
-/// as it does in Codex's app-server. A count that cannot be read is unknown, never zero.
 fn wham_reset_credits(summary: &Value, details: Option<&Value>) -> Option<Value> {
     use serde_json::json;
     let detailed = details.and_then(|details| {

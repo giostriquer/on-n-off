@@ -141,7 +141,6 @@ fn hooks_sort_by_source_then_event_and_keep_their_file_order() {
             ("Acme", "other start"),
             ("acme", "plugin stop"),
             ("settings.json", "guard"),
-            // Two rows of one event stay in the order the file has them.
             ("settings.json", "user one"),
             ("settings.json", "user two"),
         ]
@@ -150,9 +149,6 @@ fn hooks_sort_by_source_then_event_and_keep_their_file_order() {
 
 #[test]
 fn hooks_of_two_plugins_that_share_a_name_sort_by_plugin_id() {
-    // Source is the plugin's *name*, so two marketplaces shipping an `acme` both land here; the
-    // id is what separates them, and without it the two would interleave by whichever adapter
-    // walked first.
     let mut hooks = vec![
         hook("acme", "Stop", "from webapp", Some("acme@webapp")),
         hook("acme", "Stop", "from other", Some("acme@other")),

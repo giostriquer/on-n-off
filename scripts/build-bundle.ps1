@@ -8,9 +8,6 @@ param(
     [switch] $ValidateOnly
 )
 
-# Builds (or with -ValidateOnly, only checks) one installer format and, with -StageDirectory,
-# copies the release assets under their published names. Runs on Windows and macOS.
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -21,8 +18,6 @@ if (-not (Test-Path -LiteralPath $RepositoryRoot -PathType Container)) {
     throw "Repository root does not exist: $RepositoryRoot"
 }
 
-# One row per installer format: what `tauri build` is asked for, where the installer people
-# download lands, and which artifact (plus its .sig) the in-app updater downloads.
 $formats = @{
     nsis = @{
         Bundles = "nsis"

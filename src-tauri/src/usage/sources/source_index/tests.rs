@@ -1,7 +1,3 @@
-//! What needs the index's own seams: a walk that could not finish, which no directory produces
-//! on every platform, and how one parse attempt reads a file that moves. Everything else about
-//! the index is tested through `Sources` (`sources/tests`).
-
 use super::super::test_support::{record, transcript_path, write_records};
 use super::*;
 use crate::paths::scratch_dir;
@@ -85,8 +81,6 @@ fn a_file_that_changes_during_both_parse_attempts_reads_as_moving_with_its_last_
     );
 }
 
-/// Growth with an unchanged mtime is still movement: filesystems with coarse timestamps see an
-/// append only through the size.
 #[test]
 fn a_size_change_alone_reads_as_moving() {
     let identities = std::cell::RefCell::new(vec![(2, 1), (3, 1)].into_iter());

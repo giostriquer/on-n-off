@@ -5,10 +5,6 @@ import { CODEX_RESET_MAX_LEFT_PERCENT, RESET_ALERT_MAX_HOURS, RESET_AUTO_SPEND_D
 import { notificationPermissionProblem } from "$lib/notificationPermission";
 import type { ResetAlert } from "$lib/types";
 
-/**
- * The banked reset alerts the Limits screen was given, by the card's account id, and how to change
- * one: the app's settings, saved through the session so no screen writes a stale copy over another.
- */
 type ResetAlerts = {
   alerts: Record<string, ResetAlert>;
   save: (accountId: string, alert: ResetAlert | null) => Promise<void>;
@@ -16,10 +12,6 @@ type ResetAlerts = {
 
 export const ResetAlertsContext = createContext<ResetAlerts | null>(null);
 
-/**
- * The share of the current limit left at or under which `accountId`'s banked reset may be spent
- * (`resetSpendLimit`): Codex's own 10% outside the Limits screen, which holds no alerts.
- */
 export function useResetSpendLimit(accountId: string): number {
   return resetSpendLimit(useContext(ResetAlertsContext)?.alerts ?? {}, accountId);
 }
@@ -27,14 +19,8 @@ export function useResetSpendLimit(accountId: string): number {
 const button = "rounded-md border border-[var(--hair)] px-2.5 py-1 text-[12px] hover:bg-[var(--wash)] disabled:opacity-50";
 const field = "w-16 rounded border border-[var(--hair)] bg-transparent px-2 py-1 text-[12px] tabular-nums";
 
-/**
- * A Codex account's banked reset alert, as its card's menu edits it: whether on-n-off acts once the
- * account runs low, at how much left, how long before its limit renews by itself, and whether it
- * only says so or uses the reset by itself ten minutes after saying so.
- */
 export function ResetAlertForm({ accountId, label, onDone }: {
   accountId: string;
-  /** The account's email as the card shows it, kept with the alert for Settings to name it. */
   label: string;
   onDone: () => void;
 }) {
@@ -61,8 +47,6 @@ export function ResetAlertForm({ accountId, label, onDone }: {
     setBusy(true);
     setProblem(null);
     try {
-      // The alert says what it does in a notification: without permission to show one, an alert
-      // would never be seen, and a reset would be used without warning.
       const denied = enabled ? await notificationPermissionProblem() : null;
       if (denied) {
         setProblem(denied);

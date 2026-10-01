@@ -97,8 +97,6 @@ fn reads_a_manifest_that_names_one_file() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// Claude Code 2.1.281 merges a plugin's servers into one map: `.mcp.json` first, then each
-/// manifest entry in order, a later entry replacing an earlier one of the same name.
 #[test]
 fn a_later_source_replaces_a_server_of_the_same_name() {
     let root = scratch_dir("claude-mcp-merge-order");
@@ -141,8 +139,6 @@ fn a_later_source_replaces_a_server_of_the_same_name() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// An MCP bundle (`.mcpb`, and the older `.dxt`) is an archive Claude Code installs; on-n-off
-/// does not open it, whatever it holds.
 #[test]
 fn bundle_entries_are_skipped() {
     let root = scratch_dir("claude-mcp-bundles");
@@ -167,7 +163,6 @@ fn bundle_entries_are_skipped() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// Names only collide within one plugin: two plugins that each bring a `search` are two rows.
 #[test]
 fn two_plugins_may_bring_servers_of_the_same_name() {
     let root = scratch_dir("claude-mcp-two-plugins");
@@ -206,8 +201,6 @@ fn a_plugin_without_servers_or_with_a_broken_file_brings_none() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// One row per definition: the same server in several projects is one row, a different
-/// definition under the same name is its own row, and a row is on when any project has it on.
 #[test]
 fn groups_local_servers_by_definition() {
     let config = serde_json::json!({
@@ -292,9 +285,6 @@ fn server(id: &str, origin: &str) -> McpServerDto {
     }
 }
 
-/// Inside a project, what that project's `~/.claude.json` entry says: its local servers, off when
-/// its `disabledMcpServers` names them; the plugin servers it switched off by their scoped name;
-/// and none of the rows that stand for servers kept for particular projects.
 #[test]
 fn a_project_view_applies_that_projects_own_disabled_list() {
     let config = serde_json::json!({

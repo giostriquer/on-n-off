@@ -1,5 +1,3 @@
-//! What unarchives an account among the account operations: the explicit re-adds (Save account,
-//! Add account, Sign in again), never automatic remembering.
 use super::fixture::{claude, codex, identity, Harness};
 use crate::accounts::{model::Identity, store::Login};
 use crate::dto::{AgentId, LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
@@ -14,7 +12,6 @@ fn archived(harness: &Harness, provider: AgentId) -> BTreeSet<String> {
     crate::limits::archived(harness.path(), provider)
 }
 
-/// The key `identity`'s cards had before scoped identities: Claude's user, Codex's workspace.
 fn legacy_id(identity: &Identity) -> String {
     if identity.provider == AgentId::Codex {
         identity.workspace_id.clone()
@@ -23,8 +20,6 @@ fn legacy_id(identity: &Identity) -> String {
     }
 }
 
-/// `identity`'s card and the legacy history it replaced, labelled `email`, archived beside another
-/// account's.
 fn archived_beside_another(harness: &Harness, identity: &Identity, email: &str) {
     let history = ProviderLimitsDto {
         current_account: false,
@@ -57,8 +52,6 @@ fn archived_beside_another(harness: &Harness, identity: &Identity, email: &str) 
     );
 }
 
-/// A Codex login for `user` in the shared test workspace whose ID token names its email, as the
-/// accounts it re-adds do.
 fn codex_with_email(user: &str, generation: &str) -> Login {
     use base64::Engine;
     let payload = json!({
@@ -73,7 +66,6 @@ fn codex_with_email(user: &str, generation: &str) -> Login {
     login
 }
 
-/// Its legacy history comes along, by the saved login's email.
 #[test]
 fn saving_the_current_login_unarchives_its_account() {
     let harness = Harness::new();
@@ -89,8 +81,6 @@ fn saving_the_current_login_unarchives_its_account() {
     );
 }
 
-/// Add account and Sign in again unarchive the account they signed in to, and its legacy history by
-/// the login's email, once the sign-in is published; one that did not finish leaves them archived.
 #[test]
 fn a_finished_sign_in_unarchives_its_account() {
     for (provider, login) in [
@@ -135,7 +125,6 @@ fn a_finished_sign_in_unarchives_its_account() {
     }
 }
 
-/// Automatic remembering is not the user's action, so it never unarchives the login it saves.
 #[test]
 fn automatic_remembering_never_unarchives() {
     let harness = Harness::new();

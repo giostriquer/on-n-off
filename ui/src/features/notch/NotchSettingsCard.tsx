@@ -40,7 +40,6 @@ export function layoutDisplays(displays: NotchDisplay[]): DisplayLayout[] {
   }));
 }
 
-/** The three-way "Show" control folds `enabled` and `show` into one choice. */
 type NotchShowChoice = "always" | "hover" | "hide";
 
 function showChoice(settings: Pick<NotchSettings, "enabled" | "show">): NotchShowChoice {
@@ -53,7 +52,6 @@ function showPatch(choice: NotchShowChoice): Partial<Pick<NotchSettings, "enable
   return { enabled: true, show: choice === "hover" ? "onHover" : "always" };
 }
 
-/** Adds or removes one entry, keeping `order`'s sequence and refusing to remove the last one. */
 function toggleOrdered<T>(order: readonly T[], selected: readonly T[], id: T, shown: boolean): T[] {
   const next = new Set(selected);
   if (shown) next.add(id);

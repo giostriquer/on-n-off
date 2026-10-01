@@ -114,9 +114,6 @@ describe("Overview", () => {
     expect(screen.getByText("No trips yet this session.")).toBeTruthy();
   });
 
-  // Not a regression test for the column layout — jsdom has no layout, and the screenshot scenes
-  // are what cover that. This guards the other half of the bargain: the card was shortened by
-  // reflowing the rows, so a later change must not shorten it by dropping them instead.
   it("keeps every live row when the catalog is long", () => {
     const rows = Array.from({ length: 60 }, (_, index) => ({
       kind: "skill" as const,

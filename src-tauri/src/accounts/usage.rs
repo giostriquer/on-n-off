@@ -1,7 +1,3 @@
-//! Poll every saved subscription without publishing credentials to a native client. A saved
-//! account with a home (`homes.rs`) is read there by its provider's own client, which renews its
-//! login itself; the vault holds no login for it. A login still in the vault is read access-only,
-//! and only a never-activated isolated sign-in of a provider that renews privately owns renewal.
 use super::{
     model::Identity,
     store::{Guard, Login, Profile, Store, Ticket},
@@ -27,8 +23,6 @@ struct Attempt {
     error: Option<String>,
     rejected: bool,
 }
-/// One saved profile's fetch: the login it was made with, which a renewal may have replaced, and
-/// the reading.
 pub(super) struct FetchResult {
     pub(super) login: Option<Login>,
     pub(super) result: Result<ProviderLimitsDto, SavedReadError>,
@@ -36,8 +30,6 @@ pub(super) struct FetchResult {
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
 
-/// Caller holds the provider activity read lease and shares the Limits cache with all surfaces.
-/// At most two saved-account requests per provider run at once; no state mutex spans a network call.
 pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<ProviderLimitsDto>) {
     let Ok(accounts) = super::Accounts::live() else {
         return;
@@ -45,13 +37,9 @@ pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<Provider
     accounts.refresh_usage(provider, force, entries, &fetch_profile);
 }
 
-/// How one saved profile's usage is fetched, given how to open the vault.
 type Fetch<'a> = dyn Fn(&Profile, &dyn Fn() -> Result<Store, String>) -> FetchResult + Sync + 'a;
 
 impl super::Accounts {
-    /// Merges a fresh reading of every saved `provider` account but the one its CLI is signed in
-    /// with into `entries`, each fetched by `fetch`, or read from its home when it keeps its login
-    /// in one. Nothing is read on a device with no vault.
     pub(super) fn refresh_usage(
         &self,
         provider: AgentId,
@@ -68,7 +56,6 @@ impl super::Accounts {
             .native(provider)
             .and_then(|native| native.subscription());
         let homes = self.account_homes(provider);
-        // Before either read: every saved login that belongs in a home moves there first.
         if let (Some(homes), Ok(native)) = (&homes, &native) {
             super::homes::settle(home, provider, native.as_ref(), &open, homes);
         }
@@ -87,9 +74,6 @@ impl super::Accounts {
     }
 }
 
-/// `native` is who the CLI is signed in as with a subscription; a native store that could not be
-/// read reads no saved account either. An account the user archived is left alone entirely: no
-/// read, and so no renewal, which runs only inside one.
 fn refresh_with(
     home: &Path,
     provider: AgentId,
@@ -105,7 +89,6 @@ fn refresh_with(
     let Ok(db) = open().and_then(|s| s.load()) else {
         return;
     };
-    // A pending recovery refuses the ticket: no saved account is polled until it is recovered.
     let Ok(ticket) = db.ticket(Guard::SignIn) else {
         return;
     };
@@ -178,8 +161,6 @@ fn poll_with(
         .fingerprint();
     let result = fetched.result;
     let mut outcome = attempt_outcome(&result);
-    // Removal, reauthentication and logout can proceed while HTTP is in flight. Recheck under
-    // the vault lease and hold it only for numeric snapshot publication, never for HTTP.
     let held = ticket.holding(profile, fingerprint.clone());
     let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
@@ -190,9 +171,6 @@ fn poll_with(
     published
 }
 
-/// A poll's `result` as `profile`'s card, published while the vault lease `lease` opens still vouches
-/// for what was read, `None` once it does not. A reading is remembered as the profile's card; a
-/// failure is the card's message. A reading that could not be remembered counts as a failure.
 fn publish(
     home: &Path,
     profile: &Profile,
@@ -217,8 +195,6 @@ fn publish(
             }
             let mut remembered = crate::limits::remember(home, dto);
             if remembered.saved.is_err() {
-                // The reading stands, under the failure; only the snapshot is missing, so the
-                // poll counts as failed and reads again once its backoff passes.
                 *outcome = AttemptOutcome::failed(UNSAVED, false, Duration::ZERO);
                 remembered.card.status = LimitsStatus::Failed;
                 remembered.card.message.clone_from(&outcome.error);
@@ -229,9 +205,6 @@ fn publish(
     }
 }
 
-/// Holds the next poll of `key`'s `fingerprint` back until a new login when this one was rejected,
-/// else for the poll interval, doubled for each failure in a row, and at least as long as the
-/// service asked. A poll that could not publish is held back too.
 fn hold_back(
     attempts: &Mutex<HashMap<String, Attempt>>,
     key: String,
@@ -262,9 +235,6 @@ fn hold_back(
     }
 }
 
-/// Merges a fresh reading of every saved `provider` account kept in a home, but the signed-in one,
-/// into `entries`, each read by its provider's own client from the home `homes` resolves. At most
-/// two run at once. An archived account is left alone, as in `refresh_with`.
 fn refresh_homes(
     home: &Path,
     provider: AgentId,
@@ -322,9 +292,6 @@ fn refresh_homes(
     }
 }
 
-/// `profile`'s poll from its home, read by `read`, held back and published as `poll_with` holds
-/// back and publishes a vault login's. Nothing here is ever refused for good: the home's client
-/// renews its own login, and a new sign-in replaces the home.
 fn poll_home(
     home: &Path,
     profile: &Profile,
@@ -360,8 +327,6 @@ fn poll_home(
     published
 }
 
-/// How a poll from a home went. Its client renews the login, so no answer waits for a new login:
-/// every failure only backs off.
 fn home_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOutcome {
     let failed = |error: &str| AttemptOutcome::failed(error, false, Duration::ZERO);
     match result {
@@ -378,17 +343,12 @@ fn home_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOu
     }
 }
 
-/// What a card says of a reading the snapshot store could not keep.
 const UNSAVED: &str = "Could not save the latest usage reading.";
 
-/// How one saved poll went, as the next poll of the same login is held back by it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AttemptOutcome {
-    /// What the card says of the poll; `None` for one that answered.
     error: Option<String>,
-    /// Only a new login is worth another read.
     rejected: bool,
-    /// The least the service asked to wait before the next read.
     retry: Duration,
 }
 
@@ -402,7 +362,6 @@ impl AttemptOutcome {
     }
 }
 
-/// What a fetch that came to `result` says, and how it holds the next poll back.
 fn attempt_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOutcome {
     match result {
         Ok(_) => AttemptOutcome {
@@ -415,7 +374,6 @@ fn attempt_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> Attemp
             true,
             Duration::ZERO,
         ),
-        // Renewal cannot change whose login it is, so only a new login is worth another read.
         Err(SavedReadError::OtherAccount) => AttemptOutcome::failed(
             "This saved login now signs in as a different account. Sign in again.",
             true,
@@ -453,7 +411,6 @@ fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) ->
     )
 }
 
-/// `profile`'s fetch at `now` through its provider's adapter, which asks `urls`.
 fn fetch_profile_at(
     profile: &Profile,
     open: &dyn Fn() -> Result<Store, String>,
@@ -518,8 +475,6 @@ fn fetch_with(
     FetchResult { login, result }
 }
 
-/// `profile`'s poll into `entries`, whose card for it then says it is a saved profile Limits polls,
-/// whatever the poll came to. The signed-in account's card is never touched.
 fn merge(
     entries: &mut Vec<ProviderLimitsDto>,
     profile: &Profile,
@@ -533,7 +488,6 @@ fn merge(
         return;
     }
     let Some(result) = result else {
-        // Held back by its last poll, the profile shows the snapshot that poll left.
         if let Some(i) = existing {
             entries[i].saved_profile = true;
         }
@@ -541,10 +495,7 @@ fn merge(
     };
     let remembered = existing.map(|i| &entries[i]);
     let mut dto = match result {
-        // The poll kept from the account's file as it wrote over it (`limits::remember`).
         Ok(dto) => dto,
-        // A failed poll read nothing of its own: the card keeps its identity and shows what it
-        // remembers under the failure.
         Err(error) => {
             let (provider, account, current_account) = match remembered {
                 Some(card) => (card.provider, card.account.clone(), card.current_account),

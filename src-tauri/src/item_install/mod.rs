@@ -1,10 +1,3 @@
-//! Local items: skills and subagents copied out of a GitHub marketplace by on-n-off itself,
-//! tracked in `~/.on-n-off/installed-items.json` so upstream changes stay visible even after
-//! the user edits their copy.
-//!
-//! The provider CLIs are never involved; `AgentAdapter::item_roots` only tells us where each
-//! provider keeps user skills (and, for Claude, subagents).
-
 pub mod deps;
 pub mod fetch;
 pub mod manifest;
@@ -32,16 +25,13 @@ use crate::dto::{
 
 const MAX_MEMO_TARBALLS: usize = 8;
 
-/// Resolves a requested target to on-disk roots; the command layer supplies the adapters.
 pub type ResolveRoots<'a> = &'a dyn Fn(&ItemTarget) -> Result<ItemRoots, AdapterError>;
 
 type RepoRef = (String, String, String);
 
 #[derive(Default)]
 struct Memo {
-    /// `(owner, repo, ref)` -> the sha that ref pointed at when we last asked.
     shas: HashMap<RepoRef, String>,
-    /// `(owner, repo, sha)` -> unpacked snapshot.
     tarballs: HashMap<RepoRef, Arc<Tarball>>,
     order: VecDeque<RepoRef>,
 }
@@ -81,22 +71,18 @@ impl ItemService {
         })
     }
 
-    // -- network memo -----------------------------------------------------------------------
-
     fn memo(&self) -> MutexGuard<'_, Memo> {
         self.memo
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The snapshot `ref` points at according to the memo, without any network.
     fn memoized(&self, owner: &str, repo: &str, git_ref: &str) -> Option<Arc<Tarball>> {
         let memo = self.memo();
         let sha = memo.shas.get(&key(owner, repo, git_ref))?;
         memo.tarballs.get(&key(owner, repo, sha)).map(Arc::clone)
     }
 
-    /// The snapshot `ref` points at according to the memo, otherwise one tarball download.
     fn snapshot(
         &self,
         owner: &str,
@@ -117,7 +103,6 @@ impl ItemService {
         Ok(tarball)
     }
 
-    /// A specific sha when we still have it, else whatever `ref` points at now.
     fn snapshot_at(
         &self,
         owner: &str,
@@ -150,14 +135,10 @@ impl ItemService {
         Ok(sha)
     }
 
-    // -- registry -----------------------------------------------------------------------------
-
     fn load_registry(&self) -> Result<InstalledItemsFile, AdapterError> {
         registry::load(&self.registry_path)
     }
 
-    /// Locks, loads, runs `edit`, and saves when it reports a change. Never holds the lock
-    /// around network work: callers fetch what they need first.
     fn with_registry<T>(
         &self,
         edit: impl FnOnce(&mut InstalledItemsFile) -> Result<(T, bool), AdapterError>,
@@ -174,8 +155,6 @@ impl ItemService {
         Ok(value)
     }
 
-    // -- public operations ------------------------------------------------------------------
-
     pub fn inspect_marketplace(
         &self,
         owner: &str,
@@ -183,8 +162,6 @@ impl ItemService {
         git_ref: Option<&str>,
     ) -> Result<MarketplaceInspectDto, AdapterError> {
         let git_ref = git_ref.filter(|r| !r.trim().is_empty()).unwrap_or("HEAD");
-        // One cheap sha request keeps a re-opened sheet from installing a stale memoised
-        // snapshot; if that request fails the tarball fetch (or memo) still decides.
         let tarball = match self.upstream_sha(owner, repo, git_ref, true) {
             Ok(sha) => self.snapshot_at(owner, repo, git_ref, &sha)?,
             Err(_) => self.snapshot(owner, repo, git_ref)?,
@@ -210,7 +187,6 @@ impl ItemService {
         let primary = self.snapshot_at(&src.owner, &src.repo, &src.git_ref, &request.commit_sha)?;
         let sha_moved = primary.commit_sha != request.commit_sha;
         let plugin_roots = manifest::plugin_roots(&primary);
-        // Fetch every plugin-specific repository before taking the registry lock.
         let mut snapshots: HashMap<ItemSourceDto, Result<Arc<Tarball>, AdapterError>> =
             HashMap::new();
         for pick in &request.items {
@@ -220,9 +196,6 @@ impl ItemService {
                 });
             }
         }
-        // Dependencies are recorded from what is already in memory: the marketplace listing
-        // and the plugin repositories fetched above (or memoised by the inspect step). Install
-        // never downloads a repository just to describe an unpicked plugin.
         let mut memo_only = |o: &str, r: &str, rf: Option<&str>| {
             self.memoized(o, r, rf.unwrap_or("HEAD"))
                 .ok_or_else(|| AdapterError::message("plugin repository not fetched"))
@@ -270,7 +243,6 @@ impl ItemService {
         })
     }
 
-    /// One (target, pick) placement; every early exit is an outcome, never an error.
     fn install_one(
         &self,
         batch: &Batch<'_>,
@@ -404,7 +376,6 @@ impl ItemService {
         )
     }
 
-    /// Read-only: never writes the registry, and takes no lock around the network work.
     pub fn item_update_status(
         &self,
         provider: AgentId,
@@ -414,8 +385,6 @@ impl ItemService {
         let scope = scope_for(project_path);
         let registry = self.load_registry()?;
         let items: Vec<&InstalledItem> = registry.for_provider(provider, &scope);
-        // A forced check asks GitHub once per repository; a repository that cannot be reached
-        // reports `Unknown` rather than falling back to a memoised answer.
         let mut unreachable: HashSet<RepoRef> = HashSet::new();
         if force {
             let repos: HashSet<RepoRef> = items.iter().map(|item| repo_key(&item.source)).collect();
@@ -459,7 +428,6 @@ impl ItemService {
             &item.source.git_ref,
             false,
         )?;
-        // Everything network-bound happens before the registry lock.
         let replacement = match mode {
             UpdateItemMode::Dismiss => None,
             UpdateItemMode::Overwrite => {
@@ -518,10 +486,8 @@ impl ItemService {
         })
     }
 
-    /// The status of one item; `upstream_sha` is `None` when the check failed.
     fn status_of(&self, item: &InstalledItem, upstream_sha: Option<&str>) -> ItemStatusDto {
         let target = PathBuf::from(&item.target_path);
-        // An unreadable folder is neither "missing" nor "modified": leave both flags off.
         let (missing, modified) = match write::hash_tree_on_disk(&target, item.kind) {
             Ok(None) => (true, false),
             Ok(Some(hashes)) => (false, hashes != item.files),
@@ -558,7 +524,6 @@ impl ItemService {
         }
     }
 
-    /// Upstream moved past the installed sha: does this item's content actually differ?
     fn compare_upstream(&self, item: &InstalledItem, sha: &str) -> ItemUpstream {
         let Ok(tarball) = self.snapshot_at(
             &item.source.owner,
@@ -569,7 +534,6 @@ impl ItemService {
             return ItemUpstream::Unknown;
         };
         match write::item_files(&tarball, &item.source.upstream_path, item.kind) {
-            // Removed upstream: nothing to update to.
             Err(_) => ItemUpstream::Current,
             Ok(files) if write::hash_files(&files) == item.files => ItemUpstream::Current,
             Ok(_) => ItemUpstream::UpdateAvailable {
@@ -581,7 +545,6 @@ impl ItemService {
     }
 }
 
-/// Everything `install_one` needs that was fetched before the registry lock.
 struct Batch<'a> {
     request: &'a InstallItemsRequest,
     primary: &'a Arc<Tarball>,
@@ -625,7 +588,6 @@ fn failure(target: &ItemTarget, pick: &ItemPick, reason: String) -> ItemOutcomeD
     }
 }
 
-/// GitHub page of an installed item at the commit it was copied from.
 pub fn upstream_url(item: &InstalledItem) -> String {
     let view = match item.kind {
         ItemKind::Skill => "tree",
@@ -637,7 +599,6 @@ pub fn upstream_url(item: &InstalledItem) -> String {
     )
 }
 
-/// The only links the app opens in the browser: pages on github.com over HTTPS.
 pub fn is_openable_url(url: &str) -> bool {
     url.starts_with("https://github.com/")
 }
@@ -670,7 +631,6 @@ fn root_for(roots: &ItemRoots, kind: ItemKind) -> Option<&Path> {
     }
 }
 
-/// `skills/engineering/tdd` -> `tdd`; `agents/reviewer.md` -> `reviewer`.
 fn item_name(upstream_path: &str, kind: ItemKind) -> String {
     let normalized = write::normalize_upstream_path(upstream_path).unwrap_or_default();
     let last = normalized.rsplit('/').next().unwrap_or("").to_string();

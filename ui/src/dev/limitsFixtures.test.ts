@@ -51,7 +51,6 @@ describe("limitsScenario", () => {
     expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", legacy]);
     scenario.addAccount();
     expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", "profile:shared", legacy]);
-    // Another page's scenario starts clean.
     expect(ids(limitsScenario("accountDuplicate").readLimits("codex"))).toEqual(["codex-1", legacy]);
   });
 
@@ -72,7 +71,6 @@ describe("limitsScenario", () => {
     expect(archived("codex")).toEqual(["codex-2", "codex-history", "codex-2"]);
     expect(archived("claude")).toEqual(["profile:claude-unread"]);
     expect(scenario.readLimits("claude")[0].archived, "never the signed-in card").toBeFalsy();
-    // Another page's scenario starts clean.
     expect(limitsScenario("archivedAccounts").readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-history"]);
   });
 
@@ -100,7 +98,6 @@ describe("limitsScenario", () => {
 
     scenario.forgetSnapshot("codex", "codex-1");
     expect(ids(scenario.readLimits("codex")), "the signed-in card is a live read, not a snapshot").toEqual(["codex-1"]);
-    // Another page's scenario starts clean.
     expect(ids(limitsScenario("ok").readLimits("codex"))).toEqual(["codex-1", "codex-2"]);
     expect(limitsScenario("ok").readAccounts("codex").profiles.map(profile => profile.id)).toEqual(["personal", "work"]);
   });
@@ -110,7 +107,6 @@ describe("limitsScenario", () => {
     scenario.forgetSnapshot("codex", "codex-history");
     expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", "codex-2"]);
 
-    // Remove account removes a saved login before it forgets; forgetting alone leaves the login, unarchived.
     scenario.forgetSnapshot("claude", "profile:claude-unread");
     const profiles = scenario.readAccounts("claude").profiles;
     expect(profiles.map(profile => profile.id)).toEqual(["personal", "work", "unread"]);

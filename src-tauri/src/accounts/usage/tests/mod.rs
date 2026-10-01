@@ -39,7 +39,6 @@ fn stored(home: &Path) -> Profile {
 fn open(home: &Path) -> Store {
     Store::open_with_key(home, true, |_, _| Ok([8; 32])).unwrap()
 }
-/// A fixture write: no rule refuses it, and it rejects nothing in flight.
 fn rewrite(home: &Path, edit: impl FnOnce(&mut Database)) {
     open(home)
         .change(ChangeKind::Metadata, |db| {
@@ -48,7 +47,6 @@ fn rewrite(home: &Path, edit: impl FnOnce(&mut Database)) {
         })
         .unwrap();
 }
-/// An account change, which rejects every reading in flight.
 fn account_change(home: &Path, edit: impl FnOnce(&mut Database)) {
     open(home)
         .change(ChangeKind::Account, |db| {
@@ -57,7 +55,6 @@ fn account_change(home: &Path, edit: impl FnOnce(&mut Database)) {
         })
         .unwrap();
 }
-/// The ticket a refresh starting now takes.
 fn ticket(home: &Path) -> Ticket {
     open(home).load().unwrap().ticket(Guard::SignIn).unwrap()
 }
@@ -109,8 +106,6 @@ fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
         before
     );
 }
-/// A remembered login or a private renewal can replace a saved login without an account change:
-/// the login the reading was made with, not only the epoch, vouches for its publication.
 #[test]
 fn a_login_replaced_without_an_account_change_during_http_discards_the_late_read() {
     let home = tempfile::tempdir().unwrap();
@@ -135,8 +130,6 @@ fn a_login_replaced_without_an_account_change_during_http_discards_the_late_read
     assert!(result.is_none());
     assert!(!home.path().join(".on-n-off/limits").exists());
 }
-/// Any account change while HTTP is in flight discards the reading, even one that left this
-/// profile's login alone: the epoch, not only the login, vouches for a usage publication.
 #[test]
 fn an_unrelated_account_change_during_http_discards_the_late_read() {
     let home = tempfile::tempdir().unwrap();
@@ -157,7 +150,6 @@ fn an_unrelated_account_change_during_http_discards_the_late_read() {
     );
     assert!(result.is_none());
     assert!(!home.path().join(".on-n-off/limits").exists());
-    // The attempt stands all the same, so the next poll of this login waits its turn.
     assert!(attempt(home.path(), &p).next > Instant::now());
 }
 #[test]
@@ -211,13 +203,10 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
         assert!(result.unwrap().is_err());
     }
     assert_eq!(calls.get(), 1);
-    // The service's Retry-After outlasts the longest backoff of its own (an hour), so only it can
-    // hold the account back two hours.
     assert!(
         attempt(home.path(), &p).next >= Instant::now() + Duration::from_secs(7200 - 60),
         "the next poll waits out the Retry-After"
     );
-    // A different saved account is not held behind this account's backoff.
     let mut other = p.clone();
     other.id = "other-profile".into();
     other.identity.user_id = "other".into();
@@ -236,8 +225,6 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
     .unwrap()
     .is_ok());
 }
-/// What each fetch result says, whether only a new login is worth another read, and how long the
-/// service asked to wait.
 #[test]
 fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
     const SIGN_IN: &str =
@@ -296,7 +283,6 @@ fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
     }
 }
 
-/// The attempt the last poll of `p` in `home` recorded.
 fn attempt(home: &Path, p: &Profile) -> Attempt {
     ATTEMPTS
         .get()
@@ -307,7 +293,6 @@ fn attempt(home: &Path, p: &Profile) -> Attempt {
         .expect("the attempt is recorded")
 }
 
-/// What a poll that read nothing says, and whether it waits for a new login before it reads again.
 #[test]
 fn a_poll_that_read_nothing_says_why() {
     use std::cell::Cell;
@@ -364,13 +349,10 @@ fn a_poll_that_read_nothing_says_why() {
     }
 }
 
-/// A reading the snapshot store could not keep is still shown, under the failure, and the poll
-/// counts as failed so it is read again once its backoff passes.
 #[test]
 fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
-    // A file where the snapshot directory goes: every snapshot write fails.
     std::fs::write(home.path().join(".on-n-off/limits"), "").unwrap();
     let poll = || {
         poll_with(
@@ -482,8 +464,6 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
     }
 }
 
-/// A CLI signed in with no subscription login, an API key among them
-/// (`codex::CodexNative::subscription`), excludes no saved account from polling.
 #[test]
 fn a_cli_without_a_subscription_login_excludes_no_saved_account_from_polling() {
     use std::sync::atomic::{AtomicUsize, Ordering};

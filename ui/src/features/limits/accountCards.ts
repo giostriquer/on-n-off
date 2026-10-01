@@ -4,9 +4,6 @@ import { hasObservations } from "./limitPresentation";
 
 const emailKey = (email?: string | null) => email?.trim().toLowerCase() || null;
 
-/** Join history to verified saved identities, even when an older writer drops legacyId.
- * Only an actual scoped observation replaces legacy history; never transfer its quotas.
- */
 export function accountCards(entries: ProviderLimits[], profiles: SavedProfile[]) {
   const replacements = profiles.flatMap(profile => {
     const email = emailKey(profile.email);

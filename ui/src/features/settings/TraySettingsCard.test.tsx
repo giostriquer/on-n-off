@@ -29,8 +29,6 @@ it("stays hidden where the platform has no tray to hide into", async () => {
   calls.traySupported.mockResolvedValue(false);
   renderCard(false);
 
-  // Absent on the first paint, and still absent once the answer has arrived — a card headed
-  // "Windows tray" offering a setting macOS ignores would be worse than no card.
   expect(screen.queryByRole("region", { name: "Windows tray" })).toBeNull();
   await waitFor(() => expect(calls.traySupported).toHaveBeenCalled());
   expect(screen.queryByRole("region", { name: "Windows tray" })).toBeNull();

@@ -33,31 +33,21 @@ pub struct AppSettings {
     pub limit_notifications: bool,
     #[serde(default = "limits_poll_minutes_default")]
     pub limits_poll_minutes: u16,
-    /// Search qualifiers (`org:NAME`, `user:NAME`, `repo:OWNER/NAME`) that narrow the GitHub
-    /// screen's "Mine" list; empty means no filter.
     #[serde(default)]
     pub github_scopes: Vec<String>,
     #[serde(default)]
     pub github_notifications: bool,
     #[serde(default = "github_poll_seconds_default")]
     pub github_poll_seconds: u16,
-    /// Windows only: closing the main window hides it and leaves the app in the tray.
     #[serde(default)]
     pub close_to_tray: bool,
-    /// Codex accounts whose banked reset on-n-off offers once they run low, by the card's account
-    /// id: an opt-in each, which spends the reset only when it says so (`ResetAlert::automatic`).
     #[serde(default)]
     pub reset_alerts: HashMap<String, ResetAlert>,
 }
 
-/// When a Codex account's banked reset is offered: with `max_left_percent` or less of its current
-/// limit left, and its own reset at least `min_hours_to_renewal` away, since a reset spent just
-/// before the limit renews anyway is wasted. An `automatic` alert then spends the reset itself,
-/// after a wait the user can cancel it in (`limits_monitor::auto_spend`); otherwise it only tells.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetAlert {
-    /// The account's email when it was turned on, for Settings to name it.
     #[serde(default)]
     pub label: Option<String>,
     #[serde(default = "reset_max_left_default")]
@@ -68,15 +58,11 @@ pub struct ResetAlert {
     pub automatic: bool,
 }
 
-/// The share of the current limit left at or under which Codex's own app lets a reset be used.
 pub const CODEX_RESET_MAX_LEFT_PERCENT: u8 = 10;
 
-/// The longest wait an alert can ask for before the limit renews by itself: a week, the cycle.
 pub const RESET_ALERT_MAX_HOURS: u16 = 7 * 24;
 
 impl ResetAlert {
-    /// The share of the current limit left at or under which this account's banked reset may be
-    /// spent: Codex's own 10%, or the lower share the alert names.
     pub fn spend_limit(&self) -> u8 {
         self.max_left_percent.min(CODEX_RESET_MAX_LEFT_PERCENT)
     }
@@ -90,8 +76,6 @@ const fn reset_min_hours_default() -> u16 {
     24
 }
 
-/// The share of the current limit left at or under which a banked reset of `account_id` may be
-/// spent (`ResetAlert::spend_limit`), Codex's own 10% without an alert.
 pub fn reset_spend_limit(settings: &AppSettings, account_id: &str) -> u8 {
     settings
         .reset_alerts
@@ -149,8 +133,6 @@ pub struct ProviderDiagnose {
 }
 
 pub fn parse_settings(json: Option<&str>) -> AppSettings {
-    // An editor that marks a file's encoding starts it with a byte-order mark, which JSON does not
-    // allow. A document that is not a JSON object has no settings to keep.
     json.and_then(|text| {
         serde_json::from_str::<Map<String, Value>>(text.trim_start_matches('\u{feff}')).ok()
     })
@@ -159,10 +141,6 @@ pub fn parse_settings(json: Option<&str>) -> AppSettings {
     })
 }
 
-/// Settings read from a document one field at a time. A hand-edited file can hold a value the app
-/// cannot read, such as a number beyond its type or a provider it does not know: that value takes
-/// its default, an item or entry of a list or map that cannot be read is dropped, and every other
-/// setting is kept.
 fn read_settings(document: &Map<String, Value>) -> AppSettings {
     let defaults = AppSettings::default();
     let field = |key: &str| document.get(key).unwrap_or(&Value::Null);
@@ -184,12 +162,8 @@ fn read_settings(document: &Map<String, Value>) -> AppSettings {
     }
 }
 
-/// One banked reset alert, or none when the entry is not an object. A figure is rounded and held
-/// within its type, a negative one at 0, so one out of range still meets the alert's rule in
-/// [`normalize_settings`].
 fn read_reset_alert(alert: &Value) -> Option<ResetAlert> {
     let alert = alert.as_object()?;
-    // A float's `as` cast saturates at the target type's bounds.
     let figure = |key: &str| alert.get(key).and_then(Value::as_f64).map(f64::round);
     Some(ResetAlert {
         label: alert.get("label").and_then(read),
@@ -205,14 +179,12 @@ fn read<T: DeserializeOwned>(value: &Value) -> Option<T> {
     T::deserialize(value).ok()
 }
 
-/// The items of a list that can be read, in order.
 fn items<T: DeserializeOwned>(list: &Value) -> Vec<T> {
     list.as_array()
         .map(|list| list.iter().filter_map(read).collect())
         .unwrap_or_default()
 }
 
-/// The entries of a map whose key and value can both be read.
 fn entries<K: DeserializeOwned + Eq + Hash, V>(
     map: &Value,
     read_value: impl Fn(&Value) -> Option<V>,
@@ -239,9 +211,6 @@ pub fn save_settings(settings: AppSettings) -> Result<AppSettings, AdapterError>
     save_settings_to(settings, paths::settings_path)
 }
 
-/// [`save_settings`] into the document `path` names. It validates before it resolves the path or
-/// writes anything, so a refused save touches no file; tests save through this into a disposable
-/// home, never the real settings document, even while the refusal they check is broken.
 fn save_settings_to(
     mut settings: AppSettings,
     path: impl FnOnce() -> Result<PathBuf, AdapterError>,
@@ -308,8 +277,6 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     settings
 }
 
-/// One GitHub scope as the search qualifier it stands for: `org:NAME`, `user:NAME`,
-/// `repo:OWNER/NAME`, or a bare `OWNER/NAME` (which becomes `repo:`). Anything else is `None`.
 pub fn normalize_github_scope(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw.is_empty() || raw.chars().any(char::is_whitespace) {
@@ -378,7 +345,6 @@ fn home_for(id: AgentId) -> Result<PathBuf, AdapterError> {
     }
 }
 
-/// Why a CLI check may fail and what to do about it, per platform and provider.
 fn cli_hint(id: AgentId, binary: &str, resolved: Option<&Path>) -> Option<String> {
     match resolved {
         None if id == AgentId::Cursor => Some(cursor_missing_hint()),
@@ -395,8 +361,6 @@ fn cli_hint(id: AgentId, binary: &str, resolved: Option<&Path>) -> Option<String
     }
 }
 
-/// Cursor's CLI shares its `agent` name with other products, so only a launcher inside a
-/// `cursor-agent` install folder (or the legacy `cursor-agent` alias) is accepted.
 fn cursor_missing_hint() -> String {
     let install = if cfg!(windows) {
         r"%LOCALAPPDATA%\cursor-agent (irm 'https://cursor.com/install?win32=true' | iex)"
@@ -416,7 +380,6 @@ fn home_missing_hint() -> &'static str {
     }
 }
 
-/// One line describing where CLIs are looked for, including what the login shell contributed.
 fn search_detail() -> String {
     let searched = cli_search_path().len();
     let from_shell = login_shell_path_dirs().len();

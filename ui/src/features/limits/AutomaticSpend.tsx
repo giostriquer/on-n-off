@@ -7,11 +7,6 @@ import { usePendingResetSpends } from "$lib/usePendingResetSpends";
 import { PENDING_RESET_SPENDS_KEY } from "$lib/useSharedRead";
 import { accountButton } from "@/features/accounts/AccountManager";
 
-/**
- * The banked reset an automatic alert is waiting to use on this account (`limits_monitor::
- * auto_spend`): when, and a Cancel that keeps it. The monitor uses it then unless it is cancelled
- * here, and says in a notification what came of it.
- */
 export function AutomaticSpend({ accountId, now }: { accountId: string; now: number }) {
   const client = useQueryClient();
   const spends = usePendingResetSpends();

@@ -54,7 +54,6 @@ pub fn read() -> NotchSnapshot {
     }
 }
 
-/// Displays for the snapshot; macOS shells out to its helper, Windows enumerates here.
 #[cfg(target_os = "macos")]
 fn displays_result() -> Result<Vec<model::Display>, String> {
     displays::read()
@@ -65,7 +64,6 @@ fn displays_result() -> Result<Vec<model::Display>, String> {
     win_displays::read()
 }
 
-/// The platform gate: macOS always; Windows only from Windows 11 (build 22000).
 fn supported() -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -81,8 +79,6 @@ fn supported() -> bool {
     }
 }
 
-/// Windows 11 is build 22000 and up; the notch's edge-docked overlay assumes the
-/// Win11 shell. Read from the registry the way `winver` reports it.
 #[cfg(target_os = "windows")]
 fn win11() -> bool {
     use winreg::enums::HKEY_LOCAL_MACHINE;

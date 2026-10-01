@@ -1,7 +1,3 @@
-//! The archive file: what it holds per provider, what a missing or malformed one reads as, that
-//! writes are whole and serialized, that the snapshot loader never takes it for a snapshot, and
-//! which ids Forget and an unarchived account take out of it.
-
 use super::super::tests::snapshot;
 use super::super::{file_name, is_snapshot_file, SnapshotStore};
 use super::ARCHIVE_FILE;
@@ -96,8 +92,6 @@ fn a_malformed_file_reads_as_nothing_archived_and_the_next_write_replaces_it() {
     let _ = fs::remove_dir_all(home);
 }
 
-/// The loader's own filter decides: no provider's snapshots include the archive, and a snapshot
-/// beside it loads as it did.
 #[test]
 fn the_archive_is_never_mistaken_for_a_snapshot() {
     for provider in [
@@ -128,8 +122,6 @@ fn the_archive_is_never_mistaken_for_a_snapshot() {
     let _ = fs::remove_dir_all(home);
 }
 
-/// Writes share the snapshot lock and replace the file whole: writers racing on distinct ids lose
-/// none of them, and nothing but the archive is left behind.
 #[test]
 fn concurrent_archive_writes_lose_no_id_and_leave_no_partial_file() {
     let home = scratch_dir("limits-archive-concurrent");
@@ -160,7 +152,6 @@ fn concurrent_archive_writes_lose_no_id_and_leave_no_partial_file() {
     let _ = fs::remove_dir_all(home);
 }
 
-/// A scoped account's card and the legacy history it replaced, both labelled `a@example.com`.
 fn scoped_with_history(store: &SnapshotStore) {
     store
         .save(
@@ -183,8 +174,6 @@ fn scoped_with_history(store: &SnapshotStore) {
         .unwrap();
 }
 
-/// Forget unarchives every id whose snapshot it deletes, the legacy history it takes along
-/// included, and leaves every other archived id alone.
 #[test]
 fn forgetting_an_account_unarchives_every_id_it_deletes() {
     let home = scratch_dir("limits-archive-forget");
@@ -209,14 +198,11 @@ fn forgetting_an_account_unarchives_every_id_it_deletes() {
         .unwrap();
     assert_eq!(store.archived(AgentId::Codex), set(&["profile:other"]));
 
-    // A profile with no snapshot of its own is forgotten by its id all the same.
     store.forget(AgentId::Codex, "profile:other").unwrap();
     assert!(store.archived(AgentId::Codex).is_empty());
     let _ = fs::remove_dir_all(home);
 }
 
-/// Legacy history is forgotten by its email, and unarchived, only while it still names the email the
-/// card confirmed. Another email, or history that cannot be read, is refused and stays archived.
 #[test]
 fn forgetting_legacy_history_by_its_email_unarchives_it_only_while_the_email_matches() {
     let home = scratch_dir("limits-archive-forget-by-email");
@@ -262,9 +248,6 @@ fn account(id: &str, legacy_id: Option<&str>, label: Option<&str>) -> LimitsAcco
     }
 }
 
-/// An unarchived account takes its own id out of the archive, and the legacy id its history was
-/// kept under only while that history names the same email: in a shared workspace the legacy id
-/// can hold another member's history, which stays archived.
 #[test]
 fn unarchiving_an_account_takes_along_only_its_own_legacy_history() {
     let home = scratch_dir("limits-archive-unarchive-account");

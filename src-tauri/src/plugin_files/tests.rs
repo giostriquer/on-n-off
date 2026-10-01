@@ -14,9 +14,6 @@ fn resolves_a_manifest_path_inside_the_plugin() {
     assert_eq!(windows.path, root.join("hooks").join("a.json"));
 }
 
-/// Decided by the text, the same on every platform: on Windows `\outside.json` and `/outside.json`
-/// are not absolute and `C:outside.json` is drive-relative, and each would land outside the plugin
-/// once joined.
 #[test]
 fn refuses_every_path_that_could_leave_the_plugin() {
     let root = scratch_dir("plugin-files-escape");

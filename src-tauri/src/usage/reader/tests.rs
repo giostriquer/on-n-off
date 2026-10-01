@@ -15,8 +15,6 @@ fn list_finds_jsonl_by_mtime() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// Claude Code sets a replaced transcript aside as `<session>.jsonl.superseded-<ms>` rather than
-/// overwriting it, and turns it dropped from the rewrite live only there.
 #[test]
 fn list_finds_superseded_transcripts_and_nothing_else() {
     let root = scratch_dir("usage-list-superseded");

@@ -16,11 +16,6 @@ export type AgentInfo = {
   installGit: boolean;
   installFolder: boolean;
   pluginToggle: boolean;
-  /**
-   * Whether on-n-off reads this provider's hooks at all. `false` gets an empty Hooks screen that
-   * says so, because "no hooks" and "we never looked" are different facts — and no rail count,
-   * because there is no number to be right about.
-   */
   readsHooks: boolean;
 };
 
@@ -46,10 +41,6 @@ export type PluginDto = {
   skills: SkillDto[];
 };
 
-/**
- * Where a server is configured: "" the user's own list, "project" the selected project,
- * "plugin" an enabled plugin, "local" Claude's list for particular projects (all-projects view).
- */
 export type McpOrigin = "" | "project" | "plugin" | "local";
 
 export type McpServerDto = {
@@ -60,32 +51,19 @@ export type McpServerDto = {
   enabled: boolean;
   togglable: boolean;
   origin?: McpOrigin;
-  /** The plugin (`name@marketplace`) that brings a "plugin" server. */
   pluginId?: string | null;
-  /** The projects, as the provider keys them, that keep a "local" server. */
   projects?: string[];
 };
 
-/**
- * One hook handler a provider would run, as the backend found it. Read-only: on-n-off lists
- * these, never runs or edits them. `event` is the provider's own vocabulary (Claude's
- * `PreToolUse`, Codex's `notification`) and stays opaque here, and `command` stays unexpanded —
- * `${CLAUDE_PLUGIN_ROOT}/…` is what the user would see in their own settings file.
- */
 export type HookDto = {
   id: string;
   event: string;
-  /** "" when the entry has none, which for most events means "every tool". */
   matcher: string;
-  /** "command" | "mcp_tool" | "http" | "prompt" | "agent", or whatever a newer CLI adds. */
   handler: string;
-  /** The command line, `<server> · <tool>` for an mcp_tool handler, or "" when there is none. */
   command: string;
-  /** Where it comes from: a plugin's display name, or the settings file that holds it. */
   source: string;
   pluginId: string | null;
   description: string;
-  /** Codex's `[hooks.state]` switch. Claude has none, so its entries are always on. */
   enabled: boolean;
 };
 
@@ -102,7 +80,6 @@ export type AgentTabDto = {
   plugins: PluginDto[];
   userSkills: SkillDto[];
   mcpServers: McpServerDto[];
-  /** Absent on a tab serialized before hooks existed; read it through `filterTab`/`catalogCounts`. */
   hooks?: HookDto[];
 };
 
@@ -125,31 +102,20 @@ export type AppSettings = {
   automaticUpdates: boolean;
   limitNotifications: boolean;
   limitsPollMinutes: LimitsPollMinutes;
-  /** GitHub search qualifiers (`org:NAME`, `user:NAME`, `repo:OWNER/NAME`) narrowing "Mine". */
   githubScopes: string[];
   githubNotifications: boolean;
   githubPollSeconds: GithubPollSeconds;
-  /** Windows only: closing the main window hides it into the tray instead of quitting. */
   closeToTray: boolean;
-  /** Codex accounts whose banked reset is offered once they run low, by the card's account id. */
   resetAlerts: Record<string, ResetAlert>;
 };
 
-/**
- * When a Codex account's banked reset is offered: with `maxLeftPercent` or less of its current limit
- * left (at most Codex's own 10%), and its own reset at least `minHoursToRenewal` away. on-n-off never
- * spends one by itself.
- */
 export type ResetAlert = {
-  /** The account's email when the alert was turned on, for Settings to name it. */
   label: string | null;
   maxLeftPercent: number;
   minHoursToRenewal: number;
-  /** Uses the reset by itself, ten minutes after saying so, unless it is cancelled on the card. */
   automatic: boolean;
 };
 
-/** A banked reset an automatic alert will use at `dueAt` unless it is cancelled on the account's card. */
 export type PendingResetSpend = {
   accountId: string;
   dueAt: string;
@@ -170,18 +136,14 @@ export type ProviderDiagnose = {
   checks: DiagnoseCheck[];
 };
 
-// --- Local items: skills/agents copied out of a marketplace by on-n-off ---------------------
-
 export type ItemKind = "skill" | "agent";
 
 export type ItemScope = { kind: "global" } | { kind: "project"; projectPath: string };
 
 export type ItemSource = { owner: string; repo: string; ref: string };
 
-/** How sure the backend's prose scan is that one entry needs another. */
 export type DepConfidence = "high" | "medium";
 
-/** Another marketplace entry that an entry names in its text. */
 export type ItemDependency = {
   pluginName: string;
   kind: ItemKind;
@@ -195,13 +157,10 @@ export type MarketplaceEntry = {
   description: string;
   path: string;
   dependsOn: ItemDependency[];
-  /** Paths the text refers to that a local copy will not contain. */
   externalRefs: string[];
-  /** The text mentions `CLAUDE_PLUGIN_ROOT`, so it expects to run inside the plugin. */
   usesPluginRoot: boolean;
 };
 
-/** Plugin-level assets a local copy never gets. */
 export type PluginExtra = "commands" | "hooks" | "mcp";
 
 export type MarketplacePlugin = {
@@ -241,7 +200,6 @@ export type ItemOutcome = {
   provider: AgentId;
   kind: ItemKind;
   name: string;
-  /** The pick this outcome answers. */
   pluginName: string;
   path: string;
   targetPath: string;
@@ -268,25 +226,16 @@ export type ItemStatus = {
   modified: boolean;
   missing: boolean;
   upstream: ItemUpstream;
-  /** Where the item was copied from, so the UI can say so and link to it. */
   source: ItemSource;
   pluginName: string;
   upstreamPath: string;
-  /** GitHub page of the item at the installed commit. */
   upstreamUrl: string;
 };
 
 export type UpdateItemMode = "overwrite" | "dismiss";
 
-/**
- * A read the backend caches once for every surface that wants it. The screens, the menu-bar
- * popovers, the notch and the monitors share these, so any of them can be the one that fetches;
- * the announcement is how the rest find out. These strings are the contract with `Source::name`
- * in `src-tauri/src/read_revision.rs`; change the two together.
- */
 export type SharedReadSource = "accounts" | "limits:claude" | "limits:codex" | "github:prs" | "limits:reset-spends";
 
-/** Sent once per replacement of a shared read, never for a read that changed nothing. */
 export type SharedReadChanged = {
   source: SharedReadSource;
 };

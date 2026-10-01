@@ -1,6 +1,3 @@
-//! Reader tests: a real stub `gh`, a real loopback GitHub, a scratch home, injected memos and
-//! clock. Nothing under test is mocked.
-
 use super::*;
 use crate::cli::AgentCli;
 use crate::cli_stub::CliStub;
@@ -61,8 +58,6 @@ impl Harness {
         self.read_revisioned(cli, url, now_secs, force).0
     }
 
-    /// The read plus what it did to the remembered result: the notch's pull-request cell takes
-    /// the revision from it, and only a replacement is announced to the windows.
     fn read_revisioned(
         &self,
         cli: &AgentCli,
@@ -281,7 +276,6 @@ fn force_skips_the_memory_but_not_the_token_memo() {
 #[test]
 fn a_missing_gh_shows_the_snapshot_as_stale() {
     let harness = Harness::new("gh-read-missing", &["org:acme"], 60);
-    // The stub first, so its start is not counted against the server's wait for a request.
     let gh = gh(&harness.home.join("cli"), "gho_t");
     let (url, server) = serve_sequence(&[("200 OK", &[], REPLY)]);
     let first = harness.read(&gh, &url, NOW, false);

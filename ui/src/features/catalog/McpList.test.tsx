@@ -12,19 +12,16 @@ const server: McpServerDto = {
   togglable: true,
 };
 
-/** The row that names `name`. */
 function row(name: string): HTMLElement {
   return screen.getByText(name).closest("article")!;
 }
 
-/** The dot beside a row's name: lit when the server runs here. */
 function liveDot(article: HTMLElement): Element {
   return article.querySelector("span.rounded-full")!;
 }
 
 describe("McpList", () => {
   it("shows the server list it is given without filtering it again", () => {
-    // The shell already filtered; a query the given server does not match must not hide it.
     render(
       <McpList
         tab={{ plugins: [], userSkills: [], mcpServers: [server] }}
@@ -71,7 +68,6 @@ describe("McpList", () => {
       projects: ["/Users/me/acme/webapp", "/Users/me/acme/api"],
     };
     const pad: McpServerDto = { ...docs, id: "local:pad", name: "pad", projects: ["/Users/me/acme/notes"] };
-    // Its plugin is not listed (not installed from this home's inventory): the raw id stands in.
     const orphan: McpServerDto = { ...tracker, id: "plugin:gone:orphan", name: "orphan", pluginId: "gone@acme" };
     const plugin = (id: string, name: string) => ({
       id,
@@ -83,7 +79,6 @@ describe("McpList", () => {
       togglable: true,
       skills: [],
     });
-    // Another plugin listed first, so only a lookup by id finds Kit.
     const plugins = [plugin("tools@acme", "Tools"), plugin("kit@acme", "Kit")];
     const servers = [server, tracker, docs, pad, orphan];
     render(<McpList tab={{ plugins, userSkills: [], mcpServers: servers }} servers={servers} onToggle={vi.fn()} />);
@@ -98,7 +93,6 @@ describe("McpList", () => {
     expect(projects).toHaveAttribute("title", "/Users/me/acme/api\n/Users/me/acme/webapp");
     expect(within(row("pad")).getByText("in notes")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /tracker on/ })).toBeDisabled();
-    // A server kept for particular projects does not run here: listed on, but no live glow.
     expect(liveDot(row("library-docs"))).not.toHaveClass("bg-[var(--live)]");
     expect(liveDot(row("tracker"))).toHaveClass("bg-[var(--live)]");
   });
@@ -108,8 +102,6 @@ describe("McpList", () => {
     const servers = [server, repo];
     render(<McpList tab={{ plugins: [], userSkills: [], mcpServers: servers }} servers={servers} onToggle={vi.fn()} />);
 
-    // The name line holds the name and its badges, nothing else; the block under it is that line
-    // and the source, with no "from"/"in" line between them.
     const nameLine = (name: string) => screen.getByText(name).parentElement!;
     expect(nameLine("GitHub")).toHaveTextContent(/^GitHubSTDIO$/);
     expect(nameLine("GitHub").parentElement!.children).toHaveLength(2);

@@ -32,7 +32,6 @@ fn inspect_lists_plugins_skills_and_agents_from_plugin_json() {
     assert_eq!(plugin.agents.len(), 1);
     assert_eq!(plugin.agents[0].name, "reviewer");
     assert_eq!(plugin.agents[0].path, "agents/reviewer.md");
-    // A second inspect re-checks the ref's sha (one cheap request) but reuses the tarball.
     let calls = h.fetcher.calls().len();
     h.service
         .inspect_marketplace("mattpocock", "skills", None)

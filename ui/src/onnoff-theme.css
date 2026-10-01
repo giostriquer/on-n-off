@@ -1,6 +1,6 @@
 [data-theme='onnoff'] {
-	--spacing: 0.25rem; /* 0.22rem; | 0.25rem; | 0.28rem; */
-	--text-scaling: 1; /* 1.067 */
+	--spacing: 0.25rem;
+	--text-scaling: 1;
 	--typo-base--font-family: var(--font-sans);
 	--typo-base--font-size: inherit;
 	--typo-base--color-light: #17191d;
