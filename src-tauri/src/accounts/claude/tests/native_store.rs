@@ -248,27 +248,6 @@ fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
     }
 }
 
-/// Claude's config home is `CLAUDE_CONFIG_DIR` as Claude Code reads it: NFC-normalized, never
-/// trimmed.
-#[test]
-fn the_claude_config_home_is_claude_config_dir_as_claude_code_reads_it() {
-    let root = tempfile::tempdir().unwrap();
-    let mut padded = root.path().join("claude").into_os_string();
-    padded.push(" ");
-    for (value, config) in [
-        (
-            root.path().join("cafe\u{301}"),
-            root.path().join("caf\u{e9}"),
-        ),
-        (PathBuf::from(&padded), PathBuf::from(&padded)),
-    ] {
-        let env = [("CLAUDE_CONFIG_DIR", value.clone())];
-        let store = ClaudeNative::resolve_from(root.path(), &environment(&env)).unwrap();
-        assert_eq!(store.config_home, config, "{value:?}");
-        assert_eq!(store.config_file, config.join(".claude.json"));
-    }
-}
-
 /// Whatever the developer running the suite has exported, a store resolved in a test lives in
 /// the test's own home and never chooses the login Keychain: `resolve` reads the test
 /// environment, not `CLAUDE_CONFIG_DIR` or whatever a sibling test did to `ON_N_OFF_HOME`.

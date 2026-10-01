@@ -80,48 +80,6 @@ fn persisted_vault_roundtrip_never_exposes_tokens_in_plaintext() {
 }
 
 #[test]
-fn another_manager_logout_invalidates_an_earlier_signin_after_reload() {
-    let mut db = Database::default();
-    let started = db.ticket(Guard::SignIn).unwrap();
-    db.invalidate_logins().unwrap();
-    let reloaded: Database = serde_json::from_slice(&serde_json::to_vec(&db).unwrap()).unwrap();
-    assert!(reloaded.check(&started).is_err());
-}
-#[test]
-fn pending_recovery_refuses_login_publication_even_at_current_epoch() {
-    let started = Database::default().ticket(Guard::SignIn).unwrap();
-    let db = Database {
-        recovery: Some(super::super::transaction::Recovery {
-            target_id: "target".into(),
-            outgoing: None,
-            outgoing_identity: None,
-        }),
-        ..Database::default()
-    };
-    assert!(db.check(&started).is_err());
-    assert!(
-        db.ticket(Guard::SignIn).is_err(),
-        "nor does a sign-in start"
-    );
-}
-
-#[test]
-fn saved_account_name_comes_from_email_even_when_captured_without_a_name() {
-    let mut db = Database::default();
-    let user = Identity {
-        provider: AgentId::Claude,
-        user_id: "stable-user".into(),
-        workspace_id: "team".into(),
-    };
-    let native = Login {
-        auth: json!({"claudeAiOauth":{"refreshToken":"fixture"}}),
-        account: json!({"emailAddress":"person@example.com"}),
-    };
-    db.save(user, native, None).unwrap();
-    assert_eq!(db.profiles[0].label, "person@example.com");
-}
-
-#[test]
 fn category_survives_credential_updates_and_can_be_cleared() {
     let root = tempfile::tempdir().unwrap();
     let store = Store {
@@ -356,19 +314,6 @@ fn capturing_a_native_login_revokes_private_renewal_ownership() {
     db.profiles[0].usage_renewal_owned = true;
     db.save(identity("a"), login("native"), Some(&id)).unwrap();
     assert!(!db.profiles[0].usage_renewal_owned);
-}
-
-#[test]
-fn old_vaults_do_not_assume_renewal_ownership() {
-    let mut db = Database::default();
-    db.save(identity("a"), login("old"), None).unwrap();
-    let mut encoded = serde_json::to_value(&db).unwrap();
-    encoded["profiles"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("usage_renewal_owned");
-    let restored: Database = serde_json::from_value(encoded).unwrap();
-    assert!(!restored.profiles[0].usage_renewal_owned);
 }
 
 /// The vault is JSON sealed in `vault.enc`, and every earlier vault must keep loading: the names

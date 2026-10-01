@@ -357,11 +357,12 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
 
 /// A read does the archive's part in one place and one order, under the cache lock as Forget
 /// writes: the signed-in account unarchived first, since being signed in unarchives an account, then
-/// every card flagged once, so no flagged signed-in card is ever cached. The account list is
-/// announced outside the lock, only when the read unarchived something: a replacement, never a
-/// read, so a read served from the cache writes and announces nothing.
+/// the saved accounts polled, then every card flagged once, so no flagged signed-in card is ever
+/// cached and every saved card is flagged. The account list is announced outside the lock, only
+/// when the read unarchived something: a replacement, never a read, so a read served from the cache
+/// polls, writes and announces nothing.
 #[test]
-fn a_replacing_read_unarchives_then_flags_under_the_lock_and_announces_only_a_change() {
+fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_lock() {
     let cache = Cache::new(Source::LimitsClaude);
     let _ = read_revision::take_announced();
     let log = std::cell::RefCell::new(Vec::new());
@@ -381,6 +382,15 @@ fn a_replacing_read_unarchives_then_flags_under_the_lock_and_announces_only_a_ch
         log.borrow_mut().push("unarchive");
         changes.get()
     };
+    let saved = |force, entries: &mut Vec<ProviderLimitsDto>| {
+        assert!(
+            cache.read.try_lock().is_err(),
+            "polled under the cache lock"
+        );
+        log.borrow_mut()
+            .push(if force { "saved, forced" } else { "saved" });
+        entries.push(snapshot("saved", false, LimitsStatus::Ok));
+    };
     let flag = |entries: &mut [ProviderLimitsDto]| {
         assert!(
             cache.read.try_lock().is_err(),
@@ -392,27 +402,16 @@ fn a_replacing_read_unarchives_then_flags_under_the_lock_and_announces_only_a_ch
         }
     };
     let interval = Duration::from_secs(300);
-    let read = |force| {
-        read_provider(
-            &cache,
-            AgentId::Claude,
-            interval,
-            force,
-            &native,
-            &unarchive,
-            &flag,
-        )
-        .0
-    };
+    let read = |force| read_provider(&cache, interval, force, &native, &unarchive, &saved, &flag).0;
 
     let entries = read(false);
-    assert_eq!(*log.borrow(), ["native", "unarchive", "flag"]);
+    assert_eq!(*log.borrow(), ["native", "unarchive", "saved", "flag"]);
     assert_eq!(
         entries
             .iter()
             .map(|entry| entry.archived)
             .collect::<Vec<_>>(),
-        [false, true]
+        [false, true, true]
     );
     assert_eq!(
         read_revision::take_announced(),
@@ -420,12 +419,19 @@ fn a_replacing_read_unarchives_then_flags_under_the_lock_and_announces_only_a_ch
     );
 
     assert_eq!(read(false), entries, "the cache holds the flagged cards");
-    assert_eq!(log.borrow().len(), 3, "a cached answer writes nothing");
+    assert_eq!(
+        log.borrow().len(),
+        4,
+        "a cached answer polls and writes nothing"
+    );
     assert!(read_revision::take_announced().is_empty());
 
     changes.set(false);
     read(true);
-    assert_eq!(log.borrow().len(), 6);
+    assert_eq!(
+        log.borrow()[4..],
+        ["native", "unarchive", "saved, forced", "flag"]
+    );
     assert_eq!(
         read_revision::take_announced(),
         [Source::LimitsClaude],

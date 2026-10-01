@@ -40,7 +40,7 @@ fn a_usage_refresh_reads_every_saved_account_but_the_signed_in_one() {
             }
         });
 
-    assert_eq!(*fetched.lock().unwrap(), [b]);
+    assert_eq!(*fetched.lock().unwrap(), std::slice::from_ref(&b));
     let key = identity(AgentId::Claude, "b", "team").observation_key();
     let cards: Vec<_> = entries
         .iter()
@@ -48,6 +48,8 @@ fn a_usage_refresh_reads_every_saved_account_but_the_signed_in_one() {
         .collect();
     assert_eq!(cards, [key.as_str()]);
     assert_eq!(*harness.native.resolved.borrow(), [AgentId::Claude]);
+    // Without homes, as for Codex, the saved login stays in the vault it was read from.
+    assert_eq!(harness.in_vault(&b), Some("b1".into()));
 }
 
 /// A device that never saved an account reads nothing and resolves nothing.

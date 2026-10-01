@@ -46,18 +46,6 @@ pub(crate) struct StorageDir {
     scoped: bool,
 }
 
-#[cfg(test)]
-impl StorageDir {
-    /// `<home>/.claude`, the default, whose Keychain entry is Claude Code's unscoped one: what
-    /// [`dirs`] resolves for a disposable home.
-    pub(crate) fn default_in(home: &Path) -> Self {
-        Self {
-            path: home.join(".claude"),
-            scoped: false,
-        }
-    }
-}
-
 impl StorageDir {
     pub(crate) fn new(path: PathBuf, scoped: bool) -> Self {
         Self { path, scoped }
@@ -681,16 +669,7 @@ struct Heartbeat {
 
 impl ClaudeLocks {
     pub(crate) fn acquire(dir: &StorageDir, scope: LockScope<'_>) -> Result<Self, LockError> {
-        Self::acquire_at(dir, scope, SystemTime::now())
-    }
-
-    /// `now` is a parameter so the staleness branch is reachable from a test without waiting a
-    /// minute or backdating a directory the filesystem may not let us touch.
-    pub(crate) fn acquire_at(
-        dir: &StorageDir,
-        scope: LockScope<'_>,
-        now: SystemTime,
-    ) -> Result<Self, LockError> {
+        let now = SystemTime::now();
         // Claude Code creates its config dir before locking in it, and so does this.
         fs::create_dir_all(&dir.path).map_err(|error| LockError::Unavailable(error.to_string()))?;
         let mut locks = Self {

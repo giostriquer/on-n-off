@@ -1,10 +1,11 @@
 //! When a saved login renews before or after its read.
 use super::*;
 
-fn policy_profile(provider: AgentId, owned: bool, expired: bool) -> Profile {
+/// A saved Codex login, `owned` for private renewal, whose access token has `expired` or not.
+fn policy_profile(owned: bool, expired: bool) -> Profile {
     use base64::Engine;
     let mut p = profile();
-    p.identity.provider = provider;
+    p.identity.provider = AgentId::Codex;
     let jwt = |value: serde_json::Value| {
         format!(
             "header.{}.signature",
@@ -13,58 +14,54 @@ fn policy_profile(provider: AgentId, owned: bool, expired: bool) -> Profile {
         )
     };
     p.login = Some(Login {
-        auth: if provider == AgentId::Claude {
-            json!({"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh","expiresAt":if expired {1} else {9_000_000}}})
-        } else {
-            json!({"tokens":{"access_token":jwt(json!({"exp":if expired {1} else {9_000_000}})),"refresh_token":"refresh","account_id":"team",
-                "id_token":jwt(json!({"https://api.openai.com/auth":{"chatgpt_user_id":"user","chatgpt_account_id":"team"}}))}})
-        },
+        auth: json!({"tokens":{"access_token":jwt(json!({"exp":if expired {1} else {9_000_000}})),"refresh_token":"refresh","account_id":"team",
+            "id_token":jwt(json!({"https://api.openai.com/auth":{"chatgpt_user_id":"user","chatgpt_account_id":"team"}}))}}),
         account: json!({"accountUuid":"user","organizationUuid":"team"}),
     });
     p.usage_renewal_owned = owned;
     p
 }
 
+/// Only a login this owns renews: before its read once it expired, or after a refused read. A
+/// Claude login never gets that far, since Claude Code renews it in its home.
 #[test]
-fn automatic_renewal_policy_covers_both_providers_and_never_renews_shadows() {
+fn automatic_renewal_renews_only_an_owned_login_and_never_a_shadow() {
     use std::cell::Cell;
-    for provider in [AgentId::Claude, AgentId::Codex] {
-        for owned in [false, true] {
-            for expired in [false, true] {
-                for unauthorized in [false, true] {
-                    let p = policy_profile(provider, owned, expired);
-                    let reads = Cell::new(0);
-                    let renewals = Cell::new(0);
-                    let result = fetch_with(
-                        &p,
-                        1_000_000,
-                        &|_| {
-                            reads.set(reads.get() + 1);
-                            if unauthorized {
-                                Err(HttpError::Unauthorized.into())
-                            } else {
-                                Ok(reading(&p))
-                            }
-                        },
-                        &|| {
-                            renewals.set(renewals.get() + 1);
-                            Ok(p.login.clone().unwrap())
-                        },
-                    );
-                    assert_eq!(
-                        renewals.get(),
-                        usize::from(owned && (expired || unauthorized))
-                    );
-                    assert_eq!(
-                        reads.get(),
-                        if owned && !expired && unauthorized {
-                            2
+    for owned in [false, true] {
+        for expired in [false, true] {
+            for unauthorized in [false, true] {
+                let p = policy_profile(owned, expired);
+                let reads = Cell::new(0);
+                let renewals = Cell::new(0);
+                let result = fetch_with(
+                    &p,
+                    1_000_000,
+                    &|_| {
+                        reads.set(reads.get() + 1);
+                        if unauthorized {
+                            Err(HttpError::Unauthorized.into())
                         } else {
-                            1
+                            Ok(reading(&p))
                         }
-                    );
-                    assert_eq!(result.result.is_err(), unauthorized);
-                }
+                    },
+                    &|| {
+                        renewals.set(renewals.get() + 1);
+                        Ok(p.login.clone().unwrap())
+                    },
+                );
+                assert_eq!(
+                    renewals.get(),
+                    usize::from(owned && (expired || unauthorized))
+                );
+                assert_eq!(
+                    reads.get(),
+                    if owned && !expired && unauthorized {
+                        2
+                    } else {
+                        1
+                    }
+                );
+                assert_eq!(result.result.is_err(), unauthorized);
             }
         }
     }
@@ -135,40 +132,34 @@ fn a_saved_login_renews_before_its_read_once_its_provider_says_it_is_due() {
 #[test]
 fn owned_renewal_uses_the_rotated_credential_for_usage() {
     use std::cell::Cell;
-    for provider in [AgentId::Claude, AgentId::Codex] {
-        for expired in [false, true] {
-            let p = policy_profile(provider, true, expired);
-            let fingerprint = |login: &Login| {
-                crate::accounts::view(provider, login)
-                    .unwrap()
-                    .fingerprint()
-            };
-            let old = fingerprint(p.login.as_ref().unwrap());
-            let mut rotated = p.login.clone().unwrap();
-            if provider == AgentId::Claude {
-                rotated.auth["claudeAiOauth"]["accessToken"] = json!("rotated-access");
-            } else {
-                rotated.auth["tokens"]["access_token"] = json!("rotated-access");
-            }
-            let reads = Cell::new(0);
-            let result = fetch_with(
-                &p,
-                1_000_000,
-                &|login| {
-                    reads.set(reads.get() + 1);
-                    if fingerprint(login) == old {
-                        Err(HttpError::Unauthorized.into())
-                    } else {
-                        assert_eq!(fingerprint(login), fingerprint(&rotated));
-                        Ok(reading(&p))
-                    }
-                },
-                &|| Ok(rotated.clone()),
-            );
-            assert!(result.result.is_ok());
-            assert_eq!(fingerprint(&result.login.unwrap()), fingerprint(&rotated));
-            assert_eq!(reads.get(), if expired { 1 } else { 2 });
-        }
+    for expired in [false, true] {
+        let p = policy_profile(true, expired);
+        let fingerprint = |login: &Login| {
+            crate::accounts::view(AgentId::Codex, login)
+                .unwrap()
+                .fingerprint()
+        };
+        let old = fingerprint(p.login.as_ref().unwrap());
+        let mut rotated = p.login.clone().unwrap();
+        rotated.auth["tokens"]["access_token"] = json!("rotated-access");
+        let reads = Cell::new(0);
+        let result = fetch_with(
+            &p,
+            1_000_000,
+            &|login| {
+                reads.set(reads.get() + 1);
+                if fingerprint(login) == old {
+                    Err(HttpError::Unauthorized.into())
+                } else {
+                    assert_eq!(fingerprint(login), fingerprint(&rotated));
+                    Ok(reading(&p))
+                }
+            },
+            &|| Ok(rotated.clone()),
+        );
+        assert!(result.result.is_ok());
+        assert_eq!(fingerprint(&result.login.unwrap()), fingerprint(&rotated));
+        assert_eq!(reads.get(), if expired { 1 } else { 2 });
     }
 }
 
@@ -178,29 +169,23 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
 #[test]
 fn a_login_that_signs_in_as_another_account_is_never_renewed_for_it() {
     use std::cell::Cell;
-    for provider in [AgentId::Claude, AgentId::Codex] {
-        for owned in [false, true] {
-            let p = policy_profile(provider, owned, false);
-            let reads = Cell::new(0);
-            let renewals = Cell::new(0);
-            let result = fetch_with(
-                &p,
-                1_000_000,
-                &|_| {
-                    reads.set(reads.get() + 1);
-                    Err(SavedReadError::OtherAccount)
-                },
-                &|| {
-                    renewals.set(renewals.get() + 1);
-                    Ok(p.login.clone().unwrap())
-                },
-            );
-            assert_eq!(result.result.err(), Some(SavedReadError::OtherAccount));
-            assert_eq!(
-                (reads.get(), renewals.get()),
-                (1, 0),
-                "{provider:?} owned: {owned}"
-            );
-        }
+    for owned in [false, true] {
+        let p = policy_profile(owned, false);
+        let reads = Cell::new(0);
+        let renewals = Cell::new(0);
+        let result = fetch_with(
+            &p,
+            1_000_000,
+            &|_| {
+                reads.set(reads.get() + 1);
+                Err(SavedReadError::OtherAccount)
+            },
+            &|| {
+                renewals.set(renewals.get() + 1);
+                Ok(p.login.clone().unwrap())
+            },
+        );
+        assert_eq!(result.result.err(), Some(SavedReadError::OtherAccount));
+        assert_eq!((reads.get(), renewals.get()), (1, 0), "owned: {owned}");
     }
 }
