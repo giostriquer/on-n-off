@@ -42,14 +42,14 @@ export function layoutDisplays(displays: NotchDisplay[]): DisplayLayout[] {
 }
 
 /** The three-way "Show" control folds `enabled` and `show` into one choice. */
-export type NotchShowChoice = "always" | "hover" | "hide";
+type NotchShowChoice = "always" | "hover" | "hide";
 
-export function showChoice(settings: Pick<NotchSettings, "enabled" | "show">): NotchShowChoice {
+function showChoice(settings: Pick<NotchSettings, "enabled" | "show">): NotchShowChoice {
   if (!settings.enabled) return "hide";
   return settings.show === "onHover" ? "hover" : "always";
 }
 
-export function showPatch(choice: NotchShowChoice): Partial<Pick<NotchSettings, "enabled" | "show">> {
+function showPatch(choice: NotchShowChoice): Partial<Pick<NotchSettings, "enabled" | "show">> {
   if (choice === "hide") return { enabled: false };
   return { enabled: true, show: choice === "hover" ? "onHover" : "always" };
 }
@@ -63,7 +63,7 @@ function toggleOrdered<T>(order: readonly T[], selected: readonly T[], id: T, sh
 }
 
 /** Toggles one provider's cell, keeping rail order and refusing to remove the last one. */
-export function toggleNotchProvider(
+function toggleNotchProvider(
   providers: readonly AgentId[],
   id: AgentId,
   shown: boolean,
@@ -72,7 +72,7 @@ export function toggleNotchProvider(
 }
 
 /** Toggles one pull-request list, keeping screen order and refusing to remove the last one. */
-export function toggleNotchList(
+function toggleNotchList(
   lists: readonly GithubListId[],
   id: GithubListId,
   shown: boolean,

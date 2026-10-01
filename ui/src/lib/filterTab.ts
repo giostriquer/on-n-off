@@ -92,7 +92,7 @@ function filterHookList(tab: AgentTabDto, query: string): HookDto[] {
   );
 }
 
-export function filterSkillList(tab: AgentTabDto, query: string): SkillDto[] {
+function filterSkillList(tab: AgentTabDto, query: string): SkillDto[] {
   const q = query.trim().toLowerCase();
   const skills = allSkills(tab);
   if (!q) {
@@ -102,13 +102,4 @@ export function filterSkillList(tab: AgentTabDto, query: string): SkillDto[] {
     skills.filter((skill) => matches(q, skill.name, skill.id, skill.description, skill.pluginId ?? "")),
     tab.plugins,
   );
-}
-
-export function filterMcpList(tab: AgentTabDto, query: string): McpServerDto[] {
-  const q = query.trim().toLowerCase();
-  const servers = sortMcps(tab.mcpServers ?? []);
-  if (!q) {
-    return servers;
-  }
-  return servers.filter((server) => matchesMcp(q, server));
 }

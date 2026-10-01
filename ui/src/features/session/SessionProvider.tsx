@@ -74,7 +74,7 @@ export function pathToScreen(pathname: string): Screen {
   return hit?.[0] ?? "overview";
 }
 
-export function readAgent(): AgentId {
+function readAgent(): AgentId {
   const value = localStorage.getItem(AGENT_KEY);
   if (value === "codex" || value === "antigravity" || value === "cursor") {
     return value;

@@ -5,8 +5,6 @@ import { ItemList } from "./ItemList";
 import type { AgentTabDto } from "$lib/types";
 
 const rockerRender = vi.hoisted(() => vi.fn());
-const filterSkillListCall = vi.hoisted(() => vi.fn());
-const sortPluginsCall = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/Rocker", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/Rocker")>();
@@ -14,28 +12,6 @@ vi.mock("@/components/Rocker", async (importOriginal) => {
     Rocker: (props: React.ComponentProps<typeof actual.Rocker>) => {
       rockerRender(props.ariaLabel);
       return <actual.Rocker {...props} />;
-    },
-  };
-});
-
-vi.mock("$lib/filterTab", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("$lib/filterTab")>();
-  return {
-    ...actual,
-    filterSkillList: (...args: Parameters<typeof actual.filterSkillList>) => {
-      filterSkillListCall();
-      return actual.filterSkillList(...args);
-    },
-  };
-});
-
-vi.mock("$lib/catalog", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("$lib/catalog")>();
-  return {
-    ...actual,
-    sortPlugins: (...args: Parameters<typeof actual.sortPlugins>) => {
-      sortPluginsCall();
-      return actual.sortPlugins(...args);
     },
   };
 });
@@ -53,10 +29,11 @@ const largeSkills: AgentTabDto = {
   mcpServers: [],
 };
 
+/** The fixture's skills in name order; the list below is handed them in neither this order nor the tab's. */
+const byName = [...largeSkills.userSkills].reverse();
+
 beforeEach(() => {
   rockerRender.mockClear();
-  filterSkillListCall.mockClear();
-  sortPluginsCall.mockClear();
 });
 
 describe("ItemList", () => {
@@ -66,7 +43,7 @@ describe("ItemList", () => {
     const props = {
       kind: "skill" as const,
       tab: largeSkills,
-      items: [...largeSkills.userSkills].reverse(),
+      items: [...byName.slice(100), ...byName.slice(0, 100)],
       expandedIds: new Set<string>(),
       cliOk: true,
       pluginToggle: true,
@@ -79,11 +56,10 @@ describe("ItemList", () => {
     const articles = view.container.querySelectorAll("article");
 
     expect(articles).toHaveLength(200);
-    expect(articles[0]).toHaveTextContent("Skill 000");
-    expect(articles[199]).toHaveTextContent("Skill 199");
+    expect(articles[0]).toHaveTextContent("Skill 100");
+    expect(articles[199]).toHaveTextContent("Skill 099");
     expect(screen.getAllByRole("button")).toHaveLength(203);
     expect(rockerRender).toHaveBeenCalledTimes(200);
-    expect(filterSkillListCall).not.toHaveBeenCalled();
 
     await user.tab();
     expect(screen.getByRole("button", { name: "all" })).toHaveFocus();
@@ -92,34 +68,35 @@ describe("ItemList", () => {
     await user.tab();
     expect(screen.getByRole("button", { name: "off" })).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole("button", { name: "Skill 000 on" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Skill 100 on" })).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onToggleSkill).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "skill-000" }),
+      expect.objectContaining({ id: "skill-100" }),
       false,
     );
 
     view.rerender(<ItemList {...props} />);
     expect(rockerRender).toHaveBeenCalledTimes(200);
-    expect(filterSkillListCall).not.toHaveBeenCalled();
   });
 
-  it("does not sort an already-derived plugin list again", () => {
-    const plugin = {
-      id: "workbench@workshop",
-      name: "workbench",
+  it("shows an already-derived plugin list in the order it is given", () => {
+    const plugin = (name: string) => ({
+      id: `${name}@workshop`,
+      name,
       source: "workshop",
       version: "0.23.0",
       upstream: "0.23.0",
       enabled: true,
       togglable: true,
       skills: [],
-    };
-    render(
+    });
+    // Handed over out of name order: sorting again would put toolkit first.
+    const items = [plugin("workbench"), plugin("toolkit")];
+    const view = render(
       <ItemList
         kind="plugin"
-        tab={{ plugins: [plugin], userSkills: [], mcpServers: [] }}
-        items={[plugin]}
+        tab={{ plugins: items, userSkills: [], mcpServers: [] }}
+        items={items}
         expandedIds={new Set()}
         cliOk
         pluginToggle
@@ -130,8 +107,10 @@ describe("ItemList", () => {
       />,
     );
 
-    expect(screen.getByText("workbench")).toBeInTheDocument();
-    expect(sortPluginsCall).not.toHaveBeenCalled();
+    const articles = view.container.querySelectorAll("article");
+    expect(articles).toHaveLength(2);
+    expect(articles[0]).toHaveTextContent("workbench");
+    expect(articles[1]).toHaveTextContent("toolkit");
   });
 
   it("offers an Outdated chip that keeps only plugins behind their catalog", async () => {

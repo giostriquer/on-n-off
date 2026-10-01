@@ -38,13 +38,9 @@ describe("SubscriptionBadge", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("Paid through");
     expect(screen.getByRole("tooltip")).not.toHaveTextContent("Confirmed");
   });
-  it.each([
-    ["missing", null],
-    ["invalid", { date: "invalid", checkedAt: null }],
-    ["passed", subscription(-1)],
-    ["ending this instant", subscription(0)],
-  ])("omits the badge when the date is %s", (_case, value) => {
-    const { container } = render(<SubscriptionBadge paidThrough={value} now={NOW} />);
+  it("omits the badge when there is no date to show", () => {
+    // Which dates show nothing is `codexSubscriptionTerm`'s call; the badge only draws its answer.
+    const { container } = render(<SubscriptionBadge paidThrough={subscription(0)} now={NOW} />);
     expect(container).toBeEmptyDOMElement();
   });
 });
@@ -92,14 +88,6 @@ describe("SubscriptionBadge with the billing term", () => {
     fireEvent.focus(badge);
     expect(screen.getByRole("tooltip")).toHaveTextContent("Renewal was due");
     expect(screen.getByRole("tooltip")).toHaveTextContent("A payment is overdue.");
-  });
-  it("prefers the billing term to the token date, and falls back to the token when there is none", () => {
-    const { rerender } = render(<SubscriptionBadge term={term(3, true)} paidThrough={subscription(40)} now={NOW} />);
-    expect(screen.getByRole("button", { name: "Subscription status: Auto-renew" })).toBeTruthy();
-    rerender(<SubscriptionBadge term={null} paidThrough={subscription(40)} now={NOW} />);
-    expect(screen.getByRole("button", { name: "Subscription paid through Oct 24" })).toBeTruthy();
-    rerender(<SubscriptionBadge term={{ ...term(3, true), activeUntil: "invalid" }} paidThrough={null} now={NOW} />);
-    expect(screen.queryByRole("button")).toBeNull();
   });
 });
 

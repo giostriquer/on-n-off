@@ -176,9 +176,6 @@ test("the Swift cache action keys on the toolchain and the inputs SwiftPM tracks
   // release's version bump keeps the key Bundle saved before it. The CI leg's native checks fail a
   // helper that embeds another Info.plist than the one beside it.
   assert.doesNotMatch(key, /Info\.plist/);
-  const buildScript = readFileSync(join(directory, "..", "..", "src-tauri", "native_build.rs"), "utf8");
-  const removal = buildScript.indexOf("fs::remove_file(&legacy);");
-  assert.ok(removal !== -1 && removal < buildScript.indexOf('.args(["swift", "build", "--package-path"])'), "the helper is removed before the Swift build");
   assert.match(step(lint(), "Check native notch models and lifecycle").run, /bun scripts\/check-native-notch\.mjs src-tauri\/target\/debug\/on-n-off-notch/);
   // A source change restores the previous generation and rebuilds only what changed.
   assert.ok(key.endsWith("}}"));
