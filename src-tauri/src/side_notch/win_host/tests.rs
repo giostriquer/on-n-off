@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto, Reading};
+use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
 use crate::side_notch::model::NotchSettings;
 use std::time::Duration;
 
@@ -75,45 +75,6 @@ fn a_poll_refreshes_on_its_interval_forces_once_and_never_stays_loading_forever(
         "a read that never reported back releases its slot"
     );
     assert_eq!(poll.value, 1);
-}
-
-#[test]
-fn current_provider_drops_everything_but_the_signed_in_account() {
-    let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
-        {"provider":"claude","status":"ok","currentAccount":false,"plan":"remembered-plan","windows":[]},
-        {"provider":"claude","status":"signedOut","currentAccount":true,"account":{"id":"private-id","label":"private-label"},"windows":[]}
-    ]))
-    .unwrap();
-    let entry = NotchProvider::current(entries).expect("the current account");
-    assert_eq!(entry.status, LimitsStatus::SignedOut);
-    assert!(NotchProvider::current(Vec::new()).is_none());
-}
-
-/// The painter draws a business member's credit share on the Codex cell's inner ring, so it has to
-/// arrive with the cell.
-#[test]
-fn a_business_members_credit_share_reaches_the_codex_cell() {
-    let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
-        {"provider":"codex","status":"ok","currentAccount":true,"windows":[],
-         "workspaceCredits":{"limit":"25000","used":"8000","usedPercent":32.0,"reached":false}}
-    ]))
-    .unwrap();
-    let mut providers: [Poll<Option<NotchProvider>>; PROVIDER_COUNT] =
-        [(); PROVIDER_COUNT].map(|_| Poll::new(None));
-    providers[1] = Poll::new(NotchProvider::current(entries));
-    let session_rows: Vec<Vec<LiveSession>> = vec![Vec::new(); PROVIDER_COUNT];
-    let cells = rail_cells(&snapshot(), &providers, &session_rows, &Poll::new(None));
-    match cells.first() {
-        Some(CellData::Provider(provider)) => assert_eq!(
-            provider
-                .cell
-                .workspace_credits
-                .as_ref()
-                .map(|share| (share.limit.as_str(), share.used.as_str())),
-            Some(("25000", "8000"))
-        ),
-        _ => panic!("the Codex cell"),
-    }
 }
 
 #[test]

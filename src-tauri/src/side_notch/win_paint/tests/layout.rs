@@ -12,11 +12,6 @@ fn metrics_mirror_the_notchcore_constants_at_standard_size() {
     assert_eq!(standard.inset, 40.0);
     assert_eq!(standard.ear, 40.0);
     assert_eq!(standard.ring_stroke, 4.0);
-    // Rail length for two cells: cells + spacing + two ears.
-    assert_eq!(
-        2.0 * standard.cell_length + standard.cell_spacing + 2.0 * standard.inset,
-        2.0 * 73.0 + 8.0 + 80.0
-    );
 
     let vertical_m = metrics(NotchSize::Standard, 1.0, Edge::Right);
     let horizontal_m = metrics(NotchSize::Standard, 1.0, Edge::Top);

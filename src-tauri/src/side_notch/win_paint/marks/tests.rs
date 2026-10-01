@@ -1,56 +1,33 @@
 use super::*;
 
-fn coverage(shape: &Shape, box_: (f32, f32, f32, f32)) -> usize {
-    let mut pixmap = Pixmap::new(48, 48).unwrap();
-    fill(
-        shape,
-        box_,
-        (8.0, 8.0, 32.0, 32.0),
-        [255, 0, 0, 255],
-        &mut pixmap,
-    );
-    pixmap
-        .data()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .filter(|px| px[3] > 0)
-        .count()
-}
-
+/// Each glyph, drawn through `provider` with the view box the rail really uses, fills its rect
+/// and stays inside it.
 #[test]
-fn every_provider_mark_draws_pixels() {
-    assert!(
-        coverage(&CLAUDE, (0.0, 0.0, 24.0, 24.0)) > 200,
-        "claude starburst"
-    );
-    assert!(coverage(&CODEX, (0.0, 0.0, 24.0, 24.0)) > 200, "codex knot");
-    assert!(
-        coverage(&CURSOR, (0.0, 0.0, 466.73, 532.09)) > 200,
-        "cursor cube"
-    );
-    assert!(
-        coverage(&ANTIGRAVITY, (13.0, 14.5, 85.0, 85.0)) > 100,
-        "antigravity arch"
-    );
-}
-
-#[test]
-fn marks_fit_inside_their_rect() {
-    let mut pixmap = Pixmap::new(32, 32).unwrap();
-    provider(
-        crate::dto::AgentId::Claude,
-        (4.0, 4.0, 24.0, 24.0),
-        [255, 255, 255, 255],
-        &mut pixmap,
-    );
-    for (index, px) in pixmap.data().as_chunks::<4>().0.iter().enumerate() {
-        if px[3] > 0 {
-            let x = index % 32;
-            let y = index / 32;
-            assert!((1..31).contains(&x), "glyph leaks horizontally at {x}");
-            assert!((1..31).contains(&y), "glyph leaks vertically at {y}");
+fn every_provider_mark_draws_inside_its_rect() {
+    use crate::dto::AgentId;
+    for (id, least) in [
+        (AgentId::Claude, 200),
+        (AgentId::Codex, 200),
+        (AgentId::Cursor, 200),
+        (AgentId::Antigravity, 100),
+    ] {
+        let mut pixmap = Pixmap::new(48, 48).unwrap();
+        provider(
+            id,
+            (8.0, 8.0, 32.0, 32.0),
+            [255, 255, 255, 255],
+            &mut pixmap,
+        );
+        let mut ink = 0;
+        for (index, px) in pixmap.data().as_chunks::<4>().0.iter().enumerate() {
+            if px[3] > 0 {
+                ink += 1;
+                let (x, y) = (index % 48, index / 48);
+                assert!((5..43).contains(&x), "{id:?} leaks horizontally at {x}");
+                assert!((5..43).contains(&y), "{id:?} leaks vertically at {y}");
+            }
         }
+        assert!(ink > least, "{id:?} draws only {ink} pixels");
     }
 }
 
