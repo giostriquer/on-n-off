@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterMcpList, filterSkillList, filterTab } from "./filterTab";
+import { filterTab } from "./filterTab";
 import type { AgentTabDto } from "./types";
 
 const tab: AgentTabDto = {
@@ -91,7 +91,7 @@ describe("filterTab", () => {
     expect(filterTab(tab, "0.23.0").plugins.map((plugin) => plugin.id)).toEqual(["workbench@workshop"]);
   });
 
-  it("finds a server by any project that keeps it, or by the plugin that brings it", () => {
+  it("finds a server by its transport, by any project that keeps it, or by the plugin that brings it", () => {
     const withSources: AgentTabDto = {
       ...tab,
       mcpServers: [
@@ -119,6 +119,7 @@ describe("filterTab", () => {
       ],
     };
     const ids = (query: string) => filterTab(withSources, query).mcpServers.map((server) => server.id);
+    expect(ids("stdio")).toEqual(["github"]);
     expect(ids("webapp")).toEqual(["local:library-docs"]);
     expect(ids("acme/api")).toEqual(["local:library-docs"]);
     expect(ids("marketplace-one")).toEqual(["plugin:kit:tracker"]);
@@ -126,15 +127,12 @@ describe("filterTab", () => {
   });
 });
 
-describe("filterSkillList", () => {
-  it("flattens plugin and user skills", () => {
-    expect(filterSkillList(tab, "").map((skill) => skill.name)).toEqual(["statusline", "brainstorming"]);
-  });
-
+describe("filterTab skills", () => {
   it("matches plugin id, skill name, and description", () => {
-    expect(filterSkillList(tab, "workshop").map((skill) => skill.name)).toEqual(["brainstorming"]);
-    expect(filterSkillList(tab, "status").map((skill) => skill.name)).toEqual(["statusline"]);
-    expect(filterSkillList(tab, "designs").map((skill) => skill.name)).toEqual(["brainstorming"]);
+    const names = (query: string) => filterTab(tab, query).skills.map((skill) => skill.name);
+    expect(names("workshop")).toEqual(["brainstorming"]);
+    expect(names("status")).toEqual(["statusline"]);
+    expect(names("designs")).toEqual(["brainstorming"]);
   });
 });
 
@@ -165,13 +163,5 @@ describe("filterTab hooks", () => {
     // its snake_cased event would otherwise match rows that show neither.
     expect(ids("0")).toEqual([]);
     expect(ids("pre_tool_use")).toEqual([]);
-  });
-});
-
-describe("filterMcpList", () => {
-  it("matches mcp name, transport, and source", () => {
-    expect(filterMcpList(tab, "").map((server) => server.id)).toEqual(["github"]);
-    expect(filterMcpList(tab, "stdio").map((server) => server.id)).toEqual(["github"]);
-    expect(filterMcpList(tab, "nope")).toEqual([]);
   });
 });

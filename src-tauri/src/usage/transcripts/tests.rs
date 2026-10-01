@@ -152,6 +152,31 @@ fn richest_copies_keeps_one_record_per_message_whichever_file_holds_it_first() {
     }
 }
 
+/// Claude Code writes one line per content block, all under one message id and request id, and
+/// the early lines carry a partial `output_tokens` (often 1 for a thinking block): the copy with
+/// the most output is the message as billed. It keeps the first copy's place, and a line with no
+/// key is kept as it is.
+#[test]
+fn richest_copies_keeps_a_messages_billed_line_in_its_first_lines_place() {
+    let line = |key: Option<&str>, output: u64| {
+        usage_record(UsageProvider::Claude, key, "session-a", 100, output)
+    };
+    let file = [
+        line(Some("msg_1:"), 1),
+        line(None, 4),
+        line(Some("msg_1:"), 99),
+        line(Some("msg_2:"), 4),
+        line(Some("msg_1:"), 7),
+    ];
+
+    let kept: Vec<(Option<&str>, u64)> = richest_copies([&file[..]])
+        .into_iter()
+        .map(|record| (record.dedupe_key.as_deref(), record.totals.output_tokens))
+        .collect();
+
+    assert_eq!(kept, [(Some("msg_1:"), 99), (None, 4), (Some("msg_2:"), 4)]);
+}
+
 #[test]
 fn richest_copies_breaks_output_ties_by_total_tokens_and_keeps_the_held_copy_on_a_full_tie() {
     let held = usage_record(UsageProvider::Claude, Some("k"), "held", 100, 50);
@@ -368,14 +393,4 @@ fn parse_codex_drops_fork_copy_burst() {
     )
     .unwrap();
     assert_eq!(real.totals.output_tokens, 30);
-}
-
-#[test]
-fn might_carry_usage_gates() {
-    assert!(might_carry_usage(r#"{"usage":{}}"#, UsageProvider::Claude));
-    assert!(!might_carry_usage(r#"{"foo":1}"#, UsageProvider::Claude));
-    assert!(might_carry_usage(
-        r#"{"payload":{"type":"token_count"}}"#,
-        UsageProvider::Codex
-    ));
 }

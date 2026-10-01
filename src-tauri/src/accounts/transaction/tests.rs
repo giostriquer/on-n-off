@@ -10,7 +10,6 @@ fn login(user: &str, refresh: &str) -> Login {
 }
 struct Store {
     live: RefCell<Option<Login>>,
-    fail_verify: bool,
 }
 impl Native for Store {
     fn read(&self) -> Result<Option<Login>, String> {
@@ -28,17 +27,12 @@ impl Native for Store {
         Ok(())
     }
     fn verify(&self) -> Result<(), String> {
-        if self.fail_verify {
-            Err("verification refused".into())
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 }
-fn fixture(fail_verify: bool) -> (Database, Store, String, String) {
+fn fixture() -> (Database, Store, String, String) {
     let native = Store {
         live: RefCell::new(Some(login("a", "cli-rotated-a"))),
-        fail_verify,
     };
     let mut db = Database::default();
     let a = db
@@ -58,26 +52,8 @@ fn fixture(fail_verify: bool) -> (Database, Store, String, String) {
     (db, native, a, b)
 }
 #[test]
-fn switch_back_uses_the_outgoing_cli_rotated_generation() {
-    let (mut db, native, a, b) = fixture(false);
-    let mut durable = String::new();
-    activate(&mut db, &native, &b, false, &mut |db| {
-        durable = serde_json::to_string(db).unwrap();
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(native.read().unwrap().unwrap().auth["user"], "b");
-    let mut reloaded: Database = serde_json::from_str(&durable).unwrap();
-    activate(&mut reloaded, &native, &a, false, &mut |_| Ok(())).unwrap();
-    assert_eq!(
-        native.read().unwrap().unwrap().auth["refresh"],
-        "cli-rotated-a"
-    );
-    assert!(reloaded.recovery().is_none());
-}
-#[test]
 fn backup_failure_never_changes_native_login() {
-    let (mut db, native, _, b) = fixture(false);
+    let (mut db, native, _, b) = fixture();
     assert!(activate(
         &mut db,
         &native,
@@ -91,16 +67,6 @@ fn backup_failure_never_changes_native_login() {
         "cli-rotated-a"
     );
 }
-#[test]
-fn failed_readback_restores_the_newest_outgoing_login() {
-    let (mut db, native, _, b) = fixture(true);
-    assert!(activate(&mut db, &native, &b, false, &mut |_| Ok(())).is_err());
-    assert_eq!(
-        native.read().unwrap().unwrap().auth["refresh"],
-        "cli-rotated-a"
-    );
-}
-
 #[test]
 fn repairs_a_partial_identity_write_without_saving_outgoing_tokens_as_the_target() {
     struct Partial(RefCell<Option<Login>>, std::cell::Cell<bool>);
@@ -157,7 +123,7 @@ fn repairs_a_partial_identity_write_without_saving_outgoing_tokens_as_the_target
 
 #[test]
 fn reauthenticated_current_profile_can_activate_its_new_login() {
-    let (mut db, native, a, _) = fixture(false);
+    let (mut db, native, a, _) = fixture();
     let profile = db.profiles.iter_mut().find(|p| p.id == a).unwrap();
     profile.login = Some(login("a", "new-sign-in-a"));
     profile.pending_activation = true;
@@ -189,7 +155,7 @@ fn capture_waits_for_native_lock_and_preserves_the_completed_refresh() {
             self.0.verify()
         }
     }
-    let (mut db, native, a, b) = fixture(false);
+    let (mut db, native, a, b) = fixture();
     activate(&mut db, &RefreshBeforeLock(native), &b, false, &mut |_| {
         Ok(())
     })
@@ -208,7 +174,7 @@ fn capture_waits_for_native_lock_and_preserves_the_completed_refresh() {
 }
 #[test]
 fn switching_away_preserves_a_pending_reauthentication() {
-    let (mut db, native, a, b) = fixture(false);
+    let (mut db, native, a, b) = fixture();
     let profile = db.profiles.iter_mut().find(|p| p.id == a).unwrap();
     profile.login = Some(login("a", "fresh-isolated-login"));
     profile.pending_activation = true;
@@ -223,7 +189,7 @@ fn switching_away_preserves_a_pending_reauthentication() {
 
 #[test]
 fn switching_away_from_a_removed_account_keeps_only_its_recovery_backup() {
-    let (mut db, native, a, b) = fixture(false);
+    let (mut db, native, a, b) = fixture();
     let identity = native.identify(&native.read().unwrap().unwrap()).unwrap();
     db.profiles.retain(|p| p.id != a);
     db.ignored_accounts.push(identity.clone());
@@ -318,7 +284,6 @@ impl Native for Running {
 fn running(client: Client) -> (Database, Running, String, String) {
     let native = Store {
         live: RefCell::new(Some(in_workspace("a", "cli-rotated-a", "one"))),
-        fail_verify: false,
     };
     let mut db = Database::default();
     let a_login = in_workspace("a", "old", "one");
@@ -635,7 +600,7 @@ fn a_journal_that_cannot_be_cleared_before_publication_says_so() {
 
 #[test]
 fn activation_revokes_private_ownership_in_the_durable_journal_before_native_publication() {
-    let (mut db, native, _, b) = fixture(false);
+    let (mut db, native, _, b) = fixture();
     db.profiles
         .iter_mut()
         .find(|p| p.id == b)

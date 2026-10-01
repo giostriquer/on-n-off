@@ -3,19 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { McpList } from "./McpList";
 import type { McpServerDto } from "$lib/types";
 
-const filterMcpListCall = vi.hoisted(() => vi.fn());
-
-vi.mock("$lib/filterTab", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("$lib/filterTab")>();
-  return {
-    ...actual,
-    filterMcpList: (...args: Parameters<typeof actual.filterMcpList>) => {
-      filterMcpListCall();
-      return actual.filterMcpList(...args);
-    },
-  };
-});
-
 const server: McpServerDto = {
   id: "github",
   name: "GitHub",
@@ -36,18 +23,18 @@ function liveDot(article: HTMLElement): Element {
 }
 
 describe("McpList", () => {
-  it("uses an already-derived server list without filtering it again", () => {
+  it("shows the server list it is given without filtering it again", () => {
+    // The shell already filtered; a query the given server does not match must not hide it.
     render(
       <McpList
         tab={{ plugins: [], userSkills: [], mcpServers: [server] }}
         servers={[server]}
-        filterQuery="github"
+        filterQuery="no-such-server"
         onToggle={vi.fn()}
       />,
     );
 
     expect(screen.getByText("GitHub")).toBeInTheDocument();
-    expect(filterMcpListCall).not.toHaveBeenCalled();
   });
 
   it("shows a provider notice and keeps read-only servers unswitchable", () => {

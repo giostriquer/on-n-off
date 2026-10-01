@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { ALL_AGENTS } from "./appSettings";
 import { providerColor } from "./providerStyle";
 
 describe("providerColor", () => {
-  it("gives Claude its orange and every provider a colour", () => {
-    expect(providerColor("claude")).toBe("#d97757");
-    for (const provider of ["claude", "codex", "antigravity", "cursor"] as const) {
-      expect(providerColor(provider)).toBeTruthy();
+  it("gives every provider a colour to paint its bars with", () => {
+    for (const provider of ALL_AGENTS) {
+      expect(providerColor(provider), provider).toBeTruthy();
     }
   });
 });

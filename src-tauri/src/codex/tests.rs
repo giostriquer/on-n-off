@@ -38,11 +38,11 @@ fn fixture() -> (PathBuf, PathBuf) {
         "---\nname: loom-feed\ndescription: Feed Loom\n---\n",
     )
     .unwrap();
-    let extra = home.join("elsewhere/conoswiki-feed/SKILL.md");
+    let extra = home.join("elsewhere/acme-feed/SKILL.md");
     fs::create_dir_all(extra.parent().unwrap()).unwrap();
     fs::write(
         &extra,
-        "---\nname: conoswiki-feed\ndescription: Feed ConosWiki\n---\n",
+        "---\nname: acme-feed\ndescription: Feed Acme\n---\n",
     )
     .unwrap();
     let marketplace = root.join(".tmp/marketplaces/workshop");
@@ -83,13 +83,13 @@ fn lists_plugins_and_user_skills_from_agents_dir_and_config_paths() {
         .iter()
         .map(|skill| skill.name.as_str())
         .collect();
-    assert_eq!(names, ["conoswiki-feed", "loom-feed"]);
-    let wiki = tab
+    assert_eq!(names, ["acme-feed", "loom-feed"]);
+    let feed = tab
         .user_skills
         .iter()
-        .find(|skill| skill.name == "conoswiki-feed")
+        .find(|skill| skill.name == "acme-feed")
         .unwrap();
-    assert!(!wiki.enabled);
+    assert!(!feed.enabled);
     let mcp_ids: Vec<_> = tab
         .mcp_servers
         .iter()
@@ -170,10 +170,10 @@ fn toggling_skill_upserts_config_and_keeps_plugins() {
         .unwrap();
     assert!(loom.enabled);
     let loom_id = loom.id.clone();
-    let wiki_id = tab
+    let feed_id = tab
         .user_skills
         .iter()
-        .find(|skill| skill.name == "conoswiki-feed")
+        .find(|skill| skill.name == "acme-feed")
         .unwrap()
         .id
         .clone();
@@ -194,14 +194,14 @@ fn toggling_skill_upserts_config_and_keeps_plugins() {
     assert!(text.contains("loom-feed"));
 
     let tab = adapter
-        .set_skill_enabled(&wiki_id, true)
-        .expect("toggle wiki");
-    let wiki = tab
+        .set_skill_enabled(&feed_id, true)
+        .expect("toggle feed");
+    let feed = tab
         .user_skills
         .iter()
-        .find(|skill| skill.name == "conoswiki-feed")
+        .find(|skill| skill.name == "acme-feed")
         .unwrap();
-    assert!(wiki.enabled);
+    assert!(feed.enabled);
     assert!(root
         .join("_backups/codex")
         .read_dir()

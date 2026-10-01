@@ -27,8 +27,12 @@ describe("codexSubscriptionTerm", () => {
     expect(fallback.caveat).toMatch(/Renewal status unknown/);
     expect(fallback.checked).toBeNull();
     expect(codexSubscriptionTerm(null, token(-1), NOW)).toBeNull();
+    expect(codexSubscriptionTerm(null, token(0), NOW)).toBeNull();
     expect(codexSubscriptionTerm(null, { date: "invalid", checkedAt: null }, NOW)).toBeNull();
     expect(codexSubscriptionTerm(null, null, NOW)).toBeNull();
+  });
+  it("shows nothing for a term it cannot read and no token to fall back on", () => {
+    expect(codexSubscriptionTerm({ ...term(3, true), activeUntil: "invalid" }, null, NOW)).toBeNull();
   });
   it("prefers the billing term to the token date", () => {
     const shown = codexSubscriptionTerm(term(3, false), token(40), NOW)!;

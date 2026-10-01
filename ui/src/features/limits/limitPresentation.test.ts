@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatResetAt } from "$lib/limitsFormat";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, headlineWindow, latestObservedAt, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft, presentWorkspaceShare } from "./limitPresentation";
+import { hasObservations, latestObservedAt, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -54,26 +54,6 @@ describe("presentLimitWindow", () => {
     expect(presented.text).toBe("12%");
     expect(presented.note).toBe("");
     expect(presentLimitWindow({ ...window, resetsAt: "soon" }, NOW).text).toBe("93%");
-  });
-});
-
-describe("headlineWindow", () => {
-  const card = (windows: LimitWindow[]): ProviderLimits => ({ provider: "claude", status: "ok", currentAccount: true, windows });
-  const weekly: LimitWindow = { ...window, id: "weekly_all", label: "Weekly · all models", kind: "weekly" };
-  const session: LimitWindow = { ...window, id: "session", kind: "session" };
-  const fable: LimitWindow = { ...window, id: "weekly_fable", label: "Weekly · Fable", kind: "model" };
-
-  it("leads with the weekly window, the headline window, and keeps the rest in the order the backend sent", () => {
-    expect(headlineWindow(card([weekly, session, fable]))).toEqual({ headline: weekly, rest: [session, fable] });
-  });
-
-  it("has no headline without a weekly window: the session and the rest are ordinary rows", () => {
-    expect(headlineWindow(card([session, fable]))).toEqual({ headline: undefined, rest: [session, fable] });
-    expect(headlineWindow(card([fable]))).toEqual({ headline: undefined, rest: [fable] });
-  });
-
-  it("has no headline without windows", () => {
-    expect(headlineWindow(card([]))).toEqual({ headline: undefined, rest: [] });
   });
 });
 
@@ -135,43 +115,6 @@ describe("usableAgainAt", () => {
 });
 
 const SHARE = { limit: "25000", used: "8000", usedPercent: 32, resetsAt: null, reached: false };
-
-describe("presentWorkspaceShare", () => {
-  const pending = "2026-09-01T00:00:00Z";
-
-  it("meters the share with the reader's figure and says what is left and when it resets", () => {
-    expect(presentWorkspaceShare({ ...SHARE, usedPercent: 40, resetsAt: pending }, NOW)).toEqual({
-      percent: 40,
-      text: "40%",
-      color: undefined,
-      note: "17,000 of 25,000 left · resets Sep 1",
-    });
-  });
-
-  it("says all of a reached share is used when its amounts agree", () => {
-    const presented = presentWorkspaceShare({ ...SHARE, used: "25000", usedPercent: 100, reached: true, resetsAt: pending }, NOW);
-    expect(presented.note).toBe("all 25,000 used · resets Sep 1");
-    expect(presented.color).toBe("var(--trip)");
-  });
-
-  it("says only that the limit is reached when a reached share's amounts show some left", () => {
-    expect(presentWorkspaceShare({ ...SHARE, used: "24000", usedPercent: 100, reached: true, resetsAt: pending }, NOW).note)
-      .toBe("limit reached · resets Sep 1");
-  });
-
-  it("never says less than nothing is left", () => {
-    expect(presentWorkspaceShare({ ...SHARE, limit: "100", used: "120", usedPercent: 100 }, NOW).note).toBe("0 of 100 left");
-  });
-
-  it("reads a share past its reset as renewed, as a window past its reset is", () => {
-    expect(presentWorkspaceShare({ ...SHARE, used: "25000", usedPercent: 100, reached: true, resetsAt: "2026-08-17T19:00:00Z" }, NOW)).toEqual({
-      percent: 0,
-      text: "0%",
-      color: undefined,
-      note: "25,000 of 25,000 left · reset 1h ago · Aug 17",
-    });
-  });
-});
 
 const SPENT = { last7Days: 18303.44, last30Days: 20299.7, updatedAt: "2026-08-17T19:00:00Z" };
 

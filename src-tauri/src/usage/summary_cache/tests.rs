@@ -34,7 +34,7 @@ fn round_trip_hit_requires_matching_source_signature() {
         until_time: None,
         force: false,
     };
-    let key = window_key(&input);
+    let key = summary_key(&input, None, "none");
     let signature = "v1-a";
     store_summary(&path, &key, signature, &sample_dto());
     let hit = load_summary_hit(&path, &key, signature).expect("hit");
@@ -63,7 +63,6 @@ fn summary_key_changes_with_the_rate_table() {
         summary_key(&input, None, "none"),
         summary_key(&input, Some(1), "none")
     );
-    assert!(summary_key(&input, Some(7), "none").starts_with(&window_key(&input)));
 }
 
 /// A fold or a clear rewrites the history; a summary counted with the old one must not serve.
@@ -89,15 +88,44 @@ fn summary_key_changes_with_the_usage_history() {
 }
 
 #[test]
-fn window_key_includes_resolution_and_bounds() {
-    let input = UsageSummaryInput {
-        since_day: "a".into(),
-        until_day: "b".into(),
+fn summary_key_changes_with_every_field_of_the_window() {
+    let window = UsageSummaryInput {
+        since_day: "2026-08-01".into(),
+        until_day: "2026-08-01".into(),
         time_zone: "UTC".into(),
         resolution: Some("hour".into()),
-        since_time: Some("t0".into()),
-        until_time: Some("t1".into()),
+        since_time: Some("2026-08-01T00:00:00Z".into()),
+        until_time: Some("2026-08-01T12:00:00Z".into()),
         force: false,
     };
-    assert_eq!(window_key(&input), "hour|a|b|UTC|t0|t1");
+    let others = [
+        UsageSummaryInput {
+            resolution: Some("day".into()),
+            ..window.clone()
+        },
+        UsageSummaryInput {
+            since_day: "2026-07-31".into(),
+            ..window.clone()
+        },
+        UsageSummaryInput {
+            until_day: "2026-08-02".into(),
+            ..window.clone()
+        },
+        UsageSummaryInput {
+            time_zone: "America/Sao_Paulo".into(),
+            ..window.clone()
+        },
+        UsageSummaryInput {
+            since_time: Some("2026-08-01T01:00:00Z".into()),
+            ..window.clone()
+        },
+        UsageSummaryInput {
+            until_time: Some("2026-08-01T13:00:00Z".into()),
+            ..window.clone()
+        },
+    ];
+    let key = |input: &UsageSummaryInput| summary_key(input, Some(1), "none");
+    for other in &others {
+        assert_ne!(key(&window), key(other), "{other:?}");
+    }
 }

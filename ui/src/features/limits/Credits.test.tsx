@@ -94,6 +94,7 @@ describe("CreditsRows", () => {
 
     expect(shown.filled).toBe("0");
     expect(shown.figure?.textContent).toBe("0%");
+    expect((shown.figure as HTMLElement | null)?.style.color).toBe("");
     expect(shown.note).toBe("25,000 of 25,000 left · reset 1d ago · Sep 23");
   });
 

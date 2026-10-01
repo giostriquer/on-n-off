@@ -2,13 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { defaultNotchSettings, type NotchSnapshot } from "$lib/notchTypes";
-import {
-  layoutDisplays,
-  NotchSettingsCard,
-  showChoice,
-  showPatch,
-  toggleNotchList, toggleNotchProvider,
-} from "./NotchSettingsCard";
+import { layoutDisplays, NotchSettingsCard } from "./NotchSettingsCard";
 
 const calls = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn() }));
 vi.mock("$lib/api", () => ({
@@ -58,7 +52,7 @@ function mount() {
 
 const button = (name: string) => screen.getByRole("button", { name });
 
-it("requires an explicit display before the rail can be shown, then saves its identity", async () => {
+it("requires an explicit display before the rail can be shown, then saves its identity and each show choice", async () => {
   mount();
   const selector = await screen.findByRole("combobox", { name: "Display" });
   await waitFor(() => expect(selector).not.toBeDisabled());
@@ -80,6 +74,13 @@ it("requires an explicit display before the rail can be shown, then saves its id
     providers: [...ALL],
     pullRequests: { enabled: true, lists: ["mine"] },
   });
+  fireEvent.click(button("Always show"));
+  await waitFor(() =>
+    expect(button("Always show")).toHaveAttribute("aria-pressed", "true"),
+  );
+  expect(calls.save).toHaveBeenLastCalledWith(
+    expect.objectContaining({ enabled: true, show: "always" }),
+  );
 });
 
 it("keeps a disconnected display selected and lets the notch be hidden", async () => {
@@ -168,14 +169,15 @@ it("toggles providers in rail order and never removes the last one", async () =>
   );
 });
 
-it("maps the show control onto enabled + show and refuses to drop the last provider", () => {
-  expect(showChoice({ enabled: false, show: "onHover" })).toBe("hide");
-  expect(showChoice({ enabled: true, show: "onHover" })).toBe("hover");
-  expect(showChoice({ enabled: true, show: "always" })).toBe("always");
-  expect(showPatch("hide")).toEqual({ enabled: false });
-  expect(showPatch("hover")).toEqual({ enabled: true, show: "onHover" });
-  expect(toggleNotchProvider(["codex"], "claude", true)).toEqual(["claude", "codex"]);
-  expect(toggleNotchProvider(["codex"], "codex", false)).toEqual(["codex"]);
+it("keeps the only provider when its toggle stays live beside the pull-request cell", async () => {
+  snapshot.settings.pullRequests = { enabled: true, lists: ["mine"] };
+  snapshot.settings.providers = ["claude"];
+  mount();
+  const claude = await screen.findByRole("button", { name: "Show Claude in the notch" });
+  await waitFor(() => expect(claude).not.toBeDisabled());
+  fireEvent.click(claude);
+  await waitFor(() => expect(calls.save).toHaveBeenCalled());
+  expect(calls.save).toHaveBeenLastCalledWith(expect.objectContaining({ providers: ["claude"] }));
 });
 
 it("lays monitors out by physical coordinates instead of API order", () => {
@@ -208,12 +210,17 @@ it("shows only the user's own pull requests by default and lets other lists join
       expect.objectContaining({ pullRequests: { enabled: true, lists: ["mine", "assigned"] } }),
     ),
   );
+  // Joining after Assigned, Review requested still takes its place in screen order.
+  fireEvent.click(screen.getByRole("button", { name: "Review requested" }));
+  await waitFor(() =>
+    expect(calls.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pullRequests: { enabled: true, lists: ["mine", "reviewRequested", "assigned"] } }),
+    ),
+  );
   fireEvent.click(toggle);
   await waitFor(() =>
     expect(calls.save).toHaveBeenLastCalledWith(
-      expect.objectContaining({ pullRequests: { enabled: false, lists: ["mine", "assigned"] } }),
+      expect.objectContaining({ pullRequests: { enabled: false, lists: ["mine", "reviewRequested", "assigned"] } }),
     ),
   );
-  expect(toggleNotchList(["assigned"], "assigned", false)).toEqual(["assigned"]);
-  expect(toggleNotchList(["assigned"], "reviewRequested", true)).toEqual(["reviewRequested", "assigned"]);
 });

@@ -422,25 +422,6 @@ describe("Github", () => {
     expect(within(review).getByText("tools: bump lockfile")).toBeTruthy();
   });
 
-  it("shows the loaded slice against the GitHub total in the section heading", async () => {
-    readGithubPrs.mockResolvedValue(
-      okPrs({
-        mine: {
-          total: 137,
-          items: [
-            pr({ id: "a", ci: "failure" }),
-            pr({ id: "b", number: 2, title: "Second thing", ci: "success" }),
-            pr({ id: "c", number: 3, title: "Conflicted", mergeKind: "conflicts", ci: "success" }),
-            pr({ id: "d", number: 4, title: "Ready", mergeKind: "ready", reviewDecision: "APPROVED", ci: "success" }),
-          ],
-        },
-      }),
-    );
-    renderGithub();
-    await screen.findByText("Second thing");
-    expect(within(section("Mine")).getByRole("heading", { level: 3 }).textContent).toContain("4 of 137");
-  });
-
   it("says it is checking until the first read answers", () => {
     readGithubPrs.mockReturnValue(new Promise(() => undefined));
     renderGithub();

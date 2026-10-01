@@ -123,19 +123,3 @@ export function mergeEnrichedPluginMetadata(
     }),
   };
 }
-
-export async function withAgentLock<T>(
-  tabs: Record<AgentId, TabState>,
-  agentId: AgentId,
-  fn: () => Promise<T>,
-): Promise<T | undefined> {
-  if (tabs[agentId].inFlight) {
-    return undefined;
-  }
-  tabs[agentId].inFlight = true;
-  try {
-    return await fn();
-  } finally {
-    tabs[agentId].inFlight = false;
-  }
-}

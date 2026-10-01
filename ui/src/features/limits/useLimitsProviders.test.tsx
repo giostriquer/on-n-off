@@ -4,7 +4,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, SharedReadChanged } from "$lib/types";
-import { limitsRefreshMs, refreshLimits, useLimitsProviders } from "./useLimitsProviders";
+import { refreshLimits, useLimitsProviders } from "./useLimitsProviders";
 
 const calls = vi.hoisted(() => ({
   readLimits: vi.fn(),
@@ -19,12 +19,6 @@ vi.mock("$lib/api", () => ({
 }));
 
 describe("limits refresh policy", () => {
-  it("converts every supported setting to one refresh interval", () => {
-    const fiveMinutes = limitsRefreshMs(5);
-    expect(fiveMinutes).toBe(300_000);
-    expect(limitsRefreshMs(10)).toBe(600_000);
-  });
-
   it("picks up a read another surface already made, unforced, without waiting out the interval", async () => {
     calls.listeners.clear();
     calls.readLimits.mockReset().mockResolvedValue([]);

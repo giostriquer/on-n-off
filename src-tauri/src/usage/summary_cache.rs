@@ -46,7 +46,7 @@ pub fn summary_key(
     )
 }
 
-pub fn window_key(input: &UsageSummaryInput) -> String {
+fn window_key(input: &UsageSummaryInput) -> String {
     format!(
         "{}|{}|{}|{}|{}|{}",
         input.resolution.as_deref().unwrap_or("day"),
