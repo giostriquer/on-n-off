@@ -40,7 +40,7 @@ describe("SubscriptionBadge", () => {
   });
   it("omits the badge when there is no date to show", () => {
     // Which dates show nothing is `codexSubscriptionTerm`'s call; the badge only draws its answer.
-    const { container } = render(<SubscriptionBadge paidThrough={subscription(0)} now={NOW} />);
+    const { container } = render(<SubscriptionBadge paidThrough={null} now={NOW} />);
     expect(container).toBeEmptyDOMElement();
   });
 });

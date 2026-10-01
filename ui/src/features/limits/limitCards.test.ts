@@ -231,11 +231,12 @@ describe("a card's windows", () => {
     });
   });
 
-  it("leads a card with no weekly window with nothing: its session is an ordinary row", () => {
+  it("leads a card with no weekly window with nothing: its session and model windows are ordinary rows", () => {
     const session = { id: "primary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
-    const [card] = cards([okCodex({ windows: [session] })]);
+    const model = { id: "fable", label: "Weekly · Fable", kind: "model" as const, usedPercent: 30, resetsAt: "2026-08-20T23:00:00Z", observedAt: NOW };
+    const [card] = cards([okCodex({ windows: [session, model] })]);
     expect(card.headline).toBeNull();
-    expect(card.rows.map(row => row.id)).toEqual(["primary"]);
+    expect(card.rows.map(row => row.id)).toEqual(["primary", "fable"]);
     expect(card.empty).toBeNull();
   });
 

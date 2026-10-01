@@ -4,7 +4,6 @@ import { displayError, parseInvokeError } from "$lib/error";
 import { GITHUB_LIST_IDS, type GithubListId } from "$lib/githubTypes";
 import type { NotchDisplay, NotchEdge, NotchSettings } from "$lib/notchTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { Rocker } from "@/components/Rocker";
 import { Segmented } from "@/components/Segmented";
@@ -60,24 +59,6 @@ function toggleOrdered<T>(order: readonly T[], selected: readonly T[], id: T, sh
   if (shown) next.add(id);
   else if (next.size > 1) next.delete(id);
   return order.filter((entry) => next.has(entry));
-}
-
-/** Toggles one provider's cell, keeping rail order and refusing to remove the last one. */
-function toggleNotchProvider(
-  providers: readonly AgentId[],
-  id: AgentId,
-  shown: boolean,
-): AgentId[] {
-  return toggleOrdered(ALL_AGENTS, providers, id, shown);
-}
-
-/** Toggles one pull-request list, keeping screen order and refusing to remove the last one. */
-function toggleNotchList(
-  lists: readonly GithubListId[],
-  id: GithubListId,
-  shown: boolean,
-): GithubListId[] {
-  return toggleOrdered(GITHUB_LIST_IDS, lists, id, shown);
 }
 
 const LIST_LABEL: Record<GithubListId, string> = {
@@ -244,7 +225,7 @@ export function NotchSettingsCard() {
                   ariaLabel={`Show ${providerLabel(id)} in the notch`}
                   onToggle={() =>
                     settings &&
-                    change({ providers: toggleNotchProvider(settings.providers, id, !shown) })
+                    change({ providers: toggleOrdered(ALL_AGENTS, settings.providers, id, !shown) })
                   }
                 />
               </SettingRow>
@@ -269,7 +250,8 @@ export function NotchSettingsCard() {
                   change({
                     pullRequests: {
                       ...settings.pullRequests,
-                      lists: toggleNotchList(
+                      lists: toggleOrdered(
+                        GITHUB_LIST_IDS,
                         settings.pullRequests.lists,
                         list,
                         !settings.pullRequests.lists.includes(list),

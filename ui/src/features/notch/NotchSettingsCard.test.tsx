@@ -169,6 +169,17 @@ it("toggles providers in rail order and never removes the last one", async () =>
   );
 });
 
+it("keeps the only provider when its toggle stays live beside the pull-request cell", async () => {
+  snapshot.settings.pullRequests = { enabled: true, lists: ["mine"] };
+  snapshot.settings.providers = ["claude"];
+  mount();
+  const claude = await screen.findByRole("button", { name: "Show Claude in the notch" });
+  await waitFor(() => expect(claude).not.toBeDisabled());
+  fireEvent.click(claude);
+  await waitFor(() => expect(calls.save).toHaveBeenCalled());
+  expect(calls.save).toHaveBeenLastCalledWith(expect.objectContaining({ providers: ["claude"] }));
+});
+
 it("lays monitors out by physical coordinates instead of API order", () => {
   const displays = [
     { ...snapshot.displays[0], id: "right", x: 1920 },
