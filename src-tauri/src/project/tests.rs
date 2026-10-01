@@ -128,8 +128,6 @@ fn inspect_reads_git_branch_and_local_counts() {
     assert_eq!(git_branch(&root), "main");
 }
 
-/// Under a home, inspecting a Claude project also counts the servers the home's `~/.claude.json`
-/// keeps for it, and a path written with `~` resolves inside that home.
 #[test]
 fn inspecting_under_a_home_reads_its_claude_json_and_expands_its_tilde() {
     let home = crate::paths::scratch_dir("on-n-off-inspect-project-home");
@@ -226,9 +224,6 @@ fn overlay_collapses_same_name_across_skill_roots() {
     assert!(!tab.user_skills[1].togglable);
 }
 
-/// Inside a Claude project, that project's `~/.claude.json` entry decides: its servers become
-/// project rows (off when its `disabledMcpServers` names them), a plugin server it switched off
-/// reads off, and the rows standing for servers kept for particular projects are not repeated.
 #[test]
 fn a_claude_project_view_follows_its_own_entry() {
     let root = crate::paths::scratch_dir("on-n-off-project-scope-local");
@@ -281,8 +276,6 @@ fn a_claude_project_view_follows_its_own_entry() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// The project views read the home's `~/.claude.json` for Claude and for no one else: the same
-/// home, whose entry for this project keeps one server, gives Claude a project row and Codex none.
 #[test]
 fn only_a_claude_project_view_reads_the_homes_claude_json() {
     let home = crate::paths::scratch_dir("on-n-off-project-scope-home");

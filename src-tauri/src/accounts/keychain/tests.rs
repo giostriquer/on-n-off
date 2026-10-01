@@ -17,9 +17,6 @@ fn hex_argument(command: &str) -> &str {
         .trim_end_matches('"')
 }
 
-/// The secret reaches `security` on stdin, hex-encoded and decodable back to the same bytes.
-/// Nothing about it can then be read out of the process table, and no quoting in the JSON can
-/// escape into the command.
 #[test]
 fn the_write_hex_encodes_the_secret_instead_of_quoting_it() {
     let service = crate::accounts::claude_store::CLAUDE_KEYCHAIN_SERVICE;
@@ -50,7 +47,6 @@ fn the_write_hex_encodes_the_secret_instead_of_quoting_it() {
     assert!(write_command("s", "a", b"").unwrap().ends_with("-X \"\"\n"));
 }
 
-/// A delete names the account as well as the service, or Codex's other homes are fair game.
 #[test]
 fn the_delete_names_the_exact_entry() {
     assert_eq!(
@@ -59,7 +55,6 @@ fn the_delete_names_the_exact_entry() {
     );
 }
 
-/// An identifier the command syntax cannot carry is refused, never escaped by guesswork.
 #[test]
 fn an_identifier_that_needs_escaping_is_refused() {
     for bad in ["", "a\"b", "a\\b", "a\nb", "a\rb"] {
@@ -79,9 +74,6 @@ fn an_identifier_that_needs_escaping_is_refused() {
     assert!(delete_command("Claude Code-credentials", "cli|x y").is_ok());
 }
 
-/// `security`'s answers, mapped before the caller names the operation: success is silent, a
-/// refusal keeps the tool's words on one line, silence gets a reason of its own, and a prompt
-/// nobody answered is named as such.
 #[test]
 fn the_tool_outcome_is_read_into_one_reason() {
     let exited = |success: bool, stderr: &str| CommandOutcome::Exited {
@@ -107,7 +99,6 @@ fn the_tool_outcome_is_read_into_one_reason() {
     );
 }
 
-/// Both spellings of "no such item" count, and nothing else does.
 #[test]
 fn only_a_missing_item_counts_as_not_found() {
     assert!(not_found(
@@ -118,8 +109,6 @@ fn only_a_missing_item_counts_as_not_found() {
     assert!(!not_found(""));
 }
 
-/// `find-generic-password -w`'s answers: the secret, trimmed; no item, in either form; or a failure
-/// that says how the user can unblock it.
 #[test]
 fn a_password_read_is_mapped_to_the_secret_no_item_or_why_not() {
     assert_eq!(
@@ -145,9 +134,6 @@ fn a_password_read_is_mapped_to_the_secret_no_item_or_why_not() {
     assert!(denied.contains("click Allow"), "{denied}");
 }
 
-/// The production entry points, driven through the test runner: what they send is exactly the
-/// command the builders produce, a missing item is a completed delete, and any other refusal is
-/// wrapped as a terminated sentence naming the operation.
 #[cfg(target_os = "macos")]
 #[test]
 fn write_and_delete_send_their_commands_and_read_the_answers() {
@@ -203,13 +189,6 @@ fn write_and_delete_send_their_commands_and_read_the_answers() {
     );
 }
 
-/// The production write and delete, driven against a throwaway entry of our own so no real login
-/// is at stake. The entry is created the way Claude Code creates its own — by `security` — and the
-/// check that matters is the access list afterwards: only the tool's identity may be on it. An
-/// in-process write would have needed this test binary to be allowed, and would have left its hash
-/// on the item's partition list, which is the state that made every account switch prompt.
-///
-/// `cargo test --manifest-path src-tauri/Cargo.toml rehearse_the_keychain_write -- --ignored`
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "writes a throwaway Keychain entry; not part of CI"]
@@ -239,11 +218,6 @@ fn rehearse_the_keychain_write_and_delete() {
             .success()
             .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
     };
-    // `dump-keychain -a` prints every item as a `keychain: "<path>"` block whose attributes
-    // include `"svce"<blob>="<service>"` and whose `access:` entries list each trusted
-    // application's path and code requirement (`cdhash H"…"` for an ad-hoc-signed binary) plus a
-    // `partition_id` entry naming `cdhash:…` / `apple-tool:` partitions. That is the shape matched
-    // here, as of macOS 26.
     let access_list = || {
         let dump = security(&["dump-keychain", "-a"]);
         String::from_utf8_lossy(&dump.stdout)
@@ -253,7 +227,6 @@ fn rehearse_the_keychain_write_and_delete() {
             .expect("the rehearsal entry is in the login keychain")
     };
 
-    // A quote and a space in the payload: the two things hex encoding exists to survive.
     let first = r#"{"claudeAiOauth":{"accessToken":"one","note":"a \"quoted\" word"}}"#;
     let second = r#"{"claudeAiOauth":{"accessToken":"two"}}"#;
     write(service, account, first.as_bytes()).unwrap();
@@ -279,7 +252,6 @@ fn rehearse_the_keychain_write_and_delete() {
         "this process never touched the item with its own identity:\n{access}"
     );
 
-    // The account lookup, against output `security` really produced rather than a fixture.
     let attributes = security(&["find-generic-password", "-s", service]);
     assert_eq!(
         crate::accounts::claude_store::parse_keychain_account(&String::from_utf8_lossy(

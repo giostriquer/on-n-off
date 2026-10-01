@@ -63,9 +63,6 @@ fn a_model_limit_crossing_one_hundred_percent_notifies_once() {
     assert!(observe(&mut state, &[exhausted]).is_empty());
 }
 
-/// Codex's hidden buckets never reach a surface, so one reaching its limit is no reason to notify.
-/// The Codex reader drops them before the monitor sees the read; the weekly window beside it still
-/// notifies.
 #[test]
 fn a_hidden_codex_window_reaching_its_limit_never_notifies() {
     let read = |weekly: u32, spark: u32, observed_at: &str| {
@@ -302,8 +299,6 @@ fn an_older_observation_never_notifies_or_replaces_the_baseline() {
     );
 }
 
-/// A newer read whose reset instant moved is a reset only when usage dropped by more than half a
-/// point; at half a point or less it is a correction.
 #[test]
 fn a_moved_reset_instant_is_a_reset_only_past_half_a_point_of_drop() {
     for (now, resets) in [(49.5, false), (49.4, true)] {
@@ -496,8 +491,6 @@ fn monitor_state_without_observation_times_is_discarded_instead_of_migrated() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// A banked reset alert is Codex's alone, so with limit notifications off an alert reads Codex and
-/// never Claude, whose failures would otherwise slow the alert's polls.
 #[test]
 fn the_monitor_reads_only_what_its_settings_watch() {
     let alert = crate::settings::ResetAlert {
@@ -531,7 +524,6 @@ fn the_monitor_reads_only_what_its_settings_watch() {
     );
 }
 
-/// A signed-in Codex card at `used` observed `at`, with a banked reset to spend.
 fn codex_with_a_reset(used: f64, at: &str) -> ProviderLimitsDto {
     let mut card = observed_at(
         snapshot(
@@ -567,8 +559,6 @@ fn alerts_only() -> crate::settings::AppSettings {
     }
 }
 
-/// With limit notifications off, an alert still offers its reset, and a limit reaching 100% on the
-/// same reads notifies nothing.
 #[test]
 fn an_alert_offers_its_reset_while_limit_notifications_stay_quiet() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
@@ -601,7 +591,6 @@ fn an_alert_offers_its_reset_while_limit_notifications_stay_quiet() {
     assert!(state.providers.is_empty(), "limit baselines kept while off");
 }
 
-/// With limit notifications on, the same reads notify the limit reached as well.
 #[test]
 fn with_limit_notifications_on_the_limit_is_notified_too() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
@@ -633,8 +622,6 @@ fn with_limit_notifications_on_the_limit_is_notified_too() {
     );
 }
 
-/// With nothing watched the monitor reads nothing, and that poll of nothing forgets everything it
-/// observed, so turning a notification back on starts from a fresh baseline.
 #[test]
 fn a_poll_of_nothing_forgets_every_observation() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
@@ -664,7 +651,6 @@ fn a_poll_of_nothing_forgets_every_observation() {
     assert!(state.providers.is_empty() && state.reset_alerts.is_empty());
 }
 
-/// A state file written before banked reset alerts existed still loads, limit baselines and all.
 #[test]
 fn a_state_written_before_alerts_keeps_its_limit_baselines() {
     let root = scratch_dir("limits-monitor-before-alerts");
@@ -682,7 +668,6 @@ fn a_state_written_before_alerts_keeps_its_limit_baselines() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// An offer made before a restart is not made again after it.
 #[test]
 fn an_offer_is_not_made_again_after_a_restart() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
@@ -722,7 +707,6 @@ fn an_offer_is_not_made_again_after_a_restart() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// What one poll notifies, for an alert that only notifies: nothing is offered to be spent.
 fn notices_of(
     state: &mut MonitorState,
     snapshots: &[ProviderLimitsDto],
@@ -750,8 +734,6 @@ fn at(value: &str) -> chrono::DateTime<chrono::Utc> {
         .with_timezone(&chrono::Utc)
 }
 
-/// An automatic alert's offer is not the "available" notification: it is handed on to be
-/// scheduled, once it is saved.
 #[test]
 fn an_automatic_alerts_offer_is_handed_on_to_be_scheduled() {
     let now = at("2026-08-19T13:00:00Z");
@@ -776,9 +758,6 @@ fn an_automatic_alerts_offer_is_handed_on_to_be_scheduled() {
     assert_eq!(outcome.automatic_offers[0].account_id, "acct-codex");
 }
 
-/// The monitor wakes when a reset falls due, not at its next poll, and polls as usual otherwise. A
-/// spend its last poll saw and could not decide waits for the next poll, which after a failure is
-/// the backoff, so the monitor never asks every second.
 #[test]
 fn the_monitor_wakes_when_a_reset_falls_due_but_never_every_second() {
     let now = at("2026-08-19T13:00:00Z");

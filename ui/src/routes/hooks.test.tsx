@@ -17,7 +17,6 @@ const hook: HookDto = {
   enabled: true,
 };
 
-/** Mutated per test, so every field it holds is reset in `beforeEach` before the next one reads it. */
 const session = vi.hoisted(() => ({
   provider: "claude" as AgentId,
   displayName: "Claude",
@@ -35,7 +34,6 @@ vi.mock("@/features/session/SessionProvider", () => ({
         readsHooks: session.readsHooks,
       },
       currentTab: { dto, filter: session.filter, inFlight: false, loading: false, error: null },
-      // The shell filters once, for every screen; the route only picks its slice out.
       filtered: filterTab(dto, session.filter),
       emptyTabDto,
     };

@@ -27,7 +27,6 @@ fn only_a_replacement_is_worth_announcing() {
 
 #[test]
 fn every_source_has_its_own_wire_name() {
-    // These strings are the contract with `SharedReadSource` in `ui/src/lib/types.ts`.
     let names = [
         Source::LimitsClaude.name(),
         Source::LimitsCodex.name(),

@@ -1,5 +1,3 @@
-//! Copying an item out of a tarball onto disk: hashing, staging, atomic placement.
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -8,12 +6,8 @@ use std::path::{Path, PathBuf};
 use super::fetch::Tarball;
 use crate::dto::{AdapterError, ItemKind};
 
-/// Files of one item, keyed by path relative to the item (a skill folder's contents, or the
-/// agent file under its own file name).
 pub type ItemFiles = BTreeMap<String, Vec<u8>>;
 
-/// Normalises a repository-relative path: `\` → `/`, no leading `./`, no trailing `/`.
-/// Rejects anything that could leave the repository root.
 pub fn normalize_upstream_path(path: &str) -> Result<String, AdapterError> {
     let unified = path.trim().replace('\\', "/");
     let mut parts = Vec::new();
@@ -85,7 +79,6 @@ pub fn hash_files(files: &ItemFiles) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Hashes what is on disk for an item, `None` when the target is gone.
 pub fn hash_tree_on_disk(
     target: &Path,
     kind: ItemKind,
@@ -136,8 +129,6 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
-/// Writes `files` as `dest` (a folder for skills, a single file for agents), replacing any
-/// previous copy atomically: everything is staged in a sibling, then swapped in with a rename.
 pub fn place(dest: &Path, kind: ItemKind, files: &ItemFiles) -> Result<(), AdapterError> {
     place_with(dest, kind, files, || Ok(()))
 }
@@ -183,8 +174,6 @@ pub fn place_with(
     result.map_err(|error| io_error(error, dest))
 }
 
-/// Replaces `dest` with `staging`. The old copy is moved aside first so a failed rename can put
-/// it back; the aside copy is removed only once the new one is in place.
 fn swap_in(staging: &Path, dest: &Path) -> io::Result<()> {
     let existed = dest.exists();
     let aside = aside_sibling(dest);

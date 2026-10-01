@@ -1,5 +1,3 @@
-//! Child-process plumbing shared by the agent CLI runner and the login-shell probe.
-
 use std::io::Read;
 use std::process::Child;
 use std::thread::JoinHandle;
@@ -14,11 +12,6 @@ pub(crate) enum CommandOutcome {
     TimedOut,
 }
 
-/// Drain a child's pipes while it runs and enforce `timeout` as a hard deadline.
-///
-/// The child must have been spawned with piped stdout/stderr. On timeout the child is
-/// killed and its drainers are detached, since a spawned descendant may still own the
-/// inherited pipe handles.
 pub(crate) fn wait_with_deadline(
     child: Child,
     timeout: Duration,
@@ -26,7 +19,6 @@ pub(crate) fn wait_with_deadline(
     wait_with_cancellation(child, timeout, || false)
 }
 
-/// As above, with cooperative cancellation that kills and reaps the owned child.
 pub(crate) fn wait_with_cancellation(
     mut child: Child,
     timeout: Duration,

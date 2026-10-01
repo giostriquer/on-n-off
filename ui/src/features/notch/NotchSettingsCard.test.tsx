@@ -210,7 +210,6 @@ it("shows only the user's own pull requests by default and lets other lists join
       expect.objectContaining({ pullRequests: { enabled: true, lists: ["mine", "assigned"] } }),
     ),
   );
-  // Joining after Assigned, Review requested still takes its place in screen order.
   fireEvent.click(screen.getByRole("button", { name: "Review requested" }));
   await waitFor(() =>
     expect(calls.save).toHaveBeenLastCalledWith(

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { accountAction, forgetLimitsSnapshot, readAccounts, readLimits } from "$lib/api";
 
-// The mock answers the page it loads on, so the URL is set before it is imported.
 describe("the dev mock", () => {
   it("removes an account through the commands Remove account sends", async () => {
     window.history.replaceState(null, "", "/?mock=archivedAccounts&latency=0");

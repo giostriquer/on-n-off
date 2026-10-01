@@ -1,14 +1,3 @@
-//! When to offer a banked Codex reset: an account the user opted in (`settings::ResetAlert`) that
-//! has run low, long enough before its limit renews by itself that a reset is worth spending. The
-//! offer is a notification, and the reset the user's to spend on the account's card, unless the
-//! alert uses it automatically (`auto_spend`), after a wait the user can cancel it in.
-//!
-//! Low is judged as the spend itself judges it: what is left of the current limit
-//! (`Reading::limit_left_percent`), at the account's share (`ResetAlert::spend_limit`). The offer
-//! needs two polls in a row to find the account low in the same weekly cycle, each a new read, so
-//! one stray reading never offers a reset; and it is made once per weekly cycle, which a spent
-//! reset starts anew.
-
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
@@ -17,15 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto};
 use crate::settings::ResetAlert;
 
-/// What the monitor remembers of one account's alert between polls, by the card's account id.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct AlertState {
-    /// The weekly cycle, by its reset instant, a poll last found the account low in, and when that
-    /// reading was made: the next poll must find it low again, in a newer reading.
     #[serde(default)]
     low: Option<LowReading>,
-    /// The weekly cycle a reset was last offered for.
     #[serde(default)]
     offered_cycle: Option<String>,
 }
@@ -37,24 +22,17 @@ struct LowReading {
     observed_at: String,
 }
 
-/// A banked reset worth offering.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Offer {
     pub(super) account_id: String,
     pub(super) account_label: Option<String>,
-    /// The weekly cycle it is made for, by the weekly window's reset instant.
     pub(super) cycle: String,
-    /// What is left of the current limit, 0 to 100.
     pub(super) left_percent: f64,
-    /// When the weekly window renews by itself.
     pub(super) renews_at: DateTime<Utc>,
     pub(super) available: u32,
-    /// Its alert uses the reset by itself (`auto_spend`) rather than only saying so.
     pub(super) automatic: bool,
 }
 
-/// Every offer `snapshots` make at `now` for the accounts in `alerts`, with `state` brought up to
-/// date. An account no longer opted in is forgotten.
 pub(super) fn observe(
     state: &mut HashMap<String, AlertState>,
     snapshots: &[ProviderLimitsDto],
@@ -89,8 +67,6 @@ pub(super) fn observe(
     offers
 }
 
-/// The offer `snapshot` makes for `alert` at `now` on its own, without the second poll in a row an
-/// offer waits for: what an automatic spend checks again when its time comes.
 pub(super) fn offer_now(
     snapshot: &ProviderLimitsDto,
     alert: &ResetAlert,
@@ -100,13 +76,10 @@ pub(super) fn offer_now(
     low_reading(snapshot, alert, now).map(|(_, offer)| offer)
 }
 
-/// Whether `snapshot` is the signed-in Codex account's live read ([`signed_in_codex`]).
 pub(super) fn is_signed_in_codex(snapshot: &ProviderLimitsDto) -> bool {
     signed_in_codex(snapshot).is_some()
 }
 
-/// The account of `snapshot` when it is the signed-in Codex account's live read: a reset lands on
-/// whoever is signed in, and a card that failed or is remembered says nothing new about now.
 fn signed_in_codex(snapshot: &ProviderLimitsDto) -> Option<&LimitsAccountDto> {
     let account = snapshot.account.as_ref()?;
     (snapshot.provider == AgentId::Codex
@@ -115,9 +88,6 @@ fn signed_in_codex(snapshot: &ProviderLimitsDto) -> Option<&LimitsAccountDto> {
         .then_some(account)
 }
 
-/// The low reading `snapshot` makes for `alert` at `now`, and the offer it would be, when all hold:
-/// no more than the alert's share of the current limit is left, the weekly window renews by itself
-/// no sooner than the alert's wait, and a banked reset is available.
 fn low_reading(
     snapshot: &ProviderLimitsDto,
     alert: &ResetAlert,
@@ -172,8 +142,6 @@ fn instant(value: &str) -> Option<DateTime<Utc>> {
         .map(|at| at.with_timezone(&Utc))
 }
 
-/// Whether `later` was observed after `earlier`; an observation time that cannot be read is never
-/// newer.
 fn is_newer(later: &str, earlier: &str) -> bool {
     instant(later)
         .zip(instant(earlier))

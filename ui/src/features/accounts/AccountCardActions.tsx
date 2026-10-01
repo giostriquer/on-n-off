@@ -4,38 +4,23 @@ import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
 import { accountButton as button, useAccountManagement } from "./AccountManager";
 
-/**
- * What more account actions beside the primary one can act on. `current` is the card's own notion of
- * the signed-in account. `blocked` holds while the account controls cannot act: an operation is
- * running, accounts are loading or failed to load, or recovery is required. `unconfirmedCurrent`
- * marks a current card whose native login is not confirmed as this account. Each action decides
- * which of them stop it.
- */
 export type AccountFooterState = { current: boolean; blocked: boolean; unconfirmedCurrent: boolean };
 
-/** What Remove account asks before it removes `label`, wherever it is offered. */
 export function removeAccountQuestion(label: string): string {
   return `Remove ${label} from on-n-off? You will need to sign in to add it again.`;
 }
 
-/** What the menu's panel shows, one at a time: the menu itself, or the panel one of its items opened. */
 type Panel = "menu" | "category" | "extra" | Confirmation;
 type Confirmation = "remove" | "removeLogin" | "signOut";
 
 export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, menuButtonRef, extraAction, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
-  /** Drops the account's history for Remove account, after its saved login, if any, is removed. */
   onForget: () => Promise<void>;
-  /** Archive account, offered on every card but the signed-in one; it asks nothing and deletes nothing. */
   onArchive: () => Promise<void>;
-  /** The footer offers Archive account in place of Use account (`LimitCard.archiveInsteadOfUse`, which is never the current card's). */
   archiveInsteadOfUse?: boolean;
-  /** Receives the More actions button, where focus can land when a neighbouring card goes. */
   menuButtonRef?: RefCallback<HTMLButtonElement>;
-  /** One more menu item, whose panel takes the menu's place until it closes it. */
   extraAction?: { label: string; render: (close: () => void) => ReactNode };
   header: (menu: ReactNode) => ReactNode;
-  /** More account actions beside the primary one; see `AccountFooterState`. */
   footer?: (state: AccountFooterState) => ReactNode;
   children?: ReactNode;
 }) {
@@ -71,7 +56,6 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   if (!manager) return <>{header(null)}{children}</>;
   const { provider, busy, blocked, query, action, removeAccount, use, add, cancel, loginTarget } = manager;
   const nativeMatches = !query.isFetching && query.data?.nativeObservationId === accountId;
-  // A current card whose native login is not confirmed as this account must not act on it.
   const unconfirmedCurrent = current && !nativeMatches;
   const signingIn = loginTarget === accountId && (busy === "login" || busy === "cancelLogin");
   const disabled = blocked || removing;
@@ -91,16 +75,11 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     } catch (error) { setError(parseInvokeError(error).message); }
     finally { setRemoving(false); }
   }
-  /**
-   * Archive account from the menu or the footer, once at a time. While it runs both are
-   * aria-disabled rather than disabled, which would drop a keyboard user's focus to the page.
-   */
   function archive() {
     if (archiving) return;
     setArchiving(true);
     void onArchive().finally(() => setArchiving(false));
   }
-  /** The footer's one primary action, the first that applies. */
   function primaryAction(): ReactNode {
     if (signingIn) return <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button>;
     if (archiveInsteadOfUse) return <button className={button} disabled={disabled} aria-disabled={archiving || undefined} aria-busy={archiving || undefined} onClick={archive}>Archive account</button>;
@@ -152,12 +131,9 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   </>;
 }
 
-/** Asks before a switch that provider clients still running would not follow. */
 function SwitchAlongsideConfirmation({ product, clients, disabled, onSwitch, onCancel }: {
   product: string; clients: string[]; disabled: boolean; onSwitch: () => void; onCancel: () => void;
 }) {
-  // React applies autoFocus in the commit that mounts the question, so its first frame already has
-  // focus on the safe answer.
   return <div role="group" aria-label={`Confirm switching while ${product} is running`} className="flex w-full flex-col gap-2 text-[12px]"
     onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onCancel(); } }}>
     <p className="m-0">{product} is still running in {clients.join(", ")}. Those sessions keep using the current account until you restart them. Don't sign out or sign in again from them: that can revoke saved logins.</p>

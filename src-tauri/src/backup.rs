@@ -21,13 +21,10 @@ impl BackupStore {
         Self { root }
     }
 
-    /// Copies one configuration file under `<root>/<agent>/`, keeping the last `KEEP` copies.
     pub fn backup(&self, agent: AgentId, file: &Path) -> Result<Option<PathBuf>, AdapterError> {
         self.snapshot(self.root.join(agent.key()), file)
     }
 
-    /// Copies a whole item (a skill folder or an agent file) under `<root>/<agent>/items/`,
-    /// keeping the last `KEEP` copies per name.
     pub fn backup_item(
         &self,
         agent: AgentId,

@@ -106,7 +106,6 @@ export function removeItem(id: string): Promise<void> {
   return invoke("remove_item", { id });
 }
 
-/** Opens a github.com page in the default browser (the backend refuses anything else). */
 export function openUrl(url: string): Promise<void> {
   return invoke("open_url", { url });
 }
@@ -131,27 +130,22 @@ export function usageHistoryStatus(): Promise<UsageHistoryStatus> {
   return invoke("usage_history_status");
 }
 
-/** Forgets the usage kept after transcripts were deleted; transcripts still on disk count again. */
 export function clearUsageHistory(): Promise<UsageHistoryStatus> {
   return invoke("clear_usage_history");
 }
 
-/** Live limits for the signed-in account first, then remembered snapshots of other accounts. */
 export function readLimits(agentId: AgentId, force = false): Promise<ProviderLimits[]> {
   return invoke("read_limits", { agentId, force });
 }
 
-/** Spends one banked Codex reset on the signed-in account `accountId` names; `attemptId` is one user attempt. */
 export function consumeCodexResetCredit(accountId: string, attemptId: string): Promise<ResetCreditOutcome> {
   return invoke("consume_codex_reset_credit", { accountId, idempotencyKey: attemptId });
 }
 
-/** The banked resets automatic alerts are waiting to use, one per account. */
 export function pendingResetSpends(): Promise<PendingResetSpend[]> {
   return invoke("pending_reset_spends");
 }
 
-/** Keeps the banked reset an automatic alert is waiting to use on `accountId`; `false` when none was waiting. */
 export function cancelResetSpend(accountId: string): Promise<boolean> {
   return invoke("cancel_reset_spend", { accountId });
 }
@@ -160,12 +154,10 @@ export function forgetLimitsSnapshot(agentId: AgentId, accountId: string, expect
   return invoke("forget_limits_snapshot", { agentId, accountId, ...(expectedEmail !== undefined ? { expectedEmail } : {}) });
 }
 
-/** Archives or unarchives the accounts a Limits card names; unarchiving reads the provider again. */
 export function setLimitsArchived(agentId: AgentId, accountIds: string[], archived: boolean): Promise<void> {
   return invoke("set_limits_archived", { agentId, accountIds, archived });
 }
 
-/** The GitHub screen's pull requests; `force` skips the backend's in-memory result. */
 export function readGithubPrs(force = false): Promise<GithubPrs> {
   return invoke("read_github_prs", { force });
 }
@@ -186,10 +178,6 @@ export function onNotchChanged(handler: (change: NotchChanged) => void): Promise
   return listen<NotchChanged>("side-notch-changed", (event) => handler(event.payload));
 }
 
-/**
- * Fires when a process-wide cached read has been replaced by whichever surface got there first,
- * so the queries built on it can pick the newer answer up instead of waiting out their interval.
- */
 export function onSharedReadChanged(
   handler: (change: SharedReadChanged) => void,
 ): Promise<UnlistenFn> {
@@ -204,7 +192,6 @@ export function quitApp(): Promise<void> {
   return invoke("quit_app");
 }
 
-/** Whether this platform has a notification-area icon for `closeToTray` to hide into. */
 export function traySupported(): Promise<boolean> {
   return invoke("tray_supported");
 }
@@ -237,7 +224,6 @@ export function diagnoseProviders(): Promise<ProviderDiagnose[]> {
   return invoke("diagnose_providers");
 }
 
-/** The Codex account's paid-through date, from its login's ID token: no network, no browser, nothing persisted. */
 export function readCodexSubscription(accountId: string): Promise<import("./subscriptionTypes").SubscriptionDate | null> {
   return invoke("read_codex_subscription", { accountId });
 }
@@ -248,7 +234,6 @@ export function readAccounts(agent: import("./accountTypes").AccountProvider): P
 export function accountAction(agent: import("./accountTypes").AccountProvider, action: import("./accountTypes").AccountAction, profileId?: string, category?: string): Promise<void> {
   return invoke("account_action", { agent, action, profileId: profileId ?? null, category: category ?? null });
 }
-/** Clients that would stop an ordinary switch to another saved account; empty when none would. */
 export function readAccountActivationBlockers(agent: import("./accountTypes").AccountProvider): Promise<string[]> {
   return invoke("read_account_activation_blockers", { agent });
 }

@@ -172,8 +172,6 @@ impl ClaudeAdapter {
         Ok(plugins)
     }
 
-    /// The user's own servers, then the ones enabled `plugins` bring, then the ones Claude keeps for
-    /// particular projects (`claude_mcp.rs`).
     fn mcp_servers(
         &self,
         plugins: &[crate::plugin_files::PluginSource],
@@ -234,7 +232,6 @@ impl ClaudeAdapter {
                 .get(&id)
                 .copied()
                 .unwrap_or_else(|| plugin_default_enabled(&install_path));
-            // A disabled plugin's hooks and MCP servers do not run, so they are not rows.
             if enabled {
                 enabled_plugins.push(crate::plugin_files::PluginSource {
                     id: id.clone(),

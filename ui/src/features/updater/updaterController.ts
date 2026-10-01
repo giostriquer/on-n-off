@@ -172,7 +172,6 @@ export class UpdateController {
     try {
       await update.close();
     } catch {
-      // The process can already be exiting or the native resource can be gone.
     }
   }
 

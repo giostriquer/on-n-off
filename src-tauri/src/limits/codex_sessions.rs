@@ -1,5 +1,3 @@
-//! Read-only Codex rate-limit observations from local session event streams.
-
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -10,8 +8,6 @@ use serde::Deserialize;
 use crate::dto::{LimitWindowKind, ProviderLimitsDto};
 
 const LOOKBACK_DAYS: i64 = 8;
-// Codex emits rate-limit samples repeatedly. The newest 256 KiB keeps each session's latest
-// samples, while 512 files cap one reconciliation at 128 MiB even when transcripts span gigabytes.
 const MAX_SESSION_FILES: usize = 512;
 const SESSION_FILE_TAIL_BYTES: u64 = 256 * 1024;
 const RESET_TOLERANCE_SECONDS: i64 = 2;

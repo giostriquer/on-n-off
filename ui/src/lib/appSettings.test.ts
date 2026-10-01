@@ -79,7 +79,6 @@ describe("appSettings", () => {
   it("lets a banked reset be spent at Codex's 10% left, or at an account's lower share", () => {
     const alerts = {
       low: { label: null, maxLeftPercent: 4, minHoursToRenewal: 24, automatic: false },
-      // Settings from a hand-edited file are clamped by the backend; the UI never spends above 10%.
       high: { label: null, maxLeftPercent: 40, minHoursToRenewal: 24, automatic: false },
     };
 

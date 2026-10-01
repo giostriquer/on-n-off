@@ -6,7 +6,6 @@ import { codexSubscriptionTerm } from "./codexSubscriptionTerm";
 import type { CardSubscription } from "./limitCards";
 import "./SubscriptionBadge.css";
 
-/** The Codex badge: `codexSubscriptionTerm` decides what it says; this only draws it. */
 export function SubscriptionBadge({ term, paidThrough, now }: { term?: LimitsSubscription | null; paidThrough: SubscriptionDate | null; now: number }) {
   const shown = codexSubscriptionTerm(term, paidThrough, now);
   if (!shown) return null;
@@ -28,10 +27,6 @@ export function CodexSubscriptionBadge({accountId, current, term, now}: {account
   return <SubscriptionBadge term={term} paidThrough={query.data ?? null} now={now} />;
 }
 
-/**
- * The subscription badge a card's header shows: Codex's paid-through date, from what the card model
- * gathered for it (`CardSubscription`). Claude reports no subscription term, so its cards have none.
- */
 export function AccountSubscriptionBadge({ subscription, now }: { subscription: CardSubscription | null; now: number }) {
   if (!subscription) return null;
   return <CodexSubscriptionBadge accountId={subscription.accountId} current={subscription.current} term={subscription.term} now={now} />;

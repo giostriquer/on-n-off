@@ -168,8 +168,6 @@ fn codex_reads_recent_rollouts_and_infers_work_from_task_boundaries() {
     assert_eq!(idle.status, SessionStatus::Idle);
     assert_eq!(idle.place, "Terminal");
 
-    // A transcript last written 20 minutes ago is no longer working, and after an hour it
-    // is no longer listed at all.
     let later = now + Duration::minutes(20);
     let stale = read_codex(&root, later);
     assert!(stale.iter().all(|s| s.status == SessionStatus::Idle));

@@ -1,5 +1,3 @@
-//! What a poll's card keeps of what its account remembers: from the account's file when the poll
-//! answered, from the card it replaces when it failed.
 use super::*;
 
 #[test]
@@ -13,8 +11,6 @@ fn inactive_results_never_replace_the_active_account() {
     assert_eq!(entries, before);
 }
 
-/// `profile` as a saved Codex account, and its card with every figure known, as the card list holds
-/// it before a poll: remembered, not the signed-in account.
 fn remembered_codex_card(profile: &mut Profile) -> ProviderLimitsDto {
     profile.identity.provider = AgentId::Codex;
     serde_json::from_value(json!({
@@ -37,7 +33,6 @@ fn remembered_codex_card(profile: &mut Profile) -> ProviderLimitsDto {
     .unwrap()
 }
 
-/// A failed poll shows the card's whole remembered reading under the failure, its term included.
 #[test]
 fn a_failed_saved_read_keeps_the_cards_whole_reading() {
     let mut profile = profile();
@@ -54,8 +49,6 @@ fn a_failed_saved_read_keeps_the_cards_whole_reading() {
     assert_eq!(serde_json::to_value(&entries[0]).unwrap(), expected);
 }
 
-/// A poll that answered with its plan and one window, over a snapshot holding every figure: its
-/// card and the snapshot it leaves keep the same figures, the ones it could not tell.
 #[test]
 fn an_answered_poll_keeps_the_same_figures_on_its_card_and_on_disk() {
     use crate::limits::{remember, remembered};

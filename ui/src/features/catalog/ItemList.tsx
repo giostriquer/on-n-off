@@ -31,7 +31,6 @@ type ItemListBaseProps = {
   onToggleSkill: (skill: SkillDto, enabled: boolean) => void;
   onUninstall: (plugin: PluginDto) => void;
   onUpdate?: (plugin: PluginDto) => void;
-  /** Managed-item record for a skill on-n-off installed from a marketplace, if any. */
   statusFor?: (skill: SkillDto) => ItemStatus | undefined;
   onUpdateItem?: (status: ItemStatus) => void;
   onRemoveItem?: (status: ItemStatus) => void;

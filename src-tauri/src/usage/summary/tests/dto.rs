@@ -1,6 +1,3 @@
-//! The summary exactly as it crosses IPC to the Usage screen, read from transcripts and from the
-//! usage history together.
-
 use serde_json::{json, Value};
 
 use super::super::test_support::*;
@@ -9,8 +6,6 @@ use crate::paths::scratch_dir;
 use crate::usage::folding::{fold_history_in, FoldChecks};
 use crate::usage::pricing::{self, rates_cache_path};
 
-/// Power-of-two prices, so every cost below is exact in binary and written as a literal. Fetched
-/// long before the read, which therefore tries to fetch again and, offline, keeps this table.
 fn write_rates(home: &Path) {
     let path = rates_cache_path(home);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -42,7 +37,6 @@ fn claude_usage(input: u64, cache_read: u64, output: u64) -> Value {
     })
 }
 
-/// One Codex turn: its session, model and a single usage event at `at_iso`.
 fn write_rollout(path: &Path, session: &str, at_iso: &str, usage: Value, written: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let lines = [
@@ -59,12 +53,6 @@ fn write_rollout(path: &Path, session: &str, at_iso: &str, usage: Value, written
     set_mtime(path, written);
 }
 
-/// A home read for August after a fold on 2026-08-21, so the watermark sits at 2026-08-14:
-/// - Claude `session.jsonl`: `msg_a` on 2026-08-07 (a partial line, then the billed one), folded,
-///   and `msg_b` on 2026-08-20, read from the transcript.
-/// - Claude `gone.jsonl`: `msg_g` on 2026-08-10, folded, and the transcript deleted after.
-/// - Claude `notes.jsonl`: written on 2026-08-19 and holding no usage at all.
-/// - Codex: one live rollout and one archived rollout, both on 2026-08-18.
 fn write_fixture_home(home: &Path) {
     write_rates(home);
     write_claude_lines(
@@ -147,8 +135,6 @@ fn write_fixture_home(home: &Path) {
     std::fs::remove_file(home.join(".claude/projects/proj/gone.jsonl")).unwrap();
 }
 
-/// The summary as JSON, with what differs between runs replaced: when it was read, how long the
-/// scan took, and the scratch home every source path starts with.
 fn pinned(home: &Path, summary: &UsageSummaryDto) -> Value {
     let mut value = serde_json::to_value(summary).unwrap();
     value["readAt"] = json!("<read at>");
@@ -166,12 +152,6 @@ fn pinned(home: &Path, summary: &UsageSummaryDto) -> Value {
     value
 }
 
-/// Costs by hand, at the prices in `write_rates`:
-/// - 2026-08-07: 1024 × 2⁻¹⁰ + 2048 × 2⁻¹³ + 256 × 2⁻⁸ = 2.25; saved 2048 × (2⁻¹⁰ − 2⁻¹³) = 1.75.
-/// - 2026-08-10: 8 × 2⁻¹⁰ + 32 × 2⁻⁸ = 0.1328125.
-/// - 2026-08-18: (4096 − 1024) × 2⁻¹² + 1024 × 2⁻¹⁴ + 512 × 2⁻¹⁰ = 1.3125, plus 512 × 2⁻¹² +
-///   32 × 2⁻¹⁰ = 0.15625; saved 1024 × (2⁻¹² − 2⁻¹⁴) = 0.1875.
-/// - 2026-08-20: 16 × 2⁻¹⁰ + 64 × 2⁻⁸ = 0.265625.
 fn expected(cache_hit: bool) -> Value {
     let totals = |uncached: u64, cached: u64, output: u64, reasoning: u64| {
         json!({

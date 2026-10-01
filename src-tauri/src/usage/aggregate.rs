@@ -1,5 +1,3 @@
-//! Fold usage records into `(day, hour?, provider, model)` buckets.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -62,7 +60,6 @@ struct MutableBucket {
     sessions: HashSet<String>,
 }
 
-/// What one record, or one folded row of records, adds to its bucket.
 struct Usage<'a> {
     at_ms: i64,
     provider: UsageProvider,
@@ -72,7 +69,6 @@ struct Usage<'a> {
     reported_cost_usd: Option<f64>,
 }
 
-/// Folds records that are already de-duplicated (`transcripts::richest_copies`) into buckets.
 pub struct UsageAggregator {
     buckets: HashMap<String, MutableBucket>,
     zone: Tz,
@@ -105,7 +101,6 @@ impl UsageAggregator {
         })
     }
 
-    /// The `(day, hour, provider, model)` bucket of usage at `at_ms`, or `None` outside the window.
     fn bucket_key(&self, at_ms: i64, provider: UsageProvider, model: &str) -> Option<String> {
         if let Some((since, until)) = self.hourly {
             if at_ms < since || at_ms >= until {
@@ -135,7 +130,6 @@ impl UsageAggregator {
         ))
     }
 
-    /// Counts one record into its bucket; `false` when it falls outside the window.
     pub fn add(&mut self, record: &UsageRecord) -> bool {
         self.add_usage(
             Usage {
@@ -150,10 +144,6 @@ impl UsageAggregator {
         )
     }
 
-    /// Counts a folded row as the records it holds: its slot never straddles a local midnight or
-    /// hour, and pricing is linear in tokens per model, so the bucket, the tokens and the cost
-    /// all come out as they would from the records. An hourly window that does not start on a
-    /// quarter hour counts the slot by its start.
     pub fn add_folded(&mut self, row: &FoldedRow) -> bool {
         self.add_usage(
             Usage {

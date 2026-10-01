@@ -1,17 +1,3 @@
-//! The app's presence outside its main window.
-//!
-//! Both desktop platforms keep a status item, but they do different jobs.
-//!
-//! On macOS it is a Limits popover. Clicking the template icon opens a small always-on-top
-//! window, and both app windows hide rather than close, because the status item — not the
-//! Dock — is where the app lives.
-//!
-//! On Windows it is the app itself. Left click raises the main window, right click offers the
-//! screens and a quit, and the icon is always present. Closing the main window quits, as it
-//! always has, unless the user turned `closeToTray` on; then it hides, which is also what
-//! removes the taskbar button. The live quota rail is `side_notch`'s job there, so this icon
-//! stays static.
-
 #[cfg(target_os = "windows")]
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -148,14 +134,9 @@ fn tray_click_action(visible: bool, since_focus_loss: Option<Duration>) -> TrayC
     }
 }
 
-/// Whether this platform hides every app window on close. macOS does, because the status item
-/// is the app's home there and the Dock icon brings the windows back; Windows has no
-/// equivalent, so it hides only what the user asked it to.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 const HIDES_ALL_ON_CLOSE: bool = cfg!(target_os = "macos");
 
-/// The close policy. The platform is a parameter rather than a constant read, so both CI legs
-/// exercise both branches instead of each checking only its own.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn hides_on_close(label: &str, hides_all: bool, close_to_tray: bool) -> bool {
     match label {
@@ -170,9 +151,6 @@ fn hides_on_focus_loss(label: &str, focused: bool) -> bool {
     label == POPOVER_LABEL && !focused
 }
 
-/// The saved `closeToTray` flag. [`setup`] seeds it before the event loop starts, so it is
-/// already resolved by the time any close can arrive, and `save_app_settings` refreshes it.
-/// The close handler therefore only ever loads an atomic, never the settings file.
 #[cfg(target_os = "windows")]
 static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(false);
 
@@ -181,11 +159,9 @@ pub(crate) fn set_close_to_tray(enabled: bool) {
     CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
 }
 
-/// macOS hides on close whatever the setting says, so it keeps no mirror to update.
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn set_close_to_tray(_enabled: bool) {}
 
-/// What [`hides_on_close`] should see for `close_to_tray` here. macOS never consults it.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn close_to_tray() -> bool {
     #[cfg(target_os = "windows")]
@@ -196,9 +172,6 @@ fn close_to_tray() -> bool {
     false
 }
 
-/// What a tray menu entry does. The ids live here rather than inline in [`setup`], so the
-/// builder and the lookup cannot drift apart, and the mapping stays testable without a
-/// running app.
 #[cfg(any(target_os = "windows", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MenuAction {
@@ -210,7 +183,6 @@ enum MenuAction {
 
 #[cfg(any(target_os = "windows", test))]
 impl MenuAction {
-    /// Every entry, in the order the menu shows them, with the label it carries.
     const ENTRIES: [(Self, &'static str); 4] = [
         (Self::Open, "Open on-n-off"),
         (Self::Limits, "Limits"),
@@ -286,10 +258,8 @@ pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// The Windows notification-area icon: the app's home while the main window is hidden.
 #[cfg(target_os = "windows")]
 pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
-    // Seeded here, before the event loop starts, so a close never has to read the disk.
     set_close_to_tray(crate::settings::load_settings().close_to_tray);
 
     let mut items = MenuBuilder::new(app);
@@ -302,14 +272,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
     let menu = items.build()?;
 
     let tray = TrayIconBuilder::with_id(TRAY_ICON_ID)
-        // The colour app icon, not macOS's monochrome template: Windows draws the bitmap
-        // as-is, so a template image would arrive as a black square. Embedded rather than
-        // read from `default_window_icon()`, which is an `Option` — an iconless tray entry
-        // must be unreachable, because it is the only way back to a hidden window.
         .icon(tauri::include_image!("icons/32x32.png"))
         .tooltip("on-n-off")
         .menu(&menu)
-        // Left click belongs to the window; the menu is the right-click affordance.
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             let Some(action) = menu_action(event.id.as_ref()) else {
@@ -412,7 +377,6 @@ fn show_popover(app: &AppHandle, tray_rect: Rect) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn physical_tray_rect(rect: Rect) -> PixelRect {
-    // Tauri documents tray geometry as physical pixels.
     let position = rect.position.to_physical::<i32>(1.0);
     let size = rect.size.to_physical::<u32>(1.0);
     PixelRect::new(position.x, position.y, size.width, size.height)
@@ -465,7 +429,6 @@ pub(crate) fn hide_limits_popover(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Brings the main window forward and tells the shell which screen to show.
 fn open_main_window_on(app: &AppHandle, event: &str) -> Result<(), String> {
     show_main_window(app)?;
     let main = app
@@ -479,7 +442,6 @@ pub(crate) fn open_limits_window(app: &AppHandle) -> Result<(), String> {
     open_main_window_on(app, "open-limits-window")
 }
 
-/// Brings the main window forward on the Pull requests screen (the side notch's popover).
 pub(crate) fn open_github_window(app: &AppHandle) -> Result<(), String> {
     open_main_window_on(app, "open-github-window")
 }

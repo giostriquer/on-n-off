@@ -5,14 +5,11 @@ import type { AgentTabDto, HookDto } from "$lib/types";
 
 type HookListProps = {
   tab: AgentTabDto;
-  /** Already sorted and filtered by the session's one filter pass; never derived again here. */
   hooks: HookDto[];
   filterQuery?: string;
-  /** Set for a provider whose hooks on-n-off does not read, which is not the same as none. */
   unread?: string;
 };
 
-/** "mcp_tool" is the provider's word; the badge is the one place it is made presentable. */
 function handlerLabel(handler: string): string {
   return handler.replace(/_/g, " ").toUpperCase();
 }
@@ -25,11 +22,6 @@ function Badge({ children }: { children: string }) {
   );
 }
 
-/**
- * Every hook handler a provider would run, one row each, with where it comes from. Nothing here
- * is togglable: on-n-off reads hooks and never writes or runs them, so a Codex handler switched
- * off in `[hooks.state]` is shown as inactive rather than as something to switch back on.
- */
 export function HookList({ tab, hooks, filterQuery = "", unread }: HookListProps) {
   const pool = tab.hooks ?? [];
   const live = pool.filter((hook) => hook.enabled).length;

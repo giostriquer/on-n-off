@@ -14,8 +14,6 @@ pub struct ConfigIo {
 }
 
 impl ConfigIo {
-    /// Account activation has already persisted an encrypted recovery journal before this call.
-    /// Back up the narrow oauthAccount identity there, never the credential in BackupStore.
     pub(crate) fn patch_account_identity(
         path: &Path,
         account: Option<&JsonValue>,

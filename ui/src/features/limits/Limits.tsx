@@ -25,9 +25,7 @@ import { Meter, MeterRow } from "./Meter";
 
 export function Limits({ pollMinutes = 5, resetAlerts, onResetAlertsChange }: {
   pollMinutes?: LimitsPollMinutes;
-  /** Codex accounts whose banked reset is offered once they run low (`AppSettings.resetAlerts`). */
   resetAlerts: Record<string, ResetAlert>;
-  /** Saves the alerts, rejecting when they were not saved. */
   onResetAlertsChange: (alerts: Record<string, ResetAlert>) => Promise<void>;
 }) {
   const alerts = useMemo(() => ({
@@ -42,7 +40,6 @@ export function Limits({ pollMinutes = 5, resetAlerts, onResetAlertsChange }: {
 }
 
 function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
-  // Only Claude and Codex carry a subscription the backend can read; the rest report `unsupported`.
   const { providers, loading, now } = useLimitsProviders(pollMinutes);
   const addAccount = useRef<HTMLButtonElement | null>(null);
 
@@ -81,10 +78,6 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
   );
 }
 
-/**
- * The current account card for a provider plus one card per remembered account, then the accounts
- * the user archived, collapsed.
- */
 function ProviderColumn({
   provider,
   query,
@@ -94,7 +87,6 @@ function ProviderColumn({
   provider: AgentId;
   query: UseQueryResult<ProviderLimits[]>;
   now: number;
-  /** The screen's Add account button, where focus goes once no card is left to take it. */
   addAccount: RefObject<HTMLButtonElement | null>;
 }) {
   const queryClient = useQueryClient();
@@ -106,8 +98,6 @@ function ProviderColumn({
   const menus = useRef(new Map<string, HTMLButtonElement>());
   const visibleKeys = column?.visible.map(card => card.key) ?? [];
   const menu = (key: string | undefined) => (key === undefined ? undefined : menus.current.get(key));
-  // A card leaving hands focus to the archived list if it was archived, else to the next card's More
-  // actions, else the previous one's.
   const handOffCard = useFocusHandoff<"archive" | "remove">(visibleKeys, (index, action) =>
     [action === "archive" ? archivedDisclosure.current : null, menu(visibleKeys[index]), menu(visibleKeys[index - 1]), addAccount.current]);
   const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
@@ -115,7 +105,6 @@ function ProviderColumn({
 
   async function forget({ forget: steps }: CardAccount) {
     setForgetError(null);
-    // Keep the verified association from the confirmed card even after its saved login is removed.
     const ids = steps.map(({ accountId }) => accountId);
     try {
       for (const { accountId, expectedEmail } of steps) await api.forgetLimitsSnapshot(provider, accountId, expectedEmail);
@@ -128,17 +117,15 @@ function ProviderColumn({
     }
   }
 
-  /** Archive from a card's menu or footer; once the card goes, focus follows it to the archived list. */
   async function archive(key: string, account: CardAccount) {
     try {
       await setArchived(account, true);
     } catch {
-      return; // setArchived says why
+      return;
     }
     handOffCard(key, "archive");
   }
 
-  /** Remove account from a card's menu, whose last step drops the card; focus then goes on to its neighbour. */
   async function forgetCard(key: string, account: CardAccount) {
     await forget(account);
     handOffCard(key, "remove");
@@ -149,10 +136,6 @@ function ProviderColumn({
     else await forget(account);
   }
 
-  /**
-   * Archive or unarchive every id the card stands for, its merged legacy history included; the card
-   * moves at once. Unarchiving also reads the provider again in the backend, which announces it.
-   */
   async function setArchived({ forget: steps }: CardAccount, archived: boolean) {
     setForgetError(null);
     const ids = steps.map(({ accountId }) => accountId);
@@ -208,7 +191,6 @@ function ProviderColumn({
   );
 }
 
-/** Account identity stays prominent; workspace ids are never displayed. */
 function CardHeader({ card, provider, title, subscription, menu }: { card?: LimitCard; provider: AgentId; title: string; subscription?: ReactNode; menu?: ReactNode }) {
   const updatedAt = card?.freshness.updatedAt;
   const status = card?.status;
@@ -310,7 +292,6 @@ function ActiveAccountDot() {
     className="size-[7px] shrink-0 rounded-full bg-[var(--live)] shadow-[0_0_8px_var(--live)]" />;
 }
 
-/** The card's headline window, in the Overview's big-number idiom. */
 function HeadlineWindow({
   active,
   window,
@@ -343,7 +324,6 @@ function HeadlineWindow({
   );
 }
 
-/** Remaining windows as compact meter rows, with the reset, or why there is none, as the note. */
 function WindowRow({ row, provider }: { row: CardWindow; provider: AgentId }) {
   return <MeterRow label={row.label} note={row.note} percent={row.percent} text={row.text} color={row.color} provider={provider} />;
 }

@@ -1,21 +1,4 @@
 #!/usr/bin/env node
-// Screenshot harness: drives the UI in headless Chromium against the Vite dev server with the
-// Tauri IPC mocked (`?mock=<scenario>`, see ui/src/dev/mockIpc.ts) and writes PNGs.
-//
-//   bun run ui:shots                      # the built-in scenes
-//   bun run ui:shots scenes.json          # your own scenes (same shape as SCENES below)
-//   UI_SHOTS_DIR=out bun run ui:shots     # output folder (default .tmp/ui-shots)
-//
-// A scene: { name, url, theme?: "dark"|"light", clock?: ISO instant, viewport?: {width,height},
-// steps?: Step[] }. Steps run in order: {click: selector} · {fill: selector, text} · {press: key}
-// · {hover: selector} · {scroll: selector} · {wait: selector | {ms}} · {shot: name}. `scroll`
-// brings an element to the top of the frame, which is how a surface below the fold is captured.
-// Selectors are Playwright selectors ("role=button[name=…]", "text=…", CSS) and must match
-// exactly one element. Every scene ends with a screenshot named after the scene unless steps
-// took one. The page clock is frozen (default: the fixtures' instant) so relative ages are
-// reproducible; a scene fails on any page or console error.
-// Starts its own Vite on UI_PORT (default 1425) so a running `tauri dev` on :1420 is left alone;
-// set UI_BASE to point at an existing server instead.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, openSync } from "node:fs";
@@ -28,15 +11,11 @@ const PORT = Number(process.env.UI_PORT ?? 1425);
 const BASE = process.env.UI_BASE ?? `http://localhost:${PORT}`;
 const OUT = process.env.UI_SHOTS_DIR ?? ".tmp/ui-shots";
 const VIEWPORT = { width: 1120, height: 760 };
-// Matches NOW in ui/src/dev/githubFixtures.ts and limitsFixtures.ts, so "updated just now" / "5m ago" hold in captures.
 const FIXTURE_CLOCK = "2026-08-24T20:00:00Z";
-// localStorage keys the app reads at boot (ui/src/lib/theme.ts, features/session/SessionProvider.tsx).
-// The saved screen is forced to "overview" because AppShell navigates to it on first route.
 const THEME_KEY = "on-n-off.theme";
 const SCREEN_KEY = "on-n-off.screen";
 const STEP_KEYS = ["click", "fill", "press", "hover", "scroll", "wait", "shot"];
 
-// The archived-accounts scenes' selectors: each column's archived list is its own region.
 const ARCHIVED = {
   claude: "role=region[name='Claude archived accounts']",
   codex: "role=region[name='Codex archived accounts']",
@@ -54,16 +33,12 @@ const SCENES = [
   { name: "github-stale", url: "/github?mock=stale" },
   { name: "github-gh-missing", url: "/github?mock=ghMissing" },
   { name: "github-many", url: "/github?mock=many" },
-  // Scrolled into the review list so an owner band is stuck under its section header.
   { name: "github-scrolled", url: "/github?mock=ok", steps: [{ click: "role=searchbox[name='Search pull requests']" }, { press: "PageDown" }, { press: "PageDown" }] },
-  // The live list reflows into columns, so it is judged at two widths, in both themes, and empty.
   { name: "overview-catalog", url: "/overview?mock=catalog", steps: [{ scroll: "text=Live on this scope" }] },
   { name: "overview-catalog-wide", url: "/overview?mock=catalog", viewport: { width: 1440, height: 900 }, steps: [{ scroll: "text=Live on this scope" }] },
   { name: "overview-catalog-light", url: "/overview?mock=catalog", theme: "light", steps: [{ scroll: "text=Live on this scope" }] },
   { name: "overview-empty", url: "/overview?mock=ok", steps: [{ scroll: "text=Live on this scope" }] },
   { name: "settings-github", url: "/settings?mock=ok", steps: [{ wait: "role=region[name='Pull requests']" }] },
-  // Claude's rows carry the plugin descriptions and the long commands; Codex's carry the one
-  // switched off in [hooks.state], which is the row that has to read as inactive.
   { name: "hooks", url: "/hooks?mock=hooks", steps: [
     { wait: "role=heading[name='Hooks']" },
     { shot: "hooks" },
@@ -71,15 +46,11 @@ const SCENES = [
     { wait: "text=acme-webapp-tools" },
     { shot: "hooks-codex" },
   ] },
-  // Walks the usage ramp, which the ordinary fixtures never reach.
   { name: "limits-band", url: "/limits?mock=limitsBand", steps: [{ wait: "role=region[name='Codex limits · 50% of the week']" }] },
   { name: "limits-band-light", url: "/limits?mock=limitsBand", theme: "light", steps: [{ wait: "role=region[name='Codex limits · 50% of the week']" }] },
   { name: "limits-ok", url: "/limits?mock=ok", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
   { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
-  // The menu-bar popover renders the same cards at the window size tray.rs gives it.
   { name: "limits-popover", url: "/?surface=limits-popover&mock=ok", viewport: { width: 350, height: 480 }, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
-  // Archived accounts: each column's list collapsed, then opened; the card menu's Archive account,
-  // and the card in its column's list once archived. The popover shows none of them.
   { name: "limits-archived", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: [{ wait: `${ARCHIVED.claude} >> role=button[name='Archived (2)']` }] },
   { name: "limits-archived-open", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
   { name: "limits-archived-open-light", url: "/limits?mock=archivedAccounts", theme: "light", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
@@ -103,7 +74,6 @@ function connects(port, host) {
   });
 }
 
-// Vite binds "localhost", which is ::1 on some machines and 127.0.0.1 on others.
 async function listening(port) {
   for (const host of ["127.0.0.1", "::1"]) {
     if (await connects(port, host)) return true;
@@ -113,7 +83,6 @@ async function listening(port) {
 
 function stopDevServer(child) {
   if (!child) return;
-  // On POSIX the child leads its own process group, so this stops Vite and esbuild too.
   if (process.platform === "win32") child.kill();
   else process.kill(-child.pid);
 }
@@ -168,11 +137,9 @@ async function runScene(browser, scene) {
   });
   await page.goto(`${BASE}${scene.url}`, { waitUntil: "networkidle" });
   if (problems.some((problem) => problem.includes("Outdated Optimize Dep"))) {
-    // Vite re-optimised its dependencies under us (a lockfile change); one reload settles it.
     problems.length = 0;
     await page.reload({ waitUntil: "networkidle" });
   }
-  // Screens mark themselves busy while their first read is in flight; wait for that, not a timer.
   await page.locator('[aria-busy="true"]').waitFor({ state: "detached", timeout: 10_000 }).catch(() => undefined);
   await page.waitForTimeout(100);
   let shots = 0;
@@ -183,7 +150,6 @@ async function runScene(browser, scene) {
     console.log(`  shot ${file}`);
   };
   for (const step of scene.steps ?? []) {
-    // Locators are strict: a selector matching two elements fails the scene instead of guessing.
     if (step.click) await page.locator(step.click).click();
     else if (step.fill) await page.locator(step.fill).fill(step.text ?? "");
     else if (step.press) await page.keyboard.press(step.press);
@@ -200,8 +166,6 @@ async function runScene(browser, scene) {
   return problems;
 }
 
-// `scrollIntoView` puts the element flush against the frame, which crops the border of the card it
-// sits in. Back off a little afterwards, in whichever ancestor actually scrolls.
 async function scrollTo(page, selector) {
   await page.locator(selector).evaluate((node) => {
     node.scrollIntoView({ block: "start" });
@@ -227,7 +191,6 @@ async function main() {
   try {
     for (const scene of scenes) {
       console.log(`scene ${scene.name}`);
-      // A failing scene is reported and the run goes on, so one bad selector does not hide the rest.
       const problems = await runScene(browser, scene).catch((error) => [`scene failed: ${error.message}`]);
       for (const problem of problems) {
         console.log(`  ! ${problem}`);

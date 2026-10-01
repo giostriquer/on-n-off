@@ -4,7 +4,6 @@ import type { GithubRepo } from "$lib/installSource";
 
 const MARKETPLACE_STALE_MS = 5 * 60_000;
 
-/** Downloads and reads a GitHub marketplace once per repo/ref; `null` repo disables the query. */
 export function useMarketplaceInspect(repo: GithubRepo | null) {
   return useQuery({
     queryKey: ["marketplace", repo?.owner ?? "", repo?.repo ?? "", repo?.ref ?? ""],

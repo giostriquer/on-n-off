@@ -1,17 +1,9 @@
-//! Provider marks as vector paths, ported from
-//! `src-tauri/macos/SideNotch/Sources/NotchApp/ProviderMark.swift` (converted offline from
-//! their SVG sources). Every mark fits into a rect the same way the SwiftUI shape does:
-//! uniform scale, centred, `xMidYMid meet`.
-
-// The path constants are transcribed from the Swift source; their full f64 precision is
-// intentional, so the precision lint is off for this module.
 #![allow(clippy::excessive_precision)]
 
 use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
 
 type Point = (f32, f32);
 
-/// One path segment after the previous point (or the subpath's start).
 enum Seg {
     Line(Point),
     Curve { c1: Point, c2: Point, to: Point },
@@ -44,7 +36,6 @@ fn append(pb: &mut PathBuilder, sub: &Sub) {
     pb.close();
 }
 
-/// `path` scaled uniformly into `rect` and centred, like an SVG with `xMidYMid meet`.
 fn fitted(shape: &Shape, box_: (f32, f32, f32, f32), rect: (f32, f32, f32, f32)) -> Option<Path> {
     let (bx, by, bw, bh) = box_;
     let (rx, ry, rw, rh) = rect;
@@ -58,8 +49,6 @@ fn fitted(shape: &Shape, box_: (f32, f32, f32, f32), rect: (f32, f32, f32, f32))
     }
     pb.finish().and_then(|path| path.transform(transform))
 }
-
-// MARK: Claude (Simple Icons, 24 x 24) — one continuous starburst.
 
 const CLAUDE: Shape = Shape {
     even_odd: true,
@@ -231,8 +220,6 @@ const CLAUDE: Shape = Shape {
         ],
     }],
 };
-
-// MARK: Codex (Simple Icons, 24 x 24) — the knot plus its six inner windows.
 
 const CODEX: Shape = Shape {
     even_odd: true,
@@ -500,8 +487,6 @@ const CODEX: Shape = Shape {
     ],
 };
 
-// MARK: Cursor (official 2D cube, 466.73 x 532.09)
-
 const CURSOR: Shape = Shape {
     even_odd: true,
     subs: &[
@@ -580,8 +565,6 @@ const CURSOR: Shape = Shape {
     ],
 };
 
-// MARK: Antigravity (arch silhouette, viewBox 13 14.5 85 85)
-
 const ANTIGRAVITY: Shape = Shape {
     even_odd: true,
     subs: &[Sub {
@@ -647,7 +630,6 @@ fn fill(
     );
 }
 
-/// The provider glyph centred in `rect` (x, y, w, h device pixels), white like the rail.
 pub(super) fn provider(
     provider: crate::dto::AgentId,
     rect: (f32, f32, f32, f32),
@@ -663,8 +645,6 @@ pub(super) fn provider(
     }
 }
 
-/// GitHub's pull-request glyph: a branch dot joined to a base dot and a merge dot on the
-/// right, stroked like the SwiftUI `PullRequestMark` (unit 16, radius 2.2).
 pub(super) fn pull_request(
     rect: (f32, f32, f32, f32),
     stroke: f32,
@@ -702,15 +682,11 @@ pub(super) fn pull_request(
     }
 }
 
-/// A pushpin glyph for the show-mode cap, centred in `rect`. The mac cap swaps
-/// `pin.fill` for `pin` between the two show modes; a 12 pt outline turns to mush in
-/// this rasteriser, so the caller dims the same silhouette instead.
 pub(super) fn pin(rect: (f32, f32, f32, f32), color: [u8; 4], pixmap: &mut Pixmap) {
     let (rx, ry, rw, rh) = rect;
     let u = rw.min(rh);
     let cx = rx + rw / 2.0;
     let cy = ry + rh / 2.0;
-    // A pushpin seen head-on: a cap bar, a barrel, a flange and the needle.
     let at = |x: f32, y: f32| (cx + x * u, cy + y * u);
     let outline = [
         (-0.30, -0.40),
@@ -744,7 +720,6 @@ pub(super) fn pin(rect: (f32, f32, f32, f32), color: [u8; 4], pixmap: &mut Pixma
     }
 }
 
-/// The "open externally" arrow used by the popover footer.
 pub(super) fn open_arrow(
     rect: (f32, f32, f32, f32),
     stroke: f32,
@@ -766,7 +741,6 @@ pub(super) fn open_arrow(
     }
 }
 
-/// A "copy" affordance: two overlapping rounded sheets.
 pub(super) fn copy_icon(
     rect: (f32, f32, f32, f32),
     stroke: f32,

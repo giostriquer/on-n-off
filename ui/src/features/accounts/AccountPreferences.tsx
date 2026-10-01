@@ -20,7 +20,6 @@ export function AccountPreferences() {
   );
 }
 
-/** The same switch as a row of the Add account menu. */
 export function AutomaticAccountSaving() {
   const saving = useAutomaticAccountSaving();
   return <>

@@ -166,16 +166,10 @@ fn loading_settings_drops_malformed_github_scopes_and_normalises_the_rest() {
     );
 }
 
-/// Saves into `home`, never the real settings document: a test whose save is wrongly accepted
-/// then writes into a disposable home, not over the developer's settings.
 fn save_under(home: &Path, settings: AppSettings) -> Result<AppSettings, AdapterError> {
     save_settings_to(settings, || Ok(crate::paths::settings_path_for(home)))
 }
 
-/// Why `settings` is refused. The document it would be saved to panics when resolved: a save is
-/// validated before its path is, so these tests reach no settings document at all — least of all
-/// the real one, which a broken refusal would otherwise overwrite — and a refusal names the bad
-/// value even when no home can be resolved.
 fn refused_save(settings: AppSettings) -> AdapterError {
     save_settings_to(settings, || {
         panic!("a refused save must not resolve a settings path")
@@ -234,7 +228,6 @@ fn refuses_hiding_every_provider() {
     );
 }
 
-/// What a save writes, in a disposable home: the validated document, which loads back as saved.
 #[test]
 fn a_saved_document_is_the_validated_one_and_loads_back_unchanged() {
     let home = crate::paths::scratch_dir("settings-save");
@@ -274,7 +267,6 @@ fn a_saved_document_is_the_validated_one_and_loads_back_unchanged() {
 
 #[test]
 fn close_to_tray_defaults_off_and_survives_a_round_trip() {
-    // Settings files written before the tray existed must still load.
     assert!(!parse_settings(Some(r#"{"limitsPollMinutes":10}"#)).close_to_tray);
     assert!(!AppSettings::default().close_to_tray);
 
@@ -285,15 +277,12 @@ fn close_to_tray_defaults_off_and_survives_a_round_trip() {
     assert!(parse_settings(Some(&body)).close_to_tray);
 }
 
-/// Settings written before banked reset alerts existed load with none.
 #[test]
 fn settings_without_reset_alerts_load_with_none() {
     let settings = parse_settings(Some(r#"{"limitNotifications": true}"#));
     assert!(settings.reset_alerts.is_empty());
 }
 
-/// An account's alert keeps its own share and wait, and a share above Codex's 10% or below 1% is
-/// brought back into that range, as is a wait longer than a week.
 #[test]
 fn reset_alerts_stay_within_codexs_rule() {
     let settings = parse_settings(Some(
@@ -319,7 +308,6 @@ fn reset_alerts_stay_within_codexs_rule() {
     assert_eq!(alert("acct-b").min_hours_to_renewal, 168);
     assert_eq!(alert("acct-c").max_left_percent, 1);
     assert_eq!(alert("acct-c").min_hours_to_renewal, 24);
-    // An alert saved without its figures has Codex's own share and a day's wait.
     assert_eq!(
         alert("acct-d"),
         ResetAlert {
@@ -331,8 +319,6 @@ fn reset_alerts_stay_within_codexs_rule() {
     );
 }
 
-/// A reset is spent at 10% or less left, the rule Codex's own app keeps, or at the lower share an
-/// account's alert names.
 #[test]
 fn the_share_a_reset_is_spent_at_is_codexs_or_the_accounts_lower_one() {
     let settings = parse_settings(Some(
@@ -343,8 +329,6 @@ fn the_share_a_reset_is_spent_at_is_codexs_or_the_accounts_lower_one() {
     assert_eq!(reset_spend_limit(&settings, "acct-other"), 10);
 }
 
-/// A hand-edited file can hold a value the app cannot read. That value takes its default; every
-/// other setting is kept.
 #[test]
 fn one_setting_the_app_cannot_read_leaves_every_other_one() {
     let settings = parse_settings(Some(
@@ -364,8 +348,6 @@ fn one_setting_the_app_cannot_read_leaves_every_other_one() {
     assert_eq!(settings.github_poll_seconds, 120);
 }
 
-/// An alert's figure beyond what the app keeps is held to the alert's rule, and the alert, its
-/// neighbours and every other setting stay.
 #[test]
 fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
     let settings = parse_settings(Some(
@@ -388,14 +370,11 @@ fn an_out_of_range_alert_figure_keeps_the_alert_and_the_rest() {
             automatic: false,
         }
     );
-    // Rounded, not cut: 4.6 is 5.
     assert_eq!(settings.reset_alerts["acct-b"].max_left_percent, 5);
-    // An unreadable mode is the safe one: an alert that only tells.
     assert!(!settings.reset_alerts["acct-b"].automatic);
     assert_eq!(settings.reset_alerts["acct-b"].min_hours_to_renewal, 0);
 }
 
-/// A provider the app does not know drops only its own entry of a list or a map.
 #[test]
 fn an_unknown_provider_drops_only_its_own_entry() {
     let settings = parse_settings(Some(
@@ -420,15 +399,12 @@ fn an_unknown_provider_drops_only_its_own_entry() {
     );
 }
 
-/// A file whose top level is not an object has no settings to keep.
 #[test]
 fn a_document_that_is_not_an_object_loads_as_defaults() {
     assert_eq!(parse_settings(Some("[1, 2]")), AppSettings::default());
     assert_eq!(parse_settings(Some("null")), AppSettings::default());
 }
 
-/// Every setting, each away from its default, reads back as it was written, so the field-by-field
-/// reader names each key the document holds.
 #[test]
 fn every_setting_reads_back_as_it_was_written() {
     let settings = AppSettings {
@@ -460,7 +436,6 @@ fn every_setting_reads_back_as_it_was_written() {
         automatic: false,
     })
     .unwrap();
-    // A key left at its default would read back right even if the reader never named it.
     for (key, value) in written.as_object().unwrap() {
         assert_ne!(Some(value), defaults.get(key), "{key} is at its default");
     }
@@ -475,8 +450,6 @@ fn every_setting_reads_back_as_it_was_written() {
     assert_eq!(parse_settings(Some(&written.to_string())), settings);
 }
 
-/// An editor that marks a file's encoding starts it with a byte-order mark, which JSON does not
-/// allow; the settings after it are still read.
 #[test]
 fn a_file_starting_with_a_byte_order_mark_keeps_its_settings() {
     let settings = parse_settings(Some(

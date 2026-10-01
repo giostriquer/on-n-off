@@ -1,7 +1,3 @@
-//! What loading gives back: files written before a figure existed, files from an obsolete
-//! schema, banked-reset counts whose soonest expiry has passed, and Codex files that still hold
-//! hidden windows.
-
 use super::*;
 
 #[test]
@@ -38,7 +34,6 @@ fn remembered_reset_credits_survive_a_reload_and_older_snapshots_load_without_th
         dto.reading.reset_credits
     );
 
-    // A snapshot written before on-n-off knew about reset credits has no such key.
     let path = fs::read_dir(store.dir())
         .unwrap()
         .flatten()
@@ -59,9 +54,6 @@ fn remembered_reset_credits_survive_a_reload_and_older_snapshots_load_without_th
     assert_eq!(loaded[0].reading.reset_credits, None);
 }
 
-/// A remembered count stops at its soonest known expiry: by then at least one reset has lapsed and
-/// what is left is not known until a read answers again. The windows beside it stay remembered, and
-/// a snapshot left with nothing observed is not loaded, as none would be saved.
 #[test]
 fn a_remembered_banked_reset_count_past_its_soonest_expiry_loads_as_unknown() {
     let home = scratch_dir("limits-snap-reset-credits-lapsed");
@@ -111,9 +103,6 @@ fn a_remembered_banked_reset_count_past_its_soonest_expiry_loads_as_unknown() {
     assert_eq!(loaded.len(), 3);
 }
 
-/// A saved account whose only observation was a count that has since lapsed stops replacing the
-/// history it superseded, since it no longer holds an observation. Forgetting it still takes that
-/// history with it, as it did while the count stood.
 #[test]
 fn forgetting_an_account_whose_count_lapsed_still_removes_the_history_it_replaced() {
     let home = scratch_dir("limits-snap-lapsed-forget");
@@ -153,8 +142,6 @@ fn forgetting_an_account_whose_count_lapsed_still_removes_the_history_it_replace
     assert!(ids(&store).is_empty());
 }
 
-/// Claude reports no banked resets, so a count an earlier version remembered for a Claude account
-/// is dropped as the snapshot loads, and a snapshot left with nothing observed is no card at all.
 #[test]
 fn a_remembered_claude_reset_count_is_dropped_as_the_snapshot_loads() {
     let home = scratch_dir("limits-snap-claude-resets");
@@ -189,8 +176,6 @@ fn a_remembered_claude_reset_count_is_dropped_as_the_snapshot_loads() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A snapshot an earlier version wrote with Claude's subscription status, a field this version no
-/// longer has, still loads.
 #[test]
 fn a_snapshot_with_the_retired_subscription_status_still_loads() {
     let home = scratch_dir("limits-snap-subscription-status");
@@ -219,7 +204,6 @@ fn a_snapshot_with_the_retired_subscription_status_still_loads() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// The term is remembered with the card, and a snapshot written before it existed loads without one.
 #[test]
 fn a_remembered_term_loads_back() {
     let home = scratch_dir("limits-snap-term");
@@ -252,8 +236,6 @@ fn a_remembered_term_loads_back() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A remembered Codex file as a version before the reader dropped hidden windows wrote it: the
-/// weekly window beside `extra` windows, all observed at one time.
 fn codex_file_with(store: &SnapshotStore, account: &str, extra: &[(&str, &str)]) -> PathBuf {
     let window = |id: &str, label: &str, kind: &str| {
         serde_json::json!({"id": id, "label": label, "kind": kind, "usedPercent": 100,
@@ -270,9 +252,6 @@ fn codex_file_with(store: &SnapshotStore, account: &str, extra: &[(&str, &str)])
     path
 }
 
-/// Files written before the Codex reader dropped hidden windows still hold some. Loading drops
-/// them through the reader's own rule, by bucket id and by name, so a paused read's last observed
-/// values never bring one back. The file itself loses them only at its next save.
 #[test]
 fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
     let home = scratch_dir("limits-snap-hidden-windows");
@@ -310,8 +289,6 @@ fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
         .contains("codex_bengalfox"));
 }
 
-/// A remembered Codex file holding only hidden windows has observed nothing a surface shows, so it
-/// is not loaded, as none would be saved.
 #[test]
 fn a_remembered_codex_file_with_only_hidden_windows_is_not_loaded() {
     let home = scratch_dir("limits-snap-only-hidden-windows");
@@ -329,8 +306,6 @@ fn a_remembered_codex_file_with_only_hidden_windows_is_not_loaded() {
     assert!(store.load(AgentId::Codex).is_empty());
 }
 
-/// The hidden-window rule is Codex's: another provider's remembered windows load whatever they are
-/// called.
 #[test]
 fn another_providers_remembered_windows_load_whatever_their_names() {
     let home = scratch_dir("limits-snap-hidden-rule-is-codexs");

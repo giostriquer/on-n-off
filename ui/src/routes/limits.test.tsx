@@ -4,9 +4,6 @@ import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AppSettings, ResetAlert } from "$lib/types";
 import { LimitsRoute } from "./limits";
 
-// The route hands Limits the app's banked reset alerts and saves a change through the session,
-// whose failed save must reach the alert's form as one.
-
 const persistAppSettings = vi.hoisted(() => vi.fn<(next: AppSettings) => Promise<AppSettings | null>>());
 const limitsProps = vi.hoisted(() => ({ current: null as null | {
   resetAlerts: Record<string, ResetAlert>;

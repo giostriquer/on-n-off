@@ -1,19 +1,14 @@
 use super::*;
 use crate::paths::scratch_dir;
 
-/// A name no earlier run has used. A stub whose body carries it is this test's alone: this run
-/// creates and warms its shared launcher, and a test that breaks that launcher breaks no other.
 fn fresh_token(dir: &Path) -> String {
     dir.file_name().unwrap().to_string_lossy().into_owned()
 }
 
-/// Removes the shared launcher made for a body only this test uses.
 fn discard_shared(stub: &CliStub) {
     let _ = fs::remove_file(shared_launcher_path(&stub.body()));
 }
 
-/// A hand-written launcher that notes, in a `warmed` file beside itself, a run with the warm-up
-/// flag set, and then exits with `exit`.
 fn warm_up_probe(dir: &Path, exit: i32) -> PathBuf {
     let path = dir.join(launcher_file_name("probe"));
     let body = if cfg!(windows) {
@@ -95,8 +90,6 @@ fn a_stub_that_cannot_replace_the_old_one_never_writes_through_its_link() {
     let old = CliStub::new("tool").stdout(&format!("{token}-old"));
     old.write(&dir);
     let shared = shared_launcher_path(&old.body());
-    // Stands in for Windows, where a shared launcher stays writable and a link the OS still holds
-    // cannot be removed.
     mark_executable(&shared, PRIVATE_MODE).unwrap();
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
 
@@ -151,7 +144,6 @@ fn writing_a_stub_does_not_run_it() {
         .copy("source", &copied)
         .log_args(&logged, false);
     stub.write(&dir);
-    // The warm-up runs the shared file, so a body that ignored the flag would act beside it.
     let shared_dir = shared_launcher_path(&stub.body())
         .parent()
         .unwrap()
@@ -169,7 +161,6 @@ fn writing_a_stub_does_not_run_it() {
 #[test]
 fn a_stub_that_fails_when_run_still_warms_up() {
     let token = fresh_token(&scratch_dir("cli-stub-failing"));
-    // Run for real, this body fails; its warm-up run must exit before the body and succeed.
     let stub = CliStub::new("failing").stdout(&token).exit(3);
     let shared = shared_launcher(&stub.body());
     discard_shared(&stub);
@@ -212,7 +203,6 @@ fn a_foreign_file_under_a_launchers_name_is_never_run() {
     let stub = CliStub::new("foreign").stdout(&token);
     let shared = shared_launcher_path(&stub.body());
     fs::create_dir_all(shared.parent().unwrap()).unwrap();
-    // A launcher that runs, just not this one.
     let impostor = CliStub::new("foreign").stdout("impostor").body();
     fs::write(&shared, impostor).unwrap();
     mark_executable(&shared, PRIVATE_MODE).unwrap();

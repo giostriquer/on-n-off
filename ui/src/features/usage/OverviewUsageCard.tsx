@@ -24,7 +24,6 @@ function OpenUsageLink({ className }: { className: string }) {
   );
 }
 
-/** Compact Overview panel — links through to the full Usage screen. */
 function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
   const window = useMemo(() => makeWindow(30), []);
@@ -90,7 +89,6 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
               <span className="text-[34px] leading-none font-semibold tracking-[-0.03em]">
                 {metric === "cost" ? formatUsd(folded.costUsd) : formatTokens(folded.totalTokens)}
               </span>
-              {/* One line: the column is sized so the pair never wraps onto an orphan word. */}
               <span className="min-w-0 truncate font-mono text-[11px] leading-snug text-[var(--mute)]">
                 {formatTokens(folded.totalTokens)} tokens · {folded.activeDays} active days
               </span>

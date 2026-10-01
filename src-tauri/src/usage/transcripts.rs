@@ -1,14 +1,7 @@
-//! Pure parsers for Claude Code / Codex session transcripts.
-//!
-//! Line-at-a-time so callers can stream large files. Port of T3 Code's
-//! `usageTranscripts.ts` (algorithm only).
-
 use std::collections::HashMap;
 
 use serde_json::Value;
 
-/// Increment whenever transcript parsing semantics change.
-/// v2: the one-hour share of Claude cache writes, and zero-token Claude lines dropped.
 pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -32,8 +25,6 @@ pub struct TokenTotals {
     pub uncached_input_tokens: u64,
     pub cached_input_tokens: u64,
     pub cache_creation_tokens: u64,
-    /// The part of `cache_creation_tokens` written with a one-hour lifetime, which Anthropic bills
-    /// at 2x input against the five-minute write's 1.25x. Never more than `cache_creation_tokens`.
     pub cache_creation_1h_tokens: u64,
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
@@ -41,7 +32,6 @@ pub struct TokenTotals {
 
 impl TokenTotals {
     pub fn total_tokens(&self) -> u64 {
-        // reasoning is a subset of output — do not add again.
         self.uncached_input_tokens
             + self.cached_input_tokens
             + self.cache_creation_tokens
@@ -69,29 +59,16 @@ pub struct UsageRecord {
     pub session_id: String,
     pub totals: TokenTotals,
     pub reported_cost_usd: Option<f64>,
-    /// Cross-file de-duplication key; `None` means unique / no dedupe.
     pub dedupe_key: Option<String>,
 }
 
 impl UsageRecord {
-    /// Whether this copy of a de-duplicated record should replace `kept`. Claude Code writes one
-    /// line per content block of a message, and the early lines carry a partial `output_tokens`
-    /// (often 1 for a thinking block), so the copy with the most output is the message as billed.
-    /// Ties keep the copy already held.
     pub fn is_richer_than(&self, kept: &Self) -> bool {
         (self.totals.output_tokens, self.totals.total_tokens())
             > (kept.totals.output_tokens, kept.totals.total_tokens())
     }
 }
 
-/// One record per group of copies: the richest copy (see `UsageRecord::is_richer_than`) in the
-/// first copy's place.
-///
-/// A Claude message's copies share its `dedupe_key`. A Codex rollout carries no id, but one listed
-/// twice (moved to `archived_sessions/` between two walks, or kept stale after an incomplete walk)
-/// repeats its session's events at the same instants, so a Codex event is keyed by its session,
-/// instant, model and tokens, counted per file so repeated identical events inside one rollout stay
-/// apart. Records with neither key are all kept.
 pub fn richest_copies<'a>(
     files: impl IntoIterator<Item = &'a [UsageRecord]>,
 ) -> Vec<&'a UsageRecord> {
@@ -166,16 +143,11 @@ fn parse_timestamp_ms(value: &Value) -> Option<i64> {
         .ok()
         .map(|dt| dt.timestamp_millis())
         .or_else(|| {
-            // Some transcripts omit offset; try appending Z.
             chrono::DateTime::parse_from_rfc3339(&format!("{raw}Z"))
                 .ok()
                 .map(|dt| dt.timestamp_millis())
         })
 }
-
-/* -------------------------------------------------------------------------- */
-/* Claude                                                                     */
-/* -------------------------------------------------------------------------- */
 
 pub fn parse_claude_line(line: &str) -> Option<UsageRecord> {
     let parsed: Value = serde_json::from_str(line).ok()?;
@@ -223,7 +195,6 @@ pub fn parse_claude_line(line: &str) -> Option<UsageRecord> {
         output_tokens: positive_int(usage.get("output_tokens").unwrap_or(&Value::Null)),
         reasoning_tokens: 0,
     };
-    // Locally generated lines (API errors, interrupts) come as `<synthetic>` with zero usage.
     if totals.total_tokens() == 0 {
         return None;
     }
@@ -242,10 +213,6 @@ pub fn parse_claude_line(line: &str) -> Option<UsageRecord> {
         dedupe_key,
     })
 }
-
-/* -------------------------------------------------------------------------- */
-/* Codex                                                                      */
-/* -------------------------------------------------------------------------- */
 
 const FORK_COPY_MAX_GAP_MS: i64 = 1000;
 

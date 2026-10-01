@@ -1,5 +1,3 @@
-//! The change protocol itself: which change kinds are refused and bump the sign-in epoch, what a
-//! ticket guards, and when the lease is held.
 use super::super::*;
 use crate::dto::AgentId;
 use serde_json::json;
@@ -29,13 +27,11 @@ fn login(generation: &str) -> Login {
         account: serde_json::Value::Null,
     }
 }
-/// The fingerprint of the Codex login `login(generation)`.
 fn generation(generation: &str) -> String {
     super::super::super::view(AgentId::Codex, &login(generation))
         .unwrap()
         .fingerprint()
 }
-/// A vault holding one Codex profile whose login is `generation`, owning its private renewal.
 fn seeded(generation: &str) -> tempfile::TempDir {
     let home = tempfile::tempdir().unwrap();
     let mut db = Database::default();
@@ -60,8 +56,6 @@ fn edit_category(db: &mut Database) -> Result<(), String> {
     Ok(())
 }
 
-/// One change kind's rule: whether a pending recovery refuses it, whether its absence does, and
-/// whether it bumps the sign-in epoch.
 struct Rule {
     name: &'static str,
     kind: fn() -> ChangeKind<'static>,
@@ -345,7 +339,6 @@ fn a_gate_applies_the_rule_without_creating_or_writing_a_vault() {
     );
     assert!(!Store::vault_exists(home.path()));
 
-    // The key `vault::tests::unlock_fixture` gives this home.
     let key = [7; 32];
     let store = Store::open_with_key(home.path(), true, |_, _| Ok(key)).unwrap();
     let db = Database {
@@ -370,9 +363,6 @@ fn a_gate_applies_the_rule_without_creating_or_writing_a_vault() {
     );
 }
 
-/// A reading made from an account's home publishes only while the vault still says the account's
-/// login is in that home: not after another home, a login back in the vault, an account change or
-/// a pending recovery.
 #[test]
 fn a_reading_from_a_home_holds_only_while_the_account_keeps_its_login_there() {
     let homed = |home: &Path| {

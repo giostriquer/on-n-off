@@ -18,18 +18,14 @@ import { useGithubPrs } from "./useGithubPrs";
 
 type GithubProps = {
   pollSeconds: GithubPollSeconds;
-  /** Opens the Settings screen, where the scope and interval live. */
   onOpenSettings?: () => void;
 };
 
 const EMPTY_LIST: GithubPrList = { total: 0, items: [] };
 
-// The section header sticks to the top of the scroll area; a repository band sticks right under
-// it, so the band's offset is the header's height. Keep the two in step.
 const SECTION_HEADER_HEIGHT = "h-10";
 const REPO_BAND_TOP = "top-10";
 
-/** Mine first: the user's own CI is what the screen exists for, and review requests can be many. */
 const SECTIONS: { id: GithubListId; title: string; empty: string }[] = [
   { id: "mine", title: "Mine", empty: "No open pull requests of yours." },
   { id: "reviewRequested", title: "Review requested", empty: "No reviews requested from you." },
@@ -38,7 +34,6 @@ const SECTIONS: { id: GithubListId; title: string; empty: string }[] = [
 
 type Banner = { headline: string; hint: string; tone: "trip" | "warn" };
 
-/** What to tell the user when the read did not come back `ok`, or the command itself failed. */
 function bannerFor(prs: GithubPrs | null, invokeError: unknown): Banner | null {
   if (invokeError) {
     return {
@@ -81,7 +76,6 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
             {updated ? `updated ${updated} · ` : ""}
             every {pollSeconds} s
             {checking ? (
-              // Only the first load is announced; routine polls stay quiet for screen readers.
               <span role="status" aria-live="polite">
                 {" "}
                 · Checking…
@@ -176,7 +170,6 @@ function ScopeChips({ scope, onOpenSettings }: { scope: string[]; onOpenSettings
   );
 }
 
-/** One field narrows all three lists; Escape clears it. */
 function SearchField({ query, onChange }: { query: string; onChange: (query: string) => void }) {
   return (
     <div className="relative">
@@ -243,17 +236,12 @@ function PrList({
   const searching = query.trim().length > 0;
   const shown = searching ? filterPrs(list.items, query) : list.items;
   const count = listCountLabel(list, searching ? shown.length : undefined);
-  // A search looks everywhere: a folded section with matches opens for as long as the search
-  // lasts; one without stays folded, its header already saying "0 of N".
   const open = (searching && shown.length > 0) || !collapsed;
   const bodyId = `github-${id}-list`;
-  // Rows are grouped by repository so it is not repeated on every line. A single repository
-  // describes the title row instead of earning a band of its own.
   const groups = groupPrsByRepo(orderPrs(shown));
   const soleRepo = groups.length === 1 ? groups[0].repo : null;
   return (
     <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={title}>
-      {/* Sticks to the top of the scroll area so a long list keeps its name in view. */}
       <header
         className={`sticky top-0 z-10 rounded-t-[11px] bg-[var(--plate)] ${open ? "border-b border-[var(--hair)]" : "rounded-b-[11px]"}`}
       >
@@ -291,7 +279,6 @@ function PrList({
                 aria-label={group.repo}
                 className="border-t border-[var(--hair)] first:border-t-0"
               >
-                {/* Sits under the section header while its rows scroll past. */}
                 <h4
                   className={`sticky ${REPO_BAND_TOP} m-0 flex items-center gap-2 bg-[var(--well)] px-3.5 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase`}
                 >

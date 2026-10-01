@@ -3,10 +3,6 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import { AutomaticSpend } from "./AutomaticSpend";
 import { UseBankedReset } from "./BankedResets";
 
-/**
- * A Codex card's extra account actions. Spending a banked reset waits for the native login to be
- * confirmed as this account, because Codex spends it on whoever is signed in.
- */
 export function CodexAccountActions({ entry, label, now, state }: {
   entry: ProviderLimits;
   label: string;

@@ -1,35 +1,22 @@
-//! Thin JSON GET/POST over `ureq` with a hard timeout; status codes map to a small error taxonomy
-//! shared by the Limits and GitHub readers.
-
 use std::time::Duration;
 
 use serde_json::Value;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-/// When an exhausted rate limit opens again, as the service stated it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RateLimitReset {
-    /// `retry-after`: seconds from the moment the reply arrived (secondary limits).
     RetryAfter(u64),
-    /// `x-ratelimit-reset`: epoch seconds (the primary limit).
     At(i64),
-    /// Exhausted without a usable instant.
     Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HttpError {
-    /// The stored token was rejected (401; also 403 for the Limits GET, whose services use it).
     Unauthorized,
-    /// The service's rate limit is exhausted: a 429 from the Limits GET, or a GitHub 403/429
-    /// carrying `x-ratelimit-remaining: 0` or `retry-after`.
     RateLimited(RateLimitReset),
-    /// Any other non-success status.
     Status(u16),
-    /// DNS, connect, TLS, or timeout failure.
     Network(String),
-    /// 2xx with a body that is not JSON.
     Parse(String),
 }
 
@@ -45,19 +32,12 @@ impl std::fmt::Display for HttpError {
     }
 }
 
-/// What a call returns once the status is no longer an error: `ureq` 3 hands back the `http`
-/// crate's response carrying its own body.
 type Reply = ureq::http::Response<ureq::Body>;
 
 fn agent() -> ureq::Agent {
-    // Tests only ever talk to loopback servers, and `ureq` has no loopback exception: a
-    // developer's `HTTP(S)_PROXY` or `ALL_PROXY` would send those requests to the proxy.
-    // The app itself keeps honouring the environment's proxy.
     ureq::Agent::new_with_config(agent_config(ureq::Agent::config_builder(), !cfg!(test)))
 }
 
-/// The settings every request shares, laid over `builder`, which already carries whatever proxy
-/// the environment names; `honour_env_proxy` false drops it.
 fn agent_config(
     builder: ureq::config::ConfigBuilder<ureq::typestate::AgentScope>,
     honour_env_proxy: bool,
@@ -65,8 +45,6 @@ fn agent_config(
     let builder = builder
         .timeout_global(Some(TIMEOUT))
         .user_agent(concat!("on-n-off/", env!("CARGO_PKG_VERSION")))
-        // A non-success status stays a response instead of becoming an error: the rate-limit
-        // headers this module reads live on the 403 and 429 replies themselves.
         .http_status_as_error(false);
     if honour_env_proxy {
         builder.build()
@@ -83,10 +61,6 @@ fn parse_body(mut response: Reply) -> Result<Value, HttpError> {
     serde_json::from_str::<Value>(&body).map_err(|error| HttpError::Parse(error.to_string()))
 }
 
-/// GET `url` with the given headers and parse the JSON body. A `User-Agent` is always added, and
-/// `Accept: application/json` unless the caller states its own — `ureq` 3 appends rather than
-/// replaces, so a built-in default has to stand aside instead of being sent alongside.
-/// The request never logs or echoes its headers.
 pub fn get_json(url: &str, headers: &[(&str, &str)]) -> Result<Value, HttpError> {
     let mut request = agent().get(url);
     if !headers
@@ -104,9 +78,6 @@ pub fn get_json(url: &str, headers: &[(&str, &str)]) -> Result<Value, HttpError>
     finish(response, Forbidden::RejectedToken)
 }
 
-/// POST `body` as JSON to `url` with a bearer token and parse the JSON reply. Unlike `get_json`,
-/// a 403 is only `Unauthorized` when it is not a rate limit: GitHub answers 403/429 for exhausted
-/// limits and 401 for a bad token. The token is never logged or echoed.
 pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpError> {
     let payload =
         serde_json::to_string(body).map_err(|error| HttpError::Parse(error.to_string()))?;
@@ -120,11 +91,6 @@ pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpErr
     finish(response, Forbidden::RateLimitWhenSaid)
 }
 
-/// POST an OAuth grant as JSON and parse the reply.
-///
-/// The one thing that separates this from `post_json` is that it sends no `Authorization` header:
-/// a grant authenticates by its own contents, and the credential being replaced is exactly the one
-/// the endpoint would refuse.
 pub fn post_grant(url: &str, body: &Value) -> Result<Value, HttpError> {
     let payload =
         serde_json::to_string(body).map_err(|error| HttpError::Parse(error.to_string()))?;
@@ -137,21 +103,12 @@ pub fn post_grant(url: &str, body: &Value) -> Result<Value, HttpError> {
     finish(response, Forbidden::PlainStatus)
 }
 
-/// What a 403 means to an endpoint — the only place the three callers' status taxonomies differ.
-/// A 429 is a rate limit to every endpoint but a token issuer's.
 enum Forbidden {
-    /// The Limits services answer 403 for a rejected token.
     RejectedToken,
-    /// GitHub answers 403 for an exhausted limit when its rate-limit headers say so, and 401 for a
-    /// bad token.
     RateLimitWhenSaid,
-    /// A token endpoint refuses the grant itself; neither 403 nor 429 carries extra meaning.
     PlainStatus,
 }
 
-/// The one status ladder this module owns: 2xx parses, 401 is always a rejected token, a 429 is a
-/// rate limit until its `retry-after` wherever that is read, and a 403 means whatever the endpoint
-/// says it means.
 fn finish(response: Reply, forbidden: Forbidden) -> Result<Value, HttpError> {
     let code = response.status().as_u16();
     match (code, &forbidden) {
@@ -168,9 +125,6 @@ fn finish(response: Reply, forbidden: Forbidden) -> Result<Value, HttpError> {
     }
 }
 
-/// `Some` when the response says the rate limit is exhausted: `retry-after` (secondary limits)
-/// wins over `x-ratelimit-reset` (the primary limit). GitHub sends the `x-ratelimit-*` headers
-/// on every reply, so only a zero remaining count marks a 403 as a rate limit.
 fn rate_limit_reset(response: &Reply) -> Option<RateLimitReset> {
     let header = |name: &str| {
         response
@@ -192,13 +146,9 @@ fn rate_limit_reset(response: &Reply) -> Option<RateLimitReset> {
     )
 }
 
-/// How long a loopback test server waits for the code under test to connect. A test whose code
-/// never makes its request must fail with a message, not leave `join()` waiting until CI's job
-/// timeout.
 #[cfg(test)]
 const ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
 
-/// The next connection to `listener`, or a panic once `deadline` passes without one.
 #[cfg(test)]
 fn accept_within(listener: &std::net::TcpListener, deadline: Duration) -> std::net::TcpStream {
     listener.set_nonblocking(true).unwrap();
@@ -206,7 +156,6 @@ fn accept_within(listener: &std::net::TcpListener, deadline: Duration) -> std::n
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
-                // macOS and Windows hand an accepted socket its listener's non-blocking mode.
                 stream.set_nonblocking(false).unwrap();
                 return stream;
             }
@@ -222,16 +171,11 @@ fn accept_within(listener: &std::net::TcpListener, deadline: Duration) -> std::n
     }
 }
 
-/// The next connection to `listener`, or a panic once `ACCEPT_DEADLINE` passes without one. Every
-/// loopback test server accepts through this, including a test's own listener, so none of them
-/// can wait forever on a request that never comes.
 #[cfg(test)]
 pub(crate) fn accept_in_time(listener: &std::net::TcpListener) -> std::net::TcpStream {
     accept_within(listener, ACCEPT_DEADLINE)
 }
 
-/// One-shot HTTP server on a loopback port; returns the URL and the captured request head.
-/// Shared by the http and pipeline tests so no test ever touches the network.
 #[cfg(test)]
 pub(crate) fn serve_once(
     status_line: &str,
@@ -242,15 +186,12 @@ pub(crate) fn serve_once(
     })
 }
 
-/// What `serve_once_capturing` saw: the request head (request line + headers) and the body.
 #[cfg(test)]
 pub(crate) struct CapturedRequest {
     pub(crate) head: String,
     pub(crate) body: String,
 }
 
-/// Like `serve_once`, but hands back the request body too, and lets the test add response
-/// headers (rate-limit headers, for instance).
 #[cfg(test)]
 pub(crate) fn serve_once_capturing(
     status_line: &str,
@@ -264,8 +205,6 @@ pub(crate) fn serve_once_capturing(
     )
 }
 
-/// A loopback server answering one connection per entry, in order, capturing each request's
-/// head and body. Lets a test script "401, then 200" or "429, then 200" against one URL.
 #[cfg(test)]
 pub(crate) fn serve_sequence(
     responses: &[(&str, &[&str], &str)],
@@ -273,9 +212,6 @@ pub(crate) fn serve_sequence(
     serve("/graphql", responses, |requests| requests)
 }
 
-/// The one loopback server behind the fixtures above: it answers one connection per entry at
-/// `path`, in order, reads each request's head and its `Content-Length` body, and hands what it
-/// captured to `finish`, which shapes what the thread returns.
 #[cfg(test)]
 fn serve<T: Send + 'static>(
     path: &str,
@@ -285,7 +221,6 @@ fn serve<T: Send + 'static>(
     serve_with(path, responses, || {}, finish)
 }
 
-/// `serve`, running `on_request` once each request has been read and before it is answered.
 #[cfg(test)]
 fn serve_with<T: Send + 'static>(
     path: &str,
@@ -361,11 +296,6 @@ fn serve_with<T: Send + 'static>(
     (url, handle)
 }
 
-/// The value a captured request head carries for `name`, or `None`.
-///
-/// Header names are case-insensitive on the wire and `ureq` sends them lowercased, so a test that
-/// matched `"Authorization: "` verbatim would assert the client library's spelling rather than
-/// the request it made.
 #[cfg(test)]
 pub(crate) fn head_header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
     head.lines().find_map(|line| {
@@ -374,22 +304,11 @@ pub(crate) fn head_header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
-/// A loopback URL no server can answer: any request to it fails with a connection error, at once.
-///
-/// It names port 0, which no listener can hold. The client's own network stack rejects a connect
-/// to it before sending anything: `EADDRNOTAVAIL` on macOS, `WSAEADDRNOTAVAIL` on Windows. A
-/// port freed by dropping a listener would not do: Windows retries a connect to a closed loopback
-/// port for about 2 s before it reports the refusal, and the OS may hand the port to another
-/// test's server in the meantime.
 #[cfg(test)]
 pub(crate) fn refused_url() -> String {
     "http://127.0.0.1:0/usage".to_string()
 }
 
-/// A loopback server that never answers, for a request a test says is never made: its listener and
-/// a URL on it. A request made to it would wait for an answer and sit in the listener's backlog,
-/// where [`was_asked`] finds it, rather than failing at once and being swallowed like one to
-/// [`refused_url`].
 #[cfg(test)]
 pub(crate) fn never_asked() -> (std::net::TcpListener, String) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -398,9 +317,6 @@ pub(crate) fn never_asked() -> (std::net::TcpListener, String) {
     (listener, url)
 }
 
-/// Whether a request reached `listener`, one from [`never_asked`] or a test's own, without waiting:
-/// the code under test has connected by the time it returns. Any failure to look, other than there
-/// being nothing to accept, fails the test rather than reading as no request.
 #[cfg(test)]
 pub(crate) fn was_asked(listener: &std::net::TcpListener) -> bool {
     listener.set_nonblocking(true).unwrap();

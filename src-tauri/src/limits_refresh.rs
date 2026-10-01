@@ -17,11 +17,6 @@ struct CachedRead {
     consecutive_failures: u32,
 }
 
-/// One provider's shared read, with the [`Revision`] its consumers watch to notice a refresh made
-/// through another surface and the [`Source`] they are told about it under. The revision is
-/// deliberately outside the mutex: a read holds that lock for the whole provider call, and asking
-/// "is there anything newer?" must never block. Carrying the source here rather than mapping an
-/// `AgentId` to one a second time is what keeps "has a shared cache" a single fact.
 struct Cache {
     read: Mutex<Option<CachedRead>>,
     revision: Revision,
@@ -57,14 +52,10 @@ pub fn poll_interval() -> Duration {
     Duration::from_secs(POLL_SECONDS.load(Ordering::Acquire))
 }
 
-/// One process-wide provider read per configured interval. Every automatic consumer shares this
-/// cache; a user-requested refresh bypasses it and replaces the cached observation.
 pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
     read_limits_revisioned(agent, force).0
 }
 
-/// `read_limits` plus the shared cache's revision the entries were taken at, for a consumer that
-/// caches the answer itself and needs to notice a refresh made through another consumer.
 pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
     let Some(cache) = cache_for(agent) else {
         return (crate::limits::read_limits(agent, force), 0);
@@ -91,7 +82,6 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
     )
 }
 
-/// Common composition boundary: active native results and saved-account results share one cache.
 fn read_provider(
     cache: &Cache,
     interval: Duration,
@@ -104,33 +94,24 @@ fn read_provider(
     let mut unarchived = false;
     let (entries, reading) = read_through_cache(cache, interval, force, |force| {
         let mut entries = native(force);
-        // Being signed in unarchives an account, before the saved polls and before the cards are
-        // flagged once, all under the cache lock, which Forget and archiving write under too.
         unarchived = unarchive(&entries);
         saved(force, &mut entries);
         flag(&mut entries);
         entries
     });
     announce(cache, reading);
-    // Only a read that replaced the cache can have unarchived anything, so the account list is told
-    // of a change, never of a read, and outside the lock.
     if unarchived {
         read_revision::announce(Source::Accounts);
     }
     (entries, reading.revision())
 }
 
-/// Tells the windows about a replacement, outside the lock the read held, so neither a provider
-/// call waits on the announcement nor the announcement on a provider call.
 fn announce(cache: &Cache, reading: Reading) {
     if reading.replaced() {
         read_revision::announce(cache.source);
     }
 }
 
-/// The shared cache's current revision for `agent`, `0` for a provider that is not cached. Never
-/// blocks: a caller polls this to decide whether a cheap cache-served read is worth making. Only
-/// the native notch keeps its own copy of a read, so only macOS asks.
 #[cfg(any(target_os = "macos", test))]
 pub fn revision(agent: AgentId) -> u64 {
     cache_for(agent).map_or(0, |cache| cache.revision.current())
@@ -147,17 +128,10 @@ pub fn forget_snapshot(
     let reading = forget_through_cache(cache, account_id, || {
         crate::limits::forget_snapshot(agent, account_id, expected_email)
     })?;
-    // Dropping a remembered account replaces the shared entries like any read does, and the other
-    // window lists those accounts too: without this it goes on offering to forget an account this
-    // one already forgot, until its own poll comes round.
     announce(cache, reading);
     Ok(())
 }
 
-/// Archives or unarchives the accounts `ids` of `agent` names, the user's own action from a Limits
-/// card: the card's own id and the legacy ids merged into it. The shared entries follow at once,
-/// and unarchiving then reads the provider again, forced, so the account comes back polled rather
-/// than remembered until the next poll.
 pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<(), String> {
     let Some(cache) = cache_for(agent) else {
         return Err(format!(
@@ -176,9 +150,6 @@ pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<()
     )
 }
 
-/// [`set_archived`] with its archive `write` and the provider's `reread`, told whether to force it.
-/// Each announcement is of a replacement, made outside the lock: the entries to the other window,
-/// and the archive to the account list, which reads it for the profiles no entry answers for.
 fn set_archived_with(
     cache: &Cache,
     ids: &[String],
@@ -200,9 +171,6 @@ fn set_archived_with(
     Ok(())
 }
 
-/// Writes the archive under the cache lock, as Forget does, so the edit cannot race an in-flight
-/// read, then flags the cached entries it names. The entries' reading, and whether the archive
-/// changed.
 fn archive_through_cache<F>(
     cache: &Cache,
     ids: &[String],
@@ -234,11 +202,6 @@ where
     Ok((reading, changed))
 }
 
-/// Spend one banked Codex reset, then replace the shared Codex read so every surface shows the
-/// renewed windows and the count that is left. An account change in progress refuses the attempt
-/// rather than spend a reset on an account that is being replaced. A click on the card and an
-/// automatic alert's spend (`limits_monitor::auto_spend`) both come through here, so both keep the
-/// same rules.
 pub fn consume_codex_reset_credit(
     account_id: &str,
     idempotency_key: &str,
@@ -255,9 +218,6 @@ pub fn consume_codex_reset_credit(
     )
 }
 
-/// The shared read is replaced after every spend that got past the lease, failed ones included: a
-/// request that timed out may still have reached Codex, and a card left on the old numbers would
-/// offer that reset again. The lease is released first, because the refresh takes its own.
 fn spend_then_refresh<L, O>(
     idempotency_key: &str,
     lease: impl FnOnce() -> Option<L>,
@@ -325,8 +285,6 @@ where
         entries: entries.clone(),
         consecutive_failures,
     });
-    // Every read is remembered, a failed one included, so the consumer that answers the
-    // announcement is served this same entry rather than calling the provider again.
     (entries, Reading::Replaced(cache.revision.bump()))
 }
 
@@ -381,7 +339,6 @@ fn cache_is_fresh(
     !force && now.saturating_duration_since(refreshed_at) < interval
 }
 
-/// Discard the previous account projection, then publish one normal shared replacement.
 pub(crate) fn account_changed(agent: AgentId) {
     if let Some(cache) = cache_for(agent) {
         *cache

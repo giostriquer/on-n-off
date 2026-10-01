@@ -1,10 +1,6 @@
 import type { LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 
-/**
- * Readings the Limits tests share: a signed-in Claude and Codex account, a remembered Codex account
- * and a read with only a status, all dated against `NOW`. Tests only.
- */
 export const NOW = "2026-08-17T20:00:00Z";
 
 export function okClaude(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
@@ -39,7 +35,6 @@ export function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits
   };
 }
 
-/** A remembered reading of the other Codex account: read yesterday, its session already reset. */
 export function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
   return {
     provider: "codex",

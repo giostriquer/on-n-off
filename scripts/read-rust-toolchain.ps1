@@ -20,10 +20,6 @@ if (-not (Test-Path -LiteralPath $ToolchainPath -PathType Leaf)) {
     throw "rust-toolchain.toml is missing at $ToolchainPath"
 }
 
-# Deliberately a narrow reader rather than a TOML parser: the workflows only need `channel`, and
-# the pin is meaningless unless it is an exact version. Anything looser (a bare `stable`, a date
-# channel) would let the rust-cache environment hash drift again, which is the whole reason the
-# file exists, so reject it here instead of discovering it as a cold build weeks later.
 $channel = ""
 foreach ($line in [System.IO.File]::ReadAllLines($ToolchainPath)) {
     $match = [regex]::Match($line, '^\s*channel\s*=\s*"(?<channel>[^"]*)"\s*(#.*)?$')

@@ -1,9 +1,7 @@
-//! Using a saved profile, recovering an interrupted switch, and signing out.
 use super::super::Activation;
 use super::fixture::{claude, claude_in, codex, fingerprint, generation, identity, Harness, Heard};
 use crate::dto::AgentId;
 
-/// Profile a is the CLI's login and has rotated to a2 since it was saved; b is saved.
 fn two_profiles(harness: &Harness) -> (String, String) {
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
     let b = harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
@@ -94,8 +92,6 @@ fn another_providers_profile_is_not_used() {
     assert!(harness.heard().is_empty());
 }
 
-/// Only a provider whose saved logins stay in the vault renews one privately, so a Codex login
-/// stands for any login whose renewal may have spent its refresh token.
 #[test]
 fn a_login_with_an_unfinished_private_renewal_is_not_used() {
     let harness = Harness::new();
@@ -125,7 +121,6 @@ fn a_login_with_an_unfinished_private_renewal_is_not_used() {
     assert_eq!(harness.sealed(), sealed);
 }
 
-/// A rollback may have touched the native login, so a switch that failed is announced too.
 #[test]
 fn a_failed_switch_restores_the_outgoing_login_and_is_still_announced() {
     let harness = Harness::new();
@@ -142,8 +137,6 @@ fn a_failed_switch_restores_the_outgoing_login_and_is_still_announced() {
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
-/// A pending recovery refuses a use before it writes anything, so it rejects no sign-in in
-/// flight, and leaves nothing to announce.
 #[test]
 fn a_pending_recovery_refuses_a_use_before_anything_is_written() {
     let harness = Harness::new();
@@ -191,8 +184,6 @@ fn recovery_restores_the_outgoing_login_with_clients_closed() {
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
-/// Recovery rewrites the native login, so running clients refuse it: one could overwrite the
-/// restored outgoing login after the journal is cleared.
 #[test]
 fn recovery_requires_closed_clients() {
     let harness = Harness::new();
@@ -256,7 +247,6 @@ fn recovery_without_a_pending_journal_is_refused() {
     assert!(harness.heard().is_empty());
 }
 
-/// a and a-other are the same user in two workspaces, b another user, c the same user on Codex.
 #[test]
 fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
     let harness = Harness::new();
@@ -294,7 +284,6 @@ fn signing_out_forgets_the_users_saved_logins_before_logging_out() {
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
-/// Signing Codex out resolves Codex's native store, and forgets only the user's Codex logins.
 #[test]
 fn signing_out_one_provider_leaves_the_other_providers_logins() {
     let harness = Harness::new();
@@ -367,8 +356,6 @@ fn signing_out_refuses_during_a_pending_recovery_without_writing_or_logging_out(
     assert!(harness.heard().is_empty());
 }
 
-/// A pending recovery refuses a sign-out before it reads the native login (the Keychain, on
-/// macOS).
 #[test]
 fn a_sign_out_refused_by_a_pending_recovery_reads_no_native_login() {
     let harness = Harness::new();

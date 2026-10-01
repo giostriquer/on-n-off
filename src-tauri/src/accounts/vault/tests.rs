@@ -104,7 +104,6 @@ fn simultaneous_provider_reads_join_the_same_pending_unlock() {
         }));
     }
     start.wait();
-    // An unrelated store can unlock while this OS prompt is pending: no global mutex held.
     assert_eq!(
         memo.get("other-home", false, || Ok([2; 32])).unwrap(),
         [2; 32]
@@ -117,7 +116,6 @@ fn simultaneous_provider_reads_join_the_same_pending_unlock() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
-/// Give cross-domain fixture tests an already-unlocked vault without touching an OS keychain.
 pub(crate) fn unlock_fixture(home: &tempfile::TempDir) {
     let root = std::fs::canonicalize(home.path().join(".on-n-off/accounts")).unwrap();
     let scope = crate::sha::sha256_hex(root.to_string_lossy().as_bytes());

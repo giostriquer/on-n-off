@@ -1,8 +1,8 @@
-// @ts-expect-error Node builtins — vitest runs this file in Node.
+// @ts-expect-error
 import { readdirSync, readFileSync, statSync } from "node:fs";
-// @ts-expect-error Node builtins — vitest runs this file in Node.
+// @ts-expect-error
 import { dirname, extname, join, relative } from "node:path";
-// @ts-expect-error Node builtins — vitest runs this file in Node.
+// @ts-expect-error
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 

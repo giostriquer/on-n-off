@@ -1,10 +1,3 @@
-//! Credits a business Codex member has spent lately: the figure the Codex app's "Credit usage
-//! history" shows a workspace member, read from the same per-member endpoint and summed the same way.
-//!
-//! A workspace member's own credit balance reads 0 and, without a per-member cap, Codex reports no
-//! share of the pooled credits either (`individualLimit` is null), so spending is the one credit
-//! figure a member can see. The workspace-wide endpoint the app's admins read answers a member 403.
-
 use chrono::{DateTime, Days, NaiveDate, SecondsFormat, Utc};
 use serde_json::Value;
 
@@ -13,13 +6,9 @@ use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::AccessToken;
 use crate::dto::{AgentId, LimitsCreditsSpentDto, ProviderLimitsDto};
 
-/// The per-member daily breakdown the Codex app reads for a business member's usage history.
 pub(crate) const CODEX_CREDIT_USAGE_URL: &str =
     "https://chatgpt.com/backend-api/wham/usage/daily-workspace-user-token-usage-breakdown";
 
-/// Whether a Codex plan type belongs to a workspace, where credits are pooled: Codex's own
-/// `PlanType::is_workspace_account` (openai/codex rust-v0.156.1, `codex-rs/protocol/src/account.rs`),
-/// which counts team-like, business-like and education-like plans and enterprise.
 pub(crate) fn is_codex_workspace_plan(plan: &str) -> bool {
     matches!(
         plan,
@@ -37,10 +26,6 @@ pub(crate) fn is_codex_workspace_plan(plan: &str) -> bool {
     )
 }
 
-/// Whether `card` is one that is asked what it spent: a Codex workspace plan. A successful read of
-/// one whose spending read failed or was backing off keeps the remembered figure
-/// (`limits/reading.rs`); a card on any other plan keeps nothing, so an account that moved to a
-/// personal plan loses the figure it had on its next read.
 pub(crate) fn asks_what_was_spent(card: &ProviderLimitsDto) -> bool {
     card.provider == AgentId::Codex
         && card
@@ -50,8 +35,6 @@ pub(crate) fn asks_what_was_spent(card: &ProviderLimitsDto) -> bool {
             .is_some_and(is_codex_workspace_plan)
 }
 
-/// The breakdown for the 30 UTC days up to and including `today`, one row per day, the window the
-/// app asks for: `start = today - (days - 1)`.
 pub(crate) fn query_url(base: &str, today: NaiveDate) -> String {
     let start = today - Days::new(LONG_WINDOW_DAYS - 1);
     format!(
@@ -61,14 +44,9 @@ pub(crate) fn query_url(base: &str, today: NaiveDate) -> String {
     )
 }
 
-/// The days the card's second figure covers, and the most any read asks for.
 const LONG_WINDOW_DAYS: u64 = 30;
-/// The days the card's headline figure covers, the app's default view.
 const SHORT_WINDOW_DAYS: u64 = 7;
 
-/// The last 7 and 30 days' spending from one breakdown response. Like the app, a day's spending is
-/// the credits its models used, and only a breakdown counted in credits is read. An amount that is
-/// not a finite count of at least zero, or a row without a readable date, adds nothing.
 pub(crate) fn parse(payload: &Value, now: DateTime<Utc>) -> Option<LimitsCreditsSpentDto> {
     let today = now.date_naive();
     if payload.get("units").and_then(Value::as_str) != Some("credits") {
@@ -79,8 +57,6 @@ pub(crate) fn parse(payload: &Value, now: DateTime<Utc>) -> Option<LimitsCredits
     let mut spent = LimitsCreditsSpentDto {
         last_7_days: 0.0,
         last_30_days: 0.0,
-        // Without a freshness time of its own, the figure is as fresh as this read. The card does not
-        // show it; it stays with the figure, and with a remembered one, as a record of its age.
         updated_at: Some(
             payload
                 .get("data_freshness_ts")
@@ -120,8 +96,6 @@ pub(crate) fn parse(payload: &Value, now: DateTime<Utc>) -> Option<LimitsCredits
     Some(spent)
 }
 
-/// What a Codex login spent lately: one GET to `url` with its access token, for its workspace,
-/// covering the 30 UTC days up to `now`. Any failure is no figure.
 pub(crate) fn read(
     token: &AccessToken,
     workspace_id: &str,
@@ -140,11 +114,8 @@ pub(crate) fn read(
     parse(&payload, now)
 }
 
-/// What each account answered lately is not kept: spending moves with every day's use, so every
-/// refresh asks, and only a failure holds the account back.
 static MEMO: PerAccount<LimitsCreditsSpentDto> = PerAccount::new(None);
 
-/// `read` for the account `access` belongs to, unless its last read failed recently.
 pub(super) fn read_backed_off(
     access: &CodexAccess,
     url: &str,

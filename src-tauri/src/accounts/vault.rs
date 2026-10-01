@@ -1,5 +1,3 @@
-//! Versioned authenticated encryption. Only the 32-byte key enters the OS credential store;
-//! large OAuth envelopes remain encrypted on disk. There is no plaintext fallback.
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305, XNonce,
@@ -48,8 +46,6 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .map_err(|_| "Cannot sync account storage.")?;
     Ok(())
 }
-/// Only the vault encryption key is retained for this app session, never native OAuth payloads.
-/// Concurrent account and subscription reads join one unlock; a denied read waits for an explicit retry.
 type KeyResult = Result<[u8; 32], String>;
 #[derive(Default)]
 struct SessionKeys(Mutex<HashMap<String, Arc<OnceLock<KeyResult>>>>);
@@ -66,7 +62,6 @@ impl SessionKeys {
             }
             Arc::clone(slot)
         };
-        // No map mutex or account-storage lease is held during the OS authorization prompt.
         slot.get_or_init(read).clone()
     }
 }
@@ -79,8 +74,6 @@ pub fn key(root: &Path, create: bool, retry: bool) -> KeyResult {
         .get_or_init(SessionKeys::default)
         .get(&scope, retry, || read_key(&scope, create))
 }
-/// A test that reaches the OS credential store has forgotten `tests::unlock_fixture` for its home;
-/// failing it here keeps the suite from reading or writing whoever runs it's real vault keys.
 #[cfg(test)]
 fn read_key(scope: &str, _create: bool) -> KeyResult {
     panic!("a test reached the OS credential store for vault scope {scope}; unlock its home with vault::tests::unlock_fixture")

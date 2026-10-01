@@ -1,8 +1,3 @@
-//! GraphQL reply → lists. Lenient by design: a node that is not PR-shaped is skipped, an enum
-//! value this version does not know collapses to the field's "nothing known" value (`None` for
-//! the review decision, `CiState::None` for the rollup, `Unknown` for the merge fields), and
-//! `errors[]` next to usable `data` are warnings rather than a failure.
-
 use std::collections::HashSet;
 
 use serde_json::Value;
@@ -12,15 +7,12 @@ use crate::dto::{
     MergeState, Mergeability, ReviewDecision, ReviewRequestKind,
 };
 
-/// The lists and viewer of one reply (`fetched_at` and `scope` are the reader's to fill in),
-/// plus any error messages GitHub attached to otherwise usable data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ParsedPrs {
     pub(super) data: GithubPrsData,
     pub(super) warnings: Vec<String>,
 }
 
-/// `Err` carries the first GraphQL error message when the reply has no usable `data`.
 pub(super) fn parse(reply: &Value) -> Result<ParsedPrs, String> {
     let warnings: Vec<String> = reply["errors"]
         .as_array()
@@ -133,7 +125,6 @@ fn merge_state(value: Option<&str>) -> MergeState {
     }
 }
 
-/// A queue entry is an object (even an empty one) while the pull request is queued.
 fn merge_queue(value: &Value) -> Option<GithubMergeQueueDto> {
     value.is_object().then(|| GithubMergeQueueDto {
         position: value["position"].as_u64(),

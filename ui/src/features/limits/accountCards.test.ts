@@ -27,7 +27,6 @@ it("does not discard current legacy observations", () => {
 });
 it.each([
   { ...scoped, windows: [] },
-  // The shape a current Codex read has when it reports no windows.
   { ...scoped, windows: [], resetCredits: { availableCount: 0, nextExpiresAt: null } },
   { ...scoped, status: "failed" as const },
   { ...scoped, account: { id: "profile:other-user", label: profile.email } },
@@ -39,9 +38,6 @@ it("counts a scoped read that carries only banked resets as an observation", () 
   const resetsOnly = { ...scoped, windows: [], resetCredits: { availableCount: 1, nextExpiresAt: null } };
   expect(accountCards([resetsOnly, legacy], [profile]).entries).toEqual([resetsOnly]);
 });
-// The Codex reader drops the windows no surface shows before a card leaves the backend, so a card
-// and the account list count the same windows: every one it carries. A window a surface once hid
-// replaces the account's history in the list, and the card shows it as remembered usage.
 it("counts every window a card carries, as the card itself does", () => {
   const onlyAWindowOnceHidden = {
     ...scoped,

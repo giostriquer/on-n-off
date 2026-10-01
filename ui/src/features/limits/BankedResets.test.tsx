@@ -97,7 +97,6 @@ describe("BankedResetsRow", () => {
       `Full reset · expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`,
       `expires in 23d 4h · ${formatShortDate("2026-09-10T00:00:00Z")}`,
     ]);
-    // The first line already says when the next one expires.
     expect(screen.queryByText(/next expires/)).toBeNull();
   });
 
@@ -122,7 +121,6 @@ describe("BankedResetsRow", () => {
     expect(screen.getByText(`expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`)).toBeTruthy();
   });
 
-  // Which counts are worth a row (none, or one past its soonest expiry) is `limitCards.test.ts`'s.
   it("stays out of the card when the card has no banked resets to show", () => {
     const { container } = render(<BankedResetsRow resetCredits={null} now={NOW} />);
     expect(container.innerHTML).toBe("");
@@ -130,7 +128,6 @@ describe("BankedResetsRow", () => {
 });
 
 describe("UseBankedReset", () => {
-  /** Uses the reset as a person does: the button, then "Use reset" in the confirmation. */
   function spendNow() {
     fireEvent.click(useReset());
     fireEvent.click(within(screen.getByRole("alertdialog", { name: "Use this reset?" })).getByRole("button", { name: "Use reset" }));
@@ -168,7 +165,6 @@ describe("UseBankedReset", () => {
     expect(consumeCodexResetCredit).not.toHaveBeenCalled();
   });
 
-  /** Codex's own rule: a reset is used only with 10% or less of the current limit left. */
   it.each([
     ["60% left", [weekly(40), session(12)], false],
     ["11% left", [weekly(89)], false],
@@ -202,7 +198,6 @@ describe("UseBankedReset", () => {
   });
 
   it("asks every time, naming the account, what is left and when the limit renews by itself", async () => {
-    // The five-hour window comes first, so the renewal read is the weekly window's, not the first one's.
     render(button({ entry: codex({ windows: [session(12), weekly(96)] }), label: "saved@codex.example" }));
 
     fireEvent.click(useReset());
@@ -258,7 +253,6 @@ describe("UseBankedReset", () => {
     await waitFor(() => expect(consumeCodexResetCredit).toHaveBeenCalledTimes(3));
 
     const [first, retry, next] = consumeCodexResetCredit.mock.calls.map((call) => call[1]);
-    // The timed-out request may already have spent the reset; reusing its key lets Codex say so.
     expect(retry).toBe(first);
     expect(next).not.toBe(first);
   });
@@ -274,10 +268,6 @@ describe("UseBankedReset", () => {
     expect(screen.queryByRole("button", { name: "Use banked reset" })).toBeNull();
   });
 
-  /**
-   * The backend refreshes the card while the attempt is in flight, so that reading is newer than the
-   * click and than the screen's `now`, and older than the answer: it must not take the message away.
-   */
   it("keeps the result through the refresh the backend reads while the attempt is in flight", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -308,7 +298,6 @@ describe("UseBankedReset", () => {
     expect(screen.getByRole("status").textContent).toBe("Banked reset used.");
   });
 
-  /** A window read `seconds` from now: a reading made after the attempt's answer came back. */
   function readLater(usedPercent: number, seconds = 60): LimitWindow {
     return { ...weekly(usedPercent), observedAt: new Date(Date.now() + seconds * 1000).toISOString() };
   }
@@ -318,7 +307,6 @@ describe("UseBankedReset", () => {
     spendNow();
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Banked reset used."));
 
-    // A reset granted since: the card offers it, and says nothing of the one already spent.
     rerender(button({ entry: codex({ windows: [readLater(92)], resetCredits: { availableCount: 1, nextExpiresAt: "2026-08-29T15:00:00Z" } }) }));
 
     expect(screen.queryByRole("status")).toBeNull();

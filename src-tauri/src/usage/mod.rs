@@ -1,5 +1,3 @@
-//! Usage scan: local Claude / Codex transcript analytics.
-
 mod aggregate;
 pub(crate) mod cache_io;
 mod folding;

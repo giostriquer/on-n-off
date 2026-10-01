@@ -1,9 +1,5 @@
-//! The signed-in account's card as Claude Code reports it for the user's own config dir
-//! (`read_signed_in`): the account `.claude.json` names, before and after the read, and what the
-//! card says when there is no report.
 use super::*;
 
-/// The signed-in card from a stand-in `claude` built in `dir`.
 fn signed_in(dir: &tempfile::TempDir, cli: &AgentCli) -> ProviderLimitsDto {
     read_signed_in_within(
         &|| cli.command(),
@@ -21,7 +17,6 @@ fn a_report_reads_as_the_signed_in_card_of_the_account_the_config_dir_names() {
 
     assert_eq!(card.status, LimitsStatus::Ok);
     assert!(card.current_account);
-    // Known by its scoped key, as its saved profile's card is, so the two are one card.
     let account = card.account.expect("the signed-in account");
     assert_eq!(account.id, identity().observation_key());
     assert_eq!(account.legacy_id.as_deref(), Some("user"));
@@ -111,8 +106,6 @@ fn no_report_from_a_config_dir_still_signed_in_is_a_failed_read() {
     );
 }
 
-/// A report with no window Claude Code's reader knows is no reading: the card fails, and shows
-/// what it remembers, rather than an account with no windows.
 #[test]
 fn a_report_with_no_readable_window_is_a_failed_read() {
     let output = r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"lunar","group":"lunar","percent":1}]}}}"#;
@@ -127,8 +120,6 @@ fn a_report_with_no_readable_window_is_a_failed_read() {
     );
 }
 
-/// The account `.claude.json` names must be the same one after the read, user and organization
-/// alike: one that changed, appeared or went while Claude Code ran is not shown.
 #[test]
 fn a_report_after_which_the_config_dir_names_another_account_is_not_shown() {
     let empty = "{}".to_string();
@@ -161,7 +152,6 @@ fn a_report_after_which_the_config_dir_names_another_account_is_not_shown() {
     }
 }
 
-/// A config dir that names no account, before and after, is read as the one default account.
 #[test]
 fn a_config_dir_naming_no_account_reads_as_the_default_account() {
     let (dir, cli) = home("{}", REPORT, CliStub::new("claude"));
@@ -188,7 +178,6 @@ fn a_claude_code_too_old_to_leave_customizations_out_asks_for_an_update() {
 
     assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(card.message.as_deref(), Some(OUTDATED));
-    // Asked once, with the flag, and never again without it.
     let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
     let runs: Vec<&str> = args.lines().collect();
     assert_eq!(runs.len(), 1, "{args}");
@@ -213,8 +202,6 @@ fn another_unknown_option_is_not_read_as_an_outdated_claude_code() {
     );
 }
 
-/// Claude Code's usage report also scans every transcript its config dir kept this week. Read in a
-/// config dir that holds none, signed in from the user's store, it needs nothing from the user's.
 #[test]
 fn a_report_from_a_config_dir_without_history_needs_nothing_from_the_users() {
     let (dir, users) = home(
@@ -239,9 +226,6 @@ fn a_report_from_a_config_dir_without_history_needs_nothing_from_the_users() {
     );
 }
 
-/// A Claude Code that does not know `CLAUDE_SECURESTORAGE_CONFIG_DIR` looks for the login in the
-/// config dir without history, finds none and says it is signed out: the user's own config dir
-/// answers instead.
 #[test]
 fn a_claude_code_signed_out_in_a_config_dir_without_history_is_read_in_the_users() {
     let (dir, users) = home(&config("user", "team"), REPORT, CliStub::new("claude"));
@@ -263,8 +247,6 @@ fn a_claude_code_signed_out_in_a_config_dir_without_history_is_read_in_the_users
     assert_eq!(card.reading.windows.len(), 3);
 }
 
-/// Any other failure there is the read's own: the user's config dir, whose report scans the week's
-/// transcripts, is not asked as well.
 #[test]
 fn a_read_that_fails_in_a_config_dir_without_history_is_not_read_again_in_the_users() {
     let (dir, users) = home(

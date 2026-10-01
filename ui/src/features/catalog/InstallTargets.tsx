@@ -5,7 +5,6 @@ import type { AgentId, AgentInfo, ItemScope, ProjectDto } from "$lib/types";
 
 const LABEL = "text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)]";
 
-/** Which providers receive the items. */
 export function ProviderChips({
   visibleAgents,
   providers,
@@ -39,7 +38,6 @@ export function ProviderChips({
   );
 }
 
-/** Global vs. one project, with the resolved skill folder per provider underneath. */
 export function ScopePicker({
   scope,
   onChange,

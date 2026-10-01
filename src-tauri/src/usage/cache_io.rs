@@ -1,5 +1,3 @@
-//! Best-effort durable writes for derived Usage caches.
-
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

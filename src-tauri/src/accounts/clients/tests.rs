@@ -13,7 +13,6 @@ fn child(pid: &str, parent: &str, executable: &str, args: &str) -> Process {
     }
 }
 
-/// How the provider's adapter tells its clients apart.
 fn client(provider: AgentId) -> &'static Client {
     super::super::adapter(provider).unwrap().client()
 }
@@ -243,7 +242,6 @@ fn only_the_prompt_leaves_out_the_clients_on_n_off_started_itself() {
         blockers(client(AgentId::Codex), || Ok(processes()), Some("99")),
         Ok(Vec::new())
     );
-    // A reused pid can make a real client look like on-n-off's child, so gates never exclude.
     assert_eq!(
         running_clients(client(AgentId::Codex), || Ok(processes()), None),
         Ok(vec!["on-n-off (codex)".to_owned()])

@@ -7,8 +7,6 @@ use std::{
 };
 
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
-/// Moves on every save, so a snapshot in flight from before the save is discarded rather than
-/// drawn: the same mechanism the shared provider reads use, see [`Revision`].
 static REVISION: Revision = Revision::new();
 
 pub fn revision() -> u64 {

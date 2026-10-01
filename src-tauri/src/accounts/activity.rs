@@ -1,6 +1,3 @@
-//! Excludes native account mutation from in-process provider reads without holding a mutex
-//! across network I/O. Shared/exclusive file leases also exclude other app processes; the
-//! separate vault lease serializes protected database publication.
 use super::PROVIDERS;
 use crate::{dto::AgentId, file_lease::FileLease};
 use std::sync::{
@@ -10,7 +7,6 @@ use std::sync::{
 static ACTIVITY: Mutex<[usize; PROVIDERS.len()]> = Mutex::new([0; PROVIDERS.len()]);
 static SWITCHING: [AtomicBool; PROVIDERS.len()] =
     [const { AtomicBool::new(false) }; PROVIDERS.len()];
-/// The provider's slot; `None` for a provider without saved profiles, whose reads nothing excludes.
 fn index(provider: AgentId) -> Option<usize> {
     PROVIDERS.iter().position(|p| *p == provider)
 }
@@ -62,7 +58,6 @@ impl Drop for Change {
     }
 }
 
-/// Separate from the protected vault lease: ordinary reads must not unlock the vault.
 fn lease(home: &std::path::Path, provider: usize, exclusive: bool) -> Result<FileLease, String> {
     let root = home.join(".on-n-off/accounts");
     std::fs::create_dir_all(&root).map_err(|_| "Cannot coordinate native account access.")?;

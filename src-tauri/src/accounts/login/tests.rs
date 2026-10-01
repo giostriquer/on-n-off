@@ -127,7 +127,6 @@ use super::super::{
     transaction::Recovery,
 };
 
-/// A scratch home whose vault is unlocked by the fixture key.
 fn vault_home() -> tempfile::TempDir {
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(home.path().join(".on-n-off/accounts")).unwrap();
@@ -148,7 +147,6 @@ fn finished(user: &str) -> PreparedLogin {
 fn saved(home: &std::path::Path) -> Database {
     Store::open_existing(home).unwrap().load().unwrap()
 }
-/// Change the vault the way another account operation would, meanwhile.
 fn meanwhile(home: &std::path::Path, kind: ChangeKind<'_>, edit: impl FnOnce(&mut Database)) {
     Store::open(home, false)
         .unwrap()

@@ -44,9 +44,6 @@ fn normalize_skill_path_unifies_slash_and_skill_md() {
     );
 }
 
-/// Every agent home and on-n-off's own data sit under the user home, so a test build that
-/// resolved one would let a test read, or write, a developer's real `~/.claude`, `~/.codex` or
-/// `~/.on-n-off`. It must resolve none, whatever the process environment says.
 #[test]
 fn a_test_build_resolves_no_user_home() {
     assert!(user_home().is_err(), "a test build resolved a user home");
@@ -74,8 +71,6 @@ fn a_test_build_resolves_no_user_home() {
     }
 }
 
-/// Outside a test build `ON_N_OFF_HOME` wins, then `USERPROFILE`, then `HOME`, and with none of
-/// them there is no home.
 #[test]
 fn a_running_app_takes_its_home_from_on_n_off_home_then_userprofile_then_home() {
     type Environment = &'static [(&'static str, &'static str)];
@@ -106,14 +101,8 @@ fn a_running_app_takes_its_home_from_on_n_off_home_then_userprofile_then_home() 
     }
 }
 
-/// Only this module resolves the user home. Reading the process's `HOME` or `USERPROFILE`, or
-/// calling a `home_dir` function, anywhere else would reach a developer's real home from a test
-/// build, where [`user_home`] has none.
 #[test]
 fn only_the_paths_module_reads_the_process_home() {
-    // Where another file may name those variables, and why. An entry allows exactly the lines it
-    // lists, compared trimmed, so any other line in the same file that names them still fails,
-    // and so does an entry whose line is gone.
     const ALLOWED: [(&str, &str, &[&str]); 2] = [
         (
             "accounts/claude.rs",

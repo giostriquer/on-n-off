@@ -11,7 +11,6 @@ const unread: SavedProfile = {
   email: "unread@codex.example", label: "unread@codex.example", category: "Client B", savedAt: NOW, active: false, needsLogin: false, archived: true,
 };
 
-/** A history card and a profile-only card, both archived, beside the signed-in account. */
 function archived(): LimitCard[] {
   const column = limitColumn({
     provider: "codex",
@@ -131,7 +130,6 @@ describe("the archived accounts list", () => {
   });
 });
 
-/** The list below a stand-in for the column's first card, which is where focus goes once no row can take it. */
 function Column({ cards, onUnarchive = vi.fn().mockResolvedValue(undefined), onRemove = vi.fn().mockResolvedValue(undefined) }: {
   cards: LimitCard[]; onUnarchive?: (account: CardAccount) => Promise<void>; onRemove?: (account: CardAccount) => Promise<void>;
 }) {

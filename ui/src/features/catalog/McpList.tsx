@@ -13,7 +13,6 @@ type McpListProps = {
   servers: McpServerDto[];
   filterQuery?: string;
   busy?: boolean;
-  /** Shown under the header when this provider's servers can only be listed, not switched. */
   notice?: string;
   onToggle: (server: McpServerDto, enabled: boolean) => void;
 };
@@ -116,7 +115,6 @@ export function McpList({ tab, servers: pool, filterQuery = "", busy = false, no
   );
 }
 
-/** The badge for a server that is not the user's own; none for one that is. */
 const ORIGIN_BADGE: Record<McpOrigin, string | null> = {
   "": null,
   project: "PROJECT",
@@ -124,10 +122,6 @@ const ORIGIN_BADGE: Record<McpOrigin, string | null> = {
   local: "PER-PROJECT",
 };
 
-/**
- * The line saying where a read-only server comes from: the plugin that brings it (by its name
- * where the plugin is listed), or the projects keeping it, all named in the tooltip.
- */
 function fromLine(server: McpServerDto, plugins: PluginDto[]): { text: string; title: string } | null {
   if (server.pluginId) {
     const name = plugins.find((plugin) => plugin.id === server.pluginId)?.name ?? server.pluginId;

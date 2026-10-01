@@ -6,7 +6,6 @@ fn sample_record() -> UsageRecord {
         timestamp_ms: 1_000,
         model: "claude-fable-5".into(),
         session_id: "session-a".into(),
-        // Every field distinct, so a column swapped in the row format cannot round-trip.
         totals: TokenTotals {
             uncached_input_tokens: 1,
             cached_input_tokens: 2,

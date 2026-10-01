@@ -1,17 +1,9 @@
-//! Desktop notifications. Windows goes through the notification plugin (a toast). macOS is
-//! split: the bundled app asks for permission and posts through `UserNotifications`, the
-//! framework every app is expected to use since 10.14 — an app that has registered with it
-//! (which asking for permission does) no longer gets the deprecated `NSUserNotification` path
-//! the plugin uses delivered, and only this path can ask for sound. An unbundled dev build has
-//! no bundle for `UserNotifications` to attach to and keeps the plugin.
-
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 
 use crate::dto::AdapterError;
 
 pub async fn request_permission(app: AppHandle) -> Result<bool, AdapterError> {
-    // The center handle is not `Send`, so the request is fired before anything is awaited.
     #[cfg(target_os = "macos")]
     let answer = macos::center().map(|center| macos::request_authorization(&center));
     #[cfg(target_os = "macos")]
@@ -42,10 +34,6 @@ fn request_permission_through_plugin(app: &AppHandle) -> Result<bool, AdapterErr
     }
 }
 
-/// Ask again at startup while a notification setting is on. macOS only offers the sound
-/// controls once an app has asked for sound, and an authorization already given is refreshed
-/// without a prompt, so a login that dates from when the app asked for alerts alone gains the
-/// "play sound" switch the first time this version runs.
 #[cfg(target_os = "macos")]
 pub fn refresh_authorization(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -62,22 +50,14 @@ pub fn refresh_authorization(app: AppHandle) {
     });
 }
 
-/// The sound a notification arrives with. Every notification plays one, so the OS's own
-/// per-app "play sound" switch stays the single place to silence them; the two named ones let
-/// a monitor mark news worth telling apart without looking (what each means is its call).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sound {
-    /// The platform's default notification sound.
     Default,
-    /// Something turned out well.
     Success,
-    /// Something is finished.
     Done,
 }
 
 impl Sound {
-    /// The name the notification plugin expects: one of the toast `ms-winsoundevent` names on
-    /// Windows, an `NSUserNotification` sound name on a macOS dev build.
     #[cfg(target_os = "macos")]
     fn plugin_name(self) -> &'static str {
         match self {
@@ -96,7 +76,6 @@ impl Sound {
         }
     }
 
-    /// The system sound file `UserNotifications` plays, `None` for its default sound.
     #[cfg(target_os = "macos")]
     fn file_name(self) -> Option<&'static str> {
         match self {
@@ -107,8 +86,6 @@ impl Sound {
     }
 }
 
-/// On a bundled macOS app the result only says the request was handed to the framework, which
-/// decides later and off-thread; a refusal is logged there, never returned.
 pub fn show(
     app: &AppHandle,
     title: String,
@@ -144,15 +121,11 @@ mod macos {
 
     use super::{authorization_result, Sound};
 
-    /// The framework's notification center, or `None` when this process has no bundle
-    /// identifier (an unbundled dev build): asking for the center there raises an Objective-C
-    /// exception that kills the process, so the callers fall back to the plugin instead.
     pub(super) fn center() -> Option<Retained<UNUserNotificationCenter>> {
         NSBundle::mainBundle().bundleIdentifier()?;
         Some(UNUserNotificationCenter::currentNotificationCenter())
     }
 
-    /// Ask for alerts and sound; the framework's answer arrives on the returned channel.
     pub(super) fn request_authorization(
         center: &UNUserNotificationCenter,
     ) -> Receiver<Result<bool, String>> {
@@ -170,7 +143,6 @@ mod macos {
         receiver
     }
 
-    /// Hand a notification to the framework; it decides later, on its own queue.
     pub(super) fn post(center: &UNUserNotificationCenter, title: &str, body: &str, sound: Sound) {
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(title));
@@ -186,8 +158,6 @@ mod macos {
             &content,
             None,
         );
-        // Reading the error would need `unsafe`, which this crate forbids; its presence is
-        // the useful part (the app is not allowed to notify, or the framework is unavailable).
         let completion: RcBlock<dyn Fn(*mut NSError)> = RcBlock::new(|error: *mut NSError| {
             if !error.is_null() {
                 eprintln!("macOS refused a notification");

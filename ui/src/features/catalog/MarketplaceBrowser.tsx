@@ -30,7 +30,6 @@ import type {
 } from "$lib/types";
 import { ProviderChips, ScopePicker } from "./InstallTargets";
 
-/** Everything the user chooses in the marketplace step, owned by `MarketplaceInstall`. */
 export type MarketplaceSelection = SelectionState & {
   action: MarketplaceAction;
   filter: string;
@@ -232,7 +231,6 @@ function PluginGroup({
   );
 }
 
-/** What "Install everything" selects from one plugin. */
 function allKeysOf(plugin: MarketplacePlugin, canAgents: boolean): string[] {
   return [...groupKeys(plugin, "skill"), ...(canAgents ? groupKeys(plugin, "agent") : [])];
 }
@@ -253,7 +251,6 @@ function extrasList(extras: PluginExtra[]): string {
   return joinNames(extras.map(label));
 }
 
-/** `a`, `a and b`, `a, b and c`. */
 function joinNames(names: string[]): string {
   if (names.length <= 1) {
     return names.join("");
@@ -379,7 +376,6 @@ function EntryList({
   );
 }
 
-/** `needs: a, b, c` — high in normal ink, medium muted; gaps flagged, medium gaps addable. */
 function DependencyLine({
   deps,
   selected,

@@ -306,12 +306,6 @@ function hook(overrides: Partial<HookDto>): HookDto {
   };
 }
 
-/**
- * The backend's own order: source, then event, then the order the file lists them in. The two
- * `settings.json` PreToolUse rows are the trap — "Write" sorts before "Bash" only because the
- * file says so, and `:10:` sorts before `:2:` only as a string — so any tiebreak beyond source
- * and event reorders them.
- */
 const hooks: HookDto[] = [
   hook({ id: ":settings.json:pre_tool_use:2:0", matcher: "Write" }),
   hook({ id: ":settings.json:pre_tool_use:10:0", matcher: "Bash" }),
@@ -395,7 +389,6 @@ describe("catalog MCP sources", () => {
     ]);
   });
 
-  // A plugin's skills and hooks are not counted apart from the plugin; its servers are not either.
   it("counts only the user's own servers as global items", () => {
     expect(globalItemCount({ ...emptyTabDto(), mcpServers: [own, plugin, local, project] })).toBe(1);
   });

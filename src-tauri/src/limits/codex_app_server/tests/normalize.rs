@@ -1,6 +1,3 @@
-//! The card an app-server read becomes: which account it is, confirmed against the native login
-//! before and after the read, and the access projection that confirmation hands the backend reads.
-
 use super::*;
 
 #[test]
@@ -175,7 +172,6 @@ fn rejects_native_identity_changes_during_an_app_server_read() {
     }
 }
 
-/// A session for `plan` whose native login holds an access token.
 fn signed_in_on(plan: &str, name: &str) -> (AppServerResult, Option<(String, Value)>) {
     let codex_home = business_home(name).join(".codex");
     let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
@@ -190,8 +186,6 @@ fn signed_in_on(plan: &str, name: &str) -> (AppServerResult, Option<(String, Val
     (session, before)
 }
 
-/// The identity check after the handshake reads the native store once, and for a workspace plan
-/// that one read also yields the login's access projection, so spending costs no read of its own.
 #[test]
 fn a_workspace_plan_takes_its_access_from_the_identity_check() {
     let (session, before) = signed_in_on("business", "codex-app-server-access");
@@ -220,7 +214,6 @@ fn a_personal_plan_takes_the_access_projection_too_for_the_term_read() {
     assert_eq!(parsed.account.unwrap().id, "acct-1");
 }
 
-/// The account's plan outranks the rate-limit bucket's.
 #[test]
 fn the_accounts_plan_decides_the_card() {
     let codex_home = business_home("codex-app-server-plan-precedence").join(".codex");

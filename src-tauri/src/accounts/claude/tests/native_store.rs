@@ -1,6 +1,3 @@
-//! The account switch's view of Claude Code's native store: where it resolves, what it reads and
-//! writes, its locks, its verification, its preflight and the `claude` it starts.
-
 use super::*;
 
 #[test]
@@ -77,8 +74,6 @@ fn isolated_claude_sign_in_keeps_the_os_home_for_keychain_lookup() {
     assert_ne!(native.service(), "Claude Code-credentials");
 }
 
-/// A signed-in store under `root` naming you@example.com in `org-a`, and a stand-in `claude` whose
-/// `auth status` prints `status` and exits with `exit`.
 fn verified(root: &Path, status: &str, exit: i32) -> (ClaudeNative, PathBuf) {
     let native = claude(root);
     fs::write(
@@ -102,8 +97,6 @@ fn verified(root: &Path, status: &str, exit: i32) -> (ClaudeNative, PathBuf) {
     (native, stub)
 }
 
-/// Verification asks Claude Code what it has stored, and nothing of Anthropic: a login signed in
-/// to the organization and as the email its account names passes.
 #[test]
 fn verification_asks_claude_code_which_account_it_is_signed_in_to() {
     let root = tempfile::tempdir().unwrap();
@@ -117,12 +110,10 @@ fn verification_asks_claude_code_which_account_it_is_signed_in_to() {
 
     let args = fs::read_to_string(root.path().join("bin").join("args.txt")).unwrap();
     assert_eq!(args.trim(), "auth status --json");
-    // Asked of the store being verified, not whichever one the app's own environment names.
     let config_dir = fs::read_to_string(root.path().join("bin").join("config-dir.txt")).unwrap();
     assert_eq!(Path::new(config_dir.trim()), native.config_home.as_path());
 }
 
-/// A status that does not say the login is signed in does not verify it.
 #[test]
 fn verification_refuses_a_status_that_does_not_say_signed_in() {
     let root = tempfile::tempdir().unwrap();
@@ -140,7 +131,6 @@ fn verification_refuses_a_status_that_does_not_say_signed_in() {
     );
 }
 
-/// A login Claude Code rotated while it was asked is not the one verified: the change is retried.
 #[test]
 fn verification_refuses_a_login_that_changed_while_claude_code_was_asked() {
     let root = tempfile::tempdir().unwrap();
@@ -192,7 +182,6 @@ fn verification_refuses_a_login_claude_code_reads_as_another_organization_or_ema
     }
 }
 
-/// Claude Code answers a signed-out status with exit status 1.
 #[test]
 fn verification_refuses_a_login_claude_code_reads_as_signed_out() {
     let root = tempfile::tempdir().unwrap();
@@ -219,8 +208,6 @@ fn verification_refuses_when_claude_code_cannot_say_who_is_signed_in() {
     );
 }
 
-/// The account an older Claude Code left in `.config.json` is the one verified, even beside a
-/// `.claude.json` that names another.
 #[test]
 fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
     for (org, verifies) in [("team", true), ("other", false)] {
@@ -248,9 +235,6 @@ fn legacy_identity_is_canonical_even_when_the_other_config_disagrees() {
     }
 }
 
-/// Whatever the developer running the suite has exported, a store resolved in a test lives in
-/// the test's own home and never chooses the login Keychain: `resolve` reads the test
-/// environment, not `CLAUDE_CONFIG_DIR` or whatever a sibling test did to `ON_N_OFF_HOME`.
 #[test]
 fn a_test_resolves_the_claude_store_inside_its_own_home_whatever_the_machine_exports() {
     let root = tempfile::tempdir().unwrap();
@@ -291,7 +275,6 @@ fn a_disposable_home_ignores_claude_config_dir_and_the_keychain() {
     assert!(!store.use_keychain);
 }
 
-/// A linked configuration file is the official client's to change.
 #[cfg(unix)]
 #[test]
 fn account_changes_refuse_a_linked_claude_configuration_file() {
@@ -306,9 +289,6 @@ fn account_changes_refuse_a_linked_claude_configuration_file() {
     );
 }
 
-/// The account switch's read of a store that has no Keychain to consult, for each thing the
-/// credentials file can hold. A login needs an access token: Claude Code signs out by emptying
-/// `claudeAiOauth`, so an emptied one is no login, as it is for Limits.
 #[test]
 fn the_native_claude_read_of_the_credentials_file() {
     let root = tempfile::tempdir().unwrap();
@@ -350,8 +330,6 @@ fn the_native_claude_read_of_the_credentials_file() {
     );
 }
 
-/// Claude Code's refresh lock, its legacy lock beside the config home, and the config file's lock,
-/// in the order they are taken.
 fn native_lock_paths(native: &ClaudeNative) -> [PathBuf; 3] {
     let mut legacy = native.config_home.as_os_str().to_owned();
     legacy.push(".lock");
@@ -369,7 +347,6 @@ fn backdate(path: &Path, seconds: u64) {
     filetime::set_file_mtime(path, filetime::FileTime::from_system_time(then)).unwrap();
 }
 
-/// Polls `done` for up to ten seconds, well past two heartbeats.
 fn eventually(what: &str, done: impl Fn() -> bool) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while !done() {
@@ -395,7 +372,6 @@ fn any_one_held_native_lock_refuses_and_leaves_none_of_the_others_taken() {
     }
 }
 
-/// Claude Code abandons its refresh locks after a minute and the config file's after ten seconds.
 #[test]
 fn a_native_lock_left_behind_is_broken_only_once_stale_for_its_kind() {
     for (held, age, broken) in [
@@ -417,7 +393,6 @@ fn a_native_lock_left_behind_is_broken_only_once_stale_for_its_kind() {
     }
 }
 
-/// While held, every lock is touched often enough that Claude Code never judges it abandoned.
 #[test]
 fn held_native_locks_are_kept_fresh_and_released_on_drop() {
     let root = tempfile::tempdir().unwrap();
@@ -440,8 +415,6 @@ fn held_native_locks_are_kept_fresh_and_released_on_drop() {
     assert!(paths.iter().all(|path| !path.exists()));
 }
 
-/// A lock another process broke means the write is no longer coordinated with Claude Code, so it
-/// must not happen.
 #[test]
 fn a_native_lock_broken_under_the_holder_stops_the_write() {
     let root = tempfile::tempdir().unwrap();
@@ -469,8 +442,6 @@ fn a_native_lock_broken_under_the_holder_stops_the_write() {
     assert!(!native.config_file.exists());
 }
 
-/// Claude Code takes `.storage-write.lock` around every change to its credentials. While another
-/// process holds it, the switch writes neither half.
 #[test]
 fn a_switch_yields_while_claude_code_writes_its_credentials() {
     let root = tempfile::tempdir().unwrap();
@@ -493,7 +464,6 @@ fn a_switch_yields_while_claude_code_writes_its_credentials() {
     assert!(!lock.exists(), "released once the write is done");
 }
 
-/// A credentials file that is a link is refused before either half of the switch is written.
 #[cfg(unix)]
 #[test]
 fn a_switch_refuses_a_linked_credentials_file_before_writing_anything() {
@@ -515,8 +485,6 @@ fn a_switch_refuses_a_linked_credentials_file_before_writing_anything() {
     assert!(!native.config_file.exists(), "the identity was not patched");
 }
 
-/// A credentials file that cannot be read is an error, never a missing login, and the switch
-/// writes nothing over it.
 #[test]
 fn an_unreadable_credentials_file_is_an_error_and_nothing_is_written() {
     let root = tempfile::tempdir().unwrap();
@@ -534,8 +502,6 @@ fn an_unreadable_credentials_file_is_an_error_and_nothing_is_written() {
     assert!(!native.config_file.exists(), "the identity was not patched");
 }
 
-/// Only a lock another process holds is worth waiting on. One that cannot be created at all is
-/// reported for what it is, not as Claude being busy.
 #[test]
 fn a_native_lock_that_cannot_be_created_says_why_instead_of_busy() {
     let root = tempfile::tempdir().unwrap();
@@ -552,7 +518,6 @@ fn a_native_lock_that_cannot_be_created_says_why_instead_of_busy() {
     assert_ne!(refused, BUSY);
 }
 
-/// A storage-write lock that cannot be created is reported as that lock, not as a bare I/O error.
 #[test]
 fn a_storage_lock_that_cannot_be_created_is_named_in_the_error() {
     let root = tempfile::tempdir().unwrap();
@@ -571,7 +536,6 @@ fn a_storage_lock_that_cannot_be_created_is_named_in_the_error() {
     );
 }
 
-/// Claude settings that force a login method or organization are managed authentication.
 #[test]
 fn account_changes_refuse_claude_settings_that_force_how_it_signs_in() {
     const MANAGED: &str =
@@ -591,8 +555,6 @@ fn account_changes_refuse_claude_settings_that_force_how_it_signs_in() {
     }
 }
 
-/// A `claude` started for the user's own default store inherits no config dir and no secure
-/// storage dir, and keeps the OS home, so it works where Claude Code itself would.
 #[test]
 fn a_claude_command_for_the_default_store_inherits_no_store_of_its_own() {
     let root = tempfile::tempdir().unwrap();
@@ -608,7 +570,6 @@ fn a_claude_command_for_the_default_store_inherits_no_store_of_its_own() {
     );
 }
 
-/// A file-backed store gets a disposable OS home beside its config dir, `USERPROFILE` included.
 #[test]
 fn a_file_backed_claude_command_gets_a_disposable_os_home() {
     let root = tempfile::tempdir().unwrap();
@@ -624,8 +585,6 @@ fn a_file_backed_claude_command_gets_a_disposable_os_home() {
     assert_eq!(env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR"), Some(&None));
 }
 
-/// A store `CLAUDE_CONFIG_DIR` chose hands that dir to the `claude` it starts, and keeps the user's
-/// own OS home on every platform: it is the user's own store, whose usage read runs there.
 #[test]
 fn a_claude_command_for_a_chosen_config_dir_is_handed_that_dir() {
     let root = tempfile::tempdir().unwrap();
@@ -640,8 +599,6 @@ fn a_claude_command_for_a_chosen_config_dir_is_handed_that_dir() {
     assert!(!env.contains_key("HOME") && !env.contains_key("USERPROFILE"));
 }
 
-/// A private store, an isolated sign-in's or a saved account's home, is handed a disposable OS home
-/// off macOS; on macOS it keeps the OS home, where the login Keychain is found through it.
 #[test]
 fn a_claude_command_for_a_private_store_is_handed_its_own_os_home_off_macos() {
     let root = tempfile::tempdir().unwrap();
@@ -651,8 +608,6 @@ fn a_claude_command_for_a_private_store_is_handed_its_own_os_home_off_macos() {
     assert_eq!(env.get("HOME").cloned(), home);
 }
 
-/// A credential in Claude Code's environment overrides its own login, so account changes defer to
-/// the official client while one is set.
 #[test]
 fn account_changes_refuse_a_claude_credential_in_the_environment() {
     const OVERRIDDEN: &str = "An environment credential overrides native login. Remove the override before using saved profiles.";
@@ -682,8 +637,6 @@ fn account_changes_refuse_a_claude_credential_in_the_environment() {
     );
 }
 
-/// An administrator's managed settings that force how Claude signs in are managed authentication
-/// too, and unreadable ones are not taken as permission.
 #[test]
 fn account_changes_refuse_managed_claude_settings_that_force_how_it_signs_in() {
     let root = tempfile::tempdir().unwrap();
@@ -704,7 +657,6 @@ fn account_changes_refuse_managed_claude_settings_that_force_how_it_signs_in() {
     }
 }
 
-/// What a command runs its program with.
 fn args(command: &Command) -> Vec<String> {
     command
         .get_args()
@@ -712,8 +664,6 @@ fn args(command: &Command) -> Vec<String> {
         .collect()
 }
 
-/// The official client signs in with its claude.ai login and signs out with its own command, both
-/// in the store they are started for.
 #[test]
 fn claude_signs_in_and_out_through_its_own_auth_commands() {
     let root = tempfile::tempdir().unwrap();

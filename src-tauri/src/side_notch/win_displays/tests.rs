@@ -36,7 +36,7 @@ fn physical_pixels_become_points_at_the_monitor_scale() {
 fn a_work_area_that_excludes_the_taskbar_survives_the_point_conversion() {
     let mut monitor = raw("\\\\.\\DISPLAY1", 0, 0, 2560, 1440, 120);
     monitor.work_y = 0;
-    monitor.work_height = 1392; // taskbar takes 48 physical pixels
+    monitor.work_height = 1392;
     let display = to_display(&monitor, "id", "name");
     assert_eq!(display.scale, 1.25);
     assert_eq!(display.work_height, 1113.6);
@@ -57,8 +57,6 @@ fn two_active_monitors_sharing_a_desktop_rect_are_mirrored() {
 
 #[test]
 fn a_cloned_gdi_source_marks_every_reported_display_mirrored() {
-    // Duplicate mode enumerates ONE GDI monitor; the topology shows two active paths
-    // sharing the same source.
     let cloned = [raw("\\\\.\\DISPLAY1", 0, 0, 1920, 1080, 96)];
     let mut displays = vec![to_display(&cloned[0], "a", "A")];
     let duplicated = paths_duplicated(&[(1, 2, 0), (1, 2, 0)]);

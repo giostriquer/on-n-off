@@ -21,7 +21,6 @@ fn metrics_mirror_the_notchcore_constants_at_standard_size() {
 #[test]
 fn fractional_presets_snap_to_the_display_pixel_grid() {
     let metric_set = metrics(NotchSize::Compact, 1.5, Edge::Right);
-    // 76 pt * 0.875 = 66.5 pt; snapped to a whole number of 1.5x device pixels.
     assert_eq!(metric_set.thickness, 100.0 / 1.5);
     let snapped = value(10.25, 1.0, 1.0);
     assert_eq!(snapped, 10.0, "1x displays snap to whole pixels");
@@ -144,8 +143,6 @@ fn the_popover_unions_with_the_rail_and_places_zones() {
         "the window widens past the rail: {}",
         popover.rect.w
     );
-    // The window (display coords) is the union of the 76 pt rail and the 280 pt popover
-    // (272 card + 8 tail) with the 2 pt gap; the popover hugs the window's start.
     assert_eq!(planned.window.w, 76.0 + 280.0 + 2.0);
     assert_eq!(
         popover.rect.x, 0.0,
@@ -238,16 +235,12 @@ fn pull_request_popovers_carry_open_copy_and_footer_zones() {
             .count(),
         1
     );
-    // The badges show approved and ready-to-merge wording.
     assert!(popover.entries.iter().any(
         |(item, _)| matches!(item, PopItem::Text { text, color, .. } if text == "Approved" && *color == LIVE_GREEN)
     ));
 }
 #[test]
 fn the_popover_tail_points_at_its_own_cell() {
-    // A full rail, with the last cell's popover clamped against the work area: the
-    // card then starts below the window's top, so a tail measured from the card but
-    // drawn from the window lands too high.
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells: Vec<CellData> = (0..5)
         .map(|index| {
@@ -281,7 +274,6 @@ fn the_popover_tail_points_at_its_own_cell() {
         popover.card.y
     );
     let pixmap = render(&planned);
-    // Two pixels into the tail, past the card's edge.
     let x = (popover.card.x + popover.card.w + 2.0).round() as u32;
     let rows: Vec<u32> = (0..pixmap.height())
         .filter(|y| pixmap.pixel(x, *y).is_some_and(|px| px.alpha() > 0))
@@ -296,8 +288,6 @@ fn the_popover_tail_points_at_its_own_cell() {
 }
 #[test]
 fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
-    // Zones and entries come out of the same walk in card coordinates; only entries
-    // used to be moved onto the card, so every popover affordance was inert.
     let pulls = PrCellData {
         status: GithubStatus::Ok,
         hint: None,
@@ -319,8 +309,6 @@ fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
         }],
     };
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    // The pull-request cell is last, so its popover is centred low and the card no
-    // longer starts at the window's top edge.
     let cells = vec![
         CellData::Provider(session_only(AgentId::Claude, 42.0)),
         CellData::Provider(session_only(AgentId::Codex, 42.0)),

@@ -1,5 +1,3 @@
-//! The duplicate-descriptor tests are Unix only: a duplicate shares the lock only where locks
-//! belong to the open file description, and Windows opens handles that a child cannot inherit.
 use super::FileLease;
 use std::{fs::File, path::Path};
 

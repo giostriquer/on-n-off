@@ -1,12 +1,8 @@
-//! Saved Claude accounts kept in their homes (`accounts::homes`): each login lives in one store at
-//! a time, the signed-in account's in Claude Code's own and every other one in its home, where
-//! Claude Code renews it.
 use super::super::{store::Store, usage::FetchResult, usage_renew::Renewals, Activation};
 use super::fixture::{claude, claude_in, identity, weekly_reading, Harness};
 use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
 use std::sync::Mutex;
 
-/// Two saved Claude accounts, `a` signed in with a newer login than the one saved, `b` not.
 fn two_accounts(harness: &Harness) -> (String, String) {
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
     let b = harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
@@ -14,8 +10,6 @@ fn two_accounts(harness: &Harness) -> (String, String) {
     (a, b)
 }
 
-/// A read of the saved Claude accounts, as Limits makes one: its cards, and the profiles read with
-/// a login still in the vault.
 fn read_all(harness: &Harness) -> (Vec<ProviderLimitsDto>, Vec<String>) {
     let fetched = Mutex::new(Vec::new());
     let mut entries = Vec::new();
@@ -31,7 +25,6 @@ fn read_all(harness: &Harness) -> (Vec<ProviderLimitsDto>, Vec<String>) {
     (entries, fetched.into_inner().unwrap())
 }
 
-/// A read in which every saved login that belongs in a home is in one by the time it is read.
 fn read(harness: &Harness) -> Vec<ProviderLimitsDto> {
     let (cards, fetched) = read_all(harness);
     assert!(fetched.is_empty(), "read with a vault login: {fetched:?}");
@@ -42,17 +35,14 @@ fn key(user: &str) -> String {
     identity(AgentId::Claude, user, "team").observation_key()
 }
 
-/// The homes a read asked for usage, in order.
 fn asked(harness: &Harness) -> Vec<std::path::PathBuf> {
     harness.homes().read.lock().unwrap().clone()
 }
 
-/// The directory of the home `id` names, whichever profile names it.
 fn account_home(harness: &Harness, id: &str) -> std::path::PathBuf {
     super::super::homes::dir(harness.path(), id).unwrap()
 }
 
-/// Seeds profile `profile`'s home, holding `login`, beside whatever the vault holds for it.
 fn seeded_home(harness: &Harness, profile: usize, login: super::super::store::Login) -> String {
     let id = uuid::Uuid::new_v4().to_string();
     harness.seed(|db| db.profiles[profile].home = Some(id.clone()));
@@ -86,7 +76,6 @@ fn a_saved_login_that_is_not_the_signed_in_one_moves_into_its_home_and_is_read_t
         })
         .collect();
     assert_eq!(read, [(key("b"), true)]);
-    // The signed-in account is Claude Code's own: nothing of it moves.
     assert_eq!(harness.in_vault(&a), Some("a1".into()));
     assert_eq!(harness.home_of(&a), None);
 }
@@ -109,8 +98,6 @@ fn switching_to_an_account_in_its_home_publishes_its_login_and_empties_the_home(
         *harness.homes().emptied.lock().unwrap(),
         std::slice::from_ref(&home)
     );
-    // The outgoing login is captured as ever, and moves into its own home at the next read, which
-    // leaves the now signed-in account's emptied home alone.
     assert_eq!(harness.in_vault(&a), Some("a2".into()));
     read(&harness);
     assert_eq!(harness.in_home(&a), Some("a2".into()));
@@ -121,8 +108,6 @@ fn switching_to_an_account_in_its_home_publishes_its_login_and_empties_the_home(
     );
 }
 
-/// A switch away and back with no read between: the account's home was emptied, and its login is
-/// the one the switch away captured into the vault.
 #[test]
 fn switching_back_before_any_read_publishes_the_login_the_switch_away_captured() {
     let harness = Harness::new().with_homes();
@@ -136,7 +121,6 @@ fn switching_back_before_any_read_publishes_the_login_the_switch_away_captured()
     accounts
         .activate(AgentId::Claude, &a, Activation::Ordinary)
         .unwrap();
-    // Not the a1 it was saved with: the a2 Claude Code had renewed it to by the switch away.
     assert_eq!(harness.live(), Some("a2".into()));
     accounts
         .activate(AgentId::Claude, &b, Activation::Ordinary)
@@ -160,7 +144,6 @@ fn a_home_that_cannot_be_emptied_stops_the_switch_before_anything_is_replaced() 
 
     assert!(error.contains("nothing was replaced"), "{error}");
     assert_eq!(harness.live(), Some("a2".into()));
-    // The one login is in both, and nothing renewed it in between: the next read keeps one.
     assert_eq!(harness.in_home(&b), Some("b1".into()));
     assert_eq!(harness.in_vault(&b), Some("b1".into()));
     harness.homes().refuses.lock().unwrap().clear();
@@ -169,7 +152,6 @@ fn a_home_that_cannot_be_emptied_stops_the_switch_before_anything_is_replaced() 
     assert_eq!(harness.in_home(&b), Some("b1".into()));
 }
 
-/// Left in both by a move that stopped halfway, the one login settles into the home.
 #[test]
 fn a_login_left_in_both_its_home_and_the_vault_settles_into_the_home() {
     let harness = Harness::new().with_homes();
@@ -182,8 +164,6 @@ fn a_login_left_in_both_its_home_and_the_vault_settles_into_the_home() {
     assert_eq!(harness.in_vault(&b), None);
 }
 
-/// A vault login unlike the home's was put there since the home got its copy, from the native
-/// store: it is the newer, and it replaces the home's.
 #[test]
 fn a_newer_login_in_the_vault_replaces_the_one_its_home_holds() {
     let harness = Harness::new().with_homes();
@@ -208,7 +188,6 @@ fn switching_to_an_account_whose_vault_login_is_newer_publishes_that_one() {
         .unwrap();
 
     assert_eq!(harness.live(), Some("b1".into()));
-    // The signed-in account's home is empty, the older login it held gone with it.
     assert_eq!(harness.in_home(&b), None);
 }
 
@@ -224,8 +203,6 @@ fn a_home_holding_another_accounts_login_is_left_as_it_is_and_its_profile_read_f
     assert_eq!(harness.in_home(&b), Some("c1".into()));
     assert!(asked(&harness).is_empty(), "read the other account's home");
     assert_eq!(fetched, std::slice::from_ref(&b));
-    // Switching to it publishes the account's own login, from the vault, and leaves the home as it
-    // is.
     harness
         .accounts()
         .activate(AgentId::Claude, &b, Activation::Ordinary)
@@ -253,8 +230,6 @@ fn switching_to_an_account_whose_only_login_is_another_accounts_fails_and_leaves
     assert_eq!(harness.in_home(&a), None);
 }
 
-/// A write that did not land, as one filed where Claude Code never reads, must not cost the login:
-/// the vault keeps it.
 #[test]
 fn a_login_its_home_does_not_read_back_stays_in_the_vault() {
     let harness = Harness::new().with_homes();
@@ -293,8 +268,6 @@ fn an_account_archived_once_in_its_home_is_no_longer_read_there() {
     assert_eq!(asked(&harness).len(), 1, "read the archived account's home");
 }
 
-/// An account signed in to outside on-n-off while its login was in its home: the signed-in read is
-/// its card, so its home is not read beside it, nor its login renewed there.
 #[test]
 fn the_signed_in_accounts_home_is_not_read() {
     let harness = Harness::new().with_homes();
@@ -327,8 +300,6 @@ fn nothing_moves_while_an_interrupted_switch_awaits_recovery() {
     assert_eq!(harness.home_of(&b), None);
 }
 
-/// A version before homes rewrites the vault without the field that names a home. The login in it
-/// is the account's only one, so the next read takes the home back rather than tearing it down.
 #[test]
 fn a_home_an_older_version_forgot_is_taken_back_at_the_next_read() {
     let harness = Harness::new().with_homes();
@@ -347,7 +318,6 @@ fn a_home_an_older_version_forgot_is_taken_back_at_the_next_read() {
         && card.account.as_ref().map(|a| a.id.as_str()) == Some(key("b").as_str())));
 }
 
-/// A forgotten home that cannot be read right now may hold the account's only login: it waits.
 #[test]
 fn a_forgotten_home_that_cannot_be_read_is_left_for_a_later_read() {
     let harness = Harness::new().with_homes();
@@ -373,8 +343,6 @@ fn a_forgotten_home_that_cannot_be_read_is_left_for_a_later_read() {
     assert_eq!(harness.in_home(&b), Some("b1".into()));
 }
 
-/// Only the account the login signs in as takes a forgotten home back, and only while it has no
-/// login of its own anywhere.
 #[test]
 fn a_forgotten_home_whose_account_signed_in_again_goes_at_the_next_read() {
     let harness = Harness::new().with_homes();
@@ -413,8 +381,6 @@ fn a_removed_accounts_home_goes_at_the_next_read() {
     assert!(harness.vault().profiles.iter().all(|p| p.id != b));
 }
 
-/// A home its client holds, or one that could not be removed, is not forgotten: every read tries
-/// again until it goes.
 #[test]
 fn a_home_that_does_not_go_at_once_goes_at_a_later_read() {
     for cause in ["busy", "undeletable"] {
@@ -438,8 +404,6 @@ fn a_home_that_does_not_go_at_once_goes_at_a_later_read() {
     }
 }
 
-/// Two reads moving one login at once: the one that records its home second takes the home the
-/// first recorded, so the login lands in the home the vault names and no other.
 #[test]
 fn a_read_that_finds_the_home_already_named_moves_the_login_into_that_one() {
     let harness = Harness::new().with_homes();
@@ -448,7 +412,6 @@ fn a_read_that_finds_the_home_already_named_moves_the_login_into_that_one() {
     let opened = std::cell::Cell::new(0);
     let open = || {
         opened.set(opened.get() + 1);
-        // The second open is the move's own: another read recorded a home for b in between.
         if opened.get() == 2 {
             harness.seed(|db| db.profiles[1].home = Some(other.clone()));
         }
@@ -509,7 +472,6 @@ fn a_new_sign_in_replaces_the_home_the_account_had() {
     assert_eq!(harness.in_vault(&b), None);
 }
 
-/// Logout may end every login of the user, so signing out forgets them all, homes included.
 #[test]
 fn signing_out_forgets_the_users_saved_logins_in_their_homes_too() {
     let harness = Harness::new().with_homes();
@@ -540,9 +502,6 @@ fn signing_out_forgets_the_users_saved_logins_in_their_homes_too() {
     );
 }
 
-/// A signed-out account's home whose client holds it at the next read goes at a later one: the
-/// account never takes it back, though it has neither a login nor a home, as after a version before
-/// homes.
 #[test]
 fn a_signed_out_accounts_home_that_does_not_go_at_once_is_never_taken_back() {
     let harness = Harness::new().with_homes();
@@ -573,8 +532,6 @@ fn a_signed_out_accounts_home_that_does_not_go_at_once_is_never_taken_back() {
         .any(|p| p.id == elsewhere && p.needs_login));
 }
 
-/// Signing in again sets the old home aside for the next read; signing out before that read must
-/// not hand the replaced login back.
 #[test]
 fn signing_out_before_a_read_after_signing_in_again_leaves_the_old_home_to_go() {
     let harness = Harness::new().with_homes();
@@ -639,8 +596,6 @@ fn a_home_signed_out_of_its_login_asks_for_a_new_sign_in() {
     );
 }
 
-/// A home's read that failed backs off as a vault login's does, even forced: Claude Code, which may
-/// renew the login each time, is not started again until the service's wait has passed.
 #[test]
 fn a_failed_read_of_a_home_holds_the_next_one_back() {
     let harness = Harness::new().with_homes();
@@ -668,8 +623,6 @@ fn a_failed_read_of_a_home_holds_the_next_one_back() {
     );
 }
 
-/// A read Claude Code could not give says why on the card, as it is: an update it needs is the
-/// user's to make.
 #[test]
 fn a_home_read_claude_code_could_not_give_says_why_on_the_card() {
     let harness = Harness::new().with_homes();
@@ -691,8 +644,6 @@ fn a_home_read_claude_code_could_not_give_says_why_on_the_card() {
     );
 }
 
-/// A renewal an earlier version made of a login it owned, finished but never published, moves in
-/// with the login it renewed to, and no grant is sent for it again.
 #[test]
 fn a_finished_private_renewal_moves_into_the_home_in_its_logins_place() {
     let harness = Harness::new().with_homes();
@@ -708,15 +659,12 @@ fn a_finished_private_renewal_moves_into_the_home_in_its_logins_place() {
 
     assert_eq!(harness.in_home(&b), Some("b-renewed".into()));
     assert_eq!(harness.in_vault(&b), None);
-    // Asked about the login it renewed, the record would still answer had it stayed.
     assert!(
         matches!(renewals.finished(&profile), Ok(None)),
         "the renewal record stayed"
     );
 }
 
-/// One whose outcome is unknown may have spent its refresh token: the login stays where it is and
-/// is not switched to until it is signed in again.
 #[test]
 fn a_login_with_an_unfinished_private_renewal_stays_in_the_vault() {
     let harness = Harness::new().with_homes();
@@ -743,7 +691,6 @@ fn a_login_with_an_unfinished_private_renewal_stays_in_the_vault() {
     assert!(error.contains("unfinished usage renewal"), "{error}");
 }
 
-/// The app's own stores: Claude's saved logins wait in homes, Codex's in the vault.
 #[test]
 fn claude_keeps_homes_and_codex_does_not() {
     use super::super::NativeStores;

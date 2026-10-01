@@ -46,9 +46,7 @@ describe("itemStatus", () => {
         ?.installedVersion,
     ).toBe("0.9.0");
     expect(statusForSkill(skill({ name: "other" }), { global, project })).toBeUndefined();
-    // Plugin skills are never managed items.
     expect(statusForSkill(skill({ pluginId: "x@y" }), { global, project })).toBeUndefined();
-    // A renamed local copy still matches through the recorded name.
     expect(statusForSkill(skill({ name: "my-tdd" }), { global: [status({ displayName: "my-tdd" })], project: [] })).toBeTruthy();
   });
 

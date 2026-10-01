@@ -1,5 +1,3 @@
-//! When an automatic alert's reset is spent: ten minutes after it is offered, only if the account
-//! still needs it in the same weekly cycle, and never once it is cancelled or turned off.
 use super::*;
 use crate::dto::{AgentId, LimitWindowDto, LimitWindowKind, LimitsResetCreditsDto, Reading};
 
@@ -16,7 +14,6 @@ fn minutes_after_now(minutes: i64) -> DateTime<Utc> {
     at(NOW) + chrono::Duration::minutes(minutes)
 }
 
-/// The signed-in Codex card of `acct`, `used` of its week used, renewing at `renews`.
 fn card(used: f64, renews: &str) -> ProviderLimitsDto {
     ProviderLimitsDto::for_test(AgentId::Codex, "acct")
         .labelled("you@example.com")
@@ -114,7 +111,6 @@ fn at_its_time_a_reset_still_needed_is_spent_and_leaves_the_queue() {
     assert!(pending.is_empty());
 }
 
-/// A reset the live read at its time no longer finds needed is not spent.
 #[test]
 fn at_its_time_a_reset_no_longer_needed_is_not_spent() {
     let later_cycle = "2026-10-08T12:00:00Z";
@@ -143,8 +139,6 @@ fn at_its_time_a_reset_no_longer_needed_is_not_spent() {
     }
 }
 
-/// Codex's signed-in card is found among the others a poll reads: Claude's signed-in card and a
-/// remembered Codex account listed before it decide nothing.
 #[test]
 fn the_signed_in_codex_card_decides_among_the_others() {
     let claude = ProviderLimitsDto::for_test(AgentId::Claude, "claude-acct")
@@ -167,8 +161,6 @@ fn the_signed_in_codex_card_decides_among_the_others() {
     assert!(matches!(due.as_slice(), [Due::Spend(_)]), "{due:?}");
 }
 
-/// Codex answering that nobody is signed in, or an account without a subscription, is an answer:
-/// there is no account for the reset to land on, so it is kept.
 #[test]
 fn nobody_signed_in_keeps_the_reset() {
     for status in [
@@ -192,8 +184,6 @@ fn nobody_signed_in_keeps_the_reset() {
     }
 }
 
-/// Without a live read of the signed-in account nothing is known about now, so the spend waits for
-/// a read that answers.
 #[test]
 fn without_a_live_read_a_spend_waits() {
     let failed = {
@@ -216,8 +206,6 @@ fn without_a_live_read_a_spend_waits() {
     }
 }
 
-/// A spend found more than fifteen minutes past its time, as after the computer slept, is kept
-/// even when the account still needs it: the user was told too long ago.
 #[test]
 fn a_spend_found_late_is_kept() {
     for snapshots in [vec![card(96.0, RENEWS)], Vec::new()] {
@@ -250,7 +238,6 @@ fn fifteen_minutes_past_its_time_a_spend_is_still_made() {
     assert!(matches!(due.as_slice(), [Due::Spend(_)]));
 }
 
-/// An alert turned off, or turned back to notifying only, takes its waiting spend with it.
 #[test]
 fn a_spend_whose_alert_no_longer_spends_is_dropped_without_a_word() {
     let mut notify_only = automatic();
@@ -327,9 +314,6 @@ fn the_notifications_say_when_and_what_came_of_it() {
     );
 }
 
-/// The waiting spends in this app, one test so no other touches them meanwhile: scheduled once an
-/// offer is saved, listed for the card, woken for, decided, cancelled from the card, and cleared,
-/// each change told to every window and a change of nothing told to none.
 #[test]
 fn the_waiting_spends_move_through_their_life_and_every_change_is_told() {
     use crate::read_revision::{take_announced, Source};
@@ -378,7 +362,6 @@ fn the_waiting_spends_move_through_their_life_and_every_change_is_told() {
     assert!(!clear());
     assert!(take_announced().is_empty(), "announced clearing nothing");
 
-    // A reset used by hand takes the waiting one with it; an attempt that used nothing does not.
     schedule_all(&[offer()], at(NOW));
     let _ = take_announced();
     used_by_hand("acct", ResetCreditOutcome::NothingToReset);

@@ -26,7 +26,6 @@ function periodValue(period: PeriodTotals | undefined, provider: AgentId, metric
   return metric === "cost" ? slice.costUsd : slice.totalTokens;
 }
 
-/** Build stacked columns for the Usage chart (daily or hourly). */
 export function buildChartSeries(args: {
   folded: FoldedUsage;
   metric: UsageMetric;
@@ -35,7 +34,6 @@ export function buildChartSeries(args: {
   sinceTime?: string;
   untilTime?: string;
   hourly: boolean;
-  /** When true, only emit days that have activity (Full time). */
   sparse?: boolean;
 }): ChartSeries {
   const { folded, metric, hourly } = args;
@@ -82,7 +80,6 @@ export type ChartRow = {
   value: number;
 };
 
-/** Flatten stacked columns into long rows for TanStack Charts. */
 export function toChartRows(series: ChartSeries): ChartRow[] {
   const rows: ChartRow[] = [];
   for (const column of series.columns) {

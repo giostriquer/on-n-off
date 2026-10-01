@@ -34,7 +34,6 @@ pub fn scan_user_skills(skills_root: &Path) -> Vec<ScannedSkill> {
     skills
 }
 
-/// Flat `name.md` skills (Antigravity CLI / workspace style).
 pub fn scan_skill_markdown_files(dir: &Path) -> Vec<ScannedSkill> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();

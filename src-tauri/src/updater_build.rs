@@ -14,7 +14,6 @@ impl InstallerKind {
         }
     }
 
-    /// Updater platform key; must match the `platforms` entry the release feed publishes.
     pub const fn target(self) -> Option<&'static str> {
         match self {
             Self::Development => None,
@@ -35,8 +34,6 @@ pub fn parse_installer_kind(value: Option<&str>) -> Result<InstallerKind, String
     }
 }
 
-// build.rs also includes this file via `#[path = "src/updater_build.rs"]`, which changes the
-// directory `mod tests;` would resolve against; pin it so both inclusion trees agree.
 #[cfg(test)]
 #[path = "updater_build/tests.rs"]
 mod tests;

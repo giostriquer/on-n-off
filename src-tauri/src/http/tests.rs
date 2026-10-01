@@ -36,7 +36,6 @@ fn unauthorized_and_forbidden_are_unauthorized() {
     }
 }
 
-/// The Limits services answer a 429 when their rate limit is exhausted, saying when to retry.
 #[test]
 fn a_throttled_get_is_rate_limited_until_its_retry_after() {
     for (headers, reset) in [
@@ -67,10 +66,6 @@ fn a_non_json_body_is_a_parse_error() {
     request.join().unwrap();
 }
 
-/// A regression that stops the request from being made has to fail its test with a message, not
-/// leave `request.join()` waiting until CI's job timeout. Every loopback server here accepts
-/// through `accept_within`; the deadline is shortened so the test stays quick, where the servers
-/// wait `ACCEPT_DEADLINE`.
 #[test]
 fn a_loopback_server_nobody_calls_gives_up_at_its_deadline() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -99,10 +94,6 @@ fn a_loopback_server_nobody_calls_gives_up_at_its_deadline() {
     );
 }
 
-/// The server polls for its connection without blocking, and on macOS and Windows the socket it
-/// accepts starts out non-blocking too. A client that has connected but not yet written must
-/// still be read, not fail the server with `WouldBlock`: the code under test is often slower than
-/// the accept poll, above all on a loaded CI runner.
 #[test]
 fn a_one_shot_server_reads_a_request_that_arrives_after_it_accepts() {
     use std::io::{Read, Write};
@@ -125,9 +116,6 @@ fn a_one_shot_server_reads_a_request_that_arrives_after_it_accepts() {
     assert!(head.starts_with("GET /usage "), "{head}");
 }
 
-/// A refused URL has to stay refused while other tests open servers, and has to fail at once on
-/// every OS. A port given back by a dropped listener is neither: the OS may hand it to the next
-/// test's server, and Windows retries a connect it answers with a reset for about 2 s.
 #[test]
 fn a_refused_url_fails_at_once_and_no_server_can_take_it() {
     let url = refused_url();
@@ -152,8 +140,6 @@ fn a_refused_url_fails_at_once_and_no_server_can_take_it() {
     );
 }
 
-/// `was_asked` sees a request made to `never_asked`'s server, so one that finds none means none was
-/// made.
 #[test]
 fn a_never_asked_server_tells_whether_it_was_asked() {
     let (listener, _url) = never_asked();
@@ -169,9 +155,6 @@ fn a_never_asked_server_tells_whether_it_was_asked() {
     }
 }
 
-/// `ureq` reads `HTTP(S)_PROXY` and `ALL_PROXY` when the builder is made, and would send every
-/// loopback test server's request to that proxy. A builder given a proxy outright stands in for
-/// such an environment without touching the process-wide variables other tests read.
 #[test]
 fn test_requests_ignore_a_proxy_the_environment_names() {
     let proxied = || {
@@ -369,7 +352,6 @@ fn post_grant_keeps_a_refused_grant_apart_from_a_transport_failure() {
     );
     request.join().unwrap();
 
-    // A token issuer's 429 is no rate limit the renewal reads as one, whatever it says.
     let (url, request) = serve_once_capturing("429 Too Many Requests", &["Retry-After: 30"], "{}");
     assert_eq!(
         post_grant(&url, &serde_json::json!({})),

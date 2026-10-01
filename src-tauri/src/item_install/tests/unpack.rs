@@ -33,7 +33,6 @@ fn unpack_rejects_path_traversal() {
 
 #[test]
 fn unpack_rejects_a_single_file_over_the_per_file_cap() {
-    // Zeros compress ~1000:1, so the body stays far below the compressed cap.
     let big = "0".repeat(20 * 1024 * 1024 + 1);
     let bytes = tarball_with_root("r-x", Some(SHA_A), &[("big.bin", big.as_str())]);
     let error = fetch::unpack(&bytes).unwrap_err();
@@ -77,7 +76,6 @@ fn unpack_skips_symlinks_and_directories() {
         .unwrap();
     let rest = builder.into_inner().unwrap();
     let mut merged = all.into_inner().unwrap();
-    // Drop the trailing 1024-byte end-of-archive marker of the first builder before appending.
     merged.truncate(merged.len() - 1024);
     merged.extend_from_slice(&rest);
     let mut gz = GzEncoder::new(Vec::new(), Compression::fast());

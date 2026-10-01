@@ -1,10 +1,6 @@
-//! A snapshot file key for key: what released versions wrote and load, so a change to the Rust
-//! types that hold a reading cannot move a key. Inputs are wire JSON for the same reason.
-
 use super::*;
 use serde_json::{json, Value};
 
-/// The one snapshot file `store` holds, as JSON.
 fn the_file(store: &SnapshotStore) -> Value {
     let files: Vec<_> = fs::read_dir(store.dir())
         .unwrap()
@@ -19,7 +15,6 @@ fn card(value: Value) -> ProviderLimitsDto {
     serde_json::from_value(value).expect("a card")
 }
 
-/// A Codex business member's successful read with every figure known, and a live offer beside them.
 fn every_figure() -> ProviderLimitsDto {
     card(json!({
         "provider": "codex",
@@ -47,8 +42,6 @@ fn every_figure() -> ProviderLimitsDto {
     }))
 }
 
-/// Every figure under its wire name, the schema version, and the newest window's time in UTC
-/// milliseconds; never the offer, the status or whether the account is signed in.
 #[test]
 fn a_snapshot_file_holds_the_whole_reading_under_its_wire_names() {
     let home = scratch_dir("limits-snap-file-shape");
@@ -85,8 +78,6 @@ fn a_snapshot_file_holds_the_whole_reading_under_its_wire_names() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// Whether a card is a saved profile's describes the read that showed it, so its file never says,
-/// and the card it loads back is a remembered reading.
 #[test]
 fn a_saved_profiles_card_is_filed_without_saying_so() {
     let home = scratch_dir("limits-snap-file-shape-saved-profile");
@@ -104,8 +95,6 @@ fn a_saved_profiles_card_is_filed_without_saying_so() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// Whether an account is archived lives in the archive, so its file never says, and the card it
-/// loads back is not flagged until the read path looks it up.
 #[test]
 fn an_archived_card_is_filed_without_saying_so() {
     let home = scratch_dir("limits-snap-file-shape-archived");
@@ -123,8 +112,6 @@ fn an_archived_card_is_filed_without_saying_so() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// A newer read that told only its plan and one window: the account details and balances it did
-/// not report are gone, its windows replace the old ones, and the figures it could not tell stay.
 #[test]
 fn a_newer_read_that_could_not_tell_keeps_only_the_remembered_figures_in_the_file() {
     let home = scratch_dir("limits-snap-file-shape-kept");
@@ -167,8 +154,6 @@ fn a_newer_read_that_could_not_tell_keeps_only_the_remembered_figures_in_the_fil
     let _ = fs::remove_dir_all(&home);
 }
 
-/// A remembered count whose soonest expiry has passed is not known any more, so a newer read that
-/// could not tell the count leaves none in the file, as none is loaded from it.
 #[test]
 fn a_newer_read_that_could_not_tell_leaves_no_lapsed_count_in_the_file() {
     let home = scratch_dir("limits-snap-file-shape-lapsed");
@@ -202,8 +187,6 @@ fn a_newer_read_that_could_not_tell_leaves_no_lapsed_count_in_the_file() {
     let _ = fs::remove_dir_all(&home);
 }
 
-/// No version writes an offer to a file, and one that is there anyway is never read back: an offer
-/// is withdrawn the moment the account is under its limit again.
 #[test]
 fn an_offer_in_a_snapshot_file_is_not_loaded() {
     let home = scratch_dir("limits-snap-file-shape-offer");

@@ -1,8 +1,5 @@
-//! Which cards say they are a saved profile Limits polls (`saved_profile`): every polled profile's,
-//! whatever its poll came to, and no other.
 use super::*;
 
-/// A remembered card of the account `key` that no read this poll answered for.
 fn history(key: &str) -> ProviderLimitsDto {
     ProviderLimitsDto {
         current_account: false,
@@ -13,8 +10,6 @@ fn history(key: &str) -> ProviderLimitsDto {
     }
 }
 
-/// `entries` after the saved polls of `home`'s Claude profiles, each fetched as `fetch` says, with
-/// `native` the CLI's own subscription.
 fn polled(
     home: &Path,
     entries: &mut Vec<ProviderLimitsDto>,
@@ -32,7 +27,6 @@ fn polled(
     );
 }
 
-/// The flag of the card for `key` in `entries`.
 fn flag(entries: &[ProviderLimitsDto], key: &str) -> bool {
     entries
         .iter()
@@ -58,7 +52,6 @@ fn a_polled_profile_is_a_saved_profile_whether_it_answered_failed_or_was_held_ba
     });
     assert!(flag(&answered, &key), "answered");
 
-    // The next read, inside the poll interval, shows the snapshot the answer left.
     let mut held_back = crate::limits::remembered(home.path(), AgentId::Claude);
     assert!(!flag(&held_back, &key));
     polled(home.path(), &mut held_back, Ok(None), &|_| {
@@ -77,7 +70,6 @@ fn a_polled_profile_is_a_saved_profile_whether_it_answered_failed_or_was_held_ba
     assert!(flag(&failed, &p.identity.observation_key()), "failed");
 }
 
-/// The signed-in card, a saved profile without a login, and history no saved profile polls.
 #[test]
 fn cards_no_saved_poll_reads_are_not_saved_profiles() {
     let home = tempfile::tempdir().unwrap();
@@ -103,8 +95,6 @@ fn cards_no_saved_poll_reads_are_not_saved_profiles() {
     assert!(entries.iter().all(|card| !card.saved_profile));
 }
 
-/// A native store that could not be read, or a recovery still pending, polls no saved profile, so
-/// its card stays a remembered reading.
 #[test]
 fn a_profile_left_unpolled_is_not_a_saved_profile() {
     for skipped in ["native store unreadable", "recovery pending"] {

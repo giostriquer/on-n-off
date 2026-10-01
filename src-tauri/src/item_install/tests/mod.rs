@@ -38,15 +38,10 @@ impl ItemService {
     }
 }
 
-// Fixtures shared by every test module in this folder.
-
-/// A GitHub-shaped tarball: pax global header carrying `comment=<sha>`, then every file
-/// under a `<repo>-<something>/` top-level folder.
 fn tarball_with_root(root: &str, sha: Option<&str>, files: &[(&str, &str)]) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
     if let Some(sha) = sha {
         let record_body = format!("comment={sha}\n");
-        // pax record: "<len> <key>=<value>\n" where len counts the whole record.
         let mut len = record_body.len() + 1;
         loop {
             let candidate = format!("{len} {record_body}");
@@ -68,7 +63,6 @@ fn tarball_with_root(root: &str, sha: Option<&str>, files: &[(&str, &str)]) -> V
         let mut header = tar::Header::new_ustar();
         header.set_size(contents.len() as u64);
         header.set_mode(0o644);
-        // Raw name bytes: `set_path` refuses `..`, which is exactly what one fixture needs.
         let name = format!("{root}/{path}");
         let ustar = header.as_ustar_mut().unwrap();
         ustar.name[..name.len()].copy_from_slice(name.as_bytes());
@@ -100,7 +94,6 @@ fn skill_md(name: &str, description: &str) -> String {
     format!("---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n")
 }
 
-/// The canonical fixture: one plugin at `./`, `plugin.json` listing two skills, plus one agent.
 fn mattpocock_files(version: &str, tdd_body: &str) -> Vec<(String, String)> {
     vec![
         (
@@ -183,7 +176,6 @@ impl Fetcher for FakeFetcher {
     }
 }
 
-/// A fetcher shared between the test and the service (the service owns a `Box<dyn Fetcher>`).
 struct SharedFetcher(std::sync::Arc<FakeFetcher>);
 
 impl Fetcher for SharedFetcher {
@@ -230,7 +222,6 @@ impl Harness {
         CodexAdapter::at(self.home.join(".codex"), self.home.join(".agents/skills"))
     }
 
-    /// Resolves targets through the real adapters rooted in this scratch home.
     fn resolver(
         &self,
     ) -> impl Fn(&ItemTarget) -> Result<crate::adapter::ItemRoots, crate::dto::AdapterError> + '_
@@ -247,7 +238,6 @@ impl Harness {
         }
     }
 
-    /// Runs `install_items` against this home for the given targets.
     fn install(
         &self,
         mut request: InstallItemsRequest,

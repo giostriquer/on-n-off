@@ -1,7 +1,3 @@
-//! Windows display enumeration for the side notch. One entry per active monitor, with a
-//! stable EDID-derived id, in the same point coordinates the macOS reader reports, so the
-//! shared `model::layout` math applies unchanged. Read-only.
-
 #![allow(unsafe_code)]
 
 use super::model::Display;
@@ -33,7 +29,6 @@ struct CachedDisplays {
 }
 static CACHE: Mutex<Option<CachedDisplays>> = Mutex::new(None);
 
-/// A monitor as the OS reports it: physical pixels plus its GDI device name.
 #[derive(Clone, PartialEq)]
 struct RawMonitor {
     device: String,
@@ -70,8 +65,6 @@ pub fn read() -> Result<Vec<Display>, String> {
             to_display(monitor, &id, &name)
         })
         .collect();
-    // One GDI source driving two active targets is a duplicate (mirrored) desktop;
-    // shared rects are the fallback signal when the topology API did not answer.
     apply_mirroring(&mut displays, duplicated || shared_rects(&raw));
     if displays.iter().any(|display| {
         display.id.is_empty()
@@ -99,8 +92,6 @@ pub fn read() -> Result<Vec<Display>, String> {
     Ok(displays)
 }
 
-/// Per-monitor-v2 awareness on the calling thread, restored afterwards, so
-/// `GetDpiForMonitor` reports the monitor's own DPI wherever the caller runs.
 pub(super) fn thread_pm_v2() -> impl Drop {
     let previous =
         unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
@@ -181,10 +172,6 @@ fn topology(raw: &[RawMonitor]) -> String {
         .join(";")
 }
 
-/// The EDID-derived identity and friendly name per GDI device name, from the active
-/// display-config paths. A target's `monitorDevicePath` is the per-unit EDID identity
-/// that survives reboots and replugs; the GDI name is the fallback when the API fails.
-/// Also reports whether any GDI source drives two active targets (duplicate mode).
 fn target_identities(raw: &[RawMonitor]) -> (HashMap<String, (String, String)>, bool) {
     let mut map = HashMap::new();
     let mut num_paths = 0u32;
@@ -264,8 +251,6 @@ fn target_identities(raw: &[RawMonitor]) -> (HashMap<String, (String, String)>, 
     (map, paths_duplicated(&source_keys))
 }
 
-/// Whether any source key appears on two active paths (a cloned output renders one GDI
-/// desktop on two physical targets).
 fn paths_duplicated(source_keys: &[(u64, u64, u32)]) -> bool {
     let mut keys = source_keys.to_vec();
     keys.sort_unstable();
@@ -286,7 +271,6 @@ fn display_header(
     }
 }
 
-/// Physical pixels -> the Display model, in points at the monitor's own scale.
 fn to_display(monitor: &RawMonitor, id: &str, name: &str) -> Display {
     let scale = f64::from(monitor.dpi) / 96.0;
     Display {
@@ -303,8 +287,6 @@ fn to_display(monitor: &RawMonitor, id: &str, name: &str) -> Display {
     }
 }
 
-/// Two active monitors sharing one desktop rect render the same picture (duplicate mode);
-/// the same GDI source driving two targets says the same thing more reliably.
 fn apply_mirroring(displays: &mut [Display], duplicated_sources: bool) {
     if duplicated_sources {
         for display in &mut *displays {
@@ -326,7 +308,6 @@ fn shares_rect(a: &Display, b: &Display) -> bool {
     a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height
 }
 
-/// Fallback mirroring signal: two enumerated monitors describing the same desktop rect.
 fn shared_rects(raw: &[RawMonitor]) -> bool {
     for (index, monitor) in raw.iter().enumerate() {
         if raw.iter().enumerate().any(|(other, candidate)| {

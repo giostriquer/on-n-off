@@ -1,10 +1,8 @@
 use super::*;
 use serde_json::json;
 
-/// What account changes say about a native home the environment chose.
 const CUSTOM_HOME: &str = "Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.";
 
-/// An environment holding exactly `vars`, for `resolve_from`.
 fn environment<'a>(
     vars: &'a [(&'a str, PathBuf)],
 ) -> impl Fn(&str) -> Option<std::ffi::OsString> + 'a {
@@ -15,7 +13,6 @@ fn environment<'a>(
     }
 }
 
-/// The environment a command reads, as the child will see it: `Some(None)` is a variable removed.
 fn command_env(command: &Command) -> std::collections::HashMap<String, Option<std::ffi::OsString>> {
     command
         .get_envs()
@@ -28,13 +25,10 @@ fn command_env(command: &Command) -> std::collections::HashMap<String, Option<st
         .collect()
 }
 
-/// An unsigned ID token whose `https://api.openai.com/auth` claims are `claims`, shaped the way
-/// `CodexLogin` decodes it: fixtures across the crate build their logins from it.
 pub(crate) fn id_token(claims: &Value) -> String {
     jwt(&json!({"https://api.openai.com/auth": claims}))
 }
 
-/// An unsigned JWT whose payload is `payload`.
 fn jwt(payload: &Value) -> String {
     format!(
         "header.{}.signature",
@@ -47,7 +41,6 @@ fn auth(user: &str, workspace: &str) -> Value {
     json!({"tokens":{"id_token":format!("e30.{}.sig",URL_SAFE_NO_PAD.encode(claims.to_string())),"access_token":"access","refresh_token":"renewable","account_id":workspace}})
 }
 
-/// A Codex login of `auth`, with no account record beside it, as Codex keeps none.
 fn login_of(auth: &Value) -> Login {
     Login {
         auth: auth.clone(),
@@ -84,8 +77,6 @@ fn refuses_codex_workspace_claim_disagreement_and_access_only_login() {
     assert!(identity_of(&value).is_err());
 }
 
-/// A Codex login that carries an API key is not a subscription, so it is never a profile; a key
-/// left null is no key.
 #[test]
 fn a_codex_api_key_login_is_not_a_subscription_profile() {
     let mut value = auth("user-a", "team");
@@ -115,8 +106,6 @@ fn a_codex_login_renews_soon_within_ten_minutes_of_expiry_or_without_a_readable_
     assert!(renews_soon(&auth("user-a", "team")));
 }
 
-/// A Codex login's email is the ID token's own `email` claim, trimmed: not one nested under the
-/// auth claims, and none without an ID token.
 #[test]
 fn a_codex_logins_email_is_the_id_tokens_own_claim() {
     let email = |auth: Value| CodexLogin::of(&login_of(&auth)).email();
@@ -143,9 +132,6 @@ fn a_codex_logins_email_is_the_id_tokens_own_claim() {
     );
 }
 
-/// A Codex credential generation is its access and refresh tokens and nothing else. The digest is
-/// a literal because a vault's signed-out generations and a renewal journal written by an earlier
-/// version must still match the login they name.
 #[test]
 fn a_codex_logins_fingerprint_is_its_token_generation_alone() {
     let codex = json!({"tokens":{"access_token":"access-c","refresh_token":"refresh-c","id_token":"id-one","account_id":"team"},"last_refresh":"2026-09-01T00:00:00Z"});

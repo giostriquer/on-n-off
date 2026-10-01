@@ -452,24 +452,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
   loadTabRef.current = loadTab;
 
-  /**
-   * The header Refresh: every visible provider, not only the open tab — a user who edits Claude's
-   * config while Codex is selected expects one button to catch it. Boot sweeps `ALL_AGENTS`
-   * instead, so unhiding a provider later finds its tab already warm.
-   *
-   * Only the open tab probes. A probe re-reads CLI health for all four providers at once, so a
-   * probe per provider would repeat that scan; the rest reload local-first and enrich in the
-   * background, which lands the same data.
-   *
-   * Resolving means every reload was dispatched, not that every one finished: a provider already
-   * loading takes a queued reload that runs after this returns.
-   */
   const refreshAll = useCallback(async () => {
     const primary = selectedRef.current;
     const targets = visibleAgentIds(appSettings.hiddenAgents);
     await Promise.all(targets.map((id) => loadTab(id, id === primary)));
-    // loadTab only narrates the open tab, so without this the sweep's whole point — that the
-    // providers behind the tab were read too — leaves no trace.
     note("SYNC", `refreshed ${targets.map(agentLabel).join(", ")}`);
   }, [agentLabel, appSettings.hiddenAgents, loadTab, note]);
 
@@ -488,8 +474,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const settings =
         nextSettings.status === "fulfilled" ? mergeAppSettings(nextSettings.value) : DEFAULT_APP_SETTINGS;
       setAppSettings(settings);
-      // The remembered provider may have been hidden since (Settings → Providers): boot on the
-      // first visible one instead of loading a tab the user cannot reach.
       const visible = visibleAgentIds(settings.hiddenAgents);
       if (!visible.includes(selectedRef.current) && visible[0]) {
         selectedRef.current = visible[0];
@@ -741,7 +725,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       try {
         const result = await api.installItems(request);
         const summary = summarizeOutcomes(result);
-        // loadTab queues a reload when a provider is mid-flight; withLock would drop it.
         for (const provider of summary.touchedProviders) {
           void loadTabRef.current(provider);
         }

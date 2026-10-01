@@ -1,10 +1,5 @@
-//! The account switch's reads and writes of Claude Code's Keychain item, answered by a fake
-//! `security` so no test touches the login Keychain.
-
 use super::*;
 
-/// Answers `security` as a Keychain holding at most one Claude Code item, filed under `me`: its
-/// attributes, and its secret or the reason the secret could not be read.
 #[cfg(target_os = "macos")]
 fn keychain_item(
     secret: Option<Result<&'static str, &'static str>>,
@@ -29,14 +24,11 @@ fn keychain_item(
     }
 }
 
-/// What the account switch's read found, told apart by the fixture each store holds.
 #[cfg(target_os = "macos")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Found {
     Keychain,
     File,
-    /// A login whose token is empty, from either store: never an answer, since Claude Code's
-    /// sign-out empties the login.
     Emptied,
     Nothing,
     Malformed,
@@ -63,10 +55,6 @@ fn found(read: Result<Option<Login>, String>) -> Found {
     }
 }
 
-/// The account switch's read for every combination of what the Keychain entry and the
-/// credentials file hold, taken from the store Claude Code would read: a Keychain entry that
-/// parses, token or not; otherwise the file. Rows are the Keychain, columns the file: no file, a
-/// login, no token, broken.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_native_claude_read_truth_table() {
@@ -117,8 +105,6 @@ fn the_native_claude_read_truth_table() {
     }
 }
 
-/// An entry whose secret is refused, or whose attributes name no account, cannot be read: the
-/// credentials file answers in its place, as it would for Claude Code.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_keychain_entry_the_switch_cannot_identify_leaves_the_read_to_the_file() {
@@ -159,8 +145,6 @@ fn a_keychain_entry_the_switch_cannot_identify_leaves_the_read_to_the_file() {
     assert_eq!(found(read), Found::File);
 }
 
-/// Claude Code's own item, filed under the name it derives (in a test binary, which sees no
-/// `$USER`, the fallback `claude-code-user`), and an older item under another account.
 #[cfg(target_os = "macos")]
 const TWO_ITEMS: &[(&str, &str)] = &[
     (
@@ -173,8 +157,6 @@ const TWO_ITEMS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Claude Code reads the item filed under its own account name, so the switch does too, rather
-/// than whichever item `security` happens to return for the service.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_switch_reads_the_item_filed_under_claude_codes_own_account() {
@@ -191,8 +173,6 @@ fn the_switch_reads_the_item_filed_under_claude_codes_own_account() {
     );
 }
 
-/// An item an older Claude Code filed under another account is still Claude Code's login when it is
-/// the only one: the service-only lookup names its account.
 #[cfg(target_os = "macos")]
 #[test]
 fn an_item_filed_under_another_account_is_still_found() {
@@ -215,7 +195,6 @@ fn an_item_filed_under_another_account_is_still_found() {
         ]
     );
 
-    // And the write goes back under that account, never a guessed one.
     let (written, sent) = with_test_runner(
         fake_items(&[("other", r#"{"claudeAiOauth":{"accessToken":"kc-token"}}"#)]),
         || native.write(Some(&incoming())),
@@ -228,8 +207,6 @@ fn an_item_filed_under_another_account_is_still_found() {
     );
 }
 
-/// `add-generic-password -U` replaces the item matching service and account, so the write names
-/// the account of the item it read; any other would file a second item beside it.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_switch_writes_back_under_the_account_of_the_item_it_read() {
@@ -253,8 +230,6 @@ fn the_switch_writes_back_under_the_account_of_the_item_it_read() {
     );
 }
 
-/// A write goes to the store Claude Code's next read uses. A Keychain entry that is not JSON is one
-/// that read skips, so the login goes to the credentials file and the entry is left alone.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_switch_past_a_malformed_keychain_entry_writes_the_credentials_file() {
@@ -280,8 +255,6 @@ fn a_switch_past_a_malformed_keychain_entry_writes_the_credentials_file() {
     );
 }
 
-/// When the Keychain cannot be read, which store Claude Code reads next is unknown, so the switch
-/// writes neither.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_switch_refuses_to_write_when_the_keychain_cannot_be_read() {
@@ -312,8 +285,6 @@ fn a_switch_refuses_to_write_when_the_keychain_cannot_be_read() {
         .all(|command| command.starts_with("find-generic-password")));
 }
 
-/// A lookup that would name the item's account and fails leaves the Keychain unreadable, not
-/// empty: which store Claude Code reads next is unknown, so the switch writes neither.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_failed_account_lookup_is_not_read_as_no_entry() {
@@ -349,8 +320,6 @@ fn a_failed_account_lookup_is_not_read_as_no_entry() {
     assert!(!native.config_file.exists(), "the identity was not patched");
 }
 
-/// A Keychain holding one item under Claude Code's own account, whose secret the writes replace,
-/// recording for each read of the secret whether `lock` was held at that moment.
 #[cfg(target_os = "macos")]
 fn recording_keychain(
     lock: PathBuf,
@@ -382,8 +351,6 @@ fn recording_keychain(
     }
 }
 
-/// The switch reads the published login back before it lets Claude Code's locks go, so a client
-/// that writes in between is caught rather than verified.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_switch_reads_its_write_back_while_it_still_holds_the_locks() {
@@ -418,8 +385,6 @@ fn the_switch_reads_its_write_back_while_it_still_holds_the_locks() {
     );
 }
 
-/// Cleaning up an isolated sign-in deletes its own scoped Keychain entry and nothing else: never
-/// Claude Code's unscoped entry, which holds the user's real login.
 #[cfg(target_os = "macos")]
 #[test]
 fn cleaning_an_isolated_sign_in_deletes_only_its_scoped_entry() {

@@ -18,22 +18,11 @@ const OUTCOME_MESSAGES: Record<ResetCreditOutcome, string> = {
   unknown: "Codex answered with a result on-n-off doesn't recognize. Check the reset count after the refresh.",
 };
 
-/**
- * A paid reset the provider is offering while the account sits at its limit. It is shown, never
- * sold: the purchase happens on the provider's own site, so this row carries no action.
- */
 export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
   if (!offer) return null;
   return <SummaryRow label="Paid reset" value={offer.price ? formatPrice(offer.price) : "offered"} note="offered by Codex · buy it on chatgpt.com" />;
 }
 
-/**
- * The banked reset count as one more row under the windows, with when the next one expires. When
- * Codex lists more than one, the note
- * lists each instead, soonest first, by name and expiry, so its first line says what the
- * next-expiry note would. Whether a count is worth showing is the card model's call (`CardFigures`),
- * and it is gone by the time the soonest reset lapses, so every one listed is still ahead.
- */
 export function BankedResetsRow({ resetCredits, now }: { resetCredits: CardFigures["bankedResets"]; now: number }) {
   if (!resetCredits) return null;
   const resets = resetCredits.resets ?? [];
@@ -45,43 +34,20 @@ export function BankedResetsRow({ resetCredits, now }: { resetCredits: CardFigur
   return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
 }
 
-/** One banked reset's line: its name and when it expires, each when Codex says. */
 function describeReset(reset: LimitsBankedReset, now: number): string {
   const when = expiry(reset.expiresAt, now);
   return [reset.title, when && `expires ${when}`].filter(Boolean).join(" · ") || "Banked reset";
 }
 
-/** "in 11d 19h · Sep 5" for an instant still ahead; `null` for one that is not. */
 function expiry(at: string | null | undefined, now: number): string | null {
   const left = formatResetIn(at, now);
   return left ? `in ${left} · ${formatShortDate(at)}` : null;
 }
 
-/** What one attempt to spend a banked reset came to, and when its answer arrived. */
 type AttemptResult = { role: "status" | "alert"; message: string; answeredAt: number };
 
-/**
- * Spends one banked reset on the signed-in Codex account. Codex applies a reset to whoever is signed
- * in, so only the card that is both the live read and the account controls' current account offers
- * it. As in Codex's own app, it is usable only with 10% or less of the limit left (or the lower share
- * the account's alert names), and every use asks first, naming the account, what is left and when
- * the limit renews by itself, because a reset used early is a reset wasted. The backend refuses a
- * spend above that share too.
- *
- * One attempt keeps one idempotency key until Codex gives a definite answer: a retry after an error
- * may be retrying a request that already went through, and a new key would spend a second reset.
- * The refreshed limits arrive through the shared read the backend replaces after every attempt.
- *
- * What an attempt came to is said until a reading made after its answer replaces the card's: the
- * backend's refresh is read before the answer comes back, so it keeps the message, and the next
- * read, which may find a reset granted since, lets it go. The answer is timed by the clock the
- * backend stamps its readings with, not the screen's `now`, which lags it by up to a minute and
- * would let the refresh take the message away. A card with no window read at all has nothing to
- * tell a later reading by, so it keeps the message.
- */
 export function UseBankedReset({ entry, label, current, now, disabled = false }: {
   entry: ProviderLimits;
-  /** The name the card shows for this account, so the confirmation names the same one. */
   label: string;
   current: boolean;
   now: number;

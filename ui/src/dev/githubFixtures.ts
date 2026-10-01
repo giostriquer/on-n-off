@@ -1,7 +1,5 @@
 import type { CiState, GithubPr, GithubPrs, GithubStatus, MergeKind, ReviewDecision } from "$lib/githubTypes";
 
-/** Synthetic pull requests for the UI harness; nothing here is a real repository or person. */
-
 const NOW = Date.parse("2026-08-24T20:00:00Z");
 
 type Seed = {
@@ -14,9 +12,7 @@ type Seed = {
   decision?: ReviewDecision;
   team?: boolean;
   minutesAgo?: number;
-  /** The backend's merge verdict, as the DTO would carry it; `queued` implies "queued". */
   merge?: MergeKind;
-  /** In the merge queue: at this position, or `null` when GitHub reports none. */
   queued?: number | null;
 };
 

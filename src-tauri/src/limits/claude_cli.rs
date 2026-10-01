@@ -1,29 +1,3 @@
-//! A Claude account's usage as Claude Code itself reports it: `claude -p /usage`, run with the
-//! account's own config dir, answers from Anthropic's usage endpoint without a model turn, and
-//! renews that dir's login when it has to. on-n-off sends no request and reads no credential here.
-//! It reads both the signed-in account, from the user's own store ([`read_signed_in`]), and a saved
-//! account in its home ([`read_usage`]).
-//!
-//! The report also scans every transcript its config dir kept this week, to say what used the
-//! limits; there is no cache, and no switch but an organization's policy. In a busy config dir that
-//! is gigabytes on every poll, so the signed-in read runs in a config dir of on-n-off's own, which
-//! keeps none, signed in from the user's store all the same. A Claude Code that cannot be told to
-//! sign in from a store outside its config dir says it is signed out there, and is asked again in
-//! the user's own.
-//!
-//! The user's own config dir has their hooks, plugins, MCP servers and CLAUDE.md, which every poll
-//! would otherwise start, so each read runs with `--safe-mode`, which leaves them all out and keeps
-//! the login. A Claude Code too old to know the flag refuses it, and is never run again without it:
-//! its card asks for an update instead.
-//!
-//! The answer is the assistant message of `--output-format stream-json`, whose
-//! `usage_report.rate_limits.limits[]` has the shape `/api/oauth/usage` answers with, so
-//! [`parse_claude`] reads it. Whose answer it is comes from the config dir's `.claude.json`, which
-//! Claude Code writes at sign-in and may rewrite while it runs: it must name the expected account
-//! before Claude Code starts and still name it once Claude Code has answered. A config dir signed
-//! out of Claude answers with no report; Claude Code's own `auth status` then tells that apart from
-//! a report that could not be had.
-
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -42,8 +16,6 @@ use crate::dto::{
 use crate::http::HttpError;
 use crate::process::{wait_with_deadline, CommandOutcome};
 
-/// Claude Code's own usage report, printed as structured events, with no session left behind and
-/// none of the config dir's customizations started.
 const USAGE_ARGS: [&str; 7] = [
     "-p",
     "/usage",
@@ -54,19 +26,13 @@ const USAGE_ARGS: [&str; 7] = [
     "--verbose",
 ];
 
-/// What a Claude Code that does not know `--safe-mode` is told to do.
 pub(crate) const OUTDATED: &str =
     "Update Claude Code: this version cannot report usage without starting your hooks and MCP servers.";
 
-/// Generous, because a read that renews the login waits on Anthropic, and Claude Code killed in the
-/// middle of a renewal could lose the refresh token it was just issued.
 const DEADLINE: Duration = Duration::from_secs(90);
 
-/// `auth status` only reads what is stored, and renews nothing.
 const STATUS_DEADLINE: Duration = Duration::from_secs(30);
 
-/// The usage of `identity`, reported by a `claude` from `claude` (one for the config dir whose
-/// `.claude.json` is `config_file`) as its card.
 pub(crate) fn read_usage(
     claude: &dyn Fn() -> Command,
     config_file: &Path,
@@ -100,10 +66,6 @@ fn read_usage_within(
     )
 }
 
-/// The signed-in account's card, as a `claude` from `claude` reports it for the user's own config
-/// dir, whose `.claude.json` is `config_file`. The card is the account that file names before the
-/// read, which must still name it after; a read that fails keeps that account, so the card it
-/// remembers stands in.
 pub(crate) fn read_signed_in(
     claude: &dyn Fn() -> Command,
     without_history: Option<&dyn Fn() -> Command>,
@@ -132,8 +94,6 @@ fn read_signed_in_within(
         )
     };
     let read = match without_history.map(|claude| report(claude, deadline)) {
-        // A Claude Code that does not know `CLAUDE_SECURESTORAGE_CONFIG_DIR` looks for the login
-        // in the config dir without history and finds none: the user's own config dir answers.
         None | Some(Err(NoReport::SignedOut)) => report(claude, deadline),
         Some(read) => read,
     };
@@ -183,8 +143,6 @@ fn read_signed_in_within(
     )
 }
 
-/// The account a signed-in card is known by: its scoped key when the config names its
-/// organization, as its saved profile's card is, else the account's own id.
 fn card_account(account: &ClaudeConfigAccount) -> LimitsAccountDto {
     let identity = &account.identity;
     match &identity.organization_id {
@@ -208,18 +166,12 @@ fn default_account() -> LimitsAccountDto {
     }
 }
 
-/// Why Claude Code gave no usage report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NoReport {
-    /// There is no `claude` to start.
     NotInstalled,
-    /// It could not be started, failed, or did not answer in time.
     Unavailable,
-    /// It does not know `--safe-mode`, so it was not left to run with the user's customizations.
     Outdated,
-    /// It says the config dir is signed out of Claude.
     SignedOut,
-    /// It answered, with no report in the answer.
     Empty,
 }
 
@@ -235,7 +187,6 @@ impl NoReport {
     }
 }
 
-/// The windows of the usage report a `claude` from `claude` prints within `deadline`.
 fn report(
     claude: &dyn Fn() -> Command,
     deadline: Duration,
@@ -263,7 +214,6 @@ fn report(
                     NoReport::Empty
                 }
             }),
-        // Claude Code without the flag says `error: unknown option '--safe-mode'`.
         Ok(CommandOutcome::Exited { stderr, .. })
             if stderr.contains("unknown option") && stderr.contains("--safe-mode") =>
         {
@@ -273,27 +223,18 @@ fn report(
     }
 }
 
-/// `command` as the read runs it, with `args`.
 fn prepared(mut command: Command, args: &[&str]) -> Command {
     command.args(args).env("DISABLE_AUTOUPDATER", "1");
-    // Claude Code would read as any of these credentials' account, not the config dir's.
     for name in ENV_CREDENTIALS {
         command.env_remove(name);
     }
     command
 }
 
-/// Whether Claude Code says the config dir is signed out. Anything else it says, or saying nothing,
-/// is no reason to ask for a new sign-in.
 fn signed_out(claude: &dyn Fn() -> Command) -> bool {
     auth_status(claude).and_then(|status| status.get("loggedIn")?.as_bool()) == Some(false)
 }
 
-/// What `claude auth status --json` says of the config dir a `claude` from `claude` works in:
-/// `loggedIn`, and when it is, `email`, `orgId` and the like. It reads only what is stored and asks
-/// Anthropic nothing. Claude Code answers a signed-out status with exit status 1, the answer on
-/// stdout all the same, so the status is read whatever the exit. `None` when it says nothing
-/// readable.
 pub(crate) fn auth_status(claude: &dyn Fn() -> Command) -> Option<Value> {
     let mut command = prepared(claude(), &["auth", "status", "--json"]);
     command
@@ -308,7 +249,6 @@ pub(crate) fn auth_status(claude: &dyn Fn() -> Command) -> Option<Value> {
     serde_json::from_str(&stdout).ok()
 }
 
-/// The account `config_file` names, when it is `identity`'s.
 fn config_account(
     config_file: &Path,
     identity: &Identity,
@@ -320,7 +260,6 @@ fn config_account(
     Ok(account)
 }
 
-/// The windows of the first usage report in Claude Code's `stream-json` output.
 fn report_windows(stdout: &str) -> Option<Vec<LimitWindowDto>> {
     let report = stdout
         .lines()

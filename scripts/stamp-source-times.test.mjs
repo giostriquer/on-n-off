@@ -1,4 +1,3 @@
-// Run with `bun test scripts/` (CI's frontend job) or `node --test scripts/*.test.mjs`.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -16,7 +15,6 @@ function write(root, path, text) {
   writeFileSync(join(root, path), text);
 }
 
-/** A throwaway repository with one committed Swift package and a file outside it. */
 function repository(t) {
   const root = mkdtempSync(join(tmpdir(), "on-n-off-stamp-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -30,7 +28,6 @@ function repository(t) {
   return root;
 }
 
-/** A second checkout of the same commit, as the next CI run gets: same content, new files. */
 function checkoutAgain(t, root) {
   const copy = mkdtempSync(join(tmpdir(), "on-n-off-stamp-copy-"));
   t.after(() => rmSync(copy, { recursive: true, force: true }));
@@ -50,7 +47,6 @@ test("the time depends on the content alone, and stays in the past", () => {
 test("two checkouts of the same commit get the same times", (t) => {
   const first = repository(t);
   const second = checkoutAgain(t, first);
-  // A checkout stamps every file with the time it was written, which differs between runs.
   utimesSync(join(second, "macos/Notch/Sources/Core/Meter.swift"), 1_900_000_000, 1_900_000_000);
   assert.equal(stampSourceTimes(first, ["macos"]), 3);
   assert.equal(stampSourceTimes(second, ["macos"]), 3);
@@ -61,8 +57,6 @@ test("two checkouts of the same commit get the same times", (t) => {
   assert.notEqual(mtime(join(first, "macos/Notch/Sources/Core/Meter.swift")), mtime(join(first, "macos/Notch/Sources/Core/Ink.swift")));
 });
 
-// A build tool compares a source's time with the one it recorded. A changed file must not keep the
-// time of the content the cached build was made from, or the build would reuse a stale object.
 test("a changed file gets another time, even one older than its outputs", (t) => {
   const root = repository(t);
   stampSourceTimes(root, ["macos"]);

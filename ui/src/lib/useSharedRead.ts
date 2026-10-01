@@ -3,15 +3,8 @@ import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import type { SharedReadSource } from "$lib/types";
 
-/** The query the banked resets automatic alerts are waiting to use are held under. */
 export const PENDING_RESET_SPENDS_KEY: QueryKey = ["reset-spends"];
 
-/**
- * The queries each shared read backs. Account changes also change whose login a Codex subscription
- * date comes from. Keeping the mapping here rather than at the call sites is
- * what stops a source and a key drifting apart: a hook told to watch `limits:claude` while
- * refetching `["limits", "codex"]` would compile and then quietly never update either.
- */
 const QUERY_KEYS: Record<SharedReadSource, readonly QueryKey[]> = {
   accounts: [["accounts"], ["subscription", "codex"]],
   "limits:claude": [["limits", "claude"]],
@@ -20,18 +13,6 @@ const QUERY_KEYS: Record<SharedReadSource, readonly QueryKey[]> = {
   "limits:reset-spends": [PENDING_RESET_SPENDS_KEY],
 };
 
-/**
- * Refetches this source's query when the backend says the process-wide read behind it has been
- * replaced — by the other window, a monitor, or the notch's own poll.
- *
- * Without this a screen shows its own last answer until its poll interval comes round, however
- * recently something else fetched fresher numbers: refresh the Limits screen during a provider
- * outage that has just ended and the notch keeps the error for minutes, or the other way about.
- *
- * The refetch must stay unforced. It is then served from the same cache, so it costs no provider
- * call and replaces nothing, so it is not announced back; a forced one would call the provider,
- * replace the read, and announce again without end.
- */
 export function useSharedRead(source: SharedReadSource): void {
   const client = useQueryClient();
   useEffect(() => {

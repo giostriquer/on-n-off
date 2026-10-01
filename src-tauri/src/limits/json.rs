@@ -1,10 +1,7 @@
-//! Tolerant JSON accessors shared by the payload parsers.
-
 use serde_json::Value;
 
 use crate::dto::{LimitWindowDto, LimitWindowKind};
 
-/// Finite percentage clamped to `0..=100`; `None` for anything that is not a number.
 pub(crate) fn percent(value: Option<&Value>) -> Option<f64> {
     value
         .and_then(Value::as_f64)
@@ -20,7 +17,6 @@ pub(crate) fn optional_string(value: Option<&Value>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// `sonnet_4_5` → `Sonnet 4 5`; `opus` → `Opus`.
 pub(crate) fn humanize(raw: &str) -> String {
     raw.split('_')
         .filter(|part| !part.is_empty())
@@ -49,8 +45,6 @@ pub(crate) fn window(
         used_percent,
         resets_at,
         window_seconds: None,
-        // Provider payload parsers are pure. `finish` stamps the read instant before the DTO is
-        // returned or persisted.
         observed_at: String::new(),
     }
 }

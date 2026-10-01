@@ -85,9 +85,6 @@ describe("formatClock", () => {
 });
 
 describe("usageMeterColor", () => {
-  // The bar used to step to `--warn` at 70 %, an amber lighter than the accents it replaced, so a
-  // filling meter went paler and yellower as it ran out. It now hardens toward `--trip` instead,
-  // matching the side notch. These cases are the ones that would catch a regression to a step.
   it("holds the base colour while there is room", () => {
     expect(usageMeterColor("red", 0)).toBe("red");
     expect(usageMeterColor("red", 69.9)).toBe("red");
@@ -107,7 +104,6 @@ describe("usageMeterColor", () => {
 
   it("eases, so a quarter through the band is half the way to red", () => {
     expect(usageMeterColor("red", 75)).toBe("color-mix(in srgb, red, var(--trip) 50.0%)");
-    // A linear blend would put 25 % here; this is the assertion that pins the easing.
     expect(usageMeterColor("red", 75)).not.toContain("25.0%");
   });
 
@@ -132,7 +128,6 @@ describe("usageFillColor and usageTextColor", () => {
   it("leaves the figure its ordinary colour until the window is spent", () => {
     expect(usageTextColor(50)).toBeUndefined();
     expect(usageTextColor(70)).toBeUndefined();
-    // Blending the page ink toward red would wash the figure out rather than sharpen it.
     expect(usageTextColor(80)).toBeUndefined();
     expect(usageTextColor(90)).toBe("var(--trip)");
     expect(usageTextColor(95)).toBe("var(--trip)");
@@ -197,7 +192,6 @@ describe("formatShortDate", () => {
     expect(formatShortDate("2026-08-29T23:30:00Z", { timeZone: "America/Sao_Paulo" })).toBe("Aug 29");
     expect(formatShortDate("2026-08-30T01:30:00Z", { timeZone: "America/Sao_Paulo" })).toBe("Aug 29");
     expect(formatShortDate("2027-01-04T12:00:00Z", { timeZone: "UTC", withYear: true })).toBe("Jan 4, 2027");
-    // The year appears only outside the year of `yearUnlessSameAs`, judged in the same time zone.
     const newYearsEve = "2026-12-31T23:30:00Z";
     const justAfter = Date.parse("2027-01-01T01:00:00Z");
     expect(formatShortDate(newYearsEve, { timeZone: "UTC", yearUnlessSameAs: justAfter })).toBe("Dec 31, 2026");
@@ -211,7 +205,6 @@ describe("formatPrice", () => {
   it("divides by the minor units the currency actually has", () => {
     expect(formatPrice({ currency: "USD", amountMinorUnits: 800 })).toBe("$8.00");
     expect(formatPrice({ currency: "EUR", amountMinorUnits: 1250 })).toBe("€12.50");
-    // Yen has no minor unit and dinars have three, so neither is two decimal places.
     expect(formatPrice({ currency: "JPY", amountMinorUnits: 1200 })).toBe("¥1,200");
     expect(formatPrice({ currency: "KRW", amountMinorUnits: 12000 })).toBe("₩12,000");
     expect(formatPrice({ currency: "BHD", amountMinorUnits: 3000 })).toBe("BHD 3.000");
@@ -219,9 +212,7 @@ describe("formatPrice", () => {
   });
 
   it("shows the number beside a code with no symbol, and never disappears on a bad one", () => {
-    // A well-formed code this runtime has no symbol for still formats, with two decimals.
     expect(formatPrice({ currency: "ZZZ", amountMinorUnits: 800 })).toBe("ZZZ 8.00");
-    // A code Intl rejects outright falls back rather than throwing into the card.
     expect(formatPrice({ currency: "US", amountMinorUnits: 800 })).toBe("US 8");
   });
 });

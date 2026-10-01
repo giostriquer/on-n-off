@@ -19,7 +19,6 @@ import type { Theme } from "@/features/session/SessionProvider";
 type LeftRailProps = {
   screen: Screen;
   counts: CatalogCounts;
-  /** False for a provider whose hooks on-n-off never read, whose count would be a claim, not a tally. */
   readsHooks: boolean;
   theme: Theme;
   masterOn: boolean;
@@ -44,7 +43,6 @@ type RailButtonProps = {
   onIntent?: () => void;
 };
 
-/** One nav entry; `onIntent` fires on hover/focus so a heavy screen can preload its chunk. */
 function RailButton({ id, label, Icon, screen, count, className, onScreen, onIntent }: RailButtonProps) {
   const active = screen === id;
   return (
@@ -114,8 +112,6 @@ export function LeftRail({
     {
       id: "hooks" as const,
       label: "Hooks",
-      // A provider on-n-off never read hooks for gets the bare label Agent config has: "0/0"
-      // would read as "this provider has none", which is the one thing the screen denies.
       count: readsHooks ? `${counts.hooks.on}/${counts.hooks.total}` : "",
       Icon: Webhook,
     },

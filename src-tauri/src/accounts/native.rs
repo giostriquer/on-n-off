@@ -1,7 +1,3 @@
-//! What both adapters' native stores share: running a provider's official CLI, reading native
-//! configuration, and the refusals every account-change preflight makes. No whole-home restores
-//! and no provider endpoint/config rewriting; each provider's own rules live in its adapter
-//! (`claude.rs`, `codex.rs`).
 use crate::{
     dto::AgentId,
     process::{wait_with_deadline, CommandOutcome},
@@ -15,10 +11,8 @@ use std::{
     time::Duration,
 };
 
-/// What account changes say about a native home the environment chose.
 pub(super) const CUSTOM_HOME: &str = "Account activation currently supports the default CLI home. Remove the custom home override or use the official CLI for this context.";
 
-/// Refuses a configuration file that is a link: the official client changes it, not on-n-off.
 pub(super) fn refuse_linked(config_file: &Path) -> Result<(), String> {
     if fs::symlink_metadata(config_file).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(
@@ -28,8 +22,6 @@ pub(super) fn refuse_linked(config_file: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Refuses when the environment `env` reads sets any of `names`, a credential that overrides
-/// the native login.
 pub(super) fn refuse_env_credentials(
     names: &[&str],
     env: &dyn Fn(&str) -> Option<OsString>,
@@ -40,7 +32,6 @@ pub(super) fn refuse_env_credentials(
     Ok(())
 }
 
-/// The provider's official CLI, `name`, found as a GUI app must find it.
 pub(super) fn cli(provider: AgentId, name: &str) -> Command {
     #[cfg(test)]
     if let Some(program) = TEST_CLI.with(|cli| cli.borrow().clone()) {
@@ -57,8 +48,6 @@ thread_local! {
     static TEST_CLI: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Runs `run` with every official CLI this thread's `cli` finds replaced by `program`, a stub, so a
-/// real store can be driven without a real client.
 #[cfg(test)]
 pub(crate) fn with_test_cli<T>(program: &Path, run: impl FnOnce() -> T) -> T {
     struct Restore(Option<String>);

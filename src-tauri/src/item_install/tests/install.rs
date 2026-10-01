@@ -35,7 +35,6 @@ fn install_writes_skill_and_records_it() {
         "nested files use / keys"
     );
     assert_eq!(read(&dest.join("ref").join("notes.md")), "nested");
-    // Claude sees it as a user skill.
     let tab = h.claude().list_tab().unwrap();
     assert!(tab.user_skills.iter().any(|s| s.name == "tdd"));
     h.finish();
@@ -114,7 +113,6 @@ fn install_into_several_providers_and_skips_agents_outside_claude() {
         .unwrap();
     assert!(anti.user_skills.iter().any(|s| s.name == "tdd"));
     assert_eq!(h.registry().items.len(), 5);
-    // Only one tarball download for the whole batch.
     let tarballs = h
         .fetcher
         .calls()
@@ -152,7 +150,6 @@ fn install_into_project_scope_creates_provider_dirs() {
     assert!(project.join(".codex/skills/tdd/SKILL.md").is_file());
     assert!(h.registry().items.iter().all(|i| i.scope == scope));
 
-    // A project folder that does not exist fails without creating anything.
     let missing = ItemScope::Project {
         project_path: h.home.join("nope").to_string_lossy().into_owned(),
     };
@@ -213,7 +210,6 @@ fn install_replaces_managed_item_with_backup_and_dedupes_batch() {
     );
     h.install(req, vec![(AgentId::Claude, ItemScope::Global)])
         .unwrap();
-    // Same skill twice in one batch (e.g. two plugins shipping `tdd`): second is a conflict.
     let mut second = pick(ItemKind::Skill, "skills/engineering/tdd");
     second.plugin_name = "other-plugin".into();
     let req = request(
@@ -293,7 +289,6 @@ fn install_reports_missing_upstream_path_as_failed() {
 fn install_reports_write_failure_and_leaves_registry_untouched() {
     let h = Harness::new("items-install-write-fail");
     h.route_repo("HEAD", SHA_A, mattpocock_tarball(SHA_A, "1.2.3", ""));
-    // A regular file where the skills folder should be makes every Claude write fail.
     fs::create_dir_all(h.home.join(".claude")).unwrap();
     fs::write(h.home.join(".claude/skills"), "not a folder").unwrap();
     let req = request(
@@ -322,7 +317,6 @@ fn install_reports_write_failure_and_leaves_registry_untouched() {
     assert!(claude
         .iter()
         .all(|o| o.status == ItemOutcomeStatus::Failed && o.reason.is_some()));
-    // The batch continues for the other provider.
     assert!(result
         .outcomes
         .iter()
@@ -349,7 +343,6 @@ fn install_uses_the_snapshot_the_user_saw_when_upstream_moves_after_inspect() {
         .service
         .inspect_marketplace("mattpocock", "skills", None)
         .unwrap();
-    // Upstream advances between the sheet opening and Install being clicked.
     h.route_repo("HEAD", SHA_B, mattpocock_tarball(SHA_B, "1.3.0", "\nnew"));
     let downloads = |h: &Harness| {
         h.fetcher

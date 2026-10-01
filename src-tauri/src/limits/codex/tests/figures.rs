@@ -1,6 +1,3 @@
-//! The one gate both Codex reads ask their backend figures through (`backend_figures`): the term
-//! only with the card's own access, and what it spent only on a workspace plan too.
-
 use super::*;
 use crate::accounts::model::AccessToken;
 use crate::http::{never_asked, was_asked};
@@ -11,13 +8,10 @@ fn now() -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-/// An account key of this test's own: a failed read backs off per account, and must not hold
-/// another test's read back.
 fn account(name: &str) -> String {
     format!("test-account:{name}:{:?}", std::thread::current().id())
 }
 
-/// The signed-in login's access projection, as the read's identity check hands it over.
 fn access(key: &str) -> Option<CodexAccess> {
     Some(CodexAccess {
         observation_key: key.to_string(),
@@ -26,7 +20,6 @@ fn access(key: &str) -> Option<CodexAccess> {
     })
 }
 
-/// Where the gate asks what was spent and the term. The usage reads are not the gate's to make.
 fn urls<'a>(credit_usage: &'a str, subscriptions: &'a str) -> CodexEndpoints<'a> {
     CodexEndpoints {
         usage: "unused",
@@ -36,7 +29,6 @@ fn urls<'a>(credit_usage: &'a str, subscriptions: &'a str) -> CodexEndpoints<'a>
     }
 }
 
-/// A breakdown in the shape the endpoint answers, for one day's credits of one model.
 fn breakdown(date: &str, credits: f64) -> String {
     json!({
         "data": [{
@@ -52,11 +44,8 @@ fn breakdown(date: &str, credits: f64) -> String {
     .to_string()
 }
 
-/// A term in the shape the endpoint answers a team member, trimmed to what is read.
 const TERM: &str = r#"{"id":"ws-1","entitlement":{"subscription_plan":"chatgptteamplan","expires_at":"2026-09-28T22:22:34+00:00","renews_at":"2026-09-28T16:22:34+00:00","cancels_at":null,"scheduled_plan_change":null,"is_delinquent":false},"last_active_subscription":{"will_renew":true,"cancellation_outcome":null},"plan_type":"team","active_until":"2026-09-28T16:22:34Z","will_renew":true,"cancellation_outcome":null}"#;
 
-/// The signed-in card has no token of its own (app-server reads it), so its login's access token is
-/// used, for its own workspace, and the figure is that card's.
 #[test]
 fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
     let key = account("signed-in");
@@ -83,17 +72,13 @@ fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
     );
 }
 
-/// Whose access the gate is handed for a card.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Handed {
-    /// The card's own account's.
     Own,
-    /// Another account's.
     Other,
     None,
 }
 
-/// An endpoint one case of the table expects asked, which answers `body` once, or never asked.
 enum Endpoint {
     Asked(String, std::thread::JoinHandle<String>),
     NeverAsked(std::net::TcpListener, String),
@@ -116,7 +101,6 @@ impl Endpoint {
         }
     }
 
-    /// Fails `case` unless the endpoint was asked exactly when expected.
     fn check(self, case: &str) {
         match self {
             Self::Asked(_, request) => {
@@ -127,10 +111,6 @@ impl Endpoint {
     }
 }
 
-/// Every plan against every access it can be handed, for both figures: the term is asked whatever
-/// the plan, and what was spent only on a workspace plan, both only with the card's own access, so
-/// another account's token is never spent on it and no access is no figure. A figure not asked is
-/// none, and its endpoint never hears of it.
 #[test]
 fn each_figure_is_asked_only_with_the_cards_own_access_and_spending_only_on_a_workspace_plan() {
     let plans = [

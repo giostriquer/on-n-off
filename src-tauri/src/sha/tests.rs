@@ -1,9 +1,5 @@
 use super::sha256_hex;
 
-/// The published SHA-256 vectors. Nothing else in the crate pins a digest: both callers only ever
-/// compare one of these strings against another, so a broken encoder would stay invisible while
-/// every stored filename and every recorded item hash silently changed. The "abc" digest carries
-/// bytes below 0x10 (`01`, `03`, `00`), so an encoder that drops their leading zero fails it too.
 #[test]
 fn matches_the_published_vectors() {
     assert_eq!(

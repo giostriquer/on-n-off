@@ -5,11 +5,8 @@ use crate::dto::{
 };
 use serde::{Deserialize, Serialize};
 
-/// A cell's width on screen (points at the standard size); a vertical rail is this thick.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const CELL_WIDTH: f64 = 76.0;
-/// A cell's height on screen, from the same parts the helper's `railLayout` adds up (icon slot,
-/// gap, percent label, padding); a horizontal bar is this thick.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const CELL_HEIGHT: f64 = ICON_SLOT + CONTENT_SPACING + LABEL_HEIGHT + 2.0 * CELL_PADDING;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -23,10 +20,8 @@ const CELL_PADDING: f64 = 1.0;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const CELL_SPACING: f64 = 8.0;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-/// Also the length of the ear curve that flares each end into the screen edge.
 pub const RAIL_INSET: f64 = 40.0;
 
-/// Providers in the order the rail lays them out.
 pub const RAIL_ORDER: [AgentId; 4] = [
     AgentId::Claude,
     AgentId::Codex,
@@ -71,7 +66,6 @@ impl Edge {
     }
 }
 
-/// Whether the rail stays open or waits behind a small pill at the edge.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ShowMode {
@@ -80,7 +74,6 @@ pub enum ShowMode {
     OnHover,
 }
 
-/// The Pull requests screen's three lists, in the order the popover shows them.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum GithubList {
@@ -96,7 +89,6 @@ pub const GITHUB_LIST_ORDER: [GithubList; 3] = [
     GithubList::Assigned,
 ];
 
-/// The pull-request cell: on by default, showing only the user's own pull requests.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct NotchPullRequests {
@@ -114,7 +106,6 @@ impl Default for NotchPullRequests {
 }
 
 impl NotchPullRequests {
-    /// The selected lists in screen order, without duplicates.
     #[cfg(any(target_os = "macos", target_os = "windows", test))]
     pub fn selected_lists(&self) -> Vec<GithubList> {
         GITHUB_LIST_ORDER
@@ -137,9 +128,6 @@ pub struct NotchSettings {
     pub pull_requests: NotchPullRequests,
 }
 
-/// What a settings document written before the notch had a provider list meant: every
-/// provider. A fresh install starts narrower (see `Default`), but nobody who already
-/// has a rail loses cells from it.
 fn documented_providers() -> Vec<AgentId> {
     RAIL_ORDER.to_vec()
 }
@@ -152,9 +140,6 @@ impl Default for NotchSettings {
             edge: Edge::default(),
             size: NotchSize::default(),
             show: ShowMode::default(),
-            // Only the providers that publish a subscription quota worth a ring.
-            // Antigravity has none and Cursor only reports one on some setups, so a
-            // first run would rail two dashes; both are one toggle away in settings.
             providers: vec![AgentId::Claude, AgentId::Codex],
             pull_requests: NotchPullRequests::default(),
         }
@@ -162,7 +147,6 @@ impl Default for NotchSettings {
 }
 
 impl NotchSettings {
-    /// The selected providers in rail order, without duplicates.
     #[cfg(any(target_os = "macos", target_os = "windows", test))]
     pub fn rail_providers(&self) -> Vec<AgentId> {
         RAIL_ORDER
@@ -171,7 +155,6 @@ impl NotchSettings {
             .collect()
     }
 
-    /// Cells on the rail: one per selected provider, then the pull-request cell when it is on.
     #[cfg(any(target_os = "macos", target_os = "windows", test))]
     pub fn cell_count(&self) -> usize {
         self.rail_providers().len() + usize::from(self.pull_requests.enabled)
@@ -196,7 +179,6 @@ pub struct Display {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NotchSnapshot {
-    /// Orders settings reads, writes, and window events within this app run.
     pub revision: u64,
     pub supported: bool,
     pub settings: NotchSettings,
@@ -213,16 +195,12 @@ pub struct Layout {
     pub height: f64,
 }
 
-/// Length of the rail along its axis for `count` cells of `cell` length, before size scaling.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn rail_length(count: usize, cell: f64) -> f64 {
     let count = count as f64;
     count * cell + (count - 1.0).max(0.0) * CELL_SPACING + 2.0 * RAIL_INSET
 }
 
-/// The rail's frame in top-left display coordinates, or `None` when the notch must stay hidden:
-/// disabled, no provider, the selected display missing, ambiguous, or mirrored, or a rail that
-/// does not fit inside the display's work area.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> {
     if !settings.enabled {
@@ -272,10 +250,6 @@ pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> 
     }
 }
 
-/// A point snapped to the display's pixel grid, the `pixelAligned` port. Centring the
-/// rail in a work area that does not divide evenly leaves it on a half pixel, and the
-/// window origin moves with the popover: without this the whole rail slides half a
-/// pixel whenever a popover opens above its top edge.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
     let scale = if display_scale.is_finite() && display_scale > 0.0 {
@@ -286,11 +260,6 @@ fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
     (value * scale).round() / scale
 }
 
-/// One provider cell as both notches draw it, projected once from the current account's card: its
-/// windows in the card's order (weekly, session, model, as the Limits screen lists them), the window
-/// its ring and figure lead with, and what its inner ring shows. The macOS helper and the Windows
-/// painter draw it and decide none of it; what depends on the clock (a window's percent now, its
-/// reset note) stays with them, since they redraw between reads.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotchProvider {
@@ -298,25 +267,15 @@ pub struct NotchProvider {
     pub status: LimitsStatus,
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
-    /// The window the ring and the figure show, by id: the headline window, which is the weekly
-    /// window. None for a card without one. Chosen whatever the card's status, as the Limits card's
-    /// headline is: a paused card's windows are the ones it last observed (`limits/reading.rs`).
-    /// Private, like `inner_ring`, so only `current` decides them and they always name what
-    /// `windows` holds.
     headline_window_id: Option<String>,
-    /// None without a Fable window or a workspace share.
     inner_ring: Option<InnerRing>,
     pub workspace_credits: Option<LimitsWorkspaceCreditsDto>,
 }
 
-/// What a provider cell's inner ring shows: Claude's Fable weekly window, or a business member's
-/// share of the workspace credits. On the macOS wire, `{"kind":"fable","windowId":…}` or
-/// `{"kind":"workspaceShare"}`.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum InnerRing {
-    /// The Fable window, by id among the provider's windows.
     #[serde(rename_all = "camelCase")]
     Fable {
         window_id: String,
@@ -326,8 +285,6 @@ pub enum InnerRing {
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 impl NotchProvider {
-    /// The current account's card among one provider's cards, projected; `None` without one.
-    /// Remembered accounts never reach the notch.
     pub fn current(entries: Vec<ProviderLimitsDto>) -> Option<Self> {
         let card = entries.into_iter().find(|entry| entry.current_account)?;
         let windows = card.reading.windows;
@@ -349,7 +306,6 @@ impl NotchProvider {
     }
 }
 
-/// The names the projection chose, as the macOS helper receives them over the pipe.
 #[cfg(target_os = "macos")]
 impl NotchProvider {
     pub fn headline_window_id(&self) -> Option<&str> {
@@ -361,18 +317,13 @@ impl NotchProvider {
     }
 }
 
-/// What the Windows painter draws from the names the projection chose. The macOS helper resolves
-/// the same names on its side of the pipe (`Provider.headline`, `Provider.inner` in NotchCore).
 #[cfg(any(target_os = "windows", test))]
 impl NotchProvider {
-    /// The headline window, which the ring and the figure show.
     pub fn headline(&self) -> Option<&LimitWindowDto> {
         let id = self.headline_window_id.as_deref()?;
         self.windows.iter().find(|window| window.id == id)
     }
 
-    /// The inner ring's choice and the window it draws: the Fable window, or the workspace share
-    /// drawn as a window (`workspace_share_window`).
     pub fn inner_window(&self) -> Option<(&InnerRing, LimitWindowDto)> {
         let ring = self.inner_ring.as_ref()?;
         let window = match ring {
@@ -389,7 +340,6 @@ impl NotchProvider {
     }
 }
 
-/// The inner ring: Claude's Fable window, else a business member's workspace-credit share.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn inner_ring(
     provider: AgentId,
@@ -403,7 +353,6 @@ fn inner_ring(
         .or_else(|| share.map(|_| InnerRing::WorkspaceShare))
 }
 
-/// Claude's Fable weekly window, which the Claude reader labels "Weekly · Fable" whatever its id.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn fable_window(provider: AgentId, windows: &[LimitWindowDto]) -> Option<&LimitWindowDto> {
     if provider != AgentId::Claude {
@@ -415,20 +364,6 @@ fn fable_window(provider: AgentId, windows: &[LimitWindowDto]) -> Option<&LimitW
     })
 }
 
-/// The side notch meter ramp, twin of `NotchCore/Meter.swift`.
-///
-/// It used to step to a warning amber at 70 %. That amber is far lighter than the accents it
-/// replaced and its hue points away from red, so a meter that was filling up went paler and
-/// yellower exactly as it ran out, which reads as cooling down. Interpolating the accent toward the
-/// trip red keeps the ramp monotonic: every step sits closer to red than the one before it. The
-/// blend is eased rather than linear so crossing 70 % announces itself instead of creeping.
-///
-/// It lives here rather than in `win_paint.rs` for the reason the layout maths does: that file has
-/// no test target, so a ramp kept there is tested on neither CI leg. The gate is `windows` plus
-/// `test` rather than both platforms, because the painter is the only consumer and an item cfg'd
-/// into a target that never calls it fails `-D warnings` as dead code. Under `test` it compiles on
-/// both legs, which is what lets one regression test cover the Windows ramp from either runner.
-/// The amber still means "pending" on CI rollups and badges, so it stays in the painter palette.
 #[cfg(any(target_os = "windows", test))]
 pub type Color = [u8; 4];
 
@@ -447,9 +382,6 @@ pub fn meter_color(percent: Option<f64>, base: Color) -> Color {
     }
 }
 
-/// Two palette entries blended in sRGB, `amount` clamped to 0...1. Alpha is blended with the rest
-/// rather than taken from `from`, so the helper is right for any pair and not only for the opaque
-/// ramp colours it is used on today.
 #[cfg(any(target_os = "windows", test))]
 fn mix(from: Color, to: Color, amount: f64) -> Color {
     let t = amount.clamp(0.0, 1.0);
@@ -462,10 +394,6 @@ fn mix(from: Color, to: Color, amount: f64) -> Color {
     ]
 }
 
-/// What the side notch says about a business workspace member's credit share, worded once for both
-/// notches as the Limits screen words it (`presentWorkspaceShare` in
-/// `ui/src/features/limits/limitPresentation.ts`): `left` while the share is current, `renewed` once
-/// its reset has passed and all of it is left again. Each notch picks one by the clock when it draws.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShareWording {
@@ -473,8 +401,6 @@ pub struct ShareWording {
     pub renewed: String,
 }
 
-/// A reached share reads "all 10,000 used" when its amounts agree and "limit reached" when they show
-/// some left; otherwise it says what is left, never less than nothing.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn workspace_share_wording(share: &LimitsWorkspaceCreditsDto) -> ShareWording {
     let limit = amount(&share.limit);
@@ -496,14 +422,11 @@ pub fn workspace_share_wording(share: &LimitsWorkspaceCreditsDto) -> ShareWordin
     }
 }
 
-/// An amount as the provider writes it; the limits reader only keeps finite amounts of at least zero.
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn amount(text: &str) -> f64 {
     text.trim().parse().unwrap_or(0.0)
 }
 
-/// An amount in en-US digits with at most two decimals, rounding half away from zero like the app's
-/// `Intl.NumberFormat`: 25000.5 → "25,000.5".
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn format_amount(value: f64) -> String {
     let cents = (value.max(0.0) * 100.0).round() as u128;
@@ -522,8 +445,6 @@ fn format_amount(value: f64) -> String {
     }
 }
 
-/// The share as a window, so the Windows painter's inner ring, meter ramp and renewal treat it the way
-/// they treat Claude's Fable window. The meter is the reader's figure.
 #[cfg(any(target_os = "windows", test))]
 pub fn workspace_share_window(share: &LimitsWorkspaceCreditsDto) -> LimitWindowDto {
     LimitWindowDto {
@@ -537,7 +458,6 @@ pub fn workspace_share_window(share: &LimitsWorkspaceCreditsDto) -> LimitWindowD
     }
 }
 
-/// Whether the share's reset has passed, so all of it is left again.
 #[cfg(any(target_os = "windows", test))]
 pub fn workspace_share_renewed(
     share: &LimitsWorkspaceCreditsDto,
@@ -552,8 +472,6 @@ fn share_reset(share: &LimitsWorkspaceCreditsDto) -> Option<chrono::DateTime<chr
     Some(reset.with_timezone(&chrono::Utc))
 }
 
-/// "Resets Oct 1" while pending, "Reset Sep 23" once renewed, empty with no reset. A date rather than
-/// the windows' weekday and clock: a share renews monthly, and a weekday would not say which week.
 #[cfg(any(target_os = "windows", test))]
 pub fn workspace_share_note(
     share: &LimitsWorkspaceCreditsDto,

@@ -1,17 +1,10 @@
-/**
- * Fold one machine's UsageSummary buckets into page totals.
- * Multi-environment merge is out of scope for on-n-off.
- */
-
 import type { AgentId } from "./types";
 import type { UsageBucket, UsageSummary } from "./usageTypes";
 
-/** What a model or provider row adds up across its buckets. */
 export type CostTally = {
   costUsd: number;
   totalTokens: number;
   records: number;
-  /** Records the rate table had no price for; their tokens count, their cost is not in `costUsd`. */
   unpricedRecords: number;
 };
 
@@ -21,7 +14,6 @@ export type ProviderTotals = CostTally & {
   tokenShare: number;
 };
 
-/** A model's totals within one day. Shares belong to the caller, which holds the denominator. */
 export type ModelDayTotals = Omit<ModelTotals, "costShare" | "tokenShare">;
 
 export type ModelTotals = CostTally & {
@@ -104,11 +96,6 @@ const EMPTY: FoldedUsage = {
   hourly: [],
 };
 
-/**
- * The models behind each day, so a day row can open into the same columns the model breakdown
- * shows. Totals only: the caller shares them against the window, the way the day rows above them
- * are shared, so one column never carries two denominators.
- */
 export function foldModelsByDay(
   summary: UsageSummary | null,
 ): ReadonlyMap<string, readonly ModelDayTotals[]> {
@@ -255,12 +242,10 @@ function tallyBucket(row: CostTally, bucket: UsageBucket): void {
   row.unpricedRecords += bucket.unpricedRecords;
 }
 
-/** Whether none of a row's records had a price: its cost is unknown, not zero. */
 export function isUnpriced(row: Pick<CostTally, "records" | "unpricedRecords">): boolean {
   return row.records > 0 && row.unpricedRecords === row.records;
 }
 
-/** The line under the headline cost: what the figure assumes, and what it leaves out. */
 export function usagePricingNote(summary: UsageSummary | null, folded: FoldedUsage): string {
   if (!summary) return "";
   if (summary.pricing.status === "unavailable") return "Token counts only · pricing table unavailable";

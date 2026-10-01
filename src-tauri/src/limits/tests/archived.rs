@@ -1,14 +1,9 @@
-//! Archived accounts in a provider's list: flagged after the list hid the legacy history their
-//! cards replaced, so that history stays hidden behind them, and the signed-in card never; and the
-//! signed-in account a read names, unarchived.
-
 use super::account;
 use crate::dto::LimitWindowKind;
 use crate::limits::json::window;
 use crate::limits::*;
 use crate::paths::scratch_dir;
 
-/// A successful read of `id`, labelled `label`, observed at `hour` o'clock.
 fn read(id: &str, label: &str, hour: u32) -> ProviderLimitsDto {
     let mut dto = finish(
         AgentId::Codex,
@@ -39,7 +34,6 @@ fn archive(store: &SnapshotStore, ids: &[&str]) {
     store.set_archived(AgentId::Codex, &ids, true).unwrap();
 }
 
-/// What each listed card is: its id, whether it is signed in and whether it is archived.
 fn summary(listed: &[ProviderLimitsDto]) -> Vec<(&str, bool, bool)> {
     listed
         .iter()
@@ -79,8 +73,6 @@ fn archived_accounts_are_flagged_and_still_hide_the_history_they_replaced() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// Being signed in unarchives an account, so its card is never flagged, even while the archive
-/// still names it.
 #[test]
 fn the_signed_in_card_is_never_flagged_archived() {
     let home = scratch_dir("limits-archived-signed-in");
@@ -98,9 +90,6 @@ fn the_signed_in_card_is_never_flagged_archived() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// Being signed in unarchives an account: the signed-in card's own id, and its legacy history's
-/// when that history names the same email. Other archived accounts stay archived, and a read that
-/// names no signed-in account unarchives nothing.
 #[test]
 fn the_signed_in_account_a_read_names_is_unarchived() {
     let home = scratch_dir("limits-archived-unarchive-signed-in");
@@ -140,8 +129,6 @@ fn the_signed_in_account_a_read_names_is_unarchived() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A write that fails changed nothing: the account stays archived, for the next read to try again,
-/// and the read says nothing changed, so the account list is not announced.
 #[cfg(unix)]
 #[test]
 fn a_signed_in_read_that_cannot_write_the_archive_says_nothing_changed() {

@@ -2,7 +2,6 @@ use super::*;
 
 #[test]
 fn shutdown_reaps_an_unresponsive_child_without_the_supervisor() {
-    // This child does not read stdin or cooperate with graceful shutdown.
     let child = Arc::new(Mutex::new(
         Command::new("/bin/sleep").arg("60").spawn().unwrap(),
     ));

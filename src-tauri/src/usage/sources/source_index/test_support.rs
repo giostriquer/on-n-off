@@ -17,14 +17,10 @@ pub(crate) fn transcript_parse_count() -> usize {
 }
 
 thread_local! {
-    /// A transcript a test treats as live, by its normalized path: every parse of it is followed by
-    /// one more appended line, the way an agent session keeps writing while the scan reads.
     static LIVE_TRANSCRIPT: std::cell::RefCell<Option<(String, String)>> =
         const { std::cell::RefCell::new(None) };
 }
 
-/// Run `f` while `path` grows by `line` after every parse of it. Growth changes the file's size,
-/// so a parse never sees it hold still, however coarse the filesystem's mtime.
 pub(crate) fn with_live_transcript<R>(
     path: &std::path::Path,
     line: &str,

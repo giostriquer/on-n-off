@@ -1,7 +1,3 @@
-//! `~/.on-n-off/installed-items.json`: provenance of every skill/agent on-n-off copied out of a
-//! marketplace. Item folders themselves stay byte-identical to upstream; this file is what lets
-//! us tell "upstream moved" from "you edited it".
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -20,13 +16,9 @@ pub struct ItemSource {
     #[serde(rename = "ref")]
     pub git_ref: String,
     pub plugin_name: String,
-    /// Plugin folder inside the repository (`""` for the repository root), `/`-separated.
     #[serde(default)]
     pub plugin_root: String,
-    /// Skill folder or agent file inside the repository, `/`-separated.
     pub upstream_path: String,
-    /// Marketplace entries this item was detected to need (`plugin/kind/path`), high
-    /// confidence only; recorded so a later removal can warn about dependants.
     #[serde(default)]
     pub depends_on: Vec<String>,
 }
@@ -46,15 +38,12 @@ pub struct InstalledItem {
     pub provider: AgentId,
     pub kind: ItemKind,
     pub name: String,
-    /// Absolute path of the folder (skill) or file (agent) as written on this machine.
     pub target_path: String,
     pub scope: ItemScope,
     pub source: ItemSource,
     pub installed: Installed,
-    /// Relative path → sha256 hex of every file as installed.
     #[serde(default)]
     pub files: BTreeMap<String, String>,
-    /// Upstream sha the user chose to keep their copy over ("Keep mine").
     #[serde(default)]
     pub dismissed_sha: Option<String>,
 }
@@ -118,7 +107,6 @@ fn same_scope(a: &ItemScope, b: &ItemScope) -> bool {
     }
 }
 
-/// Case-insensitive on Windows, `/`-separated everywhere: two spellings of one folder match.
 fn normalize(path: &Path) -> String {
     let text = path.to_string_lossy().replace('\\', "/");
     let text = text.trim_end_matches('/').to_string();
@@ -145,7 +133,6 @@ pub fn item_id(provider: AgentId, kind: ItemKind, target_path: &Path) -> String 
     )
 }
 
-/// How `ItemSource::depends_on` names a marketplace entry: `plugin/kind/upstream_path`.
 pub fn dependency_key(plugin_name: &str, kind: ItemKind, upstream_path: &str) -> String {
     format!("{plugin_name}/{}/{upstream_path}", kind_key(kind))
 }

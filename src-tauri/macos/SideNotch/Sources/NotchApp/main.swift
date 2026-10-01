@@ -26,8 +26,6 @@ let controller = PanelController()
 let outputQueue = DispatchQueue(label: "app.on-n-off.notch.output")
 let outputSlots = DispatchSemaphore(value: 32)
 func stopAfterDisconnect() {
-  // AppKit normally terminates cleanly. A stuck main queue must not leave an
-  // orphan window after the parent exits or its protocol connection fails.
   DispatchQueue.main.async {
     controller.shutdown()
     application.terminate(nil)
@@ -48,7 +46,6 @@ controller.emit = { action in
     }
   }
 }
-// One message at a time reaches the main thread; EOF also covers an abrupt parent exit.
 DispatchQueue.global(qos: .utility).async {
   var buffer = Data()
   let pending = DispatchSemaphore(value: 1)
@@ -77,7 +74,6 @@ DispatchQueue.global(qos: .utility).async {
 }
 controller.emit(.ready)
 #if DEBUG
-  // Exercise parent-death cleanup without a responsive AppKit event loop.
   if CommandLine.arguments.contains("--check-unresponsive-main") {
     DispatchSemaphore(value: 0).wait()
   }

@@ -1,4 +1,3 @@
-//! Isolated official sign-in with operation-scoped cancellation and publication guards.
 use super::model::Identity;
 use super::store;
 use super::transaction::Native;
@@ -95,8 +94,6 @@ fn prepare_login(
         .ok_or("Official sign-in returned no reusable login.")?;
     let identity = native.identify(&login)?;
     let usage = read_usage(&identity);
-    // The official client can rotate its credential while reading usage. Save that latest
-    // generation, but never publish a result after a user/workspace change.
     let latest = native
         .read()?
         .ok_or("Sign-in disappeared while reading usage.")?;
@@ -143,9 +140,6 @@ impl Drop for LoginLease {
     }
 }
 impl super::Accounts {
-    /// Signs in to `provider` with its official client in an isolated home, then publishes the
-    /// login as a profile awaiting activation; `expected` is the profile a sign-in again is for.
-    /// Announced only once published: nothing else it does changes a login.
     pub(super) fn add(
         &self,
         provider: AgentId,
@@ -161,7 +155,6 @@ impl super::Accounts {
         let home = &self.home;
         let native = self.native(provider)?;
         native.preflight()?;
-        // Unlock storage before asking the user to sign in, so a denied vault cannot strand a login.
         let ticket = start(home, provider, expected.as_deref())?;
         let root = home.join(".on-n-off/accounts/logins");
         std::fs::create_dir_all(&root).map_err(|_| "Cannot create isolated sign-in storage.")?;
@@ -220,13 +213,10 @@ impl super::Accounts {
             return Err("The isolated login could not be cleaned from protected storage. Its private recovery directory was retained.".into());
         }
         result?;
-        // Unlike a use or a sign-out, only a published sign-in changed anything to announce.
         self.notify.changed(provider);
         Ok(())
     }
 
-    /// Recover only app-created, abandoned login homes after their provider processes have exited.
-    /// Live leases, unrecognized folders and inaccessible Keychain entries are left intact.
     pub(super) fn recover_abandoned(&self) {
         let Ok(entries) = std::fs::read_dir(self.home.join(".on-n-off/accounts/logins")) else {
             return;
@@ -257,8 +247,6 @@ impl super::Accounts {
             else {
                 continue;
             };
-            // Only a provider with saved profiles has an isolated store. The home a sign-in left
-            // already holds its store's directory, so resolving it creates nothing.
             let Ok(isolated) = self.isolated(provider, &path) else {
                 continue;
             };
@@ -273,9 +261,6 @@ impl super::Accounts {
     }
 }
 
-/// What a sign-in is checked against before the official client runs: no pending recovery, and
-/// the profile it signs in again still saved for this provider. Gives the ticket its publication
-/// is checked against.
 fn start(home: &Path, provider: AgentId, expected: Option<&str>) -> Result<store::Ticket, String> {
     let store = store::Store::open(home, true)?;
     let db = store.load()?;
@@ -292,9 +277,6 @@ fn start(home: &Path, provider: AgentId, expected: Option<&str>) -> Result<store
     Ok(ticket)
 }
 
-/// Publishes a finished sign-in into the vault as a profile awaiting activation, which owns its
-/// renewal when its provider renews privately: an account change, refused if the sign-in was
-/// canceled or its ticket no longer holds.
 fn publish(
     registry: &Mutex<Registry>,
     home: &Path,
@@ -313,8 +295,6 @@ fn publish(
     store::Store::open(home, false)?.change_then(
         store::ChangeKind::SignIn(ticket),
         |db| {
-            // Cancellation/removal is checked at publication, not merely when the child exits,
-            // and holds off a cancel until the publication is durable.
             let operation = registry
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -329,8 +309,6 @@ fn publish(
                 .iter_mut()
                 .find(|p| p.id == saved_id)
                 .ok_or("Saved profile disappeared.")?;
-            // The new login replaces whatever a home kept for the account; it moves into a new
-            // home at the next read, and the old one, which no profile names then, goes.
             profile.home = None;
             profile.pending_activation = true;
             profile.usage_renewal_owned = renews_privately;
@@ -338,12 +316,8 @@ fn publish(
         },
         |(operation, email), _, _| {
             if let Some(usage) = usage {
-                // Only a successfully published login may add observations. Quota storage
-                // failure must not discard a valid login; its previous history remains untouched.
                 let _ = crate::limits::remember(home, usage);
             }
-            // A published sign-in is an explicit re-add, which unarchives its account as it
-            // undoes a Remove; as with its observations, a failed write must not discard it.
             let _ = crate::limits::unarchive_profile(home, &signed_in, email);
             drop(operation);
             Ok(())

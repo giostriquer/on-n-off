@@ -1,18 +1,3 @@
-//! Claude Code's native store: where its dirs are ([`dirs`], honouring `CLAUDE_CONFIG_DIR` and
-//! `CLAUDE_SECURESTORAGE_CONFIG_DIR`); which Keychain item or credentials file holds its signed-in
-//! login, read with Claude Code's own precedence ([`read`]); how that item is found; the lock
-//! directories Claude Code takes around changing it; and the writes of the `claudeAiOauth`
-//! document itself.
-//!
-//! Everything here follows Claude Code 2.1.282, with one intended difference: when the Keychain
-//! cannot be read and the credentials file holds no document, Claude Code reads a signed-out
-//! user, while this reports the Keychain's failure, because a login may well be behind it and
-//! "sign in again" would be the wrong advice.
-//!
-//! Every on-n-off path that reads or writes Claude's login comes through here: the account switch
-//! and the saved accounts' homes in [`super::claude`]. on-n-off never renews a Claude login; Claude
-//! Code does, under the same locks, which is why a write here takes them as Claude Code does.
-
 use std::ffi::OsString;
 use std::fs;
 use std::io;
@@ -24,25 +9,13 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-/// Outcome of probing the macOS Keychain: `Ok(Some(json))` entry found, `Ok(None)` no entry,
-/// `Err(why)` the entry could not be read (access denied, tool failure).
 pub(crate) type KeychainProbe = Result<Option<String>, String>;
 
-/// The name of Claude Code's Keychain entry for its default config dir. Read and write share it: a
-/// second copy that drifted would mean writing a login to an entry nothing reads.
-///
-/// Not gated to macOS: [`StorageDir::service`] names the entry on every platform, and on Windows
-/// a write to it is refused before anything is attempted, by `write_account`'s stub.
 pub(crate) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
-/// Claude Code's storage dir: where its credentials file and lock directories live, and whose path
-/// names its Keychain entry. It is the config dir unless `CLAUDE_SECURESTORAGE_CONFIG_DIR` moves it
-/// (see [`dirs`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StorageDir {
     path: PathBuf,
-    /// Whether the Keychain entry's name carries a hash of this path, as it does when the
-    /// environment chose the dir rather than the default.
     scoped: bool,
 }
 
@@ -51,8 +24,6 @@ impl StorageDir {
         Self { path, scoped }
     }
 
-    /// Where Claude Code keeps the login for the config dir `config`: that dir, scoped when
-    /// `CLAUDE_CONFIG_DIR` chose it (`custom`), unless `CLAUDE_SECURESTORAGE_CONFIG_DIR` moved it.
     pub(crate) fn of(config: &Path, custom: bool, secure_storage: Option<&SecureStorage>) -> Self {
         secure_storage.map_or_else(
             || Self::new(config.to_path_buf(), custom),
@@ -60,9 +31,6 @@ impl StorageDir {
         )
     }
 
-    /// The `CLAUDE_SECURESTORAGE_CONFIG_DIR` that keeps Claude Code's login in this dir whatever
-    /// its config dir: empty for the default dir's unscoped entry, else the dir itself, whose hash
-    /// scopes the entry as before.
     pub(crate) fn secure_storage_var(&self) -> OsString {
         if self.scoped {
             self.path.clone().into_os_string()
@@ -75,8 +43,6 @@ impl StorageDir {
         self.path.join(".credentials.json")
     }
 
-    /// The Keychain entry Claude Code files this dir's login under: its own name, suffixed with a
-    /// hash of the NFC-normalized path when the dir is scoped.
     pub(crate) fn service(&self) -> String {
         if !self.scoped {
             return CLAUDE_KEYCHAIN_SERVICE.into();
@@ -94,20 +60,14 @@ impl StorageDir {
     }
 }
 
-/// Claude Code's dirs for one environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Dirs {
-    /// The config dir: `CLAUDE_CONFIG_DIR`, else `<home>/.claude`.
     pub(crate) config: PathBuf,
-    /// `CLAUDE_CONFIG_DIR` chose the config dir.
     pub(crate) custom: bool,
     pub(crate) secure_storage: Option<SecureStorage>,
 }
 
 impl Dirs {
-    /// The file Claude Code keeps its signed-in account in: `.config.json` in the config dir when
-    /// an older Claude Code left one, else `.claude.json` in the config dir `CLAUDE_CONFIG_DIR`
-    /// chose, or in `home`.
     pub(crate) fn config_file(&self, home: &Path) -> PathBuf {
         let legacy = self.config.join(".config.json");
         if legacy.exists() {
@@ -120,42 +80,20 @@ impl Dirs {
     }
 }
 
-/// The name of the variable that moves Claude Code's storage away from its config dir.
 pub(crate) const SECURE_STORAGE_VAR: &str = "CLAUDE_SECURESTORAGE_CONFIG_DIR";
 
-/// The credentials that override the store's login when set in Claude Code's environment: the
-/// account changes refuse to run beside one, and a usage read runs without them.
 pub(crate) const ENV_CREDENTIALS: [&str; 3] = [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",
 ];
 
-/// `CLAUDE_SECURESTORAGE_CONFIG_DIR` as it was set, and the storage dir it chose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SecureStorage {
-    /// The value exactly as set, empty included, for a `claude` started for this store to be
-    /// handed the same, as Claude Code hands it to the processes it starts.
     pub(crate) var: OsString,
     pub(crate) dir: StorageDir,
 }
 
-/// Claude Code's dirs under `home` for the environment `env` reads, resolved as Claude Code
-/// 2.1.282 resolves them:
-///
-/// - The config dir is `CLAUDE_CONFIG_DIR` exactly as set — never trimmed, and set even when
-///   empty — else `<home>/.claude`, NFC-normalized either way.
-/// - The storage dir, which holds the credentials file and the lock directories, is the config
-///   dir; a set `CLAUDE_CONFIG_DIR` scopes its Keychain entry by a hash of that path.
-/// - `CLAUDE_SECURESTORAGE_CONFIG_DIR`, when set, moves the storage dir to it (NFC-normalized)
-///   and scopes the entry by its hash instead, leaving the config dir alone. Set but empty, it
-///   puts the storage back in `<home>/.claude` under the unscoped entry, whatever
-///   `CLAUDE_CONFIG_DIR` says.
-///
-/// A dir that is not absolute is refused. Claude Code would resolve it against whatever directory
-/// it happens to run in, which on-n-off cannot know. A disposable `ON_N_OFF_HOME` keeps the
-/// default dirs whatever the environment says, so no test or development run follows it to a
-/// real store.
 pub(crate) fn dirs(home: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Result<Dirs, String> {
     if env("ON_N_OFF_HOME").is_some() {
         return Ok(Dirs {
@@ -192,8 +130,6 @@ fn absolute(path: PathBuf) -> Result<PathBuf, String> {
     }
 }
 
-/// `path` in Unicode normalization form C, as Claude Code normalizes its dirs. A path that is not
-/// Unicode is left as it is.
 fn nfc(path: OsString) -> PathBuf {
     use unicode_normalization::UnicodeNormalization;
     match path.into_string() {
@@ -202,34 +138,22 @@ fn nfc(path: OsString) -> PathBuf {
     }
 }
 
-/// Where a stored login lives, so a write goes back to the entry the next read will consult.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClaudeStore {
-    /// The `Claude Code-credentials` Keychain entry, which only macOS has.
     Keychain,
-    /// `<storage dir>/.credentials.json`: the only store on Windows, and the macOS fallback.
     File(PathBuf),
 }
 
-/// What Claude Code's next read of its login would find, and where a write has to go.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Stored {
-    /// The store that read uses. `Err` when the Keychain could not be read: the credentials file
-    /// stood in for it, but whether Claude Code will read the Keychain or the file next is
-    /// unknown, so a write refuses rather than guess.
     pub(crate) target: Result<ClaudeStore, String>,
-    /// What that store holds, token or not; `None` when nothing is stored there.
     pub(crate) document: Option<Value>,
 }
 
-/// Why no store could be read. Each caller words these its own way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StoreError {
-    /// The Keychain could not be read, and the credentials file held nothing to stand in for it.
     Keychain(String),
-    /// The credentials file could not be read.
     FileUnreadable(String),
-    /// The credentials file is not JSON.
     FileMalformed(String),
 }
 
@@ -243,16 +167,6 @@ impl std::fmt::Display for StoreError {
     }
 }
 
-/// Claude Code's login, from the store Claude Code itself would read it from (2.1.282):
-///
-/// - A Keychain entry that parses as JSON is the login, token or not. Claude Code signs out by
-///   emptying it, so an entry without a token is a signed-out user, never a reason to look past
-///   it to an older login in the file.
-/// - An entry that is not JSON, or no entry, leaves it to `<storage dir>/.credentials.json`.
-/// - A Keychain that cannot be read (denied, not answered, locked) leaves the read to the file
-///   too, but only a file that holds a document can answer for it: with nothing there the
-///   Keychain's failure is the answer, because a login may be behind it. Claude Code reads that
-///   case as signed out; the difference is intended. And a write refuses.
 pub(crate) fn read(dir: &StorageDir, keychain: KeychainProbe) -> Result<Stored, StoreError> {
     let unread = match keychain {
         Ok(Some(secret)) => match serde_json::from_str::<Value>(&secret) {
@@ -281,7 +195,6 @@ pub(crate) fn read(dir: &StorageDir, keychain: KeychainProbe) -> Result<Stored, 
     }
 }
 
-/// `Ok(None)` when the file does not exist.
 fn read_document(path: &Path) -> Result<Option<Value>, StoreError> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
@@ -298,10 +211,6 @@ fn read_document(path: &Path) -> Result<Option<Value>, StoreError> {
         .map_err(|error| StoreError::FileMalformed(format!("{}: {error}", path.display())))
 }
 
-/// The account name Claude Code (2.1.282) files its Keychain entry under: `$USER`, else the login
-/// name, and `claude-code-user` when that is not a plain name `security` takes as it is. Claude
-/// Code asks the OS for the login name; `$LOGNAME`, which a login session and launchd both set,
-/// stands in for it here.
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn claude_code_account(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> String {
     ["USER", "LOGNAME"]
@@ -316,21 +225,14 @@ pub(crate) fn claude_code_account(env: &dyn Fn(&str) -> Option<std::ffi::OsStrin
         .unwrap_or_else(|| "claude-code-user".into())
 }
 
-/// This process's name for Claude Code's Keychain entry. A test binary resolves the fallback name,
-/// never a developer's own: [`crate::paths::process_env`] shows it no `$USER`.
 #[cfg(target_os = "macos")]
 fn own_account() -> String {
     claude_code_account(&crate::paths::process_env)
 }
 
-/// Deadline for an attribute lookup, which prints no secret and raises no prompt.
 #[cfg(target_os = "macos")]
 const ACCOUNT_DEADLINE: Duration = Duration::from_secs(30);
 
-/// The secret of Claude Code's item under `service`. First the item filed under Claude Code's own
-/// account name, which is the one Claude Code reads; failing that, whichever item the service
-/// holds, through the account its attributes name, so an item an older Claude Code filed under
-/// another account still resolves. A refused read of Claude Code's own item is not looked past.
 #[cfg(target_os = "macos")]
 pub(crate) fn keychain_secret(service: &str) -> KeychainProbe {
     let own = own_account();
@@ -343,13 +245,6 @@ pub(crate) fn keychain_secret(service: &str) -> KeychainProbe {
     }
 }
 
-/// The account of the item [`keychain_secret`] reads, found the same way but from attributes
-/// alone, so a write replaces that item.
-///
-/// `security add-generic-password -U` matches on service **and** account. Any other account would
-/// file a second item for the same service, and a service-only lookup then returns one of the two
-/// in no defined order — on-n-off and Claude Code reading different logins, with nothing on
-/// screen to say so.
 #[cfg(target_os = "macos")]
 pub(crate) fn keychain_account(service: &str) -> Result<Option<String>, String> {
     let own = own_account();
@@ -359,7 +254,6 @@ pub(crate) fn keychain_account(service: &str) -> Result<Option<String>, String> 
     attributes_account(service, None)
 }
 
-/// The account of the item under `service` (and `account`, when named), read from its attributes.
 #[cfg(target_os = "macos")]
 fn attributes_account(service: &str, account: Option<&str>) -> Result<Option<String>, String> {
     use crate::process::CommandOutcome;
@@ -379,20 +273,16 @@ fn attributes_account(service: &str, account: Option<&str>) -> Result<Option<Str
     }
 }
 
-/// The account a write to the Keychain entry under `service` goes to.
 #[cfg(target_os = "macos")]
 fn write_account(service: &str) -> Result<String, String> {
     keychain_account(service)?.ok_or_else(|| "The Claude Code Keychain entry disappeared.".into())
 }
 
-/// These platforms have no such entry, and the file store is the one their read will have chosen.
 #[cfg(not(target_os = "macos"))]
 fn write_account(_service: &str) -> Result<String, String> {
     Err("this platform has no Claude Code Keychain entry".to_string())
 }
 
-/// Pull `acct` out of `security find-generic-password`'s attribute dump. Kept pure so the parsing
-/// is testable on every platform; only the lookups above are macOS-specific.
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_keychain_account(attributes: &str) -> Option<String> {
     attributes
@@ -403,17 +293,11 @@ pub(crate) fn parse_keychain_account(attributes: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Why a change to Claude Code's credentials could not begin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BeginError {
-    /// Claude Code is writing its credentials: its change goes first.
     Busy,
-    /// The storage-write lock could not be created, for a reason of its own.
     Lock(String),
-    /// No store could be read.
     Store(StoreError),
-    /// The write could not be proven: a Keychain that could not be read, the Keychain entry's
-    /// account, a linked credentials file, or a temporary the directory will not take.
     Unavailable(String),
 }
 
@@ -426,14 +310,6 @@ impl From<LockError> for BeginError {
     }
 }
 
-/// One change to Claude Code's credentials: the only way on-n-off writes them.
-///
-/// [`begin`] takes Claude Code's `.storage-write.lock` and reads the store under it, and
-/// [`PendingWrite::prove`] then proves the write: the Keychain entry's account, or a private
-/// temporary beside the credentials file. What is left for [`CredentialWrite::commit`] is one
-/// `security -U` or one rename, and the document it writes is a change to the one read under the
-/// lock, so no credential write of Claude Code's can land in between. The lock is held until the
-/// write drops.
 pub(crate) struct PendingWrite<'a> {
     dir: StorageDir,
     target: Result<ClaudeStore, String>,
@@ -441,7 +317,6 @@ pub(crate) struct PendingWrite<'a> {
     held: &'a dyn Fn() -> bool,
 }
 
-/// A [`PendingWrite`] proven: nothing left that can fail on its own account but the write itself.
 pub(crate) struct CredentialWrite<'a> {
     target: WriteTarget,
     storage: ClaudeLocks,
@@ -459,10 +334,6 @@ enum WriteTarget {
     },
 }
 
-/// Begin a change to the credentials in `dir`: take Claude Code's storage-write lock and read the
-/// store under it with `keychain`. `held` says whether a lock the caller holds around the change
-/// was taken away. Returns what the store holds, `None` for nothing, and the write, still to be
-/// proven: a caller that finds it has nothing to write never pays for the proof.
 pub(crate) fn begin<'a>(
     dir: &StorageDir,
     keychain: &dyn Fn(&StorageDir) -> KeychainProbe,
@@ -482,9 +353,6 @@ pub(crate) fn begin<'a>(
 }
 
 impl<'a> PendingWrite<'a> {
-    /// Prove the write, before anything is written. Refused when the Keychain could not be read,
-    /// since which store Claude Code reads next is then unknown, and when the credentials file is a
-    /// link: replacing it would cut the link and leave the login where Claude Code no longer looks.
     pub(crate) fn prove(self) -> Result<CredentialWrite<'a>, BeginError> {
         let store = self.target.map_err(BeginError::Unavailable)?;
         let target = match store {
@@ -501,9 +369,6 @@ impl<'a> PendingWrite<'a> {
                         "Refusing to replace a linked credential file.".into(),
                     ));
                 }
-                // Created now, private and beside the file, so a directory that will not take it
-                // says so before anything is written. Named for what it is, so one left behind by
-                // a kill between write and rename can be told apart.
                 let temporary = tempfile::Builder::new()
                     .prefix(".credentials.json.on-n-off.")
                     .tempfile_in(&self.dir.path)
@@ -520,11 +385,6 @@ impl<'a> PendingWrite<'a> {
         })
     }
 
-    /// `prove`, for the home on-n-off keeps for a saved account (`accounts::homes`). On macOS its
-    /// login goes to the home's own scoped Keychain entry, which this write creates when the home
-    /// has none, filed under Claude Code's own account name. It never goes to a plaintext
-    /// credentials file, which Claude Code would read as the login just the same. A home that
-    /// already keeps one in a file is refused rather than written beside it.
     pub(crate) fn prove_in_home(self) -> Result<CredentialWrite<'a>, BeginError> {
         #[cfg(target_os = "macos")]
         if let Ok(ClaudeStore::File(path)) = &self.target {
@@ -548,14 +408,10 @@ impl<'a> PendingWrite<'a> {
 }
 
 impl CredentialWrite<'_> {
-    /// Whether a lock this change relies on was taken away while held: the caller's own, or the
-    /// storage-write lock. Whatever is written after that is uncoordinated.
     pub(crate) fn lost(&self) -> bool {
         (self.held)() || self.storage.lost()
     }
 
-    /// Write `document`: one `security -U`, or the temporary synced and renamed over the
-    /// credentials file, and the directory synced.
     pub(crate) fn commit(self, document: &Value) -> Result<(), String> {
         let bytes = serde_json::to_vec(document).map_err(|error| error.to_string())?;
         match self.target {
@@ -586,45 +442,26 @@ impl CredentialWrite<'_> {
     }
 }
 
-/// Claude Code treats a refresh lock older than a minute as abandoned. Matching that is what makes
-/// the two implementations take turns instead of both deciding the other is stuck.
 const LOCK_STALE: Duration = Duration::from_secs(60);
 
-/// Claude Code abandons a config file's lock after ten seconds: the smallest staleness of any lock
-/// taken here.
 const CONFIG_LOCK_STALE: Duration = Duration::from_secs(10);
 
-/// Claude Code abandons its credentials' write lock after fifteen seconds.
 const STORAGE_WRITE_STALE: Duration = Duration::from_secs(15);
 
-/// How long Claude Code 2.1.282 watches a refresh lock whose time has not moved before it starts
-/// asking whether its holder is still alive.
 const CLAUDE_CODE_LIVENESS: Duration = Duration::from_millis(7500);
 
-/// How often every held lock is touched.
 const HEARTBEAT: Duration = Duration::from_secs(2);
 
-// A held lock must never look abandoned: the heartbeat has to land several times over within the
-// smallest staleness limit and within Claude Code's liveness watch, or a slow tick breaks a lock
-// this process still holds, or has Claude Code ask whether its holder is alive.
 const _: () = assert!(HEARTBEAT.as_millis() * 3 <= CONFIG_LOCK_STALE.as_millis());
 const _: () = assert!(HEARTBEAT.as_millis() * 3 <= CLAUDE_CODE_LIVENESS.as_millis());
 
-/// Which of Claude Code's locks to take, in the storage dir.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LockScope<'a> {
-    /// The refresh locks and this config file's lock, around an account change that writes both.
     RefreshAndConfig(&'a Path),
-    /// `.storage-write.lock`, which Claude Code takes around every change to its credentials, in
-    /// the Keychain or the file. Taken inside the refresh locks, as Claude Code takes it.
     StorageWrite,
 }
 
 impl LockScope<'_> {
-    /// The lock directories in the order Claude Code takes them — two processes that disagree
-    /// about the order deadlock — each with the age after which it counts as abandoned. The legacy
-    /// lock sits beside the storage dir's real path, as Claude Code resolves it, so a storage dir
-    /// reached through a link locks the directory Claude Code locks.
     fn paths(self, dir: &StorageDir) -> Vec<(PathBuf, Duration)> {
         if let Self::StorageWrite = self {
             return vec![(dir.path.join(".storage-write.lock"), STORAGE_WRITE_STALE)];
@@ -648,23 +485,10 @@ impl LockScope<'_> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LockError {
-    /// Another process holds one of the locks and it is not stale: whoever holds it goes first.
     Busy,
-    /// A lock could not be created for a reason of its own.
     Unavailable(String),
 }
 
-/// Claude Code's lock directories, held until this value drops and released in reverse order.
-///
-/// They are directories, taken with `mkdir` because that is atomic on every filesystem either
-/// implementation runs on. One already there yields at once unless it is stale, in which case its
-/// holder is gone and it is broken, as Claude Code breaks one.
-///
-/// While held, every lock is touched every [`HEARTBEAT`], as Claude Code touches its own. Nothing
-/// done under them is bounded by the minute after which Claude Code breaks a lock that has gone
-/// quiet — the Keychain probe allows ninety seconds for its prompt, an account lookup thirty and a
-/// Keychain write twenty — so without the heartbeat Claude Code would break a lock this process
-/// still holds. A lock taken away all the same shows as [`ClaudeLocks::lost`].
 #[derive(Debug)]
 pub(crate) struct ClaudeLocks {
     held: Vec<PathBuf>,
@@ -680,7 +504,6 @@ struct Heartbeat {
 
 impl ClaudeLocks {
     pub(crate) fn acquire(dir: &StorageDir, scope: LockScope<'_>) -> Result<Self, LockError> {
-        // Claude Code creates its config dir before locking in it, and so does this.
         fs::create_dir_all(&dir.path).map_err(|error| LockError::Unavailable(error.to_string()))?;
         let mut locks = Self {
             held: Vec::new(),
@@ -688,7 +511,6 @@ impl ClaudeLocks {
             lost: Arc::new(AtomicBool::new(false)),
         };
         for (path, stale) in scope.paths(dir) {
-            // `?` drops `locks`, which releases whatever it had already taken.
             take(&path, stale)?;
             locks.held.push(path);
         }
@@ -696,8 +518,6 @@ impl ClaudeLocks {
         Ok(locks)
     }
 
-    /// Whether a lock was taken away while held: its heartbeat could no longer touch it, so
-    /// someone else broke or removed it and whatever this holder writes now is uncoordinated.
     pub(crate) fn lost(&self) -> bool {
         self.lost.load(Ordering::Acquire)
     }
@@ -727,8 +547,6 @@ fn take(path: &Path, stale: Duration) -> Result<(), LockError> {
             if !is_stale(path, stale) {
                 return Err(LockError::Busy);
             }
-            // Whoever left it behind is gone; Claude Code breaks an abandoned lock the same way,
-            // and this inherits the same race between two processes that both judged it stale.
             let _ = fs::remove_dir(path);
             fs::create_dir(path).map_err(|_| LockError::Busy)
         }
@@ -736,7 +554,6 @@ fn take(path: &Path, stale: Duration) -> Result<(), LockError> {
     }
 }
 
-/// Only a real directory can be stale: a link or a file where a lock should be is left alone.
 fn is_stale(path: &Path, stale: Duration) -> bool {
     fs::symlink_metadata(path)
         .ok()
@@ -758,7 +575,6 @@ impl Drop for ClaudeLocks {
     }
 }
 
-/// Innermost first: the lock taken first stays held until every lock taken under it is gone.
 fn release(held: &[PathBuf], mut remove: impl FnMut(&Path)) {
     for path in held.iter().rev() {
         remove(path);

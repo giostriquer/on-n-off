@@ -12,14 +12,12 @@ const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
 const MONITORED_PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 const MAX_BACKOFF_MINUTES: u16 = 60;
 
-/// Marker for this monitor's wake channel.
 pub struct LimitsMonitor;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct MonitorState {
     schema_version: u8,
     providers: HashMap<AgentId, ProviderObservation>,
-    /// Banked reset alerts, by the card's account id (`reset_alerts`).
     #[serde(default)]
     reset_alerts: HashMap<String, reset_alerts::AlertState>,
 }
@@ -68,7 +66,6 @@ pub fn setup(app: &mut tauri::App) {
     monitor::spawn::<LimitsMonitor, _, _>(app, run);
 }
 
-/// Wake the poll loop after a settings change.
 pub fn wake(app: &AppHandle) {
     monitor::wake::<LimitsMonitor>(app);
 }
@@ -117,10 +114,8 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             ))
         } else {
             consecutive_failures = 0;
-            // With nothing watched no alert is left, so nothing waits to be spent either.
             auto_spend::clear();
             if !state.providers.is_empty() || !state.reset_alerts.is_empty() {
-                // A poll of nothing forgets every observation.
                 observe_poll(&mut state, &[], &settings, chrono::Utc::now());
                 if let Err(error) = monitor::persist_state(&state_path, &state).await {
                     eprintln!("limits monitor could not clear its state: {error}");
@@ -143,10 +138,6 @@ fn minutes(minutes: u16) -> Duration {
     Duration::from_secs(u64::from(minutes) * 60)
 }
 
-/// How long the monitor sleeps: until its next poll, or until the soonest reset waiting to be
-/// spent falls due, whichever comes first, and never less than a second. Only a spend falling due
-/// after the poll made at `polled_at` wakes it early: one that poll saw and could not decide waits
-/// for the next poll, which after a failure is the backoff, rather than being asked every second.
 fn next_wake(
     poll_delay: Duration,
     next_due: Option<chrono::DateTime<chrono::Utc>>,
@@ -160,8 +151,6 @@ fn next_wake(
         .max(Duration::from_secs(1))
 }
 
-/// The providers the monitor reads under `settings`: both while limit notifications are on, Codex
-/// alone while only banked reset alerts are, and none otherwise.
 fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [AgentId] {
     if settings.limit_notifications {
         &MONITORED_PROVIDERS
@@ -172,13 +161,6 @@ fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [Agent
     }
 }
 
-/// One poll of `watched`: limit notifications when they are on, a banked reset offered to every
-/// opted-in account that needs one, and every automatic spend whose time has come.
-///
-/// A spend whose time has come reads Codex afresh, so it is decided by what Codex says now. It is
-/// taken out of the waiting ones before anything else, which is what stops it being handed out
-/// twice, and is decided whether or not the state saves. An offer is saved before it is shown or
-/// scheduled, so one that failed to save is not shown again and again, nor spent.
 async fn poll_once(
     app: &AppHandle,
     state_path: &Path,
@@ -198,8 +180,6 @@ async fn poll_once(
     if saved.is_err() {
         *state = previous;
     } else {
-        // Counted from when the user is told, not from before the read, so the wait is the whole
-        // ten minutes.
         let scheduled = auto_spend::schedule_all(&outcome.automatic_offers, chrono::Utc::now());
         for (title, body) in outcome.notices.into_iter().chain(scheduled) {
             monitor::notify(app, "limits monitor", title, body, Sound::Default);
@@ -226,17 +206,11 @@ async fn poll_once(
     Ok(provider_failed)
 }
 
-/// What one poll's readings call for.
 struct PollOutcome {
     notices: Vec<(String, String)>,
-    /// Offers whose alerts use the reset by themselves, to be scheduled once they are saved.
     automatic_offers: Vec<reset_alerts::Offer>,
 }
 
-/// What one poll's `snapshots` call for under `settings` at `now`, with `state` brought up to
-/// date: limit changes only while limit notifications are on, whose baselines are forgotten while
-/// they are off, and every banked reset an opted-in account is offered, which an automatic alert
-/// schedules instead of only saying so.
 fn observe_poll(
     state: &mut MonitorState,
     snapshots: &[ProviderLimitsDto],
@@ -269,8 +243,6 @@ fn observe_poll(
     }
 }
 
-/// Reads `watched`, Codex afresh when `fresh_codex`: a spend whose time has come is decided by what
-/// Codex says now, not by a cached read, which can be the one that made the offer.
 async fn poll_providers(
     watched: &[AgentId],
     fresh_codex: bool,
@@ -409,8 +381,6 @@ fn observe_window(
 }
 
 fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Option<&str>) -> bool {
-    // A lower percentage alone can be a correction. Only a newer provider reset instant proves a
-    // new cycle and can rearm an exhausted notification.
     let timestamp_advanced = before
         .resets_at
         .as_deref()

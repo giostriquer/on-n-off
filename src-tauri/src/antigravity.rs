@@ -203,7 +203,6 @@ impl AgentAdapter for AntigravityAdapter {
             plugins,
             user_skills,
             mcp_servers: self.mcp_servers(),
-            // This provider has no hook mechanism on disk; the screen says so.
             hooks: Vec::new(),
         };
         sort_tab(&mut tab);
@@ -384,7 +383,6 @@ fn merge_enablement(map: &mut HashMap<String, bool>, text: &str) {
     }
 }
 
-/// Scan workspace plugin folders for project overlay.
 pub fn scan_workspace_plugins(project: &Path) -> Vec<PluginDto> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();

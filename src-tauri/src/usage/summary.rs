@@ -1,8 +1,3 @@
-//! The Usage summary: a window's usage counted from the transcript sources (`sources`) and the
-//! folded rows of the usage history (`history`), priced (`pricing`) into a UsageSummaryDto. What is
-//! its own is the window and when a count is final: when a stored summary may be served
-//! (`summary_cache`), and when one may be stored.
-
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -157,12 +152,10 @@ fn missing_source(provider: Provider, dir: &Path) -> UsageSourceDto {
     }
 }
 
-/// Scan local transcripts and return aggregated usage (priced when rates exist).
 pub fn read_summary(input: UsageSummaryInput) -> Result<UsageSummaryDto, AdapterError> {
     read_summary_from(input, user_home)
 }
 
-/// The home is resolved only once the input has passed validation, as `read_summary` always has.
 fn read_summary_from(
     input: UsageSummaryInput,
     home: impl FnOnce() -> Result<PathBuf, AdapterError>,
@@ -214,9 +207,6 @@ fn read_summary_from(
     let home = home()?;
     let summary_path = summary_cache_path_for(&home);
     let history_path = history_path_for(&home);
-    // Rates first: the table's age is part of the summary key, so a re-fetched table (a model
-    // released today, a price change) never serves a summary priced with the old one. The
-    // parsed table is memoised on the file, so this costs one metadata read on the fast path.
     let rates = ensure_rates(&home, started_ms, input.force);
     let key = summary_key(
         &input,
@@ -230,9 +220,6 @@ fn read_summary_from(
             .unwrap_or(0)
     });
 
-    // Read, never folded here: the background fold owns that (`folding`). Opened under the lock,
-    // once the sources need its watermark, so a summary served from an unchanged index never
-    // reads it.
     let open_history = || HistoryStore::open(history_path.clone());
     let history = OnceCell::new();
     let mut transcripts = Sources::open(lock_usage_files(), &home, || {
@@ -241,13 +228,10 @@ fn read_summary_from(
     let source_signature = transcripts.signature(signature_start_ms, signature_end_ms);
     if transcripts.is_complete() && !input.force {
         if let Some(hit) = load_summary_hit(&summary_path, &key, &source_signature) {
-            // What bringing the index up to date parsed is kept, though nothing else is read.
             transcripts.finish(|| history.get_or_init(open_history).watermark());
             return Ok(hit);
         }
     }
-    // Past the cache, the history is needed whatever the sources asked: opened now, under the lock,
-    // unless the sources already did.
     let history = history.get_or_init(open_history);
     let source_read = transcripts.read(since_ms, || history.watermark());
     let seen_sources = transcripts.finish(|| history.watermark());
@@ -265,10 +249,6 @@ fn read_summary_from(
     })
     .map_err(AdapterError::message)?;
 
-    // Copies of one record across files (resumed Claude sessions, a Codex rollout listed under
-    // both roots) collapse before anything is counted, so the totals and the session counts both
-    // follow the copy that is counted. Below the watermark the history is the count: a
-    // transcript's copy of a folded record, a resumed session's included, is not counted again.
     let records = source_read.records();
     let mut session_ids: HashMap<Provider, HashSet<&str>> = HashMap::new();
     for record in records {
@@ -338,7 +318,6 @@ fn read_summary_from(
 
     {
         let lock = lock_usage_files();
-        // A summary counted around a history that did not read would undercount once it reads.
         if source_read.complete && history.history().is_some() && seen_sources.unchanged(&lock) {
             store_summary(&summary_path, &key, &source_signature, &dto);
         }

@@ -138,8 +138,6 @@ function PopoverProviderSection({
   now: number;
 }) {
   const name = providerLabel(provider);
-  // No saved profiles: reading them opens the vault and the native store, which the popover never does.
-  // Archived accounts are left out entirely, uncounted.
   const cards = limitColumn({ provider, entries: query.data, profiles: [], now })?.visible ?? null;
   const error = query.error ? displayError(parseInvokeError(query.error), name) : null;
   const errorBanner = error ? (

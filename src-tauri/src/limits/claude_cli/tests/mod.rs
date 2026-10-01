@@ -1,14 +1,9 @@
-//! A Claude account's usage as Claude Code reports it (`read_usage`): the windows of its
-//! `usage_report`, whose account the config dir names, read by a stand-in `claude`.
 use super::*;
 use crate::cli::AgentCli;
 use crate::cli_stub::CliStub;
 use crate::dto::{AgentId, LimitWindowKind, LimitsStatus};
 use std::time::Duration;
 
-/// What `claude -p /usage --output-format stream-json --verbose` prints, trimmed to the lines the
-/// reader looks at: the session's start, the local command's answer and the result, with a stray
-/// line the reader has to step over.
 const REPORT: &str = r#"{"type":"system","subtype":"init","apiKeySource":"none","claude_code_version":"2.1.284"}
 a line that is not an event
 {"type":"assistant","local_command_run":"usage","message":{"content":"Current session: 12% used"},"usage_report":{"rate_limits":{"limits":[{"kind":"session","group":"session","percent":12,"resets_at":"2026-09-29T18:00:00.006917+00:00","scope":null,"severity":"normal","is_active":true},{"kind":"weekly_all","group":"weekly","percent":34,"resets_at":"2026-10-05T09:00:00.006938+00:00","scope":null,"severity":"normal","is_active":false},{"kind":"weekly_scoped","group":"weekly","percent":5,"resets_at":"2026-10-05T09:00:00+00:00","scope":{"model":{"display_name":"Fable"},"surface":null},"severity":"normal","is_active":false}],"extra_usage":{"is_enabled":false}},"session":{"total_cost_usd":0}}}
@@ -22,7 +17,6 @@ fn identity() -> Identity {
     }
 }
 
-/// The `.claude.json` Claude Code keeps in a config dir, naming `user` in `org`.
 fn config(user: &str, org: &str) -> String {
     serde_json::json!({
         "oauthAccount": {
@@ -36,7 +30,6 @@ fn config(user: &str, org: &str) -> String {
     .to_string()
 }
 
-/// A config dir holding `config`, with a stand-in `claude` built by `stub` that prints `stdout`.
 fn home(config: &str, stdout: &str, stub: CliStub) -> (tempfile::TempDir, AgentCli) {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(".claude.json"), config).unwrap();
@@ -62,7 +55,6 @@ fn a_report_reads_as_the_accounts_card_with_every_window_it_names() {
 
     let card = read(&dir, &cli).expect("a card");
 
-    // Which windows, not their order: the card's order is `finish`'s.
     let mut windows: Vec<_> = card
         .reading
         .windows
@@ -147,7 +139,6 @@ fn claude_code_runs_without_updating_itself_and_without_an_inherited_credential(
         })
         .collect();
     assert!(envs.contains(&("DISABLE_AUTOUPDATER".into(), Some("1".into()))));
-    // Any of these would make Claude Code read as that credential's account, not the config dir's.
     for name in [
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
@@ -171,7 +162,6 @@ fn a_config_dir_naming_another_account_is_never_asked() {
 
 #[test]
 fn a_config_dir_naming_the_user_in_another_organization_is_never_asked() {
-    // One user in two organizations is two accounts, each with its own card.
     let (dir, cli) = home(
         &config("user", "other-team"),
         REPORT,
@@ -272,7 +262,6 @@ fn a_claude_code_too_old_to_leave_customizations_out_says_to_update_it() {
         read(&dir, &cli).unwrap_err(),
         SavedReadError::Unavailable(OUTDATED)
     );
-    // Asked once, with the flag, and never again without it.
     let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
     let runs: Vec<&str> = args.lines().collect();
     assert_eq!(runs.len(), 1, "{args}");
@@ -326,8 +315,6 @@ fn claude_code_that_does_not_answer_in_time_reads_as_unavailable() {
     );
 }
 
-/// A `claude` from `usage` for the first run, which asks for the report, and from `status` after,
-/// which asks whether the config dir is signed in.
 fn usage_then_status<'a>(
     usage: &'a AgentCli,
     status: &'a AgentCli,
@@ -347,7 +334,6 @@ fn usage_then_status<'a>(
 fn a_config_dir_claude_code_says_is_signed_out_is_a_login_to_sign_in_again() {
     let (dir, usage) = home(&config("user", "team"), "", CliStub::new("claude"));
     let status_dir = tempfile::tempdir().unwrap();
-    // Claude Code 2.1.284 answers a signed-out `auth status` on stdout with exit status 1.
     let status = CliStub::new("claude")
         .log_args("args.txt", false)
         .stdout(r#"{"loggedIn":false,"authMethod":"none"}"#)

@@ -1,6 +1,5 @@
 import { copy } from "$lib/copy";
 
-/** The Install sheet's action row: Cancel plus one primary button. */
 export function SheetFooter({
   cancelLabel = copy.cancel,
   submitLabel,
@@ -12,7 +11,6 @@ export function SheetFooter({
   cancelLabel?: string;
   submitLabel: string;
   submitDisabled: boolean;
-  /** Short note left of the buttons, e.g. how many picks are dependencies. */
   summary?: string | null;
   onCancel: () => void;
   onSubmit: () => void;
@@ -39,7 +37,6 @@ export function SheetFooter({
   );
 }
 
-/** A backend or network error, rendered the way the rest of the sheet reports failures. */
 export function SheetError({ message }: { message: string | null }) {
   if (!message) {
     return null;

@@ -210,7 +210,6 @@ describe("SessionProvider startup", () => {
       </SessionProvider>,
     );
     await waitFor(() => expect(screen.getByTestId("selected-provider")).toHaveTextContent("claude"));
-    // The hidden provider is never the primary load, and the remembered choice is corrected.
     await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
     expect(state.refreshOrder[0]).toBe("claude");
     expect(localStorage.getItem(AGENT_KEY)).toBe("claude");

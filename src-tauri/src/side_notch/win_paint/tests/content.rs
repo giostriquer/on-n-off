@@ -1,6 +1,5 @@
 use super::*;
 
-/// The label `card`'s cell shows.
 fn ring_label(card: ProviderLimitsDto) -> String {
     match cell_content(&CellData::Provider(projected(card))) {
         CellContent::Provider { label, .. } => label,
@@ -35,7 +34,6 @@ fn the_ring_label_is_the_weekly_figure_or_a_dash_never_the_session() {
 
 #[test]
 fn reset_notes_never_double_space_the_hour() {
-    // One reset per hour of the day, so every timezone meets a single-digit hour.
     for hour in 0..24 {
         let mut pending = window("w", "Weekly", LimitWindowKind::Weekly, 10.0);
         pending.resets_at = Some(format!("2099-01-01T{hour:02}:07:00Z"));
@@ -219,8 +217,6 @@ fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
-    // The copy affordance sits at the row's right edge; a title line drawn semibold
-    // has to stop before it, so the wrap must measure the weight it draws in.
     for (item, rect) in &popover.entries {
         let PopItem::Text {
             text, size, weight, ..
@@ -243,10 +239,6 @@ fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
 
 #[test]
 fn the_popover_keeps_the_mac_weight_of_every_run() {
-    // Every run the mac draws `.medium` or `.semibold` has to carry that weight here
-    // too. What the two resolve to is the font's business — Segoe UI ships no 500, so
-    // DirectWrite lands both on semibold, exactly as it does for the app's own
-    // `font-medium` — but the popover still has to ask for the right one.
     let pulls = PrCellData {
         status: GithubStatus::Ok,
         hint: None,
@@ -283,7 +275,6 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
         last_active_at: "2026-09-03T10:00:00Z".into(),
     }];
     let cells = vec![CellData::Provider(claude), CellData::PullRequests(pulls)];
-    // Every run the mac draws `.medium`, and the ones it really draws `.semibold`.
     let medium = [
         "50% Used",
         "working",
@@ -329,10 +320,6 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
         seen >= 8,
         "the popovers really carried these runs: {seen} of 10"
     );
-    // And a medium run really is heavier ink than a regular one on this system. Segoe UI
-    // has no 500, so DirectWrite resolves both medium and semibold onto the semibold cut
-    // — the same thing it does for the app's own `font-medium`, which is why the two
-    // measure alike here.
     let plain = measure_weight("Open Limits", 11.0, TextWeight::Regular, 1.0);
     let heavy = measure_weight("Open Limits", 11.0, TextWeight::Medium, 1.0);
     assert!(
@@ -404,7 +391,6 @@ fn share(
     }
 }
 
-/// Every text entry of one open provider popover, in order.
 fn popover_texts(provider: ProviderData) -> Vec<String> {
     let (planned, _) = popover_render(provider);
     let popover = planned.popover.expect("the popover is open");
@@ -418,7 +404,6 @@ fn popover_texts(provider: ProviderData) -> Vec<String> {
         .collect()
 }
 
-/// The inner ring a cell draws: the host's choice, its figure, and the ink and track it is drawn in.
 fn inner_ring(provider: ProviderData) -> Option<(InnerRing, QuotaView, (Color, Color))> {
     match cell_content(&CellData::Provider(provider)) {
         CellContent::Provider { inner, .. } => inner.map(|(ring, quota)| {
@@ -468,7 +453,6 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
     );
 }
 
-/// Claude's Fable window takes the same inner ring, in its own terracotta.
 #[test]
 fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
     let claude = claude_with(vec![
@@ -502,7 +486,6 @@ fn the_codex_popover_lists_the_credit_share_after_the_weekly() {
     let weekly = texts.iter().position(|text| text == "Weekly · all models");
     let credits = texts.iter().position(|text| text == "Workspace credits");
     assert!(weekly.is_some() && credits > weekly, "{texts:?}");
-    // The date is the viewer's, built from the same instant in local time.
     let note = format!(
         "Resets {}",
         chrono::DateTime::parse_from_rfc3339("2099-01-01T12:00:00Z")
@@ -531,8 +514,6 @@ fn the_codex_popover_lists_the_credit_share_after_the_weekly() {
     assert_eq!(bars, 2, "a bar for the weekly and one for the share");
 }
 
-/// The popover words the share as the app does: a reached share with some left says only that the
-/// limit is reached, and a renewed one says all of it is left.
 #[test]
 fn the_codex_popover_words_a_reached_and_a_renewed_share_as_the_app_does() {
     let reached = popover_texts(codex_member(share(
@@ -557,7 +538,6 @@ fn the_codex_popover_words_a_reached_and_a_renewed_share_as_the_app_does() {
     );
 }
 
-/// A paused account with only a remembered share still says the values below are last observed.
 #[test]
 fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
     let mut paused = codex_member_card(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
@@ -572,8 +552,6 @@ fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
     );
 }
 
-/// A paused account's ring keeps its last reading, as its card on Limits does: its weekly figure
-/// and its inner ring. Without a weekly window it still shows the dash, never its session.
 #[test]
 fn a_paused_account_keeps_its_last_reading_on_the_ring() {
     let paused = |mut card: ProviderLimitsDto| {

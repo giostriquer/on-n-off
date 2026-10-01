@@ -31,14 +31,10 @@ function useController(provider: AccountProvider) {
     catch (error) { setError(parseInvokeError(error).message); throw error; }
     finally { try { await refresh(); } finally { setBusy(null); } }
   }
-  /**
-   * Starts an ordinary switch, or returns the running clients that would stop it so the person can
-   * switch anyway. A failed scan is no reason to ask: the switch checks again and reports it.
-   */
   async function use(id: string): Promise<string[]> {
     setBusy("use"); setError(null);
     let running: string[] = [];
-    try { running = await api.readAccountActivationBlockers(provider); } catch { /* checked again by the switch */ }
+    try { running = await api.readAccountActivationBlockers(provider); } catch {}
     finally { setBusy(null); }
     if (running.length) return running;
     await action("use", id);
@@ -59,10 +55,6 @@ function useController(provider: AccountProvider) {
       }
     }
   }
-  /**
-   * Remove account: the saved login first when the account has one, then `forget` drops every
-   * snapshot the card stands for. A card and an archived row both remove through here.
-   */
   async function removeAccount(profileId: string | undefined, forget: () => Promise<void>) {
     if (profileId) await action("remove", profileId, undefined, forget);
     else await forget();
@@ -78,10 +70,6 @@ function useController(provider: AccountProvider) {
       }
     }
   }
-  /**
-   * The account controls cannot act: an operation is running, the account list is loading or failed
-   * (so no card knows its saved login yet), or an interrupted change needs recovery.
-   */
   const blocked = !!busy || query.isPending || !!query.error || !!query.data?.recoveryRequired;
   return { provider, query, busy, blocked, error, action, removeAccount, use, add, cancel, loginTarget };
 }
@@ -99,7 +87,6 @@ export function useAccountControllers() {
 const Context = createContext<ReturnType<typeof useController> | null>(null);
 export function useAccountManagement() { return useContext(Context); }
 
-/** Shares operation state; accounts themselves are rendered only by their Limits cards. */
 export function AccountManager({ provider, children }: { provider: AccountProvider; children: ReactNode }) {
   const controller = useAccountControllers()[provider];
   const { query, busy, error, action, cancel, loginTarget } = controller;

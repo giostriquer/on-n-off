@@ -1,7 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-/** A focusable tooltip trigger; the popup stays within the viewport and survives pointer travel. */
 export function TooltipButton({ children, tooltip, label, className }: {
   children: ReactNode; tooltip: ReactNode; label: string; className?: string;
 }) {

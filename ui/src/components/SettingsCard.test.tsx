@@ -51,8 +51,6 @@ describe("SettingsCard", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  // Tailwind settles two classes for one property by its stylesheet's order, not the class string's,
-  // so a variant carries only its own border colour.
   it("draws the primary button's border in its fill, never the plain button's hairline", () => {
     expect(cardButtonPrimary.split(" ")).not.toContain("border-[var(--hair)]");
     expect(cardButton.split(" ")).toContain("border-[var(--hair)]");

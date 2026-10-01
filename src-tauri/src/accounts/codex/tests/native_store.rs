@@ -1,11 +1,5 @@
-//! The account switch's view of Codex's native store: where it resolves, what it reads and writes,
-//! its preflight and the `codex` it starts.
-
 use super::*;
 
-/// Whatever the developer running the suite has exported, a store resolved in a test lives in
-/// the test's own home: `resolve` reads the test environment, not `CODEX_HOME` or whatever a
-/// sibling test did to `ON_N_OFF_HOME`.
 #[test]
 fn a_test_resolves_the_codex_store_inside_its_own_home_whatever_the_machine_exports() {
     let root = tempfile::tempdir().unwrap();
@@ -47,7 +41,6 @@ fn a_relative_provider_override_is_refused() {
     );
 }
 
-/// A linked configuration file is the official client's to change.
 #[cfg(unix)]
 #[test]
 fn account_changes_refuse_a_linked_codex_configuration_file() {
@@ -63,8 +56,6 @@ fn account_changes_refuse_a_linked_codex_configuration_file() {
     );
 }
 
-/// A Codex home `CODEX_HOME` chose is custom, and account changes defer to the official client for
-/// it, as they do for a Claude home `CLAUDE_CONFIG_DIR` chose.
 #[test]
 fn account_changes_defer_to_the_official_client_for_a_codex_home_the_environment_chose() {
     let root = tempfile::tempdir().unwrap();
@@ -73,8 +64,6 @@ fn account_changes_defer_to_the_official_client_for_a_codex_home_the_environment
     assert_eq!(store.preflight().err().as_deref(), Some(CUSTOM_HOME));
 }
 
-/// Codex settings that choose how it signs in, or which profile it runs, are a policy only its
-/// official controls may change; any other setting is not.
 #[test]
 fn account_changes_refuse_a_codex_configuration_that_enforces_how_it_signs_in() {
     const POLICY: &str =
@@ -95,7 +84,6 @@ fn account_changes_refuse_a_codex_configuration_that_enforces_how_it_signs_in() 
     }
 }
 
-/// A `codex` started for a store works in that store's home, from inside it.
 #[test]
 fn a_codex_command_works_in_its_stores_home() {
     let root = tempfile::tempdir().unwrap();
@@ -111,8 +99,6 @@ fn a_codex_command_works_in_its_stores_home() {
     );
 }
 
-/// A Codex login is whatever document its store holds, read verbatim; there is no account record
-/// beside it.
 #[test]
 fn a_codex_read_is_the_stored_document_verbatim() {
     let root = tempfile::tempdir().unwrap();
@@ -127,8 +113,6 @@ fn a_codex_read_is_the_stored_document_verbatim() {
     assert_eq!(login.account, Value::Null);
 }
 
-/// Codex's config chooses its credential store: the file by default or when named, and nothing
-/// on-n-off cannot follow, nor a config profile whose store it cannot verify.
 #[test]
 fn codex_config_selects_the_file_store_and_refuses_what_it_cannot_follow() {
     let root = tempfile::tempdir().unwrap();
@@ -161,8 +145,6 @@ fn codex_config_selects_the_file_store_and_refuses_what_it_cannot_follow() {
     assert!(auth.exists(), "a refused store is not written");
 }
 
-/// Publishing a Codex login writes its document to the file store verbatim; signing out removes
-/// it; a linked file is never replaced.
 #[test]
 fn a_codex_publication_writes_the_file_store_verbatim() {
     let root = tempfile::tempdir().unwrap();
@@ -192,8 +174,6 @@ fn a_codex_publication_writes_the_file_store_verbatim() {
     }
 }
 
-/// A credential in Codex's environment overrides its own login, so account changes defer to the
-/// official client while one is set.
 #[test]
 fn account_changes_refuse_a_codex_credential_in_the_environment() {
     const OVERRIDDEN: &str = "An environment credential overrides native login. Remove the override before using saved profiles.";
@@ -215,8 +195,6 @@ fn account_changes_refuse_a_codex_credential_in_the_environment() {
     );
 }
 
-/// An administrator's managed Codex configuration, whatever it holds, leaves authentication to
-/// the official client.
 #[test]
 fn account_changes_refuse_a_managed_codex_configuration() {
     let root = tempfile::tempdir().unwrap();
@@ -236,8 +214,6 @@ fn account_changes_refuse_a_managed_codex_configuration() {
     }
 }
 
-/// An API-key login has no subscription, so the signed-in subscription is no one's and every saved
-/// account's usage is read. A blank key makes no API-key login, but still no profile.
 #[test]
 fn a_codex_api_key_login_is_signed_in_with_no_subscription() {
     let root = tempfile::tempdir().unwrap();
@@ -271,7 +247,6 @@ fn a_codex_api_key_login_is_signed_in_with_no_subscription() {
     );
 }
 
-/// What a command runs its program with.
 fn args(command: &Command) -> Vec<String> {
     command
         .get_args()
@@ -279,8 +254,6 @@ fn args(command: &Command) -> Vec<String> {
         .collect()
 }
 
-/// The official client signs in, reports its login and signs out with its own commands, each in
-/// the home it is started for.
 #[test]
 fn codex_signs_in_reports_and_signs_out_through_its_own_commands() {
     let root = tempfile::tempdir().unwrap();
@@ -301,8 +274,6 @@ fn codex_signs_in_reports_and_signs_out_through_its_own_commands() {
     );
 }
 
-/// A running Codex client renews its login within ten minutes of its access token's expiry, so
-/// the switch beside it treats such a login as about to be rewritten; one good for an hour is not.
 #[test]
 fn a_codex_login_close_to_its_access_tokens_expiry_renews_soon() {
     let root = tempfile::tempdir().unwrap();
