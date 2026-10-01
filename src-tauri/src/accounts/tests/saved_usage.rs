@@ -48,7 +48,7 @@ fn a_usage_refresh_reads_every_saved_account_but_the_signed_in_one() {
         .collect();
     assert_eq!(cards, [key.as_str()]);
     assert_eq!(*harness.native.resolved.borrow(), [AgentId::Claude]);
-    // Without homes, as for Codex, the saved login stays in the vault it was read from.
+    // This harness gives Claude no homes, so the saved login stays in the vault it was read from.
     assert_eq!(harness.in_vault(&b), Some("b1".into()));
 }
 

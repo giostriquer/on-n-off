@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -669,7 +669,6 @@ struct Heartbeat {
 
 impl ClaudeLocks {
     pub(crate) fn acquire(dir: &StorageDir, scope: LockScope<'_>) -> Result<Self, LockError> {
-        let now = SystemTime::now();
         // Claude Code creates its config dir before locking in it, and so does this.
         fs::create_dir_all(&dir.path).map_err(|error| LockError::Unavailable(error.to_string()))?;
         let mut locks = Self {
@@ -679,7 +678,7 @@ impl ClaudeLocks {
         };
         for (path, stale) in scope.paths(dir) {
             // `?` drops `locks`, which releases whatever it had already taken.
-            take(&path, stale, now)?;
+            take(&path, stale)?;
             locks.held.push(path);
         }
         locks.heartbeat = Some(Heartbeat::start(locks.held.clone(), locks.lost.clone()));
@@ -710,11 +709,11 @@ impl Heartbeat {
     }
 }
 
-fn take(path: &Path, stale: Duration, now: SystemTime) -> Result<(), LockError> {
+fn take(path: &Path, stale: Duration) -> Result<(), LockError> {
     match fs::create_dir(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            if !is_stale(path, stale, now) {
+            if !is_stale(path, stale) {
                 return Err(LockError::Busy);
             }
             // Whoever left it behind is gone; Claude Code breaks an abandoned lock the same way,
@@ -727,12 +726,12 @@ fn take(path: &Path, stale: Duration, now: SystemTime) -> Result<(), LockError> 
 }
 
 /// Only a real directory can be stale: a link or a file where a lock should be is left alone.
-fn is_stale(path: &Path, stale: Duration, now: SystemTime) -> bool {
+fn is_stale(path: &Path, stale: Duration) -> bool {
     fs::symlink_metadata(path)
         .ok()
         .filter(|meta| meta.is_dir() && !meta.file_type().is_symlink())
         .and_then(|meta| meta.modified().ok())
-        .and_then(|modified| now.duration_since(modified).ok())
+        .and_then(|modified| modified.elapsed().ok())
         .is_some_and(|age| age > stale)
 }
 

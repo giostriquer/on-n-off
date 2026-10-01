@@ -148,6 +148,31 @@ fn a_claude_logins_fingerprint_is_its_token_generation_alone() {
     assert_ne!(fingerprint(&rotated), fingerprint(&claude));
 }
 
+/// A Claude login is due to renew once its access token's `expiresAt` (ms) is reached, and never
+/// when it states none.
+#[test]
+fn a_claude_login_is_due_to_renew_once_its_expiry_is_reached() {
+    for (expires_at, due) in [
+        (Some(1_000_000), true),
+        (Some(1_000_001), false),
+        (None, false),
+    ] {
+        let mut auth = json!({"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}});
+        if let Some(at) = expires_at {
+            auth["claudeAiOauth"]["expiresAt"] = json!(at);
+        }
+        let claude = login(
+            auth,
+            json!({"accountUuid":"user","organizationUuid":"team"}),
+        );
+        assert_eq!(
+            ClaudeLogin::of(&claude).renewal_due(1_000_000),
+            due,
+            "expiring at {expires_at:?}"
+        );
+    }
+}
+
 mod first_usage;
 mod home;
 #[cfg(target_os = "macos")]

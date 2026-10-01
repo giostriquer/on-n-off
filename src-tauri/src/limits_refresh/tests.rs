@@ -362,7 +362,8 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
 /// when the read unarchived something: a replacement, never a read, so a read served from the cache
 /// polls, writes and announces nothing.
 #[test]
-fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_lock() {
+fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_lock_and_announces_only_a_change(
+) {
     let cache = Cache::new(Source::LimitsClaude);
     let _ = read_revision::take_announced();
     let log = std::cell::RefCell::new(Vec::new());
