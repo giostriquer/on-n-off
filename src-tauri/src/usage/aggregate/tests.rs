@@ -361,7 +361,8 @@ fn add_folded_says_whether_the_row_was_counted() {
 /// Cache savings are what the cached input would have cost at the input rate: 1000 cached tokens
 /// at 1e-5 input against 1e-6 cache read, per record, summed over the bucket.
 #[test]
-fn cache_savings_add_up_over_a_bucket() {
+fn a_bucket_adds_up_its_records_tokens_and_cache_savings() {
     let result = aggregate(&[record(|_| {}), record(|_| {})], "UTC", Resolution::Day);
+    assert_eq!(result.buckets[0].totals.output_tokens, 100);
     assert!((result.buckets[0].cache_savings_usd - 0.018).abs() < 1e-12);
 }

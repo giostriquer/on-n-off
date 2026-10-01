@@ -323,6 +323,7 @@ fn the_baseline_moves_only_once_the_new_state_is_persisted() {
 #[test]
 fn failure_backoff_starts_at_the_poll_interval_and_caps_at_ten_minutes() {
     assert_eq!(poll_delay(60, 0), Duration::from_secs(60));
+    assert_eq!(poll_delay(60, 1), Duration::from_secs(120));
     assert_eq!(poll_delay(60, 4), Duration::from_secs(600));
     assert_eq!(poll_delay(300, 9), Duration::from_secs(600));
 }
