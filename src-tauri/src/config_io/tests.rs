@@ -45,26 +45,22 @@ fn json_patch_only_changes_skill_overrides_and_keeps_unrelated_keys() {
 fn toml_upsert_skill_config_keeps_plugins_and_quotes_windows_paths() {
     let root = crate::paths::scratch_dir("on-n-off-toml");
     let path = root.join("config.toml");
-    fs::write(
-        &path,
-        "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[projects.'E:\\\\dev\\\\on-n-off']\ntrust_level = \"trusted\"\n",
-    )
-    .unwrap();
+    let original = "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[projects.'E:\\\\dev\\\\on-n-off']\ntrust_level = \"trusted\"\n";
+    fs::write(&path, original).unwrap();
     let io = ConfigIo::at(root.join("backups"));
     let skill = r"C:\Users\me\fake-home\.agents\skills\loom-feed\SKILL.md";
+    let with_skill = |enabled: bool| -> toml::Table {
+        toml::from_str(&format!(
+            "{original}\n[[skills.config]]\npath = '{skill}'\nenabled = {enabled}\n"
+        ))
+        .unwrap()
+    };
     io.patch_toml_skill_enabled(AgentId::Codex, &path, skill, false)
         .unwrap();
-    let text = fs::read_to_string(&path).unwrap();
-    assert!(text.contains("[plugins.\"workbench@workshop\"]"), "{text}");
-    assert!(text.contains("trust_level"), "{text}");
-    assert!(text.contains("[[skills.config]]"), "{text}");
-    assert!(text.contains("enabled = false"), "{text}");
-    assert!(text.contains("loom-feed"), "{text}");
+    assert_eq!(toml_at(&path), with_skill(false));
     io.patch_toml_skill_enabled(AgentId::Codex, &path, skill, true)
         .unwrap();
-    let text = fs::read_to_string(&path).unwrap();
-    assert_eq!(text.matches("[[skills.config]]").count(), 1);
-    assert!(text.contains("enabled = true"));
+    assert_eq!(toml_at(&path), with_skill(true));
     let _ = fs::remove_dir_all(root);
 }
 
@@ -115,25 +111,29 @@ fn toml_at(path: &Path) -> toml::Table {
 fn toml_mcp_enable_only_flips_enabled() {
     let root = crate::paths::scratch_dir("on-n-off-toml-mcp");
     let path = root.join("config.toml");
-    let servers = |github: &str, docs: &str| {
+    let servers = |github: Option<bool>, docs: Option<bool>| {
+        let enabled =
+            |value: Option<bool>| value.map_or(String::new(), |on| format!("enabled = {on}\n"));
         format!(
-            "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[mcp_servers.github]\ncommand = \"npx\"\nargs = [\"-y\", \"@modelcontextprotocol/server-github\"]\nextra = 1\n{github}\n[mcp_servers.docs]\nurl = \"https://docs.example/mcp\"\n{docs}"
+            "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[mcp_servers.github]\ncommand = \"npx\"\nargs = [\"-y\", \"@modelcontextprotocol/server-github\"]\nextra = 1\n{}\n[mcp_servers.docs]\nurl = \"https://docs.example/mcp\"\n{}",
+            enabled(github),
+            enabled(docs)
         )
     };
-    fs::write(&path, servers("", "enabled = false\n")).unwrap();
+    fs::write(&path, servers(None, Some(false))).unwrap();
     let io = ConfigIo::at(root.join("backups"));
 
     io.patch_toml_mcp_enabled(AgentId::Codex, &path, "github", false)
         .unwrap();
     assert_eq!(
         toml_at(&path),
-        toml::from_str(&servers("enabled = false\n", "enabled = false\n")).unwrap()
+        toml::from_str(&servers(Some(false), Some(false))).unwrap()
     );
     io.patch_toml_mcp_enabled(AgentId::Codex, &path, "docs", true)
         .unwrap();
     assert_eq!(
         toml_at(&path),
-        toml::from_str(&servers("enabled = false\n", "enabled = true\n")).unwrap()
+        toml::from_str(&servers(Some(false), Some(true))).unwrap()
     );
     let err = io
         .patch_toml_mcp_enabled(AgentId::Codex, &path, "missing", false)
@@ -156,6 +156,9 @@ fn toml_plugin_enable_only_flips_enabled() {
     io.patch_toml_plugin_enabled(AgentId::Codex, &path, "workbench@workshop", false)
         .unwrap();
     assert_eq!(toml_at(&path), toml::from_str(&plugins(false)).unwrap());
+    io.patch_toml_plugin_enabled(AgentId::Codex, &path, "workbench@workshop", true)
+        .unwrap();
+    assert_eq!(toml_at(&path), toml::from_str(&plugins(true)).unwrap());
     let _ = fs::remove_dir_all(root);
 }
 
