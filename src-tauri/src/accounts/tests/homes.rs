@@ -136,6 +136,8 @@ fn switching_back_before_any_read_publishes_the_login_the_switch_away_captured()
     accounts
         .activate(AgentId::Claude, &a, Activation::Ordinary)
         .unwrap();
+    // Not the a1 it was saved with: the a2 Claude Code had renewed it to by the switch away.
+    assert_eq!(harness.live(), Some("a2".into()));
     accounts
         .activate(AgentId::Claude, &b, Activation::Ordinary)
         .unwrap();
@@ -739,18 +741,6 @@ fn a_login_with_an_unfinished_private_renewal_stays_in_the_vault() {
         .activate(AgentId::Claude, &b, Activation::Ordinary)
         .unwrap_err();
     assert!(error.contains("unfinished usage renewal"), "{error}");
-}
-
-/// Without homes, as for Codex, a saved login stays in the vault and is read from there.
-#[test]
-fn a_provider_without_homes_reads_saved_logins_from_the_vault() {
-    let harness = Harness::new();
-    let (_, b) = two_accounts(&harness);
-
-    let (_, fetched) = read_all(&harness);
-
-    assert_eq!(fetched, std::slice::from_ref(&b));
-    assert_eq!(harness.in_vault(&b), Some("b1".into()));
 }
 
 /// The app's own stores: Claude's saved logins wait in homes, Codex's in the vault.

@@ -39,10 +39,6 @@ static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
 /// Caller holds the provider activity read lease and shares the Limits cache with all surfaces.
 /// At most two saved-account requests per provider run at once; no state mutex spans a network call.
 pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<ProviderLimitsDto>) {
-    #[cfg(test)]
-    if tests::refresh_fixture(force, entries) {
-        return;
-    }
     let Ok(accounts) = super::Accounts::live() else {
         return;
     };

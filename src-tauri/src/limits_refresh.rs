@@ -82,11 +82,11 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
     let interval = poll_interval();
     read_provider(
         cache,
-        agent,
         interval,
         force,
         &|force| crate::limits::read_limits(agent, force),
         &|entries| crate::limits::unarchive_signed_in(agent, entries),
+        &|force, entries| crate::accounts::usage::refresh(agent, force, entries),
         &|entries| crate::limits::flag_archived(agent, entries),
     )
 }
@@ -94,11 +94,11 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
 /// Common composition boundary: active native results and saved-account results share one cache.
 fn read_provider(
     cache: &Cache,
-    agent: AgentId,
     interval: Duration,
     force: bool,
     native: &dyn Fn(bool) -> Vec<ProviderLimitsDto>,
     unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
+    saved: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>),
     flag: &dyn Fn(&mut [ProviderLimitsDto]),
 ) -> (Vec<ProviderLimitsDto>, u64) {
     let mut unarchived = false;
@@ -107,7 +107,7 @@ fn read_provider(
         // Being signed in unarchives an account, before the saved polls and before the cards are
         // flagged once, all under the cache lock, which Forget and archiving write under too.
         unarchived = unarchive(&entries);
-        crate::accounts::usage::refresh(agent, force, &mut entries);
+        saved(force, &mut entries);
         flag(&mut entries);
         entries
     });
@@ -118,34 +118,6 @@ fn read_provider(
         read_revision::announce(Source::Accounts);
     }
     (entries, reading.revision())
-}
-
-#[cfg(test)]
-pub(crate) fn test_saved_reader(
-    native: &dyn Fn(bool) -> Vec<ProviderLimitsDto>,
-) -> (Vec<ProviderLimitsDto>, Vec<ProviderLimitsDto>) {
-    let cache = Cache::new(Source::LimitsClaude);
-    let first = read_provider(
-        &cache,
-        AgentId::Claude,
-        Duration::from_secs(300),
-        false,
-        native,
-        &|_| false,
-        &|_| {},
-    )
-    .0;
-    let cached = read_provider(
-        &cache,
-        AgentId::Claude,
-        Duration::from_secs(300),
-        false,
-        native,
-        &|_| false,
-        &|_| {},
-    )
-    .0;
-    (first, cached)
 }
 
 /// Tells the windows about a replacement, outside the lock the read held, so neither a provider
