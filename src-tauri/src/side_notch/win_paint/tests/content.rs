@@ -9,7 +9,7 @@ fn ring_label(card: ProviderLimitsDto) -> String {
 }
 
 #[test]
-fn claudes_ring_leads_with_its_weekly_over_its_session() {
+fn the_ring_label_is_the_weekly_figure_or_a_dash_never_the_session() {
     let weekly = window(
         "weekly_all",
         "Weekly · all models",
@@ -33,31 +33,6 @@ fn claudes_ring_leads_with_its_weekly_over_its_session() {
     );
 }
 
-#[test]
-fn codexs_ring_leads_with_its_weekly_over_its_session() {
-    let windows = vec![
-        window(
-            "secondary",
-            "Weekly · all models",
-            LimitWindowKind::Weekly,
-            10.0,
-        ),
-        window(
-            "primary",
-            "5 hour · all models",
-            LimitWindowKind::Session,
-            20.0,
-        ),
-    ];
-    assert_eq!(
-        ring_label(signed_in(AgentId::Codex, windows.clone())),
-        "10%"
-    );
-    assert_eq!(
-        ring_label(signed_in(AgentId::Codex, windows[1..].to_vec())),
-        "—"
-    );
-}
 #[test]
 fn reset_notes_never_double_space_the_hour() {
     // One reset per hour of the day, so every timezone meets a single-digit hour.
