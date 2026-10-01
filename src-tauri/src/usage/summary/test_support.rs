@@ -5,9 +5,6 @@ use std::time::{Duration, SystemTime};
 use super::*;
 use crate::usage::pricing;
 
-/// A summary read under `home`: a test build has no user home of its own (`paths::user_home`), so
-/// tests hand theirs over here. A summary read also changes the pricing module's process-wide
-/// state, so every test that reads one holds `pricing::lock_rates_state` first.
 pub(super) fn read_summary_in(
     home: &Path,
     input: UsageSummaryInput,
@@ -15,7 +12,6 @@ pub(super) fn read_summary_in(
     read_summary_from(input, || Ok(home.to_path_buf()))
 }
 
-/// [`read_summary_in`] with the rate table's fetch failing, as it does offline.
 pub(super) fn read_offline(home: &Path, input: UsageSummaryInput) -> UsageSummaryDto {
     pricing::with_test_fetch(None, || read_summary_in(home, input)).unwrap()
 }
@@ -67,7 +63,6 @@ pub(super) fn append_claude_record(home: &Path, message_id: &str, output_tokens:
     writeln!(file, "{line}").unwrap();
 }
 
-/// The first day `august_input` reads.
 const AUGUST_OPENS: &str = "2026-08-01";
 
 pub(super) fn august_input(force: bool) -> UsageSummaryInput {
@@ -86,7 +81,6 @@ pub(super) fn day_input(since_day: &str, until_day: &str, force: bool) -> UsageS
     }
 }
 
-/// An hourly read of `since..until` on 2026-08-07; an empty bound is left out.
 pub(super) fn hourly_input(since: &str, until: &str) -> UsageSummaryInput {
     UsageSummaryInput {
         resolution: Some("hour".into()),
@@ -127,10 +121,6 @@ pub(super) fn write_single_claude_record(
     path
 }
 
-/// Backdates `path` to 180 days before `august_input`'s window opens: outside that window and its
-/// mtime slack, inside `full_time_input`'s. A fixed instant, because the tests' windows are fixed:
-/// "now minus 180 days" enters August's window on runs after 2027-01-26, and the tests using it
-/// would go on passing without a file that window skips.
 pub(super) fn age_file(path: &Path) {
     let opens = DateTime::parse_from_rfc3339(&format!("{AUGUST_OPENS}T00:00:00Z")).unwrap();
     let modified = SystemTime::from(opens) - Duration::from_secs(180 * 24 * 60 * 60);
@@ -155,7 +145,6 @@ pub(super) fn record_count(summary: &UsageSummaryDto) -> u64 {
     summary.buckets.iter().map(|bucket| bucket.records).sum()
 }
 
-/// One Codex rollout with a single turn: its session, its model, and one usage event.
 pub(super) fn write_codex_rollout(dir: &Path, name: &str, session: &str, output_tokens: u64) {
     std::fs::create_dir_all(dir).unwrap();
     let lines = [
@@ -188,7 +177,6 @@ pub(super) fn write_codex_rollout(dir: &Path, name: &str, session: &str, output_
     std::fs::write(dir.join(name), body).unwrap();
 }
 
-/// Claude lines for `summary_line_claude`: one assistant message's usage, as Claude Code writes it.
 pub(super) fn claude_usage_line(
     message_id: &str,
     session: &str,
@@ -211,8 +199,6 @@ pub(super) fn write_claude_lines(home: &Path, name: &str, lines: &[String]) {
     std::fs::write(dir.join(name), lines.join("\n") + "\n").unwrap();
 }
 
-/// How many Claude transcripts a read scanned. A file counts only when its mtime puts it inside
-/// the window read, so an aged file is missing from a read of August.
 pub(super) fn claude_scanned_files(summary: &UsageSummaryDto) -> u64 {
     summary
         .sources

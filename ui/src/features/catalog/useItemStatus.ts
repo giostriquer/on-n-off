@@ -6,10 +6,6 @@ import type { AgentId, ItemStatus, UpdateItemMode } from "$lib/types";
 
 const ITEM_STATUS_STALE_MS = 5 * 60_000;
 
-/**
- * Managed-item statuses for a provider: always the global set, plus the project set when a
- * project is selected. `refresh()` forces the upstream check (one GitHub request per repo).
- */
 export function useItemStatus(provider: AgentId, projectPath: string | null) {
   const forceRef = useRef(false);
   const client = useQueryClient();
@@ -46,7 +42,6 @@ export function useItemStatus(provider: AgentId, projectPath: string | null) {
   return { sets, fetching, refresh };
 }
 
-/** Update / dismiss / remove one managed item, then refresh statuses and the provider's tab. */
 export function useItemActions(provider: AgentId, afterChange: () => Promise<unknown> | void) {
   const client = useQueryClient();
   const settle = useCallback(async () => {

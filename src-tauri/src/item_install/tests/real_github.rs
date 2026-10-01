@@ -1,7 +1,5 @@
 use super::*;
 
-/// Real network: inspects mattpocock/skills, installs two skills into a scratch home, checks
-/// status. Run explicitly with `cargo test real_github -- --ignored`.
 #[test]
 #[ignore = "talks to GitHub"]
 fn real_github_marketplace_round_trip() {

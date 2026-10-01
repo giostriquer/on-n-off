@@ -1,8 +1,3 @@
-//! Folding usage into the history as it ages (`history`), off the Usage screen's path: a
-//! background thread checks a little after launch and hourly after that, so usage is kept even
-//! when the screen is never opened. Settings reads how far back the history reaches and can
-//! clear it.
-
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,19 +13,11 @@ use super::history::{
 };
 use super::sources::{lock_usage_files, Sources};
 
-/// Out of the way of startup's own reads.
 const FIRST_FOLD_DELAY: Duration = Duration::from_secs(90);
-/// A fold is due once a day at most; a check that finds none reads only the history file.
 const FOLD_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
-/// A transcript that cannot be read holds a fold back while it may still be written to, or while
-/// its failure may be passing (another process holding it). One last written this long before the
-/// cutoff that failed on the previous check too never will read, and waiting on it would let the
-/// provider delete every other transcript before it is kept.
 const UNREADABLE_GRACE_MS: i64 = FOLD_AFTER_DAYS * DAY_MS;
 
-/// What the background checks remember between runs: the transcripts the last one that got as far
-/// as reading them could not read.
 #[derive(Debug, Default)]
 pub(crate) struct FoldChecks {
     unread_last_time: HashSet<String>,
@@ -66,24 +53,17 @@ pub fn usage_history_status() -> Result<UsageHistoryStatusDto, AdapterError> {
     Ok(history_status_in(&user_home()?))
 }
 
-/// Clears the history and says what it holds now.
 pub fn clear_usage_history() -> Result<UsageHistoryStatusDto, AdapterError> {
     let home = user_home()?;
     clear_history_in(&home)?;
     Ok(history_status_in(&home))
 }
 
-/// Folds what has aged past the cutoff, when a fold is due and every record it needs can be read:
-/// every root walked, and every transcript that may hold one read now or from its cached parse.
-/// A transcript still being written counts what it holds, since its records old enough to fold
-/// were written days ago. Reads only the history file unless a fold is due.
 pub(crate) fn fold_history_in(
     home: &Path,
     now_ms: i64,
     checks: &mut FoldChecks,
 ) -> Result<(), AdapterError> {
-    // The history is opened under the lock, so a clear cannot land between this read of it and
-    // the fold written over it.
     let lock = lock_usage_files();
     let mut store = HistoryStore::open(history_path_for(home));
     if store.history().is_none() || !fold_due(store.watermark(), now_ms) {
@@ -107,12 +87,10 @@ pub(crate) fn fold_history_in(
             saved = store.fold(read.records(), cutoff_ms, now_ms);
         }
     }
-    // With the watermark after the fold, so what it folded leaves the scan cache now.
     sources.finish(|| store.watermark());
     saved.map_err(|error| AdapterError::message(format!("Could not save a fold: {error}")))
 }
 
-/// How far back the usage history reaches and how much room it takes.
 pub(crate) fn history_status_in(home: &Path) -> UsageHistoryStatusDto {
     let path = history_path_for(home);
     let store = HistoryStore::open(path.clone());
@@ -145,8 +123,6 @@ pub(crate) fn history_status_in(home: &Path) -> UsageHistoryStatusDto {
     }
 }
 
-/// Forgets every folded row. Usage whose transcript is still on disk is counted from it again and
-/// folded again once due; usage only the history held is gone.
 pub(crate) fn clear_history_in(home: &Path) -> Result<(), AdapterError> {
     let _lock = lock_usage_files();
     clear_history(&history_path_for(home)).map_err(|error| {

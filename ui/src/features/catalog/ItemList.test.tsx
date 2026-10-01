@@ -29,7 +29,6 @@ const largeSkills: AgentTabDto = {
   mcpServers: [],
 };
 
-/** The fixture's skills in name order; the list below is handed them in neither this order nor the tab's. */
 const byName = [...largeSkills.userSkills].reverse();
 
 beforeEach(() => {
@@ -90,7 +89,6 @@ describe("ItemList", () => {
       togglable: true,
       skills: [],
     });
-    // Handed over out of name order: sorting again would put toolkit first.
     const items = [plugin("workbench"), plugin("toolkit")];
     const view = render(
       <ItemList
@@ -200,7 +198,6 @@ describe("ItemList managed items", () => {
         headerActions={<button type="button">Check for updates</button>}
       />,
     );
-    // A copied skill says where it came from and links to the original; own skills stay "User skill".
     expect(screen.getByText("from acme/skills")).toBeTruthy();
     expect(screen.getAllByText("User skill")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Open tdd on GitHub" }));

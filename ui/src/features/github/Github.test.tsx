@@ -139,8 +139,6 @@ describe("Github", () => {
     ]);
 
     const mine = section("Mine");
-    // Every row of the list lives in one repository, so it describes the title row and the rows
-    // do not repeat it.
     expect(within(mine).getByRole("heading", { level: 3 }).textContent).toBe("Mine1· acme/app");
     expect(within(mine).queryByRole("group")).toBeNull();
     expect(within(mine).getByText("#41")).toBeTruthy();
@@ -324,7 +322,6 @@ describe("Github", () => {
     await user.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(within(section("Review requested")).queryByText("Direct ask")).toBeNull();
-    // Folded, the title row still says how many and from which repository.
     expect(within(section("Review requested")).getByRole("heading", { level: 3 }).textContent).toBe("Review requested2· acme/lib");
     expect(within(section("Mine")).getByText("Add the thing")).toBeTruthy();
 
@@ -410,12 +407,10 @@ describe("Github", () => {
     expect(within(groups[1]).getByRole("heading", { level: 4 }).textContent).toBe("acme/lib1");
     expect(within(groups[1]).getByRole("listitem").textContent).toContain("Direct ask");
     expect(within(groups[2]).getByRole("heading", { level: 4 }).textContent).toBe("octo/tools1");
-    // The repository is said once, by the band, never again on the row.
     const row = within(groups[2]).getByRole("listitem");
     expect(within(row).getByText("sam")).toBeTruthy();
     expect(within(row).queryByText("octo/tools")).toBeNull();
     expect(within(row).queryByText("tools")).toBeNull();
-    // A search still matches the repository and narrows the groups to the ones with hits.
     await user.type(screen.getByRole("searchbox"), "octo/");
     expect(within(review).getByRole("heading", { level: 3 }).textContent).toBe("Review requested1 of 3· octo/tools");
     expect(within(review).queryByRole("group")).toBeNull();

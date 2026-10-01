@@ -53,8 +53,6 @@ fn the_fixture_parses_into_the_three_lists() {
     assert!(direct.is_draft);
     assert_eq!(direct.ci, CiState::Pending);
     assert_eq!(direct.review_decision, None);
-    // A draft's state is `DRAFT` whatever the merge would do; only `mergeable` carries the
-    // conflicts, which is why both fields ride along.
     assert_eq!(direct.mergeable, Mergeability::Conflicting);
     assert_eq!(direct.merge_state, MergeState::Draft);
     assert_eq!(direct.merge_kind, Some(MergeKind::Conflicts));

@@ -9,11 +9,6 @@ const HISTORY_KEY = ["usage-history"];
 
 const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-/**
- * The usage on-n-off keeps after the agents delete their transcripts (`usage/history.rs`): how far
- * back it reaches, and a way to forget it. Clearing loses for good whatever only the history
- * still holds, so it asks first.
- */
 export function UsageHistoryCard() {
   const client = useQueryClient();
   const status = useQuery({ queryKey: HISTORY_KEY, queryFn: () => api.usageHistoryStatus() });

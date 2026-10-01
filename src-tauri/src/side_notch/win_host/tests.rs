@@ -16,7 +16,6 @@ fn snapshot() -> NotchSnapshot {
     }
 }
 
-/// The cell the host projects for a signed-in account whose weekly window is `percent` used.
 fn provider_entry(provider: AgentId, percent: f64) -> NotchProvider {
     let card = crate::limits::signed_in_card(
         provider,

@@ -1,4 +1,3 @@
-// Run with `bun test scripts/` (CI's frontend job) or `node --test scripts/*.test.mjs`.
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -25,7 +24,6 @@ import {
 } from "./release-verification.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-/** The Windows installer signature published with v0.14.0, as the Release workflow wrote it. */
 const realSig = readFileSync(join(here, "fixtures", "on-n-off_0.14.0_x64-setup.exe.sig"), "utf8");
 const repoConf = readFileSync(join(here, "..", "src-tauri", "tauri.conf.json"), "utf8");
 const repoKey = parseUpdaterPublicKey(repoConf);
@@ -33,15 +31,10 @@ const repoKey = parseUpdaterPublicKey(repoConf);
 const b64 = (bytes) => Buffer.from(bytes).toString("base64");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-/** A minisign signature file as Tauri publishes it, from its raw parts. */
 function minisignText(signatureLine, trustedLine, globalSignature) {
   return b64(`untrusted comment: signature from tauri secret key\n${b64(signatureLine)}\n${trustedLine}\n${b64(globalSignature)}\n`);
 }
 
-/**
- * A throwaway minisign key: its tauri.conf.json text, and a signer producing Tauri `.sig` text.
- * `algorithm` "ED" signs the BLAKE2b-512 of the data (what Tauri writes), "Ed" the data itself.
- */
 function throwawayKey(keyId = Buffer.from("0102030405060708", "hex")) {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const raw = publicKey.export({ format: "der", type: "spki" }).subarray(12);
@@ -59,10 +52,6 @@ function throwawayKey(keyId = Buffer.from("0102030405060708", "hex")) {
   };
   return { conf, signFile, signParts };
 }
-
-/* -------------------------------------------------------------------------------------------- */
-/* Minisign                                                                                     */
-/* -------------------------------------------------------------------------------------------- */
 
 test("a real release signature decodes, was made with the repo's updater key and signs its trusted comment", () => {
   const sig = parseMinisignSignature(realSig);
@@ -150,15 +139,8 @@ test("a trusted comment names exactly its asset, or the macOS bundle as Tauri si
   assert.equal(trustedCommentNames(`timestamp:1\tfile:${exe}.bak`, exe, "0.15.0"), false, "a longer name");
   assert.equal(trustedCommentNames("timestamp:1\tfile:on-n-off_0.15.0_x64-setup", exe, "0.15.0"), false, "a prefix");
   assert.equal(trustedCommentNames(`timestamp:1\tfile:x${exe}`, exe, "0.15.0"), false, "a longer name ending in it");
-  // The macOS name carries no version, so a previous release's bundle and its .sig, replayed under
-  // this release's name, pass this check. Only the attestation group (the build ran at this tag)
-  // stops that replay.
   assert.equal(trustedCommentNames("timestamp:1\tfile:on-n-off.app.tar.gz", "on-n-off_0.15.0_aarch64.app.tar.gz", "0.15.0"), true);
 });
-
-/* -------------------------------------------------------------------------------------------- */
-/* SHA256SUMS                                                                                   */
-/* -------------------------------------------------------------------------------------------- */
 
 test("SHA256SUMS lines parse with CRLF or LF endings and the binary-mode marker", () => {
   const a = "a".repeat(64);
@@ -179,10 +161,6 @@ test("a SHA256SUMS line that sha256sum -c would flag is refused, and so is a nam
   ];
   for (const [name, text, reason] of rows) assert.throws(() => parseSums(text), reason, name);
 });
-
-/* -------------------------------------------------------------------------------------------- */
-/* Release groups                                                                               */
-/* -------------------------------------------------------------------------------------------- */
 
 test("the expected asset set is the previous one renamed, sorted", () => {
   assert.deepEqual(
@@ -225,16 +203,10 @@ const NOTES = "## What's Changed\n* one change";
 const releaseSigner = throwawayKey();
 const releaseKey = parseUpdaterPublicKey(releaseSigner.conf);
 
-/** Both platforms a real release ships, each with its `.sig`; the macOS one named as Tauri signed it, before the rename. */
 function releaseSignature(bytes, signedAs) {
   return releaseSigner.signFile(bytes, `timestamp:1\tfile:${signedAs}`);
 }
 
-/**
- * A complete, valid release signed with a throwaway key. `tamper` edits the files, the feed (or its
- * raw text, `latestText`) and the draft body before SHA256SUMS.txt is written; `tamperSums` edits
- * that text afterwards.
- */
 function buildRelease({ tamper = () => {}, tamperSums = (text) => text, allowChange = false } = {}) {
   const files = new Map([
     ["LICENSE", Buffer.from("license text")],
@@ -329,7 +301,6 @@ test("a valid release passes every group, and each tamper fails its own check", 
       `windows-x86_64-nsis signature equals ${EXE}.sig`,
     ],
     ["changed notes", { tamper: (r) => (r.body = `${NOTES}\n* a line added after publish-draft\n`) }, "latest.json notes match the release body (installed apps show these)"],
-    // A SHA256SUMS the parser refuses must fail its group, not switch every hash check off.
     ["a SUMS line listed twice", { tamperSums: (text) => `${text}\r\n${text.split("\r\n")[0]}` }, "SHA256SUMS.txt is readable"],
     ["a SUMS line for no asset", { tamperSums: (text) => `${text}\r\n${sha256("ghost")}  webapp_1.1.0_ghost.zip` }, "SHA256SUMS.txt lists every other asset, and nothing else"],
     [

@@ -1,10 +1,3 @@
-//! Plan + paint for the Windows side notch: geometry ported from `NotchCore`
-//! (mirroring `side_notch::model`), rasterized with `tiny-skia` into a
-//! premultiplied-BGRA pixmap. The geometry is pure, but the module is not: `text`
-//! shapes through DirectWrite, so a popover's own size depends on the fonts installed
-//! on the machine that draws it.
-// Rendering helpers pass device coordinates around; folding them into structs would
-// obscure the math this module exists to keep transparent.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 mod marks;
@@ -21,10 +14,6 @@ use crate::dto::{
 use crate::side_notch::sessions::LiveSession;
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
-// ---------------------------------------------------------------------------
-// Host data (what macOS ships over the pipe; Windows passes it in memory).
-
-/// The host's snapshot for one moment, cells already in rail order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RailData {
     pub settings: NotchSettings,
@@ -38,15 +27,12 @@ pub enum CellData {
     PullRequests(PrCellData),
 }
 
-/// One provider cell: the host's projection, drawn as it is, and the cell's live sessions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProviderData {
     pub cell: NotchProvider,
     pub sessions: Vec<LiveSession>,
 }
 
-/// The pull-request cell's data: only the selected lists, each capped, with the row
-/// fields the popover shows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrCellData {
     pub status: GithubStatus,
@@ -76,21 +62,13 @@ pub struct PrRowData {
 }
 
 impl PrRowData {
-    /// Only pull requests on github.com reach the popover, which opens rows in the
-    /// browser and copies their links; anything else is dropped here.
     pub fn keeps(url: &str) -> bool {
         url.starts_with("https://github.com/")
     }
 }
 
-/// Rows per list; the screen shows the rest.
 pub const MAX_PULL_REQUESTS: usize = 25;
 
-// ---------------------------------------------------------------------------
-// Geometry.
-
-/// A rect in points; the coordinate space is chosen by the caller (display or
-/// window-local) and always top-left.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {
     pub x: f64,
@@ -99,7 +77,6 @@ pub struct R {
     pub h: f64,
 }
 
-/// Left/right edges run the rail along y; top/bottom along x.
 fn vertical(edge: Edge) -> bool {
     matches!(edge, Edge::Left | Edge::Right)
 }
@@ -122,7 +99,6 @@ impl R {
     }
 }
 
-/// The union bounding box of two rects.
 fn union(a: &R, b: &R) -> R {
     let x = a.x.min(b.x);
     let y = a.y.min(b.y);
@@ -131,9 +107,6 @@ fn union(a: &R, b: &R) -> R {
     R::new(x, y, right - x, bottom - y)
 }
 
-/// Native metrics snapped to the target display's pixel grid: the `NotchMetrics.value`
-/// port — compact and large presets produce fractional points that must not straddle
-/// pixels on 1x monitors.
 fn value(points: f64, size_scale: f64, display_scale: f64) -> f64 {
     (points * size_scale * display_scale).round() / display_scale
 }
@@ -146,16 +119,11 @@ fn size_scale_of(size: NotchSize) -> f64 {
     }
 }
 
-/// Rail metrics for one size preset, display scale, and edge; the `railLayout` port.
-/// Cells are 76 wide and 73 tall whatever the edge: a vertical rail is 76 thick with
-/// cells stacked along it, a horizontal bar is 73 thick with cells side by side.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Metrics {
     pub thickness: f64,
-    /// A cell's extent along the rail's axis.
     pub cell_length: f64,
     pub cell_spacing: f64,
-    /// Distance from either end to the first cell; also the ear-curve length.
     pub inset: f64,
     pub ear: f64,
     pub cell_padding: f64,
@@ -168,13 +136,11 @@ pub struct Metrics {
     pub label_height: f64,
 }
 
-/// The `railLayout` port.
 pub fn metrics(size: NotchSize, display_scale: f64, edge: Edge) -> Metrics {
     let v = |points: f64| value(points, size_scale_of(size), display_scale);
     let cell_padding = v(1.0);
     let content_spacing = v(3.0);
     let icon_slot = v(46.0);
-    // Tall enough for the 17 pt label at every preset, so the figure never scales to fit.
     let label_height = v(22.0);
     let cell_width = v(76.0);
     let cell_height = icon_slot + label_height + content_spacing + 2.0 * cell_padding;
@@ -196,7 +162,6 @@ pub fn metrics(size: NotchSize, display_scale: f64, edge: Edge) -> Metrics {
     }
 }
 
-/// Cell frames inside the rail (rail-local top-left origin), the `railCellFrames` port.
 pub fn rail_cell_frames(edge: Edge, metrics: &Metrics, count: usize) -> Vec<R> {
     (0..count)
         .map(|index| {
@@ -211,8 +176,6 @@ pub fn rail_cell_frames(edge: Edge, metrics: &Metrics, count: usize) -> Vec<R> {
         .collect()
 }
 
-/// The collapsed "show on hover" strip centred on the rail's span; the `notchPillFrame`
-/// port (thickness 6, length min(120, rail span)).
 pub fn pill_frame(settings: &NotchSettings, rail: &R) -> R {
     let scale = size_scale_of(settings.size);
     let thickness = value(6.0, scale, 1.0);
@@ -243,8 +206,6 @@ pub const POPOVER_WIDTH: f64 = 272.0;
 pub const POPOVER_MARGIN: f64 = 8.0;
 pub const TAIL_LENGTH: f64 = 8.0;
 
-/// Where a popover of `size` sits next to `cell`: inward from the edge, centred on the
-/// cell, clamped to the display's work area; the `popoverFrame` port.
 pub fn popover_frame(
     cell: &R,
     edge: Edge,
@@ -275,15 +236,9 @@ pub fn popover_frame(
     )
 }
 
-// ---------------------------------------------------------------------------
-// The plan: everything the renderer and the window need for one frame.
-
-/// Where the pointer is, as the window thread sees it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Hover {
-    /// OnHover mode: the strip was reached and the rail is open.
     pub rail_open: bool,
-    /// The cell whose popover is open (hovered or pinned), as a rail index.
     pub active: Option<usize>,
     pub cap_hovered: bool,
 }
@@ -301,7 +256,6 @@ pub enum CellContent {
     Provider {
         provider: AgentId,
         headline: Option<QuotaView>,
-        /// The inner ring the host chose, and its window's figure.
         inner: Option<(InnerRing, QuotaView)>,
         label: String,
     },
@@ -312,7 +266,6 @@ pub enum CellContent {
     },
 }
 
-/// CI color and merge-conflict state for a displayed PR.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PrRingSegment {
     ci: CiState,
@@ -321,8 +274,6 @@ pub struct PrRingSegment {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct QuotaView {
-    /// `None` only when the figure is out of range, like the mac `Quota.percent(at:)`; the ring
-    /// then draws no arc and the label reads "—". A window past its reset is `Some(0.0)`.
     pub percent: Option<f64>,
     pub reached: bool,
 }
@@ -341,11 +292,8 @@ pub struct CapPlan {
     pub pinned: bool,
 }
 
-/// One positioned element of the popover; the planner computes rects once and the
-/// renderer draws exactly what was placed, so measure/zones/draw never drift.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PopItem {
-    /// A provider glyph or pull-request mark of `size` points.
     Mark {
         kind: MarkKind,
         size: f64,
@@ -355,16 +303,13 @@ pub enum PopItem {
         size: f64,
         weight: TextWeight,
         color: Color,
-        /// Right-align inside the item's rect.
         right: bool,
     },
-    /// A quota bar: track plus a fill scaled by the percent.
     Bar {
         percent: Option<f64>,
         color: Color,
     },
     Divider,
-    /// The pull-request CI dot: hollow when nothing reported.
     Dot {
         ci: CiState,
     },
@@ -397,28 +342,19 @@ impl TextWeight {
 
 pub type Color = [u8; 4];
 
-// The ramp lives beside the layout maths in `model.rs`, which compiles on both platforms and under
-// `cfg(test)`, so the meter colours are exercised on either CI leg rather than on neither.
 use super::model::{meter_color, TRIP_RED, UNREADABLE_INK};
 
-/// What a popover interaction can ask for.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Zone {
-    /// Open the pull request on GitHub.
     OpenRow { url: String },
-    /// Copy "review please: <title>" with the link.
     CopyRow { url: String, title: String },
-    /// Open the Limits or Pull requests screen.
     Footer,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopoverPlan {
-    /// The full popover rect, tail space included.
     pub rect: R,
-    /// The card rect (without the tail side).
     pub card: R,
-    /// Centre of the tail along the rail's axis, in window-local coordinates.
     pub tail: f64,
     pub entries: Vec<(PopItem, R)>,
     pub zones: Vec<(Zone, R)>,
@@ -430,24 +366,18 @@ pub struct Plan {
     pub edge: Edge,
     pub display_scale: f64,
     pub size_scale: f64,
-    /// The window bounds in display points; the pixmap covers exactly this.
     pub window: R,
     pub rail: R,
     pub metrics: Metrics,
     pub cells: Vec<CellPlan>,
     pub cap: CapPlan,
-    /// The collapsed strip, when the rail is not open.
     pub pill: Option<R>,
     pub popover: Option<PopoverPlan>,
 }
 
-/// The rail cell under a window-local point.
 pub fn rail_hit(plan: &Plan, x: f64, y: f64) -> Option<usize> {
     plan.cells.iter().position(|cell| cell.rect.contains(x, y))
 }
-
-// ---------------------------------------------------------------------------
-// Quota / session / PR projections (the NotchCore `Provider` ports).
 
 fn quota_view(window: &LimitWindowDto) -> QuotaView {
     let percent = quota_percent(window);
@@ -457,8 +387,6 @@ fn quota_view(window: &LimitWindowDto) -> QuotaView {
     }
 }
 
-/// The inner ring's ink and track: each a deeper shade of its provider's accent (Claude's
-/// terracotta for Fable, Codex's grey for the workspace share) on its own dark track.
 fn inner_ring_colors(ring: &InnerRing) -> (Color, Color) {
     match ring {
         InnerRing::Fable { .. } => (FABLE_ORANGE, FABLE_TRACK),
@@ -474,7 +402,6 @@ fn list_title(list: GithubList) -> &'static str {
     }
 }
 
-/// The same wording as the Pull requests screen's badges.
 fn row_badges(row: &PrRowData) -> Vec<(String, Badge)> {
     let mut badges = Vec::new();
     if row.is_draft {
@@ -498,9 +425,6 @@ fn row_badges(row: &PrRowData) -> Vec<(String, Badge)> {
     }
     badges
 }
-
-// ---------------------------------------------------------------------------
-// Planning.
 
 fn cell_content(data: &CellData) -> CellContent {
     match data {
@@ -547,7 +471,6 @@ fn cell_content(data: &CellData) -> CellContent {
     }
 }
 
-/// Builds the full plan for one frame, or `None` when the notch must stay hidden.
 pub fn plan(
     settings: &NotchSettings,
     displays: &[super::model::Display],
@@ -643,9 +566,6 @@ pub fn plan(
                 .into_iter()
                 .map(|(item, rect)| (item, rect.translated(card.x, card.y)))
                 .collect(),
-            // Zones come out of the same walk as the entries, in card coordinates:
-            // they move onto the card with them, or nothing in the popover is
-            // clickable.
             zones: zones
                 .into_iter()
                 .map(|(zone, rect)| (zone, rect.translated(card.x, card.y)))
@@ -696,11 +616,6 @@ fn translate_popover(mut popover: PopoverPlan, dx: f64, dy: f64) -> PopoverPlan 
     popover
 }
 
-// ---------------------------------------------------------------------------
-// Popover content -> positioned entries.
-
-/// Walks the popover content, placing every element; one source of truth for
-/// measurement, hit zones, and drawing.
 fn popover_entries(
     data: &RailData,
     index: usize,
@@ -715,11 +630,9 @@ fn popover_entries(
     };
     let mut entries: Vec<(PopItem, R)> = Vec::new();
     let mut zones: Vec<(Zone, R)> = Vec::new();
-    // Card padding: the content starts inside the card, not on its edge.
     let mut y = v(12.0);
     let x = v(12.0);
     let spacing = v(10.0);
-    // Where a glyph's own centre has to land to sit on the middle of a line of text.
     let cap_middle = |points: f64, weight: TextWeight| -> f64 {
         f64::from(text::cap_middle_px(
             device_size(points, display_scale),
@@ -763,8 +676,6 @@ fn popover_entries(
                     kind: MarkKind::Provider(provider.cell.provider),
                     size: v(13.0),
                 },
-                // The mac header is an HStack, so the glyph centres on the title's
-                // line box rather than hanging from its top.
                 R::new(x, y + header_lift, v(13.0), v(13.0)),
             ));
             text_entry(
@@ -809,7 +720,6 @@ fn popover_entries(
                     );
                     y += line_h(11.0, TextWeight::Regular);
                 }
-                // Remembered windows or a remembered share: either is a value shown below.
                 if !provider.cell.windows.is_empty() || provider.cell.workspace_credits.is_some() {
                     text_entry(
                         &mut entries,
@@ -841,8 +751,6 @@ fn popover_entries(
                 y += line_h(11.0, TextWeight::Regular);
             }
 
-            // Each window, then a business member's credit share, which brings its own note (a
-            // date, since it renews monthly) and what is left after the figure.
             struct Block {
                 label: String,
                 note: String,
@@ -876,9 +784,6 @@ fn popover_entries(
                 });
             }
             for block in blocks {
-                // The note is right-aligned; the label truncates so the two never
-                // overlap (SwiftUI's Spacer + lineLimit(1) behaviour). The note yields
-                // first: it keeps at most 60 % of the row, the label the rest.
                 let note_max = inner_w * 0.6;
                 let note = ellipsize(
                     &block.note,
@@ -1026,7 +931,6 @@ fn popover_entries(
                     );
                     y += line_h(10.0, TextWeight::Regular) + v(8.0);
                 }
-                // The sessions block ends where the next card child starts.
                 y += spacing - v(8.0);
             }
         }
@@ -1183,7 +1087,6 @@ fn popover_entries(
                         false,
                     );
                     line_x += measure_text(&repo, repo_size, display_scale) + v(8.0);
-                    // Badges stop before the CI dot at the row's right edge.
                     let badge_limit = x + inner_w - v(7.0) - v(10.0);
                     for (badge, color) in row_badges(row) {
                         let badge_size = v(9.5);
@@ -1215,7 +1118,6 @@ fn popover_entries(
                             v(7.0),
                         ),
                     ));
-                    // The whole row opens on GitHub (except the copy affordance).
                     zones.push((
                         Zone::OpenRow {
                             url: row.url.clone(),
@@ -1234,7 +1136,6 @@ fn popover_entries(
         }
     }
 
-    // The action error and the footer link.
     if let Some(error) = &data.action_error {
         text_entry(
             &mut entries,
@@ -1285,7 +1186,6 @@ fn popover_entries(
         ),
     ));
     zones.push((Zone::Footer, R::new(footer_x, y, footer_w, footer_line)));
-    // The card's height comes from the entries, so the walk ends here.
     (entries, zones)
 }
 
@@ -1300,8 +1200,6 @@ fn wrap_lines(
     if size <= 0.0 {
         return vec![text.to_string()];
     }
-    // Semibold runs about a fifth wider than regular at these sizes, so wrapping at
-    // the wrong weight pushes the last word past the box it was measured for.
     text::wrap_px(
         text,
         (max_w * scale) as f32,
@@ -1311,15 +1209,10 @@ fn wrap_lines(
     )
 }
 
-/// The rasterised height of `size` points on a display of `scale`.
 fn device_size(size: f64, scale: f64) -> f32 {
     (size * scale).max(1.0) as f32
 }
 
-/// A run of text measured in points. GDI hints every pixel size on its own, so a run
-/// measured at the point size is not `scale` times narrower than the same run
-/// rasterised at point x scale; measuring at the device size and converting back
-/// keeps a scaled display from drifting by a fifth on the longer labels.
 fn measure_weight(text: &str, size: f64, weight: TextWeight, scale: f64) -> f64 {
     f64::from(text::measure_px(
         text,
@@ -1332,7 +1225,6 @@ fn measure_text(text: &str, size: f64, scale: f64) -> f64 {
     measure_weight(text, size, TextWeight::Regular, scale)
 }
 
-/// Truncates `text` with an ellipsis so it fits `max_px` when drawn at `size`/`weight`.
 fn ellipsize(text: &str, max_px: f64, size: f64, weight: TextWeight, scale: f64) -> String {
     if measure_weight(text, size, weight, scale) <= max_px {
         return text.to_string();
@@ -1346,8 +1238,6 @@ fn ellipsize(text: &str, max_px: f64, size: f64, weight: TextWeight, scale: f64)
     format!("{cut}…")
 }
 
-/// The window's percent now: zero once its reset has passed, since that is where the provider
-/// restarts the quota; `None` only when the reported figure is unusable.
 fn quota_percent(window: &LimitWindowDto) -> Option<f64> {
     if !window.used_percent.is_finite() || !(0.0..=100.0).contains(&window.used_percent) {
         return None;
@@ -1360,10 +1250,6 @@ fn quota_percent(window: &LimitWindowDto) -> Option<f64> {
     Some(if expired { 0.0 } else { window.used_percent })
 }
 
-/// "Resets Tue 8:00 PM" while the window is pending; "Reset Tue 8:00 PM" once it has,
-/// without the spent cycle's figure; empty when the provider reported no reset.
-/// Minute-granular, computed when the host reads, so a re-render never happens for
-/// clock drift alone.
 fn reset_note(window: &LimitWindowDto) -> String {
     let Some(reset) = window
         .resets_at
@@ -1384,7 +1270,6 @@ fn reset_note(window: &LimitWindowDto) -> String {
     }
 }
 
-/// "just now", "4 min", "2 h", "3 d" since the last activity.
 fn age_text(last_active_at: &str) -> String {
     let Some(instant) = last_active_at.parse::<chrono::DateTime<chrono::Utc>>().ok() else {
         return String::new();
@@ -1401,7 +1286,6 @@ fn age_text(last_active_at: &str) -> String {
     }
 }
 
-/// The popover's card height: the bottom of the lowest entry plus padding.
 fn measure(entries: &[(PopItem, R)], size_scale: f64, display_scale: f64, padding: f64) -> f64 {
     let bottom = entries
         .iter()
@@ -1411,11 +1295,6 @@ fn measure(entries: &[(PopItem, R)], size_scale: f64, display_scale: f64, paddin
     bottom + padding
 }
 
-// ---------------------------------------------------------------------------
-// Rendering.
-
-// The mac `NotchView.swift` palette, ported. `NotchCore/Meter.swift` carries the rationale, and the
-// accents match the app window's — one quota reads the same colour on every surface.
 const RAIL_INK: Color = [8, 8, 8, 255];
 const POPOVER_INK: Color = [14, 14, 17, 255];
 const MUTED_INK: Color = [153, 153, 153, 255];
@@ -1428,10 +1307,8 @@ const CODEX_INK: Color = [238, 240, 242, 255];
 const CURSOR_BLUE: Color = [122, 162, 255, 255];
 const ANTIGRAVITY_MUTE: Color = [140, 147, 157, 255];
 const FABLE_TRACK: Color = [53, 42, 38, 255];
-/// Codex's inner ring, a business workspace member's credit share: `creditsInk` in `Meter.swift`.
 const CREDITS_INK: Color = [168, 176, 186, 255];
 const CREDITS_TRACK: Color = [38, 41, 45, 255];
-/// The mac `ShowToggleCap`'s hovered fill: white at 11 %.
 const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
 
 fn provider_color(provider: AgentId) -> Color {
@@ -1443,7 +1320,6 @@ fn provider_color(provider: AgentId) -> Color {
     }
 }
 
-/// The mac `formatPercent`: a used sliver reads "<1%" rather than rounding to zero.
 fn format_percent(percent: f64) -> String {
     if percent > 0.0 && percent < 1.0 {
         "<1%".into()
@@ -1479,7 +1355,6 @@ fn provider_name(provider: AgentId) -> &'static str {
     }
 }
 
-/// Renders the plan into a premultiplied-BGRA pixmap sized to `plan.window`.
 pub fn render(plan: &Plan) -> Pixmap {
     let scale = plan.display_scale as f32;
     let width = ((plan.window.w * plan.display_scale).round() as u32).max(1);
@@ -1547,8 +1422,6 @@ fn paint_solid_masked(
 
 use tiny_skia::Path;
 
-/// The notch silhouette: a bar whose inner side is straight and whose two ends flare
-/// into the screen edge with an S-curve `ear` points long; the `NotchSilhouette` port.
 fn draw_silhouette_masked(
     pixmap: &mut Pixmap,
     rail: &R,
@@ -1561,8 +1434,6 @@ fn draw_silhouette_masked(
     let t = if vertical(edge) { rail.w } else { rail.h } as f32;
     let length = if vertical(edge) { rail.h } else { rail.w } as f32;
     let ear = (metrics.ear as f32).min(length / 2.0);
-    // Local frame: the screen edge is x == t (+1 to hide the seam), the rail extends
-    // inward to x == 0, and the axis runs along y.
     let edge_x = t + 1.0;
     let mut pb = PathBuilder::new();
     pb.move_to(edge_x, 0.0);
@@ -1589,7 +1460,6 @@ fn draw_silhouette_masked(
     let Some(local) = pb.finish() else {
         return;
     };
-    // Place the local frame onto the rail rect according to the edge, then to device px.
     let place = match edge {
         Edge::Right => Transform::from_translate(rail.x as f32, rail.y as f32),
         Edge::Left => Transform::from_row(-1.0, 0.0, 0.0, 1.0, rail.x as f32 + t, rail.y as f32),
@@ -1643,8 +1513,6 @@ fn draw_cap(
     if !cap.hovered {
         return;
     }
-    // The macOS ShowToggleCap: the silhouette itself filled white 0.11, masked to the
-    // cap rect, so the highlight follows the flare instead of a hard rectangle.
     if let Some(mut mask) = tiny_skia::Mask::new(pixmap.width(), pixmap.height()) {
         let cap_px = Rect::from_xywh(
             cap.rect.x as f32 * scale,
@@ -1676,7 +1544,6 @@ fn draw_cap(
             12.0 * scale,
             12.0 * scale,
         ),
-        // Bright while the rail is pinned open, dim while it waits behind the strip.
         if cap.pinned {
             [255, 255, 255, 242]
         } else {
@@ -1686,9 +1553,6 @@ fn draw_cap(
     );
 }
 
-/// SwiftUI's `Capsule` in device pixels: a rectangle with half-round ends. Drawing
-/// one as an oval instead pinches it to nothing away from the middle, which turns a
-/// 4 pt meter bar into a hairline.
 fn capsule_px(x: f32, y: f32, w: f32, h: f32) -> Option<Path> {
     rounded_rect_path(
         R::new(f64::from(x), f64::from(y), f64::from(w), f64::from(h)),
@@ -1721,8 +1585,6 @@ fn rounded_rect_path(rect: R, radius: f64, scale: f32) -> Option<Path> {
     pb.finish()
 }
 
-/// Strokes an arc centred at (cx, cy) sweeping clockwise from `from_deg`, 0 deg = up,
-/// like SwiftUI's Circle().trim + rotationEffect(-90).
 fn stroke_ring(
     pixmap: &mut Pixmap,
     cx: f32,
@@ -1761,8 +1623,6 @@ fn stroke_ring(
         let mut paint = Paint::default();
         paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
         paint.anti_alias = true;
-        // Keep passing CI arcs on the same rounding path with and without the
-        // gradient, preserving antialiased pixels in the unaffected green area.
         paint.force_hq_pipeline = conflict || color == LIVE_GREEN;
         if conflict {
             let outer = radius + stroke / 2.0;
@@ -1771,8 +1631,6 @@ fn stroke_ring(
             let green =
                 tiny_skia::Color::from_rgba8(LIVE_GREEN[0], LIVE_GREEN[1], LIVE_GREEN[2], 255);
             let red = tiny_skia::Color::from_rgba8(TRIP_RED[0], TRIP_RED[1], TRIP_RED[2], 255);
-            // tiny-skia 0.12 takes the two-point conical form: the inner circle is the ring's
-            // centre with no radius, the outer one is the same centre at `outer`.
             if let Some(shader) = tiny_skia::RadialGradient::new(
                 tiny_skia::Point::from_xy(cx, cy),
                 0.0,
@@ -1806,7 +1664,6 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
     let metrics = &plan.metrics;
     let icon_slot = metrics.icon_slot as f32 * scale;
     let ring_stroke = metrics.ring_stroke as f32 * scale;
-    // The icon slot is centred horizontally in the cell whatever the edge.
     let center = (
         cell.rect.mid_x() as f32 * scale,
         cell.rect.y as f32 * scale + metrics.cell_padding as f32 * scale + icon_slot / 2.0,
@@ -1981,18 +1838,14 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
         }
     }
 
-    // The tail: a triangle pointing from the card toward the rail.
     let half = (7.0 * plan.size_scale) as f32 * scale;
     let length = tail_space.max(tail_space_y) as f32 * scale;
-    // `tail` is measured from the card's own leading edge, the way the mac popover
-    // positions its tail inside the card's GeometryReader.
     let along = if vertical(edge) {
         (card.y + popover.tail) as f32 * scale
     } else {
         (card.x + popover.tail) as f32 * scale
     };
     let (tx, ty) = match edge {
-        // The tail attaches to the card's screen-edge side and points at the rail.
         Edge::Right => ((card.x + card.w) as f32 * scale, along),
         Edge::Left => (card.x as f32 * scale, along),
         Edge::Top => (along, card.y as f32 * scale),

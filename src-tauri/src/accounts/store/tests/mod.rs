@@ -139,8 +139,6 @@ fn older_profile_names_load_as_categories_without_becoming_the_email() {
     assert_eq!(loaded.profiles[0].category.as_deref(), Some("Client A"));
 }
 
-/// Save one Codex profile with this login into `home`'s vault, which `vault::tests::unlock_fixture`
-/// has already unlocked, and give back its observation key.
 pub(crate) fn saved_codex_fixture(
     home: &std::path::Path,
     identity: Identity,
@@ -261,8 +259,6 @@ fn unlocking_an_existing_vault_does_not_hold_the_shared_account_lease() {
 #[cfg(unix)]
 #[test]
 fn a_finished_operation_frees_the_vault_lease_while_a_spawned_child_still_shares_it() {
-    // A child that another thread spawns meanwhile inherits the descriptor until it execs; the
-    // next operation must not wait on it.
     let home = tempfile::tempdir().unwrap();
     let (_, lease) = Store::lease(home.path()).unwrap();
     let inherited = lease.duplicate().unwrap();
@@ -316,8 +312,6 @@ fn capturing_a_native_login_revokes_private_renewal_ownership() {
     assert!(!db.profiles[0].usage_renewal_owned);
 }
 
-/// The vault is JSON sealed in `vault.enc`, and every earlier vault must keep loading: the names
-/// the database writes are its on-disk format.
 #[test]
 fn a_sealed_database_keeps_the_vault_format() {
     let root = tempfile::tempdir().unwrap();
@@ -369,8 +363,6 @@ fn a_sealed_database_keeps_the_vault_format() {
     );
 }
 
-/// A vault written before epochs, exclusions, recovery and renewal ownership existed loads with
-/// none of them: no pending recovery, nothing excluded, nothing awaiting activation or renewing.
 #[test]
 fn a_vault_from_before_the_later_fields_loads_without_them() {
     let root = tempfile::tempdir().unwrap();

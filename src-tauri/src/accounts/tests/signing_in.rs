@@ -1,4 +1,3 @@
-//! Signing in in an isolated home, and cleaning up the homes a sign-in abandoned.
 use super::fixture::{claude, codex, generation, identity, Harness, Heard};
 use crate::dto::AgentId;
 
@@ -6,17 +5,12 @@ fn operation() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// The isolated sign-in homes left under the scratch home.
 fn left(harness: &Harness) -> Vec<std::path::PathBuf> {
     std::fs::read_dir(harness.path().join(".on-n-off/accounts/logins"))
         .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
         .unwrap_or_default()
 }
 
-/// A sign-in resolves the provider's store through the context, runs the official client in a
-/// private home, saves what it left as a profile awaiting activation that owns its renewal, cleans
-/// the private home and announces the change once its leases are released. The CLI's own login
-/// is not touched.
 #[test]
 fn a_sign_in_saves_the_login_the_official_client_left_and_cleans_its_private_home() {
     for (provider, login) in [
@@ -35,7 +29,6 @@ fn a_sign_in_saves_the_login_the_official_client_left_and_cleans_its_private_hom
         assert_eq!(profile.identity, identity(provider, "b", "team"));
         assert_eq!(generation(profile.login.as_ref()), Some("b1".into()));
         assert!(profile.pending_activation);
-        // Only a provider whose saved logins stay in the vault renews one privately.
         assert_eq!(
             profile.usage_renewal_owned,
             provider == AgentId::Codex,
@@ -49,8 +42,6 @@ fn a_sign_in_saves_the_login_the_official_client_left_and_cleans_its_private_hom
     }
 }
 
-/// A sign-in the official client did not complete saves nothing and announces nothing, and still
-/// cleans its private home.
 #[test]
 fn an_unfinished_sign_in_saves_nothing_and_still_cleans_up() {
     let harness = Harness::new();
@@ -72,7 +63,6 @@ fn an_unfinished_sign_in_saves_nothing_and_still_cleans_up() {
     assert!(harness.heard().is_empty());
 }
 
-/// Leave an abandoned sign-in home for `provider`, as a crash would.
 fn abandoned(harness: &Harness, provider: &str) -> std::path::PathBuf {
     let dir = harness
         .path()
@@ -83,8 +73,6 @@ fn abandoned(harness: &Harness, provider: &str) -> std::path::PathBuf {
     dir
 }
 
-/// Listing accounts cleans a sign-in home that was abandoned once its provider's clients are
-/// closed, through the provider's own isolated store; while they run it is left for later.
 #[test]
 fn an_abandoned_sign_in_home_is_cleaned_only_once_its_clients_are_closed() {
     let harness = Harness::new();
@@ -115,8 +103,6 @@ fn an_abandoned_sign_in_home_is_cleaned_only_once_its_clients_are_closed() {
     );
 }
 
-/// A home marked for a provider with no saved profiles is not one on-n-off made: it is left
-/// alone, and no client is checked for it.
 #[test]
 fn a_sign_in_home_of_a_provider_without_saved_profiles_is_left_alone() {
     let harness = Harness::new();

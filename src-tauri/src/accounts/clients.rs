@@ -1,4 +1,3 @@
-//! Conservative native-writer preflight. Processes are inspected only, never terminated.
 use crate::dto::AgentId;
 use std::{
     collections::{BTreeSet, HashMap},
@@ -7,9 +6,6 @@ use std::{
     time::Duration,
 };
 
-/// A running process: what it was started as, its parent, and its whole command line. Only the
-/// executable (or the script a JavaScript runtime launched) identifies a client, so crash handlers
-/// under a framework named after the provider and tools that merely pass its name do not.
 #[derive(Debug, PartialEq)]
 struct Process {
     pid: String,
@@ -18,28 +14,15 @@ struct Process {
     args: String,
 }
 
-/// How a provider's clients are told apart from every other process, and whether they refuse an
-/// ordinary switch. Each adapter holds its provider's.
 pub(super) struct Client {
-    /// The executable a client runs as, and the script a JavaScript runtime launches for it.
     pub(super) name: &'static str,
-    /// The package's own entry script, which identifies a client whatever runs it.
     pub(super) package_entry: &'static str,
-    /// Whether an ordinary switch refuses to run beside these clients: not when they handle a
-    /// native credential change themselves.
     pub(super) blocks_activation: bool,
 }
 
 const SCRIPT_HOSTS: [&str; 6] = ["node", "node.exe", "bun", "bun.exe", "deno", "deno.exe"];
 const SCRIPT_EXTENSIONS: [&str; 8] = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"];
 
-/// Names the clients an ordinary switch refuses to run beside, so a person can close them or
-/// switch anyway: none for a provider whose clients take a native credential change.
-///
-/// This scan runs before the account-change lease, while on-n-off's own provider reads may be
-/// live, so it leaves out processes on-n-off started. The checks that gate a change never do:
-/// Windows keeps a dead parent's pid on its children and reuses pids, so the exclusion could hide
-/// a real client there, while the lease already keeps on-n-off's own reads from running.
 pub fn activation_blockers(provider: AgentId) -> Result<Vec<String>, String> {
     blockers(
         super::adapter(provider)?.client(),
@@ -48,7 +31,6 @@ pub fn activation_blockers(provider: AgentId) -> Result<Vec<String>, String> {
     )
 }
 
-/// Sign-out, crash recovery, and abandoned-login cleanup still require closed clients.
 pub fn require_activation_safe(provider: AgentId) -> Result<(), String> {
     closed(&blockers(
         super::adapter(provider)?.client(),
@@ -93,7 +75,6 @@ fn running_clients(
     Ok(clients(&processes, client, own))
 }
 
-/// `own` leaves out the processes that pid started.
 fn clients(processes: &[Process], client: &Client, own: Option<&str>) -> Vec<String> {
     let by_pid: HashMap<_, _> = processes.iter().map(|p| (p.pid.as_str(), p)).collect();
     processes
@@ -101,8 +82,6 @@ fn clients(processes: &[Process], client: &Client, own: Option<&str>) -> Vec<Str
         .filter(|process| own.is_none_or(|own| !lineage(process, &by_pid).any(|p| p.pid == own)))
         .filter_map(|process| {
             let name = client_name(process, client)?;
-            // Name a client after the app bundle it runs in or was started from, which is what
-            // a person closes; one with no app around it keeps its own name.
             Some(
                 lineage(process, &by_pid)
                     .enumerate()
@@ -125,7 +104,6 @@ fn clients(processes: &[Process], client: &Client, own: Option<&str>) -> Vec<Str
         .collect()
 }
 
-/// The process and its ancestors, bounded so reused pids cannot cycle forever.
 fn lineage<'a>(
     process: &'a Process,
     by_pid: &'a HashMap<&str, &'a Process>,
@@ -167,7 +145,6 @@ fn running_processes() -> Result<Vec<Process>, String> {
     )?))
 }
 
-/// Joins `ps -o pid=,ppid=,comm=` and `ps -o pid=,args=` by pid. `comm` is argv[0] with its spaces.
 #[cfg(any(unix, test))]
 fn ps_processes(executables: &str, args: &str) -> Vec<Process> {
     let rows = |output: &str| {
@@ -192,8 +169,6 @@ fn ps_processes(executables: &str, args: &str) -> Vec<Process> {
         .collect()
 }
 
-/// Parses `ProcessId<TAB>ParentProcessId<TAB>ExecutablePath<TAB>Name<TAB>CommandLine`; the path
-/// is empty for protected processes.
 #[cfg(any(windows, test))]
 fn cim_processes(output: &str) -> Vec<Process> {
     output
@@ -213,7 +188,6 @@ fn cim_processes(output: &str) -> Vec<Process> {
         .collect()
 }
 
-/// The name a provider client goes by, or `None` for any other process.
 fn client_name(process: &Process, client: &Client) -> Option<String> {
     let name = client.name;
     let file = process.executable.rsplit(['/', '\\']).next()?;
@@ -225,8 +199,6 @@ fn client_name(process: &Process, client: &Client) -> Option<String> {
     (script || runs_package_entry(process, client)).then(|| name.to_owned())
 }
 
-/// The package's own entry script identifies a client whatever runs it, including an Electron
-/// helper acting as Node.
 fn runs_package_entry(process: &Process, client: &Client) -> bool {
     process
         .args
@@ -234,9 +206,6 @@ fn runs_package_entry(process: &Process, client: &Client) -> bool {
         .any(|token| normalized(token).ends_with(client.package_entry))
 }
 
-/// The script is the first argument after the runtime's own flags. Windows quotes a path with
-/// spaces; `ps` does not, so there the script ends at the first prefix that is a file or has a
-/// script extension. Without either, only the first token can name it.
 fn launches_script(process: &Process, name: &str) -> bool {
     let args = process.args.trim();
     let mut rest = args

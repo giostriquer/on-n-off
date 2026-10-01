@@ -47,15 +47,6 @@ mod usage;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
-    // Single instance must be registered before every other plugin. Without it, launching
-    // on-n-off while it sits hidden in the tray starts a second copy: two tray icons, two
-    // notch overlays, two monitors.
-    //
-    // Behind the default `single-instance` feature, which `tauri dev` drops by building with
-    // --no-default-features. The plugin keys its mutex on the bundle identifier alone, which a
-    // dev build shares with the installed app and with every other worktree, so registering it
-    // unconditionally would make `tauri dev` raise whatever on-n-off is already running
-    // instead of starting. See OS.md.
     #[cfg(all(target_os = "windows", feature = "single-instance"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
         if let Err(error) = tray::show_main_window(app) {
@@ -70,10 +61,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(commands::AppState::production())
         .setup(|_app| {
-            // Lets a shared read announce itself wherever it was made from; see `read_revision`.
             read_revision::register(_app.handle());
-            // Warm the CLI search path (login-shell PATH probe) off the UI thread so the
-            // first provider load does not pay for it, and drop the cache older versions kept.
             std::thread::spawn(|| {
                 let _ = cli_locate::cli_search_path();
                 if let Ok(home) = paths::user_home() {

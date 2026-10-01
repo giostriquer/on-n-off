@@ -25,8 +25,6 @@ fn ids(card: &ProviderLimitsDto) -> Vec<&str> {
         .collect()
 }
 
-/// Whatever order a provider answers in, a card lists its windows weekly, then session, then per
-/// model: the order every surface shows.
 #[test]
 fn a_card_lists_its_windows_weekly_then_session_then_model_whatever_order_they_came_in() {
     let weekly = window(
@@ -68,7 +66,6 @@ fn a_card_lists_its_windows_weekly_then_session_then_model_whatever_order_they_c
     }
 }
 
-/// Two windows of one kind keep the order the provider gave them.
 #[test]
 fn windows_of_one_kind_keep_the_providers_order() {
     let card = card(vec![
@@ -85,9 +82,6 @@ fn windows_of_one_kind_keep_the_providers_order() {
     assert_eq!(ids(&card), ["weekly", "opus", "fable"]);
 }
 
-/// A read's windows leave as a card dated: one that came without an observation time takes the
-/// card's, which the snapshot store needs to remember the reading, and one that came with its own
-/// keeps it.
 #[test]
 fn every_window_leaves_with_an_observation_time() {
     let mut dated = window("dated", "Dated", LimitWindowKind::Weekly, 1.0, None);

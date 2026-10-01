@@ -1,6 +1,3 @@
-//! Durable per-file scan cache keyed by `(path, size, mtime)`: each transcript's last parse, so a
-//! read parses only what changed.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,7 +13,6 @@ use crate::usage::history::Watermark;
 use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 use crate::usage::transcripts::{richest_copies, TokenTotals, UsageProvider, UsageRecord};
 
-/// v4: rows carry the one-hour cache-write share at index 10.
 pub(crate) const USAGE_SCAN_CACHE_VERSION: u32 = 4;
 
 #[cfg(test)]
@@ -43,7 +39,6 @@ pub(super) struct CachedFile {
 }
 
 impl CachedFile {
-    /// A parse of the transcript `provider` wrote, as it is now: same size, same mtime.
     pub(super) fn is_parse_of(&self, provider: UsageProvider, size: u64, mtime_ms: i64) -> bool {
         self.provider == provider && self.size == size && self.mtime_ms == mtime_ms
     }
@@ -72,7 +67,6 @@ pub(super) fn scan_cache_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-scan-cache.json")
 }
 
-/// The scan cache kept at `path`: empty when there is none or it does not read.
 pub(super) fn load_scan_cache(path: &Path) -> ScanCache {
     let Ok(raw) = std::fs::read_to_string(path) else {
         return ScanCache::new();
@@ -83,9 +77,6 @@ pub(super) fn load_scan_cache(path: &Path) -> ScanCache {
     decode_scan_cache(&doc)
 }
 
-/// Drops what the scan cache no longer needs: transcripts deleted from a root walked to the end,
-/// outside every root, or whose records the history holds (`PruneOptions`). Saves it at `path`
-/// when that, or a read (`changed`), changed it.
 pub(super) fn prune_and_save(
     path: &Path,
     cache: &mut ScanCache,
@@ -282,15 +273,10 @@ fn decode_scan_cache(document: &Value) -> ScanCache {
     cache
 }
 
-/// What the scan cache is kept for, in paths normalized as the source index keys them.
 pub(super) struct PruneOptions {
-    /// Every transcript indexed now.
     pub(super) live_paths: HashSet<String>,
-    /// Every root: a parse outside all of them leaves the cache.
     pub(super) active_roots: Vec<String>,
-    /// The roots walked to the end: a parse under one of them that is not indexed was deleted.
     pub(super) walked_roots: Vec<String>,
-    /// Files whose every record the usage history holds leave the cache.
     pub(super) watermark: Watermark,
 }
 
@@ -327,8 +313,6 @@ fn path_under_root(path: &str, root: &str) -> bool {
     Path::new(path).starts_with(Path::new(root))
 }
 
-/// One file's records with each Claude message's lines collapsed to its richest copy (see
-/// `richest_copies`), which keeps the cache small; the scan collapses copies across files again.
 pub(super) fn dedupe_within_file(records: &[UsageRecord]) -> Vec<UsageRecord> {
     richest_copies([records]).into_iter().cloned().collect()
 }

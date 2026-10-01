@@ -1,11 +1,3 @@
-//! Which accounts the user archived, per provider, in `<home>/.on-n-off/limits/archived.json`
-//! beside the snapshots: `{"<provider>": ["<account id>", …]}`, keyed by the ids Forget takes.
-//!
-//! Only the user archives an account, so nothing here decides to. It is plaintext and needs no
-//! vault key: the menu-bar popover and a locked vault honour it, and archiving a history-only card
-//! never creates a vault. A missing file archives nothing, and so does a malformed one, which the
-//! next write replaces. Writes hold the snapshot lock and replace the file whole.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
@@ -13,21 +5,17 @@ use super::{file_name, read_stored, replaces, SnapshotStore, SNAPSHOT_WRITES};
 use crate::dto::{AgentId, LimitsAccountDto};
 use crate::usage::cache_io::atomic_write;
 
-/// The archive's file name: never `<provider>-…`, so the snapshot loader never reads it.
 pub(super) const ARCHIVE_FILE: &str = "archived.json";
 
-/// The file's contents: each provider's key to its archived ids.
 type Archive = BTreeMap<String, BTreeSet<String>>;
 
 impl SnapshotStore {
-    /// The ids of `provider`'s archived accounts.
     pub fn archived(&self, provider: AgentId) -> BTreeSet<String> {
         self.read_archive()
             .remove(provider.key())
             .unwrap_or_default()
     }
 
-    /// Archives or unarchives `ids`, the user's own action; whether the file changed.
     pub fn set_archived(
         &self,
         provider: AgentId,
@@ -51,10 +39,6 @@ impl SnapshotStore {
         })
     }
 
-    /// Unarchives `account`, which the user signed in to or added again: its own id, and the legacy
-    /// id its history was kept under only while that history is the one `account` replaced, by the
-    /// rule that hides it (`replaces`). Another member's history under the same legacy id stays
-    /// archived. Whether the file changed.
     pub fn unarchive_account(
         &self,
         provider: AgentId,
@@ -76,7 +60,6 @@ impl SnapshotStore {
         self.unarchive_locked(provider, &ids)
     }
 
-    /// Takes `ids` out of the archive for a caller that already holds the snapshot lock.
     pub(super) fn unarchive_locked(
         &self,
         provider: AgentId,
@@ -88,7 +71,6 @@ impl SnapshotStore {
         })
     }
 
-    /// The archive as its file holds it; empty when there is none or it cannot be read.
     fn read_archive(&self) -> Archive {
         fs::read_to_string(self.dir.join(ARCHIVE_FILE))
             .ok()
@@ -96,8 +78,6 @@ impl SnapshotStore {
             .unwrap_or_default()
     }
 
-    /// Lets `edit` change `provider`'s set, then replaces the file if it did. The caller holds the
-    /// snapshot lock.
     fn edit_archive(
         &self,
         provider: AgentId,

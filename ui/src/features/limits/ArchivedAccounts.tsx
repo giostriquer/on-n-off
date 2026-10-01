@@ -8,26 +8,15 @@ import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import type { CardAccount, LimitCard } from "./limitCards";
 
-/** A row's actions, each of which takes the row out of the list once it goes through. */
 type RowAction = "unarchive" | "remove";
 
-/**
- * A provider's archived accounts: a collapsed "Archived (n)" list, absent while there are none.
- * Each row names the account, shows no usage, and offers Unarchive and Remove account; archived
- * accounts are never used from here.
- */
 export function ArchivedAccounts({ provider, cards, blocked, onUnarchive, onRemove, focusWhenEmpty, disclosureRef }: {
   provider: AgentId;
-  /** The column's archived cards (`limitColumn`), in card order. */
   cards: LimitCard[];
-  /** The account controls cannot act right now (the account manager's `blocked`). */
   blocked: boolean;
   onUnarchive: (account: CardAccount) => Promise<void>;
-  /** Remove account, exactly as a card's menu does it. */
   onRemove: (account: CardAccount) => Promise<void>;
-  /** Where focus goes once a row's action empties the list: the column's first card's actions. */
   focusWhenEmpty?: () => HTMLElement | null | undefined;
-  /** Receives the "Archived (n)" disclosure, where focus goes after a card is archived. */
   disclosureRef?: RefCallback<HTMLButtonElement>;
 }) {
   const [open, setOpen] = useState(false);
@@ -40,7 +29,6 @@ export function ArchivedAccounts({ provider, cards, blocked, onUnarchive, onRemo
     if (node) rowButtons.current.set(`${action} ${key}`, node);
     else rowButtons.current.delete(`${action} ${key}`);
   };
-  // A row that leaves hands focus to the next row's same button, else the previous row's.
   const handOff = useFocusHandoff<RowAction>(keys, (index, action) =>
     [rowButton(action, keys[index]), rowButton(action, keys[index - 1]), disclosure.current, focusWhenEmpty?.()]);
   if (cards.length === 0) return null;
@@ -70,10 +58,8 @@ function ArchivedRow({ card, account, blocked, onUnarchive, onRemove, unarchiveR
   blocked: boolean;
   onUnarchive: (account: CardAccount) => Promise<void>;
   onRemove: (account: CardAccount) => Promise<void>;
-  /** Receive the row's Unarchive and Remove account buttons, where focus lands when a neighbouring row leaves. */
   unarchiveRef: RefCallback<HTMLButtonElement>;
   removeRef: RefCallback<HTMLButtonElement>;
-  /** `action` went through, so the row is leaving the list. */
   onDone: (action: RowAction) => void;
 }) {
   const [confirming, setConfirming] = useState(false);

@@ -30,7 +30,6 @@ fn status_reports_current_modified_and_missing() {
     assert!(!s.modified);
     assert!(!s.missing);
     assert_eq!(s.upstream, ItemUpstream::Current);
-    // Where it came from, so the Skills screen can say so and link to it.
     assert_eq!(s.source, source());
     assert_eq!(s.plugin_name, "mattpocock-skills");
     assert_eq!(s.upstream_path, "skills/engineering/tdd");
@@ -54,7 +53,6 @@ fn status_reports_current_modified_and_missing() {
         .item_update_status(AgentId::Claude, None, false)
         .unwrap();
     assert!(statuses[0].missing);
-    // Other providers / scopes see nothing.
     assert!(h
         .service
         .item_update_status(AgentId::Codex, None, false)
@@ -72,7 +70,6 @@ fn status_reports_current_modified_and_missing() {
 fn status_detects_upstream_update_and_honours_dismiss() {
     let h = Harness::new("items-status-update");
     let id = install_tdd(&h);
-    // Upstream advances with a changed skill.
     h.route_repo("HEAD", SHA_B, mattpocock_tarball(SHA_B, "1.3.0", "\nnew"));
     let statuses = h
         .service
@@ -85,7 +82,6 @@ fn status_detects_upstream_update_and_honours_dismiss() {
             plugin_version: Some("1.3.0".into()),
         }
     );
-    // Keep mine → dismissed for this sha only.
     let dismissed = h.service.update_item(&id, UpdateItemMode::Dismiss).unwrap();
     assert_eq!(dismissed.upstream, ItemUpstream::Current);
     let statuses = h
@@ -93,7 +89,6 @@ fn status_detects_upstream_update_and_honours_dismiss() {
         .item_update_status(AgentId::Claude, None, true)
         .unwrap();
     assert_eq!(statuses[0].upstream, ItemUpstream::Current);
-    // Overwrite → files replaced, backup kept, registry moved to SHA_B.
     let updated = h
         .service
         .update_item(&id, UpdateItemMode::Overwrite)
@@ -109,7 +104,6 @@ fn status_detects_upstream_update_and_honours_dismiss() {
 fn status_treats_untouched_item_as_current_when_only_other_files_changed() {
     let h = Harness::new("items-status-same");
     install_tdd(&h);
-    // Upstream advanced but tdd is byte-identical.
     h.route_repo("HEAD", SHA_B, mattpocock_tarball(SHA_B, "1.3.0", ""));
     let statuses = h
         .service
@@ -194,7 +188,6 @@ fn status_lists_project_scoped_items_only_for_that_project() {
         .unwrap();
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].upstream, ItemUpstream::Current);
-    // Trailing separator and (on Windows) a different case still name the same project.
     let with_sep = format!("{path}{}", std::path::MAIN_SEPARATOR);
     assert_eq!(
         h.service
@@ -236,7 +229,6 @@ fn dismiss_applies_to_one_upstream_sha_and_overwrite_clears_it() {
         .unwrap();
     h.service.update_item(&id, UpdateItemMode::Dismiss).unwrap();
     assert_eq!(h.registry().items[0].dismissed_sha.as_deref(), Some(SHA_B));
-    // A further upstream change is offered again.
     h.route_repo("HEAD", SHA_C, mattpocock_tarball(SHA_C, "1.4.0", "\nnewer"));
     let statuses = h
         .service
@@ -249,7 +241,6 @@ fn dismiss_applies_to_one_upstream_sha_and_overwrite_clears_it() {
             plugin_version: Some("1.4.0".into()),
         }
     );
-    // Overwrite of a locally modified copy: backup holds the edit, registry moves on.
     fs::write(h.home.join(".claude/skills/tdd/SKILL.md"), "mine").unwrap();
     let before = h
         .service
@@ -310,7 +301,6 @@ fn agent_status_update_and_remove_round_trip() {
         .unwrap()[0];
     assert!(s.modified);
     assert_eq!(s.display_name, "strict-reviewer");
-    // Upstream changes the agent body.
     let mut files = mattpocock_files("1.3.0", "");
     files.retain(|(p, _)| p != "agents/reviewer.md");
     files.push((

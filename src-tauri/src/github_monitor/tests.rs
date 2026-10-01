@@ -1,5 +1,3 @@
-//! Tests for `github_monitor`, kept beside it so the module itself stays readable.
-
 use super::*;
 use crate::dto::{
     GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus, MergeState, Mergeability,
@@ -145,7 +143,6 @@ fn a_merged_pull_request_is_announced_once_with_the_merged_sound_then_forgotten(
     assert_eq!(events[0].sound, Sound::Done);
     assert!(!state.seen.contains_key("a"));
 
-    // The merged list keeps naming it on later polls; it was announced when it left `seen`.
     assert!(observe(&mut state, &merged).is_empty());
 }
 
@@ -171,7 +168,6 @@ fn a_pull_request_that_flickers_back_into_the_open_list_is_announced_merged_once
     let open = pr("a", CiState::Success);
     observe(&mut state, &read(vec![open.clone()]));
     assert!(observe(&mut state, &read(vec![])).is_empty());
-    // A stale open-list replica still lists it while the merged list already names it.
     let flicker = read_with_merged(vec![open.clone()], vec![open.clone()]);
     assert!(observe(&mut state, &flicker).is_empty());
     assert!(state.vanished.is_empty());
@@ -319,7 +315,6 @@ fn the_baseline_moves_only_once_the_new_state_is_persisted() {
     assert!(error.contains("disk full"), "{error}");
 }
 
-/// The doubling is `monitor::backoff`'s; this monitor supplies the interval and its own cap.
 #[test]
 fn failure_backoff_starts_at_the_poll_interval_and_caps_at_ten_minutes() {
     assert_eq!(poll_delay(60, 0), Duration::from_secs(60));
@@ -352,8 +347,6 @@ fn malformed_or_foreign_monitor_state_falls_back_to_an_empty_baseline() {
     assert!(load_state(&path).seen.is_empty());
     fs::write(&path, r#"{"schema_version":99,"seen":{}}"#).unwrap();
     assert!(load_state(&path).seen.is_empty());
-    // The v0.2.0 file kept CI rollups only; it is dropped rather than migrated, so the poll
-    // after an upgrade is a baseline and announces nothing.
     fs::write(&path, r#"{"schema_version":1,"ci":{"a":"failure"}}"#).unwrap();
     let mut upgraded = load_state(&path);
     assert!(upgraded.seen.is_empty());
@@ -439,13 +432,11 @@ fn conflicts_are_announced_when_they_appear_and_when_they_clear_never_from_unkno
             (Conflicting, Dirty),
             vec![EventKind::Conflicts],
         ),
-        // A draft with conflicts: GitHub says DRAFT for the state, CONFLICTING for the merge.
         (
             (Mergeable, Draft),
             (Conflicting, Draft),
             vec![EventKind::Conflicts],
         ),
-        // Dirty alone is conflicts too, whatever `mergeable` says.
         (
             (Mergeable, Blocked),
             (Mergeable, Dirty),
@@ -493,10 +484,8 @@ fn becoming_ready_to_merge_is_announced_once_and_speaks_for_the_good_news_with_i
         )
     );
 
-    // Still ready on the next read: nothing new to say.
     assert!(observe(&mut state, &read(vec![after.clone()])).is_empty());
 
-    // Clean but already owned by the merge queue or auto-merge is not "ready" for the user.
     let mut blocked = after.clone();
     blocked.merge_state = MergeState::Blocked;
     let mut queued = after.clone();
@@ -513,7 +502,6 @@ fn becoming_ready_to_merge_is_announced_once_and_speaks_for_the_good_news_with_i
 
 #[test]
 fn bad_news_is_never_hidden_behind_ready_to_merge() {
-    // Changes requested on a repository that does not require reviews: CLEAN and red at once.
     let mut state = MonitorState::default();
     observe(
         &mut state,
@@ -538,7 +526,6 @@ fn conflicts_that_appear_across_a_poll_that_saw_unknown_are_still_announced() {
     use Mergeability::{Conflicting, Mergeable, Unknown};
     let mut state = MonitorState::default();
     observe(&mut state, &read(vec![with_merge("a", Mergeable, Blocked)]));
-    // GitHub recomputes after a push; this poll lands before it has an answer.
     assert!(observe(
         &mut state,
         &read(vec![with_merge("a", Unknown, StateUnknown)])
@@ -546,7 +533,6 @@ fn conflicts_that_appear_across_a_poll_that_saw_unknown_are_still_announced() {
     .is_empty());
     let events = observe(&mut state, &read(vec![with_merge("a", Conflicting, Dirty)]));
     assert_eq!(kinds(&events), vec![EventKind::Conflicts]);
-    // And the other way round: resolved across an unknown poll is still resolved.
     assert!(observe(
         &mut state,
         &read(vec![with_merge("a", Unknown, StateUnknown)])
@@ -572,7 +558,6 @@ fn a_poll_that_saw_unknown_does_not_re_announce_ready_to_merge() {
         kinds(&observe(&mut state, &read(vec![clean.clone()]))),
         vec![EventKind::ReadyToMerge]
     );
-    // A base-branch push triggers a recompute; nothing else changed.
     assert!(observe(
         &mut state,
         &read(vec![with_merge(
@@ -588,7 +573,6 @@ fn a_poll_that_saw_unknown_does_not_re_announce_ready_to_merge() {
 #[test]
 fn ready_to_merge_is_not_announced_when_the_baseline_never_knew() {
     let mut state = MonitorState::default();
-    // Notifications switched on for a pull request GitHub has not computed yet.
     observe(
         &mut state,
         &read(vec![with_merge(
@@ -693,7 +677,6 @@ fn ready_to_merge_sounds_green_and_approval_alone_does_not() {
     assert_eq!(kinds(&events), [EventKind::ReadyToMerge]);
     assert_eq!(events[0].sound, Sound::Success);
 
-    // A repository without checks is ready without ever being "green".
     let mut state = MonitorState::default();
     let mut blocked = with_merge("a", Mergeability::Mergeable, MergeState::Blocked);
     blocked.ci = CiState::None;

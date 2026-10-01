@@ -2,23 +2,19 @@ import AppKit
 import NotchCore
 import SwiftUI
 
-/// What one popover shows.
 enum PopoverContent {
   case provider(ProviderId, Provider?)
   case pullRequests(PullRequests?)
 }
 
-/// Everything the popover renders, captured by value so the panel can be measured synchronously.
 struct PopoverModel {
   let content: PopoverContent
   let now: Date
   let edge: NotchCore.Edge
   let metrics: NotchMetrics
   let width: CGFloat
-  /// Height cap; the body scrolls once the content is taller.
   let maxHeight: CGFloat
   let tailLength: CGFloat
-  /// Centre of the tail along the rail's axis, in the card's coordinates.
   let tail: CGFloat
   let actionError: String?
   let openLimits: () -> Void
@@ -35,7 +31,6 @@ struct PopoverModel {
 struct NotchPopoverView: View {
   let model: PopoverModel?
   var body: some View {
-    // Keyed by cell so a hover that moves to another cell crossfades the cards.
     ZStack(alignment: .topLeading) {
       if let model = model {
         PopoverCard(model: model).id(model.identity).transition(.opacity)
@@ -148,8 +143,6 @@ private struct SectionHeader: View {
   }
 }
 
-// MARK: - Provider usage
-
 private struct ProviderSection: View {
   let id: ProviderId
   let entry: Provider?
@@ -191,8 +184,6 @@ private struct ProviderSection: View {
   }
 }
 
-/// One quota in the popover: label and reset note, bar, and how much is used. A workspace-credit
-/// share passes its own note (a date) and what is left, which follows the figure.
 private struct QuotaBlock: View {
   let quota: Quota
   let provider: ProviderId
@@ -262,8 +253,6 @@ private struct SessionRow: View {
   }
 }
 
-// MARK: - Pull requests
-
 private struct PullRequestSection: View {
   let pulls: PullRequests?
   let now: Date
@@ -321,7 +310,6 @@ private struct PullRequestRow: View {
     }
   }
 
-  /// The same wording as the Pull requests screen's badges.
   private var badges: [(String, Color)] {
     var badges: [(String, Color)] = []
     if pull.isDraft { badges.append(("Draft", mutedInk)) }
@@ -343,8 +331,6 @@ private struct PullRequestRow: View {
   }
 
   var body: some View {
-    // Two lines, each with its own trailing control, so the copy button sits with the title and
-    // the CI dot with the repository line however many lines the title takes.
     VStack(alignment: .leading, spacing: metrics.value(2)) {
       HStack(alignment: .top, spacing: metrics.value(8)) {
         Button(action: { Actions.open(pull) }) {
@@ -383,7 +369,6 @@ private struct PullRequestRow: View {
         }
         .buttonStyle(PlainButtonStyle())
         .accessibilityHidden(true)
-        // The CI rollup as a dot: the same colours as the ring, hollow when nothing reported.
         Group {
           if pull.ci == .none || pull.ci == .unknown {
             Circle().strokeBorder(Color(white: 0.35), lineWidth: metrics.value(1))
@@ -410,16 +395,12 @@ private struct PullRequestRow: View {
 
 let liveGreen = Color(red: 74 / 255, green: 200 / 255, blue: 120 / 255)
 
-/// The two things a pull-request row can do on this machine; neither talks to GitHub.
 enum Actions {
-  /// Opens the pull request in the default browser. Only `https://github.com` links qualify.
   static func open(_ pull: PullRequest) {
     guard let url = pull.link else { return }
     NSWorkspace.shared.open(url)
   }
 
-  /// Puts “review please: <title>” on the pasteboard with the title linked, as rich text for
-  /// chat apps that keep links (Slack, Notes) and as plain text for everything else.
   static func copyReviewRequest(_ pull: PullRequest) {
     guard let url = pull.link else { return }
     let pasteboard = NSPasteboard.general
@@ -429,7 +410,6 @@ enum Actions {
   }
 }
 
-/// A triangle pointing from the card toward the rail.
 private struct TailShape: Shape {
   let edge: NotchCore.Edge
   func path(in rect: CGRect) -> Path {

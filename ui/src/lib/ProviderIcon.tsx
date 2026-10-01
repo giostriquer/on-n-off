@@ -5,7 +5,6 @@ type IconProps = SVGProps<SVGSVGElement> & {
   title?: string;
 };
 
-/** Claude starburst (Simple Icons / Anthropic symbol). */
 export function ClaudeIcon({ title = "Claude", ...props }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden={title ? undefined : true} role={title ? "img" : undefined} {...props}>
@@ -15,7 +14,6 @@ export function ClaudeIcon({ title = "Claude", ...props }: IconProps) {
   );
 }
 
-/** OpenAI / ChatGPT mark (Simple Icons). */
 export function ChatGptIcon({ title = "ChatGPT", ...props }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden={title ? undefined : true} role={title ? "img" : undefined} {...props}>
@@ -25,7 +23,6 @@ export function ChatGptIcon({ title = "ChatGPT", ...props }: IconProps) {
   );
 }
 
-/** Cursor mark — the 2D cube from Cursor's official brand assets. */
 export function CursorIcon({ title = "Cursor", ...props }: IconProps) {
   return (
     <svg viewBox="0 0 466.73 532.09" fill="currentColor" aria-hidden={title ? undefined : true} role={title ? "img" : undefined} {...props}>
@@ -35,7 +32,6 @@ export function CursorIcon({ title = "Cursor", ...props }: IconProps) {
   );
 }
 
-/** Antigravity arch — the monochrome mark silhouette from Google's Antigravity wordmark. */
 export function AntigravityIcon({ title = "Antigravity", ...props }: IconProps) {
   return (
     <svg viewBox="13 14.5 85 85" fill="currentColor" aria-hidden={title ? undefined : true} role={title ? "img" : undefined} {...props}>

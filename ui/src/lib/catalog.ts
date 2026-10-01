@@ -20,7 +20,6 @@ export type CatalogCounts = {
   plugins: KindCounts;
   skills: KindCounts;
   mcp: KindCounts;
-  /** `on` is the handlers that would actually run: Codex can switch one off, Claude cannot. */
   hooks: KindCounts;
 };
 
@@ -153,13 +152,6 @@ export function sortMcps(servers: McpServerDto[]): McpServerDto[] {
   return [...servers].sort((a, b) => comparePluginThenName(a.name, a.system, b.name, b.system));
 }
 
-/**
- * Hooks read as a list of *places they come from*, so they group by source — a plugin's name or
- * the settings file — and then by the provider's event, which is how the backend already listed
- * them. Nothing else breaks a tie: within one event the rows are in the order the file declares
- * them, which is the order the user is reading in their own editor, and `Array.prototype.sort` is
- * stable, so ties come out exactly as they came in.
- */
 export function sortHooks(hooks: HookDto[]): HookDto[] {
   return [...hooks].sort((a, b) => comparePluginThenName(a.source, a.event, b.source, b.event));
 }
@@ -178,20 +170,14 @@ export function skillIsLive(skill: SkillDto, tab: AgentTabDto): boolean {
   return tab.plugins.find((plugin) => plugin.id === skill.pluginId)?.enabled ?? skill.enabled;
 }
 
-/**
- * Whether a server runs in this view. One Claude keeps for particular projects is listed in the
- * all-projects view but runs only inside those projects.
- */
 export function mcpIsLive(server: McpServerDto): boolean {
   return server.enabled && !isLocalOrigin(server.origin);
 }
 
-/** A server from the user's own list, as opposed to a project's, a plugin's or a per-project one. */
 function isOwnMcp(server: McpServerDto): boolean {
   return !server.origin;
 }
 
-/** Where the listed servers come from, for the MCP screen's header. */
 export function mcpSourcesLabel(servers: McpServerDto[]): string {
   const has = (test: (origin?: string) => boolean) => servers.some((server) => test(server.origin));
   const extra = [
@@ -202,7 +188,6 @@ export function mcpSourcesLabel(servers: McpServerDto[]): string {
   return extra.length === 0 ? "user-scope config only" : ["user config", ...extra].join(" + ");
 }
 
-/** Servers read from the provider's MCP config file itself (`mcpConfigPath`). */
 export function configMcpCount(tab: AgentTabDto | null | undefined): number {
   return (tab?.mcpServers ?? []).filter(isOwnMcp).length;
 }
@@ -372,7 +357,6 @@ export function globalItemCount(tab: AgentTabDto | null | undefined): number {
   if (!tab) {
     return 0;
   }
-  // A plugin counts once: its skills, hooks and servers are not counted apart from it.
   return (
     tab.plugins.length +
     tab.userSkills.filter((skill) => !isProjectOrigin(skill.origin)).length +

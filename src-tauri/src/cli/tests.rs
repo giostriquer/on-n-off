@@ -53,7 +53,6 @@ fn timeout_kills_the_process() {
 
 #[test]
 fn drains_chatty_stdout_and_stderr_while_the_process_runs() {
-    // The deadline only turns a pipe deadlock into a failure instead of a hang.
     let out = CliStub::new("chatty")
         .chatty(5000)
         .stdout("complete")
@@ -67,7 +66,6 @@ fn drains_chatty_stdout_and_stderr_while_the_process_runs() {
 #[cfg(unix)]
 #[test]
 fn non_executable_launcher_gets_a_permission_hint() {
-    // Not an agent name: agent-named binaries fall through to the user's settings overrides.
     let path = stub_dir().join("noexec-tool");
     std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
     let err = AgentCli::new(path.to_string_lossy().as_ref())
@@ -80,9 +78,6 @@ fn non_executable_launcher_gets_a_permission_hint() {
     );
 }
 
-/// A child is handed the search path as an explicit `PATH`, not the PATH the app inherited: in a
-/// test build the two hold the same directories, so only the command's own environment tells
-/// them apart.
 #[test]
 fn children_get_the_cli_search_path() {
     let cli = CliStub::new("path-echo").print_env("PATH").cli(&stub_dir());

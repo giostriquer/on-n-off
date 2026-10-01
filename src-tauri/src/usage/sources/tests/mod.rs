@@ -1,6 +1,3 @@
-//! The transcript sources through their interface, in a scratch home: what the index answers
-//! before any read, and when that answer changes.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -21,8 +18,6 @@ fn append_record(path: &Path, record: &str) {
     writeln!(file, "{record}").unwrap();
 }
 
-/// Rewrites `path` with a record of the same length and moves its mtime five seconds on, so only
-/// the mtime tells the two versions apart.
 fn rewrite_same_size_later(path: &Path, record: &str) {
     let (size, mtime) = (std::fs::metadata(path).unwrap().len(), mtime_ms(path));
     write_records(path, &[record.to_string()]);
@@ -30,7 +25,6 @@ fn rewrite_same_size_later(path: &Path, record: &str) {
     assert_eq!(std::fs::metadata(path).unwrap().len(), size);
 }
 
-/// Sources opened on `home` with `watermark`; the lock is held until they finish.
 fn open(home: &Path, watermark: Watermark) -> Sources {
     Sources::open(lock_usage_files(), home, || watermark)
 }
@@ -39,7 +33,6 @@ fn open_and_finish(home: &Path, watermark: Watermark) -> SeenSources {
     open(home, watermark).finish(|| watermark)
 }
 
-/// What `open_and_finish` signs for `[start_ms, end_ms)`.
 fn signature(home: &Path, watermark: Watermark, start_ms: i64, end_ms: i64) -> String {
     let sources = open(home, watermark);
     let signature = sources.signature(start_ms, end_ms);
@@ -81,8 +74,6 @@ fn unchanged_sources_keep_their_index_and_window_signature() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A read made before the transcript was created is stale once the index is saved again, even
-/// when the transcripts on disk are back as that read saw them.
 #[test]
 fn a_created_transcript_changes_the_signature_of_a_window_it_falls_in() {
     let home = scratch_dir("usage-sources-create");

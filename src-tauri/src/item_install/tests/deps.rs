@@ -2,10 +2,6 @@ use super::*;
 use crate::dto::{DepConfidence, ItemDependencyDto};
 use crate::item_install::deps::{self, EntryRef, SiblingIndex};
 
-// Names here are invented ("acme" plugin, `deploy`, `lint`, …); they encode nothing about any
-// real marketplace, so a change upstream cannot silently make these tests describe the wrong
-// behaviour.
-
 fn entry(plugin: &str, kind: ItemKind, path: &str, name: &str) -> EntryRef {
     EntryRef {
         plugin_name: plugin.into(),
@@ -39,7 +35,6 @@ fn dep(plugin: &str, kind: ItemKind, name: &str, confidence: DepConfidence) -> I
     }
 }
 
-/// A "router" skill whose prose sends the user to its siblings in every form we grade.
 #[test]
 fn detect_ranks_mentions_and_skips_self_and_short_names() {
     let me = skill("acme", "router");
@@ -101,8 +96,6 @@ fn detect_matches_whole_names_and_the_highest_confidence_wins() {
         skill("acme", "plan"),
         skill("acme", "plan-with-docs"),
     ]);
-    // `the verify` (medium) and `/verify` (high) -> one high edge; `/plan-with-docs` must not
-    // count as a mention of `plan`; a slash inside a URL is not a slash command.
     let text =
         "Use the verify loop; start with /verify. Then /plan-with-docs. See https://x.y/plan";
     let found = deps::detect(&files(text), &me, &index);
@@ -134,7 +127,6 @@ fn detect_prefers_a_same_plugin_sibling_over_a_same_named_skill_elsewhere() {
         from_a.depends_on,
         vec![dep("a", ItemKind::Skill, "verify", DepConfidence::High)]
     );
-    // No same-plugin candidate: the first plugin in marketplace order wins, once.
     let from_c = deps::detect(&text, &skill("c", "wrap"), &index);
     assert_eq!(
         from_c.depends_on,
@@ -144,8 +136,6 @@ fn detect_prefers_a_same_plugin_sibling_over_a_same_named_skill_elsewhere() {
 
 #[test]
 fn detect_reads_every_text_file_and_matches_folder_names_too() {
-    // Frontmatter says "Plan With Docs" but the folder is `plan-with-docs`; prose uses the
-    // folder name. Nested reference files count; binary files are ignored.
     let me = skill("acme", "router");
     let index = SiblingIndex::from_entries(vec![
         me.clone(),
@@ -200,7 +190,6 @@ The loop is described in skills/ops/verify/SKILL.md (also reachable as ../verify
             "skills/shared/templates/spec.md".to_string()
         ]
     );
-    // Paths into a sibling are dependencies, not foreign assets.
     assert_eq!(
         found.depends_on,
         vec![ItemDependencyDto {
@@ -213,7 +202,6 @@ The loop is described in skills/ops/verify/SKILL.md (also reachable as ../verify
     );
 }
 
-/// One plugin at the repository root: `deploy` names `rollback` and the `auditor` agent.
 fn acme_files(deploy_body: &str) -> Vec<(String, String)> {
     vec![
         (
@@ -376,7 +364,6 @@ fn install_records_high_confidence_dependencies_in_the_registry() {
     .unwrap();
     let registry = h.registry();
     assert_eq!(registry.items.len(), 1);
-    // `the auditor` is only a medium mention: not recorded.
     assert_eq!(
         registry.items[0].source.depends_on,
         vec!["acme-skills/skill/skills/ops/rollback".to_string()]

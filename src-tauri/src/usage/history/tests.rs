@@ -34,8 +34,6 @@ fn folded(records: &[UsageRecord], cutoff: &str) -> UsageHistory {
     history
 }
 
-/// What opening the file finds: the history and whether it came from the backup, or `None` when
-/// nothing reads.
 fn opened(path: &Path) -> Option<(UsageHistory, bool)> {
     match HistoryStore::open(path.to_path_buf()).state {
         StoreState::Readable { history, recovered } => Some((history, recovered)),
@@ -101,9 +99,6 @@ fn fold_keeps_provider_reported_cost_apart_from_priced_usage() {
     assert_eq!(priced[0].reported_cost_usd, 0.0);
 }
 
-/// A request is long-context when its whole input (fresh, cached and cache writes) passes 200k
-/// tokens. The flag cannot be recomputed once the transcripts are gone, so which request carries
-/// it is pinned by its own output count.
 #[test]
 fn fold_marks_requests_over_two_hundred_thousand_input_tokens() {
     let input = |uncached: u64, cached: u64, writes: u64, output: u64| {
@@ -303,7 +298,6 @@ fn history_with_no_readable_copy_is_unreadable() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// A file a newer on-n-off wrote is not this version's to replace, even with a readable backup.
 #[test]
 fn history_from_a_newer_version_is_left_alone() {
     let (root, path) = history_path("usage-history-newer");
@@ -321,8 +315,6 @@ fn history_from_a_newer_version_is_left_alone() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// A row that points past the model or session table is a damaged file, not a row to skip:
-/// dropping it and writing the rest back would lose that usage for good.
 #[test]
 fn a_row_with_a_dangling_reference_makes_the_whole_file_unreadable() {
     let mut document: serde_json::Value = serde_json::from_str(&encode(&one_fold())).unwrap();
@@ -331,8 +323,6 @@ fn a_row_with_a_dangling_reference_makes_the_whole_file_unreadable() {
     assert!(decode(&document.to_string()).is_err());
 }
 
-/// Rows at or past the watermark, or rows with no watermark at all, would be counted a second
-/// time from the transcripts; rows out of slot order would be missed by a window's slice.
 #[test]
 fn rows_a_read_would_miscount_make_the_file_unreadable() {
     let history = folded(
@@ -358,8 +348,6 @@ fn rows_a_read_would_miscount_make_the_file_unreadable() {
     }
 }
 
-/// The history is written only once it is known to read back as itself; a fold that would not is
-/// refused with the file and the store left as they were.
 #[test]
 fn a_fold_that_would_not_read_back_is_not_saved() {
     let (root, path) = history_path("usage-history-no-read-back");
@@ -372,7 +360,6 @@ fn a_fold_that_would_not_read_back_is_not_saved() {
         )
         .unwrap();
     let saved = std::fs::read_to_string(&path).unwrap();
-    // More one-hour cache writes than cache writes: a row the file refuses to read.
     let impossible = record("2026-08-12T04:01:00Z", |r| {
         r.totals.cache_creation_tokens = 5;
         r.totals.cache_creation_1h_tokens = 10;
@@ -497,8 +484,6 @@ fn the_watermark_marks_what_the_history_already_holds() {
     let watermark = Watermark::at(ms("2026-08-10T00:00:00Z"));
     assert!(watermark.is_folded(ms("2026-08-09T23:59:59Z")));
     assert!(!watermark.is_folded(ms("2026-08-10T00:00:00Z")));
-    // A transcript is done once its newest record is folded, or once it was last written more
-    // than the 36-hour slack before the watermark.
     assert!(
         watermark.holds_only_folded(ms("2026-08-12T00:00:00Z"), Some(ms("2026-08-09T00:00:00Z")))
     );
@@ -507,14 +492,10 @@ fn the_watermark_marks_what_the_history_already_holds() {
     );
     assert!(watermark.holds_only_folded(ms("2026-08-08T11:59:59Z"), None));
     assert!(!watermark.holds_only_folded(ms("2026-08-08T12:00:00Z"), None));
-    // Before the first fold nothing is folded.
     assert!(!Watermark::NONE.is_folded(i64::MIN + 1));
     assert!(!Watermark::NONE.holds_only_folded(i64::MIN, Some(i64::MIN)));
 }
 
-/// Recovering from the backup must survive a write that fails: the damaged file stays where it
-/// is until the new one replaces it, so the next load falls back to the backup again rather than
-/// finding no history at all and starting over.
 #[test]
 fn a_failed_write_while_recovering_keeps_the_backup_in_reach() {
     let (root, path) = history_path("usage-history-recover-write-fails");
@@ -538,8 +519,6 @@ fn a_failed_write_while_recovering_keeps_the_backup_in_reach() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// Records exactly at the old watermark belong to this fold; records exactly at the cutoff wait
-/// for the next.
 #[test]
 fn fold_takes_from_the_watermark_up_to_but_not_including_the_cutoff() {
     let watermark = ms("2026-08-10T00:00:00Z");
@@ -569,8 +548,6 @@ fn fold_takes_from_the_watermark_up_to_but_not_including_the_cutoff() {
     assert_eq!(outputs, [1, 10, 100]);
 }
 
-/// Each malformed shape is a damaged file, not a value to normalize and write back; a damaged
-/// file falls back to its backup.
 #[test]
 fn every_malformed_row_or_version_makes_the_file_unreadable() {
     let document: serde_json::Value = serde_json::from_str(&encode(&one_fold())).unwrap();
@@ -603,8 +580,6 @@ fn every_malformed_row_or_version_makes_the_file_unreadable() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// Back-to-back folds read by the same parser are one segment; a fold after a parser change starts
-/// a new one, so the file says which parser read which stretch of history.
 #[test]
 fn folds_are_recorded_by_the_parser_that_read_them() {
     let mut history = UsageHistory::default();
@@ -647,7 +622,6 @@ fn folds_are_recorded_by_the_parser_that_read_them() {
     );
 }
 
-/// A file that exists but cannot be read is not replaced, and not backed up as if it were empty.
 #[cfg(unix)]
 #[test]
 fn save_refuses_to_replace_a_file_it_cannot_read() {

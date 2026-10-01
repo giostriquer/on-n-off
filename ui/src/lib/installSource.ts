@@ -48,8 +48,6 @@ export type GithubRepo = { owner: string; repo: string; ref?: string };
 const GITHUB_URL =
   /^https:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?#].*)?$/i;
 
-/** A GitHub repository on-n-off can browse as a marketplace: `owner/repo[@ref]` shorthand or an
- * `https://github.com/owner/repo[.git][/…]` URL. Other hosts and source kinds return `null`. */
 export function githubRepoFromSource(parsed: InstallSource | { error: string }): GithubRepo | null {
   if ("error" in parsed) {
     return null;

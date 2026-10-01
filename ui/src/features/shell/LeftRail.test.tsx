@@ -175,7 +175,6 @@ describe("LeftRail", () => {
         onMaster={() => undefined}
       />,
     );
-    // "0/0" would read as a fact about the provider; Agent config shows a bare label the same way.
     expect(screen.getByRole("button", { name: /^Hooks$/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Hooks\s*0\/0/i })).toBeNull();
   });

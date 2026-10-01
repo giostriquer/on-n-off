@@ -1,9 +1,5 @@
-//! Codex's keyring store as the account switch reads and writes it, answered by a fake `security`.
-
 use super::*;
 
-/// The Keychain account Codex files a home's login under: `cli|` and the first sixteen hex digits
-/// of the SHA-256 of the home's canonical path.
 #[cfg(target_os = "macos")]
 fn codex_account(home: &Path) -> String {
     let canonical = fs::canonicalize(home).unwrap();
@@ -11,7 +7,6 @@ fn codex_account(home: &Path) -> String {
     format!("cli|{}", &hash[..16])
 }
 
-/// A Keychain holding at most one Codex login, `secret`, under any account.
 #[cfg(target_os = "macos")]
 fn codex_item(secret: Option<&'static str>) -> impl Fn(&str) -> crate::process::CommandOutcome {
     use crate::process::CommandOutcome;
@@ -34,7 +29,6 @@ fn codex_item(secret: Option<&'static str>) -> impl Fn(&str) -> crate::process::
     }
 }
 
-/// `keyring` reads and writes Codex's own Keychain item for this home, through `security`.
 #[cfg(target_os = "macos")]
 #[test]
 fn codex_keyring_storage_is_the_item_codex_files_for_this_home() {
@@ -92,7 +86,6 @@ fn codex_keyring_storage_is_the_item_codex_files_for_this_home() {
     );
 }
 
-/// `auto` uses the Keychain item when there is one, and the file when there is none.
 #[cfg(target_os = "macos")]
 #[test]
 fn codex_auto_storage_prefers_the_keychain_item_and_falls_back_to_the_file() {

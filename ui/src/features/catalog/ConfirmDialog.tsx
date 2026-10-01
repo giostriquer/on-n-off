@@ -4,7 +4,6 @@ type ConfirmDialogProps = {
   title: string;
   body: string;
   confirmLabel?: string;
-  /** A second, non-destructive choice rendered between Cancel and the confirm button. */
   alternate?: { label: string; onClick: () => void };
   busy?: boolean;
   onCancel: () => void;

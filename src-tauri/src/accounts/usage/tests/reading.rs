@@ -1,8 +1,5 @@
-//! A saved profile's fetch through its provider's adapter (`Adapter::read_usage`).
 use super::*;
 
-/// A saved `provider` profile of `user` in `team` whose login holds `auth`, which on-n-off does not
-/// own.
 fn saved(provider: AgentId, auth: serde_json::Value) -> Profile {
     let mut p = profile();
     p.identity.provider = provider;
@@ -13,8 +10,6 @@ fn saved(provider: AgentId, auth: serde_json::Value) -> Profile {
     p
 }
 
-/// Services that refuse every connection, for a read that must not reach one, or that shows it did
-/// by the network error it gets.
 fn refused(url: &str) -> SavedReadUrls<'_> {
     SavedReadUrls {
         codex: crate::limits::CodexEndpoints {
@@ -26,7 +21,6 @@ fn refused(url: &str) -> SavedReadUrls<'_> {
     }
 }
 
-/// A Codex login without an access token is refused by its adapter before any request.
 #[test]
 fn a_saved_login_without_an_access_token_is_refused_before_any_request() {
     let url = crate::http::refused_url();
@@ -45,11 +39,8 @@ fn a_saved_login_without_an_access_token_is_refused_before_any_request() {
     assert_eq!(result.err(), Some(HttpError::Unauthorized.into()));
 }
 
-/// When these fetches run, in ms.
 const NOW: i64 = 1_000_000;
 
-/// `p`'s fetch at [`NOW`], asking `urls`. A login on-n-off does not own is never renewed, so the
-/// vault is never opened for one.
 fn fetch(p: &Profile, urls: &SavedReadUrls<'_>) -> FetchResult {
     fetch_profile_at(
         p,
@@ -59,8 +50,6 @@ fn fetch(p: &Profile, urls: &SavedReadUrls<'_>) -> FetchResult {
     )
 }
 
-/// A Claude login still in the vault is never sent, whatever its expiry: Claude Code reads a saved
-/// Claude account only in its home, and the card says the login is on its way there.
 #[test]
 fn a_saved_claude_login_in_the_vault_is_never_sent() {
     let url = crate::http::refused_url();
@@ -80,8 +69,6 @@ fn a_saved_claude_login_in_the_vault_is_never_sent() {
     }
 }
 
-/// A Codex login is read from the usage body with its own token, for its workspace, as the
-/// profile's card.
 #[test]
 fn a_saved_codex_login_is_read_from_the_usage_body_with_its_own_token() {
     let (usage, request) = crate::http::serve_once_capturing(

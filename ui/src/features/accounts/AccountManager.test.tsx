@@ -19,7 +19,6 @@ function Cards() {
     <AccountCardActions accountId={profile.observationId} label={profile.email!} current={profile.active} profile={profile} onForget={forget} onArchive={archive} header={menu => <header>{menu}</header>} />
   </section>)}</>;
 }
-/** `signedIn` makes the one saved account the signed-in one, confirmed as the native login. */
 function setup({ preferences = false, onCommit, signedIn = false }: { preferences?: boolean; onCommit?: () => void; signedIn?: boolean } = {}) {
   vi.mocked(api.readAccountPreferences).mockResolvedValue(false);
   vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: signedIn, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], ...(signedIn ? { nativeObservationId: "profile:billing-a" } : {}), nativeAccount: null, recoveryRequired: false, notice: null });
@@ -59,8 +58,6 @@ it("asks before switching beside running clients and switches only on confirmati
   await waitFor(() => expect(within(card).queryByRole("group", { name })).toBeNull());
 });
 it("moves focus to Cancel in the same commit that shows the running-clients confirmation", async () => {
-  // A Profiler reports a commit after the layout effects beneath it and before any passive one, so
-  // this sees the first frame the confirmation paints in, however late passive effects happen to run.
   const name = "Confirm switching while Codex is running"; let focusedOnShow: Element | null | undefined;
   setup({ onCommit: () => { if (focusedOnShow === undefined && document.querySelector(`[role="group"][aria-label="${name}"]`)) focusedOnShow = document.activeElement; } });
   vi.mocked(api.readAccountActivationBlockers).mockResolvedValue(["ChatGPT"]);

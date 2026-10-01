@@ -57,13 +57,10 @@ describe("githubFormat", () => {
       pr({ id: "failing", ci: "failure", updatedAt: "2026-08-24T08:00:00Z" }),
       pr({ id: "errored", ci: "error", updatedAt: "2026-08-24T09:00:00Z" }),
       pr({ id: "none", ci: "none", updatedAt: "2026-08-24T18:00:00Z" }),
-      // Red for reasons other than CI: conflicts and changes requested need the author too.
       pr({ id: "conflicts", ci: "success", mergeKind: "conflicts", updatedAt: "2026-08-24T07:00:00Z" }),
       pr({ id: "changes", ci: "success", reviewDecision: "CHANGES_REQUESTED", updatedAt: "2026-08-24T06:00:00Z" }),
-      // Amber: waiting on something — a rebase, an unexplained block — sorts with pending CI.
       pr({ id: "behind", ci: "success", mergeKind: "behind", updatedAt: "2026-08-24T11:00:00Z" }),
       pr({ id: "blocked", ci: "success", mergeKind: "blocked", reviewDecision: "APPROVED", updatedAt: "2026-08-24T13:00:00Z" }),
-      // Green is calm: ready to merge sorts with the rest by recency.
       pr({ id: "ready", ci: "success", mergeKind: "ready", updatedAt: "2026-08-24T05:00:00Z" }),
     ]).map((item) => item.id);
     expect(ordered).toEqual([
@@ -131,7 +128,6 @@ describe("githubFormat", () => {
     expect(badge({ mergeKind: "ready" })).toEqual({ label: "Ready to merge", tone: "live" });
     expect(badge({ mergeKind: "behind" })).toEqual({ label: "Behind base", tone: "warn" });
     expect(badge({ mergeKind: "blocked" })).toEqual({ label: "Blocked", tone: "warn" });
-    // A row without a kind, and one from a snapshot written before the field existed.
     expect(badge({ mergeKind: null })).toBeNull();
     expect(badge({ mergeKind: undefined })).toBeNull();
   });
@@ -156,7 +152,6 @@ describe("githubFormat", () => {
     expect(listCountLabel({ total: 137, items: [pr({})] })).toBe("1 of 137");
     expect(listCountLabel({ total: 0, items: [] })).toBe("0");
     expect(listCountLabel({ total: 3, items: [pr({}), pr({}), pr({})] }, 1)).toBe("1 of 3");
-    // Only the loaded page was searched, so the denominator is the page, and says so.
     expect(listCountLabel({ total: 137, items: [pr({})] }, 0)).toBe("0 of 1 loaded");
   });
 

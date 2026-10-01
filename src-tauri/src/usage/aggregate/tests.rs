@@ -112,7 +112,6 @@ fn add_says_whether_the_record_was_counted() {
     assert_eq!(result.out_of_window, 1);
 }
 
-/// The hourly window is `[since, until)`: its first instant counts, its end does not.
 #[test]
 fn hourly_window_includes_its_start_and_excludes_its_end() {
     let since = chrono::DateTime::parse_from_rfc3339("2026-08-06T04:37:00.000Z")
@@ -121,8 +120,6 @@ fn hourly_window_includes_its_start_and_excludes_its_end() {
     let until = chrono::DateTime::parse_from_rfc3339("2026-08-07T04:37:00.000Z")
         .unwrap()
         .timestamp_millis();
-    // Distinct output per instant, so a window shifted by a millisecond at both ends cannot
-    // count the same total.
     let at = |timestamp_ms: i64, output: u64| {
         record(|r| {
             r.timestamp_ms = timestamp_ms;
@@ -210,7 +207,6 @@ fn at(iso: &str) -> i64 {
         .timestamp_millis()
 }
 
-/// A day read of August, or an hourly read of `hours`, fed by `feed`.
 fn read_with(
     time_zone: &str,
     hours: Option<(i64, i64)>,
@@ -268,8 +264,6 @@ fn assert_same_read(from_records: &AggregateResult, from_rows: &AggregateResult)
     }
 }
 
-/// Records either side of Kathmandu's midnight (UTC+5:45) and St. John's (UTC-2:30 in August),
-/// a provider-reported cost, a model with no price, a second session and one before the window.
 fn history_sample() -> Vec<UsageRecord> {
     vec![
         record(|r| r.timestamp_ms = at("2026-08-07T18:14:59.999Z")),
@@ -358,8 +352,6 @@ fn add_folded_says_whether_the_row_was_counted() {
     });
 }
 
-/// Cache savings are what the cached input would have cost at the input rate: 1000 cached tokens
-/// at 1e-5 input against 1e-6 cache read, per record, summed over the bucket.
 #[test]
 fn a_bucket_adds_up_its_records_tokens_and_cache_savings() {
     let result = aggregate(&[record(|_| {}), record(|_| {})], "UTC", Resolution::Day);

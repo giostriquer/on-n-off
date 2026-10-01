@@ -22,8 +22,6 @@ fn settings(id: &str, edge: Edge) -> NotchSettings {
         enabled: true,
         display_id: Some(id.into()),
         edge,
-        // The placement tests measure a four-cell rail; which providers a fresh
-        // install rails is a separate question.
         providers: RAIL_ORDER.to_vec(),
         pull_requests: NotchPullRequests {
             enabled: false,
@@ -39,7 +37,6 @@ fn follows_the_selected_uuid_across_reordering_and_mixed_scales() {
         display("external", 0.0, 1.0),
         display("retina", -1728.0, 2.0),
     ];
-    // Four cells: 4 × 73 + 3 × 8 + 2 × 40 = 396.
     assert_eq!(
         layout(&settings("retina", Edge::Right), &displays),
         Some(Layout {
@@ -74,7 +71,6 @@ fn never_falls_back_to_another_display_when_the_selection_is_missing_or_mirrored
 #[test]
 fn top_and_bottom_edges_center_a_horizontal_rail_inside_the_work_area() {
     let displays = [display("main", 100.0, 2.0)];
-    // Four cells side by side: 4 × 76 + 3 × 8 + 2 × 40 = 408, as tall as a cell.
     let top = layout(&settings("main", Edge::Top), &displays).unwrap();
     assert_eq!(
         top,
@@ -191,9 +187,6 @@ fn presets_scale_the_whole_rail() {
 
 #[test]
 fn the_rail_lands_on_whole_device_pixels() {
-    // A work area that does not divide evenly leaves the rail on a half pixel. The
-    // window origin is the union with the popover, so opening a popover above the rail
-    // shifts that half pixel into the rail's own drawing and the cells visibly jump.
     let displays = vec![Display {
         id: "d1".into(),
         name: "d1".into(),
@@ -220,7 +213,6 @@ fn the_rail_lands_on_whole_device_pixels() {
     );
     assert_eq!(frame.x.fract(), 0.0, "and so does its edge: {}", frame.x);
 
-    // The same on a 150 % display, where a pixel is two thirds of a point.
     let mut scaled = displays.clone();
     scaled[0].scale = 1.5;
     let frame = layout(&settings, &scaled).expect("fits");
@@ -234,16 +226,12 @@ fn the_rail_lands_on_whole_device_pixels() {
 
 #[test]
 fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
-    // Antigravity publishes no subscription limits and Cursor only does on some
-    // setups, so a rail full of dashes is not a good first run; both are one toggle
-    // away in the settings card.
     let fresh = NotchSettings::default();
     assert_eq!(
         fresh.providers,
         vec![AgentId::Claude, AgentId::Codex],
         "the two with quotas to draw"
     );
-    // A settings file that names them keeps them.
     let chosen = NotchSettings {
         providers: RAIL_ORDER.to_vec(),
         ..NotchSettings::default()
@@ -255,10 +243,6 @@ fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
     );
 }
 
-/// The twin of `NotchCoreChecks`' ramp group. The meter used to step to a light amber at 70 %, so
-/// a window that was filling up went paler and yellower exactly as it ran out. Whatever shape the
-/// ramp takes, a fuller window must never sit further from the trip red than a less full one, and
-/// inside the band each step must actually move.
 #[test]
 fn meter_ramp_only_ever_moves_toward_the_trip_red() {
     fn distance_to_trip(color: Color) -> f64 {
@@ -268,8 +252,6 @@ fn meter_ramp_only_ever_moves_toward_the_trip_red() {
             + square(color[2], TRIP_RED[2]))
         .sqrt()
     }
-    // Claude, Fable, Codex, Codex's workspace credits, Cursor and Antigravity: every accent the
-    // meter can be handed, the same list `Meter.swift`'s check walks.
     let accents: [Color; 6] = [
         [217, 119, 87, 255],
         [204, 98, 64, 255],
@@ -288,9 +270,6 @@ fn meter_ramp_only_ever_moves_toward_the_trip_red() {
             );
             previous = distance;
         }
-        // Sampled rather than per-point: the blend quantises to 8 bits, so two adjacent percentages
-        // can legitimately round to the same colour near the top of the band. Across these spans it
-        // must still move, which is what a ramp that stopped interpolating would fail.
         for pair in [(71, 75), (75, 80), (80, 85), (85, 89)] {
             let (low, high) = pair;
             let nearer = distance_to_trip(meter_color(Some(f64::from(high)), base));
@@ -310,8 +289,6 @@ fn meter_ramp_only_ever_moves_toward_the_trip_red() {
             TRIP_RED,
             "90 % is the trip red"
         );
-        // Pins the easing: a quarter of the way through the band is half the way to red. A linear
-        // blend would put a quarter here, and nothing else in this test would notice.
         assert_eq!(
             meter_color(Some(75.0), base),
             mix(base, TRIP_RED, 0.5),
@@ -335,8 +312,6 @@ fn at(instant: &str) -> chrono::DateTime<chrono::Utc> {
     instant.parse().unwrap()
 }
 
-/// The Windows painter draws the share with the window machinery, so a share past its reset reads
-/// as renewed there exactly as a window does. The meter is the reader's figure, never recomputed.
 #[test]
 fn a_workspace_share_draws_as_a_window_with_the_readers_figure() {
     let window = workspace_share_window(&share("25000", "8000", 40.0, false));
@@ -346,8 +321,6 @@ fn a_workspace_share_draws_as_a_window_with_the_readers_figure() {
     assert_eq!(window.resets_at.as_deref(), Some("2026-10-01T12:00:00Z"));
 }
 
-/// One wording for both notches, the Limits screen's: what is left while the share is current,
-/// all of it again once it has renewed.
 #[test]
 fn a_share_is_worded_once_for_both_notches() {
     let worded = |limit, used, reached| workspace_share_wording(&share(limit, used, 0.0, reached));
@@ -367,8 +340,6 @@ fn a_share_is_worded_once_for_both_notches() {
     assert_eq!(worded("10.125", "0", false).left, "10.13 of 10.13 left");
 }
 
-/// A share the backend calls reached says so: all of it used when the amounts agree, only that
-/// the limit is reached when they show some left.
 #[test]
 fn a_reached_share_says_all_used_only_when_its_amounts_agree() {
     let left = |limit, used| workspace_share_wording(&share(limit, used, 100.0, true)).left;
@@ -400,7 +371,6 @@ fn a_share_renews_at_its_reset() {
     ));
 }
 
-/// The date is the viewer's, so the expectation is built from the same instant in local time.
 #[test]
 fn the_share_note_gives_the_reset_date_rather_than_a_weekday() {
     let note = |resets_at: Option<&str>| {

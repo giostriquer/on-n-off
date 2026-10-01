@@ -28,13 +28,6 @@ fn parse_drops_half_priced_and_normalizes() {
 
 #[test]
 fn bare_entry_wins_collisions_regardless_of_document_order() {
-    // LiteLLM lists the same model under several provider prefixes, and
-    // reseller entries often omit cache pricing (the real
-    // `deepinfra/anthropic/claude-*` rows). The canonical bare key must
-    // win the normalized-key collision in either document order. Every
-    // rate differs between the two entries — and the bare entry's cache
-    // rates are not 0.1×/1.25× of either input — so the assertions
-    // identify the winner rather than pass via derived defaults.
     let bare = serde_json::json!({
         "input_cost_per_token": 1e-5,
         "output_cost_per_token": 5e-5,
@@ -66,9 +59,6 @@ fn bare_entry_wins_collisions_regardless_of_document_order() {
 
 #[test]
 fn explicit_cache_pricing_wins_among_prefixed_entries() {
-    // No bare key: the prefixed entry carrying published cache pricing
-    // must beat the cache-less one in either document order. Distinct
-    // input rates identify the winner independently of cache derivation.
     let with_cache = serde_json::json!({
         "input_cost_per_token": 1e-5,
         "output_cost_per_token": 5e-5,
@@ -98,9 +88,6 @@ fn explicit_cache_pricing_wins_among_prefixed_entries() {
 
 #[test]
 fn missing_cache_rates_use_standard_discount_multipliers() {
-    // No published cache pricing → derive the standard discounts
-    // (read 0.1×, write 1.25× input) rather than billing cache reads
-    // at the full input rate.
     let doc = serde_json::json!({
         "model-z": {
             "input_cost_per_token": 1e-5,
@@ -113,8 +100,6 @@ fn missing_cache_rates_use_standard_discount_multipliers() {
     assert!((rate.cache_creation_cost_per_token - 1.25e-5).abs() < 1e-18);
 }
 
-/// Anthropic bills a one-hour cache write at 2x input and a five-minute one at 1.25x; LiteLLM
-/// publishes the former as `cache_creation_input_token_cost_above_1hr`.
 #[test]
 fn one_hour_cache_writes_use_the_one_hour_rate() {
     let doc = serde_json::json!({
@@ -151,8 +136,6 @@ fn one_hour_cache_writes_use_the_one_hour_rate() {
     );
 }
 
-/// Claude Code can name a context tier after the model (`claude-fable-5-1[1m]`); the table
-/// only knows the base name.
 #[test]
 fn lookup_ignores_a_bracketed_variant_suffix() {
     let table = parse_rate_table(&sample_doc());
@@ -226,7 +209,6 @@ fn uses_disk_cache_within_ttl() {
         "document": sample_doc(),
     });
     std::fs::write(&path, payload.to_string()).unwrap();
-    // Fetch would fail; still within TTL → cached.
     let snap = with_test_fetch(None, || ensure_rates(&home, 1_000_000 + 60_000, false));
     assert_eq!(snap.status, PricingStatus::Cached);
     assert!(!snap.table.is_empty());
@@ -243,9 +225,6 @@ fn fresh_fetch_writes_disk() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A test that panics while it holds the rates-state lock fails alone: the tests after it — pricing
-/// and usage summary tests alike — still get the lock, rather than each failing with a
-/// `PoisonError`.
 #[test]
 fn a_test_that_panics_holding_the_rates_state_fails_alone() {
     let failing = std::thread::spawn(|| {
@@ -282,7 +261,6 @@ fn an_unknown_model_keeps_asking_for_an_early_refresh_until_a_fetch_succeeds() {
     price_usage(&table, "claude-fable-5-1", &totals, None);
     assert!(UNPRICED_SEEN.load(Ordering::Acquire));
 
-    // Ten minutes later the disk copy still serves, and the request survives that hit…
     let early = with_test_fetch(Some(newer.clone()), || {
         ensure_rates(&home, fetched_at + 10 * 60_000, false)
     });
@@ -291,15 +269,12 @@ fn an_unknown_model_keeps_asking_for_an_early_refresh_until_a_fetch_succeeds() {
         UNPRICED_SEEN.load(Ordering::Acquire),
         "a cache hit must not consume the flag"
     );
-    // …so two hours later the table is re-fetched, well inside the scheduled day, and the
-    // flag clears only now.
     let refetched = with_test_fetch(Some(newer.clone()), || {
         ensure_rates(&home, fetched_at + 2 * 60 * 60_000, false)
     });
     assert_eq!(refetched.status, PricingStatus::Fresh);
     assert!(refetched.table.contains_key("claude-fable-5-1"));
     assert!(!UNPRICED_SEEN.load(Ordering::Acquire));
-    // A failed fetch keeps the flag for the next scan.
     UNPRICED_SEEN.store(true, Ordering::Release);
     std::fs::write(rates_cache_path(&home), stale.to_string()).unwrap();
     let failed = with_test_fetch(None, || {
@@ -309,7 +284,6 @@ fn an_unknown_model_keeps_asking_for_an_early_refresh_until_a_fetch_succeeds() {
     assert!(UNPRICED_SEEN.load(Ordering::Acquire));
     UNPRICED_SEEN.store(false, Ordering::Release);
 
-    // Without the flag the day applies; a forced refresh ignores the disk copy.
     let scheduled = with_test_fetch(Some(newer.clone()), || {
         ensure_rates(&home, fetched_at + 2 * 60 * 60_000, false)
     });

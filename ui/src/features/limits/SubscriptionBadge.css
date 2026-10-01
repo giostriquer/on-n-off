@@ -11,7 +11,6 @@
   background: transparent;
 }
 
-/* Warm metal tones keep the warning part of the header, with texture on its elapsed fill. */
 .subscription-badge--warning {
   --expiry-fill-start: #d2ad68;
   --expiry-fill-end: #bb882f;
@@ -30,14 +29,12 @@
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
 }
 
-/* A recorded expiry that has passed. */
 .subscription-badge--expired {
   color: #ffffff;
   background: #b3261e;
   border-color: #b3261e;
 }
 
-/* The label sits above the fill, which grows through the last seven days of a plan that ends. */
 .subscription-badge-fill {
   position: absolute;
   inset: 0 auto 0 0;

@@ -1,20 +1,3 @@
-//! Heuristic dependency detection between marketplace entries.
-//!
-//! Skills name the sibling skills they drive only in prose (`/deploy`, `` `lint` ``,
-//! `Skill(review)`); there is no dependency field in `SKILL.md` or `plugin.json`. This
-//! module scans every text file of an entry for the names of the other entries in the
-//! marketplace and grades each hit:
-//!
-//! - **high**: the name is used like a command or an identifier — `` `/N` ``, `` `N` ``,
-//!   `/N` in prose, `Skill(N)`, `skill: N`, `--skill N`, or a path into the sibling's folder
-//!   (`skills/…/N/`, `../N/`).
-//! - **medium**: the name appears in a phrase — `N skill`, `the N`, `run N`, `use N`.
-//!
-//! It also notes what a local copy of the entry will not carry: relative paths that leave the
-//! item (`../lib/x`), paths into other `skills/` folders that are not siblings, and any use of
-//! `CLAUDE_PLUGIN_ROOT`. Nothing here is authoritative; the picker only auto-adds high
-//! confidence hits and the user can always uncheck them.
-
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::OnceLock;
 
@@ -23,12 +6,9 @@ use regex::Regex;
 use super::write::ItemFiles;
 use crate::dto::{DepConfidence, ItemDependencyDto, ItemKind, MarketplaceInspectDto};
 
-/// Names shorter than this are too common to trust (`go`, `ai`).
 const MIN_NAME_LEN: usize = 3;
-/// Files past this size are not prose; skip them rather than scan them.
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 
-/// One installable entry of a marketplace, as the scanner sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryRef {
     pub plugin_name: String,
@@ -38,7 +18,6 @@ pub struct EntryRef {
 }
 
 impl EntryRef {
-    /// `skills/ops/deploy` -> `deploy`; `agents/auditor.md` -> `auditor`.
     fn folder_name(&self) -> &str {
         let last = self.path.rsplit('/').next().unwrap_or(&self.path);
         match self.kind {
@@ -52,11 +31,9 @@ struct Matcher {
     name: String,
     high: Regex,
     medium: Regex,
-    /// Indices into `SiblingIndex::entries`, in marketplace order.
     entries: Vec<usize>,
 }
 
-/// Every entry of a marketplace plus one compiled matcher per distinct name.
 pub struct SiblingIndex {
     entries: Vec<EntryRef>,
     names: BTreeSet<String>,
@@ -64,7 +41,6 @@ pub struct SiblingIndex {
 }
 
 impl SiblingIndex {
-    /// Every entry of every supported plugin, in display order.
     pub fn from_inspect(dto: &MarketplaceInspectDto) -> Self {
         let mut entries = Vec::new();
         for plugin in dto.plugins.iter().filter(|plugin| plugin.supported) {
@@ -123,7 +99,6 @@ impl SiblingIndex {
         }
     }
 
-    /// The entry the marketplace lists for `(plugin, kind, path)`, if any.
     pub fn find(&self, plugin_name: &str, kind: ItemKind, path: &str) -> Option<&EntryRef> {
         self.entries.iter().find(|entry| {
             entry.plugin_name == plugin_name && entry.kind == kind && entry.path == path
@@ -131,8 +106,6 @@ impl SiblingIndex {
     }
 }
 
-/// `N` used like a command or identifier. No look-around in the `regex` crate, so the
-/// surrounding characters are matched explicitly; `(?m)` lets `^`/`$` see line ends.
 fn high_pattern(name: &str) -> String {
     let after = r"(?:[^\w-]|$)";
     let forms = [
@@ -140,7 +113,6 @@ fn high_pattern(name: &str) -> String {
         format!("`{name}`"),
         format!(r"(?:^|[^\w/.-])/{name}(?:[^\w/-]|$)"),
         format!(r#"Skill\(["']?{name}["']?\)"#),
-        // `call the Skill tool with "lint" and "review"`: a quoted name shortly after "skill".
         format!(r#"(?i:skill)[^\n]{{0,60}}["']{name}["']"#),
         format!(r"(?i:skill):[ \t]*{name}{after}"),
         format!(r"--skill[ \t]+{name}{after}"),
@@ -150,7 +122,6 @@ fn high_pattern(name: &str) -> String {
     format!("(?m){}", forms.join("|"))
 }
 
-/// `N` inside a phrase that usually means "that skill".
 fn medium_pattern(name: &str) -> String {
     format!(
         "(?m)(?:^|[^\\w-]){name}(?i: skill)(?:[^\\w-]|$)|(?:^|[^\\w-])(?i:the|run|use) {name}(?:[^\\w-]|$)"
@@ -172,7 +143,6 @@ pub struct DetectedDeps {
     pub uses_plugin_root: bool,
 }
 
-/// Scans the text files of `me` for the other entries in `siblings`.
 pub fn detect(files: &ItemFiles, me: &EntryRef, siblings: &SiblingIndex) -> DetectedDeps {
     let mut best: HashMap<usize, DepConfidence> = HashMap::new();
     let mut external: BTreeSet<String> = BTreeSet::new();
@@ -239,8 +209,6 @@ pub fn detect(files: &ItemFiles, me: &EntryRef, siblings: &SiblingIndex) -> Dete
     }
 }
 
-/// Which entries a matched name stands for: never `me`; a sibling in the same plugin beats a
-/// same-named entry elsewhere, and outside the plugin only the first (marketplace order) counts.
 fn resolve(matcher: &Matcher, me: &EntryRef, siblings: &SiblingIndex) -> Vec<usize> {
     let candidates: Vec<usize> = matcher
         .entries
@@ -259,8 +227,6 @@ fn resolve(matcher: &Matcher, me: &EntryRef, siblings: &SiblingIndex) -> Vec<usi
     candidates.into_iter().take(1).collect()
 }
 
-/// A path reference counts as external when it leaves the item and does not point into a
-/// sibling entry (those are dependencies, reported separately).
 fn is_external(path: &str, me: &EntryRef, siblings: &SiblingIndex) -> bool {
     let own_prefix = format!("{}/", me.path);
     if path == me.path || path.starts_with(&own_prefix) {

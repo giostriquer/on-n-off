@@ -1,8 +1,3 @@
-//! A saved Claude account's home (`accounts::homes`): a private Claude config dir holding the
-//! account's login while it is not the signed-in one. Claude Code renews that login itself when
-//! on-n-off asks it there for the account's usage (`limits::claude_cli`). The home's own scoped
-//! Keychain entry holds the login on macOS, and its credentials file does on Windows, as Claude
-//! Code keeps any login there.
 use super::*;
 
 pub(in crate::accounts) struct ClaudeHome {
@@ -11,7 +6,6 @@ pub(in crate::accounts) struct ClaudeHome {
 }
 
 impl ClaudeHome {
-    /// The home in `dir`, created by its first write.
     pub(super) fn at(dir: &Path) -> Self {
         Self {
             dir: dir.into(),
@@ -53,8 +47,6 @@ impl Home for ClaudeHome {
         )
     }
 
-    /// The Keychain entry first, then the directory, which takes Claude Code's lock directories
-    /// with it: releasing the locks then finds nothing left to remove.
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String> {
         IsolatedSignIn::clean(&self.store)?;
         let removed = match fs::remove_dir_all(&self.dir) {

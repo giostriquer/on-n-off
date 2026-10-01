@@ -185,7 +185,6 @@ fn upgraded_identity_shows_one_card_and_stays_deduplicated_after_reload() {
 fn identity_upgrade_does_not_merge_accounts_by_email_or_workspace_alone() {
     let home = scratch_dir("limits-identity-upgrade-isolation");
     let store = SnapshotStore::for_home(&home);
-    // A different user in the same workspace, and the same email in a different workspace.
     store
         .save(&ok_snapshot(AgentId::Codex, "workspace-a", "other@x", 70.0))
         .unwrap();

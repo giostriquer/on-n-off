@@ -1,5 +1,3 @@
-//! A saved profile's Codex read (`read_saved_codex`): the usage body app-server reads, asked over
-//! HTTP with the access token its login holds, starting no CLI.
 use super::*;
 use crate::http::{never_asked, serve_once, serve_once_capturing, was_asked};
 use serde_json::Value;
@@ -12,7 +10,6 @@ fn identity(provider: AgentId) -> Identity {
     }
 }
 
-/// `read_saved_codex` with the access token in `auth`, a Codex credentials document.
 fn read_at(
     identity: &Identity,
     auth: &Value,
@@ -79,8 +76,6 @@ fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
     );
 }
 
-/// A business member's usage body carries the workspace-credit share as `spend_control`, in
-/// seconds and snake_case like the rest of it.
 #[test]
 fn saved_codex_reads_the_members_share_of_the_workspace_credits() {
     let (url, request) = serve_once_capturing(
@@ -113,7 +108,6 @@ fn saved_codex_reads_the_members_share_of_the_workspace_credits() {
     );
 }
 
-/// A saved account's meter is Codex's own too: the usage body's `remaining_percent`.
 #[test]
 fn saved_codex_takes_the_shares_meter_from_what_codex_says_remains() {
     let (url, request) = serve_once_capturing(
@@ -140,7 +134,6 @@ fn saved_codex_takes_the_shares_meter_from_what_codex_says_remains() {
     );
 }
 
-/// A saved member at their cap reads as used up, which only `spend_control.reached` says.
 #[test]
 fn saved_codex_marks_a_members_used_up_share_reached() {
     let (url, request) = serve_once_capturing(
@@ -168,7 +161,6 @@ fn saved_codex_marks_a_members_used_up_share_reached() {
 
 const CODEX_USAGE_WITH_RESETS: &str = r#"{"rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":18000}},"rate_limit_reset_credits":{"available_count":2}}"#;
 
-/// Two endpoints on one loopback server, which answers in request order whatever the path.
 fn codex_endpoints(
     responses: &[(&str, &[&str], &str)],
 ) -> (
@@ -227,13 +219,11 @@ fn saved_codex_reads_the_banked_reset_count_and_the_soonest_expiry_of_an_availab
     );
     assert!(detail.contains("Bearer fixture-access"));
     assert!(detail.to_lowercase().contains("chatgpt-account-id: team"));
-    // The detail read answered in full, so its count wins over the usage body's 2, as in Codex.
     assert_eq!(
         dto.reading.reset_credits,
         Some(LimitsResetCreditsDto {
             available_count: 3,
             next_expires_at: Some("2026-10-10T12:00:00+00:00".to_owned()),
-            // No more of them than the count.
             resets: vec![
                 super::credit(None, Some("2026-10-10T12:00:00+00:00".to_owned())),
                 super::credit(
@@ -247,8 +237,6 @@ fn saved_codex_reads_the_banked_reset_count_and_the_soonest_expiry_of_an_availab
     assert_eq!(dto.reading.windows[0].used_percent, 42.0);
 }
 
-/// Codex's own app-server keeps the usage body's count when the detail read fails, and one credit
-/// it cannot read fails the whole detail read; so does this.
 #[test]
 fn saved_codex_keeps_the_count_when_the_expiry_read_fails() {
     for detail in [
@@ -287,8 +275,6 @@ fn saved_codex_reports_zero_banked_resets_without_asking_for_their_detail() {
         &[],
         r#"{"rate_limit":{"primary_window":{"used_percent":42}},"rate_limit_reset_credits":{"available_count":0}}"#,
     )]);
-    // A detail request would sit unanswered where `was_asked` finds it, rather than being refused
-    // and swallowed like a failed detail read.
     let (detail, resets) = never_asked();
     let dto = read_codex(&usage, &resets).unwrap();
     requests.join().unwrap();
@@ -308,7 +294,6 @@ fn saved_codex_reports_zero_banked_resets_without_asking_for_their_detail() {
     );
 }
 
-/// A count Codex's own client would refuse leaves the resets unknown and never costs the windows.
 #[test]
 fn saved_codex_treats_a_malformed_banked_reset_count_as_unknown() {
     for count in ["-1", "1.5", "\"2\"", "null"] {
@@ -324,8 +309,6 @@ fn saved_codex_treats_a_malformed_banked_reset_count_as_unknown() {
     }
 }
 
-/// A body for another workspace is another account; a body that names none is accepted
-/// (`saved_codex_reads_scoped_quota_without_starting_a_cli`).
 #[test]
 fn codex_quota_for_another_account_is_rejected() {
     let (url, request) = serve_once(
@@ -348,7 +331,6 @@ fn codex_quota_for_another_account_is_rejected() {
 
 const CODEX_BUSINESS_USAGE: &str = r#"{"plan_type":"self_serve_business_prolite","rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800}},"credits":{"has_credits":true,"unlimited":false,"balance":"0"}}"#;
 
-/// A daily breakdown in the shape the per-member endpoint answers, dated back from today (UTC).
 fn spending(days: &[(u64, &[f64])]) -> String {
     let today = chrono::Utc::now().date_naive();
     json!({
@@ -365,8 +347,6 @@ fn spending(days: &[(u64, &[f64])]) -> String {
     .to_string()
 }
 
-/// The term is asked with the saved account's token for its own workspace and lands on its card,
-/// and the same user's other workspace has a term of its own.
 #[test]
 fn a_saved_codex_read_takes_the_term_for_its_own_workspace() {
     let usage = r#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":604800}}}"#;
@@ -411,8 +391,6 @@ fn a_saved_codex_read_takes_the_term_for_its_own_workspace() {
     assert!(head.contains("account_id=other"), "{head}");
 }
 
-/// A saved Codex member of workspace `team`. Each test names its own member, because a failed
-/// spending read backs off per account and must not hold another test's read back.
 fn member(user: &str) -> Identity {
     Identity {
         provider: AgentId::Codex,
@@ -438,8 +416,6 @@ fn read_codex_spending(
     )
 }
 
-/// A business member's card has no credit figure but spending: the per-member daily breakdown the
-/// Codex app's usage history reads, for the 30 UTC days up to today, with the same token.
 #[test]
 fn saved_codex_reads_what_a_workspace_member_spent() {
     let breakdown = spending(&[(0, &[100.5, 20.0]), (3, &[50.0]), (20, &[1000.0])]);
@@ -448,7 +424,6 @@ fn saved_codex_reads_what_a_workspace_member_spent() {
         ("200 OK", &[], &breakdown),
     ]);
     let base = url.trim_end_matches("/graphql");
-    // The read dates its window by the clock; a run that crosses UTC midnight may see either day.
     let before = chrono::Utc::now().date_naive();
     let dto = read_codex_spending(
         &member("spent"),
@@ -492,7 +467,6 @@ fn saved_codex_reads_what_a_workspace_member_spent() {
     assert_eq!(dto.reading.windows[0].used_percent, 12.0);
 }
 
-/// Only a workspace pools credits, so a personal plan is never asked what it spent.
 #[test]
 fn saved_codex_never_asks_a_personal_plan_what_it_spent() {
     let (url, requests) = crate::http::serve_sequence(&[(
@@ -516,8 +490,6 @@ fn saved_codex_never_asks_a_personal_plan_what_it_spent() {
     assert_eq!(dto.reading.credits_spent, None);
 }
 
-/// As with the banked-reset detail, the spending read never decides the usage read: a member the
-/// endpoint refuses, or an answer that is not counted in credits, only leaves the figure out.
 #[test]
 fn a_spending_read_that_fails_leaves_the_usage_read_standing() {
     let not_credits =
@@ -545,7 +517,6 @@ fn a_spending_read_that_fails_leaves_the_usage_read_standing() {
     }
 }
 
-/// A refused login is `Unauthorized`, and a throttled one is rate limited until its `Retry-After`.
 #[test]
 fn a_saved_codex_read_the_service_refuses_or_throttles_says_which() {
     for (status, expected) in [
@@ -562,7 +533,6 @@ fn a_saved_codex_read_the_service_refuses_or_throttles_says_which() {
     }
 }
 
-/// A read that answered with nothing to show is an error, so the card keeps what it remembers.
 #[test]
 fn a_saved_codex_read_that_observed_nothing_is_an_error() {
     let (usage, u) = serve_once("200 OK", r#"{"plan_type":"pro"}"#);
@@ -574,7 +544,6 @@ fn a_saved_codex_read_that_observed_nothing_is_an_error() {
     );
 }
 
-/// A usage body on `plan`, or on none, with one weekly window.
 fn usage_on(plan: Option<&str>) -> String {
     let mut body =
         json!({"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800}}});
@@ -584,8 +553,6 @@ fn usage_on(plan: Option<&str>) -> String {
     body.to_string()
 }
 
-/// The access a saved read asks with is its profile's own, so its term is asked whatever its plan:
-/// a workspace plan, a personal one or none.
 #[test]
 fn a_saved_codex_read_is_asked_its_term_whatever_its_plan() {
     for plan in [Some("self_serve_business_prolite"), Some("pro"), None] {
@@ -612,7 +579,6 @@ fn a_saved_codex_read_is_asked_its_term_whatever_its_plan() {
     }
 }
 
-/// A body that names no plan is not a workspace plan, and is never asked what it spent.
 #[test]
 fn saved_codex_never_asks_a_read_without_a_plan_what_it_spent() {
     let (usage, u) = serve_once("200 OK", &usage_on(None));

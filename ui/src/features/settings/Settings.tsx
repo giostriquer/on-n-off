@@ -31,7 +31,6 @@ type SettingsProps = {
   onAutomaticUpdatesChange: (enabled: boolean) => void;
   onLimitNotificationsChange: (enabled: boolean) => void;
   onLimitsPollMinutesChange: (minutes: LimitsPollMinutes) => void;
-  /** The cards that patch settings directly; the route merges the patch and persists it. */
   onSettingsChange: (patch: Partial<AppSettings>) => void;
 };
 
@@ -63,8 +62,6 @@ export function Settings({
   onLimitsPollMinutesChange,
   onSettingsChange,
 }: SettingsProps) {
-  // Keyed on the health the shell already probed, not just the binary overrides: a refresh that
-  // finds a newly installed CLI would otherwise leave this card listing the failure that fixed.
   const health = agents.map((agent) => `${agent.id}:${agent.cliOk}`).join(",");
   const diagnose = useQuery({
     queryKey: ["diagnose-providers", settings.binaryPaths, health],
@@ -138,10 +135,6 @@ export function Settings({
   );
 }
 
-/**
- * A notifications toggle that asks the OS for permission before turning on. Turning off never
- * asks; a denied or failed request leaves the setting off and explains why.
- */
 function useNotificationGate(enabled: boolean, onEnabledChange: (enabled: boolean) => void) {
   const [requestingPermission, setRequestingPermission] = useState(false);
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
@@ -179,8 +172,6 @@ function GithubSettingsCard({
   );
   const [draft, setDraft] = useState("");
 
-  // Enter commits; leaving the field keeps the draft. A blur-commit would race the chip's
-  // Remove click: both would persist from the same stale `scopes`, and one write would win.
   function addScope() {
     const scope = draft.trim();
     if (!scope) return;
@@ -329,10 +320,6 @@ function LimitNotificationsCard({
   );
 }
 
-/**
- * The Codex accounts whose banked reset on-n-off offers once they run low. An alert is turned on
- * from the account's card on Limits, where its label is; here it can be read and turned off.
- */
 function ResetAlertsCard({ alerts, onChange }: {
   alerts: Record<string, ResetAlert>;
   onChange: (alerts: Record<string, ResetAlert>) => void;

@@ -285,8 +285,6 @@ describe("Usage day breakdown", () => {
     expect(models).not.toBeNull();
     expect(within(models as HTMLElement).getByText("gpt-5.6-sol")).toBeTruthy();
     expect(within(models as HTMLElement).getByText("claude-fable-5")).toBeTruthy();
-    // One denominator for the column: $3 and $1 of the window's $5, so the rows under a day
-    // add up to the day row itself (80.0%).
     expect(rows[0].textContent).toContain("80.0%");
     expect(within(models as HTMLElement).getByText("60.0%")).toBeTruthy();
     expect(within(models as HTMLElement).getByText("20.0%")).toBeTruthy();

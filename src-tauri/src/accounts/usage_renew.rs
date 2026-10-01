@@ -1,7 +1,3 @@
-//! Renewal of app-private logins; never touches the active native store. A private file lease
-//! serializes each grant. An encrypted intent survives an ambiguous response or crash, so the
-//! next poll cannot replay a possibly consumed refresh token. A completed reply is encrypted
-//! before vault publication and can be adopted after a failed save.
 use super::{
     store::{Guard, Login, Profile, Sealer, Store},
     vault,
@@ -17,8 +13,6 @@ struct Journal {
     login: Option<Login>,
 }
 
-/// Where private renewals keep their encrypted journals beside the vault, and the vault key that
-/// seals them.
 pub(super) struct Renewals {
     root: PathBuf,
     sealer: Sealer,
@@ -30,7 +24,6 @@ impl Renewals {
             sealer: store.sealer(),
         }
     }
-    /// One profile's journal, named without its id.
     fn journal(&self, profile: &Profile) -> PathBuf {
         self.root.join(format!(
             "{}.enc",
@@ -48,8 +41,6 @@ impl Renewals {
             .map_err(|_| "The protected renewal record is unreadable.".into())
     }
 
-    /// Activation must not publish a source token whose renewal may already have consumed it.
-    /// The provider's exclusive activity lease excludes a concurrent polling attempt here.
     pub(super) fn activation_ready(&self, profile: &Profile) -> Result<(), String> {
         let Some(journal) = self.read(&self.journal(profile))? else {
             return Ok(());
@@ -67,9 +58,6 @@ impl Renewals {
 }
 
 impl Renewals {
-    /// The login a private renewal of `profile`'s login finished with but never published: adopted
-    /// as it is, without another grant. `None` when no renewal of the login it holds is on record.
-    /// Refused when one began and its outcome is unknown, since its refresh token may be spent.
     pub(super) fn finished(&self, profile: &Profile) -> Result<Option<Login>, String> {
         let Some(journal) = self.read(&self.journal(profile))? else {
             return Ok(None);
@@ -80,7 +68,7 @@ impl Renewals {
             .map(|login| super::view(profile.identity.provider, login).map(|v| v.fingerprint()))
             .transpose()?;
         if held.as_deref() != Some(journal.fingerprint.as_str()) {
-            return Ok(None); // A record of an earlier login's renewal: its source is spent.
+            return Ok(None);
         }
         let renewed = journal.login.ok_or(
             "This login has an unfinished usage renewal. Sign in again to refresh this account.",
@@ -91,14 +79,10 @@ impl Renewals {
         Ok(Some(renewed))
     }
 
-    /// Drops `profile`'s renewal record once its login has left the vault.
     pub(super) fn forget(&self, profile: &Profile) {
         let _ = std::fs::remove_file(self.journal(profile));
     }
 
-    /// Records a renewal of `profile`'s login that finished with `renewed` and was never published,
-    /// as a failure right after the grant leaves it; with no `renewed`, one whose outcome is unknown,
-    /// as a failure while the grant was in flight leaves it.
     #[cfg(test)]
     pub(super) fn record_finished(&self, profile: &Profile, renewed: Option<&Login>) {
         let source = profile.login.as_ref().expect("a login to renew");
@@ -117,7 +101,6 @@ impl Renewals {
     }
 }
 
-/// Serializes grants for one profile across threads and app instances, without waiting.
 fn acquire_renewal_lease(root: &Path, id: &str) -> Result<FileLease, String> {
     let file = std::fs::OpenOptions::new()
         .create(true)
@@ -138,7 +121,6 @@ pub(super) fn renew_owned(
     if !profile.usage_renewal_owned {
         return Err("This login is owned by a native client.".into());
     }
-    // Before any record is written: a provider whose saved logins wait in homes sends no grant.
     if !super::adapter(profile.identity.provider)?.renews_privately() {
         return Err("This login renews in its own home.".into());
     }
@@ -154,7 +136,7 @@ pub(super) fn renew_owned(
     let id = crate::sha::sha256_hex(profile.id.as_bytes());
     let _lease = acquire_renewal_lease(&renewals.root, &id)?;
     let path = renewals.journal(profile);
-    drop(store); // Vault publication lock never spans a provider request.
+    drop(store);
     let fingerprint = super::view(profile.identity.provider, source)?.fingerprint();
     let previous = renewals.read(&path)?;
     let save = |journal: &Journal| -> Result<(), String> {
@@ -180,12 +162,7 @@ pub(super) fn renew_owned(
     if super::view(profile.identity.provider, &renewed)?.identity()? != profile.identity {
         return Err("Renewal returned a different account. Sign in again.".into());
     }
-    // Only this profile's login and ownership vouch for the renewed login, never the epoch.
     open()?.publish(&ticket, |db| {
-        // `publish` checked the ticket against this same database under this lease, so the profile
-        // is saved and this cannot fail today. It fails closed all the same: a publication that
-        // wrote nothing but succeeded would delete the journal below, the only copy of a login
-        // whose refresh token is already spent.
         let target = db
             .profiles
             .iter_mut()
@@ -194,12 +171,10 @@ pub(super) fn renew_owned(
         target.login = Some(renewed.clone());
         Ok(())
     })?;
-    // A leftover completed journal is harmless: its source fingerprint no longer matches.
     let _ = std::fs::remove_file(path);
     Ok(renewed)
 }
 
-/// Renews a private `login` of `provider` with that provider's grant, at its token endpoint.
 pub(super) fn request(provider: AgentId, login: &Login, now_ms: i64) -> Result<Login, String> {
     let adapter = super::adapter(provider)?;
     let token_url = adapter
@@ -208,9 +183,6 @@ pub(super) fn request(provider: AgentId, login: &Login, now_ms: i64) -> Result<L
     adapter.renew_private(login, now_ms, token_url)
 }
 
-/// Sends a private Codex login's refresh `request` to `token_url`, giving back the reply. Native
-/// credentials still renew exclusively through the official app-server path, and on-n-off sends
-/// no Claude grant at all.
 pub(super) fn grant(token_url: &str, request: &Value) -> Result<Value, crate::http::HttpError> {
     crate::http::post_grant(token_url, request)
 }

@@ -1,5 +1,3 @@
-/** Which Pull requests sections the user folded, remembered across launches in this browser. */
-
 import { GITHUB_LIST_IDS, type GithubListId } from "$lib/githubTypes";
 
 const KEY = "on-n-off.github.collapsed";
@@ -22,6 +20,5 @@ export function writeCollapsed(ids: Set<GithubListId>) {
   try {
     localStorage.setItem(KEY, JSON.stringify([...ids]));
   } catch {
-    // Storage can be unavailable (private mode, quota); the fold then lasts for the session.
   }
 }

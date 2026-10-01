@@ -11,18 +11,14 @@ function share(overrides: Partial<LimitsWorkspaceCredits> = {}): LimitsWorkspace
   return { limit: "25000", used: "8000", usedPercent: 32, resetsAt: "2026-10-01T12:00:00Z", reached: false, ...overrides };
 }
 
-/** Which figures to show is the card model's call (`limitCards.test.ts`); these are how they read. */
 function rows(figures: Partial<Pick<CardFigures, "ownBalance" | "workspaceShare" | "creditsSpent">>) {
   render(<CreditsRows figures={{ ownBalance: null, workspaceShare: null, creditsSpent: null, ...figures }} provider="codex" now={NOW} />);
   const meter = screen.queryByRole("meter", { name: "Workspace credits" });
   const noteId = meter?.getAttribute("aria-describedby");
   return {
     meter,
-    /** What the bar reports as filled. */
     filled: meter?.getAttribute("aria-valuenow") ?? null,
-    /** The figure beside the bar. */
     figure: meter?.nextElementSibling ?? null,
-    /** The line under the label, which the bar names as its description. */
     note: noteId ? (document.getElementById(noteId)?.textContent ?? null) : null,
     own: screen.queryByRole("definition", { name: "Credits" })?.textContent ?? null,
   };

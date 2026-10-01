@@ -1,15 +1,11 @@
 import NotchCore
 import SwiftUI
 
-// The ramp itself — the `Ink` type, the provider accents and `meterInk` — lives in `NotchCore`,
-// where `NotchCoreChecks` can exercise it without SwiftUI. This file only binds it to `Color`.
 extension Ink {
   var color: Color { Color(red: r / 255, green: g / 255, blue: b / 255) }
 }
 
 let tripRed = tripInk.color
-// Still "pending" on CI rollups, badges and hints, where nothing is filling up and yellow is the
-// right signal. It is deliberately no longer part of the quota ramp.
 let warnAmber = Color(red: 224 / 255, green: 179 / 255, blue: 65 / 255)
 let railInk = Color(white: 0.03)
 let popoverInk = Color(red: 0.055, green: 0.055, blue: 0.065)
@@ -25,7 +21,6 @@ func meterColor(_ quota: Quota?, base: Ink, at now: Date) -> Color {
   meterInk(quota, base: base, at: now).color
 }
 
-/// The colour of one pull request's CI rollup on the ring and in the popover.
 func ciColor(_ ci: CiState) -> Color {
   switch ci {
   case .success: return liveGreen
@@ -44,12 +39,9 @@ func providerName(_ id: ProviderId) -> String {
   }
 }
 
-/// Where and how the rail draws, computed once per host message or screen change from the
-/// settings and the display list; every view and pointer computation reads this value.
 struct RailModel {
   let settings: NotchCore.Settings
   let display: Display
-  /// The rail in top-left display coordinates.
   let frame: CGRect
   let layout: RailLayout
   let metrics: NotchMetrics
@@ -68,22 +60,16 @@ struct RailModel {
   var cellIds: [RailCell] { settings.railCells }
   var edge: NotchCore.Edge { settings.edge }
 
-  /// Cell frames in the rail's own top-left coordinates.
   var cells: [CGRect] { railCellFrames(edge: edge, layout: layout, count: cellIds.count) }
 
-  /// The cell containing a point in the rail's own top-left coordinates.
   func cell(at point: CGPoint) -> RailCell? {
     cells.firstIndex { $0.contains(point) }.map { cellIds[$0] }
   }
 
-  /// One cell's frame in top-left display coordinates.
   func cellFrame(of id: RailCell) -> CGRect? {
     cellIds.firstIndex(of: id).map { cells[$0].offsetBy(dx: frame.minX, dy: frame.minY) }
   }
 
-  /// The rail's first ear, in its own top-left coordinates: the cap that toggles how the rail
-  /// shows. It lights up on hover; the pin sits at the visible part's centroid, which leans
-  /// toward the screen edge because the silhouette narrows away from it.
   var capRect: CGRect {
     edge.isVertical
       ? CGRect(x: 0, y: 0, width: layout.thickness, height: layout.ear)
@@ -156,13 +142,10 @@ struct NotchRailView: View {
   }
 }
 
-/// What every rail cell shares: the button, the ring track around a glyph in the icon slot, and
-/// the figure beneath. Cells supply their own progress ring and glyph.
 private struct RailCellChrome<Ring: View, Glyph: View>: View {
   let layout: RailLayout
   let metrics: NotchMetrics
   let label: String
-  /// The percent sign makes a figure read left-heavy; provider cells nudge theirs right.
   let labelOffset: CGFloat
   let description: String
   let active: Bool
@@ -207,8 +190,6 @@ private struct MeterCell: View {
   let metrics: NotchMetrics
   let action: () -> Void
   private var headline: Quota? { entry?.headline }
-  /// The inner ring the host chose: Claude's Fable window, or a Codex workspace member's credit
-  /// share, each in a deeper shade of its provider's accent on its own dark track.
   private var inner: (quota: Quota, name: String, ink: Ink, track: Color)? {
     switch entry?.inner {
     case .fable(let quota)?:
@@ -221,7 +202,6 @@ private struct MeterCell: View {
       return nil
     }
   }
-  /// The host names only a weekly window as the headline, so a ring with one is the weekly's.
   private var period: String {
     headline.map { _ in "weekly" } ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
   }
@@ -264,12 +244,8 @@ private struct MeterCell: View {
   }
 }
 
-/// Segments on the pull-request ring beyond this stop being legible; the count still says how
-/// many there are.
 let maxRingSegments = 24
 
-/// The pull-request cell: the ring is split into one arc per listed pull request, coloured by
-/// its CI state, with the count beneath.
 private struct PullRequestCell: View {
   let pulls: PullRequests?
   let active: Bool
@@ -304,8 +280,6 @@ private struct PullRequestCell: View {
   }
 }
 
-/// One arc per entry around the ring, equal in length, separated by a small gap, starting at
-/// twelve o'clock; a single entry fills the ring.
 struct SegmentedRing: View {
   let segments: [PullRequest]
   let lineWidth: CGFloat
@@ -330,8 +304,6 @@ struct SegmentedRing: View {
   }
 }
 
-/// One stroke with a soft radial transition centered on the outer-third boundary.
-/// Green and red share their edge coverage instead of painting one band over another.
 private struct ConflictArc: View {
   let from: CGFloat
   let to: CGFloat
@@ -355,7 +327,6 @@ private struct ConflictArc: View {
   }
 }
 
-/// GitHub's pull-request glyph: a branch dot joined to a base dot, and a merge dot on the right.
 struct PullRequestMark: Shape {
   func path(in rect: CGRect) -> Path {
     var path = Path()
@@ -377,9 +348,6 @@ struct PullRequestMark: Shape {
   }
 }
 
-/// The rail's first ear as a control: the same colour as the rail until the pointer reaches it,
-/// then a lighter cap with a pin in the middle. A click flips between always showing the rail
-/// and showing it on hover.
 private struct ShowToggleCap: View {
   let model: RailModel
   let hovered: Bool
@@ -414,7 +382,6 @@ private struct ShowToggleCap: View {
   }
 }
 
-/// The "show on hover" strip: reaching it opens the rail.
 struct NotchPillView: View {
   let vertical: Bool
   var body: some View {
@@ -426,9 +393,6 @@ struct NotchPillView: View {
   }
 }
 
-/// The notch silhouette: a bar whose inner side is straight and whose two ends flare into the
-/// screen edge with an S-curve `ear` points long, so the rail reads as part of the bezel. The
-/// edge side is drawn one point past the panel so no outline shows along the screen edge.
 struct NotchSilhouette: Shape {
   let edge: NotchCore.Edge
   let ear: CGFloat
@@ -437,8 +401,6 @@ struct NotchSilhouette: Shape {
     let thickness = edge.isVertical ? rect.width : rect.height
     let length = edge.isVertical ? rect.height : rect.width
     let ear = min(self.ear, length / 2)
-    // Local frame: the screen edge is x == thickness, the rail extends inward to x == 0, and
-    // the axis runs along y. The proportions come from the previous notch's hand-tuned curve.
     let edgeX = thickness + 1
     var path = Path()
     path.move(to: CGPoint(x: edgeX, y: 0))

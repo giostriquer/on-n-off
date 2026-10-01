@@ -2,9 +2,6 @@ import AppKit
 import NotchCore
 import SwiftUI
 
-/// `on-n-off-notch --render <message.json> <out-dir>`: draws the rail, the hover pill, and one
-/// popover per provider from a fixture host message into PNGs, so native visuals can be checked
-/// without a display. The fixture's displays stand in for the live screens; no panel is created.
 @MainActor
 enum Render {
   static func run(messagePath: String, outputDirectory: String) -> Int32 {

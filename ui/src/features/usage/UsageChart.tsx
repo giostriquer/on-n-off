@@ -22,11 +22,9 @@ export type UsageChartProps = {
   sinceTime?: string;
   untilTime?: string;
   hourly?: boolean;
-  /** Full-time windows only plot days with activity. */
   sparse?: boolean;
 };
 
-/** T3-like contrast: Codex near-white, Claude warm orange. */
 const PROVIDER_COLORS: Record<"light" | "dark", Record<AgentId, string>> = {
   light: {
     codex: "#2a2a2a",
@@ -161,8 +159,6 @@ export function UsageChart({
         domain: [...PROVIDERS],
         range: colors,
       },
-      // The first and last x labels are centred on their tick, so half of each sits outside the
-      // plot: the side margins have to hold that half, or the label runs into the card edge.
       margin: { top: 10, right: 30, bottom: 32, left: 52 },
     });
 

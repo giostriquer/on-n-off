@@ -5,7 +5,6 @@ use super::*;
 use crate::dto::LimitsWorkspaceCreditsDto;
 use serde_json::json;
 
-/// Sanitised `account/rateLimits/read` result from Codex app-server 0.148.0.
 const APP_SERVER_CAPTURE: &str = r#"{
       "rateLimits": {
         "limitId": "codex", "limitName": null,
@@ -56,7 +55,6 @@ fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
             )
         })
         .collect();
-    // The Spark bucket is one of Codex's hidden ones: no surface shows it (see below).
     assert_eq!(
         windows,
         [(
@@ -70,8 +68,6 @@ fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
     assert_eq!(parsed.credits, None);
 }
 
-/// A reading of the main weekly window beside one extra bucket per `(id, name)`, each with a
-/// primary and a secondary window.
 fn with_extra_buckets(buckets: &[(&str, &str)]) -> Reading {
     let mut by_id = serde_json::Map::new();
     by_id.insert(
@@ -102,8 +98,6 @@ fn ids(reading: &Reading) -> Vec<&str> {
         .collect()
 }
 
-/// Codex's internal buckets are dropped by id, whatever they are named: both windows of each.
-/// Only those exact buckets: one whose id merely starts with the same letters stays.
 #[test]
 fn the_reader_drops_codexs_internal_buckets_by_id_whatever_their_name() {
     let reading = with_extra_buckets(&[
@@ -121,9 +115,6 @@ fn the_reader_drops_codexs_internal_buckets_by_id_whatever_their_name() {
     );
 }
 
-/// The reserve and Spark buckets are dropped by the model name their label ends with, whatever
-/// their id, in any case and spacing. A longer name that only ends with a hidden one stays, and so
-/// does a hidden name that is not the last part of the label.
 #[test]
 fn the_reader_drops_the_reserve_and_spark_buckets_by_name_whatever_their_id() {
     let reading = with_extra_buckets(&[
@@ -144,7 +135,6 @@ fn the_reader_drops_the_reserve_and_spark_buckets_by_name_whatever_their_id() {
     );
 }
 
-/// Every other extra limit stays, with its own name.
 #[test]
 fn the_reader_keeps_every_other_codex_model_limit() {
     let reading = with_extra_buckets(&[("gpt_luna", "GPT-5.6-Luna")]);
@@ -243,7 +233,6 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
              "grantedAt": 1787500000, "expiresAt": null, "title": null, "description": null},
             {"id": "garbled", "resetType": "codexRateLimits", "status": "available",
              "grantedAt": 1787500000, "expiresAt": i64::MIN, "title": null, "description": null},
-            // Listed after more than the count of others: only a sort before the cut keeps it.
             {"id": "sooner", "resetType": "codexRateLimits", "status": "available",
              "grantedAt": 1787500000, "expiresAt": 1789000000, "title": null, "description": null}
         ]}
@@ -254,10 +243,7 @@ fn reset_credits_count_what_is_available_and_carry_the_soonest_expiry() {
         parse_codex(&payload).reset_credits,
         Some(LimitsResetCreditsDto {
             available_count: 2,
-            // A redeemed credit's earlier expiry is not the next one to lapse, and an expiry that is
-            // not a real instant does not hide the valid ones.
             next_expires_at: expires(1_789_000_000),
-            // Each available one, soonest first, and no more of them than the count.
             resets: vec![
                 credit(None, expires(1_789_000_000)),
                 credit(Some("Full reset"), expires(1_790_000_000)),
@@ -312,7 +298,6 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
         })
     );
 
-    // A read that skips the detail rows (`excludeResetCreditDetails`) still reports the count.
     let count_only: RateLimitsResponse = serde_json::from_value(json!({
         "rateLimits": {"limitId": "codex"},
         "rateLimitResetCredits": {"availableCount": 1, "credits": null}
@@ -338,8 +323,6 @@ fn reset_credits_tell_none_available_apart_from_a_cli_that_does_not_report_them(
 
 #[test]
 fn a_paid_reset_offer_is_read_from_the_backend_banner_and_nothing_else_is() {
-    // The banner reaches clients as the backend wrote it: `rate_limit_upsell` is an untyped value
-    // on the app-server response, so its nested keys keep the backend's snake_case.
     let offered: RateLimitsResponse = serde_json::from_value(json!({
         "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 100, "windowDurationMins": 10080}},
         "rateLimitUpsell": {
@@ -358,13 +341,11 @@ fn a_paid_reset_offer_is_read_from_the_backend_banner_and_nothing_else_is() {
         Some(LimitsResetOfferDto {
             price: Some(LimitsPriceDto {
                 amount_minor_units: 800,
-                // Upper-cased once, here, so no other layer has to.
                 currency: "USD".into(),
             }),
         })
     );
 
-    // A banner without the purchase call to action says nothing about buying one.
     let other: RateLimitsResponse = serde_json::from_value(json!({
         "rateLimits": {"limitId": "codex"},
         "rateLimitUpsell": {"banner_type": "usage_limit", "ctas": [{"action": "view_usage", "label": "See usage"}]}
@@ -394,7 +375,6 @@ fn an_offer_survives_a_price_this_app_will_not_show() {
             }),
         })
     );
-    // Not an ISO 4217 code, so there is nothing to print the number beside.
     assert_eq!(
         priced(json!({"currency": "US", "amount_minor_units": 800})),
         priceless
@@ -407,7 +387,6 @@ fn an_offer_survives_a_price_this_app_will_not_show() {
         priced(json!({"currency": "US$", "amount_minor_units": 800})),
         priceless
     );
-    // An amount that is not a whole count of minor units, or beyond any reset ever sold.
     assert_eq!(
         priced(json!({"currency": "USD", "amount_minor_units": 800.5})),
         priceless
@@ -427,7 +406,6 @@ fn an_offer_survives_a_price_this_app_will_not_show() {
     assert_eq!(priced(json!({"currency": "USD"})), priceless);
     assert_eq!(priced(json!(null)), priceless);
 
-    // Whole yen is a whole count of minor units, and stays one.
     assert_eq!(
         priced(json!({"currency": "JPY", "amount_minor_units": 1200})),
         Some(LimitsResetOfferDto {
@@ -459,10 +437,6 @@ fn a_banner_shaped_unlike_the_one_this_app_knows_offers_nothing() {
     assert_eq!(parse_codex(&absent).reset_offer, None);
 }
 
-/// A business workspace pools its credits; each member's share of them is Codex's spend control,
-/// which app-server reports on the main bucket as `individualLimit` and `spendControlReached`.
-/// App-server's answer for a business member, shaped like `APP_SERVER_CAPTURE`: the main bucket both
-/// on its own and under its id, which is the copy `parse_codex` reads.
 fn business_payload(
     individual_limit: serde_json::Value,
     reached: serde_json::Value,
@@ -510,8 +484,6 @@ fn a_share_used_up_is_marked_reached() {
     assert!(share.reached);
 }
 
-/// The meter is Codex's own: what its status line shows as used is 100 less what the backend says
-/// remains, which can differ from the amounts' ratio by the backend's rounding.
 #[test]
 fn a_shares_meter_is_what_codex_says_remains() {
     let payload = business_payload(
@@ -528,7 +500,6 @@ fn a_shares_meter_is_what_codex_says_remains() {
     );
 }
 
-/// A share the backend says is used up is full, whatever it says remains.
 #[test]
 fn a_reached_share_is_all_used() {
     let payload = business_payload(
@@ -545,8 +516,6 @@ fn a_reached_share_is_all_used() {
     );
 }
 
-/// Without a usable remaining percent, the meter is the amounts' ratio: all of a share of
-/// nothing, and never more than all of it.
 #[test]
 fn without_what_remains_the_meter_is_what_is_used_of_the_limit() {
     for (share, expected) in [
@@ -579,7 +548,6 @@ fn without_what_remains_the_meter_is_what_is_used_of_the_limit() {
     }
 }
 
-/// Right after a reset a member has used nothing, which is still a share to show.
 #[test]
 fn a_share_with_nothing_used_yet_reads() {
     let payload = business_payload(json!({"limit": "25000", "used": "0"}), json!(false));
@@ -588,7 +556,6 @@ fn a_share_with_nothing_used_yet_reads() {
     assert_eq!((share.limit.as_str(), share.used.as_str()), ("25000", "0"));
 }
 
-/// Amounts arrive as strings; a number is read the same way.
 #[test]
 fn a_share_given_in_numbers_still_reads() {
     let payload = business_payload(
@@ -605,8 +572,6 @@ fn a_share_given_in_numbers_still_reads() {
     assert!(!share.reached);
 }
 
-/// An amount that is not a finite number of at least zero leaves nothing to show, as Codex's own
-/// status line treats it.
 #[test]
 fn a_share_whose_amounts_are_not_counts_is_not_shown() {
     for (limit, used) in [
@@ -626,7 +591,6 @@ fn a_share_whose_amounts_are_not_counts_is_not_shown() {
     }
 }
 
-/// Without an individual limit there is no share to show, whatever else the bucket says.
 #[test]
 fn no_share_without_an_individual_limit() {
     let plain: RateLimitsResponse = serde_json::from_str(APP_SERVER_CAPTURE).unwrap();

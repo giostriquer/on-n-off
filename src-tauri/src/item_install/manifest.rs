@@ -1,5 +1,3 @@
-//! Reads a marketplace snapshot: which plugins it lists and which skills/agents each carries.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -19,11 +17,9 @@ use crate::scanner::parse_frontmatter;
 pub const NOT_A_MARKETPLACE: &str =
     "No plugin marketplace manifest (.claude-plugin/marketplace.json) in this repository.";
 
-/// Fetches the tarball of a plugin hosted in another repository: `(owner, repo, ref)`.
 pub type SecondFetch<'a> =
     &'a mut dyn FnMut(&str, &str, Option<&str>) -> Result<Arc<Tarball>, AdapterError>;
 
-/// The first marketplace manifest present in a snapshot.
 pub fn marketplace_file(tarball: &Tarball) -> Option<MarketplaceFile> {
     MARKETPLACE_MANIFESTS
         .iter()
@@ -31,7 +27,6 @@ pub fn marketplace_file(tarball: &Tarball) -> Option<MarketplaceFile> {
         .and_then(|text| parse_marketplace_text(&text))
 }
 
-/// Plugin name -> plugin folder inside the marketplace repository (`""` = repository root).
 pub fn plugin_roots(tarball: &Tarball) -> HashMap<String, String> {
     let mut roots = HashMap::new();
     if let Some(manifest) = marketplace_file(tarball) {
@@ -46,14 +41,11 @@ pub fn plugin_roots(tarball: &Tarball) -> HashMap<String, String> {
     roots
 }
 
-/// A marketplace listing plus, per plugin, the snapshot its entries were read from (`None`
-/// for unsupported plugins).
 pub struct Inspected {
     pub dto: MarketplaceInspectDto,
     pub trees: Vec<Option<Arc<Tarball>>>,
 }
 
-/// The full listing: entries, plugin extras, and the dependencies between entries.
 pub fn inspect(
     tarball: &Arc<Tarball>,
     fallback_name: &str,
@@ -64,7 +56,6 @@ pub fn inspect(
     inspected.dto
 }
 
-/// Entries and extras only; `annotate_dependencies` fills in the edges between them.
 pub fn inspect_entries(
     tarball: &Arc<Tarball>,
     fallback_name: &str,
@@ -145,8 +136,6 @@ pub fn inspect_entries(
     }
 }
 
-/// Runs the dependency scanner over every entry of every supported plugin. Siblings are
-/// indexed marketplace-wide, so an entry can depend on one in another plugin.
 pub fn annotate_dependencies(inspected: &mut Inspected) {
     let index = SiblingIndex::from_inspect(&inspected.dto);
     for (plugin, tree) in inspected.dto.plugins.iter_mut().zip(&inspected.trees) {
@@ -177,7 +166,6 @@ pub fn annotate_dependencies(inspected: &mut Inspected) {
     }
 }
 
-/// Reads one plugin folder out of a snapshot: its manifest, skills, and agents.
 pub fn describe(tree: &Tarball, root: &str, base: MarketplacePluginDto) -> MarketplacePluginDto {
     let manifest = plugin_manifest(tree, root);
     let version = manifest
@@ -204,7 +192,6 @@ pub fn describe(tree: &Tarball, root: &str, base: MarketplacePluginDto) -> Marke
     }
 }
 
-/// Plugin-level assets a local skill/agent copy never gets: `commands`, `hooks`, `mcp`.
 fn extras(tree: &Tarball, root: &str, manifest: Option<&PluginManifest>) -> Vec<String> {
     let has_folder = |folder: &str| {
         let prefix = format!("{}/", join(root, folder));
@@ -326,7 +313,6 @@ fn agents(tree: &Tarball, root: &str) -> Vec<MarketplaceEntryDto> {
         .collect()
 }
 
-/// Direct child folders of `dir` that contain `marker`, in name order.
 fn child_folders_with(tree: &Tarball, dir: &str, marker: &str) -> Vec<String> {
     let prefix = format!("{dir}/");
     let suffix = format!("/{marker}");

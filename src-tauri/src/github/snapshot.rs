@@ -1,7 +1,3 @@
-//! The last successful read, kept under `~/.on-n-off/github/prs.json` so the screen renders
-//! before the first poll answers and keeps rendering when GitHub or `gh` is unavailable. It holds
-//! PR titles and URLs only — never the token, and none of the transient envelope (status, hint).
-
 use std::fs;
 use std::path::Path;
 
@@ -28,10 +24,6 @@ pub(super) fn save(path: &Path, data: &GithubPrsData) -> Result<(), String> {
     atomic_write(path, &json).map_err(|error| format!("{}: {error}", path.display()))
 }
 
-/// `None` for an absent, unreadable, or differently-versioned file; old versions are ignored
-/// rather than migrated, since the next successful read rewrites the file anyway. The merge
-/// verdict is re-derived from the raw fields, so a file written by another version of the
-/// classification never shows a stale one.
 pub(super) fn load(path: &Path) -> Option<GithubPrsData> {
     let stored: Stored = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
     if stored.schema_version != SCHEMA_VERSION {

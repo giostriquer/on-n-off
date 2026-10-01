@@ -45,7 +45,6 @@ fn conflicts_beat_everything_whichever_field_reports_them() {
     assert_eq!(classify(&conflicting), Some(MergeKind::Conflicts));
     let dirty = with(|pr| pr.merge_state = MergeState::Dirty);
     assert_eq!(classify(&dirty), Some(MergeKind::Conflicts));
-    // A draft with conflicts: the state says DRAFT, only `mergeable` knows.
     let draft = with(|pr| {
         pr.is_draft = true;
         pr.mergeable = Mergeability::Conflicting;
@@ -79,7 +78,6 @@ fn the_queue_beats_auto_merge_which_beats_ready() {
 fn ready_is_a_clean_non_draft_and_behind_is_behind() {
     let clean = with(|pr| pr.merge_state = MergeState::Clean);
     assert_eq!(classify(&clean), Some(MergeKind::Ready));
-    // HAS_HOOKS already maps to Clean in the parser; a draft is never ready.
     let draft = with(|pr| {
         pr.merge_state = MergeState::Clean;
         pr.is_draft = true;
@@ -144,7 +142,6 @@ fn the_monitor_facts_are_none_only_while_github_has_not_computed_them() {
         conflicts_known(&with(|pr| pr.mergeable = Mergeability::Conflicting)),
         Some(true)
     );
-    // Dirty is conflicts even before `mergeable` is computed.
     assert_eq!(
         conflicts_known(&with(|pr| {
             pr.mergeable = Mergeability::Unknown;

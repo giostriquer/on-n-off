@@ -357,13 +357,10 @@ fn windows_home_comparison_is_case_and_separator_insensitive() {
     ));
 }
 
-/// A spend's app-server session: the handshake, the account, the weekly window at 95% used, and
-/// `consume_reply` to the spend itself.
 fn consume_transport(account: Value, consume_reply: Option<Value>) -> FakeTransport {
     consume_transport_at(account, 95.0, consume_reply)
 }
 
-/// [`consume_transport`] with the weekly window at `used_percent`.
 fn consume_transport_at(
     account: Value,
     used_percent: f64,
@@ -379,7 +376,6 @@ fn consume_transport_at(
     )
 }
 
-/// A spend's session whose rate-limits read answers `rate_limits`.
 fn consume_transport_reading(
     account: Value,
     rate_limits: Value,
@@ -410,8 +406,6 @@ fn signed_in_as(id: &str) -> Result<Option<(String, Value)>, String> {
     Ok(Some((id.to_string(), json!({}))))
 }
 
-/// Spend through the real checks with a fake app-server, allowed at 10% or less left; the transport
-/// comes back for inspection, or `None` when the checks refused before starting one.
 fn spend(
     card: &str,
     identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
@@ -420,7 +414,6 @@ fn spend(
     spend_within(card, 10, identity, transport)
 }
 
-/// [`spend`], allowed at `max_left_percent` or less left.
 fn spend_within(
     card: &str,
     max_left_percent: u8,
@@ -483,9 +476,7 @@ fn spending_a_reset_credit_completes_the_handshake_then_redeems_exactly_one() {
                 "name": "on_n_off", "title": "on-n-off", "version": env!("CARGO_PKG_VERSION")
             }}}),
             json!({"method": "initialized", "params": {}}),
-            // Spending a reset never forces a token refresh of its own.
             json!({"id": 2, "method": "account/read", "params": {"refreshToken": false}}),
-            // How much is left is read in the same session, just before the reset is spent.
             json!({"id": 3, "method": "account/rateLimits/read", "params": {}}),
             json!({"id": 4, "method": "account/rateLimitResetCredit/consume",
                    "params": {"idempotencyKey": "attempt-1"}}),
@@ -500,7 +491,6 @@ fn every_consume_outcome_reaches_the_caller_and_a_new_one_is_not_a_failure() {
         ("nothingToReset", ResetCreditOutcome::NothingToReset),
         ("noCredit", ResetCreditOutcome::NoCredit),
         ("alreadyRedeemed", ResetCreditOutcome::AlreadyRedeemed),
-        // The request went through; an outcome this build does not know must not read as an error.
         ("somethingCodexAddedLater", ResetCreditOutcome::Unknown),
     ] {
         let (outcome, _) = spend(
@@ -525,7 +515,6 @@ fn a_reset_is_not_spent_when_the_signed_in_account_is_not_the_cards() {
         );
 
         assert!(outcome.is_err(), "{outcome:?}");
-        // Refused before an app-server was ever started.
         assert!(transport.is_none());
     }
     let (changed, _) = spend(
@@ -551,7 +540,6 @@ fn a_login_that_changes_while_the_app_server_starts_is_caught_before_the_request
         "acct-1",
         |_| {
             checks.set(checks.get() + 1);
-            // The first check passes; by the time app-server has loaded, another login is active.
             signed_in_as(if checks.get() == 1 {
                 "acct-1"
             } else {
@@ -643,7 +631,6 @@ fn the_card_account_id_from_a_read_is_the_id_a_spend_accepts() {
     );
 }
 
-/// An app-server session for a signed-in business member of `acct-1`, answered in order.
 fn business_session(codex_home: &Path, kind: &str) -> FakeTransport {
     FakeTransport {
         received: VecDeque::from([
@@ -679,8 +666,6 @@ fn business_home(name: &str) -> PathBuf {
     home
 }
 
-/// The spending read runs after the identity check, for the account and plan the card was read
-/// for, and its figure is on the card before the card is remembered.
 #[test]
 fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() {
     let home = business_home("codex-app-server-spent");
@@ -718,7 +703,6 @@ fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() 
     );
 }
 
-/// A read that fails, or a login that is not a ChatGPT one, is never asked what it spent.
 #[test]
 fn a_failed_signed_in_read_never_asks_what_it_spent() {
     let home = business_home("codex-app-server-spent-failed");

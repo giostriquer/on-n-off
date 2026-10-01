@@ -70,8 +70,6 @@ export function ScopeBar({
     if (!open) {
       return;
     }
-    // Prefer document click-outside over a fixed transparent backdrop —
-    // WebView2 often paints transparent fixed layers as an opaque grey slab.
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) {

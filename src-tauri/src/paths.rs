@@ -5,12 +5,6 @@ use std::path::PathBuf;
 
 use crate::dto::AdapterError;
 
-/// The environment on-n-off reads its providers' settings from: the process's own. A test binary
-/// sees only a disposable `ON_N_OFF_HOME` instead, so no test can follow a developer's
-/// `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME` to a real home, find the
-/// Claude Code Keychain entry under a developer's own account name, or read the login Keychain at
-/// all. A test that needs another environment hands one to the resolver it tests
-/// (`accounts::claude_store::dirs`, the adapters' `resolve_from`).
 #[cfg(not(test))]
 pub(crate) fn process_env(name: &str) -> Option<OsString> {
     env::var_os(name)
@@ -20,11 +14,6 @@ pub(crate) fn process_env(name: &str) -> Option<OsString> {
     (name == "ON_N_OFF_HOME").then(|| OsString::from("disposable"))
 }
 
-/// The home every agent home and on-n-off's own data sit under: `ON_N_OFF_HOME` when it is set,
-/// else `USERPROFILE` or `HOME`. A test binary has none, so no test can read or write a
-/// developer's real `~/.claude`, `~/.codex` or `~/.on-n-off` through it or a helper built on it:
-/// each fails as it would on a machine without a home. A test that needs a home hands its own
-/// root to a `*_for(home)` or `*_in` function instead.
 #[cfg(not(test))]
 pub fn user_home() -> Result<PathBuf, AdapterError> {
     user_home_from(|name| env::var(name).ok())
@@ -34,7 +23,6 @@ pub fn user_home() -> Result<PathBuf, AdapterError> {
     Err(AdapterError::message("a test build has no user home"))
 }
 
-/// The home an environment `lookup` describes, in [`user_home`]'s order.
 fn user_home_from(lookup: impl Fn(&str) -> Option<String>) -> Result<PathBuf, AdapterError> {
     ["ON_N_OFF_HOME", "USERPROFILE", "HOME"]
         .into_iter()
@@ -126,12 +114,10 @@ pub fn limits_monitor_state_path() -> Result<PathBuf, AdapterError> {
     Ok(limits_monitor_state_path_for(&user_home()?))
 }
 
-/// Last successful pull-request read, so the GitHub screen has something to show at launch.
 pub fn github_prs_path_for(home: &std::path::Path) -> PathBuf {
     home.join(".on-n-off").join("github").join("prs.json")
 }
 
-/// The CI monitor's last-seen rollup per own pull request, so a restart never re-notifies.
 pub fn github_monitor_state_path_for(home: &std::path::Path) -> PathBuf {
     home.join(".on-n-off").join("github").join("monitor.json")
 }
@@ -179,8 +165,6 @@ pub fn newest_dir(parent: &std::path::Path) -> Option<PathBuf> {
     })
 }
 
-/// Fresh per-call fixture directory. The counter keeps parallel tests apart even when the
-/// clock has coarse (microsecond) resolution, as it does on macOS.
 #[cfg(test)]
 pub fn scratch_dir(prefix: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -199,9 +183,6 @@ pub fn scratch_dir(prefix: &str) -> PathBuf {
     dir
 }
 
-/// The home a deliberate, `#[ignore]`d real-home probe reads: the one whoever runs it names in
-/// `ON_N_OFF_PROBE_HOME`. A test build has no user home of its own ([`user_home`]), so a real
-/// home is reached only when a person hands it over for that run.
 #[cfg(test)]
 pub fn probe_home() -> PathBuf {
     std::env::var_os("ON_N_OFF_PROBE_HOME")

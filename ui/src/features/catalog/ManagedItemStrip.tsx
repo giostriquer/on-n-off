@@ -11,11 +11,9 @@ const BADGE_TONE = {
 export type ManagedItemActions = {
   onUpdateItem: (status: ItemStatus) => void;
   onRemoveItem: (status: ItemStatus) => void;
-  /** Opens the item's upstream page (github.com) in the browser. */
   onOpenUpstream: (status: ItemStatus) => void;
 };
 
-/** `from owner/repo` — the tag a copied item wears instead of "User skill". */
 export function OriginTag({ status }: { status: ItemStatus }) {
   return (
     <span className="shrink-0 border border-[var(--mute)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)]">
@@ -24,7 +22,6 @@ export function OriginTag({ status }: { status: ItemStatus }) {
   );
 }
 
-/** Version / update / modified badges plus Update and Remove for an item on-n-off installed. */
 export function ManagedItemStrip({
   status,
   busy,
@@ -77,7 +74,6 @@ export function ManagedItemStrip({
   );
 }
 
-/** A managed Claude subagent (`agents/*.md`), listed under the Skills library. */
 export function AgentCard({
   status,
   busy,

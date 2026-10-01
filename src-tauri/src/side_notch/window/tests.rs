@@ -18,7 +18,6 @@ fn outbound_delivery_is_dirty_driven_with_a_slow_heartbeat() {
     assert!(HEARTBEAT_INTERVAL >= Duration::from_secs(30));
 }
 
-/// The provider the helper is sent for these cards.
 fn current_provider(entries: Vec<ProviderLimitsDto>) -> Option<NativeProvider> {
     NotchProvider::current(entries).map(NativeProvider::from)
 }
@@ -50,7 +49,6 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
     assert!(current_provider(Vec::new()).is_none());
 }
 
-/// The helper finds the ring's windows by the ids the host names, in the shape it decodes.
 #[test]
 fn the_headline_and_the_inner_ring_travel_as_window_ids() {
     let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
@@ -74,8 +72,6 @@ fn the_headline_and_the_inner_ring_travel_as_window_ids() {
     );
 }
 
-/// The helper draws the share on the Codex cell's inner ring with the reader's meter, and shows the
-/// amounts already worded: it picks the renewed wording by the clock and formats nothing but dates.
 #[test]
 fn a_business_members_credit_share_travels_worded_with_the_readers_meter() {
     let entries: Vec<ProviderLimitsDto> = serde_json::from_value(serde_json::json!([
@@ -231,7 +227,6 @@ fn a_poll_refreshes_on_its_interval_forces_once_and_never_stays_loading_forever(
     let now = Instant::now();
     let interval = Duration::from_secs(5 * 60);
     let mut poll = Poll::new(0u8);
-    // A value with no shared source: `0` throughout, so only the interval and `force` speak.
     assert!(poll.due(now, interval, 0), "never read yet");
     assert!(!poll.start(now));
     assert!(!poll.due(now, interval, 0), "one read in flight");

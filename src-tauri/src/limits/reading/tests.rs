@@ -17,9 +17,6 @@ fn observed(
     }
 }
 
-/// A read that answers without its weekly window keeps the remembered weekly, dated when it was
-/// read, so a card never leads with its session. Its other windows are its own: the remembered
-/// per-model window is not kept.
 #[test]
 fn an_answer_without_a_weekly_window_keeps_the_remembered_weekly() {
     let answered = Outcome::Answered {
@@ -79,7 +76,6 @@ fn an_answer_without_a_weekly_window_keeps_the_remembered_weekly() {
         ]
     );
 
-    // A read that reports its own weekly keeps it, and nothing of the remembered one.
     let mut with_weekly = own;
     with_weekly.windows.insert(
         0,
@@ -97,9 +93,6 @@ fn an_answer_without_a_weekly_window_keeps_the_remembered_weekly() {
     assert_eq!(used, [63.0, 17.0]);
 }
 
-/// The rule's boundary: a read that reports other windows but no weekly keeps the remembered weekly;
-/// one that reports no windows at all keeps none of them, so a read of figures alone clears the
-/// windows it no longer reports.
 #[test]
 fn only_an_answer_with_other_windows_keeps_the_remembered_weekly() {
     let answered = Outcome::Answered {
@@ -166,7 +159,6 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
     let merged = Reading::default().keeping(remembered, Outcome::Failed);
 
     assert_eq!(merged.reset_credits, reset_credits);
-    // The banked count is remembered; a price the provider may already have withdrawn is not.
     assert_eq!(merged.reset_offer, None);
     assert_eq!(merged.plan.as_deref(), Some("pro"));
     assert!(merged.windows.is_empty());
@@ -187,8 +179,6 @@ fn a_count_lapses_at_its_expiry_itself() {
     assert!(!passed(None, at), "no known expiry never lapses");
 }
 
-/// A reading with every field known, each told apart by `tag`, as wire JSON. Its windows are a
-/// weekly and a session.
 fn every_field(tag: &str, used: f64) -> Value {
     json!({
         "plan": tag,
@@ -209,16 +199,11 @@ fn reading(value: Value) -> Reading {
     serde_json::from_value(value).expect("a reading")
 }
 
-/// The whole policy in one table: for each field and each way a read can go, what the reading
-/// keeps where the read did not report the field; for windows, where it reported its session but
-/// not its weekly. Where it did, its own value always stands (a failed read's own windows are
-/// merged with the remembered ones instead).
 #[test]
 fn the_remember_policy_field_by_field() {
     #[derive(Debug, Clone, Copy)]
     enum Kept {
         Remembered,
-        /// Of the remembered windows, only the weekly one, beside the read's own.
         RememberedWeekly,
         Nothing,
     }
@@ -234,8 +219,6 @@ fn the_remember_policy_field_by_field() {
         answered(true, true),
         Outcome::Failed,
     ];
-    // Columns follow `outcomes`: answered and asked nothing, asked what was spent, asked about
-    // renewal, asked both; failed.
     let table = [
         ("plan", [Nothing, Nothing, Nothing, Nothing, Remembered]),
         (
@@ -277,7 +260,6 @@ fn the_remember_policy_field_by_field() {
                 reading(unreported).keeping(reading(remembered.clone()), outcome),
             )
             .unwrap();
-            // The windows are weekly then session, and a card lists them in that order.
             let (own_session, remembered_weekly) = (&own["windows"][1], &remembered["windows"][0]);
             let expected = match (field, cell) {
                 ("windows", RememberedWeekly) => Some(json!([remembered_weekly, own_session])),

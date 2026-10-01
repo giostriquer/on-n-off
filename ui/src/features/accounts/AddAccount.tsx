@@ -4,7 +4,6 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { accountButton, useAccountControllers } from "./AccountManager";
 import { AutomaticAccountSaving } from "./AccountPreferences";
 
-/** `buttonRef` receives the Add account button, where focus can land once no card is left to take it. */
 export function AddAccount({ buttonRef }: { buttonRef?: RefCallback<HTMLButtonElement> }) {
   const controllers = useAccountControllers();
   const [open, setOpen] = useState(false);

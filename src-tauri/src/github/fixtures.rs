@@ -1,8 +1,3 @@
-//! Canned GraphQL replies shared by the parser and reader tests.
-
-/// One authored PR with failing CI, two review requests (one direct: a draft that already has
-/// conflicts, which only `mergeable` reports because the state says `DRAFT`; one via a team), no
-/// assignments, one recently merged authored PR (of three ever), and a healthy rate-limit budget.
 pub(super) const REPLY: &str = r#"{
   "data": {
     "viewer": { "login": "octocat" },

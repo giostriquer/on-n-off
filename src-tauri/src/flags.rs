@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths;
 
-/// Resolved feature flags. Unknown file keys are ignored. Defaults are off.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeatureFlags {
@@ -26,7 +25,6 @@ pub fn parse_env_bool(raw: &str) -> Option<bool> {
     }
 }
 
-/// File overlay first, then `ON_N_OFF_FLAG_*` env. Invalid env values are ignored.
 pub fn resolve_flags(
     file_json: Option<&str>,
     env_lookup: impl Fn(&str) -> Option<String>,

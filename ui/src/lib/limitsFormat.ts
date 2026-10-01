@@ -1,5 +1,3 @@
-/** Display formatting for the Limits screen (pure). */
-
 import { providerColor } from "./providerStyle";
 import type { AgentId } from "./types";
 
@@ -13,10 +11,6 @@ export function parseInstant(value: string | null | undefined): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-/**
- * "2d 2h" / "4h 5m" / "12m" / "<1m" until the window resets, phrased to follow "resets in";
- * empty when the instant is unknown or already past (see `hasElapsed`).
- */
 export function formatResetIn(resetsAt: string | null | undefined, nowMs: number): string {
   const at = parseInstant(resetsAt);
   if (at === null) return "";
@@ -36,13 +30,11 @@ export function formatResetIn(resetsAt: string | null | undefined, nowMs: number
   return `${Math.floor(remaining / MINUTE_MS)}m`;
 }
 
-/** True when `iso` is a known instant at or before `nowMs` (a window whose reset has passed). */
 export function hasElapsed(iso: string | null | undefined, nowMs: number): boolean {
   const at = parseInstant(iso);
   return at !== null && at <= nowMs;
 }
 
-/** "Tue 14:00" in the given (or the viewer's) time zone; empty when unknown. */
 export function formatResetAt(resetsAt: string | null | undefined, timeZone?: string): string {
   const at = parseInstant(resetsAt);
   if (at === null) return "";
@@ -55,11 +47,6 @@ export function formatResetAt(resetsAt: string | null | undefined, timeZone?: st
   }).format(at);
 }
 
-/**
- * "Aug 29" in the given or the viewer's time zone, for instants weeks away where a weekday alone
- * would be ambiguous; empty when unknown. `withYear` always adds the year; `yearUnlessSameAs` adds
- * it only when the date falls in another year than that instant, both judged in the same zone.
- */
 export function formatShortDate(
   iso: string | null | undefined,
   { timeZone, withYear = false, yearUnlessSameAs }: { timeZone?: string; withYear?: boolean; yearUnlessSameAs?: number } = {},
@@ -71,7 +58,6 @@ export function formatShortDate(
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: year ? "numeric" : undefined, timeZone }).format(at);
 }
 
-/** "Aug 19, 2026, 02:04" in the given (or viewer's) time zone; empty when unknown. */
 export function formatObservedAt(observedAt: string | null | undefined, timeZone?: string): string {
   const at = parseInstant(observedAt);
   if (at === null) return "";
@@ -86,7 +72,6 @@ export function formatObservedAt(observedAt: string | null | undefined, timeZone
   }).format(at);
 }
 
-/** "14:05" (24h) in the given (or the viewer's) time zone; empty when unknown. */
 export function formatClock(iso: string | null | undefined, timeZone?: string): string {
   const at = parseInstant(iso);
   if (at === null) return "";
@@ -98,60 +83,24 @@ export function formatClock(iso: string | null | undefined, timeZone?: string): 
   }).format(at);
 }
 
-/** Where a meter starts hardening, and where it is spent. Both twins use the same two numbers. */
 const HARDENS_FROM = 70;
 const SPENT = 90;
 
-/**
- * The app's one usage ramp, shared by every surface that shows a quota filling up.
- *
- * A meter stays on its base colour while there is room, then hardens toward `--trip` as it fills,
- * reaching it at `SPENT`. It never passes through `--warn`: that amber's hue points away from red,
- * and on the dark theme it is lighter than the accents it would replace, so a meter stepping into
- * it went paler and yellower exactly as it ran out, which reads as cooling down. `--warn` still
- * means "pending" on CI rollups, badges and hints, where nothing is filling up.
- *
- * The blend is eased rather than linear — a quarter of the way through the band is half the way to
- * red — so crossing 70 % announces itself instead of creeping. `color-mix` is used rather than
- * numeric interpolation so the ramp follows whichever theme is active.
- *
- * The side notch runs the same ramp over the same endpoints, in Swift (`NotchCore/Meter.swift`) and
- * in Rust (`side_notch/model.rs`). Change the shape here and change it in both of those.
- */
 export function usageMeterColor(base: string, usedPercent: number): string {
   if (usedPercent >= SPENT) return "var(--trip)";
-  // Negated rather than `<= HARDENS_FROM`, so a non-numeric percent lands on the base colour like
-  // it does in both twins, instead of falling through and emitting `NaN%` — invalid CSS, which the
-  // browser drops, leaving an empty bar in the very band that matters.
   if (!(usedPercent > HARDENS_FROM)) return base;
   const travelled = Math.sqrt((usedPercent - HARDENS_FROM) / (SPENT - HARDENS_FROM));
   return `color-mix(in srgb, ${base}, var(--trip) ${(travelled * 100).toFixed(1)}%)`;
 }
 
-/** A quota bar: the provider's accent, hardening toward red as the window fills. */
 export function usageFillColor(provider: AgentId, usedPercent: number): string {
   return usageMeterColor(providerColor(provider), usedPercent);
 }
 
-/**
- * The same fill as a style object, with the flat accent underneath it.
- *
- * If a webview ever cannot parse the `color-mix`, it drops that declaration and the accent stands.
- * Without the pair the bar would render with no background at all — an empty track, which reads as
- * unused, in exactly the band where the meter is trying to warn.
- */
 export function usageFillStyle(provider: AgentId, usedPercent: number) {
   return { background: providerColor(provider), backgroundColor: usageFillColor(provider, usedPercent) };
 }
 
-/**
- * The percent figure beside the bar: ordinary text until the window is spent, then `--trip`.
- *
- * It deliberately does not follow the bar through the band. The figure sits on the page's own ink,
- * and blending white toward red gives a washed-out pink that is *less* legible at 75 % than the
- * plain figure was at 50 % — the paling problem again, one surface over. The notch does the same
- * thing: its ring carries the ramp while its label stays plain.
- */
 export function usageTextColor(usedPercent: number): string | undefined {
   return usedPercent >= SPENT ? "var(--trip)" : undefined;
 }
@@ -161,7 +110,6 @@ export function formatUsedPercent(usedPercent: number): string {
   return `${Math.round(usedPercent)}%`;
 }
 
-/** Codex's Pro tiers, by how many Plus-sized plans each is worth; the badge and the order share it. */
 const CODEX_PRO_TIERS: Record<string, number> = { pro: 20, prolite: 5 };
 
 function codexProTier(plan: string, provider?: string): number | undefined {
@@ -169,7 +117,6 @@ function codexProTier(plan: string, provider?: string): number | undefined {
   return CODEX_PRO_TIERS[plan.toLowerCase().replaceAll(/[ _-]/g, "")];
 }
 
-/** "max" → "Max", "enterprise_x" → "Enterprise x"; empty when unknown. */
 export function planLabel(plan: string | null | undefined, provider?: string): string {
   const raw = plan?.trim().replaceAll("_", " ") ?? "";
   if (!raw) return "";
@@ -178,11 +125,6 @@ export function planLabel(plan: string | null | undefined, provider?: string): s
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
-/**
- * How many base-sized plans a plan is worth, for comparing one account's percentage against
- * another's: the ×N the tier carries ("max ×20" as the backend writes it, Codex Pro as the badge
- * says), a bare "max" the five Claude gives one, anything else one.
- */
 export function planMultiplier(plan: string | null | undefined, provider?: string): number {
   const raw = plan?.trim() ?? "";
   const proTier = codexProTier(raw, provider);
@@ -192,20 +134,12 @@ export function planMultiplier(plan: string | null | undefined, provider?: strin
   return raw.toLowerCase() === "max" ? 5 : 1;
 }
 
-/**
- * A price the provider stated in minor units, in its own currency. `Intl` knows how many minor
- * units each ISO code carries — yen has none, dinars have three — so the exponent is never guessed.
- */
 export function formatPrice({ amountMinorUnits, currency }: { amountMinorUnits: number; currency: string }): string {
   try {
     const format = new Intl.NumberFormat("en-US", { style: "currency", currency });
-    // Every currency resolves its own exponent; two decimals is the ISO default if one ever does not.
     const digits = format.resolvedOptions().maximumFractionDigits ?? 2;
-    // `Intl` separates a code from its number with a non-breaking space; the card's monospace
-    // column wants an ordinary one.
     return format.format(amountMinorUnits / 10 ** digits).replace(/\u00a0/g, " ");
   } catch {
-    // A code `Intl` refuses outright: show the number beside it rather than nothing at all.
     return `${currency} ${amountMinorUnits / 100}`;
   }
 }

@@ -1,7 +1,3 @@
-//! The Windows side-notch supervisor: the `window.rs::supervise` port. Same poll and
-//! delivery cadence (intervals, read deadlines, force flags, dirty + heartbeat), with
-//! the pipe transport replaced by an in-process channel to the window thread.
-
 #![allow(unsafe_code)]
 
 use super::model::{layout, GithubList, NotchProvider, NotchSnapshot, RAIL_ORDER};
@@ -24,16 +20,11 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
-/// Live session rows are small local reads; the popover shows "just now" style ages.
 const SESSIONS_INTERVAL: Duration = Duration::from_secs(10);
-/// A read that never reports back (a hung child, a panicked thread) releases its slot after this.
 const READ_DEADLINE: Duration = Duration::from_secs(60);
 const PROVIDER_COUNT: usize = RAIL_ORDER.len();
-/// One in-flight read per provider, plus the sessions read and the pull-request read.
 const READ_SLOTS: usize = PROVIDER_COUNT + 2;
 
-/// A value refreshed by a background read: at most one read in flight, refreshed on an
-/// interval, forced on request, and never left "loading" forever.
 pub(crate) struct Poll<T> {
     pub value: T,
     loading: bool,
@@ -61,7 +52,6 @@ impl<T> Poll<T> {
                     .is_none_or(|last_read| now.saturating_duration_since(last_read) >= interval))
     }
 
-    /// Marks a read in flight and returns whether it was forced.
     pub fn start(&mut self, now: Instant) -> bool {
         self.loading = true;
         self.started = Some(now);
@@ -85,8 +75,6 @@ impl<T> Poll<T> {
     }
 }
 
-/// Frames go to the window when something changed, or as a slow heartbeat so a stale
-/// render can never outlive its data.
 pub(crate) struct Delivery {
     dirty: bool,
     next_heartbeat: Instant,
@@ -114,9 +102,6 @@ impl Delivery {
     }
 }
 
-/// The pull-request cell's data: only the selected lists, each capped, with the row
-/// fields the popover shows. No account identifiers beyond the author logins GitHub
-/// already displays.
 fn to_row(pr: &GithubPrDto) -> Option<PrRowData> {
     if !PrRowData::keeps(&pr.url) {
         return None;
@@ -162,7 +147,6 @@ fn pr_cell(dto: &GithubPrsDto, selected: &[GithubList]) -> PrCellData {
     }
 }
 
-/// The selected providers' current-account entries in rail order.
 fn rail_cells(
     snapshot: &NotchSnapshot,
     providers: &[Poll<Option<NotchProvider>>],
@@ -194,7 +178,6 @@ fn rail_cells(
     cells
 }
 
-/// Live sessions for the selected providers only, in rail order; hidden cells cost nothing.
 fn read_sessions(selected: &[AgentId]) -> Vec<Vec<LiveSession>> {
     let Ok(home) = crate::paths::user_home() else {
         return vec![Vec::new(); PROVIDER_COUNT];
@@ -215,9 +198,6 @@ fn read_sessions(selected: &[AgentId]) -> Vec<Vec<LiveSession>> {
 enum Read {
     Limits(usize, Option<NotchProvider>),
     Sessions(Vec<Vec<LiveSession>>),
-    /// The screen's whole answer; the selected lists are projected when a frame is
-    /// built, so a settings change shows at once instead of after the next poll. Boxed: it
-    /// dwarfs the other variants (`clippy::large_enum_variant`).
     PullRequests(Box<GithubPrsDto>),
 }
 
@@ -227,7 +207,6 @@ struct Controller {
     wake: Condvar,
     stopped: AtomicBool,
     error: Mutex<Option<String>>,
-    /// The live window-thread sender, kept so shutdown can end the overlay loop.
     window: Mutex<Option<mpsc::Sender<WindowMsg>>>,
 }
 
@@ -330,12 +309,7 @@ fn initial_snapshot() -> NotchSnapshot {
 fn supervise(app: AppHandle, controller: Arc<Controller>) {
     let (sender, reads) = mpsc::sync_channel::<Read>(READ_SLOTS);
     let mut snapshot = initial_snapshot();
-    // The window thread exists only while the notch is on. It owns an always-on-top
-    // window and, while a popover is pinned, a process-wide low-level mouse hook; the
-    // notch is off by default, so a user who never enables it must never pay for either.
-    // This is `window.rs`'s `connection` — a helper it starts and stops the same way.
     let mut window_tx: Option<mpsc::Sender<WindowMsg>> = None;
-    // Actions only arrive while a window exists; until one does, this end is disconnected.
     let (_no_window_yet, mut action_rx) = mpsc::channel::<WinAction>();
     let mut providers: [Poll<Option<NotchProvider>>; PROVIDER_COUNT] =
         [(); PROVIDER_COUNT].map(|_| Poll::new(None));
@@ -408,7 +382,6 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
             } else {
                 WindowMsg::Ping
             };
-            // The window thread died (a panic): surface it and restart with backoff.
             if window.send(message).is_err() {
                 runtime_error = Some("Native notch stopped unexpectedly. Retrying…".into());
                 retry_delay = (retry_delay * 2).min(30);
@@ -470,14 +443,11 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
             pulls.release_stale(now);
             if snapshot.settings.pull_requests.enabled && pulls.due(now, pulls_interval) {
                 let force = pulls.start(now);
-                // One settings read per poll keeps the cadence in step with the screen's.
                 pulls_interval = Duration::from_secs(u64::from(
                     crate::settings::load_settings().github_poll_seconds,
                 ));
                 let sender = sender.clone();
                 thread::spawn(move || {
-                    // `read_prs` memoises within the screen's poll window, so this adds
-                    // no GitHub calls beyond what the screen and monitor already make.
                     let _ =
                         sender.send(Read::PullRequests(Box::new(crate::github::read_prs(force))));
                 });
@@ -540,17 +510,12 @@ fn handle_action(
             pulls.force = true;
         }
         WinAction::OpenLimits => {
-            // Windows keeps a non-activating overlay from taking the foreground, so a
-            // main window that is already open behind another app is shown and raised
-            // but not brought in front of it; the taskbar button flashes instead.
             *action_error = crate::tray::open_limits_window(app).err();
         }
         WinAction::OpenPullRequests => {
             *action_error = crate::tray::open_github_window(app).err();
         }
         WinAction::SetShow(show) => {
-            // The same validated save the Settings card uses; the new revision reaches
-            // the card through the changed event below.
             let mut settings = snapshot.settings.clone();
             settings.show = show;
             match super::save(settings) {
@@ -575,8 +540,6 @@ fn handle_action(
     }
 }
 
-/// "review please: <title> <url>", the plain-text form of the macOS helper's
-/// rich-text pasteboard write; the Windows clipboard keeps one text format.
 fn copy_review_request(title: &str, url: &str) -> Result<(), String> {
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
     use windows::Win32::System::DataExchange::{
@@ -600,7 +563,6 @@ fn copy_review_request(title: &str, url: &str) -> Result<(), String> {
             }
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), locked as *mut u16, bytes.len());
             let _ = GlobalUnlock(handle);
-            // On success the system owns the handle; on failure we free it.
             match SetClipboardData(CF_UNICODETEXT, Some(HANDLE(handle.0))) {
                 Ok(_) => Ok(()),
                 Err(error) => {

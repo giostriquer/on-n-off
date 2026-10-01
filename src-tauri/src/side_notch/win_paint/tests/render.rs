@@ -22,7 +22,6 @@ fn rendering_is_deterministic_and_lands_ink_where_planned() {
         (planned.window.w * planned.display_scale).round() as u32
     );
 
-    // The pill body colour sits at the icon slot's centre; the ring track surrounds it.
     let cell = &planned.cells[0];
     let scale = planned.display_scale as f32;
     let cx = (cell.rect.mid_x() * scale as f64) as u32;
@@ -31,7 +30,6 @@ fn rendering_is_deterministic_and_lands_ink_where_planned() {
     let pixel = first.pixel(cx, cy).expect("inside the pixmap");
     assert!(pixel.alpha() > 200, "the glyph slot area has ink");
 
-    // The window is transparent well outside the rail (the popover is inward of it).
     let left_edge = first.pixel(0, first.height() / 2).unwrap();
     assert_eq!(
         left_edge.alpha(),
@@ -52,7 +50,6 @@ fn the_collapsed_pill_renders_only_the_strip() {
         pixmap.width(),
         (planned.window.w * planned.display_scale).round() as u32
     );
-    // The pill rect is window-local; the strip is drawn exactly there.
     let px_x = (pill.mid_x() * planned.display_scale) as u32;
     let px_y = (pill.mid_y() * planned.display_scale) as u32;
     let mid = pixmap.pixel(px_x.min(pixmap.width() - 1), px_y.min(pixmap.height() - 1));
@@ -80,8 +77,6 @@ fn the_quota_bar_is_a_capsule_the_whole_way_across() {
     let top = bar.y.round() as u32;
     let bottom = (bar.y + bar.h).round() as u32;
     assert_eq!(bottom - top, 4, "the bar keeps its 4 pt height");
-    // A capsule is full height everywhere past its rounded caps; a flat ellipse
-    // tapers away from the middle and reads as a hairline.
     let middle = column_ink(&pixmap, bar.mid_x().round() as u32, top, bottom);
     assert!(
         middle > 800,
@@ -107,7 +102,6 @@ fn the_hover_strip_is_a_capsule_along_its_length() {
     let pixmap = render(&planned);
     let left = pill.x.round() as u32;
     let right = (pill.x + pill.w).round() as u32;
-    // A capsule keeps its width along the strip; an ellipse pinches to a pixel.
     let middle = row_ink(&pixmap, pill.mid_y().round() as u32, left, right);
     assert!(middle > 200, "the strip is a few points wide: {middle}");
     for fraction in [0.1_f64, 0.9] {
@@ -140,7 +134,6 @@ fn hovering_the_cap_lightens_the_ear() {
         },
     )
     .expect("fits");
-    // A point inside the ear, clear of the pin glyph at 62 % of the cap.
     let (x, y) = (10, 30);
     let before = render(&dark).pixel(x, y).expect("inside").red();
     let after = render(&lit).pixel(x, y).expect("inside").red();
@@ -174,8 +167,6 @@ fn the_cap_pin_says_which_show_mode_is_on() {
         pinned.cap.pinned && !loose.cap.pinned,
         "the two modes differ"
     );
-    // The two plans differ in nothing but the cap, so the pin has to carry the
-    // difference: the mac cap swaps `pin.fill` for `pin` to say which mode is on.
     let (a, b) = (render(&pinned), render(&loose));
     let cap = pinned.cap.rect;
     let mut differing = 0;
@@ -199,9 +190,6 @@ fn the_cap_pin_says_which_show_mode_is_on() {
 }
 #[test]
 fn text_is_measured_at_the_size_it_is_drawn_on_a_scaled_display() {
-    // The planner lays out in points and the renderer rasterises at
-    // point x display scale. Measuring at the point size instead of the device size
-    // drifts on a 150 % or 200 % display: right-aligned rows and ellipses land wrong.
     for scale in [1.0_f64, 2.0] {
         let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, scale)];
         let planned = plan(
@@ -252,10 +240,6 @@ fn text_is_measured_at_the_size_it_is_drawn_on_a_scaled_display() {
 
 #[test]
 fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
-    // The mac header is an `HStack` and the app's rows are `flex items-center`; both
-    // land a mark beside a title on the middle of the capitals. Centring on the whole
-    // ink extent instead drops the mark about a pixel and a half, because Segoe UI's
-    // descender runs much deeper below the baseline than its cap line runs above it.
     let (planned, pixmap) = popover_render(claude_with(vec![window(
         "w",
         "Weekly - all models",
@@ -276,7 +260,6 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
             _ => None,
         })
         .expect("the header title is planned");
-    // Only the header band, so the quota bar below it cannot join the measurement.
     let top = (title.y - 4.0).max(0.0).round() as u32;
     let bottom = (title.y + title.h + 4.0).round() as u32;
     let ink_centre = |x0: f64, x1: f64| -> f64 {
@@ -290,8 +273,6 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
         f64::from(rows[0] + rows[rows.len() - 1]) / 2.0
     };
     let glyph = ink_centre(mark.x, mark.x + mark.w);
-    // The leading capital on its own: cap line to baseline, with no ascender or
-    // descender in the window to widen the band.
     let caps = ink_centre(title.x, title.x + 8.0);
     assert!(
         (glyph - caps).abs() <= 1.0,

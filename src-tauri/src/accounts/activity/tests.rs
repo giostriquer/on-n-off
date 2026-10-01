@@ -17,7 +17,6 @@ fn independent_managers_cannot_refresh_during_activation() {
 #[cfg(unix)]
 #[test]
 fn released_leases_are_free_while_a_spawned_child_still_shares_them() {
-    // A child that another thread spawns meanwhile inherits the descriptor until it execs.
     let root = tempfile::tempdir().unwrap();
     let activation = lease(root.path(), 0, true).unwrap();
     let inherited = activation.duplicate().unwrap();
@@ -31,9 +30,6 @@ fn released_leases_are_free_while_a_spawned_child_still_shares_them() {
     drop(inherited);
 }
 
-/// Whether no read or change of `provider` is running in this process. Only tests that hold no
-/// reservation of their own concurrently, such as the serialized account-operation tests, can rely
-/// on it.
 pub(crate) fn idle(provider: AgentId) -> bool {
     let Some(i) = index(provider) else {
         return true;

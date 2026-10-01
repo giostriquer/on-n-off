@@ -36,7 +36,6 @@ fn backup_item_copies_folders_and_prunes() {
     fs::write(&agent, "x").unwrap();
     let file_copy = store.backup_item(AgentId::Claude, &agent).unwrap().unwrap();
     assert_eq!(fs::read_to_string(file_copy).unwrap(), "x");
-    // Pruning `tdd` must not count or remove `tdd.md` copies that share the prefix.
     let same_stem = root.join("tdd.md");
     fs::write(&same_stem, "agent").unwrap();
     for _ in 0..3 {

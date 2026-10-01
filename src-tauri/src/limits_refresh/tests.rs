@@ -42,8 +42,6 @@ fn cache_freshness_uses_the_configured_interval_and_force_bypasses_it() {
     ));
 }
 
-/// Every automatic read paces itself by this interval. A test build has no user home, so it is
-/// the settings default, never whatever a developer's own settings file says.
 #[test]
 fn a_test_builds_poll_interval_is_the_settings_default() {
     let minutes = crate::settings::AppSettings::default().limits_poll_minutes;
@@ -250,7 +248,6 @@ fn ids(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }
 
-/// Whether each cached entry is archived, in order.
 fn flags(cache: &Cache) -> Vec<bool> {
     let read = cache.read.lock().unwrap();
     read.as_ref()
@@ -261,8 +258,6 @@ fn flags(cache: &Cache) -> Vec<bool> {
         .collect()
 }
 
-/// The shared entries follow the archive once the disk write succeeded, and only the entries it
-/// names; the signed-in card is never flagged. Only an edit that changed an entry replaces them.
 #[test]
 fn archiving_flags_the_shared_entries_after_the_disk_write_and_never_the_signed_in_card() {
     let cache = seeded(vec![
@@ -304,9 +299,6 @@ fn archiving_flags_the_shared_entries_after_the_disk_write_and_never_the_signed_
     assert_eq!(flags(&cache), [false, true, false], "nothing changed");
 }
 
-/// Archiving tells the other window its entries changed and the account list that the archive did;
-/// unarchiving then reads the provider again, once the lock is released, so the account comes back
-/// polled rather than remembered. A change that changed nothing is announced to nobody.
 #[test]
 fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
     let cache = seeded(vec![
@@ -355,12 +347,6 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
     assert!(read_revision::take_announced().is_empty());
 }
 
-/// A read does the archive's part in one place and one order, under the cache lock as Forget
-/// writes: the signed-in account unarchived first, since being signed in unarchives an account, then
-/// the saved accounts polled, then every card flagged once, so no flagged signed-in card is ever
-/// cached and every saved card is flagged. The account list is announced outside the lock, only
-/// when the read unarchived something: a replacement, never a read, so a read served from the cache
-/// polls, writes and announces nothing.
 #[test]
 fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_lock_and_announces_only_a_change(
 ) {

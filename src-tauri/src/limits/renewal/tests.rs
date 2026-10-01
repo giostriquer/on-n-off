@@ -9,7 +9,6 @@ fn now() -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-/// An account's access projection, as the saved read builds it and the identity check hands it over.
 fn projection(key: &str) -> CodexAccess {
     CodexAccess {
         observation_key: key.into(),
@@ -18,7 +17,6 @@ fn projection(key: &str) -> CodexAccess {
     }
 }
 
-/// A term in the shape the endpoint answers a team member, trimmed to what is read.
 fn term(will_renew: bool) -> Value {
     json!({
         "id": "ws-1",
@@ -82,8 +80,6 @@ fn a_cancellation_a_plan_change_and_an_overdue_payment_are_noted_in_that_order()
     );
 }
 
-/// The entitlement's `expires_at` is not `active_until` under another name, and a flag under
-/// `last_active_subscription` is not the term's: neither stands in.
 #[test]
 fn refuses_a_term_it_cannot_stand_behind() {
     let mut no_date = term(true);
@@ -119,7 +115,6 @@ fn a_refusal_is_no_term_and_is_not_asked_again_at_once() {
     let account = projection("renewal-refused");
     MEMO.forget(&account.observation_key);
     assert!(read_backed_off(&account, &refused_url(), now()).is_none());
-    // Within the backoff a working endpoint is not even tried.
     let (url, served) = serve_once("200 OK", &term(true).to_string());
     assert!(read_backed_off(&account, &url, now()).is_none());
     MEMO.forget(&account.observation_key);
@@ -127,8 +122,6 @@ fn a_refusal_is_no_term_and_is_not_asked_again_at_once() {
     served.join().unwrap();
 }
 
-/// A standing answer is served until the day is out, then the account is asked again and the new
-/// answer replaces it.
 #[test]
 fn an_answer_stands_for_a_day_then_is_asked_again_and_replaced() {
     let account = projection("renewal-day");

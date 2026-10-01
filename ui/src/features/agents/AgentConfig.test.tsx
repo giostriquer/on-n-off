@@ -33,8 +33,6 @@ const server = (id: string, origin: McpServerDto["origin"]): McpServerDto => ({
   origin,
 });
 
-// The row names Claude's MCP config file, so it counts the servers read from that file alone —
-// not a plugin's, not one kept for particular projects, not the selected project's.
 it("counts only the servers in the MCP config file beside its path", () => {
   const tab: AgentTabDto = {
     plugins: [],

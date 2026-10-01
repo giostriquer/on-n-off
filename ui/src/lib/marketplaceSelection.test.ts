@@ -67,7 +67,6 @@ const inspect: MarketplaceInspect = {
   ],
 };
 
-/** Invented names: router -> build -> verify, review; build also mentions probe loosely. */
 const deps: MarketplaceInspect = {
   ...inspect,
   plugins: [
@@ -84,7 +83,6 @@ const deps: MarketplaceInspect = {
             needs("verify", "skills/verify"),
             needs("review", "skills/review"),
             needs("probe", "skills/probe", "medium"),
-            // A dependency the marketplace no longer lists is ignored, never crashes.
             needs("ghost", "skills/ghost"),
           ],
         }),
@@ -156,10 +154,8 @@ describe("marketplaceSelection", () => {
       [K("verify"), [K("build")]],
       [K("review"), [K("build"), K("verify")]],
     ]);
-    // Seeds are never their own dependency; medium mentions and unknown targets are skipped.
     expect(requiredClosure(deps, [K("verify"), K("review")]).size).toBe(0);
     expect(requiredClosure(deps, [K("probe")]).size).toBe(0);
-    // Declined keys are neither added nor traversed.
     const partial = requiredClosure(deps, [K("router")], new Set([K("build")]));
     expect([...partial.keys()]).toEqual([]);
   });
@@ -172,14 +168,12 @@ describe("marketplaceSelection", () => {
     expect(after.autoAdded.has(K("build"))).toBe(false);
     expect(after.declined.size).toBe(0);
 
-    // Explicitly checking an auto-added item promotes it: it no longer follows its parent.
     const promoted = checkWithDeps(after, deps, K("verify"));
     expect(promoted.autoAdded.has(K("verify"))).toBe(false);
     const parentGone = uncheck(promoted, deps, K("build"));
     expect([...parentGone.keys].sort()).toEqual([K("review"), K("verify")].sort());
     expect(parentGone.autoAdded.get(K("review"))).toEqual([K("verify")]);
 
-    // Unchecking a parent drops what only it required.
     const cascade = uncheck(after, deps, K("build"));
     expect(cascade.keys.size).toBe(0);
     expect(cascade.autoAdded.size).toBe(0);
@@ -191,23 +185,19 @@ describe("marketplaceSelection", () => {
     const declined = uncheck(withBuild, deps, K("verify"));
     expect(declined.keys.has(K("verify"))).toBe(false);
     expect(declined.declined.has(K("verify"))).toBe(true);
-    // review stays: build still requires it directly.
     expect(declined.keys.has(K("review"))).toBe(true);
     expect(declined.autoAdded.get(K("review"))).toEqual([K("build")]);
 
-    // Another parent arriving does not override the user's "no".
     const more = checkWithDeps(declined, deps, K("router"));
     expect(more.keys.has(K("verify"))).toBe(false);
     expect(more.declined.has(K("verify"))).toBe(true);
 
-    // Unchecking and re-checking the parent brings the dependency back.
     const off = uncheck(more, deps, K("build"));
     expect(off.declined.has(K("verify"))).toBe(false);
     const on = checkWithDeps(off, deps, K("build"));
     expect(on.keys.has(K("verify"))).toBe(true);
     expect(on.autoAdded.get(K("verify"))).toEqual([K("build")]);
 
-    // Checking the declined item itself is always honoured.
     const explicit = checkWithDeps(declined, deps, K("verify"));
     expect(explicit.keys.has(K("verify"))).toBe(true);
     expect(explicit.declined.has(K("verify"))).toBe(false);

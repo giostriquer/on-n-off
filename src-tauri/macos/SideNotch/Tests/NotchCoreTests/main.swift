@@ -36,22 +36,16 @@ final class NotchTests {
       workHeight: 1084, scale: scale, mirrored: mirrored)
   }
 
-  /// The ring used to jump to a light amber at 70 %, so a meter that was filling up went paler and
-  /// yellower exactly as it ran out. Whatever shape the ramp takes, the invariant is that a fuller
-  /// window never sits further from the trip red than a less full one.
   func testTheMeterRampOnlyEverMovesTowardTheTripRed() {
     func distanceToTrip(_ ink: Ink) -> Double {
       let dr = ink.r - tripInk.r, dg = ink.g - tripInk.g, db = ink.b - tripInk.b
       return (dr * dr + dg * dg + db * db).squareRoot()
     }
-    // Every accent the meter can be handed, so a new provider is covered the day it lands.
     for base in railProviderOrder.map(providerInk) + [fableInk, creditsInk] {
       var previous = Double.infinity
       for step in 0...100 {
         let ink = meterInk(quota("weekly", Double(step)), base: base, at: now)
         let distance = distanceToTrip(ink)
-        // Inside the band every step must move, not merely fail to retreat: a ramp that stopped
-        // interpolating would still satisfy a non-increasing check.
         let strict = (71...89).contains(step) && base != tripInk
         if distance > previous + 0.000_001 || (strict && distance >= previous) {
           failures += 1
@@ -61,20 +55,12 @@ final class NotchTests {
       }
       expectEqual(meterInk(quota("weekly", 70), base: base, at: now), base)
       expectEqual(meterInk(quota("weekly", 90), base: base, at: now), tripInk)
-      // Pins the easing itself: a quarter of the way through the band is half the way to red.
-      // A linear blend would put 25 % here, and nothing else in this check would notice.
       expectEqual(
         meterInk(quota("weekly", 75), base: base, at: now), base.mixed(toward: tripInk, 0.5))
     }
-    // An unreadable window stays grey rather than joining the ramp.
     expectEqual(meterInk(nil, base: claudeInk, at: now), unreadableInk)
   }
 
-  /// The host decides what each ring shows (`NotchProvider` in `side_notch/model.rs`); the helper
-  /// finds those windows by id and lists every window in the order it came.
-  /// The popover lists the windows in the order they came, which the host pins
-  /// (`side_notch/model/tests/projection.rs`); here they come in another order on purpose, so only
-  /// a lookup by id finds the named ones: neither the first window nor the first per-model one.
   func testTheRingsShowTheWindowsTheHostNamed() {
     let fable = quota("model", 58, label: "Weekly · Fable", id: "weekly_scoped:Fable")
     let entry = provider(
@@ -87,20 +73,17 @@ final class NotchTests {
     expectEqual(entry.headline?.usedPercent, 41)
     expectEqual(entry.inner, InnerQuota.fable(fable))
     expectEqual(entry.inner?.quota.usedPercent, 58)
-    // Nothing named, nothing on the rings.
     let unnamed = provider(windows: [quota("weekly", 41)])
     expectNil(unnamed.headline)
     expectNil(unnamed.inner)
   }
 
-  /// The share as the host sends it: the reader's meter and the amounts already worded.
   func credits(
     _ percent: Double, reset: String? = "2027-02-01T12:00:00Z",
     left: String = "17,000 of 25,000 left", renewed: String = "25,000 of 25,000 left"
   ) -> WorkspaceCredits {
     WorkspaceCredits(usedPercent: percent, resetsAt: reset, left: left, renewed: renewed)
   }
-  /// A reset's date as the viewer reads it, built from the same instant in local time.
   func localDate(_ instant: String) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US")
@@ -117,12 +100,9 @@ final class NotchTests {
     expectEqual(entry.inner, InnerQuota.workspaceShare(credits(32).quota))
     expectEqual(entry.inner?.quota.percent(at: now), 32)
     expectEqual(entry.inner?.quota.label, "Workspace credits")
-    // The weekly stays the headline: the share never joins the windows the popover lists.
     expectEqual(entry.windows.map(\.label), ["Weekly · all models"])
   }
 
-  /// The host words the amounts; the helper only picks the renewed wording once the reset has
-  /// passed, and formats the reset's date in local time.
   func testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset() {
     let pending = credits(32)
     expectEqual(pending.amounts(at: now), "17,000 of 25,000 left")
@@ -131,7 +111,6 @@ final class NotchTests {
     expectEqual(credits(100, left: "limit reached").amounts(at: now), "limit reached")
     expectEqual(credits(32, reset: nil).note(at: now), "")
     expectEqual(credits(32, reset: nil).amounts(at: now), "17,000 of 25,000 left")
-    // Past its reset the share has renewed: nothing used, all of it left, and when it reset.
     let renewed = credits(100, reset: "2026-06-15T12:00:00Z", left: "limit reached")
     expectEqual(renewed.quota.percent(at: now), 0)
     expectEqual(renewed.quota.isReached(at: now), false)
@@ -139,8 +118,6 @@ final class NotchTests {
     expectEqual(renewed.note(at: now), "Reset \(localDate("2026-06-15T12:00:00Z"))")
   }
 
-  /// A paused account's popover says its values are last observed whenever it shows any: remembered
-  /// windows or a remembered share.
   func testAPausedAccountWithOnlyAShareStillHasObservedValues() {
     let share = Provider(
       provider: .codex, status: "failed", currentAccount: true, message: "Paused",
@@ -152,12 +129,10 @@ final class NotchTests {
 
   func testAPausedRingSaysItsReadingIsTheLastObserved() {
     let weekly = [quota("weekly", 46)]
-    // The host keeps the headline for every status whose read did not answer.
     for status in ["failed", "signedOut", "unauthenticated", "unsupported"] {
       expectEqual(provider(windows: weekly, status: status, headline: "weekly").ringIsLastObserved, true)
     }
     expectEqual(provider(windows: weekly, status: "ok", headline: "weekly").ringIsLastObserved, false)
-    // A ring with nothing to lead with shows the dash, which is no reading at all.
     expectEqual(provider(windows: weekly, status: "failed").ringIsLastObserved, false)
   }
 
@@ -167,19 +142,16 @@ final class NotchTests {
       quota("model", 58, label: "Weekly · Fable", reset: "2026-01-01T00:00:00Z"),
     ])
     expectEqual(entry.windows[0].percent(at: now), 41)
-    // A window past its own reset is back at zero, not unknown: the quota renewed.
     expectEqual(entry.windows[1].percent(at: now), 0)
     expectEqual(entry.windows[1].text(at: now), "0%")
     expectEqual(quota("weekly", 0.4, reset: "invalid").percent(at: now), 0.4)
     expectEqual(quota("weekly", 9, reset: "2027-01-15T08:00:00.000Z").percent(at: now), 0)
-    // A figure that is not a usable percentage stays unknown, reset or not.
     expectNil(quota("weekly", .nan).percent(at: now))
     expectNil(quota("weekly", 101, reset: "2026-01-01T00:00:00Z").percent(at: now))
     expectEqual(quota("weekly", .nan).text(at: now), "—")
     expectEqual(quota("weekly", 100).isReached(at: now), true)
     expectEqual(quota("weekly", 99.49).isReached(at: now), false)
     expectEqual(quota("weekly", 41, reset: "2027-02-01T00:00:00Z").note(at: now).hasPrefix("Resets "), true)
-    // The renewed note says when, and never recites the spent cycle's figure.
     let renewed = quota("weekly", 97, reset: "2026-01-01T00:00:00Z").note(at: now)
     expectEqual(renewed.hasPrefix("Reset "), true)
     expectEqual(renewed.contains("last seen"), false)
@@ -204,7 +176,6 @@ final class NotchTests {
 
   func testRailFramesFollowTheSelectedUUIDOnEveryEdge() {
     let displays = [display("external"), display("retina", x: -1728)]
-    // Four cells: 4 × 73 + 3 × 8 + 2 × 40 = 396.
     expectEqual(
       notchRailFrame(settings: rail("retina"), displays: displays),
       CGRect(x: -76, y: 377, width: 76, height: 396))
@@ -225,7 +196,6 @@ final class NotchTests {
     expectEqual(two.railProviders, [.claude, .cursor])
     expectEqual(notchRailFrame(settings: two, displays: displays)?.height, 234)
     expectNil(notchRailFrame(settings: rail("main", providers: []), displays: displays))
-    // The pull-request cell counts like a provider and is on by default, listing only "Mine".
     let defaults = Settings(enabled: true, displayId: "main")
     expectEqual(defaults.pullRequests.enabled, true)
     expectEqual(defaults.railCells.count, 5)
@@ -319,7 +289,6 @@ final class NotchTests {
     let bar = railLayout(size: .standard, displayScale: 1, edge: .top)
     expectEqual(bar.thickness, 73)
     expectEqual(railCellFrames(edge: .top, layout: bar, count: 2)[1].minX, 40 + 76 + 8)
-    // The block of cells is centred, so both ends of the rail read the same.
     expectEqual(cells[0].minY, layout.length(count: 4) - cells[3].maxY)
 
     let railFrame = notchRailFrame(settings: rail("main"), displays: [main])!
@@ -327,7 +296,6 @@ final class NotchTests {
     let size = CGSize(width: 300, height: 420)
     let frame = popoverFrame(cell: cell, edge: .right, size: size, display: main, scale: 1)
     expectEqual(frame.maxX, cell.minX - 2)
-    // An odd cell height puts the cell's centre on a half point; the popover snaps to the pixel grid.
     expectEqual(abs(frame.midY - cell.midY) <= 0.5, true)
     let topCell = CGRect(x: 690, y: 33, width: 76, height: 73)
     let below = popoverFrame(cell: topCell, edge: .top, size: size, display: main, scale: 1)
@@ -345,7 +313,6 @@ final class NotchTests {
     let valid =
       #"{"version":4,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[]}"#
     expectEqual(try HostMessage.decode(Data(valid.utf8)).sequence, 1)
-    // An older host's message is refused rather than drawn in part, whichever version it speaks.
     for older in ["1", "2", "3"] {
       expectThrows(
         try HostMessage.decode(
@@ -391,8 +358,6 @@ final class NotchTests {
     expectEqual(maxSessions, 12)
   }
 
-  /// The host names the ring's windows by id. A message naming a window it did not send, or putting
-  /// a share it did not send on the inner ring, is refused rather than drawn with an empty ring.
   func testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames() throws {
     let valid =
       #"{"version":4,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]}},"displays":[]},"providers":[{"provider":"claude","status":"ok","currentAccount":true,"windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7,"observedAt":""},{"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13,"observedAt":""}],"headlineWindowId":"weekly_all","innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"},"sessions":[]}]}"#
@@ -422,12 +387,11 @@ final class NotchTests {
       of: "\"providers\":[]}",
       with: "\"providers\":[],\"pullRequests\":{\"status\":\"ok\",\"hint\":null,\"stale\":false,\"lists\":[{\"id\":\"mine\",\"total\":1,\"items\":[\(pull)]},{\"id\":\"assigned\",\"total\":1,\"items\":[\(pull)]}]}}")
     let decoded = try HostMessage.decode(Data(withPulls.utf8))
-    expectEqual(decoded.pullRequests?.count, 1)  // the same pull request in two lists counts once
+    expectEqual(decoded.pullRequests?.count, 1)
     expectEqual(decoded.pullRequests?.ready, 1)
     expectEqual(decoded.pullRequests?.lists.first?.items.first?.link?.host, "github.com")
     expectEqual(decoded.pullRequests?.lists.first?.items.first?.ci, CiState.success)
     expectEqual(decoded.pullRequests?.lists.first?.items.first?.reviewDecision, ReviewDecision.approved)
-    // Values a newer host may send decode to `unknown` instead of rejecting the message.
     let newer = withPulls.replacingOccurrences(of: "\"ci\":\"success\"", with: "\"ci\":\"skipped\"")
       .replacingOccurrences(of: "\"mergeKind\":\"ready\"", with: "\"mergeKind\":\"frozen\"")
     let lenient = try HostMessage.decode(Data(newer.utf8))

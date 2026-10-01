@@ -44,8 +44,6 @@ const tab: AgentTabDto = {
       togglable: true,
     },
   ],
-  // One token per searchable field, shared with nothing else, so a query can only match through
-  // the field it is meant to: drop one from the haystack and exactly one assertion below fails.
   hooks: [
     {
       id: ":settings.json:pre_tool_use:0:0",
@@ -159,8 +157,6 @@ describe("filterTab hooks", () => {
   });
 
   it("leaves the synthetic id out of the haystack", () => {
-    // `…:<event>:<group>:<index>` is a key, not something a user types: searching its digits or
-    // its snake_cased event would otherwise match rows that show neither.
     expect(ids("0")).toEqual([]);
     expect(ids("pre_tool_use")).toEqual([]);
   });

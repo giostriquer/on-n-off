@@ -65,7 +65,6 @@ fn summary_key_changes_with_the_rate_table() {
     );
 }
 
-/// A fold or a clear rewrites the history; a summary counted with the old one must not serve.
 #[test]
 fn summary_key_changes_with_the_usage_history() {
     let input = UsageSummaryInput {

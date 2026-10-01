@@ -1,24 +1,3 @@
-//! Usage kept after the agents delete their transcripts.
-//!
-//! Claude Code deletes a transcript once it is older than `cleanupPeriodDays` (30 by default), so
-//! a read that only ever parses transcripts loses that usage for good. Records older than a
-//! cutoff are folded here instead: summed into rows keyed by a 15-minute UTC slot, provider,
-//! model and how the record is priced, holding token totals, record count, provider-reported
-//! cost and the session ids seen in the slot. Every UTC offset in use is a multiple of 15
-//! minutes, so a slot never straddles a local midnight or hour, and day and hour buckets in any
-//! time zone come out as they would from the records themselves. Tokens are kept rather than
-//! dollars, so a new price table still prices history.
-//!
-//! The file also holds the [`Watermark`]: rows cover every record before it, and a read counts a
-//! transcript's records only from it onward. Nothing below the watermark is ever counted twice,
-//! and a transcript entirely below it is never parsed again. The watermark only moves forward,
-//! to the UTC midnight [`FOLD_AFTER_DAYS`] before now, well inside every provider's retention.
-//!
-//! This is user data, not a cache: it cannot be rebuilt once the transcripts are gone. A file
-//! that does not read is never written over: the previous good file is kept as a backup and read
-//! in its place, and the unreadable one is copied aside, never deleted. A file a newer on-n-off
-//! wrote is left alone entirely, and a history is written only once it is known to read back.
-
 use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -34,23 +13,16 @@ use super::transcripts::{
 
 pub const USAGE_HISTORY_VERSION: u32 = 1;
 
-/// How old a record must be before it is folded. Records newer than this stay in the transcripts,
-/// where a parser fix still reaches them.
 pub const FOLD_AFTER_DAYS: i64 = 7;
 
 const SLOT_MS: i64 = 15 * 60 * 1000;
 pub const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// A request whose input (fresh, cached and cache writes) exceeds this is flagged in its row.
-/// LiteLLM lists a higher `*_above_200k_tokens` rate for some models; on-n-off does not apply it
-/// yet, and a slot's sum could not say which requests crossed the line once folded.
 const LONG_CONTEXT_INPUT_TOKENS: u64 = 200_000;
 
 const REPORTED_FLAG: u8 = 1;
 const LONG_CONTEXT_FLAG: u8 = 2;
 
-/// The instant before which the history holds every record and the transcripts count for
-/// nothing. [`Watermark::NONE`] until the first fold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Watermark(i64);
 
@@ -66,37 +38,29 @@ impl Watermark {
         (self != Self::NONE).then_some(self.0)
     }
 
-    /// A record from `at_ms` is in the history, not counted from its transcript.
     pub fn is_folded(self, at_ms: i64) -> bool {
         at_ms < self.0
     }
 
-    /// Every record a transcript holds is in the history, so the transcript need not be read:
-    /// its newest record is, or it was last written well before the watermark.
     pub fn holds_only_folded(self, mtime_ms: i64, newest_record_ms: Option<i64>) -> bool {
         newest_record_ms.is_some_and(|newest| self.is_folded(newest))
             || mtime_ms < self.0.saturating_sub(MTIME_SLACK_MS)
     }
 }
 
-/// The records of one slot that share a provider, a model and a way of being priced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FoldedRow {
     pub slot_start_ms: i64,
     pub provider: UsageProvider,
     pub model: String,
-    /// Every record carried a provider-reported cost, summed in `reported_cost_usd`; the others
-    /// are priced from their tokens at read time.
     pub reported: bool,
     pub long_context: bool,
     pub totals: TokenTotals,
     pub records: u64,
     pub reported_cost_usd: f64,
-    /// Sorted, each once, never empty strings.
     pub sessions: Vec<String>,
 }
 
-/// One fold: which records it took and which parser read them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FoldSegment {
@@ -106,7 +70,6 @@ pub struct FoldSegment {
     pub folded_at_ms: i64,
 }
 
-/// Rows sorted by slot, all before the watermark.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UsageHistory {
     folded_through_ms: Option<i64>,
@@ -124,7 +87,6 @@ impl UsageHistory {
         &self.rows
     }
 
-    /// The rows whose slot starts in `[start_ms, end_ms)`.
     pub fn rows_between(&self, start_ms: i64, end_ms: i64) -> &[FoldedRow] {
         let first = self
             .rows
@@ -137,10 +99,6 @@ impl UsageHistory {
         self.rows.first().map(|row| row.slot_start_ms)
     }
 
-    /// Folds the records from the watermark up to `cutoff_ms` and moves the watermark there.
-    /// `records` must already be one per copy group (`transcripts::richest_copies`); records
-    /// before the watermark are already folded and are skipped. A cutoff at or before the
-    /// watermark changes nothing.
     pub fn fold<'a>(
         &mut self,
         records: impl IntoIterator<Item = &'a UsageRecord>,
@@ -190,7 +148,6 @@ impl UsageHistory {
             })
             .collect();
         rows.sort_by(|a, b| row_order(a).cmp(&row_order(b)));
-        // Every new slot starts at or after the old watermark, past every row already held.
         self.rows.extend(rows);
         self.record_segment(from.ms(), cutoff_ms, folded_at_ms);
         self.folded_through_ms = Some(cutoff_ms);
@@ -245,8 +202,6 @@ fn input_tokens(totals: &TokenTotals) -> u64 {
     totals.uncached_input_tokens + totals.cached_input_tokens + totals.cache_creation_tokens
 }
 
-/// The UTC midnight [`FOLD_AFTER_DAYS`] before `now_ms`. Moving once a day keeps folds, and the
-/// transcript reads they need, to one a day.
 pub fn fold_cutoff_ms(now_ms: i64) -> i64 {
     (now_ms - FOLD_AFTER_DAYS * DAY_MS).div_euclid(DAY_MS) * DAY_MS
 }
@@ -261,8 +216,6 @@ pub fn history_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-history.json")
 }
 
-/// The history file and what it holds. A missing file is an empty history; one that does not
-/// read, with no readable backup, is held apart and never written.
 #[derive(Debug)]
 pub struct HistoryStore {
     path: PathBuf,
@@ -273,8 +226,6 @@ pub struct HistoryStore {
 enum StoreState {
     Readable {
         history: UsageHistory,
-        /// Read from the backup because the file itself did not read; the next save copies
-        /// that file aside first.
         recovered: bool,
     },
     Unreadable,
@@ -286,7 +237,6 @@ impl HistoryStore {
         Self { path, state }
     }
 
-    /// `None` when the file does not read.
     pub fn history(&self) -> Option<&UsageHistory> {
         match &self.state {
             StoreState::Readable { history, .. } => Some(history),
@@ -294,14 +244,11 @@ impl HistoryStore {
         }
     }
 
-    /// [`Watermark::NONE`] when the file does not read: every record counts from its transcript.
     pub fn watermark(&self) -> Watermark {
         self.history()
             .map_or(Watermark::NONE, UsageHistory::watermark)
     }
 
-    /// Folds into a copy and saves it; the store holds the fold only once the file has it, so a
-    /// save that fails changes nothing. A file that does not read is never folded over.
     pub fn fold<'a>(
         &mut self,
         records: impl IntoIterator<Item = &'a UsageRecord>,
@@ -362,10 +309,6 @@ fn save(path: &Path, history: &UsageHistory, recovered: bool) -> io::Result<()> 
     save_with(path, history, recovered, atomic_write)
 }
 
-/// Writes `history`, keeping the file it replaces as the backup. A `recovered` history came from
-/// the backup because the file did not read: that file is copied aside under a new name first,
-/// and the backup is not replaced with it. Nothing is touched unless the encoded history reads
-/// back as itself. `write_file` writes the file itself, so a test can fail it.
 fn save_with(
     path: &Path,
     history: &UsageHistory,
@@ -403,16 +346,12 @@ fn set_aside(path: &Path) -> io::Result<()> {
         }
         attempt += 1;
     };
-    // Copied, not moved: the file stays where it is until the new one replaces it, so a write
-    // that fails leaves it to fall back to the backup again.
     match std::fs::copy(path, target) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
         _ => Ok(()),
     }
 }
 
-/// The history file's backup, the copies set aside and any temporary left by an interrupted
-/// write: every sibling named after it.
 fn copies_of(path: &Path) -> io::Result<Vec<PathBuf>> {
     let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
         return Ok(Vec::new());
@@ -433,7 +372,6 @@ fn copies_of(path: &Path) -> io::Result<Vec<PathBuf>> {
     }
 }
 
-/// The room the history takes on disk: the file and every copy of it.
 pub fn history_bytes(path: &Path) -> u64 {
     copies_of(path)
         .unwrap_or_default()
@@ -445,10 +383,8 @@ pub fn history_bytes(path: &Path) -> u64 {
         .sum()
 }
 
-/// Forgets every folded row: the file, its backup, and any copy set aside.
 pub fn clear_history(path: &Path) -> io::Result<()> {
     let copies = copies_of(path)?;
-    // The file goes last, so a clear cut short leaves the history readable rather than half gone.
     for target in copies.iter().map(PathBuf::as_path).chain([path]) {
         match std::fs::remove_file(target) {
             Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
@@ -458,8 +394,6 @@ pub fn clear_history(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Changes whenever the history file is written or removed, so a stored summary counted with
-/// one history is never served with another.
 pub fn history_fingerprint(path: &Path) -> String {
     std::fs::metadata(path).map_or_else(
         |_| "none".to_string(),
@@ -496,8 +430,6 @@ struct HistoryFile {
     rows: Vec<WireRow>,
 }
 
-/// `[slot start, provider, model index, flags, uncached input, cached input, cache writes,
-/// one-hour cache writes, output, reasoning, records, reported cost, session indexes]`
 #[derive(Serialize, Deserialize)]
 struct WireRow(
     i64,
@@ -578,9 +510,6 @@ impl Interner {
     }
 }
 
-/// Every row or none: a row that does not read makes the whole file unreadable, because writing
-/// the rest back would lose that row's usage for good. So do rows out of slot order, or at or
-/// past the watermark, which a read would count a second time from the transcripts.
 fn decode(raw: &str) -> Result<UsageHistory, DecodeError> {
     let version = serde_json::from_str::<VersionOnly>(raw)
         .map_err(|_| DecodeError::Damaged)?

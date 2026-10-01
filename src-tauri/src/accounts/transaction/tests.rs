@@ -212,8 +212,6 @@ fn in_workspace(user: &str, refresh: &str, workspace: &str) -> Login {
         account: Value::Null,
     }
 }
-/// A running client: `during` runs when on-n-off persists its journal, `after_write` replaces the
-/// new login right after on-n-off publishes it, and `in_verify` writes while verification runs.
 #[derive(Default)]
 struct Client {
     during: Option<Option<Login>>,
@@ -280,7 +278,6 @@ impl Native for Running {
         self.client.renewing
     }
 }
-/// Profile a (the signed-in login, in workspace one) and profile b (in workspace two).
 fn running(client: Client) -> (Database, Running, String, String) {
     let native = Store {
         live: RefCell::new(Some(in_workspace("a", "cli-rotated-a", "one"))),
@@ -403,9 +400,6 @@ fn reads_the_published_login_back_under_the_native_locks() {
     assert_eq!(native.readback_locked.get(), Some(true));
 }
 
-/// Verification asks the provider's own client, which takes the native locks itself when it renews
-/// the login: run under them, it would wait on on-n-off while on-n-off waited on it. So neither
-/// activation nor recovery verifies while it holds them.
 #[test]
 fn verification_never_runs_under_the_native_locks() {
     let (mut db, native, _, b) = running(Client::default());

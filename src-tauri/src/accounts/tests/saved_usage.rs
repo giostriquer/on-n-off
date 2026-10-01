@@ -1,4 +1,3 @@
-//! Reading the usage of saved accounts beside the CLI's own.
 use super::super::usage::FetchResult;
 use super::fixture::{claude, identity, Harness};
 use crate::dto::{AgentId, ProviderLimitsDto};
@@ -19,8 +18,6 @@ fn reading(key: &str) -> ProviderLimitsDto {
     })
 }
 
-/// A usage refresh resolves the provider's store through the context and reads every saved
-/// account but the one the CLI is signed in with, whose reading is the CLI's own.
 #[test]
 fn a_usage_refresh_reads_every_saved_account_but_the_signed_in_one() {
     let harness = Harness::new();
@@ -48,11 +45,9 @@ fn a_usage_refresh_reads_every_saved_account_but_the_signed_in_one() {
         .collect();
     assert_eq!(cards, [key.as_str()]);
     assert_eq!(*harness.native.resolved.borrow(), [AgentId::Claude]);
-    // This harness gives Claude no homes, so the saved login stays in the vault it was read from.
     assert_eq!(harness.in_vault(&b), Some("b1".into()));
 }
 
-/// A device that never saved an account reads nothing and resolves nothing.
 #[test]
 fn a_usage_refresh_without_a_vault_reads_nothing() {
     let harness = Harness::new();
@@ -66,8 +61,6 @@ fn a_usage_refresh_without_a_vault_reads_nothing() {
     assert!(harness.native.resolved.borrow().is_empty());
 }
 
-/// An archived account is dormant: a usage refresh never reads it, and so never renews it either,
-/// even a login on-n-off owns, since a private renewal runs only inside a read.
 #[test]
 fn a_usage_refresh_leaves_archived_accounts_alone() {
     let harness = Harness::new();

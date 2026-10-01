@@ -115,13 +115,6 @@ export function Overview({
       ) : null}
 
       <div className="flex flex-col gap-3">
-        {/* One column per ~320px of width. The list is as long as the catalog, so a single column
-            ran to several screens while the space beside it sat empty. The card cannot scroll on
-            its own — `layout-contract.test.ts` allows exactly one page scroller — so columns are
-            how it is kept near a screen. `overflow-hidden` here and `-mb-px` on the column box are
-            a pair: the first gives the section a block formatting context so the second shortens
-            it by a pixel instead of collapsing, which swallows the tallest column's last row
-            border into the card's own. Drop either and that border doubles. */}
         <section className="overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]">
           <header className="flex items-baseline justify-between gap-3 border-b border-[var(--hair)] px-3 py-2">
             <span className="shrink-0 text-[12px] font-semibold tracking-[0.03em] uppercase">Live on this scope</span>
@@ -155,8 +148,6 @@ export function Overview({
                     onToggle={() => onToggle(row, !row.enabled)}
                   />
                 ) : (
-                  // Matches `.rocker.skill` (22px, 70px): a shorter row would knock this column's
-                  // hairlines out of register with its neighbours' for every row below it.
                   <span className="font-mono flex h-[22px] min-w-[70px] shrink-0 items-center gap-[7px] text-[11px] text-[var(--mute)]">
                     <span className="size-2 shrink-0 rounded-full bg-[var(--mute)]" aria-hidden="true" />
                     {row.kind === "plugin" ? "fixed" : "with plugin"}

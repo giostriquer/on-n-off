@@ -44,8 +44,6 @@ pub fn parse_claude_projects(text: &str) -> Vec<String> {
 }
 
 pub fn parse_codex_projects(text: &str) -> Vec<String> {
-    // A document, not a value: `toml::Value`'s own `FromStr` reads a single TOML value, so a file
-    // that opens with a table header fails to parse at all and every project is lost.
     let Ok(document) = text.parse::<toml::Table>() else {
         return Vec::new();
     };
@@ -56,7 +54,6 @@ pub fn parse_codex_projects(text: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `raw` with a leading `~` standing for `home`; left as written when there is none.
 fn expand_project_path_in(raw: &str, home: Option<&Path>) -> PathBuf {
     let raw = raw.trim();
     if let Some(rest) = raw
@@ -87,7 +84,6 @@ pub fn inspect_project(path: &Path, agent: AgentId) -> ProjectDto {
     inspect_project_in(path, agent, crate::paths::user_home().ok().as_deref())
 }
 
-/// [`inspect_project`] under `home`, which a relative path's `~` and Claude's view both read.
 fn inspect_project_in(path: &Path, agent: AgentId, home: Option<&Path>) -> ProjectDto {
     let resolved = if path.is_absolute() {
         path.to_path_buf()
@@ -99,7 +95,6 @@ fn inspect_project_in(path: &Path, agent: AgentId, home: Option<&Path>) -> Proje
         plugins: vec![],
         user_skills: vec![],
         mcp_servers: vec![],
-        // Hooks are read from user settings only, never from a project overlay.
         hooks: vec![],
     };
     overlay_project_in(&mut tab, &resolved, agent, home);
@@ -145,8 +140,6 @@ pub fn overlay_project(tab: &mut AgentTabDto, project: &Path, agent: AgentId) {
     );
 }
 
-/// [`overlay_project`] under `home`: Claude's view also reads `<home>/.claude.json`, where it
-/// keeps its servers for particular projects. `None` when there is no home to read.
 fn overlay_project_in(tab: &mut AgentTabDto, project: &Path, agent: AgentId, home: Option<&Path>) {
     let claude_json = if agent == AgentId::Claude {
         home.and_then(|home| fs::read_to_string(home.join(".claude.json")).ok())
@@ -158,7 +151,6 @@ fn overlay_project_in(tab: &mut AgentTabDto, project: &Path, agent: AgentId, hom
     overlay_project_with(tab, project, agent, &claude_json);
 }
 
-/// [`overlay_project`] with `~/.claude.json` already read, for Claude; `Null` for the others.
 fn overlay_project_with(
     tab: &mut AgentTabDto,
     project: &Path,
@@ -257,8 +249,6 @@ fn project_skill_dirs(project: &Path, agent: AgentId) -> Vec<PathBuf> {
     }
 }
 
-/// Where on-n-off writes project-scoped items for a provider: the first of its skill dirs,
-/// plus `.claude/agents` for Claude subagents.
 pub(crate) fn project_item_roots(project: &Path, agent: AgentId) -> crate::adapter::ItemRoots {
     let skills = project_skill_dirs(project, agent)
         .into_iter()
@@ -285,7 +275,6 @@ fn project_mcp_servers(project: &Path, agent: AgentId) -> Vec<McpServerDto> {
         servers.extend(as_project_mcp(parse_claude_json(&text)));
     }
     match agent {
-        // Its `~/.claude.json` entry is read with the user's view in `overlay_project_with`.
         AgentId::Claude => {}
         AgentId::Codex => {
             let config = project.join(".codex").join("config.toml");

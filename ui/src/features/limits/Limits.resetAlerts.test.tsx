@@ -6,8 +6,6 @@ import type { AgentId, ResetAlert } from "$lib/types";
 import { Limits } from "./Limits";
 import { okClaude, okCodex } from "./readingFixtures";
 
-// A Codex account's banked reset alert, turned on, changed and off from its card's menu.
-
 const readAccounts = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
 const requestNotificationPermission = vi.hoisted(() => vi.fn());

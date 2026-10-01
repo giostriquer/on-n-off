@@ -1,11 +1,6 @@
-//! The windows of a Claude usage report (`parse_claude`): the normalized `limits[]` array, and the
-//! legacy top-level fields it replaced.
 use super::*;
 use serde_json::json;
 
-/// Sanitised capture from 2026-08-17 (Max plan). Legacy fields *and* the normalized
-/// `limits[]` array are present; the legacy numbers are deliberately different so the
-/// test proves which one wins.
 const CAPTURED: &str = r#"{
       "five_hour": {"utilization": 99.0, "resets_at": "2026-08-18T04:59:59.692639+00:00"},
       "seven_day": {"utilization": 98.0, "resets_at": "2026-08-24T13:59:59.692659+00:00"},
@@ -139,8 +134,6 @@ fn empty_limits_array_falls_back_to_legacy_fields() {
     assert_eq!(windows[0].id, "session");
 }
 
-/// The signed-in card is Claude Code's own report for the user's config dir, as the environment
-/// places it: here a test build's disposable home, whose `.claude` the `claude` it starts is handed.
 #[test]
 fn the_signed_in_card_is_claude_codes_report_in_the_users_own_config_dir() {
     use crate::cli_stub::CliStub;
@@ -193,15 +186,12 @@ fn the_signed_in_card_is_claude_codes_report_in_the_users_own_config_dir() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A user who has not run Claude Code yet has no config dir for it to work in: the read still runs,
-/// and reads the store as signed out.
 #[test]
 fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
     use crate::cli_stub::CliStub;
     let home = crate::paths::scratch_dir("limits-claude-no-config-dir");
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    // Signed out, Claude Code prints no report from `/usage`, and says so from `auth status`.
     let stub = CliStub::new("claude")
         .stdout(r#"{"loggedIn":false,"authMethod":"none"}"#)
         .write(&bin);
@@ -217,7 +207,6 @@ fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
         "{:?}",
         cards[0].message
     );
-    // Claude Code answered: the card is not the one a missing `claude` gets.
     assert_eq!(
         cards[0].message.as_deref(),
         Some("Sign in with `claude` to see subscription limits.")
@@ -225,7 +214,6 @@ fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Without Claude Code there is nothing to read, and the card says what would be.
 #[test]
 fn without_claude_code_the_card_asks_for_it() {
     let home = crate::paths::scratch_dir("limits-claude-not-installed");

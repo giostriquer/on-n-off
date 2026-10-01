@@ -12,8 +12,6 @@ export function useNotchState() {
       const floor = Math.max(newestRevision.current, cached?.revision ?? 0);
       if (snapshot.revision < floor) return;
       newestRevision.current = snapshot.revision;
-      // A read started before a save/event is no longer authoritative. Cancelling
-      // the query also prevents its eventual IPC result from replacing this state.
       await client.cancelQueries({ queryKey: ["side-notch"] });
       if (snapshot.revision < newestRevision.current) return;
       client.setQueryData(["side-notch"], snapshot);

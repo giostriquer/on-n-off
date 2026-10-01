@@ -1,6 +1,3 @@
-//! The notch projection: what each provider cell lists, leads with and shows inside, decided once
-//! for the macOS helper and the Windows painter alike.
-
 use super::*;
 use crate::dto::Reading;
 
@@ -28,8 +25,6 @@ fn model(id: &str, label: &str) -> LimitWindowDto {
     window(id, label, LimitWindowKind::Model)
 }
 
-/// The signed-in account's card for `provider` when a read reports `windows`, which the pipeline
-/// puts in the order every card lists them.
 fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
     crate::limits::signed_in_card(
         provider,
@@ -71,8 +66,6 @@ fn claudes_ring_leads_with_its_weekly_and_its_fable_window_fills_the_inner_ring(
     }
 }
 
-/// Fable is Claude's window and is known by its label: another model's window, or a window of the
-/// same name from another provider, leaves the inner ring empty.
 #[test]
 fn only_claudes_window_labelled_weekly_fable_fills_the_inner_ring() {
     let opus = project(signed_in(
@@ -97,9 +90,6 @@ fn only_claudes_window_labelled_weekly_fable_fills_the_inner_ring() {
     );
 }
 
-/// Every ring leads with its headline window, which is its weekly window. A card without one leads
-/// with nothing, never with its session or a per-model window. Codex included, which used to lead
-/// with its session.
 #[test]
 fn every_ring_leads_with_its_weekly_window_or_with_nothing() {
     let codex_both = signed_in(
@@ -130,8 +120,6 @@ fn every_ring_leads_with_its_weekly_window_or_with_nothing() {
     assert_eq!(headline(signed_in(AgentId::Claude, Vec::new())), None);
 }
 
-/// A business member's credit share takes the inner ring; the weekly window stays the headline, and
-/// the share travels with the cell for the popover.
 #[test]
 fn a_workspace_share_fills_the_inner_ring_while_the_weekly_stays_the_headline() {
     let mut card = signed_in(AgentId::Codex, vec![weekly("primary")]);
@@ -147,8 +135,6 @@ fn a_workspace_share_fills_the_inner_ring_while_the_weekly_stays_the_headline() 
     );
 }
 
-/// An account whose refresh is paused keeps leading with the last reading it has, as its card on
-/// Limits does.
 #[test]
 fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
     for status in [
@@ -186,13 +172,11 @@ fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
         assert_eq!(cell.message.as_deref(), Some("Paused"));
     }
 
-    // A paused member keeps the share on its inner ring, where no Fable window takes it.
     let mut member = signed_in(AgentId::Codex, vec![weekly("primary")]);
     member.status = LimitsStatus::Failed;
     member.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
     assert_eq!(project(member).inner_ring, Some(InnerRing::WorkspaceShare));
 
-    // Paused or not, a card without a weekly window leads with nothing, never its session.
     let mut session_only = signed_in(AgentId::Codex, vec![session("primary")]);
     session_only.status = LimitsStatus::Failed;
     assert_eq!(project(session_only).headline_window_id, None);
@@ -216,8 +200,6 @@ fn only_the_signed_in_account_reaches_the_notch() {
     assert_eq!(NotchProvider::current(Vec::new()), None);
 }
 
-/// The popover lists a card's windows as the Limits screen does, in the card's own order: weekly,
-/// then session, then per model. The projection keeps that order rather than sorting again.
 #[test]
 fn the_popover_lists_the_windows_weekly_first_as_the_card_orders_them() {
     let cell = project(signed_in(
@@ -240,9 +222,6 @@ fn the_popover_lists_the_windows_weekly_first_as_the_card_orders_them() {
     );
 }
 
-/// From an app-server read to the notch: Codex reports its session as `primary` and its weekly as
-/// `secondary`, beside a Spark bucket. The reader drops Spark, the card puts weekly first, and the
-/// ring leads with it.
 #[test]
 fn a_codex_read_reaches_the_notch_weekly_first_without_its_hidden_windows() {
     let main = serde_json::json!({"limitId": "codex",
@@ -273,8 +252,6 @@ fn a_codex_read_reaches_the_notch_weekly_first_without_its_hidden_windows() {
     assert_eq!(cell.inner_ring, None);
 }
 
-/// The Windows painter draws what the projection named: the headline window, and the inner ring's
-/// window, which for a workspace share is the share drawn as a window.
 #[test]
 fn the_named_windows_resolve_for_the_painter() {
     let claude = project(signed_in(

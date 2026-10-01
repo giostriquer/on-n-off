@@ -250,8 +250,6 @@ fn cache_write_failures_do_not_fail_correct_summary() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// Archiving a Codex session moves its rollout from `sessions/` to `archived_sessions/`, keeping
-/// its mtime; the usage it recorded is still usage, and still Codex's one source.
 #[test]
 fn archived_codex_sessions_still_count() {
     let _serial = pricing::lock_rates_state();
@@ -315,8 +313,6 @@ fn a_codex_home_with_only_archived_sessions_still_reports_codex() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A rename between the two walks, or a stale entry kept after an incomplete walk, lists one
-/// rollout under both Codex roots; it is still one rollout.
 #[test]
 fn a_codex_rollout_listed_under_both_roots_counts_once() {
     let _serial = pricing::lock_rates_state();
@@ -341,8 +337,6 @@ fn a_codex_rollout_listed_under_both_roots_counts_once() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// The session count follows the copy of a message that is counted: here a resumed session
-/// holds the partial first line inside the window and the original the billed line after it.
 #[test]
 fn a_message_counted_outside_the_window_adds_no_session() {
     let _serial = pricing::lock_rates_state();
@@ -388,8 +382,6 @@ fn a_message_counted_outside_the_window_adds_no_session() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A one-hour cache write travels parse, scan cache and reload intact, and is priced at the
-/// one-hour rate both times.
 #[test]
 fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
     let _serial = pricing::lock_rates_state();
@@ -677,9 +669,6 @@ fn tokens_still_returned_when_rates_unavailable() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Why `input` is refused. The home it would read panics when resolved: an invalid window must be
-/// refused before any home is, so these tests reach no home at all — least of all the real one,
-/// which a broken refusal would otherwise scan, price over the network and cache into.
 fn refused_before_any_home(input: UsageSummaryInput) -> AdapterError {
     read_summary_from(input, || {
         panic!("an invalid window must be refused before a home is resolved")
@@ -724,8 +713,6 @@ fn hourly_windows_need_exact_bounds_at_most_a_day_apart() {
     }
 }
 
-/// A local day east of UTC begins the evening before in UTC. A transcript last written then, hours
-/// before the UTC midnight the window names, still holds the first local day's usage.
 #[test]
 fn a_window_east_of_utc_reads_transcripts_written_before_its_utc_midnight() {
     let _serial = pricing::lock_rates_state();
@@ -751,8 +738,6 @@ fn a_window_east_of_utc_reads_transcripts_written_before_its_utc_midnight() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// The bound is inclusive: exactly 24 hours is the only hourly window the Usage screen sends
-/// (`ui/src/lib/usageFormat.ts`), so refusing it would blank that view.
 #[test]
 fn an_hourly_window_of_exactly_a_day_is_read_into_hour_buckets() {
     let _serial = pricing::lock_rates_state();
@@ -774,9 +759,6 @@ fn an_hourly_window_of_exactly_a_day_is_read_into_hour_buckets() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// Claim-check harness: time real-home common windows and reusable Full time, under the home
-/// named in `ON_N_OFF_PROBE_HOME` (`paths::probe_home`), since a test build has no user home.
-/// `ON_N_OFF_PROBE_HOME="$HOME" cargo test --release --manifest-path src-tauri/Cargo.toml bench_real_home_usage_summary -- --ignored --nocapture`
 #[test]
 #[ignore = "real-home performance probe; not part of CI"]
 fn bench_real_home_usage_summary() {
@@ -799,8 +781,6 @@ fn bench_real_home_usage_summary() {
             "bench window={label} {} .. {}",
             input.since_day, input.until_day
         ));
-        // A live agent may update a source during the forced read, which correctly prevents
-        // publication. Report the follow-up result instead of requiring a cache hit.
         let measurements = [("forced", true), ("cache-attempt", false)].map(|(pass, force)| {
             let wall = Instant::now();
             let dto = read_summary_in(

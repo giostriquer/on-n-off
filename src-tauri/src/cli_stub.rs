@@ -1,26 +1,3 @@
-//! Test-only builder for fake agent CLIs.
-//!
-//! Adapter tests need a stand-in for `claude` / `codex` / `agy` that records its argv,
-//! prints canned output, and exits with a chosen code. The stand-in has to be a real
-//! program the OS can spawn: a `.cmd` batch file on Windows and an executable `sh`
-//! script elsewhere. Callers describe the behavior once and this module writes the
-//! platform-appropriate launcher.
-//!
-//! Launchers are shared by content. Endpoint security on a developer Mac can hold a newly written
-//! script for seconds the first time it runs, and it pays that once per file, not per path: a
-//! hard link to a file that has already run starts at once. A test that gives its stub a few
-//! seconds to answer fails on that first start alone. So each distinct launcher body is written
-//! once, under the temp dir and named by a hash of its content, run there once with
-//! [`WARM_UP_VAR`] set (every body exits straight away on it), and then hard-linked into the
-//! directory the test asked for. The first start is paid while the test is still setting up, and
-//! because the shared files outlive the run, later runs skip it.
-//!
-//! A link keeps everything else as it was. `$0` and `%~dp0` still name the test's own directory,
-//! so argument logs and copies stay private to it. On Unix the shared file is read-only, so no
-//! test can change another test's stub by writing through its link, and on every platform a stub
-//! written again under one name replaces its link or fails, never writing through it. Where no
-//! link can be made, the launcher is a private copy, as before.
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -31,21 +8,13 @@ use std::time::Duration;
 
 use crate::cli::AgentCli;
 
-/// How long a test waits for a stub, or for a script it has just written, to answer.
-///
-/// Generous on purpose. A first start can take seconds on a loaded machine (see above), and how
-/// fast a launcher starts is never what such a test checks. A test about giving up in time keeps
-/// its own short deadline and bounds how long giving up took.
 pub const ANSWER_DEADLINE: Duration = Duration::from_secs(60);
 
 const CHATTY_PAYLOAD: &str = "abcdefghijklmnopqrstuvwxyz0123456789";
 
-/// Set only for the one run that warms a shared launcher, which makes the launcher exit at once.
 const WARM_UP_VAR: &str = "ON_N_OFF_STUB_WARMUP";
 
-/// A test's own launcher: it stays writable, as a written file always was.
 const PRIVATE_MODE: u32 = 0o755;
-/// A launcher every test with the same body links to.
 const SHARED_MODE: u32 = 0o555;
 
 #[derive(Debug, Default)]
@@ -64,7 +33,6 @@ pub struct CliStub {
 }
 
 impl CliStub {
-    /// `name` is the launcher name without an extension, e.g. `claude`.
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -72,31 +40,26 @@ impl CliStub {
         }
     }
 
-    /// Copy `from` to `to` (both relative to the stub's directory) before anything else.
     pub fn copy(mut self, from: &str, to: &str) -> Self {
         self.copy = Some((from.to_string(), to.to_string()));
         self
     }
 
-    /// Write the received argv to `file` (relative to the stub's directory).
     pub fn log_args(mut self, file: &str, append: bool) -> Self {
         self.args_log = Some((file.to_string(), append));
         self
     }
 
-    /// Write the value of environment variable `name` to `file` (relative to the stub's directory).
     pub fn log_env(mut self, name: &str, file: &str) -> Self {
         self.env_log = Some((name.to_string(), file.to_string()));
         self
     }
 
-    /// Emit `lines` long lines on both stdout and stderr to fill the pipes.
     pub fn chatty(mut self, lines: usize) -> Self {
         self.chatty_lines = lines;
         self
     }
 
-    /// Print the value of environment variable `name` on stdout.
     pub fn print_env(mut self, name: &str) -> Self {
         self.print_env = Some(name.to_string());
         self
@@ -107,8 +70,6 @@ impl CliStub {
         self
     }
 
-    /// Print the contents of `file` (relative to the stub's directory) on stdout, for output an
-    /// `echo` cannot carry: several lines, or JSON with characters `cmd` treats as operators.
     pub fn stdout_file(mut self, file: &str) -> Self {
         self.stdout_file = Some(file.to_string());
         self
@@ -129,14 +90,10 @@ impl CliStub {
         self
     }
 
-    /// Write the launcher into `dir` and return its path.
     pub fn write(&self, dir: &Path) -> PathBuf {
         fs::create_dir_all(dir).unwrap();
         let path = dir.join(launcher_file_name(&self.name));
         let body = self.body();
-        // An earlier stub of this name may be a link to a shared launcher: replace the link rather
-        // than write through it. A link that stays (one the OS still holds on Windows, where the
-        // shared file is writable) would carry this body into every stub sharing it, so stop.
         if let Err(error) = fs::remove_file(&path) {
             assert!(
                 error.kind() == io::ErrorKind::NotFound,
@@ -153,7 +110,6 @@ impl CliStub {
         path
     }
 
-    /// Write the launcher into `dir` and wrap it in an [`AgentCli`].
     pub fn cli(&self, dir: &Path) -> AgentCli {
         AgentCli::new(self.write(dir).to_string_lossy().as_ref())
     }
@@ -258,10 +214,6 @@ impl CliStub {
     }
 }
 
-/// The shared, already-started launcher holding `body`, or `None` when it cannot be shared.
-///
-/// Each body is published and warmed once per process; a thread that wants a launcher another
-/// thread is still warming waits for it rather than starting it cold.
 fn shared_launcher(body: &str) -> Option<PathBuf> {
     static READY: Mutex<BTreeMap<PathBuf, Arc<OnceLock<bool>>>> = Mutex::new(BTreeMap::new());
     let path = shared_launcher_path(body);
@@ -285,10 +237,6 @@ fn shared_launcher_path(body: &str) -> PathBuf {
         .join(launcher_file_name(&key[..32]))
 }
 
-/// Makes `path` hold exactly `body` without ever showing a partly written file: the launcher is
-/// staged under a name of this process's own and linked into place, so a test run in another
-/// worktree either finds the whole file or publishes an identical one. A file already there is
-/// used only if it holds this very body.
 fn publish(path: &Path, body: &str) -> io::Result<()> {
     if !path.exists() {
         let dir = path
@@ -307,7 +255,6 @@ fn publish(path: &Path, body: &str) -> io::Result<()> {
         let _ = fs::remove_file(&staging);
         match staged {
             Ok(()) => {}
-            // Another test run published it first.
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error),
         }
@@ -319,8 +266,6 @@ fn publish(path: &Path, body: &str) -> io::Result<()> {
     }
 }
 
-/// Starts the launcher once, doing nothing, so whatever a first start costs is paid here and not
-/// inside the test that runs it next.
 fn warm_up(path: &Path) -> bool {
     Command::new(path)
         .env(WARM_UP_VAR, "1")

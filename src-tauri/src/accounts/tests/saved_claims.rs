@@ -1,4 +1,3 @@
-//! A saved Codex profile's claims, as the subscription dates read them.
 use super::super::{
     codex::tests::id_token,
     model::Identity,
@@ -8,7 +7,6 @@ use super::super::{
 use crate::dto::AgentId;
 use serde_json::{json, Value};
 
-/// A scratch home whose vault the fixture key unlocks.
 fn vault_home() -> tempfile::TempDir {
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(home.path().join(".on-n-off/accounts")).unwrap();
@@ -24,8 +22,6 @@ fn codex_identity(user: &str) -> Identity {
     }
 }
 
-/// A saved profile's claims come only from the exact saved Codex login they are asked for, and
-/// never carry its tokens.
 #[test]
 fn codex_claims_come_only_from_the_exact_saved_login_after_vault_reload() {
     let home = vault_home();

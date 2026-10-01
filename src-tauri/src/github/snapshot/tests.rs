@@ -58,7 +58,6 @@ fn a_saved_read_loads_back_unchanged() {
     );
 }
 
-/// v0.2.0 wrote schema 1 without the merge-state fields; that file must keep loading.
 #[test]
 fn a_snapshot_from_before_the_merge_state_fields_loads_with_defaults() {
     let home = scratch_dir("gh-snapshot-v0-2-0");
@@ -84,8 +83,6 @@ fn a_loaded_snapshot_re_derives_the_merge_verdict_from_its_raw_fields() {
     let home = scratch_dir("gh-snapshot-rederive");
     let path = github_prs_path_for(&home);
     let mut stale = data();
-    // A file that says "ready" beside raw fields that mean conflicts (as an older or newer
-    // classification could) loads with the verdict this version draws from the raw fields.
     stale.mine.items[0].merge_kind = Some(MergeKind::Ready);
     save(&path, &stale).unwrap();
     assert!(fs::read_to_string(&path)
@@ -95,8 +92,6 @@ fn a_loaded_snapshot_re_derives_the_merge_verdict_from_its_raw_fields() {
     assert_eq!(loaded.mine.items[0].merge_kind, Some(MergeKind::Conflicts));
 }
 
-/// The raw fields and the verdict are pinned on the wire so a `prs.json` written by this
-/// version keeps loading in later ones (`mergeKind` is also what the screen reads).
 #[test]
 fn the_merge_fields_keep_their_camel_case_wire_names() {
     let home = scratch_dir("gh-snapshot-wire-names");

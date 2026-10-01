@@ -1,9 +1,3 @@
-//! Remembered per-account limit snapshots under `<home>/.on-n-off/limits/`.
-//!
-//! The CLIs store one login at a time, so switching accounts (`codex login`, `claude`) makes the
-//! previous account invisible. Canonical per-window observations are written here (numbers only —
-//! never a token) so the screen can keep showing each account's last observations.
-
 use std::cmp::Reverse;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,12 +13,8 @@ use crate::usage::cache_io::atomic_write;
 mod archive;
 
 const SNAPSHOT_SCHEMA_VERSION: u8 = 2;
-// Sign-in and the live provider reader can publish concurrently. Protect the timestamp check
-// and replacement together; this lock covers only local snapshot I/O, never provider calls.
 static SNAPSHOT_WRITES: Mutex<()> = Mutex::new(());
 
-/// One account's remembered reading as its file holds it: the reading's own keys beside the
-/// account, the schema version and the time that dates it. The live offer is never among them.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredSnapshot {
@@ -48,13 +38,6 @@ impl SnapshotStore {
         }
     }
 
-    /// `card`, keeping what its read could not tell from what its account's file remembers now, by
-    /// the remember policy's column for how the read went ([`keep_remembered`]); then written over
-    /// that file when it observed something datable and is not older than it. The card comes back
-    /// kept either way, beside whether the file was written.
-    ///
-    /// Every read goes through this once: the signed-in read (`aggregate_accounts`), a saved
-    /// profile's poll and the first usage after a sign-in (`accounts/`).
     pub fn remember(&self, mut card: ProviderLimitsDto) -> Remembered {
         let _write = SNAPSHOT_WRITES
             .lock()
@@ -73,10 +56,6 @@ impl SnapshotStore {
         Remembered { card, saved }
     }
 
-    /// Persist `dto` as it is: canonical account observations. Dated local or remembered windows
-    /// remain trustworthy while refresh is unavailable; a successful read with only credits or banked
-    /// resets is dated when it reaches this storage boundary. A file with newer observations is
-    /// left alone.
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
@@ -87,14 +66,11 @@ impl SnapshotStore {
         write_over(&path, dto, read_stored(&path).as_ref())
     }
 
-    /// Where the file of `dto`'s account is; `None` for a card that names no account.
     fn path_of(&self, dto: &ProviderLimitsDto) -> Option<PathBuf> {
         let account = dto.account.as_ref()?;
         Some(self.dir.join(file_name(dto.provider, &account.id)))
     }
 
-    /// Persist the accounts a merge changed, leaving the others' files and dates alone: re-saving an
-    /// untouched account with no dated windows would date its old figures now.
     pub fn save_changed(&self, before: &[ProviderLimitsDto], after: &[ProviderLimitsDto]) {
         for (changed, previous) in after.iter().zip(before) {
             if changed != previous {
@@ -103,10 +79,6 @@ impl SnapshotStore {
         }
     }
 
-    /// The remembered snapshots the cards show for `provider`, newest first: `stored` less
-    /// any left with nothing observed once a lapsed banked-reset count is dropped (as `save` would
-    /// refuse to write it, and which so no longer hides the legacy history it superseded), less the
-    /// legacy history a remaining scoped observation supersedes.
     pub fn load(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
         without_superseded(
             self.stored(provider)
@@ -116,10 +88,6 @@ impl SnapshotStore {
         )
     }
 
-    /// Every readable snapshot for `provider`, newest first, whatever it still observes. Unreadable
-    /// files are skipped rather than failing the whole read, and files from obsolete snapshot
-    /// schemas are ignored. Forget works from this list, so an account whose count lapsed still
-    /// takes the history it replaced.
     fn stored(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
         let now = Utc::now();
         let Ok(entries) = fs::read_dir(&self.dir) else {
@@ -140,9 +108,6 @@ impl SnapshotStore {
         snapshots.into_iter().map(|(_, dto)| dto).collect()
     }
 
-    /// Conditionally remove legacy history identified by a confirmed saved-account card, and
-    /// unarchive it. Recheck the stored label: a workspace-only key may have been reused by another
-    /// user.
     pub fn forget_matching_email(
         &self,
         provider: AgentId,
@@ -180,8 +145,6 @@ impl SnapshotStore {
         self.unarchive_locked(provider, &forgotten).map(drop)
     }
 
-    /// Delete one account's snapshot, with the legacy history it supersedes, and unarchive every id
-    /// deleted; unknown accounts are a no-op but for the archive.
     pub fn forget(&self, provider: AgentId, account_id: &str) -> Result<(), String> {
         let _write = SNAPSHOT_WRITES
             .lock()
@@ -219,7 +182,6 @@ impl StoredSnapshot {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             provider: dto.provider,
             account: dto.account.clone().expect("caller checked account"),
-            // A live offer belongs to the read that saw it and is never remembered.
             reading: Reading {
                 reset_offer: None,
                 ..dto.reading.clone()
@@ -235,13 +197,10 @@ impl StoredSnapshot {
             .or_else(|| newest(&self.reading.windows))
     }
 
-    /// The card a remembered reading shows at `now`. A Codex file written before the reader dropped
-    /// hidden windows loses them here, by the reader's own rule; the file loses them at its next save.
     fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
         let mut reading = self.reading.known_at(now);
         match self.provider {
             AgentId::Codex => super::codex::drop_hidden(&mut reading.windows),
-            // Claude reports no banked resets; a count an earlier version remembered stays out.
             AgentId::Claude => reading.reset_credits = None,
             AgentId::Antigravity | AgentId::Cursor => {}
         }
@@ -258,22 +217,15 @@ impl StoredSnapshot {
     }
 }
 
-/// What [`SnapshotStore::remember`] made of a card.
 pub struct Remembered {
-    /// The card to show: the read, with what it could not tell kept from the account's file.
     pub card: ProviderLimitsDto,
-    /// Whether the file holds it: `Ok` also when the file already held newer observations, `Err`
-    /// when the card observed nothing datable or the write failed.
     pub saved: Result<(), String>,
 }
 
-/// The snapshot at `path`, when there is a readable one of this schema.
 fn read_stored(path: &Path) -> Option<StoredSnapshot> {
     fs::read_to_string(path).ok().and_then(|raw| decode(&raw))
 }
 
-/// Write `dto` over `existing`, the file at `path`, unless it observed nothing datable or the file
-/// is newer.
 fn write_over(
     path: &Path,
     dto: &ProviderLimitsDto,
@@ -282,10 +234,8 @@ fn write_over(
     if !dto.reading.has_observations() {
         return Err("snapshot has no observations".to_string());
     }
-    let incoming_latest = newest(&dto.reading.windows).or_else(|| {
-        // Figures have no observation time of their own; a successful read dates them here.
-        (dto.status == LimitsStatus::Ok && dto.reading.has_figures()).then(Utc::now)
-    });
+    let incoming_latest = newest(&dto.reading.windows)
+        .or_else(|| (dto.status == LimitsStatus::Ok && dto.reading.has_figures()).then(Utc::now));
     let incoming_latest =
         incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
     if existing
@@ -307,14 +257,10 @@ fn write_stored(path: &Path, stored: StoredSnapshot) -> Result<(), String> {
     atomic_write(path, &json).map_err(|error| format!("{}: {error}", path.display()))
 }
 
-/// Whether the loader reads the file called `name` as one of `provider`'s snapshots: every
-/// `<provider>-….json`, whatever else lives beside them.
 fn is_snapshot_file(provider: AgentId, name: &str) -> bool {
     name.starts_with(&format!("{}-", provider.key())) && name.ends_with(".json")
 }
 
-/// `<provider>-<account>.json` with the account id reduced to a file-name-safe token; a short
-/// hash keeps distinct ids distinct after sanitising.
 fn file_name(provider: AgentId, account_id: &str) -> String {
     let safe: String = account_id
         .chars()
@@ -330,8 +276,6 @@ fn fnv1a(input: &str) -> u32 {
     })
 }
 
-/// New scoped observations supersede the old card only when both its provider-specific legacy
-/// key and email match. Keep the old file until Forget; never import its unscoped quota windows.
 fn supersedes(scoped: &ProviderLimitsDto, legacy: &ProviderLimitsDto) -> bool {
     !legacy.current_account
         && scoped.provider == legacy.provider
@@ -342,9 +286,6 @@ fn supersedes(scoped: &ProviderLimitsDto, legacy: &ProviderLimitsDto) -> bool {
         )
 }
 
-/// Whether `legacy` is the history the scoped account `scoped` replaced: the scoped account's
-/// legacy key names it, and both name the same email. In a shared workspace the legacy key alone
-/// can name another member's history, which the email tells apart.
 fn replaces(scoped: &LimitsAccountDto, legacy: &LimitsAccountDto) -> bool {
     if !scoped.id.starts_with("profile:")
         || legacy.id.starts_with("profile:")

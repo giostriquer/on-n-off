@@ -54,7 +54,6 @@ describe("which cards a provider shows", () => {
   it("keeps an unverified legacy card beside its saved login", () => {
     const shown = cards([okCodex({ account: { id: "team", label: "shared@example.com" }, currentAccount: false })],
       [saved("codex", "saved", "profile:user-team", "shared@example.com", { identity: { provider: "codex", userId: "user", workspaceId: "team" } })]);
-    // Unverified legacy quotas stay historical until a fresh scoped observation arrives.
     expect(labels(shown)).toEqual(["shared@example.com", "shared@example.com"]);
     expect(shown.map(card => [card.account?.id, card.empty?.reason ?? null])).toEqual([["team", null], ["profile:user-team", "usageUnavailable"]]);
   });
@@ -76,7 +75,6 @@ describe("card order", () => {
   const ORDER_NOW = Date.parse("2026-09-21T12:00:00Z");
   const at = (hours: number) => new Date(ORDER_NOW + hours * 3_600_000).toISOString();
   let sequence = 0;
-  /** One account with a 5-hour and a weekly window; `usedPercent` and reset instants per window. */
   function account(
     label: string,
     windows: { session?: [number, string | null]; weekly?: [number, string | null]; model?: [number, string | null] },
@@ -114,11 +112,9 @@ describe("card order", () => {
     expect(order([max5, max20])).toEqual(["max ×20 at 30% left", "max ×5 untouched"]);
     const max20Low = account("max ×20 at 20% left", { session: [80, at(3)], weekly: [80, at(100)] }, { plan: "max ×20" });
     expect(order([max20Low, max5])).toEqual(["max ×5 untouched", "max ×20 at 20% left"]);
-    // Codex: Pro is ×20 to Plus, as the badge says.
     const pro = account("pro", { weekly: [60, at(100)] }, { provider: "codex", plan: "pro" });
     const plus = account("plus", { weekly: [0, at(100)] }, { provider: "codex", plan: "plus" });
     expect(order([plus, pro], [], "codex")).toEqual(["pro", "plus"]);
-    // A Claude login whose tier the backend could not name is still a Max, worth five.
     const bareMax = account("bare max at 30% left", { weekly: [70, at(100)] }, { plan: "max" });
     const proUntouched = account("pro untouched", { weekly: [0, at(100)] }, { plan: "pro" });
     expect(order([proUntouched, bareMax])).toEqual(["bare max at 30% left", "pro untouched"]);
@@ -132,7 +128,6 @@ describe("card order", () => {
   });
 
   it("ignores a full model bucket when working out when an exhausted account is usable again", () => {
-    // Out on the 5-hour window for an hour; the Opus bucket resetting in four days is not what it waits for.
     const opusToo = account("opus bucket full too", { session: [100, at(1)], weekly: [30, at(100)], model: [100, at(96)] });
     const laterAnyway = account("weekly full for two days", { session: [10, at(1)], weekly: [100, at(48)] });
     expect(order([laterAnyway, opusToo])).toEqual(["opus bucket full too", "weekly full for two days"]);
@@ -154,7 +149,6 @@ describe("card order", () => {
   it("puts accounts with unknown usage last and keeps the incoming order between equals", () => {
     const unknownA = account("unknown a", {});
     const unknownB = account("unknown b", {});
-    // Equal capacity left: the backend's order (newest observation first) decides, not the resets.
     const twinA = account("twin a", { session: [40, at(50)], weekly: [40, at(100)] });
     const twinB = account("twin b", { session: [40, at(2)], weekly: [40, at(100)] });
     const out = account("out", { session: [100, at(2)], weekly: [0, at(100)] });
@@ -169,7 +163,6 @@ describe("card order", () => {
     const spare = account("spare", { weekly: [30, at(100)] });
     const unknown = account("unknown", {});
     const profile = (id: string, active: boolean) => saved("claude", id, `profile:${id}`, `${id}@example.com`, { active });
-    // However late the profile list adds them.
     expect(order([unknown, spare, current], [profile("idle", false), profile("ghost", true)]))
       .toEqual(["current", "ghost@example.com", "spare", "unknown", "idle@example.com"]);
   });
@@ -177,7 +170,6 @@ describe("card order", () => {
 
 describe("a card's identity", () => {
   it("is named by its saved profile's email and category, and is active as the profiles say", () => {
-    // The read still calls the switched-away login current and knows it by an older label.
     const shown = cards([okCodex({ account: { id: "acct-work", label: "old-label@codex.example" } }), staleCodex()], [
       saved("codex", "work", "acct-work", "work@codex.example", { category: "Client A" }),
       saved("codex", "personal", "acct-personal", "personal@codex.example", { active: true }),

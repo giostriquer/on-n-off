@@ -199,7 +199,6 @@ impl CodexAdapter {
         for (id, entry) in plugin_rows {
             let (name, source) = plugin_id_parts(id);
             let cache = self.plugin_cache_dir(id);
-            // A disabled plugin's hooks do not run, so they are not rows.
             if entry.enabled {
                 if let Some(dir) = cache.as_deref() {
                     hook_plugins.push(crate::plugin_files::PluginSource {

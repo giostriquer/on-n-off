@@ -1,8 +1,3 @@
-/**
- * Strings used only by the marketplace step of the Install sheet, which is loaded lazily.
- * They live apart from `copy.ts` on purpose: that module is imported by eager code too, so
- * anything added there lands in the entry chunk (see `scripts/check-bundle.mjs`).
- */
 export const marketplaceCopy = {
   installSummary: (picked: number, required: number, missing: number) =>
     [

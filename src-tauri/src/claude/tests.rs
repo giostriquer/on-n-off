@@ -439,8 +439,6 @@ fn uninstall_uses_official_argv_and_backs_up() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// A plugin's `.mcp.json`, as its root file holds it: the bare server map, or one wrapped in
-/// `mcpServers`.
 fn write_plugin_mcp(plugin_root: &Path, body: serde_json::Value) {
     fs::create_dir_all(plugin_root).unwrap();
     fs::write(plugin_root.join(".mcp.json"), body.to_string()).unwrap();
@@ -482,8 +480,6 @@ fn lists_the_mcp_servers_enabled_plugins_bring_read_only() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// Claude's local scope keeps a server for particular projects in `~/.claude.json`. Outside
-/// those projects it is one read-only row per definition, saying which projects have it.
 #[test]
 fn lists_servers_kept_for_particular_projects_once_each() {
     let root = fixture();
@@ -541,8 +537,6 @@ fn lists_servers_kept_for_particular_projects_once_each() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// Claude Code 2.1.281 reads `disabledMcpServers` only from a project's own entry, so a
-/// top-level list naming a plugin server switches nothing off; the plugin's switch does.
 #[test]
 fn a_top_level_disabled_list_does_not_switch_off_a_plugin_server() {
     let root = fixture();
@@ -571,8 +565,6 @@ fn a_top_level_disabled_list_does_not_switch_off_a_plugin_server() {
     let _ = fs::remove_dir_all(root);
 }
 
-/// A plugin's server and a server kept for particular projects are listed, never switched: a
-/// toggle on either is refused and `~/.claude.json` is left byte for byte as it was.
 #[test]
 fn toggling_a_plugin_or_per_project_server_is_refused_without_a_write() {
     let root = fixture();

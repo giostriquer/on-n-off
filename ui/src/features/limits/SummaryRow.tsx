@@ -1,20 +1,13 @@
 import { useId, type ReactNode } from "react";
 
-/** A note made of parts, one per line, announced as a list with its own name. */
 export type NoteLines = { label: string; lines: readonly string[] };
 
-/**
- * One more row under a card's windows for an account figure that is not a quota: a small-caps
- * label, an optional note under it, and the value on the right. The value is the label's definition,
- * so it is announced with its name. A figure made of parts gives its note as lines.
- */
 export function SummaryRow({ label, value, note }: {
   label: string;
   value: ReactNode;
   note?: string | NoteLines;
 }) {
   const labelId = useId();
-  // One name–value group: the label, its value, then the note, laid out so the note sits under the label.
   return (
     <dl className="border-t border-[var(--hair)] px-3.5 py-2">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1">

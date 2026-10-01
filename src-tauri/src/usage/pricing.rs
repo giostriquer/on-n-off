@@ -1,8 +1,3 @@
-//! LiteLLM rate table parse + cost arithmetic (pure).
-//!
-//! Fetch/cache of the JSON lives in `ensure_rates` at the bottom — same URL
-//! `ccusage` / T3 Code use.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,13 +12,8 @@ pub const LITELLM_RATES_URL: &str =
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 
 const RATES_TTL_MS: i64 = 24 * 60 * 60 * 1000;
-/// How often the table may be re-fetched because a scan met a model it could not price: a
-/// model released today shows up in LiteLLM within hours, not a day.
 const RATES_EARLY_TTL_MS: i64 = 60 * 60 * 1000;
 
-/// Set when a scan prices a model the table does not carry; `ensure_rates` then re-fetches after
-/// the shorter TTL and clears the flag once a fetch succeeds, so it survives any number of
-/// summary-cache hits in between.
 static UNPRICED_SEEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,7 +22,6 @@ pub struct ModelRate {
     pub output_cost_per_token: f64,
     pub cache_read_cost_per_token: f64,
     pub cache_creation_cost_per_token: f64,
-    /// A one-hour cache write (`TokenTotals::cache_creation_1h_tokens`).
     pub cache_creation_1h_cost_per_token: f64,
 }
 
@@ -75,8 +64,6 @@ pub struct RatesSnapshot {
     pub fetched_at_ms: Option<i64>,
 }
 
-/// The parsed on-disk table, keyed on the file's identity so the summary fast path never
-/// re-parses a multi-megabyte document it has already seen.
 struct RatesMemo {
     path: PathBuf,
     len: u64,
@@ -92,7 +79,6 @@ fn file_identity(path: &Path) -> Option<(u64, Option<SystemTime>)> {
     Some((meta.len(), meta.modified().ok()))
 }
 
-/// The on-disk table (memoised) with the instant it was fetched, if the file parses.
 fn load_disk_rates(path: &Path) -> Option<(Arc<RateTable>, Option<i64>)> {
     let (len, modified) = file_identity(path)?;
     {
@@ -139,10 +125,6 @@ fn finite_number(value: &Value) -> Option<f64> {
     value.as_f64().filter(|v| v.is_finite())
 }
 
-/// Strip a `provider/` prefix and a bracketed variant suffix, and lowercase, for table lookup.
-/// Claude Code can name a context tier after the model (`claude-fable-5-1[1m]`); the table only
-/// knows the base name, so such a request is priced at base rates. Any long-context premium
-/// (LiteLLM's `*_above_200k_tokens`) is not applied: an under-priced request, not an unpriced one.
 pub fn normalize_model_name(model: &str) -> String {
     let trimmed = model.trim().to_lowercase();
     let base = trimmed.split('[').next().unwrap_or("").trim_end();
@@ -167,22 +149,10 @@ fn unpriceable_models() -> &'static HashSet<&'static str> {
     })
 }
 
-/// Cache rates omitted from an entry derive the standard discounts (read
-/// 0.1×, write 1.25× input) — ccusage's defaults — never the full input rate.
-/// The multipliers are Anthropic-shaped; OpenAI bills cache writes at the
-/// plain input rate, but its entries publish cache pricing and Codex reports
-/// zero write tokens, so the 1.25× write default has no priced traffic.
 const DERIVED_CACHE_READ_MULTIPLIER: f64 = 0.1;
 const DERIVED_CACHE_CREATION_MULTIPLIER: f64 = 1.25;
-/// Anthropic's one-hour cache write, when an entry omits
-/// `cache_creation_input_token_cost_above_1hr`. Only Claude reports one-hour writes.
 const DERIVED_CACHE_CREATION_1H_MULTIPLIER: f64 = 2.0;
 
-/// Drop half-priced models; derive omitted cache rates. Several LiteLLM keys
-/// can normalize to one model name (`claude-fable-5`, `vertex_ai/…`,
-/// `deepinfra/anthropic/…`), and reseller entries often omit cache pricing,
-/// so collisions resolve by rank instead of document order: the canonical
-/// bare key wins, then prefixed entries carrying published cache pricing.
 pub fn parse_rate_table(document: &Value) -> RateTable {
     let mut table = RateTable::new();
     let mut ranks: HashMap<String, u8> = HashMap::new();
@@ -212,11 +182,11 @@ pub fn parse_rate_table(document: &Value) -> RateTable {
             .and_then(finite_number)
             .unwrap_or(input * DERIVED_CACHE_CREATION_1H_MULTIPLIER);
         let rank = if !name.contains('/') {
-            2 // canonical bare key
+            2
         } else if explicit_cache_read.is_some() {
-            1 // prefixed, but carries published cache pricing
+            1
         } else {
-            0 // prefixed reseller without cache pricing
+            0
         };
         let key = normalize_model_name(name);
         if ranks.get(&key).is_some_and(|&existing| existing >= rank) {
@@ -324,11 +294,6 @@ thread_local! {
     static TEST_FETCH: std::cell::RefCell<Option<Option<Value>>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Held by every test that reads or changes this module's process-wide state: the early-refresh
-/// flag and the parsed-table memo. A usage summary read changes both — it prices records and loads
-/// the table — so the summary tests hold it too; a lock of their own would let a summary test
-/// flip the flag or overwrite the memo in the middle of a pricing test's assertion. A panicking
-/// holder leaves it usable: one failing test must not fail every later one with a `PoisonError`.
 #[cfg(test)]
 pub(crate) fn lock_rates_state() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
@@ -348,9 +313,6 @@ pub fn with_test_fetch<R>(response: Option<Value>, f: impl FnOnce() -> R) -> R {
     result
 }
 
-/// Load rates from disk / network. Never fails the scan — empty table + unavailable. The disk
-/// copy is reused for a day, for an hour once a scan has met a model it could not price, and
-/// not at all when the user asked for a refresh (`force`).
 pub fn ensure_rates(home: &Path, now_ms: i64, force: bool) -> RatesSnapshot {
     let path = rates_cache_path(home);
     let ttl_ms = if force {
@@ -405,7 +367,6 @@ pub fn ensure_rates(home: &Path, now_ms: i64, force: bool) -> RatesSnapshot {
         }
     }
 
-    // Refresh failed; keep stale table as cached if we have one.
     if !table.is_empty() {
         status = PricingStatus::Cached;
     }

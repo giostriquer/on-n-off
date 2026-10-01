@@ -1,4 +1,3 @@
-//! Saving the current login, editing a category and removing a profile.
 use super::fixture::{claude, codex, generation, identity, Harness, Heard};
 use crate::dto::AgentId;
 
@@ -43,7 +42,6 @@ fn saving_reenrolls_an_account_that_remove_excluded() {
     );
 }
 
-/// Only the current account's own pending sign-in refuses a save; another account's is kept.
 #[test]
 fn saving_beside_another_accounts_pending_sign_in_updates_only_the_current_profile() {
     let harness = Harness::new();
@@ -109,8 +107,6 @@ fn saving_refuses_during_a_pending_recovery_without_writing() {
     assert!(harness.heard().is_empty());
 }
 
-/// A pending recovery refuses a save before it takes the native locks (Claude Code's) or reads
-/// the native login (the Keychain, on macOS).
 #[test]
 fn a_save_refused_by_a_pending_recovery_touches_no_native_lock_or_login() {
     let harness = Harness::new();
@@ -199,8 +195,6 @@ fn removing_refuses_during_a_pending_recovery_without_writing() {
     assert!(harness.heard().is_empty());
 }
 
-/// A saved card changes Limits, which serves a cached reading until its next poll unless the
-/// change asks it to read again.
 #[test]
 fn saving_the_current_login_refreshes_limits_after_release() {
     let harness = Harness::new();
@@ -211,8 +205,6 @@ fn saving_the_current_login_refreshes_limits_after_release() {
     assert_eq!(harness.heard(), [(Heard::Changed(AgentId::Claude), true)]);
 }
 
-/// A removed card would linger in Limits until the next poll: the removal refreshes the removed
-/// profile's provider.
 #[test]
 fn removing_a_profile_refreshes_its_providers_limits_after_release() {
     let harness = Harness::new();

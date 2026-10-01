@@ -1,18 +1,13 @@
-//! When a banked reset is offered: an opted-in, signed-in Codex account found low on two polls in a
-//! row, far enough from its own renewal, with a reset to spend, once per weekly cycle.
 use super::*;
 use crate::dto::{LimitWindowDto, LimitsResetCreditsDto, Reading};
 
 const NOW: &str = "2026-10-01T12:00:00Z";
-/// Four days after [`NOW`], the weekly cycle's end.
 const RENEWS: &str = "2026-10-05T12:00:00Z";
 
 fn now() -> DateTime<Utc> {
     instant(NOW).unwrap()
 }
 
-/// `account`'s signed-in Codex card, `used` of its weekly window used as observed at `observed_at`,
-/// renewing at `renews`, with `banked` resets.
 fn card(
     account: &str,
     used: f64,
@@ -41,7 +36,6 @@ fn card(
         })
 }
 
-/// The accounts opted in: `account`, at Codex's 10% and a day's wait.
 fn opted_in(account: &str) -> HashMap<String, ResetAlert> {
     HashMap::from([(
         account.to_string(),
@@ -54,7 +48,6 @@ fn opted_in(account: &str) -> HashMap<String, ResetAlert> {
     )])
 }
 
-/// The offers two polls in a row make, the first reading `first` and the second `second`.
 fn two_polls(
     first: &ProviderLimitsDto,
     second: &ProviderLimitsDto,
@@ -113,7 +106,6 @@ fn no_reset_is_offered_while_more_than_the_share_is_left() {
     assert!(two_polls(&first, &second, &alerts).1.is_empty());
 }
 
-/// At exactly the share left, the reset is offered, as the spend itself allows it.
 #[test]
 fn exactly_the_share_left_is_low() {
     let alerts = opted_in("acct");
@@ -123,7 +115,6 @@ fn exactly_the_share_left_is_low() {
     assert_eq!(two_polls(&first, &second, &alerts).1.len(), 1);
 }
 
-/// A reset spent just before the limit renews by itself is wasted.
 #[test]
 fn no_reset_is_offered_when_the_limit_renews_soon_anyway() {
     let alerts = opted_in("acct");
@@ -152,8 +143,6 @@ fn an_account_not_opted_in_is_never_offered_a_reset() {
     assert!(two_polls(&first, &second, &alerts).1.is_empty());
 }
 
-/// Only the signed-in account's live read counts: a reset lands on whoever is signed in, and a card
-/// that failed or is remembered says nothing new about now.
 #[test]
 fn only_the_signed_in_accounts_live_read_counts() {
     let alerts = opted_in("acct");
@@ -171,7 +160,6 @@ fn only_the_signed_in_accounts_live_read_counts() {
     }
 }
 
-/// A poll in between that finds the account no longer low starts the count again.
 #[test]
 fn a_poll_that_is_not_low_starts_the_count_again() {
     let alerts = opted_in("acct");
@@ -191,7 +179,6 @@ fn a_poll_that_is_not_low_starts_the_count_again() {
     }
 }
 
-/// A spent reset starts a new weekly cycle, which may be offered its own reset.
 #[test]
 fn a_new_weekly_cycle_can_be_offered_again() {
     let alerts = opted_in("acct");
@@ -215,11 +202,9 @@ fn a_new_weekly_cycle_can_be_offered_again() {
     })
     .collect();
 
-    // The new cycle's first low reading is a first reading again, which offers nothing on its own.
     assert_eq!(offered, [0, 1, 0, 1]);
 }
 
-/// A reset whose soonest expiry has passed may be gone, so it is not offered; one still ahead is.
 #[test]
 fn a_reset_that_may_have_lapsed_is_not_offered() {
     let alerts = opted_in("acct");
@@ -240,7 +225,6 @@ fn a_reset_that_may_have_lapsed_is_not_offered() {
     }
 }
 
-/// An account's lower share is the one its alert waits for.
 #[test]
 fn an_alerts_lower_share_is_the_one_kept() {
     let mut alerts = opted_in("acct");
@@ -257,7 +241,6 @@ fn an_alerts_lower_share_is_the_one_kept() {
     }
 }
 
-/// A limit renewing by itself exactly the alert's wait away is still worth a reset.
 #[test]
 fn exactly_the_wait_before_renewal_is_offered() {
     let alerts = opted_in("acct");
@@ -268,8 +251,6 @@ fn exactly_the_wait_before_renewal_is_offered() {
     assert_eq!(two_polls(&first, &second, &alerts).1.len(), 1);
 }
 
-/// What is left is judged as the spend judges it: the fullest of the weekly and five-hour windows,
-/// never one model's own limit.
 #[test]
 fn the_fullest_main_window_decides_and_a_models_own_limit_never_does() {
     let alerts = opted_in("acct");

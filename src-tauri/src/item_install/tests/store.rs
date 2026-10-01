@@ -31,9 +31,6 @@ fn registry_never_resets_a_malformed_file() {
     let _ = fs::remove_dir_all(home);
 }
 
-// ---------------------------------------------------------------------------
-// write.rs
-
 #[test]
 fn place_replaces_atomically_and_keeps_old_copy_on_failure() {
     let root = scratch_dir("items-place");

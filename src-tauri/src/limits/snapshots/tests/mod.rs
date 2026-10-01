@@ -49,7 +49,6 @@ fn legacy_removal_rechecks_the_stored_email_after_another_account_replaces_histo
             "2026-09-13T12:00:00Z",
         ))
         .unwrap();
-    // The UI confirmed the first account, but another writer replaced its workspace-keyed row.
     store
         .save(&snapshot(
             AgentId::Codex,
@@ -252,7 +251,6 @@ fn forget_removes_one_account_and_load_skips_unreadable_files() {
     let loaded = store.load(AgentId::Codex);
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].account.as_ref().unwrap().id, "acct-1");
-    // Forgetting something unknown is not an error.
     store.forget(AgentId::Codex, "acct-2").unwrap();
 }
 
@@ -376,7 +374,6 @@ fn quota_windows_credits_and_banked_resets_each_count_as_an_observation() {
     });
     assert!(dto.reading.has_observations());
     dto.reading.credits = None;
-    // Every current Codex read reports a count, usually 0; on its own that observed nothing.
     dto.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
         available_count: 0,
         next_expires_at: None,
@@ -390,7 +387,6 @@ fn quota_windows_credits_and_banked_resets_each_count_as_an_observation() {
     });
     assert!(dto.reading.has_observations());
     dto.reading.reset_credits = None;
-    // An offer is what the provider is selling right now, not something observed about the account.
     dto.reading.reset_offer = Some(crate::dto::LimitsResetOfferDto { price: None });
     assert!(!dto.reading.has_observations());
 }
@@ -408,7 +404,6 @@ fn a_paid_reset_offer_is_never_written_to_a_snapshot_or_read_back_from_one() {
     });
     store.save(&dto).unwrap();
 
-    // Not in the file, so no later version can start reading a price the provider has withdrawn.
     let written: Vec<String> = fs::read_dir(store.dir())
         .unwrap()
         .filter_map(|entry| fs::read_to_string(entry.ok()?.path()).ok())
@@ -430,7 +425,6 @@ fn a_windowless_read_that_reports_no_banked_resets_keeps_the_remembered_windows(
     let store = SnapshotStore::for_home(&home);
     let remembered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
     store.save(&remembered).unwrap();
-    // The shape a current Codex CLI returns when it reports no windows: the count is still there.
     let mut windowless = remembered.clone();
     windowless.reading.windows.clear();
     windowless.reading.reset_credits = Some(crate::dto::LimitsResetCreditsDto {
@@ -486,13 +480,10 @@ fn saving_after_a_merge_rewrites_only_the_accounts_the_merge_changed() {
 
     store.save_changed(&before, &after);
 
-    // An untouched account keeps its own observation date instead of being re-dated now.
     assert_eq!(stored("acct-credits"), credits_before);
     assert!(stored("acct-windows").contains("\"usedPercent\":60.0"));
 }
 
-/// Every writer stores whatever its read returned, and a read that could not tell the banked-reset
-/// count must not erase the one on disk: the next reload would lose it from the card.
 #[test]
 fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_answer_replaces_it() {
     let home = scratch_dir("limits-snap-reset-credits-unknown");
@@ -514,7 +505,6 @@ fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_an
     assert_eq!(loaded[0].reading.windows, unknown.reading.windows);
     assert_eq!(loaded[0].reading.reset_credits, banked(1));
 
-    // An answer replaces the stored count, even one observed at the same moment.
     let mut answered = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T11:00:00.000Z");
     answered.reading.reset_credits = banked(0);
     store.remember(answered.clone()).saved.unwrap();
@@ -524,7 +514,6 @@ fn a_read_that_cannot_tell_the_banked_reset_count_keeps_the_stored_one_and_an_an
     );
 }
 
-/// A remembered workspace-credit share is kept whether or not its reset has passed.
 #[test]
 fn a_remembered_workspace_credit_share_outlives_its_reset() {
     let home = scratch_dir("limits-snap-workspace-credits");
@@ -546,8 +535,6 @@ fn a_remembered_workspace_credit_share_outlives_its_reset() {
         current.reading.workspace_credits
     );
 
-    // Past its reset the share has renewed, which the card shows as a window's passed reset is shown;
-    // dropping it would bring back the own balance of 0 the share stands in for.
     let mut renewed = snapshot(AgentId::Codex, "acct-2", "b@x", "2026-08-17T10:00:00.000Z");
     renewed.reading.workspace_credits = share("2026-08-18T00:00:00.000Z");
     store.save(&renewed).unwrap();
@@ -563,7 +550,6 @@ fn a_remembered_workspace_credit_share_outlives_its_reset() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A read whose only figure is a workspace-credit share is still worth remembering.
 #[test]
 fn a_workspace_credit_share_alone_counts_as_an_observation() {
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
@@ -581,8 +567,6 @@ fn a_workspace_credit_share_alone_counts_as_an_observation() {
     assert!(dto.reading.has_observations());
 }
 
-/// A failed read that carries only a remembered share observed nothing: dating it now would make an
-/// old share look fresh and replace the snapshot it came from.
 #[test]
 fn a_failed_read_carrying_only_a_remembered_share_is_not_saved() {
     let home = scratch_dir("limits-snap-failed-share");
@@ -617,7 +601,6 @@ fn credits_spent(last_7_days: f64) -> Option<crate::dto::LimitsCreditsSpentDto> 
     })
 }
 
-/// Spending is remembered like the other figures, so a card read later still has it.
 #[test]
 fn a_remembered_credits_spent_figure_loads_back() {
     let home = scratch_dir("limits-snap-credits-spent");
@@ -633,7 +616,6 @@ fn a_remembered_credits_spent_figure_loads_back() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// A read whose only figure is what the member spent still observed the account.
 #[test]
 fn credits_spent_alone_counts_as_an_observation() {
     let mut dto = snapshot(AgentId::Codex, "acct-1", "a@x", "2026-08-17T10:00:00.000Z");
@@ -645,8 +627,6 @@ fn credits_spent_alone_counts_as_an_observation() {
     assert!(dto.reading.has_observations());
 }
 
-/// Every writer stores its own read, so one that could not tell what was spent must not erase the
-/// figure already on disk; one that answered replaces it.
 #[test]
 fn a_saved_read_that_could_not_tell_what_was_spent_keeps_the_stored_figure() {
     let home = scratch_dir("limits-snap-credits-spent-kept");
@@ -688,8 +668,6 @@ fn term(will_renew: bool) -> Option<crate::dto::LimitsSubscriptionDto> {
     })
 }
 
-/// A writer that could not tell the term must not erase the one on disk; one that answered
-/// replaces it, and a Claude card never keeps one.
 #[test]
 fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
     let home = scratch_dir("limits-snap-term-kept");
@@ -736,8 +714,6 @@ fn a_saved_read_that_could_not_tell_the_term_keeps_the_stored_one() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// Only a workspace pools credits: an account now on a personal plan is never asked what it spent,
-/// so the figure it had on a workspace plan is dropped from disk rather than kept stale.
 #[test]
 fn a_personal_plan_read_drops_the_stored_figure() {
     let home = scratch_dir("limits-snap-credits-spent-personal");

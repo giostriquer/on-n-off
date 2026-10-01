@@ -20,8 +20,6 @@ fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Dis
         mirrored: false,
     }
 }
-/// The signed-in account's card for `provider` when a read reports `windows`, which the pipeline
-/// puts in the order every card lists them: the painter is never handed an order no read produces.
 fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
     crate::limits::signed_in_card(
         provider,
@@ -32,7 +30,6 @@ fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsD
         },
     )
 }
-/// What the painter is handed for `card`: the host's projection of it, without live sessions.
 fn projected(card: ProviderLimitsDto) -> ProviderData {
     ProviderData {
         cell: NotchProvider::current(vec![card]).expect("a signed-in account"),
@@ -50,8 +47,6 @@ fn session_window(percent: f64) -> LimitWindowDto {
         observed_at: "2026-09-01T10:00:00Z".into(),
     }
 }
-/// A cell whose account reports only its session, `percent` used: the popover lists it, and with no
-/// weekly window the ring leads with nothing and the figure is a dash.
 fn session_only(provider: AgentId, percent: f64) -> ProviderData {
     projected(signed_in(provider, vec![session_window(percent)]))
 }
@@ -69,7 +64,6 @@ fn data(cells: Vec<CellData>) -> RailData {
         action_error: None,
     }
 }
-/// A window that resets in the future, so `quota_percent` keeps its figure.
 fn window(id: &str, label: &str, kind: LimitWindowKind, percent: f64) -> LimitWindowDto {
     LimitWindowDto {
         id: id.into(),
@@ -84,7 +78,6 @@ fn window(id: &str, label: &str, kind: LimitWindowKind, percent: f64) -> LimitWi
 fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderData {
     projected(signed_in(AgentId::Claude, windows))
 }
-/// A Codex business member's card: the weekly window, which is all Codex reports, and a credit share.
 fn codex_member_card(share: LimitsWorkspaceCreditsDto) -> ProviderLimitsDto {
     crate::limits::signed_in_card(
         AgentId::Codex,
@@ -104,7 +97,6 @@ fn codex_member_card(share: LimitsWorkspaceCreditsDto) -> ProviderLimitsDto {
 fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderData {
     projected(codex_member_card(share))
 }
-/// The plan and its rendering for one open provider popover.
 fn popover_render(provider: ProviderData) -> (Plan, tiny_skia::Pixmap) {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
@@ -120,9 +112,6 @@ fn popover_render(provider: ProviderData) -> (Plan, tiny_skia::Pixmap) {
     let pixmap = render(&planned);
     (planned, pixmap)
 }
-/// How much of one column the bar covers, read from the red channel because the
-/// popover card behind it is already opaque. A tapering shape reads thinner than a
-/// straight-sided one even where anti-aliasing lights the same rows.
 fn column_ink(pixmap: &tiny_skia::Pixmap, x: u32, y0: u32, y1: u32) -> u32 {
     (y0..y1)
         .map(|y| u32::from(pixmap.pixel(x, y).map_or(0, |px| px.red())))

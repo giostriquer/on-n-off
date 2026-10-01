@@ -12,7 +12,6 @@ fn today() -> NaiveDate {
     now().date_naive()
 }
 
-/// A breakdown in the shape the endpoint answers: one row per day, with the credits each model used.
 fn breakdown(days: &[(&str, &[f64])]) -> Value {
     json!({
         "data": days.iter().map(|(date, credits)| json!({
@@ -30,7 +29,6 @@ fn breakdown(days: &[(&str, &[f64])]) -> Value {
     })
 }
 
-/// Codex's own parser sums each day's per-model credits, and the days in the window.
 #[test]
 fn sums_each_days_models_over_the_last_7_and_30_days() {
     let payload = breakdown(&[
@@ -62,14 +60,12 @@ fn days_outside_the_30_day_window_are_left_out() {
     assert_eq!((spent.last_7_days, spent.last_30_days), (0.0, 1.0));
 }
 
-/// A member who has used nothing yet has still been answered: nothing spent is a figure.
 #[test]
 fn no_rows_is_nothing_spent() {
     let spent = parse(&breakdown(&[]), now()).unwrap();
     assert_eq!((spent.last_7_days, spent.last_30_days), (0.0, 0.0));
 }
 
-/// Anything counted in another unit (the app also reads token breakdowns) is not credits.
 #[test]
 fn only_a_breakdown_counted_in_credits_is_read() {
     let mut tokens = breakdown(&[("2026-09-24", &[5.0])]);
@@ -98,8 +94,6 @@ fn an_amount_that_is_not_a_count_of_credits_adds_nothing() {
     assert_eq!((spent.last_7_days, spent.last_30_days), (10.0, 10.0));
 }
 
-/// Without a freshness time of its own the figure is dated when it was read, so a remembered one
-/// still says how old it is.
 #[test]
 fn a_missing_or_unreadable_freshness_dates_the_figure_when_it_was_read() {
     let mut missing = breakdown(&[]);
@@ -112,7 +106,6 @@ fn a_missing_or_unreadable_freshness_dates_the_figure_when_it_was_read() {
     assert_eq!(parse(&unreadable, now()).unwrap().updated_at, read_at);
 }
 
-/// The app asks for whole UTC days ending today: `start = today - (days - 1)`.
 #[test]
 fn asks_for_the_30_utc_days_ending_today_by_day() {
     assert_eq!(
@@ -121,8 +114,6 @@ fn asks_for_the_30_utc_days_ending_today_by_day() {
     );
 }
 
-/// Codex's own `PlanType::is_workspace_account` (openai/codex rust-v0.156.1,
-/// `codex-rs/protocol/src/account.rs`): team-like, business-like, education-like and enterprise.
 #[test]
 fn workspace_plans_are_the_ones_codex_counts_as_workspace_accounts() {
     for plan in [
@@ -147,7 +138,6 @@ fn workspace_plans_are_the_ones_codex_counts_as_workspace_accounts() {
     }
 }
 
-/// "team" is a Claude plan too; only a Codex workspace card is ever asked what it spent.
 #[test]
 fn only_a_codex_workspace_card_is_asked_what_it_spent() {
     let mut card = ProviderLimitsDto::for_test(AgentId::Codex, "acct-a");
@@ -162,13 +152,10 @@ fn only_a_codex_workspace_card_is_asked_what_it_spent() {
     assert!(!asks_what_was_spent(&card));
 }
 
-/// A key no other test uses, so the backoff one test records never skips another's read.
 fn account(name: &str) -> String {
     format!("test-account:{name}:{:?}", std::thread::current().id())
 }
 
-/// The seam both callers go through: one GET with the login's own token and workspace, for the 30
-/// UTC days up to the injected clock.
 #[test]
 fn reads_with_the_logins_token_for_its_workspace() {
     let (url, request) = crate::http::serve_once_capturing(
@@ -211,7 +198,6 @@ fn a_refused_or_failed_read_is_no_figure() {
     );
 }
 
-/// A failing endpoint costs one request per backoff period, not one per refresh.
 #[test]
 fn a_failed_read_backs_off_before_the_account_is_asked_again() {
     let key = account("backoff");
@@ -224,7 +210,6 @@ fn a_failed_read_backs_off_before_the_account_is_asked_again() {
     assert_eq!(read_backed_off(&projection(&key), &url, now()), None);
     assert!(!was_asked(&listener), "asked again while backing off");
 
-    // Another account is not held back by this one's failure.
     let (url, request) =
         crate::http::serve_once("200 OK", &breakdown(&[("2026-09-24", &[1.0])]).to_string());
     assert!(read_backed_off(&projection(&account("backoff-other")), &url, now()).is_some());
@@ -243,7 +228,6 @@ fn a_successful_read_does_not_hold_the_next_one_back() {
     assert_eq!(requests.join().unwrap().len(), 2);
 }
 
-/// A saved account's projection, as the saved read builds it.
 fn projection(key: &str) -> CodexAccess {
     CodexAccess {
         observation_key: key.to_string(),

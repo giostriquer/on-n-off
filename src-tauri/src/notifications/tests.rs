@@ -7,10 +7,6 @@ fn authorization_errors_never_count_as_a_grant() {
     assert!(authorization_result(true, true).is_err());
 }
 
-/// The names are what the platform APIs accept verbatim; a typo would mean a silent notification.
-/// On macOS the bundled app posts through UserNotifications, which takes a system sound file
-/// name (`None` is the framework's default sound); the unbundled dev build falls back to the
-/// plugin's `NSUserNotification` path and its bare names.
 #[cfg(target_os = "macos")]
 #[test]
 fn every_sound_names_a_macos_system_sound() {

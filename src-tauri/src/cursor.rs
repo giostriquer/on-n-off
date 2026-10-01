@@ -12,9 +12,6 @@ use crate::sort::sort_tab;
 
 const SOURCE_LOCAL: &str = "local";
 
-/// Cursor keeps MCP on/off in its own state (the IDE's settings; the CLI's per-project
-/// `~/.cursor/projects/<slug>/mcp-{approvals,disabled}.json`) and does not read a `disabled`
-/// key from `mcp.json`, so on-n-off lists Cursor's servers but never switches them.
 pub const MCP_READ_ONLY: &str = "Cursor manages MCP servers itself: switch them in the Cursor app or with `agent mcp enable <name>` / `agent mcp disable <name>`; on-n-off only lists them.";
 
 #[derive(Debug, Clone)]
@@ -25,7 +22,6 @@ struct DiscoveredPlugin {
     path: PathBuf,
 }
 
-/// Read-only view of `~/.cursor`: plugins, skills, and MCP servers are listed, never written.
 pub struct CursorAdapter {
     root: Option<PathBuf>,
 }
@@ -62,7 +58,6 @@ impl CursorAdapter {
         parse_antigravity_json(&text)
             .into_iter()
             .map(|mut server| {
-                // Every configured server is live as far as Cursor's config file can tell.
                 server.enabled = true;
                 server.togglable = false;
                 server
@@ -167,7 +162,6 @@ impl AgentAdapter for CursorAdapter {
             plugins,
             user_skills,
             mcp_servers: self.mcp_servers(),
-            // This provider has no hook mechanism on disk; the screen says so.
             hooks: Vec::new(),
         };
         sort_tab(&mut tab);
@@ -214,12 +208,8 @@ fn read_plugin_name(manifest: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Marker Cursor writes once a marketplace checkout finished downloading.
 const CACHE_COMPLETE: &str = ".cache-complete";
 
-/// The directory holding a plugin's files: `dir` itself when it carries a manifest (local
-/// plugins, symlinked repos), else the best of its per-version checkouts — Cursor stores
-/// marketplace installs as `cache/<marketplace>/<plugin>/<commit>/` and keeps old commits.
 fn plugin_install_dir(dir: &Path) -> Option<(PathBuf, PathBuf)> {
     if let Some(manifest) = plugin_manifest(dir) {
         return Some((dir.to_path_buf(), manifest));
@@ -233,8 +223,6 @@ fn plugin_install_dir(dir: &Path) -> Option<(PathBuf, PathBuf)> {
         .max_by_key(|(path, manifest)| checkout_rank(path, manifest))
 }
 
-/// Complete checkouts beat partial ones, then the highest manifest version, then the most
-/// recently written manifest.
 fn checkout_rank(checkout: &Path, manifest: &Path) -> (bool, Vec<u64>, std::time::SystemTime) {
     let complete = checkout.join(CACHE_COMPLETE).is_file();
     let version = crate::plugin_meta::installed_hint(checkout, None).version;

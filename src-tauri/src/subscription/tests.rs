@@ -13,7 +13,6 @@ fn claims() -> Value {
         "chatgpt_subscription_last_checked": "2026-09-09T12:00:00Z"
     })
 }
-/// A Codex `auth.json` whose ID token carries these `https://api.openai.com/auth` claims.
 fn auth(claims: &Value) -> Value {
     json!({"tokens": {
         "account_id": claims["chatgpt_account_id"],
@@ -122,7 +121,6 @@ fn the_signed_in_login_answers_for_itself_and_the_vault_for_everyone_else() {
         claims["chatgpt_subscription_active_until"] = json!(until);
         claims
     };
-    // A is signed in with the live date and also saved with an older one; B is only saved.
     let auth_path = home.path().join(".codex/auth.json");
     std::fs::write(
         &auth_path,
@@ -147,8 +145,6 @@ fn the_signed_in_login_answers_for_itself_and_the_vault_for_everyone_else() {
     );
     assert_eq!(date(&b), "2026-12-01T12:00:00+00:00");
 
-    // A native login nothing can parse costs the saved profiles nothing, and A's saved copy
-    // stands in for it.
     std::fs::write(&auth_path, "not json").unwrap();
     assert_eq!(date(&b), "2026-12-01T12:00:00+00:00");
     assert_eq!(date(&a), "2026-09-20T12:00:00+00:00");
@@ -197,7 +193,6 @@ fn a_busy_saved_account_vault_is_retryable_not_an_absent_date() {
     crate::accounts::vault::tests::unlock_fixture(&home);
     let lease = std::fs::File::create(root.join("operation.lock")).unwrap();
     lease.try_lock().unwrap();
-    // Production's ten seconds would add ten to the suite.
     let _short = crate::accounts::override_lease_timeout(std::time::Duration::from_millis(100));
     let error = read_at(home.path(), "profile:inactive", now()).unwrap_err();
     assert!(

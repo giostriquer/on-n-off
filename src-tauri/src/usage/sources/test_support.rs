@@ -1,5 +1,3 @@
-//! Transcripts the `sources` tests write into a scratch home.
-
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -9,12 +7,10 @@ pub(super) fn at(iso: &str) -> i64 {
         .timestamp_millis()
 }
 
-/// The UTC midnight that begins `month` of 2026.
 pub(super) fn month_start(month: u32) -> i64 {
     at(&format!("2026-{month:02}-01T00:00:00Z"))
 }
 
-/// A Claude transcript under the one Claude root.
 pub(super) fn transcript_path(home: &Path, name: &str) -> PathBuf {
     home.join(".claude")
         .join("projects")
@@ -22,7 +18,6 @@ pub(super) fn transcript_path(home: &Path, name: &str) -> PathBuf {
         .join(name)
 }
 
-/// One Claude assistant message's usage, as Claude Code writes it.
 pub(super) fn record(timestamp: &str, message_id: &str, output_tokens: u64) -> String {
     serde_json::json!({
         "type": "assistant",

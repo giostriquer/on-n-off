@@ -1,7 +1,3 @@
-//! Live agent sessions listed under a provider's quota windows in the side notch. Claude Code
-//! keeps `~/.claude/sessions/<pid>.json` while a session runs; Codex appends rollout transcripts
-//! under `~/.codex/sessions/YYYY/MM/DD/`. Both are read-only and stay on this machine.
-
 use crate::dto::AgentId;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,17 +9,12 @@ use std::{
     time::SystemTime,
 };
 
-/// Rows per provider; the popover is a glance, not a session manager. The helper enforces the
-/// same cap when it validates a message.
 pub const MAX_SESSIONS: usize = 12;
 const CLAUDE_MAX_FILE_BYTES: usize = 64 * 1024;
 const CODEX_MAX_FILES: usize = 48;
 const CODEX_TAIL_BYTES: u64 = 128 * 1024;
 const CODEX_RECENT_MINUTES: i64 = 60;
-/// A `task_started` older than this without a later boundary is a stale transcript, not work.
 const CODEX_WORKING_MINUTES: i64 = 15;
-/// A transcript still being written counts as work even when its boundary events are out of
-/// the tail window.
 const CODEX_ACTIVE_WRITE_MINUTES: i64 = 2;
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -38,12 +29,9 @@ pub enum SessionStatus {
 pub struct LiveSession {
     pub id: String,
     pub name: String,
-    /// Where the session runs: "Desktop", "Terminal", "VS Code", …
     pub place: String,
-    /// The working directory's last path component.
     pub project: String,
     pub status: SessionStatus,
-    /// RFC 3339 instant of the last observed activity.
     pub last_active_at: String,
 }
 
@@ -153,8 +141,6 @@ fn claude_place(entrypoint: Option<&str>) -> String {
     }
 }
 
-/// `ps` reports only the processes that still exist. A missing, failing, or hung `ps` keeps
-/// every row rather than blocking the supervisor or hiding live sessions.
 #[cfg(unix)]
 fn live_pids(pids: &[u32]) -> HashSet<u32> {
     use crate::process::{wait_with_deadline, CommandOutcome};
@@ -286,7 +272,6 @@ fn codex_session(path: &Path, mtime_ms: i64, now: DateTime<Utc>) -> Option<Obser
     })
 }
 
-/// `Some(true)` after a `task_started` with no later `task_complete` / `turn_aborted`.
 fn last_task_boundary(tail: &[u8]) -> Option<bool> {
     let mut state = None;
     for line in tail.split(|byte| *byte == b'\n') {
@@ -330,7 +315,6 @@ fn codex_place(originator: Option<&str>, source: Option<&str>) -> String {
     }
 }
 
-/// `<root>/YYYY/MM/DD`, the layout Codex uses for its rollouts.
 fn day_dir(root: &Path, day: NaiveDate) -> PathBuf {
     root.join(format!("{:04}", day.year()))
         .join(format!("{:02}", day.month()))

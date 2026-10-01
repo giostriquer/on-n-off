@@ -69,8 +69,6 @@ fn a_pending_recovery_is_reported_only_to_the_provider_it_belongs_to() {
     );
 }
 
-/// Each profile says whether the user archived it, from the archive beside the snapshots; the key
-/// is left out for one that is not.
 #[test]
 fn listing_says_which_profiles_are_archived() {
     let harness = Harness::new();

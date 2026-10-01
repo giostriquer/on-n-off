@@ -47,7 +47,6 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
     assert_eq!(cards[0].reading.windows[0].used_percent, 42.0);
     assert_eq!(cards[1].account.as_ref().unwrap().id, "other-team");
     assert_eq!(cards[1].reading.windows[0].used_percent, 100.0);
-    // The superseded original remains on disk, with its original identity and observations.
     assert_eq!(
         std::fs::read_dir(home.path().join(".on-n-off/limits"))
             .unwrap()
@@ -56,8 +55,6 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
     );
 }
 
-/// What a first usage reading keeps: an answer about the signed-in identity that observed
-/// something, as a card that is not the signed-in account's. Anything else is no reading.
 #[test]
 fn a_first_reading_is_kept_only_when_it_answered_for_the_identity_with_something_observed() {
     let who = identity();
