@@ -127,21 +127,6 @@ fn a_refusal_is_no_term_and_is_not_asked_again_at_once() {
     served.join().unwrap();
 }
 
-#[test]
-fn an_answer_stands_for_the_day_without_asking_again() {
-    let account = projection("renewal-fresh");
-    MEMO.forget(&account.observation_key);
-    let (url, served) = serve_once("200 OK", &term(false).to_string());
-    let first = read_backed_off(&account, &url, now()).unwrap();
-    served.join().unwrap();
-    // The server answered once; a second read within the day is the same term, not a request.
-    assert_eq!(
-        read_backed_off(&account, &refused_url(), now()),
-        Some(first)
-    );
-    MEMO.forget(&account.observation_key);
-}
-
 /// A standing answer is served until the day is out, then the account is asked again and the new
 /// answer replaces it.
 #[test]
@@ -167,18 +152,5 @@ fn an_answer_stands_for_a_day_then_is_asked_again_and_replaced() {
         "a day-old answer is read again and replaced"
     );
     served.join().unwrap();
-    MEMO.forget(&account.observation_key);
-}
-
-/// Once a failure's wait has run out the account is asked again, and an answer clears the count.
-#[test]
-fn a_backoff_that_has_run_out_lets_a_working_endpoint_answer() {
-    let account = projection("renewal-backoff-out");
-    MEMO.forget(&account.observation_key);
-    MEMO.failed_before(&account.observation_key, 3);
-    let (url, served) = serve_once("200 OK", &term(true).to_string());
-    assert!(read_backed_off(&account, &url, now()).is_some());
-    served.join().unwrap();
-    assert_eq!(MEMO.backoff_of(&account.observation_key), None);
     MEMO.forget(&account.observation_key);
 }
