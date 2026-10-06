@@ -190,6 +190,16 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
 - **A non-activating overlay cannot take the foreground.** The popover's "Open Limits" and "Open Pull
   requests" links show and raise the main window, but Windows refuses the focus change, so a window
   that was already open behind another app stays behind it and the taskbar button flashes instead.
+- **Always on top does not stay on top by itself.** `with_always_on_top` sets `WS_EX_TOPMOST` once,
+  and Windows can still stack the window below ordinary ones: on 2026-10-06 a maximized terminal sat
+  above the notch and both taskbars while all three kept the flag, so the notch vanished behind it.
+  The 500 ms screen poll walks the windows above the overlay (`GW_HWNDPREV`), and when a visible,
+  uncloaked window without `WS_EX_TOPMOST` is among them, `keep_on_top` puts the overlay back with
+  `SetWindowPos(HWND_TOPMOST)`, neither moving, sizing nor activating it. It acts only when an
+  ordinary window is above, so it does not keep re-raising itself over other always-on-top windows,
+  though the raise it makes puts the notch above them; it does nothing while a full-screen app has
+  the notch suppressed. Not checked: whether an immersive shell window (Start, Search, a toast) is
+  visible, uncloaked and not topmost while open, which would re-raise the notch every poll it stays.
 
 - **Text goes through DirectWrite, along the WebView's own path.** GDI's
   `ANTIALIASED_QUALITY` is a 4x4 supersample — exactly 16 coverage levels, and curves that
