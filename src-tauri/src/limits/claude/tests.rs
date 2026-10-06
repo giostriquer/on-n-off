@@ -187,6 +187,51 @@ fn the_signed_in_card_is_claude_codes_report_read_in_a_config_dir_without_histor
 }
 
 #[test]
+fn a_read_clears_the_usage_config_dir_another_account_left_and_nothing_beside_it() {
+    use crate::cli_stub::CliStub;
+    let home = crate::paths::scratch_dir("limits-claude-stale-usage-config-dir");
+    std::fs::write(
+        home.join(".claude.json"),
+        json!({"oauthAccount": {"accountUuid": "user", "organizationUuid": "team"}}).to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let usage_config_dir = super::usage_config_dir(&home);
+    std::fs::create_dir_all(&usage_config_dir).unwrap();
+    let stale = usage_config_dir.join(".claude.json");
+    std::fs::write(
+        &stale,
+        json!({"oauthAccount": {"accountUuid": "someone-else", "organizationUuid": "team"}})
+            .to_string(),
+    )
+    .unwrap();
+    let beside = home.join(".on-n-off").join("settings.json");
+    std::fs::write(&beside, "{}").unwrap();
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(
+        bin.join("report.jsonl"),
+        r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"weekly_all","group":"weekly","percent":34,"resets_at":"2026-10-05T09:00:00+00:00"}]}}}"#,
+    )
+    .unwrap();
+    let stub = CliStub::new("claude")
+        .stdout_file("report.jsonl")
+        .write(&bin);
+
+    let cards = crate::accounts::native::with_test_cli(&stub, || {
+        crate::limits::read_limits_at(AgentId::Claude, false, &home)
+    });
+
+    assert_eq!(cards[0].status, LimitsStatus::Ok, "{:?}", cards[0].message);
+    assert!(
+        !stale.exists(),
+        "kept the usage config dir another account left"
+    );
+    assert!(beside.exists(), "cleared more than the usage config dir");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
     use crate::cli_stub::CliStub;
     let home = crate::paths::scratch_dir("limits-claude-no-config-dir");
