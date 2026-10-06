@@ -93,7 +93,8 @@ a disconnected or mirrored selection hides the notch. Windows 11 is the floor
 
 `OS.md` carries the Windows behaviours that decide whether this works at all — the bare `WS_POPUP`
 style, per-pixel-alpha hit testing, the pointer poll that stands in for the `CursorMoved` events
-tao never sends, and pixel alignment on fractional display scaling. Read it before changing
+tao never sends, pixel alignment on fractional display scaling, and the screen poll that puts the
+notch back on top when Windows stacks it below an ordinary window. Read it before changing
 `win_window.rs`.
 
 **Typography is measured, not eyeballed.** The overlay sits next to the app's own window, so any

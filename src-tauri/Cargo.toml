@@ -1,6 +1,6 @@
 [package]
 name = "on-n-off"
-version = "0.28.0"
+version = "0.28.1"
 description = "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration"
 authors = ["Giovanne Striquer"]
 edition = "2021"
@@ -75,6 +75,7 @@ windows = { version = "0.61", features = [
   "Win32_System_Memory",
   "Win32_UI_Accessibility",
   "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

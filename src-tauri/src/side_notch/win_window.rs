@@ -18,14 +18,16 @@ use tao::platform::windows::{
 use tao::window::{Window, WindowBuilder};
 use tiny_skia::Pixmap;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
     AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowRect,
-    IsWindowVisible, SetWindowsHookExW, ShowWindow, UnhookWindowsHookEx, MSLLHOOKSTRUCT, SW_HIDE,
-    SW_SHOWNOACTIVATE, WH_MOUSE_LL, WM_LBUTTONDOWN, WS_EX_LAYERED,
+    CallNextHookEx, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowRect,
+    IsWindowVisible, SetWindowsHookExW, ShowWindow, UnhookWindowsHookEx, GW_HWNDPREV, HWND_TOPMOST,
+    MSLLHOOKSTRUCT, SW_HIDE, SW_SHOWNOACTIVATE, WH_MOUSE_LL, WM_LBUTTONDOWN, WS_EX_LAYERED,
+    WS_EX_TOPMOST,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, UpdateLayeredWindow, GWL_EXSTYLE,
@@ -54,6 +56,7 @@ const HOVER_OPEN_DELAY: Duration = Duration::from_millis(120);
 const HOVER_CLOSE_GRACE: Duration = Duration::from_millis(350);
 const POINTER_POLL: Duration = Duration::from_millis(80);
 const SCREEN_POLL: Duration = Duration::from_millis(500);
+const ABOVE_WALK_LIMIT: usize = 512;
 
 #[derive(Debug)]
 pub struct Machine {
@@ -464,7 +467,10 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
                             machine.set_displays(Vec::new());
                         }
                     }
-                    machine.set_suppressed(fullscreen_foreground(&machine, HWND(hwnd as *mut _)));
+                    let own = HWND(hwnd as *mut _);
+                    let fullscreen = fullscreen_foreground(&machine, own);
+                    machine.set_suppressed(fullscreen);
+                    keep_on_top(own, fullscreen);
                 }
 
                 if machine.pointer_poll_active() {
@@ -636,6 +642,61 @@ fn fullscreen_foreground(machine: &Machine, own: HWND) -> bool {
         }
     }
     rect.left <= mx && rect.top <= my && rect.right >= mx + mw && rect.bottom >= my + mh
+}
+
+#[derive(Clone, Copy)]
+struct WindowAbove {
+    visible: bool,
+    cloaked: bool,
+    topmost: bool,
+}
+
+fn sunk_below_ordinary_windows(above: impl IntoIterator<Item = WindowAbove>) -> bool {
+    above
+        .into_iter()
+        .any(|window| window.visible && !window.cloaked && !window.topmost)
+}
+
+fn windows_above(own: HWND) -> impl Iterator<Item = WindowAbove> {
+    let next = |window: HWND| unsafe { GetWindow(window, GW_HWNDPREV) }.ok();
+    std::iter::successors(next(own), move |window| next(*window))
+        .take(ABOVE_WALK_LIMIT)
+        .map(|window| {
+            let mut cloaked: u32 = 0;
+            unsafe {
+                let _ = DwmGetWindowAttribute(
+                    window,
+                    DWMWA_CLOAKED,
+                    &mut cloaked as *mut u32 as *mut core::ffi::c_void,
+                    std::mem::size_of::<u32>() as u32,
+                );
+                WindowAbove {
+                    visible: IsWindowVisible(window).as_bool(),
+                    cloaked: cloaked != 0,
+                    topmost: GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as isize != 0,
+                }
+            }
+        })
+}
+
+fn keep_on_top(own: HWND, fullscreen: bool) {
+    if fullscreen
+        || !unsafe { IsWindowVisible(own) }.as_bool()
+        || !sunk_below_ordinary_windows(windows_above(own))
+    {
+        return;
+    }
+    unsafe {
+        let _ = SetWindowPos(
+            own,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+        );
+    }
 }
 
 pub(super) fn overlay_style(current: u32) -> u32 {
