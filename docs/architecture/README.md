@@ -137,9 +137,12 @@ provider's own client:
   MCP servers or custom commands, which every poll would otherwise start; a Claude Code too old to
   know the flag is not run at all, and the card asks for an update. The card is the account the
   user's own `.claude.json` `oauthAccount` names before the read, which must still name it after,
-  and its plan comes from that record, not from the copy Claude Code keeps in on-n-off's dir. When there
-  is no report, `claude auth status --json`, which reads only what is stored, tells a signed-out
-  config dir from a report that could not be had.
+  and its plan comes from that record, not from the copy Claude Code keeps in on-n-off's dir. That
+  copy also files Claude Code's usage cache under whichever account first read there, and Claude
+  Code answers from that cache for any login, so a read first removes the dir when its copy names
+  another account than the user's record, and a read the account changed under removes it after.
+  When there is no report, `claude auth status --json`, which reads only what is stored, tells a
+  signed-out config dir from a report that could not be had.
 
   Because the read is Claude Code's, so is the renewal. The access token lives eight hours and
   Claude Code renews it whenever it runs, which each poll does, under its own refresh locks.
