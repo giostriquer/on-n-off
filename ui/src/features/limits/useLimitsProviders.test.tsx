@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, SharedReadChanged } from "$lib/types";
@@ -19,6 +19,30 @@ vi.mock("$lib/api", () => ({
 }));
 
 describe("limits refresh policy", () => {
+  it("checks the shared cache every five minutes even with a slower default", async () => {
+    vi.useFakeTimers();
+    calls.listeners.clear();
+    calls.readLimits.mockReset().mockResolvedValue([]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const hook = renderHook(() => useLimitsProviders(30), { wrapper });
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(calls.readLimits.mock.calls).toEqual([["claude", false], ["codex", false]]);
+      calls.readLimits.mockClear();
+      await act(() => vi.advanceTimersByTimeAsync(299_000));
+      expect(calls.readLimits).not.toHaveBeenCalled();
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+      expect(calls.readLimits.mock.calls).toEqual([["claude", false], ["codex", false]]);
+    } finally {
+      hook.unmount();
+      client.clear();
+      vi.useRealTimers();
+    }
+  });
+
   it("picks up a read another surface already made, unforced, without waiting out the interval", async () => {
     calls.listeners.clear();
     calls.readLimits.mockReset().mockResolvedValue([]);

@@ -6,6 +6,8 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod adaptive;
+
 fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> ProviderLimitsDto {
     ProviderLimitsDto {
         status,
@@ -102,7 +104,7 @@ fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
             let start = start.clone();
             thread::spawn(move || {
                 start.wait();
-                read_through_cache(&cache, Duration::from_secs(300), false, |_| {
+                read_through_cache(&cache, Duration::from_secs(300), false, |_, _| {
                     calls.fetch_add(1, Ordering::SeqCst);
                     thread::sleep(Duration::from_millis(25));
                     Vec::new()
@@ -123,7 +125,7 @@ fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
          announces nothing: {seen:?}"
     );
 
-    read_through_cache(&cache, Duration::from_secs(300), true, |force| {
+    read_through_cache(&cache, Duration::from_secs(300), true, |force, _| {
         assert!(force);
         calls.fetch_add(1, Ordering::SeqCst);
         Vec::new()
@@ -136,12 +138,12 @@ fn only_a_read_that_replaces_the_cache_is_announced() {
     let cache = Cache::new(Source::LimitsClaude);
     let interval = Duration::from_secs(5 * 60);
 
-    let (_, first) = read_through_cache(&cache, interval, false, |_| {
+    let (_, first) = read_through_cache(&cache, interval, false, |_, _| {
         vec![snapshot("current", true, LimitsStatus::Failed)]
     });
     assert_eq!(first, Reading::Replaced(1));
 
-    let (_, unchanged) = read_through_cache(&cache, interval, false, |_| {
+    let (_, unchanged) = read_through_cache(&cache, interval, false, |_, _| {
         unreachable!("the cached read is still fresh")
     });
     assert_eq!(
@@ -151,7 +153,7 @@ fn only_a_read_that_replaces_the_cache_is_announced() {
          announces nothing, which is what ends the exchange"
     );
 
-    let (refreshed, forced) = read_through_cache(&cache, interval, true, |force| {
+    let (refreshed, forced) = read_through_cache(&cache, interval, true, |force, _| {
         assert!(force);
         vec![snapshot("current", true, LimitsStatus::Ok)]
     });
@@ -161,7 +163,7 @@ fn only_a_read_that_replaces_the_cache_is_announced() {
         "a user refresh replaced the cached read, so every other surface is told"
     );
 
-    let (served, seen) = read_through_cache(&cache, interval, false, |_| {
+    let (served, seen) = read_through_cache(&cache, interval, false, |_, _| {
         unreachable!("the refreshed read is fresh")
     });
     assert_eq!(seen, Reading::Unchanged(2));
@@ -181,7 +183,7 @@ fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_c
     let cache = Cache::new(Source::LimitsCodex);
     let interval = Duration::from_secs(5 * 60);
 
-    let (_, failed) = read_through_cache(&cache, interval, true, |_| {
+    let (_, failed) = read_through_cache(&cache, interval, true, |_, _| {
         vec![snapshot("current", true, LimitsStatus::Failed)]
     });
     assert!(
@@ -189,7 +191,7 @@ fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_c
         "unlike the GitHub reader, a failure here is remembered, so it is worth announcing"
     );
 
-    let (served, reading) = read_through_cache(&cache, interval, false, |_| {
+    let (served, reading) = read_through_cache(&cache, interval, false, |_, _| {
         unreachable!("a consumer answering the announcement must not reach the provider")
     });
     assert_eq!(reading, Reading::Unchanged(failed.revision()));
@@ -201,6 +203,7 @@ fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_succes
     let cache = Cache::new(Source::LimitsClaude);
     *cache.read.lock().unwrap() = Some(CachedRead {
         refreshed_at: Instant::now(),
+        saved_refreshed_at: Instant::now(),
         entries: vec![
             snapshot("current", true, LimitsStatus::Ok),
             snapshot("forgotten", false, LimitsStatus::Ok),
@@ -238,6 +241,7 @@ fn seeded(entries: Vec<ProviderLimitsDto>) -> Cache {
     let cache = Cache::new(Source::LimitsCodex);
     *cache.read.lock().unwrap() = Some(CachedRead {
         refreshed_at: Instant::now(),
+        saved_refreshed_at: Instant::now(),
         entries,
         consecutive_failures: 0,
     });

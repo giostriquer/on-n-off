@@ -18,7 +18,7 @@ pub(crate) use codex::codex_card;
 pub use codex::{consume_codex_reset_credit, ResetSpend};
 pub(crate) use codex::{read_saved_codex, CodexEndpoints};
 pub(crate) use reading::keep_remembered;
-pub(crate) use snapshots::Remembered;
+pub(crate) use snapshots::{without_superseded, Remembered};
 
 use std::collections::BTreeSet;
 use std::path::Path;
