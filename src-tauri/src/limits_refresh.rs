@@ -10,11 +10,19 @@ use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto, ResetCreditOutcome};
 use crate::read_revision::{self, Reading, Revision, Source};
 
 const MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(60 * 60);
+const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 struct CachedRead {
     refreshed_at: Instant,
+    saved_refreshed_at: Instant,
     entries: Vec<ProviderLimitsDto>,
     consecutive_failures: u32,
+}
+
+struct Refresh<'a> {
+    native: bool,
+    saved: bool,
+    previous: &'a [ProviderLimitsDto],
 }
 
 struct Cache {
@@ -50,6 +58,27 @@ pub fn poll_interval() -> Duration {
     let seconds = u64::from(minutes) * 60;
     let _ = POLL_SECONDS.compare_exchange(0, seconds, Ordering::AcqRel, Ordering::Acquire);
     Duration::from_secs(POLL_SECONDS.load(Ordering::Acquire))
+}
+
+pub(crate) fn check_interval(default: Duration) -> Duration {
+    default.min(CHECK_INTERVAL)
+}
+
+fn active_interval(entries: &[ProviderLimitsDto], default: Duration) -> Duration {
+    let used = entries
+        .iter()
+        .find(|entry| entry.current_account && !entry.archived && entry.status == LimitsStatus::Ok)
+        .filter(|entry| entry.account.is_some())
+        .into_iter()
+        .flat_map(|entry| &entry.reading.windows)
+        .map(|window| window.used_percent)
+        .filter(|used| used.is_finite())
+        .reduce(f64::max);
+    if used.is_some_and(|used| (90.0..100.0).contains(&used)) {
+        default.min(CHECK_INTERVAL)
+    } else {
+        default
+    }
 }
 
 pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
@@ -92,10 +121,20 @@ fn read_provider(
     flag: &dyn Fn(&mut [ProviderLimitsDto]),
 ) -> (Vec<ProviderLimitsDto>, u64) {
     let mut unarchived = false;
-    let (entries, reading) = read_through_cache(cache, interval, force, |force| {
-        let mut entries = native(force);
-        unarchived = unarchive(&entries);
-        saved(force, &mut entries);
+    let (entries, reading) = read_through_cache(cache, interval, force, |force, refresh| {
+        let mut entries = if refresh.native {
+            let mut entries = native(force);
+            unarchived = unarchive(&entries);
+            if !refresh.saved {
+                entries = keep_saved_cards(entries, refresh.previous);
+            }
+            entries
+        } else {
+            refresh.previous.to_vec()
+        };
+        if refresh.saved {
+            saved(force, &mut entries);
+        }
         flag(&mut entries);
         entries
     });
@@ -104,6 +143,28 @@ fn read_provider(
         read_revision::announce(Source::Accounts);
     }
     (entries, reading.revision())
+}
+
+fn keep_saved_cards(
+    mut entries: Vec<ProviderLimitsDto>,
+    previous: &[ProviderLimitsDto],
+) -> Vec<ProviderLimitsDto> {
+    for card in previous.iter().filter(|card| !card.current_account) {
+        let Some(account) = &card.account else {
+            continue;
+        };
+        match entries.iter_mut().find(|entry| {
+            entry
+                .account
+                .as_ref()
+                .is_some_and(|other| other.id == account.id)
+        }) {
+            Some(entry) if !entry.current_account => entry.clone_from(card),
+            Some(_) => {}
+            None => entries.push(card.clone()),
+        }
+    }
+    crate::limits::without_superseded(entries)
 }
 
 fn announce(cache: &Cache, reading: Reading) {
@@ -253,34 +314,59 @@ fn read_through_cache<F>(
     read: F,
 ) -> (Vec<ProviderLimitsDto>, Reading)
 where
-    F: FnOnce(bool) -> Vec<ProviderLimitsDto>,
+    F: FnOnce(bool, Refresh<'_>) -> Vec<ProviderLimitsDto>,
 {
     let mut cached = cache
         .read
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let now = Instant::now();
-    if let Some(entry) = cached.as_ref() {
-        if cache_is_fresh(
+    let native = cached.as_ref().is_none_or(|entry| {
+        !cache_is_fresh(
             entry.refreshed_at,
             now,
-            interval,
+            active_interval(&entry.entries, interval),
             entry.consecutive_failures,
             force,
-        ) {
-            return (
-                entry.entries.clone(),
-                Reading::Unchanged(cache.revision.current()),
-            );
-        }
+        )
+    });
+    let saved = cached
+        .as_ref()
+        .is_none_or(|entry| !cache_is_fresh(entry.saved_refreshed_at, now, interval, 0, force));
+    if !native && !saved {
+        return (
+            cached.as_ref().unwrap().entries.clone(),
+            Reading::Unchanged(cache.revision.current()),
+        );
     }
     let previous_failures = cached
         .as_ref()
         .map_or(0, |entry| entry.consecutive_failures);
-    let entries = read(force);
-    let consecutive_failures = next_failure_count(previous_failures, &entries);
+    let entries = read(
+        force,
+        Refresh {
+            native,
+            saved,
+            previous: cached.as_ref().map_or(&[], |entry| &entry.entries),
+        },
+    );
+    let consecutive_failures = if native {
+        next_failure_count(previous_failures, &entries)
+    } else {
+        previous_failures
+    };
+    let finished_at = Instant::now();
     *cached = Some(CachedRead {
-        refreshed_at: Instant::now(),
+        refreshed_at: if native {
+            finished_at
+        } else {
+            cached.as_ref().unwrap().refreshed_at
+        },
+        saved_refreshed_at: if saved {
+            finished_at
+        } else {
+            cached.as_ref().unwrap().saved_refreshed_at
+        },
         entries: entries.clone(),
         consecutive_failures,
     });

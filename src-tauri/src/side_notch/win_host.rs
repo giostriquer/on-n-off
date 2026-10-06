@@ -418,7 +418,8 @@ fn supervise(app: AppHandle, controller: Arc<Controller>) {
                 poll.release_stale(now);
             }
             session_poll.release_stale(now);
-            let interval = crate::limits_refresh::poll_interval();
+            let interval =
+                crate::limits_refresh::check_interval(crate::limits_refresh::poll_interval());
             for (index, agent) in RAIL_ORDER.into_iter().enumerate() {
                 if !selected.contains(&agent) || !providers[index].due(now, interval) {
                     continue;

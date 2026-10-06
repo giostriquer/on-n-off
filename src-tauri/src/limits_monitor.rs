@@ -10,7 +10,6 @@ use crate::notifications::Sound;
 const DISABLED_WAKE_MINUTES: u16 = 60;
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
 const MONITORED_PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
-const MAX_BACKOFF_MINUTES: u16 = 60;
 
 pub struct LimitsMonitor;
 
@@ -85,8 +84,6 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
     let mut state = async_runtime::spawn_blocking(move || load_state(&load_path))
         .await
         .unwrap_or_default();
-    let mut consecutive_failures = 0_u32;
-
     loop {
         let settings = async_runtime::spawn_blocking(crate::settings::load_settings)
             .await
@@ -94,26 +91,13 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
         let watched = watched_providers(&settings);
         let polled_at = chrono::Utc::now();
         let poll_delay = if !watched.is_empty() {
-            let failed =
-                match poll_once(&app, &state_path, &mut state, &settings, watched, polled_at).await
-                {
-                    Ok(failed) => failed,
-                    Err(error) => {
-                        eprintln!("limits monitor poll failed: {error}");
-                        true
-                    }
-                };
-            if failed {
-                consecutive_failures = consecutive_failures.saturating_add(1);
-            } else {
-                consecutive_failures = 0;
+            if let Err(error) =
+                poll_once(&app, &state_path, &mut state, &settings, watched, polled_at).await
+            {
+                eprintln!("limits monitor poll failed: {error}");
             }
-            minutes(poll_delay_minutes(
-                settings.limits_poll_minutes,
-                consecutive_failures,
-            ))
+            crate::limits_refresh::check_interval(minutes(settings.limits_poll_minutes))
         } else {
-            consecutive_failures = 0;
             auto_spend::clear();
             if !state.providers.is_empty() || !state.reset_alerts.is_empty() {
                 observe_poll(&mut state, &[], &settings, chrono::Utc::now());
@@ -168,11 +152,8 @@ async fn poll_once(
     settings: &crate::settings::AppSettings,
     watched: &[AgentId],
     now: chrono::DateTime<chrono::Utc>,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     let snapshots = poll_providers(watched, auto_spend::any_due(now)).await?;
-    let provider_failed = snapshots
-        .iter()
-        .any(|snapshot| snapshot.current_account && snapshot.status == LimitsStatus::Failed);
     let due = auto_spend::take_due(&snapshots, &settings.reset_alerts, now);
     let previous = state.clone();
     let outcome = observe_poll(state, &snapshots, settings, now);
@@ -203,7 +184,7 @@ async fn poll_once(
         monitor::notify(app, "limits monitor", title, body, Sound::Default);
     }
     saved.map_err(|error| format!("could not save state: {error}"))?;
-    Ok(provider_failed)
+    Ok(())
 }
 
 struct PollOutcome {
@@ -390,15 +371,6 @@ fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Opti
     let drop = before.used_percent - used_percent;
 
     timestamp_advanced && drop > 0.5
-}
-
-fn poll_delay_minutes(base_minutes: u16, consecutive_failures: u32) -> u16 {
-    let delay = monitor::backoff(
-        Duration::from_secs(u64::from(base_minutes) * 60),
-        consecutive_failures,
-        Duration::from_secs(u64::from(MAX_BACKOFF_MINUTES) * 60),
-    );
-    u16::try_from(delay.as_secs() / 60).unwrap_or(MAX_BACKOFF_MINUTES)
 }
 
 fn load_state(path: &Path) -> MonitorState {

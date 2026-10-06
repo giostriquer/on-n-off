@@ -231,18 +231,19 @@ describe("Limits", () => {
     ]);
   });
 
-  it("uses a longer configured interval without an early focus refresh", async () => {
+  it("checks the shared cache on focus after five minutes with a longer configured interval", async () => {
     answer([okClaude()], [okCodex()]);
     renderLimits(10);
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(2));
 
     vi.setSystemTime(new Date("2026-08-17T20:05:01Z"));
     await act(async () => window.dispatchEvent(new Event("visibilitychange")));
-    expect(readLimits).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
+    expect(readLimits.mock.calls.slice(2)).toEqual([["claude", false], ["codex", false]]);
 
     vi.setSystemTime(new Date("2026-08-17T20:10:01Z"));
     await act(async () => window.dispatchEvent(new Event("visibilitychange")));
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(6));
   });
 
   it("forgets a remembered account on request and drops its card without a refetch", async () => {

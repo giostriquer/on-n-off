@@ -423,15 +423,6 @@ fn failed_and_remembered_snapshots_do_not_replace_the_notification_baseline() {
 }
 
 #[test]
-fn failure_backoff_doubles_and_caps_at_sixty_minutes() {
-    assert_eq!(poll_delay_minutes(10, 0), 10);
-    assert_eq!(poll_delay_minutes(10, 1), 20);
-    assert_eq!(poll_delay_minutes(10, 2), 40);
-    assert_eq!(poll_delay_minutes(10, 3), 60);
-    assert_eq!(poll_delay_minutes(10, 8), 60);
-}
-
-#[test]
 fn persisted_observations_prevent_duplicate_notifications_after_restart() {
     let root = scratch_dir("limits-monitor-round-trip");
     let path = root.join("monitor.json");
@@ -789,4 +780,17 @@ fn the_monitor_wakes_when_a_reset_falls_due_but_never_every_second() {
         poll,
         "one the poll saw and could not decide waits for the next poll"
     );
+}
+
+#[test]
+fn limits_checks_wake_the_monitor_in_five_minutes_without_delaying_a_reset() {
+    let now = at("2026-08-19T13:00:00Z");
+    let poll = crate::limits_refresh::check_interval(minutes(30));
+    assert_eq!(next_wake(poll, None, now, now), Duration::from_secs(300));
+    assert_eq!(
+        next_wake(poll, Some(at("2026-08-19T13:02:00Z")), now, now),
+        Duration::from_secs(120)
+    );
+    let faster = crate::limits_refresh::check_interval(minutes(2));
+    assert_eq!(next_wake(faster, None, now, now), Duration::from_secs(120));
 }
