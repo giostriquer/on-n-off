@@ -223,6 +223,24 @@ fn a_shared_cache_poll_is_due_as_soon_as_another_consumer_refreshes() {
 }
 
 #[test]
+fn limits_checks_wait_five_minutes_even_when_the_default_is_thirty() {
+    let now = Instant::now();
+    let interval = crate::limits_refresh::check_interval(Duration::from_secs(1800));
+    let mut poll = Poll::new(0u8);
+    assert!(!poll.start(now));
+    poll.finish(1, now, 0);
+
+    assert!(!poll.due(now, interval, 0));
+    assert!(!poll.due(now + Duration::from_secs(299), interval, 0));
+    assert!(poll.due(now + Duration::from_secs(300), interval, 0));
+    assert!(
+        !poll.start(now + Duration::from_secs(300)),
+        "automatic reads stay unforced"
+    );
+    assert!(!poll.due(now + Duration::from_secs(301), interval, 0));
+}
+
+#[test]
 fn a_poll_refreshes_on_its_interval_forces_once_and_never_stays_loading_forever() {
     let now = Instant::now();
     let interval = Duration::from_secs(5 * 60);

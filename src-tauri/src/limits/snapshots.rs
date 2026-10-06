@@ -301,7 +301,7 @@ fn replaces(scoped: &LimitsAccountDto, legacy: &LimitsAccountDto) -> bool {
     }
 }
 
-pub(super) fn without_superseded(accounts: Vec<ProviderLimitsDto>) -> Vec<ProviderLimitsDto> {
+pub(crate) fn without_superseded(accounts: Vec<ProviderLimitsDto>) -> Vec<ProviderLimitsDto> {
     let hidden: Vec<bool> = accounts
         .iter()
         .map(|old| accounts.iter().any(|new| supersedes(new, old)))

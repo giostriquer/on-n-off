@@ -9,7 +9,8 @@ import type { LimitsPollMinutes } from "$lib/types";
 type SharedLimitsProvider = Extract<AgentId, "claude" | "codex">;
 
 export function limitsRefreshMs(pollMinutes: LimitsPollMinutes): number {
-  return pollMinutes * 60_000;
+  // The shared cache decides which accounts are due, including active accounts near exhaustion.
+  return Math.min(pollMinutes, 5) * 60_000;
 }
 
 export type ProviderQuery = {

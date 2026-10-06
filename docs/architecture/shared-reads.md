@@ -18,6 +18,14 @@ numbers left both screens on their last answer.
 
 ## The mechanism
 
+Limits consumers check the shared cache at least every five minutes while polling is enabled.
+The cache keeps separate deadlines for the native account and saved profiles. Only a successful
+active account reading whose fullest quota window is at least 90% and below 100% used shortens
+its next read to five minutes (or the configured interval, if shorter). At 100%, or below 90%
+after a reset, that account returns to the configured interval. Saved profiles keep their own
+configured cadence, and native failures keep their provider's backoff without delaying the other
+provider. Extra native reads retain saved cards and announce the replacement as usual.
+
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot.
 
 ```mermaid
