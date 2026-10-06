@@ -49,6 +49,10 @@ pub(super) fn read_claude_config_account(config_file: &Path) -> Option<ClaudeCon
 }
 
 impl ClaudeIdentity {
+    pub(super) fn account_key(&self) -> (&str, Option<&str>) {
+        (&self.account.id, self.organization_id.as_deref())
+    }
+
     pub(super) fn names(&self, identity: &Identity) -> bool {
         self.account.id == identity.user_id
             && self.organization_id.as_deref() == Some(identity.workspace_id.as_str())

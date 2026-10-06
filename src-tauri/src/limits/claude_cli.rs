@@ -66,16 +66,18 @@ fn read_usage_within(
     )
 }
 
-pub(crate) fn read_signed_in(
-    claude: &dyn Fn() -> Command,
+pub(super) fn read_signed_in(
+    claude: &dyn Fn(&Path) -> Command,
     config_file: &Path,
+    usage_config_dir: &Path,
 ) -> ProviderLimitsDto {
-    read_signed_in_within(claude, config_file, DEADLINE)
+    read_signed_in_within(claude, config_file, usage_config_dir, DEADLINE)
 }
 
 fn read_signed_in_within(
-    claude: &dyn Fn() -> Command,
+    claude: &dyn Fn(&Path) -> Command,
     config_file: &Path,
+    usage_config_dir: &Path,
     deadline: Duration,
 ) -> ProviderLimitsDto {
     let before = read_claude_config_account(config_file);
@@ -91,7 +93,10 @@ fn read_signed_in_within(
             },
         )
     };
-    let windows = match report(claude, deadline) {
+    if let Err(why) = clear_if_another_account(usage_config_dir, before.as_ref()) {
+        return failed(LimitsStatus::Failed, &why);
+    }
+    let windows = match report(&|| claude(usage_config_dir), deadline) {
         Ok(windows) => windows,
         Err(NoReport::SignedOut) => {
             return failed(
@@ -108,19 +113,12 @@ fn read_signed_in_within(
         Err(why) => return failed(LimitsStatus::Failed, why.message()),
     };
     let after = read_claude_config_account(config_file);
-    let same = |a: &ClaudeConfigAccount, b: &ClaudeConfigAccount| {
-        a.identity.account.id == b.identity.account.id
-            && a.identity.organization_id == b.identity.organization_id
-    };
-    match (&before, &after) {
-        (Some(before), Some(after)) if same(before, after) => {}
-        (None, None) => {}
-        _ => {
-            return failed(
-                LimitsStatus::Failed,
-                "The signed-in Claude account changed while its usage was read.",
-            )
-        }
+    if !same_account(before.as_ref(), after.as_ref()) {
+        let _ = std::fs::remove_dir_all(usage_config_dir);
+        return failed(
+            LimitsStatus::Failed,
+            "The signed-in Claude account changed while its usage was read.",
+        );
     }
     finish(
         AgentId::Claude,
@@ -135,6 +133,27 @@ fn read_signed_in_within(
             },
         },
     )
+}
+
+fn same_account(a: Option<&ClaudeConfigAccount>, b: Option<&ClaudeConfigAccount>) -> bool {
+    a.map(|a| a.identity.account_key()) == b.map(|b| b.identity.account_key())
+}
+
+fn clear_if_another_account(
+    usage_config_dir: &Path,
+    account: Option<&ClaudeConfigAccount>,
+) -> Result<(), String> {
+    let recorded = read_claude_config_account(&usage_config_dir.join(".claude.json"));
+    if same_account(recorded.as_ref(), account) {
+        return Ok(());
+    }
+    match std::fs::remove_dir_all(usage_config_dir) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!(
+            "Could not clear Claude Code's usage config dir ({}): {error}",
+            usage_config_dir.display()
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn card_account(account: &ClaudeConfigAccount) -> LimitsAccountDto {

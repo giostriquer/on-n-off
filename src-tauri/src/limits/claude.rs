@@ -11,10 +11,11 @@ use crate::dto::{AgentId, LimitWindowDto, LimitWindowKind, LimitsStatus, Provide
 
 pub(super) fn claude_current(home: &Path) -> ProviderLimitsDto {
     match SignedIn::resolve(home) {
-        Ok(claude) => {
-            let config_dir = usage_config_dir(home);
-            claude_cli::read_signed_in(&|| claude.command_in(&config_dir), claude.config_file())
-        }
+        Ok(claude) => claude_cli::read_signed_in(
+            &|dir| claude.command_in(dir),
+            claude.config_file(),
+            &usage_config_dir(home),
+        ),
         Err(why) => finish(
             AgentId::Claude,
             LimitsStatus::Failed,
