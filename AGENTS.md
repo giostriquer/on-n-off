@@ -1,301 +1,98 @@
 # AGENTS.md
 
-on-n-off is a Tauri 2 desktop application for Windows and macOS (Apple Silicon). It reads what
-your coding agents have on disk and shows it in one place.
+on-n-off is a Tauri desktop app for Windows and macOS (Apple Silicon) that
+reads coding-agent state. `CLAUDE.md` includes this file; maintain one source.
+When this checkout is under `~/Documents/personal/`, first read
+`~/Documents/personal/AGENTS.md` and apply its workspace rules too.
 
-This file is orientation and operations: where things are, how to run them, how to finish. It is
-deliberately short.
+## Read before changing a surface
 
-| Read before you… | Document |
+Read the relevant sections, then the owning module's doc-comment.
+
+| When working on | Read |
 | --- | --- |
-| work on a subsystem you do not know | [`docs/architecture/`](docs/architecture/) |
-| name a domain concept in code, docs or a PR | [`CONTEXT.md`](CONTEXT.md) |
-| touch `cli_locate.rs`, `process.rs`, `scripts/`, or CI | [`OS.md`](OS.md) |
-| change a provider adapter | [`PROVIDERS.md`](PROVIDERS.md) — update it in the same change |
-| hand off or smoke-test a build | [`HANDOFF.md`](HANDOFF.md) |
-| cut a release | [`/release-version`](.claude/skills/release-version/SKILL.md) |
+| An unfamiliar subsystem | [Architecture](docs/architecture/README.md) |
+| Domain names in code, docs or PRs | [CONTEXT.md](CONTEXT.md) |
+| Backend/UI boundaries, performance or tests | [Development guide](docs/development.md) |
+| CLI lookup, process handling, scripts or CI | [OS.md](OS.md), including toolchain/cache rules |
+| Provider adapters | [PROVIDERS.md](PROVIDERS.md); update it in the same change |
+| Accounts, credentials or saved-account usage | [Account ownership and renewal](docs/architecture/accounts.md) |
+| Shared cached reads | [Shared-read protocol](docs/architecture/shared-reads.md) |
+| Visuals, accessibility, meters or the notch | [Visual verification](docs/development.md#visual-verification) and [notch design](docs/architecture/side-notch.md) |
+| Handoff or smoke testing | [HANDOFF.md](HANDOFF.md) and [completion requirements](docs/development.md#completion) |
+| Release work | [Release workflow](.claude/skills/release-version/SKILL.md) |
 
-## Project map
+## Data safety
 
-Each entry says what a thing is and where. The **why** lives in the module doc-comment at the top
-of the file — start there, not here.
+- Agent homes are real user data. Tests inject roots with `paths::scratch_dir`,
+  `*_for(home)` or `*_in`; a test build has no user home. An ignored real-home
+  probe reads only `ON_N_OFF_PROBE_HOME`. Never run a mutating test on a real home.
+- Every provider-config write uses `ConfigIo`: backup, atomic replacement,
+  validation, rollback. Preserve all four; never weaken validation or repair
+  a malformed fixture to make a test pass.
+- Active native credentials remain authoritative. Automatic remembering
+  verifies logins and never activates a profile. Preserve the account guide's
+  encrypted vault, native-store exceptions, renewal ownership and journals;
+  secrets must not enter DTOs, ordinary backups, logs or plaintext fallbacks.
+- `github/` never writes to GitHub; `usage/` and `side_notch/` remain read-only.
+- Runtime QA is read-only unless the user authorizes mutation. CLI installs
+  and uninstalls have effects outside rollback: disclose them and use throwaway inputs.
 
-**Frontend** — React 19, TypeScript, Vite, Tailwind, TanStack Router/Query/Charts.
+## Implementation boundaries
 
-- `ui/src/lib/api.ts` — the only place the UI calls Tauri.
-- `ui/src/components/` — the controls every screen shares: `Rocker` (the OFF/ON toggle, the one
-  switch for a setting), `Segmented` (the one segmented control) and `SettingsCard` (a setting's
-  card, its captioned toggle, rows, buttons and selects). A new setting is built from these, not
-  from a checkbox or a switch of its own.
-- `ui/src/features/` — one directory per screen: `agents`, `catalog`, `github`, `limits`, `notch`,
-  `scope`, `session`, `settings`, `shell`, `updater`, `usage`.
-- `ui/src/dev/mockIpc.ts` — `?mock[=scenario]` on a dev build swaps Tauri's IPC for synthetic
-  data. Dead code in production builds. Fixtures in `githubFixtures.ts`, `limitsFixtures.ts`.
+- UI calls Rust through `$lib/api`; feature components never invoke Tauri directly.
+- Provider differences use `AgentAdapter`; saved-account differences use
+  `accounts::Adapter`, reaching `AgentAdapter` only through `supports_accounts`.
+- Reuse the [existing seams](docs/development.md#existing-boundaries) for CLI
+  lookup/spawning, file leases, fake CLIs, shared reads, settings and quota meters.
+- Keep filesystem, process, transcript and network work off the UI thread.
+  Follow the development guide's async and lock rules.
+- Preserve Tauri command names and serialized shapes unless a migration is
+  approved. Give new fields defaults so old snapshots still load.
+- Keep both platforms building. Clippy with `-D warnings` is the enforced gate;
+  pedantic/nursery findings are advisory. Do not raise Vite's 500 kB entry-chunk
+  threshold to hide a regression.
 
-**Backend** — `src-tauri/src/`.
+## Worktrees and integration
 
-- `commands.rs` — the IPC boundary. `dto.rs` — the shapes that cross it.
-- `{claude,codex,antigravity,cursor}.rs` — provider adapters behind `AgentAdapter` (`adapter.rs`).
-- `limits/`, `github/`, `usage/`, `item_install/`, `side_notch/` — the feature subsystems.
-- `limits_refresh.rs`, `read_revision.rs` — shared cached reads and how surfaces hear about them.
-- `limits_monitor.rs`, `github_monitor.rs`, `monitor.rs` — background polling and notifications.
-- `cli_locate.rs`, `cli.rs`, `process.rs` — finding and running provider CLIs.
-- `config_io.rs`, `backup.rs` — guarded configuration writes and rollback.
-- `paths.rs` — agent homes and app data paths; `ON_N_OFF_HOME` redirects them in a running app.
-  A test build has no user home at all.
-- `cli_stub.rs` — test-only fake CLI builder (`.cmd` on Windows, `sh` script elsewhere).
-- `tray.rs` — the status item on both platforms: a Limits popover on macOS, the app's own home
-  on Windows. See [`OS.md`](OS.md) for what differs.
-- `macos/SideNotch/` — the bundled SwiftUI notch helper, built by `native_build.rs` on macOS only.
-- `side_notch/win_*.rs` — the Windows notch, which has no helper and paints its own window.
+Before starting work or inspecting/integrating a branch, fetch origin and
+fast-forward local `main` in the primary checkout. Preserve any uncommitted
+changes as a patch or a named stash restored with `apply` if they prevent sync.
 
-**Build and CI** — `scripts/`, `.github/workflows/`, `.github/actions/`.
+Implement in `.worktrees/<change-type>-<task-slug>` on
+`<change-type>/<task-slug>`, based on current `origin/main` unless the task
+needs another base. Types are `feat`, `fix`, `perf`, `audit`, `refactor`, `docs`,
+`test`, `chore`, `release`. The primary checkout is for creating, inspecting
+and integrating worktrees, not implementation. Integrate to `main` fast-forward only.
 
-- `build-bundle.ps1` — builds, validates and stages one installer format (`nsis`, `dmg`).
-- `read-rust-toolchain.ps1`, `prune-rust-toolchains.ps1` — see "Toolchain pinning" below.
-- `stamp-source-times.mjs` — dates tracked files by their content, so a Swift build restored from
-  the Actions cache treats unchanged sources as unchanged.
-- `restore-swift-build/` — the one action every macOS job restores its Swift build cache through;
-  see [`OS.md`](OS.md).
-- `verify.yml` — the native CI legs. `ci.yml` calls it once per OS, and its lint and test jobs run
-  in parallel behind the required `verify-windows` and `verify-macos` checks; see [`OS.md`](OS.md).
-- `workflows.test.mjs` — pins the choices the workflows make on purpose, such as runner images.
-- `ipc-commands.test.mjs` — holds `api.ts`'s command names, `lib.rs`'s registrations and the dev
-  mock's handlers together.
-- `ui-shots.mjs` — the screenshot harness; see "Judging visuals" below.
-- `verify-release.mjs` — checks a drafted release's assets, checksums, updater signatures, feed
-  and attestations against the previous release before it is published. Its pure checks live in
-  `release-verification.mjs`.
+Refs, objects, remotes and stash are shared: stash is not cross-session storage,
+and another session's branch is not yours to rewrite. Ports, processes, caches
+and real homes are shared too. Coordinate app/server runs and confirm ownership
+before touching another session's worktree, branch or process.
 
-## Toolchain pinning
+## Verification and completion
 
-`rust-toolchain.toml` pins the compiler, and this is load-bearing for CI cost rather than for
-correctness.
+Write regression tests first and observe the intended failure before fixing it.
+Keep test files under 1000 lines; follow the [test layout and fixture rules](docs/development.md#test-structure).
+Use [focused commands](docs/development.md#commands) while working, and apply the
+[completion requirements](docs/development.md#completion) before handing off.
 
-`Swatinem/rust-cache` hashes the rustc version into the environment portion of every cache key —
-which is also its restore-key fallback — so an unpinned `stable` cold-starts every job at once on
-each six-week Rust release. It also hashes *every* installed toolchain from `rustup toolchain
-list`, so the runner image's own `stable` sitting beside the pin keeps the key moving whenever the
-image moves.
+IPC, startup, scanning, routing and visual changes require the actual app;
+macOS CLI-resolution changes also require a built `.app` launched with `open`.
+Judge visuals from before/after captures, including the native notch paths.
+Smoke testing must leave live configuration unchanged. Stop QA processes you
+started, and report exact commands, failures and unresolved gates.
 
-Hence two steps, both of which must run **before** the rust-cache step:
-`read-rust-toolchain.ps1` feeds `channel` to the workflows so the version lives in one place and
-rejects anything that is not an exact version, and `prune-rust-toolchains.ps1` removes every other
-toolchain. Bump the pin on its own pull request; the run after a bump pays one cold build per
-shared key.
+## Documentation lookup and maintenance
 
-`.github/workflows/cache-prune.yml` keeps the Actions cache under GitHub's 10 GB per-repository
-cap by deleting superseded rust-cache and Swift build cache generations. Each Rust generation
-costs roughly 2.7 GB across the six shared keys (CI's lint and test jobs per OS, and Bundle's per
-OS), and eviction at the cap silently turns warm jobs cold.
+For library, framework, SDK, API, CLI or cloud-service documentation, use
+Context7 before web search: resolve the library ID unless an exact `/org/project`
+ID is given, select an authoritative match and requested version, query each
+concept separately, and answer from the fetched docs. Retry weak matches.
+This does not apply to refactoring, scripts from scratch, business-logic
+debugging, code review or general programming concepts.
 
-## Judging visuals
-
-`bun run ui:shots [scenes.json]` drives headless Chromium (Playwright, its own Vite on `:1425`)
-through click/fill/press steps against a `?mock` build and writes retina PNGs to `.tmp/ui-shots/`.
-
-Design and accessibility work on a screen is judged from those captures — and, for WebKit
-fidelity, from a `screencapture -l <window id>` of the running app — never from reading the
-markup. The notch helper is invisible to ordinary screenshots; use its `--render` path and
-`scripts/check-native-notch.mjs` instead.
-
-The Windows notch draws its own pixels, so
-`cargo test --lib side_notch::win_paint::visual -- --ignored` dumps the rail, every popover and a
-type specimen to `.tmp-visual/`; judge it from those and from a screen grab of the running
-overlay. Its typography is not judged by eye at all — see
-[`docs/architecture/side-notch.md`](docs/architecture/side-notch.md).
-
-## Constraints
-
-Ordinary good practice is assumed. These are the rules specific to this repo, or the ones that
-have already cost someone a day.
-
-**Data safety.** Agent homes — `~/.claude`, `.codex`, `.gemini`, `.cursor`, `.agents` — are real
-user data.
-
-- A test build has no user home: `paths::user_home`, and every path helper built on it, fails
-  there as it would on a machine without one. Tests inject their roots (`paths::scratch_dir`, a
-  `*_for(home)` or `*_in` function); an ignored real-home probe reads only the home its runner
-  names in `ON_N_OFF_PROBE_HOME`. Never run a mutating test against the real home.
-- Every provider-config write goes through `ConfigIo`: backup → atomic replace → validate →
-  rollback. Preserve all four.
-- Never weaken validation, or repair a malformed fixture, to make a test pass.
-- `accounts/` owns opt-in automatic remembering, the saved-profile vault and explicit native login
-  changes. Automatic remembering verifies native logins and never activates a profile. Its encrypted
-  vault stores renewable logins; only the small vault key enters the OS credential store. No
-  secret enters DTOs, ordinary config backups, logs or plaintext fallback storage. The one
-  exception is a saved Claude account's home on Windows, whose login is the `.credentials.json`
-  Claude Code keeps any login in there (`accounts/homes.rs`); on macOS it is the home's own
-  Keychain entry. The active native login remains authoritative. Saved native shadows never
-  refresh independently; a saved Claude login waits in its home, where Claude Code renews it.
-  Never-activated isolated Codex sign-ins can renew
-  in the encrypted vault under the saved-account renewal journal. Switching
-  captures the latest outgoing native credential before replacement; logout is a separate action
-  that can revoke it. on-n-off sends no Claude grant and no Claude token at all: Claude Code
-  renews every Claude login itself, and every Claude usage read is Claude Code's own
-  `claude -p /usage --safe-mode` (`limits/claude_cli.rs`). Native Codex renewal is app-server's;
-  private saved renewal requires recorded ownership and its encrypted journal. Account identity
-  configuration writes still go through `ConfigIo`, with the protected account journal as their
-  backup participant. See [account ownership](docs/architecture/accounts.md).
-  `github/` never writes to GitHub; `usage/` and `side_notch/` remain read-only.
-- Runtime QA is read-only unless the user authorizes a mutation. CLI installs and uninstalls have
-  effects outside on-n-off's rollback boundary: say so, and use throwaway inputs.
-
-**Route through these rather than reinventing them.**
-
-- Provider differences: `AgentAdapter`. Update `PROVIDERS.md` in the same change. Saved accounts
-  are the exception: everything an account change does differently per provider — the native
-  store, a login's shape, sign-in, preflight, clients — goes through the accounts seam
-  (`accounts::Adapter`, implemented in `accounts/claude.rs` and `accounts/codex.rs` over
-  `accounts/{claude,codex}_store.rs`), never through `AgentAdapter`, which accounts reach only
-  through `supports_accounts`.
-- UI → Rust: `$lib/api`. Feature components never invoke Tauri directly.
-- CLI lookup and spawning: `cli_locate.rs` and `AgentCli` — a GUI app does not inherit a
-  terminal's `PATH`.
-- Child processes: `process.rs`. Drain stdout and stderr concurrently from the start, or a full
-  pipe deadlocks.
-- File locks: `FileLease` (`file_lease.rs`). It unlocks when dropped; closing a locked `File`
-  leaves the lock with any child another thread spawned until that child execs.
-- Fake CLIs in tests: `cli_stub.rs`.
-- A read shared by more than one surface: `read_revision.rs`. Announce a replacement, never a
-  read, and answer an announcement unforced — either one broken makes it a loop
-  ([why](docs/architecture/shared-reads.md)).
-- `item_install/` never shells out to a provider CLI.
-- A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
-  side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
-  endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
-  accents it would replace, so a meter stepping into it reads as cooling down just as it runs out.
-  Change the shape and change all three, each of which has a test pinning it.
-
-**Performance.**
-
-- No filesystem, process, transcript or network work on the UI thread: make the command `async`,
-  clone owned state before `await`, and `spawn_blocking` the blocking adapter work. Never hold a
-  `tauri::State` borrow or a mutex guard across an `await`, and never emit an event or make a
-  seconds-long call while holding a lock.
-- Startup loads the selected provider first, through the existing per-provider in-flight
-  de-duplication rather than a second one; Overview aggregation waits for it.
-- The Vite entry chunk stays under its 500 kB warning: lazy-load heavy route and visualization
-  dependencies, and size UI assets to fit. Never raise the threshold to hide a regression.
-
-**Both CI legs run everything.**
-
-- Clippy with `-D warnings` is the enforced gate. Pedantic and nursery findings are advisory:
-  apply one deliberately, never chase the list.
-- No hard-coded drive letters or `\` separators, in code or tests.
-- Gate an item to exactly the platforms that use it. A `cfg(any(target_os = "macos", test))` on an
-  item no test calls compiles unused on the Windows *test* target and fails `-D warnings` on a leg
-  you cannot reproduce locally.
-- Preserve Tauri command names and serialized shapes unless a migration is approved. Snapshots
-  written by older versions must still load: give new fields defaults.
-- On restricted Windows sandboxes Vite/esbuild can fail with `spawn EPERM`. Record it and rerun
-  the same command elsewhere; do not change code for a sandbox fault.
-
-**Tests.**
-
-- Write the regression test first. It must fail for the intended reason before the fix exists.
-- Rust unit tests live beside their module, not inside it: `foo.rs` ends with
-  `#[cfg(test)] mod tests;` and the tests live in `foo/tests.rs` (or `foo/tests/` with a
-  `mod.rs`). `updater_build.rs` is also included by `build.rs` via `#[path = …]`, which moves the
-  directory a plain `mod tests;` resolves against, so it pins
-  `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
-- Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
-  `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
-  `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::sources` counters,
-  `github/fixtures.rs`. Single-consumer helpers stay in that module's
-  own tests file; adapter test constructors stay in the adapter files, because `item_install`
-  tests use them across domains.
-- Keep every test file under 1000 lines. Frontend tests stay co-located as `*.test.ts(x)`.
-
-## Commands
-
-Run from the repository root, in PowerShell on Windows or bash/zsh on macOS.
-
-```sh
-bun install
-bun run test
-bun run check
-bun test scripts/                          # release verifier, workflow and IPC contracts
-bun run build
-bun run tauri dev
-
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
-
-bun run tauri build                        # Windows: NSIS
-bun run tauri build --bundles app,dmg      # macOS: .app + .dmg
-```
-
-macOS native notch checks, after a Rust build:
-
-```sh
-xcrun swift run --package-path src-tauri/macos/SideNotch NotchCoreChecks
-bun scripts/check-native-notch.mjs
-```
-
-PowerShell 7 on either platform; if `pwsh` is not installed locally, rely on CI:
-
-```sh
-./scripts/check-release-version.test.ps1
-./scripts/build-bundle.test.ps1
-./scripts/new-update-feed.test.ps1
-./scripts/read-rust-toolchain.test.ps1
-./scripts/prune-rust-toolchains.test.ps1
-```
-
-## Parallel worktree sessions
-
-Parallel work happens in worktrees under `.worktrees/`, cut from the latest `origin/main` unless
-the task depends on another base. Branches are `<change-type>/<task-slug>` — `feat`, `fix`,
-`perf`, `audit`, `refactor`, `docs`, `test`, `chore`, `release` — and the folder mirrors the
-branch as `.worktrees/<change-type>-<task-slug>`. The primary checkout, the one where
-`.worktrees/` lives, is for creating, inspecting and integrating them, not for implementing
-changes. Integrate from it with fast-forward-only updates to `main`.
-
-Sync local `main` before any work. In the primary checkout, run
-`git fetch origin && git merge --ff-only origin/main` before cutting a worktree, inspecting a
-branch or integrating one. A stale `main` cuts branches from the wrong base and hides what other
-sessions have already shipped. If the fast-forward is refused by an uncommitted change, set that
-change aside (a patch file, or `git stash push -m <tag>` restored with `apply`) and put it back
-afterwards, rather than working on a stale base.
-
-Two things worktrees do **not** isolate, both of which have caused trouble: the repository's
-object database, refs, remotes and stash are shared — so `git stash` is not cross-session storage
-and another session's branch is not yours to rewrite; and ports, running processes, dependency
-caches and the real agent homes are shared with every other session on the machine — so coordinate
-dev-server and app runs, and confirm ownership before touching a worktree or branch you did not
-create.
-
-## Completion gate
-
-- Run the full frontend and Rust matrices above after relevant changes.
-- Boot the actual app for changes affecting IPC, startup, provider scanning, routing or visuals.
-  On macOS, when CLI resolution changes, also launch the built `.app` with `open` — a Finder-like
-  minimal `PATH` is the case that breaks.
-- For visual or accessibility changes, run `bun run ui:shots` and look at the captures, before and
-  after.
-- Smoke Overview, Plugins, Skills, MCP, Usage, Limits, Pull requests, Agent Config, Settings,
-  search/filtering, and every provider switch — without mutating live configuration. Note that
-  Limits runs `claude -p /usage --safe-mode` and `codex app-server` and makes outbound HTTPS calls
-  for Codex; on-n-off itself sends nothing to Anthropic. On macOS the account controls on Limits
-  read Claude Code's Keychain item through `/usr/bin/security`, which can prompt once, though the
-  Claude usage read opens no credential; Pull requests runs `gh auth token` once and calls
-  `api.github.com` on every refresh.
-- Verify the window stays interactive while startup work is still running.
-- Stop every dev-server, app and debugger process when QA finishes.
-- Report exact commands, failures and unresolved gates. Never claim completion from stale or
-  partial evidence.
-
-<!-- context7 -->
-Use Context7 MCP to fetch current documentation whenever the user asks about a library, framework, SDK, API, CLI tool, or cloud service — even well-known ones like React, Next.js, Prisma, Express, Tailwind, Django, or Spring Boot. This includes API syntax, configuration, version migration, library-specific debugging, setup instructions, and CLI tool usage. Use even when you think you know the answer — your training data may not reflect recent changes. Prefer this over web search for library docs.
-
-Do not use for: refactoring, writing scripts from scratch, debugging business logic, code review, or general programming concepts.
-
-## Steps
-
-1. Always start with `resolve-library-id` using the library name and what to look up in the library's documentation, unless the user provides an exact library ID in `/org/project` format
-2. Pick the best match (ID format: `/org/project`) by: exact name match, description relevance, code snippet count, source reputation (High/Medium preferred), and benchmark score (higher is better). If results don't look right, try alternate names or queries (e.g., "next.js" not "nextjs", or rephrase the question). Use version-specific IDs when the user mentions a version
-3. `query-docs` with the selected library ID and what to look up in the library's documentation (not single words), scoped to a single concept. If the question spans multiple distinct concepts (e.g. routing and auth and caching), make a separate `query-docs` call per concept with the same library ID, unless the question is about how the concepts interact — combined queries dilute ranking and return shallow results for each topic
-4. Answer using the fetched docs
-<!-- context7 -->
+Keep universal rules and task-triggered pointers here. Put subsystem details,
+harness recipes and toolchain explanations in their owning guides; update that
+source instead of copying it here. Prefer executable guardrails for rules
+that can be enforced mechanically.

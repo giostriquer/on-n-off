@@ -7,8 +7,9 @@ to look and which pieces talk to which; when they disagree with `src-tauri/` or 
 right and this file is stale. Fix it in passing or leave it — never "fix" the code to match a
 diagram here.
 
-Where files are, how to run them, and the constraints the code must respect all live in
-[`../../AGENTS.md`](../../AGENTS.md).
+Repository safety and workflow rules live in [AGENTS.md](../../AGENTS.md).
+Build commands, testing, visual proof and implementation conventions live in the
+[development guide](../development.md).
 
 ## What it is
 
@@ -16,8 +17,8 @@ A Tauri 2 desktop app for Windows and macOS (Apple Silicon) that reads what your
 Claude, Codex, Antigravity, Cursor — have on disk, and shows it in one place: installed plugins,
 skills, MCP servers, the hooks a provider would run (Claude and Codex, listed and never run),
 token usage and cost, subscription rate limits, and your GitHub pull requests. It is
-overwhelmingly a **reader**; the narrow set of things it writes is listed under "Constraints" in
-AGENTS.md.
+overwhelmingly a **reader**; the write boundaries are in [Data safety](../../AGENTS.md#data-safety) and
+the [account ownership guide](accounts.md).
 
 ## The shape of the process
 

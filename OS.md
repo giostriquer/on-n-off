@@ -85,6 +85,17 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   the screens' 10–12 px sizes on 1× displays, where native faces are hinted. `-webkit-font-smoothing`
   is left at its default for the same reason (macOS only; WebView2 ignores it).
 
+## Rust toolchain and cache keys
+
+`rust-toolchain.toml` pins an exact compiler version. Bump it in its own PR.
+Before every `Swatinem/rust-cache` step, `scripts/read-rust-toolchain.ps1`
+exports the pin and rejects non-exact versions, then
+`scripts/prune-rust-toolchains.ps1` removes other installed toolchains.
+The cache hashes every installed compiler, including the runner's own `stable`;
+leaving that alongside the pin changes the key when the runner image changes.
+Keep both steps before cache restoration. `cache-prune.yml` removes superseded
+Rust and Swift cache generations; the workflows and scripts own current keys.
+
 ## PowerShell vs bash in this repo
 
 - CI and `scripts/*.ps1` run under PowerShell 7 on both runners; scripts must stay path-neutral.
