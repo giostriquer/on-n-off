@@ -1,3 +1,4 @@
+use super::super::model::SignInDeadline;
 use super::fixture::{claude, codex, identity, Harness};
 use crate::dto::AgentId;
 
@@ -94,4 +95,126 @@ fn listing_says_which_profiles_are_archived() {
     let json = serde_json::to_value(&listed).unwrap();
     assert!(json["profiles"][0].get("archived").is_none(), "{json}");
     assert_eq!(json["profiles"][1]["archived"], true);
+}
+
+fn dated(mut login: super::super::store::Login, ends_at_ms: i64) -> super::super::store::Login {
+    login.auth["claudeAiOauth"]["refreshTokenExpiresAt"] = ends_at_ms.into();
+    login
+}
+
+fn deadline(user: &str, ends_at_ms: i64) -> Option<SignInDeadline> {
+    Some(SignInDeadline {
+        identity: identity(AgentId::Claude, user, "team"),
+        ends_at_ms,
+    })
+}
+
+fn homed(harness: &Harness, profile: usize, login: super::super::store::Login) {
+    let id = uuid::Uuid::new_v4().to_string();
+    harness.seed(|db| {
+        db.profiles[profile].login = None;
+        db.profiles[profile].home = Some(id.clone());
+    });
+    let dir = super::super::homes::dir(harness.path(), &id).unwrap();
+    harness.homes().logins.lock().unwrap().insert(dir, login);
+}
+
+fn ends(harness: &Harness) -> Vec<(bool, Option<String>)> {
+    let listed = harness.accounts().list(AgentId::Claude).unwrap();
+    listed
+        .profiles
+        .into_iter()
+        .map(|p| (p.active, p.sign_in_ends_at))
+        .collect()
+}
+
+#[test]
+fn listing_says_when_each_saved_claude_sign_in_ends() {
+    let harness = Harness::new().with_homes();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
+    harness.saved(identity(AgentId::Claude, "c", "team"), claude("c", "c1"));
+    harness.signed_in(Some(claude("a", "a2")));
+    *harness.native.deadline.borrow_mut() = deadline("a", 1_792_081_900_000);
+    homed(&harness, 1, dated(claude("b", "b2"), 1_794_110_392_000));
+    homed(&harness, 2, claude("c", "c2"));
+
+    assert_eq!(
+        ends(&harness),
+        [
+            (true, Some("2026-10-15T16:31:40Z".into())),
+            (false, Some("2026-11-08T03:59:52Z".into())),
+            (false, None),
+        ]
+    );
+    let json = serde_json::to_value(harness.accounts().list(AgentId::Claude).unwrap()).unwrap();
+    assert_eq!(json["profiles"][0]["signInEndsAt"], "2026-10-15T16:31:40Z");
+    assert!(json["profiles"][2].get("signInEndsAt").is_none(), "{json}");
+}
+
+#[test]
+fn a_sign_in_claude_code_already_ended_still_says_when() {
+    let harness = Harness::new();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    harness.signed_in(None);
+    *harness.native.deadline.borrow_mut() = deadline("a", 1_792_081_900_000);
+
+    assert_eq!(
+        ends(&harness),
+        [(false, Some("2026-10-15T16:31:40Z".into()))]
+    );
+}
+
+#[test]
+fn a_stored_deadline_belongs_only_to_the_account_it_signs_in_as() {
+    let harness = Harness::new().with_homes();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
+    harness.signed_in(Some(claude("x", "x1")));
+    *harness.native.deadline.borrow_mut() = deadline("x", 1_792_081_900_000);
+    homed(&harness, 1, dated(claude("a", "a2"), 1_794_110_392_000));
+
+    assert_eq!(ends(&harness), [(false, None), (false, None)]);
+}
+
+#[test]
+fn the_signed_in_store_outranks_an_older_sign_in_left_in_the_accounts_home() {
+    let harness = Harness::new().with_homes();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    homed(&harness, 0, dated(claude("a", "a0"), 1_792_081_900_000));
+    harness.signed_in(Some(claude("a", "a2")));
+    *harness.native.deadline.borrow_mut() = deadline("a", 1_794_313_502_000);
+
+    assert_eq!(
+        ends(&harness),
+        [(true, Some("2026-11-10T12:25:02Z".into()))]
+    );
+}
+
+#[test]
+fn a_sign_in_awaiting_use_shows_its_own_end_over_the_one_the_default_store_left() {
+    let harness = Harness::new().with_homes();
+    harness.saved(
+        identity(AgentId::Claude, "a", "team"),
+        dated(claude("a", "a2"), 1_794_313_502_000),
+    );
+    harness.seed(|db| db.profiles[0].pending_activation = true);
+    harness.signed_in(None);
+    *harness.native.deadline.borrow_mut() = deadline("a", 1_792_081_900_000);
+    let renewed = [(false, Some("2026-11-10T12:25:02Z".into()))];
+
+    assert_eq!(ends(&harness), renewed, "while the sign-in is in the vault");
+    homed(&harness, 0, dated(claude("a", "a2"), 1_794_313_502_000));
+    assert_eq!(ends(&harness), renewed, "once it has moved into its home");
+}
+
+#[test]
+fn a_sign_in_awaiting_use_never_borrows_the_end_the_default_store_left() {
+    let harness = Harness::new();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a2"));
+    harness.seed(|db| db.profiles[0].pending_activation = true);
+    harness.signed_in(None);
+    *harness.native.deadline.borrow_mut() = deadline("a", 1_792_081_900_000);
+
+    assert_eq!(ends(&harness), [(false, None)]);
 }

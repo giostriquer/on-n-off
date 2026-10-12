@@ -290,3 +290,36 @@ fn deleting_a_home_that_cannot_be_removed_says_so() {
     assert!(result.is_err());
     assert!(dir.exists());
 }
+
+#[test]
+fn a_homes_sign_in_says_when_it_ends_until_the_home_is_emptied() {
+    let root = tempfile::tempdir().unwrap();
+    let home = ClaudeHome::at(root.path());
+    let dated = |access: &str, refresh: &str| {
+        let mut login = login("b1");
+        login.auth["claudeAiOauth"]["accessToken"] = access.into();
+        login.auth["claudeAiOauth"]["refreshToken"] = refresh.into();
+        login.auth["claudeAiOauth"]["refreshTokenExpiresAt"] = 1_792_081_900_000_i64.into();
+        login
+    };
+    let ends = Some(SignInDeadline {
+        identity: identity(),
+        ends_at_ms: 1_792_081_900_000,
+    });
+
+    let ((live, ended, emptied), _) = keychain(|| {
+        let locks = home.lock().unwrap();
+        home.put(&dated("access-b1", "refresh-b1"), locks.as_ref())
+            .unwrap();
+        let live = home.sign_in_deadline();
+        let back = home.put(&dated("", ""), locks.as_ref()).unwrap();
+        assert!(back.is_none(), "Claude Code emptied the login");
+        let ended = home.sign_in_deadline();
+        home.clear(locks.as_ref()).unwrap();
+        (live, ended, home.sign_in_deadline())
+    });
+
+    assert_eq!(live, ends);
+    assert_eq!(ended, ends, "an emptied login keeps the date it ended at");
+    assert_eq!(emptied, None, "on-n-off's sign-out keeps no date");
+}

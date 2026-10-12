@@ -58,6 +58,14 @@ export function formatShortDate(
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: year ? "numeric" : undefined, timeZone }).format(at);
 }
 
+export function formatExactDate(iso: string | null | undefined): string {
+  const at = parseInstant(iso);
+  if (at === null) return "";
+  return new Date(at).toLocaleString(undefined, {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
 export function formatObservedAt(observedAt: string | null | undefined, timeZone?: string): string {
   const at = parseInstant(observedAt);
   if (at === null) return "";

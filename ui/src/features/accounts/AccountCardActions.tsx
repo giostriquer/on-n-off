@@ -13,11 +13,12 @@ export function removeAccountQuestion(label: string): string {
 type Panel = "menu" | "category" | "extra" | Confirmation;
 type Confirmation = "remove" | "removeLogin" | "signOut";
 
-export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, menuButtonRef, extraAction, header, footer, children }: {
+export function AccountCardActions({ accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, signInAgain = false, menuButtonRef, extraAction, header, footer, children }: {
   accountId: string; label: string; current: boolean; profile?: SavedProfile;
   onForget: () => Promise<void>;
   onArchive: () => Promise<void>;
   archiveInsteadOfUse?: boolean;
+  signInAgain?: boolean;
   menuButtonRef?: RefCallback<HTMLButtonElement>;
   extraAction?: { label: string; render: (close: () => void) => ReactNode };
   header: (menu: ReactNode) => ReactNode;
@@ -82,6 +83,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
   }
   function primaryAction(): ReactNode {
     if (signingIn) return <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button>;
+    if (signInAgain && profile) return <button className={button} disabled={disabled} onClick={() => void add(profile.id, accountId)}>Sign in again</button>;
     if (archiveInsteadOfUse) return <button className={button} disabled={disabled} aria-disabled={archiving || undefined} aria-busy={archiving || undefined} onClick={archive}>Archive account</button>;
     if (!profile) return <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>;
     if (current && !profile.pendingActivation) return null;
