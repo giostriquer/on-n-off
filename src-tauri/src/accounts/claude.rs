@@ -4,7 +4,7 @@ use super::{
         StorageDir, StoreError, Stored,
     },
     clients::Client,
-    model::{self, Identity, LoginView},
+    model::{self, Identity, LoginView, SignInDeadline},
     native::{self, CUSTOM_HOME},
     store::Login,
     transaction::{Native, NativeGuard, ReadBack},
@@ -410,6 +410,17 @@ impl NativeAccount for ClaudeNative {
     fn logout(&self) -> Result<(), String> {
         native::run(&mut self.logout_command(), Duration::from_secs(45)).map(|_| ())
     }
+
+    fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        let auth = self.stored().ok()?.document?;
+        let config = native::read_json(&self.config_file).ok()?;
+        let account = config.get("oauthAccount")?;
+        ClaudeLogin {
+            auth: &auth,
+            account,
+        }
+        .sign_in_deadline()
+    }
 }
 
 impl IsolatedSignIn for ClaudeNative {
@@ -459,15 +470,19 @@ impl<'a> ClaudeLogin<'a> {
     }
 }
 
+fn account_identity(account: &Value) -> Result<Identity, String> {
+    Ok(Identity {
+        provider: AgentId::Claude,
+        user_id: model::string(account, "/accountUuid")?.to_owned(),
+        workspace_id: model::string(account, "/organizationUuid")?.to_owned(),
+    })
+}
+
 impl LoginView for ClaudeLogin<'_> {
     fn identity(&self) -> Result<Identity, String> {
         model::string(self.auth, "/claudeAiOauth/accessToken")?;
         model::string(self.auth, "/claudeAiOauth/refreshToken")?;
-        Ok(Identity {
-            provider: AgentId::Claude,
-            user_id: model::string(self.account, "/accountUuid")?.to_owned(),
-            workspace_id: model::string(self.account, "/organizationUuid")?.to_owned(),
-        })
+        account_identity(self.account)
     }
 
     fn email(&self) -> Option<String> {
@@ -491,6 +506,18 @@ impl LoginView for ClaudeLogin<'_> {
             .pointer("/claudeAiOauth/expiresAt")
             .and_then(Value::as_i64)
             .is_some_and(|expires_at| expires_at <= now_ms)
+    }
+
+    /// Claude Code keeps `refreshTokenExpiresAt` beside the tokens, and keeps it when it empties a
+    /// login Anthropic stopped renewing, so a sign-in that has already ended still says when.
+    fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        Some(SignInDeadline {
+            ends_at_ms: self
+                .auth
+                .pointer("/claudeAiOauth/refreshTokenExpiresAt")?
+                .as_i64()?,
+            identity: account_identity(self.account).ok()?,
+        })
     }
 }
 

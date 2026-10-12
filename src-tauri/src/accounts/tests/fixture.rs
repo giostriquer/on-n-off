@@ -1,5 +1,5 @@
 use super::super::{
-    model::Identity,
+    model::{Identity, SignInDeadline},
     store::{ChangeKind, Database, Guard, Login, Store, Ticket},
     transaction::{Native, NativeGuard, Recovery},
     Accounts, Clients, Home, IsolatedSignIn, MakeHome, NativeAccount, NativeStores, Notify,
@@ -82,6 +82,7 @@ pub(super) struct NativeState {
     pub isolated: RefCell<Vec<(AgentId, PathBuf)>>,
     pub cleaned: Cell<usize>,
     pub homes: Option<Arc<Homes>>,
+    pub deadline: RefCell<Option<SignInDeadline>>,
 }
 
 #[derive(Default)]
@@ -153,6 +154,13 @@ impl Home for FakeHome {
         }
         Ok(weekly_reading(&identity.observation_key()))
     }
+    fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        let login = self.read().ok()??;
+        let deadline = super::super::view(AgentId::Claude, &login)
+            .ok()?
+            .sign_in_deadline();
+        deadline
+    }
     fn delete(&self, _: Box<dyn NativeGuard>) -> Result<(), String> {
         if self.0.undeletable.lock().unwrap().contains(&self.1) {
             return Err("The home could not be removed.".into());
@@ -214,6 +222,9 @@ impl NativeAccount for FakeNative {
         }
         *self.0.live.borrow_mut() = None;
         Ok(())
+    }
+    fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        self.0.deadline.borrow().clone()
     }
 }
 

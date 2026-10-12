@@ -50,6 +50,8 @@ const SCENES = [
   { name: "limits-band-light", url: "/limits?mock=limitsBand", theme: "light", steps: [{ wait: "role=region[name='Codex limits · 50% of the week']" }] },
   { name: "limits-ok", url: "/limits?mock=ok", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
   { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
+  { name: "limits-sign-in", url: "/limits?mock=claudeSignIn", steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }, { hover: "role=button[name='Claude sign-in ends Aug 27']" }, { wait: "role=tooltip" }] },
+  { name: "limits-sign-in-light", url: "/limits?mock=claudeSignIn", theme: "light", steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }] },
   { name: "limits-popover", url: "/?surface=limits-popover&mock=ok", viewport: { width: 350, height: 480 }, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
   { name: "limits-archived", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: [{ wait: `${ARCHIVED.claude} >> role=button[name='Archived (2)']` }] },
   { name: "limits-archived-open", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },

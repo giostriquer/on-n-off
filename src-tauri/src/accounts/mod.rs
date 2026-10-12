@@ -43,6 +43,8 @@ pub struct ProfileDto {
     pending_activation: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     archived: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sign_in_ends_at: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,6 +108,9 @@ trait NativeAccount: Native {
     fn subscription(&self) -> Result<Option<model::Identity>, String> {
         self.read()?.map(|login| self.identify(&login)).transpose()
     }
+    fn sign_in_deadline(&self) -> Option<model::SignInDeadline> {
+        None
+    }
 }
 
 trait IsolatedSignIn: Native {
@@ -132,6 +137,7 @@ trait Home: Send + Sync {
         &self,
         identity: &model::Identity,
     ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
+    fn sign_in_deadline(&self) -> Option<model::SignInDeadline>;
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String>;
 }
 
@@ -217,6 +223,37 @@ impl Accounts {
     }
 }
 
+/// A sign-in awaiting use is newer than whatever the default store still holds for the account, so
+/// it reads only its own login; otherwise the default store, which Claude Code renews, comes first.
+fn sign_in_ends_at(
+    profile: &store::Profile,
+    native: Option<&model::SignInDeadline>,
+    homes: Option<&impl Fn(&str) -> Result<Box<dyn Home>, String>>,
+) -> Option<String> {
+    let own = |deadline: &model::SignInDeadline| {
+        (deadline.identity == profile.identity).then_some(deadline.ends_at_ms)
+    };
+    let native = || native.and_then(own);
+    let saved = || {
+        let vault = profile.login.as_ref().and_then(|login| {
+            view(profile.identity.provider, login)
+                .ok()?
+                .sign_in_deadline()
+        });
+        vault
+            .or_else(|| homes?(profile.home.as_deref()?).ok()?.sign_in_deadline())
+            .as_ref()
+            .and_then(own)
+    };
+    let ends_at_ms = if profile.pending_activation {
+        saved()
+    } else {
+        native().or_else(saved)
+    }?;
+    chrono::DateTime::from_timestamp_millis(ends_at_ms)
+        .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+
 pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
     Accounts::live()?.list(provider)
 }
@@ -286,12 +323,15 @@ impl Accounts {
             .recovery_target()
             .is_some_and(|profile| profile.identity.provider == provider);
         let archived = crate::limits::archived(home, provider);
+        let native_deadline = native.sign_in_deadline();
+        let homes = self.account_homes(provider);
         Ok(AccountsDto {
             profiles: db
                 .profiles
                 .into_iter()
                 .filter(|p| p.identity.provider == provider)
                 .map(|p| ProfileDto {
+                    sign_in_ends_at: sign_in_ends_at(&p, native_deadline.as_ref(), homes.as_ref()),
                     needs_login: p.needs_login(),
                     archived: archived.contains(&p.identity.observation_key()),
                     observation_id: p.identity.observation_key(),

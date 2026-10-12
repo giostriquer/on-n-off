@@ -15,6 +15,7 @@ import { providerLabel } from "$lib/usageMerge";
 import { ArchivedAccounts } from "./ArchivedAccounts";
 import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
+import { SignInBadge } from "./SignInBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
@@ -204,6 +205,7 @@ function CardHeader({ card, provider, title, subscription, menu }: { card?: Limi
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         {card?.active && !card.headline && <ActiveAccountDot />}
         {subscription}
+        <SignInBadge signIn={card?.signIn ?? null} />
         {status?.kind === "savedRefresh" && <UsageStatusBadge detail={status.detail} />}
         {card?.plan ? (
           <span className="rounded-md border border-[var(--hair)] px-1.5 py-0.5 type-badge uppercase">
@@ -275,7 +277,7 @@ function AccountCard({
     >
       {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined}
         onForget={() => onForget(account)}
-        onArchive={() => onArchive(account)} archiveInsteadOfUse={card.archiveInsteadOfUse} menuButtonRef={menuButtonRef} header={header}
+        onArchive={() => onArchive(account)} archiveInsteadOfUse={card.archiveInsteadOfUse} signInAgain={card.signInAgain} menuButtonRef={menuButtonRef} header={header}
         extraAction={provider === "codex" ? {
           label: "Banked reset alert",
           render: close => <ResetAlertForm accountId={account.id} label={account.name} onDone={close} />,

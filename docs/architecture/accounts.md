@@ -55,6 +55,15 @@ signed-in one. Only Claude has homes (`accounts/claude/home.rs`): a persistent C
 Claude Code renews the login there whenever Limits asks it for the account's usage
 (`limits::claude_cli`), so on-n-off sends no request with that login and sends no grant for it.
 
+Renewal never outlives the sign-in itself: Anthropic ends each one at the `refreshTokenExpiresAt`
+Claude Code stores with it, and only signing in again starts a new one. The account listing reads
+that date from the default store and from each saved login, in the vault or its home
+(`NativeAccount::sign_in_deadline`, `Home::sign_in_deadline`, `LoginView::sign_in_deadline`),
+credited only to the account the store's `oauthAccount` names. A sign-in awaiting use is newer than
+whatever the default store still holds for its account, so it reads only its own login; otherwise
+the default store's date comes first. The card warns through the last seven days ([PROVIDERS.md](../../PROVIDERS.md)). The date survives
+Claude Code emptying a login Anthropic refused, so a sign-in that has already ended still says when.
+
 Every saved Claude login lives in exactly one Claude Code store at a time: the default one for the
 signed-in account, or the account's home. The issuer replaces a refresh token each time it renews
 one, so a second copy would stop working the first time the other renewed, and switching to it

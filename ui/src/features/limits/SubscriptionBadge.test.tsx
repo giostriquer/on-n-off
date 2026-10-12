@@ -15,9 +15,9 @@ describe("SubscriptionBadge", () => {
     const { rerender } = render(<SubscriptionBadge paidThrough={subscription(30)} now={NOW} />);
     const badge = screen.getByRole("button", { name: "Subscription paid through Oct 14" });
     expect(badge).toHaveTextContent("Until Oct 14");
-    expect(badge).toHaveClass("subscription-badge--neutral");
+    expect(badge).toHaveClass("term-badge--neutral");
     rerender(<SubscriptionBadge paidThrough={subscription(1)} now={NOW} />);
-    expect(screen.getByRole("button", { name: "Subscription paid through Sep 15" })).toHaveClass("subscription-badge--neutral");
+    expect(screen.getByRole("button", { name: "Subscription paid through Sep 15" })).toHaveClass("term-badge--neutral");
     rerender(<SubscriptionBadge paidThrough={subscription(200)} now={NOW} />);
     expect(screen.getByRole("button", { name: "Subscription paid through Apr 2, 2027" })).toHaveTextContent("Until Apr 2, 2027");
   });
@@ -50,20 +50,20 @@ describe("SubscriptionBadge with the billing term", () => {
   it("fills the seven-day warning window from elapsed time, without treating renewal as a warning", () => {
     const ending = term(7, false);
     const { container, rerender } = render(<SubscriptionBadge term={ending} paidThrough={null} now={NOW} />);
-    expect(screen.getByRole("button", { name: "Subscription status: No renewal" })).toHaveClass("subscription-badge--warning");
-    expect(container.querySelector<HTMLElement>(".subscription-badge-fill")!.style.width).toBe("0%");
+    expect(screen.getByRole("button", { name: "Subscription status: No renewal" })).toHaveClass("term-badge--warning");
+    expect(container.querySelector<HTMLElement>(".term-badge-fill")!.style.width).toBe("0%");
     rerender(<SubscriptionBadge term={ending} paidThrough={null} now={NOW + 3.5 * DAY} />);
-    expect(container.querySelector<HTMLElement>(".subscription-badge-fill")!.style.width).toBe("50%");
+    expect(container.querySelector<HTMLElement>(".term-badge-fill")!.style.width).toBe("50%");
     rerender(<SubscriptionBadge term={term(1, true)} paidThrough={null} now={NOW} />);
-    expect(screen.getByRole("button", { name: "Subscription status: Auto-renew" })).toHaveClass("subscription-badge--neutral");
-    expect(container.querySelector(".subscription-badge-fill")).toBeNull();
+    expect(screen.getByRole("button", { name: "Subscription status: Auto-renew" })).toHaveClass("term-badge--neutral");
+    expect(container.querySelector(".term-badge-fill")).toBeNull();
   });
   it("keeps a distant end quiet and marks a passed one without claiming verified access loss", () => {
     const { rerender } = render(<SubscriptionBadge term={term(30, false)} paidThrough={null} now={NOW} />);
-    expect(screen.getByRole("button", { name: "Subscription status: No renewal" })).toHaveClass("subscription-badge--neutral");
+    expect(screen.getByRole("button", { name: "Subscription status: No renewal" })).toHaveClass("term-badge--neutral");
     rerender(<SubscriptionBadge term={term(0, false, "cancelled")} paidThrough={null} now={NOW} />);
     const badge = screen.getByRole("button", { name: "Subscription status: No renewal" });
-    expect(badge).toHaveClass("subscription-badge--expired");
+    expect(badge).toHaveClass("term-badge--expired");
     fireEvent.focus(badge);
     expect(screen.getByRole("tooltip")).toHaveTextContent("Recorded expiry:");
     expect(screen.getByRole("tooltip")).toHaveTextContent("Cancelled: the plan ends with this period.");
@@ -83,7 +83,7 @@ describe("SubscriptionBadge with the billing term", () => {
   it("never infers renewal from an overdue date, and says why a renewing plan is in trouble", () => {
     render(<SubscriptionBadge term={term(-1, true, "pastDue")} paidThrough={null} now={NOW} />);
     const badge = screen.getByRole("button", { name: "Subscription status: Unconfirmed" });
-    expect(badge).toHaveClass("subscription-badge--neutral");
+    expect(badge).toHaveClass("term-badge--neutral");
     fireEvent.focus(badge);
     expect(screen.getByRole("tooltip")).toHaveTextContent("Renewal was due");
     expect(screen.getByRole("tooltip")).toHaveTextContent("A payment is overdue.");

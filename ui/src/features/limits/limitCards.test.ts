@@ -38,6 +38,7 @@ describe("which cards a provider shows", () => {
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
       freshness: { updatedAt: null, lastKnown: false, message: null, readStatus: "ok" },
       subscription: null,
+      signIn: null, signInAgain: false,
       archived: false, archiveInsteadOfUse: false,
     });
   });
@@ -476,5 +477,31 @@ describe("the footer of a saved account whose subscription ended", () => {
   ])("%s → Archive account in place of Use account: %s", (_case, expected, entry, profile) => {
     const shown = cards([entry], profile ? [profile] : [], AT_NOW, entry.provider);
     expect(shown.find(card => card.account?.id === "profile:saved")?.archiveInsteadOfUse).toBe(expected);
+  });
+});
+
+describe("a saved Claude sign-in's end", () => {
+  const ended = new Date(AT_NOW - 86_400_000).toISOString();
+  const endedMessage = { text: "Claude ended this sign-in on Aug 16. Sign in again to use this account.", tone: "error" };
+
+  it("once passed, is the card's message in red and makes signing in again its action, read or not", () => {
+    const unread = saved("claude", "me", "uuid-1", "me@claude.example", { signInEndsAt: ended });
+    const [card] = cards(undefined, [unread], AT_NOW, "claude");
+    expect(card).toMatchObject({ signIn: { state: "ended" }, signInAgain: true, empty: null, freshness: { message: endedMessage } });
+
+    const [signedOut] = cards([{ ...okClaude({ windows: [] }), status: "signedOut", message: "Sign in with `claude` to see subscription limits." }], [unread]);
+    expect(signedOut).toMatchObject({ signInAgain: true, freshness: { message: endedMessage } });
+  });
+
+  it("asks an account added but never used to sign in again once its own sign-in has ended", () => {
+    const pending = saved("claude", "me", "uuid-1", "me@claude.example", { signInEndsAt: ended, pendingActivation: true });
+    expect(cards(undefined, [pending], AT_NOW, "claude")[0]).toMatchObject({ signIn: { state: "ended" }, signInAgain: true });
+  });
+
+  it("never applies to a Codex card", () => {
+    const codex = saved("codex", "me", "acct-me", "me@codex.example", { signInEndsAt: ended });
+    expect(cards(undefined, [codex], AT_NOW, "codex")[0]).toMatchObject({
+      signIn: null, signInAgain: false, empty: { reason: "usageUnavailable" }, freshness: { message: null },
+    });
   });
 });

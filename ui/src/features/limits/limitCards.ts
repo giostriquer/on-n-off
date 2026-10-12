@@ -14,6 +14,7 @@ import type {
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { accountCards } from "./accountCards";
+import { claudeSignIn, type SignInPresentation } from "./claudeSignIn";
 import { codexTermEnded } from "./codexSubscriptionTerm";
 import {
   headlineWindow,
@@ -72,6 +73,8 @@ export type LimitCard = {
     readStatus: LimitsStatus;
   };
   subscription: CardSubscription | null;
+  signIn: SignInPresentation | null;
+  signInAgain: boolean;
   archived: boolean;
   archiveInsteadOfUse: boolean;
 };
@@ -150,6 +153,10 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
   const hasWindows = (reading?.windows.length ?? 0) > 0;
   const cardSubscription = subscription(provider, account?.id ?? null, current, reading);
   const active = !!account && (profile?.active ?? current);
+  const signIn = provider === "claude" ? claudeSignIn(profile?.signInEndsAt, now) : null;
+  const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
+    : presentation.message === null ? null
+    : { text: presentation.message, tone: readStatus === "failed" ? "error" as const : "muted" as const };
   return {
     key: `${current ? "current" : "remembered"}-${account?.id ?? index}`,
     provider,
@@ -171,16 +178,18 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
     headline: headline ? presentWindow(headline, now) : null,
     rows: rest.map(window => presentRow(window, provider, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
-    empty: hasWindows || readStatus !== "ok" || presentation.message ? null
+    empty: hasWindows || readStatus !== "ok" || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
       : { reason: "noWindows", copy: `${name} reported no rate-limit windows.` },
     freshness: {
       updatedAt: presentation.updatedAt,
       lastKnown: presentation.lastKnown,
-      message: presentation.message === null ? null : { text: presentation.message, tone: readStatus === "failed" ? "error" : "muted" },
+      message,
       readStatus,
     },
     subscription: cardSubscription,
+    signIn,
+    signInAgain: signIn?.state === "ended" && !!profile,
     archived: !current && !!(reading ? reading.archived : profile?.archived),
     archiveInsteadOfUse: !current && !active && !!profile && !profile.needsLogin && subscriptionEnded(cardSubscription, now),
   };

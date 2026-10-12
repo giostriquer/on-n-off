@@ -8,6 +8,11 @@ pub struct Identity {
     pub user_id: String,
     pub workspace_id: String,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignInDeadline {
+    pub identity: Identity,
+    pub ends_at_ms: i64,
+}
 pub struct AccessToken(String);
 
 impl AccessToken {
@@ -25,6 +30,9 @@ pub(crate) trait LoginView {
     fn email(&self) -> Option<String>;
     fn fingerprint(&self) -> String;
     fn renewal_due(&self, now_ms: i64) -> bool;
+    fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        None
+    }
 }
 
 pub(super) fn claude_fingerprint(access: Option<&Value>, refresh: Option<&Value>) -> String {

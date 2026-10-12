@@ -47,6 +47,10 @@ impl Home for ClaudeHome {
         )
     }
 
+    fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        NativeAccount::sign_in_deadline(&self.store)
+    }
+
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String> {
         IsolatedSignIn::clean(&self.store)?;
         let removed = match fs::remove_dir_all(&self.dir) {

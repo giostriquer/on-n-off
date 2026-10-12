@@ -560,9 +560,9 @@ it("turns a plan's last minute red on the local minute clock without rereading",
   answer([okClaude()], [okCodex({ subscription: { activeUntil: new Date(Date.parse(NOW) + 30_000).toISOString(), willRenew: false, checkedAt: NOW } })]);
   renderLimits();
   const badge = await screen.findByRole("button", {name: "Subscription status: No renewal"});
-  expect(badge).toHaveClass("subscription-badge--warning");
+  expect(badge).toHaveClass("term-badge--warning");
   await act(async () => { vi.advanceTimersByTime(60_000); });
-  expect(badge).toHaveClass("subscription-badge--expired");
+  expect(badge).toHaveClass("term-badge--expired");
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
@@ -574,7 +574,7 @@ it("drops the badge on the local minute clock once the paid period ends, without
   });
   answer([okClaude()], [okCodex()]);
   renderLimits();
-  expect(await screen.findByRole("button", {name: /Subscription paid through/})).toHaveClass("subscription-badge--neutral");
+  expect(await screen.findByRole("button", {name: /Subscription paid through/})).toHaveClass("term-badge--neutral");
   await act(async () => { vi.advanceTimersByTime(60_000); });
   expect(screen.queryByRole("button", {name: /Subscription paid through/})).toBeNull();
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);

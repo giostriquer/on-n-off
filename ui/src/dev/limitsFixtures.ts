@@ -272,6 +272,20 @@ function savedAccounts(agent: AgentId): AccountsReading {
   };
 }
 
+function claudeSignInAccounts(): AccountsReading {
+  const reading = savedAccounts("claude");
+  const endsIn = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+  const [personal, work] = reading.profiles;
+  return { ...reading, profiles: [{ ...personal, signInEndsAt: endsIn(3) }, { ...work, pendingActivation: true, signInEndsAt: endsIn(-1) }] };
+}
+
+function claudeSignIn(): ProviderLimits[] {
+  return [CLAUDE[0], {
+    ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, plan: "max ×5",
+    status: "failed", message: "This account's saved login has ended. Sign in again.",
+  }];
+}
+
 function paidThrough(accountId: string): SubscriptionDate {
   return {
     date: new Date(Date.now() + (accountId === "codex-2" ? 3 : 26) * 86_400_000).toISOString(),
@@ -293,6 +307,7 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   subscriptionBadges: () => ({ codex: subscriptionBadgesCodex }),
   claudeMissingReset: () => ({ claude: claudeWithoutReset }),
   claudeNoWeekly: () => ({ claude: claudeWithoutWeekly }),
+  claudeSignIn: () => ({ claude: claudeSignIn, accounts: { claude: claudeSignInAccounts } }),
   savedRefreshPaused: () => ({ claude: () => savedRefreshPaused(CLAUDE), codex: () => savedRefreshPaused(CODEX) }),
   limitsBand: () => ({ claude: limitsBandClaude, codex: limitsBandCodex }),
   limitsOrder: () => ({
