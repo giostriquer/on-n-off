@@ -127,6 +127,7 @@ fn the_message_lists_selected_providers_in_rail_order_with_their_sessions() {
     let snapshot = NotchSnapshot {
         revision: 0,
         supported: true,
+        liquid_glass: false,
         settings: NotchSettings {
             providers: vec![AgentId::Cursor, AgentId::Claude, AgentId::Antigravity],
             ..NotchSettings::default()

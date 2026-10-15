@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-public let protocolVersion = 4
+public let protocolVersion = 5
 public let maxSessions = 12
 
 public enum ProviderId: String, Codable, CaseIterable, Sendable {
@@ -241,6 +241,8 @@ public enum RailCell: Hashable, Sendable {
   case pullRequests
 }
 
+public enum PopoverStyle: String, Codable, Sendable { case glass, solid }
+
 public enum NotchSize: String, Codable, Sendable {
   case compact, standard, large
 
@@ -261,11 +263,12 @@ public struct Settings: Codable, Equatable, Sendable {
   public var show: ShowMode
   public var providers: [ProviderId]
   public var pullRequests: PullRequestSettings
+  public var popoverStyle: PopoverStyle
   public init(
     enabled: Bool = false, displayId: String? = nil, edge: Edge = .right,
     size: NotchSize = .standard, show: ShowMode = .always,
     providers: [ProviderId] = railProviderOrder,
-    pullRequests: PullRequestSettings = PullRequestSettings()
+    pullRequests: PullRequestSettings = PullRequestSettings(), popoverStyle: PopoverStyle = .glass
   ) {
     self.enabled = enabled
     self.displayId = displayId
@@ -274,6 +277,7 @@ public struct Settings: Codable, Equatable, Sendable {
     self.show = show
     self.providers = providers
     self.pullRequests = pullRequests
+    self.popoverStyle = popoverStyle
   }
 
   public var railProviders: [ProviderId] { railProviderOrder.filter(providers.contains) }

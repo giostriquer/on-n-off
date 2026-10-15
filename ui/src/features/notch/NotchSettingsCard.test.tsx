@@ -17,6 +17,7 @@ beforeEach(() => {
   snapshot = {
     revision: 0,
     supported: true,
+    liquidGlass: true,
     settings: defaultNotchSettings(),
     error: null,
     displays: ["first", "second"].map((id, index) => ({
@@ -73,6 +74,7 @@ it("requires an explicit display before the rail can be shown, then saves its id
     show: "onHover",
     providers: [...ALL],
     pullRequests: { enabled: true, lists: ["mine"] },
+    popoverStyle: "glass",
   });
   fireEvent.click(button("Always show"));
   await waitFor(() =>
@@ -133,6 +135,23 @@ it("offers four edges and three size presets and persists the choice", async () 
       expect.objectContaining({ edge: "top", size: "large" }),
     ),
   );
+});
+
+it("offers Liquid Glass or solid details only where macOS draws glass, and saves the choice", async () => {
+  snapshot.liquidGlass = false;
+  const first = mount();
+  await screen.findByRole("group", { name: "Edge" });
+  expect(screen.queryByRole("group", { name: "Details" })).toBeNull();
+  first.unmount();
+  snapshot.liquidGlass = true;
+  mount();
+  await screen.findByRole("group", { name: "Details" });
+  await waitFor(() => expect(button("Liquid Glass")).toHaveAttribute("aria-pressed", "true"));
+  fireEvent.click(button("Solid"));
+  await waitFor(() =>
+    expect(calls.save).toHaveBeenLastCalledWith(expect.objectContaining({ popoverStyle: "solid" })),
+  );
+  await waitFor(() => expect(button("Solid")).toHaveAttribute("aria-pressed", "true"));
 });
 
 it("toggles providers in rail order and never removes the last one", async () => {

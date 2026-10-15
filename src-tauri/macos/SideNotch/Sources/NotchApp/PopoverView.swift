@@ -16,6 +16,7 @@ struct PopoverModel {
   let maxHeight: CGFloat
   let tailLength: CGFloat
   let tail: CGFloat
+  let style: PopoverStyle
   let actionError: String?
   let openLimits: () -> Void
   let openPullRequests: () -> Void
@@ -74,20 +75,8 @@ private struct PopoverCard: View {
   }
 }
 
-private struct SolidPopoverKey: EnvironmentKey {
-  static let defaultValue = false
-}
-
-extension EnvironmentValues {
-  var solidPopover: Bool {
-    get { self[SolidPopoverKey.self] }
-    set { self[SolidPopoverKey.self] = newValue }
-  }
-}
-
 private struct PopoverSurface: ViewModifier {
   let model: PopoverModel
-  @Environment(\.solidPopover) private var solid
   private var metrics: NotchMetrics { model.metrics }
   private var cornerRadius: CGFloat { metrics.value(12) }
 
@@ -96,7 +85,7 @@ private struct PopoverSurface: ViewModifier {
     let outline = PopoverOutline(
       edge: model.edge, tailLength: model.tailLength, tail: model.tail,
       tailHalfWidth: metrics.value(7), cornerRadius: cornerRadius)
-    if #available(macOS 26.0, *), !solid {
+    if #available(macOS 26.0, *), model.style == .glass {
       card.background(popoverInk.opacity(0.55), in: outline).glassEffect(.regular, in: outline)
     } else {
       card.background(outline.fill(popoverInk)).overlay(

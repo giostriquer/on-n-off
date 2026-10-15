@@ -170,6 +170,28 @@ fn legacy_documents_default_to_always_show_all_providers_and_the_standard_size()
 }
 
 #[test]
+fn popovers_default_to_liquid_glass_and_save_a_solid_choice() {
+    let legacy: NotchSettings =
+        serde_json::from_str(r#"{"enabled":true,"displayId":"main","edge":"right"}"#).unwrap();
+    assert_eq!(legacy.popover_style, PopoverStyle::Glass);
+    let solid: NotchSettings = serde_json::from_str(
+        r#"{"enabled":true,"displayId":"main","edge":"right","popoverStyle":"solid"}"#,
+    )
+    .unwrap();
+    assert_eq!(solid.popover_style, PopoverStyle::Solid);
+    assert_eq!(
+        serde_json::to_value(&solid).unwrap()["popoverStyle"],
+        "solid"
+    );
+}
+
+#[test]
+fn liquid_glass_starts_at_macos_26() {
+    assert!(!liquid_glass_on(25));
+    assert!(liquid_glass_on(26));
+}
+
+#[test]
 fn presets_scale_the_whole_rail() {
     let displays = [display("main", 0.0, 1.0)];
     for (size, scale) in [

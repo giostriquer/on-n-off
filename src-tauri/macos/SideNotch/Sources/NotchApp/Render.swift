@@ -36,7 +36,7 @@ enum Render {
       for cell in rail.cellIds {
         guard
           let placement = popoverPlacement(
-            rail: rail, message: message, cell: cell, now: now, openLimits: {},
+            rail: rail, message: message, cell: cell, now: now, style: .solid, openLimits: {},
             openPullRequests: {})
         else { continue }
         let name: String
@@ -45,8 +45,7 @@ enum Render {
         case .pullRequests: name = "pull-requests"
         }
         try write(
-          placement.view.environment(\.solidPopover, true), size: placement.frame.size,
-          scale: rail.display.scale,
+          placement.view, size: placement.frame.size, scale: rail.display.scale,
           to: out.appendingPathComponent("popover-\(name).png"))
         print("popover-\(name) at \(placement.frame)")
       }

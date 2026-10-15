@@ -39,6 +39,7 @@ pub fn read() -> NotchSnapshot {
         NotchSnapshot {
             revision,
             supported: supported(),
+            liquid_glass: liquid_glass(),
             settings: settings.unwrap_or_default(),
             displays: displays.unwrap_or_default(),
             error,
@@ -48,6 +49,7 @@ pub fn read() -> NotchSnapshot {
     NotchSnapshot {
         revision: 0,
         supported: false,
+        liquid_glass: false,
         settings: NotchSettings::default(),
         displays: vec![],
         error: None,
@@ -74,6 +76,18 @@ fn supported() -> bool {
         win11()
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+fn liquid_glass() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let version = objc2_foundation::NSProcessInfo::processInfo().operatingSystemVersion();
+        model::liquid_glass_on(version.majorVersion)
+    }
+    #[cfg(not(target_os = "macos"))]
     {
         false
     }
@@ -118,6 +132,7 @@ pub fn save(settings: NotchSettings) -> Result<NotchSnapshot, String> {
         Ok(NotchSnapshot {
             revision,
             supported: supported(),
+            liquid_glass: liquid_glass(),
             settings,
             displays,
             error,
