@@ -16,7 +16,7 @@ struct PopoverModel {
   let maxHeight: CGFloat
   let tailLength: CGFloat
   let tail: CGFloat
-  let style: PopoverStyle
+  let style: NotchStyle
   let actionError: String?
   let openLimits: () -> Void
   let openPullRequests: () -> Void

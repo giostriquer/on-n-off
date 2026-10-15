@@ -6,7 +6,7 @@ export const NOTCH_PROVIDER_ORDER: readonly AgentId[] = ["claude", "codex", "mus
 export type NotchEdge = "left" | "right" | "top" | "bottom";
 export type NotchSize = "compact" | "standard" | "large";
 export type NotchShowMode = "always" | "onHover";
-export type NotchPopoverStyle = "glass" | "solid";
+export type NotchStyle = "glass" | "solid";
 export type NotchSettings = {
   enabled: boolean;
   displayId: string | null;
@@ -15,7 +15,7 @@ export type NotchSettings = {
   show: NotchShowMode;
   providers: AgentId[];
   pullRequests: { enabled: boolean; lists: GithubListId[] };
-  popoverStyle: NotchPopoverStyle;
+  popoverStyle: NotchStyle;
 };
 export function defaultNotchSettings(overrides: Partial<NotchSettings> = {}): NotchSettings {
   return {

@@ -77,7 +77,7 @@ pub enum ShowMode {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum PopoverStyle {
+pub enum NotchStyle {
     #[default]
     Glass,
     Solid,
@@ -140,7 +140,7 @@ pub struct NotchSettings {
     #[serde(default = "documented_providers")]
     pub providers: Vec<AgentId>,
     pub pull_requests: NotchPullRequests,
-    pub popover_style: PopoverStyle,
+    pub popover_style: NotchStyle,
 }
 
 fn documented_providers() -> Vec<AgentId> {
@@ -157,7 +157,7 @@ impl Default for NotchSettings {
             show: ShowMode::default(),
             providers: vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
             pull_requests: NotchPullRequests::default(),
-            popover_style: PopoverStyle::default(),
+            popover_style: NotchStyle::default(),
         }
     }
 }

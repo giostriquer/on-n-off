@@ -13,7 +13,7 @@ let mutedInk = Color(white: 0.6)
 
 extension View {
   @ViewBuilder func notchSurface<S: Shape, Border: View>(
-    _ ink: Color, in shape: S, style: PopoverStyle, solidBorder: Border
+    _ ink: Color, in shape: S, style: NotchStyle, solidBorder: Border
   ) -> some View {
     if #available(macOS 26.0, *), style == .glass {
       background(ink.opacity(0.55), in: shape).glassEffect(.regular, in: shape)
