@@ -7,6 +7,7 @@ fn snapshot() -> NotchSnapshot {
     NotchSnapshot {
         revision: 1,
         supported: true,
+        liquid_glass: false,
         settings: NotchSettings {
             enabled: true,
             ..NotchSettings::default()

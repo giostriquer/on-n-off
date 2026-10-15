@@ -4,16 +4,18 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
+import { inflateSync } from 'node:zlib';
 
 const executable = resolve(process.argv[2] ?? 'src-tauri/target/debug/on-n-off-notch');
+const protocolVersion = Number(/PROTOCOL_VERSION: u64 = (\d+);/.exec(readFileSync(resolve('src-tauri/src/side_notch/protocol.rs'), 'utf8'))[1]);
 
 const infoPlist = resolve('src-tauri/macos/SideNotch/Info.plist');
 const embedded = spawnSync('/usr/bin/segedit', [executable, '-extract', '__TEXT', '__info_plist', '/dev/stdout'], { maxBuffer: 1 << 20 });
 assert.equal(embedded.status, 0, `segedit could not read the helper's embedded Info.plist: ${embedded.stderr}`);
 assert.ok(embedded.stdout.equals(readFileSync(infoPlist)), `${executable} embeds another Info.plist than ${infoPlist}: the helper was not relinked`);
 console.log('PASS helper embeds the current Info.plist');
-const settings = { enabled: false, displayId: null, edge: 'right', size: 'standard', show: 'always', providers: ['claude', 'codex', 'antigravity', 'cursor', 'muse'], pullRequests: { enabled: true, lists: ['mine'] } };
-const snapshot = { version: 4, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
+const settings = { enabled: false, displayId: null, edge: 'right', size: 'standard', show: 'always', providers: ['claude', 'codex', 'antigravity', 'cursor', 'muse'], pullRequests: { enabled: true, lists: ['mine'] }, popoverStyle: 'glass' };
+const snapshot = { version: protocolVersion, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
 async function check(name, input, expectedAck, args = []) {
   const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   const timer = setTimeout(() => child.kill('SIGKILL'), 20000);
@@ -44,7 +46,7 @@ async function check(name, input, expectedAck, args = []) {
 }
 await check('disabled snapshot acknowledged, parent EOF exits', JSON.stringify(snapshot) + '\n', true);
 await check('unsupported protocol rejected', JSON.stringify({ ...snapshot, version: 1 }) + '\n', false);
-await check('previous protocol rejected', JSON.stringify({ ...snapshot, version: 3 }) + '\n', false);
+await check('previous protocol rejected', JSON.stringify({ ...snapshot, version: protocolVersion - 1 }) + '\n', false);
 await check('oversize frame rejected', ' '.repeat(262145), false);
 await check('parent closes before first snapshot', '', false);
 await check('parent EOF exits with the main queue unresponsive', '', false, ['--check-unresponsive-main']);
@@ -59,9 +61,9 @@ const pull = (number, title, ci, reviewDecision, mergeKind, isDraft) => ({
   author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z',
 });
 const fixture = edge => ({
-  version: 4, sequence: 1,
+  version: protocolVersion, sequence: 1,
   snapshot: {
-    settings: { enabled: true, displayId: 'fixture', edge, size: 'standard', show: 'onHover', providers: ['claude', 'codex', 'antigravity', 'cursor', 'muse'], pullRequests: { enabled: true, lists: ['mine', 'reviewRequested'] } },
+    settings: { enabled: true, displayId: 'fixture', edge, size: 'standard', show: 'onHover', providers: ['claude', 'codex', 'antigravity', 'cursor', 'muse'], pullRequests: { enabled: true, lists: ['mine', 'reviewRequested'] }, popoverStyle: 'glass' },
     displays: [{ id: 'fixture', name: 'Fixture', x: 0, y: 0, width: 1920, height: 1080, workY: 25, workHeight: 1055, scale: 2, mirrored: false }],
     error: null,
   },
@@ -86,8 +88,42 @@ const fixture = edge => ({
   },
   actionError: null,
 });
+function readPng(path) {
+  const data = readFileSync(path);
+  const chunks = [];
+  let width;
+  let height;
+  for (let at = 8; at < data.length;) {
+    const length = data.readUInt32BE(at);
+    const type = data.toString('latin1', at + 4, at + 8);
+    const body = data.subarray(at + 8, at + 8 + length);
+    if (type === 'IHDR') {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      assert.deepEqual([...body.subarray(8, 13)], [8, 6, 0, 0, 0], `${path} is not 8-bit RGBA without interlacing`);
+    } else if (type === 'IDAT') chunks.push(body);
+    at += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(chunks));
+  const stride = width * 4;
+  const pixels = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    assert.ok(filter <= 4, `${path} uses an unknown PNG filter ${filter}`);
+    for (let x = 0; x < stride; x++) {
+      const a = x >= 4 ? pixels[y * stride + x - 4] : 0;
+      const b = y > 0 ? pixels[(y - 1) * stride + x] : 0;
+      const c = x >= 4 && y > 0 ? pixels[(y - 1) * stride + x - 4] : 0;
+      const p = a + b - c;
+      const paeth = Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - c) ? a : Math.abs(p - b) <= Math.abs(p - c) ? b : c;
+      pixels[y * stride + x] = (raw[y * (stride + 1) + 1 + x] + [0, a, b, (a + b) >> 1, paeth][filter]) & 0xff;
+    }
+  }
+  return { width, height, at: (x, y) => [...pixels.subarray((y * width + x) * 4, (y * width + x) * 4 + 4)] };
+}
 const renderRoot = resolve(process.env.NOTCH_RENDER_DIR ?? '.tmp/notch-render');
-for (const edge of ['right', 'top']) {
+const popoverSizes = {};
+for (const edge of ['right', 'left', 'top', 'bottom']) {
   const dir = resolve(renderRoot, edge);
   mkdirSync(dir, { recursive: true });
   const message = resolve(dir, 'message.json');
@@ -98,5 +134,28 @@ for (const edge of ['right', 'top']) {
     const size = statSync(resolve(dir, `${name}.png`)).size;
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);
   }
+  const { scale } = fixture(edge).snapshot.displays[0];
+  const vertical = edge === 'right' || edge === 'left';
+  for (const name of ['popover-claude', 'popover-pull-requests']) {
+    const png = readPng(resolve(dir, `${name}.png`));
+    const pixel = png.at(edge === 'left' ? png.width - 1 - 6 * scale : 6 * scale, Math.floor(png.height / 2));
+    const ink = [14, 14, 17, 255];
+    assert.ok(pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
+    const line = { right: png.width - 4 * scale, left: 4 * scale - 1, top: 4 * scale - 1, bottom: png.height - 4 * scale }[edge];
+    const length = vertical ? png.height : png.width;
+    const opaque = [];
+    for (let i = 0; i < length; i++) if (png.at(vertical ? line : i, vertical ? i : line)[3] > 0) opaque.push(i);
+    const [first, last] = [opaque[0], opaque.at(-1)];
+    assert.ok(opaque.length >= 5 * scale && opaque.length <= 9 * scale && last - first + 1 === opaque.length, `render ${edge}: ${name}.png has ${opaque.length} opaque px 4 pt in from its tail side, not one tail`);
+    assert.ok(Math.abs((first + last) / 2 - length / 2) <= 2, `render ${edge}: ${name}.png tail is centred at ${(first + last) / 2} px, not mid-popover at ${length / 2}`);
+    (popoverSizes[name] ??= {})[edge] = [png.width, png.height];
+  }
   console.log(`PASS render ${edge} → ${dir}`);
 }
+const tailPx = 8 * fixture('right').snapshot.displays[0].scale;
+for (const [name, size] of Object.entries(popoverSizes)) {
+  assert.deepEqual(size.left, size.right, `${name}: the left and right popovers differ in size`);
+  assert.deepEqual(size.bottom, size.top, `${name}: the top and bottom popovers differ in size`);
+  assert.deepEqual([size.right[0] - size.top[0], size.top[1] - size.right[1]], [tailPx, tailPx], `${name}: a popover is not its card plus one 8 pt tail (right ${size.right}, top ${size.top})`);
+}
+console.log('PASS popovers are one card plus a tail on every edge');

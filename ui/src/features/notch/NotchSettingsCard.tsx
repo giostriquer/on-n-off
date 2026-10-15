@@ -2,7 +2,7 @@ import { GitPullRequest, RefreshCw } from "lucide-react";
 import { ALL_AGENTS } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
 import { GITHUB_LIST_IDS, type GithubListId } from "$lib/githubTypes";
-import type { NotchDisplay, NotchEdge, NotchSettings } from "$lib/notchTypes";
+import type { NotchDisplay, NotchEdge, NotchPopoverStyle, NotchSettings } from "$lib/notchTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { providerLabel } from "$lib/usageMerge";
 import { Rocker } from "@/components/Rocker";
@@ -76,6 +76,11 @@ const EDGE_OPTIONS: [NotchEdge, string][] = [
   ["left", "Left"],
   ["top", "Top"],
   ["bottom", "Bottom"],
+];
+
+const DETAILS_OPTIONS: [NotchPopoverStyle, string][] = [
+  ["glass", "Liquid Glass"],
+  ["solid", "Solid"],
 ];
 
 export function NotchSettingsCard() {
@@ -204,6 +209,19 @@ export function NotchSettingsCard() {
           disabled={busy}
         />
       </SettingRow>
+      {state.data?.liquidGlass && (
+        <SettingRow>
+          <span id="notch-details-label" className={rowLabel}>Details</span>
+          <Segmented
+            size="row"
+            ariaLabelledBy="notch-details-label"
+            options={DETAILS_OPTIONS.map(([value, label]) => ({ value, label }))}
+            pressed={(style) => settings?.popoverStyle === style}
+            onPress={(popoverStyle) => change({ popoverStyle })}
+            disabled={busy}
+          />
+        </SettingRow>
+      )}
       <SettingRow>
         <h4 id="notch-providers-label" className={`m-0 ${caption}`}>Integrations</h4>
       </SettingRow>

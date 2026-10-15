@@ -25,6 +25,7 @@ it.each(["save", "event"] as const)(
     const old: NotchSnapshot = {
       revision: 1,
       supported: true,
+      liquidGlass: true,
       settings: defaultNotchSettings({ enabled: true, displayId: "old-display", providers: ["claude", "codex"] }),
       displays: [],
       error: null,
@@ -81,6 +82,7 @@ it("does not let an older queued event overwrite a newer save", async () => {
   const old = {
     revision: 1,
     supported: true,
+    liquidGlass: true,
     settings: defaultNotchSettings({ enabled: true, displayId: "old-display", providers: ["claude", "codex"] }),
     displays: [],
     error: null,

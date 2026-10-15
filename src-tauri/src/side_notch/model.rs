@@ -75,6 +75,19 @@ pub enum ShowMode {
     OnHover,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PopoverStyle {
+    #[default]
+    Glass,
+    Solid,
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub fn liquid_glass_on(macos_major: isize) -> bool {
+    macos_major >= 26
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum GithubList {
@@ -127,6 +140,7 @@ pub struct NotchSettings {
     #[serde(default = "documented_providers")]
     pub providers: Vec<AgentId>,
     pub pull_requests: NotchPullRequests,
+    pub popover_style: PopoverStyle,
 }
 
 fn documented_providers() -> Vec<AgentId> {
@@ -143,6 +157,7 @@ impl Default for NotchSettings {
             show: ShowMode::default(),
             providers: vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
             pull_requests: NotchPullRequests::default(),
+            popover_style: PopoverStyle::default(),
         }
     }
 }
@@ -182,6 +197,7 @@ pub struct Display {
 pub struct NotchSnapshot {
     pub revision: u64,
     pub supported: bool,
+    pub liquid_glass: bool,
     pub settings: NotchSettings,
     pub displays: Vec<Display>,
     pub error: Option<String>,
