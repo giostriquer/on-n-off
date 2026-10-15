@@ -54,6 +54,20 @@ const CODEX: ProviderLimits[] = [
   },
 ];
 
+const MUSE: ProviderLimits[] = [
+  {
+    provider: "muse",
+    status: "ok",
+    account: { id: "email:you@example.com", label: "you@example.com" },
+    currentAccount: true,
+    plan: "wonder",
+    windows: [
+      { id: "weekly", label: "Weekly · all models", kind: "weekly", usedPercent: 22, resetsAt: at(6 * 24 * 60 + 4 * 60), observedAt: OBSERVED },
+      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 41, resetsAt: at(2 * 60 + 15), windowSeconds: 18_000, observedAt: OBSERVED },
+    ],
+  },
+];
+
 function subscriptionBadgesCodex(): ProviderLimits[] {
   const template = { ...CODEX[0], windows: CODEX[0].windows.filter(window => window.kind === "weekly"), credits: null };
   const cases: Array<[string, ProviderLimits["subscription"]]> = [
@@ -293,7 +307,7 @@ function paidThrough(accountId: string): SubscriptionDate {
   };
 }
 
-type LimitsProvider = Extract<AgentId, "claude" | "codex">;
+type LimitsProvider = Extract<AgentId, "claude" | "codex" | "muse">;
 
 export type LimitsScenario = Partial<Record<LimitsProvider, () => ProviderLimits[]>> & {
   accounts?: Partial<Record<LimitsProvider, () => AccountsReading>>;
@@ -328,14 +342,14 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   archivedAccounts,
 };
 
-const OK = { claude: () => CLAUDE, codex: () => CODEX };
+const OK = { claude: () => CLAUDE, codex: () => CODEX, muse: () => MUSE };
 
 export function limitsScenario(name: string) {
   const chosen: LimitsScenario = Object.hasOwn(LIMITS_SCENARIOS, name) ? LIMITS_SCENARIOS[name]() : {};
-  const provider = (agent: unknown) => (agent === "claude" || agent === "codex" ? agent : null);
-  const archived: Record<LimitsProvider, Set<string>> = { claude: new Set(chosen.archived?.claude), codex: new Set(chosen.archived?.codex) };
-  const forgotten: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set() };
-  const removedLogins: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set() };
+  const provider = (agent: unknown) => (agent === "claude" || agent === "codex" || agent === "muse" ? agent : null);
+  const archived: Record<LimitsProvider, Set<string>> = { claude: new Set(chosen.archived?.claude), codex: new Set(chosen.archived?.codex), muse: new Set(chosen.archived?.muse) };
+  const forgotten: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set(), muse: new Set() };
+  const removedLogins: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set(), muse: new Set() };
   return {
     readLimits(agentId: unknown): ProviderLimits[] {
       const which = provider(agentId);

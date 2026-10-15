@@ -11,7 +11,7 @@ vi.mock("$lib/api", () => ({
   onNotchChanged: async () => () => undefined,
 }));
 let snapshot: NotchSnapshot;
-const ALL = ["claude", "codex", "antigravity", "cursor"] as const;
+const ALL = ["claude", "codex", "antigravity", "cursor", "muse"] as const;
 
 beforeEach(() => {
   snapshot = {

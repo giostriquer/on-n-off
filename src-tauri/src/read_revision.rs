@@ -44,6 +44,7 @@ pub enum Source {
     Accounts,
     LimitsClaude,
     LimitsCodex,
+    LimitsMuse,
     GithubPrs,
     ResetSpends,
 }
@@ -54,6 +55,7 @@ impl Source {
             Self::Accounts => "accounts",
             Self::LimitsClaude => "limits:claude",
             Self::LimitsCodex => "limits:codex",
+            Self::LimitsMuse => "limits:muse",
             Self::GithubPrs => "github:prs",
             Self::ResetSpends => "limits:reset-spends",
         }

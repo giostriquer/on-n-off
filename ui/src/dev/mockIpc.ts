@@ -35,10 +35,11 @@ const AGENTS: AgentInfo[] = [
   { id: "codex", displayName: "Codex", cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true, readsHooks: true },
   { id: "antigravity", displayName: "Antigravity", cliOk: false, cliError: "Antigravity CLI not found.", installGit: false, installFolder: false, pluginToggle: false, readsHooks: false },
   { id: "cursor", displayName: "Cursor", cliOk: false, cliError: "Cursor CLI not found.", installGit: false, installFolder: false, pluginToggle: false, readsHooks: false },
+  { id: "muse", displayName: "Muse", cliOk: true, cliError: null, installGit: false, installFolder: true, pluginToggle: true, readsHooks: false },
 ];
 
 let settings: AppSettings = {
-  hiddenAgents: ["antigravity", "cursor"],
+  hiddenAgents: params.has("allProviders") ? [] : ["antigravity", "cursor"],
   binaryPaths: {},
   automaticUpdates: false,
   limitNotifications: false,
@@ -185,6 +186,7 @@ function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: 
   });
   const models: [AgentId, string, number][] = [
     ["codex", "gpt-5.6-sol", 10969.67],
+    ["muse", "muse-wonder-1.0", 640],
     ["claude", "claude-fable-5", 4282.86],
     ["claude", "claude-opus-5", 1589.63],
     ["claude", "claude-opus-4-8", 3.34],
@@ -212,6 +214,7 @@ function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: 
     sources: [
       { provider: "claude", status: "ok", scannedFiles: 120, skippedFiles: 0, malformedRecords: 0, distinctSessions: 40, resolvedPath: "~/.claude/projects" },
       { provider: "codex", status: "ok", scannedFiles: 60, skippedFiles: 0, malformedRecords: 0, distinctSessions: 20, resolvedPath: "~/.codex/sessions" },
+      { provider: "muse", status: "ok", scannedFiles: 24, skippedFiles: 0, malformedRecords: 0, distinctSessions: 9, resolvedPath: "~/.local/share/muse/sessions" },
     ],
     pricing: { status: "fresh", source: "litellm", fetchedAt: `${input.untilDay}T11:00:00Z`, knownModels: 900 },
     scanDurationMs: 12,

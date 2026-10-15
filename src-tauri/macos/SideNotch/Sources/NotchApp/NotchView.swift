@@ -36,6 +36,7 @@ func providerName(_ id: ProviderId) -> String {
   case .codex: return "Codex"
   case .antigravity: return "Antigravity"
   case .cursor: return "Cursor"
+  case .muse: return "Muse"
   }
 }
 

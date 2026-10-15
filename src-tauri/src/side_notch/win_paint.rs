@@ -1306,6 +1306,7 @@ const CLAUDE_ORANGE: Color = [217, 119, 87, 255];
 const CODEX_INK: Color = [238, 240, 242, 255];
 const CURSOR_BLUE: Color = [122, 162, 255, 255];
 const ANTIGRAVITY_MUTE: Color = [140, 147, 157, 255];
+const MUSE_TEAL: Color = [64, 196, 172, 255];
 const FABLE_TRACK: Color = [53, 42, 38, 255];
 const CREDITS_INK: Color = [168, 176, 186, 255];
 const CREDITS_TRACK: Color = [38, 41, 45, 255];
@@ -1317,6 +1318,7 @@ fn provider_color(provider: AgentId) -> Color {
         AgentId::Codex => CODEX_INK,
         AgentId::Cursor => CURSOR_BLUE,
         AgentId::Antigravity => ANTIGRAVITY_MUTE,
+        AgentId::Muse => MUSE_TEAL,
     }
 }
 
@@ -1352,6 +1354,7 @@ fn provider_name(provider: AgentId) -> &'static str {
         AgentId::Codex => "Codex",
         AgentId::Antigravity => "Antigravity",
         AgentId::Cursor => "Cursor",
+        AgentId::Muse => "Muse",
     }
 }
 

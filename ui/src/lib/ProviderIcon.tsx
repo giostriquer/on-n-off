@@ -41,6 +41,15 @@ export function AntigravityIcon({ title = "Antigravity", ...props }: IconProps) 
   );
 }
 
+export function MuseIcon({ title = "Muse", ...props }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden={title ? undefined : true} role={title ? "img" : undefined} {...props}>
+      {title ? <title>{title}</title> : null}
+      <path d="M12 1 L14.5 9.5 L23 12 L14.5 14.5 L12 23 L9.5 14.5 L1 12 L9.5 9.5 Z" />
+    </svg>
+  );
+}
+
 export function ProviderIcon({
   provider,
   className = "size-3.5 shrink-0",
@@ -59,6 +68,8 @@ export function ProviderIcon({
       return <CursorIcon className={className} title={title ?? "Cursor"} style={{ color: "var(--silkscreen)" }} />;
     case "antigravity":
       return <AntigravityIcon className={className} title={title ?? "Antigravity"} style={{ color: "#3186ff" }} />;
+    case "muse":
+      return <MuseIcon className={className} title={title ?? "Muse"} style={{ color: "#40c4ac" }} />;
     default:
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true">

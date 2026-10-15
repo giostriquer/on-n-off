@@ -20,7 +20,7 @@ export function defaultNotchSettings(overrides: Partial<NotchSettings> = {}): No
     edge: "right",
     size: "standard",
     show: "always",
-    providers: ["claude", "codex", "antigravity", "cursor"],
+    providers: ["claude", "codex", "antigravity", "cursor", "muse"],
     pullRequests: { enabled: true, lists: ["mine"] },
     ...overrides,
   };

@@ -9,7 +9,7 @@ use crate::notifications::Sound;
 
 const DISABLED_WAKE_MINUTES: u16 = 60;
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
-const MONITORED_PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
+const MONITORED_PROVIDERS: [AgentId; 3] = [AgentId::Claude, AgentId::Codex, AgentId::Muse];
 
 pub struct LimitsMonitor;
 

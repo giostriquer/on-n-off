@@ -432,11 +432,60 @@ fn one_hour_cache_writes_are_priced_the_same_fresh_and_from_the_scan_cache() {
 }
 
 #[test]
+fn muse_sessions_feed_the_summary() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-muse");
+    let session_dir = crate::paths::muse_data_for(&home)
+        .join("sessions")
+        .join("2026")
+        .join("08")
+        .join("07")
+        .join("01acme-session");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let line = serde_json::json!({
+        "id": "01acme-line",
+        "stream": {"kind": "session", "id": "01acme-session"},
+        "recorded_at": at("2026-08-07T04:05:13Z") * 1_000,
+        "payload": {"event": {
+            "kind": "model_completed",
+            "model": "muse-acme-1.0",
+            "usage": {
+                "input_tokens": 1000, "output_tokens": 100,
+                "cache_read_tokens": 250, "cache_write_tokens": 0, "reasoning_tokens": 10
+            }
+        }}
+    });
+    let transcript = session_dir.join("session.jsonl");
+    std::fs::write(&transcript, format!("{line}\n")).unwrap();
+    set_mtime(&transcript, "2026-08-07T05:00:00Z");
+
+    let summary = read_offline(&home, august_input(false));
+    let bucket = summary
+        .buckets
+        .iter()
+        .find(|bucket| bucket.provider == AgentId::Muse)
+        .expect("a muse bucket");
+    assert_eq!(bucket.model, "muse-acme-1.0");
+    assert_eq!(bucket.totals.uncached_input_tokens, 750);
+    assert_eq!(bucket.totals.cached_input_tokens, 250);
+    assert_eq!(bucket.totals.output_tokens, 100);
+    assert_eq!(bucket.sessions, 1);
+    let source = summary
+        .sources
+        .iter()
+        .find(|source| source.provider == AgentId::Muse)
+        .expect("a muse source");
+    assert_eq!(source.status, UsageSourceStatus::Ok);
+    assert_eq!(source.scanned_files, 1);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
 fn missing_dirs_report_missing_sources() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-missing");
     let summary = read_offline(&home, august_input(false));
-    assert_eq!(summary.sources.len(), 2);
+    assert_eq!(summary.sources.len(), 3);
     assert!(summary
         .sources
         .iter()

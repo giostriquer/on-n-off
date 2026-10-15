@@ -43,7 +43,7 @@ function answer(
   claude: ProviderLimits[] | Promise<ProviderLimits[]>,
   codex: ProviderLimits[] | Promise<ProviderLimits[]>,
 ) {
-  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : codex));
+  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? codex : []));
 }
 
 function renderLimits(pollMinutes: LimitsPollMinutes = 5) {
@@ -80,6 +80,34 @@ afterEach(() => {
 });
 
 describe("Limits", () => {
+  it("renders the Muse column from its own read, with no account controls", async () => {
+    readLimits.mockImplementation((agentId: AgentId) =>
+      Promise.resolve(
+        agentId === "muse"
+          ? [{
+              provider: "muse" as const,
+              status: "ok" as const,
+              account: { id: "email:you@example.com", label: "you@example.com" },
+              currentAccount: true,
+              plan: "wonder",
+              windows: [
+                { id: "weekly", label: "Weekly · all models", kind: "weekly" as const, usedPercent: 22, resetsAt: "2026-08-24T20:00:00Z", observedAt: NOW },
+                { id: "session", label: "5 hour · all models", kind: "session" as const, usedPercent: 41, resetsAt: "2026-08-17T22:15:00Z", windowSeconds: 18_000, observedAt: NOW },
+              ],
+            }]
+          : agentId === "claude"
+            ? [okClaude()]
+            : [okCodex()],
+      ));
+    renderLimits();
+    const muse = await screen.findByRole("region", { name: "Muse limits · you@example.com" });
+    expect(within(muse).getByText("Wonder")).toBeTruthy();
+    expect(within(muse).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("22");
+    expect(within(muse).getByRole("meter", { name: "5 hour · all models" }).getAttribute("aria-valuenow")).toBe("41");
+    expect(within(muse).queryByRole("button", { name: /^Sign in/ })).toBeNull();
+    expect(within(muse).queryByRole("button", { name: /^More actions/ })).toBeNull();
+  });
+
   it("draws the active account's dot beside its headline window, or in its header without one", async () => {
     const session = { id: "secondary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
     answer([okClaude({ plan: "max ×5" })], [okCodex({ windows: [session] }), staleCodex()]);
@@ -131,7 +159,7 @@ describe("Limits", () => {
     expect(accountAction).not.toHaveBeenCalled();
   });
 
-  it("asks for both subscriptions (not forced) and renders visible windows with percent, fill and reset", async () => {
+  it("asks for every subscription (not forced) and renders visible windows with percent, fill and reset", async () => {
     answer([okClaude()], [okCodex()]);
     renderLimits();
 
@@ -139,7 +167,8 @@ describe("Limits", () => {
     await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro ×20")).toBeTruthy());
     expect(readLimits).toHaveBeenCalledWith("claude", false);
     expect(readLimits).toHaveBeenCalledWith("codex", false);
-    expect(readLimits).toHaveBeenCalledTimes(2);
+    expect(readLimits).toHaveBeenCalledWith("muse", false);
+    expect(readLimits).toHaveBeenCalledTimes(3);
 
     const claude = card("Claude limits · me@claude.example");
     expect(claude.getAttribute("data-status")).toBe("ok");
@@ -211,39 +240,40 @@ describe("Limits", () => {
   it("re-reads every provider on focus only after the configured interval", async () => {
     answer([statusOnly("claude", "unauthenticated", "Access token expired")], [okCodex()]);
     renderLimits();
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(3));
 
     await act(async () => {
       window.dispatchEvent(new Event("visibilitychange"));
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    expect(readLimits).toHaveBeenCalledTimes(2);
+    expect(readLimits).toHaveBeenCalledTimes(3);
 
     vi.setSystemTime(new Date("2026-08-17T20:05:01Z"));
     await act(async () => {
       window.dispatchEvent(new Event("visibilitychange"));
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
-    expect(readLimits.mock.calls.slice(2)).toEqual([
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(6));
+    expect(readLimits.mock.calls.slice(3)).toEqual([
       ["claude", false],
       ["codex", false],
+      ["muse", false],
     ]);
   });
 
   it("checks the shared cache on focus after five minutes with a longer configured interval", async () => {
     answer([okClaude()], [okCodex()]);
     renderLimits(10);
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(3));
 
     vi.setSystemTime(new Date("2026-08-17T20:05:01Z"));
     await act(async () => window.dispatchEvent(new Event("visibilitychange")));
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
-    expect(readLimits.mock.calls.slice(2)).toEqual([["claude", false], ["codex", false]]);
-
-    vi.setSystemTime(new Date("2026-08-17T20:10:01Z"));
-    await act(async () => window.dispatchEvent(new Event("visibilitychange")));
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(6));
+    expect(readLimits.mock.calls.slice(3)).toEqual([["claude", false], ["codex", false], ["muse", false]]);
+
+    vi.setSystemTime(new Date("2026-08-17T20:10:02Z"));
+    await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(9));
   });
 
   it("forgets a remembered account on request and drops its card without a refetch", async () => {
@@ -265,7 +295,7 @@ describe("Limits", () => {
     });
     await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · personal@codex.example" })).toBeNull());
     expect(card("Codex limits · work@codex.example")).toBeTruthy();
-    expect(readLimits).toHaveBeenCalledTimes(2);
+    expect(readLimits).toHaveBeenCalledTimes(3);
   });
 
   it("keeps remembered accounts visible when the current login is signed out", async () => {
@@ -356,9 +386,10 @@ describe("Limits", () => {
 
   });
 
-  it("refreshes both providers with force and keeps the last good numbers when a refresh fails", async () => {
+  it("refreshes every provider with force and keeps the last good numbers when a refresh fails", async () => {
     let claudeCalls = 0;
     readLimits.mockImplementation((agentId: AgentId) => {
+      if (agentId === "muse") return Promise.resolve([]);
       if (agentId === "codex") return Promise.resolve([okCodex()]);
       claudeCalls += 1;
       return claudeCalls === 1 ? Promise.resolve([okClaude()]) : Promise.reject(new Error("worker failed"));
@@ -368,9 +399,9 @@ describe("Limits", () => {
     await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro ×20")).toBeTruthy());
 
     await act(async () => { await refreshLimits(view.client); });
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(6));
     expect(readLimits).toHaveBeenLastCalledWith(expect.any(String), true);
-    expect(readLimits.mock.calls.slice(2).every((call) => call[1] === true)).toBe(true);
+    expect(readLimits.mock.calls.slice(3).every((call) => call[1] === true)).toBe(true);
     await waitFor(() => expect(screen.getByText(/worker failed/)).toBeTruthy());
     const claude = card("Claude limits · me@claude.example");
     expect(claude.getAttribute("data-status")).toBe("ok");
@@ -379,8 +410,8 @@ describe("Limits", () => {
     await act(async () => {
       await view.client.invalidateQueries({ queryKey: ["limits"] });
     });
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(6));
-    expect(readLimits.mock.calls.slice(4).every((call) => call[1] === false)).toBe(true);
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(9));
+    expect(readLimits.mock.calls.slice(6).every((call) => call[1] === false)).toBe(true);
   });
 });
 
@@ -504,7 +535,7 @@ it.each(["claude", "codex"])("adds only the %s account selected in the shared pi
 
 it("queues an explicit reload behind an in-flight background check", async () => {
   const pending = deferred<ProviderLimits[]>();
-  readLimits.mockImplementation((provider: AgentId, force: boolean) => provider === "claude" && !force ? pending.promise : Promise.resolve(provider === "claude" ? [okClaude({windows: []})] : [okCodex()]));
+  readLimits.mockImplementation((provider: AgentId, force: boolean) => provider === "claude" && !force ? pending.promise : Promise.resolve(provider === "claude" ? [okClaude({windows: []})] : provider === "codex" ? [okCodex()] : []));
   const view = renderLimits();
   await waitFor(() => expect(readLimits).toHaveBeenCalledWith("claude", false));
   await act(async () => {
@@ -520,7 +551,7 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
  const profile = {id:"saved",observationId:"profile:user-team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false};
  let profiles = [profile];
  let history = [okCodex({account:{id:profile.observationId,label:profile.email},currentAccount:false}),okCodex({account:{id:"team",label:profile.email},currentAccount:false}),staleCodex()];
- readLimits.mockImplementation(async(provider:string)=>provider==="codex"?history:[okClaude()]);
+ readLimits.mockImplementation(async(provider:string)=>provider==="codex"?history:provider==="claude"?[okClaude()]:[]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?profiles:[],nativeAccount:null,recoveryRequired:false,notice:null}));
  accountAction.mockImplementation(async()=>{profiles=[];});
  forgetLimitsSnapshot.mockImplementation(async(_provider:string,id:string)=>{history=history.filter(entry=>entry.account?.id!==id);});
@@ -713,7 +744,7 @@ describe("archiving", () => {
   it("unarchives an account in place, and leaves reading it again to the backend, which announces its forced read", async () => {
     let archived = true;
     readLimits.mockImplementation(async (provider: AgentId) => provider === "codex"
-      ? [okCodex(), staleCodex({ archived })] : [okClaude()]);
+      ? [okCodex(), staleCodex({ archived })] : provider === "claude" ? [okClaude()] : []);
     setLimitsArchived.mockImplementation(async () => { archived = false; });
     renderLimits();
     fireEvent.click(await screen.findByRole("button", { name: "Archived (1)" }));
@@ -735,7 +766,7 @@ describe("archiving", () => {
     const profile = { id: "saved", observationId: "profile:user-team", identity: { provider: "codex" as const, userId: "user", workspaceId: "team" }, email: "shared@example.com", label: "shared@example.com", savedAt: NOW, active: false, needsLogin: false, archived: true };
     let history = [okCodex(), okCodex({ account: { id: profile.observationId, label: profile.email }, currentAccount: false, archived: true }),
       okCodex({ account: { id: "team", label: profile.email }, currentAccount: false, archived: true })];
-    readLimits.mockImplementation(async (provider: AgentId) => provider === "codex" ? history : [okClaude()]);
+    readLimits.mockImplementation(async (provider: AgentId) => provider === "codex" ? history : provider === "claude" ? [okClaude()] : []);
     readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
     forgetLimitsSnapshot.mockImplementation(async (_provider: string, id: string) => { history = history.filter(entry => entry.account?.id !== id); });
     renderLimits();

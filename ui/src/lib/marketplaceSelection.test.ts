@@ -140,6 +140,8 @@ describe("marketplaceSelection", () => {
     expect(agentsAllowed(["codex", "claude"])).toBe(true);
     expect(previewPath("claude", { kind: "global" })).toBe("~/.claude/skills");
     expect(previewPath("antigravity", { kind: "global" })).toBe("~/.gemini/antigravity-cli/skills");
+    expect(previewPath("muse", { kind: "global" })).toBe("~/.config/muse/skills");
+    expect(previewPath("muse", { kind: "project", projectPath: "/home/me/app" })).toBe("/home/me/app/.agents/skills");
     expect(previewPath("codex", { kind: "project", projectPath: "E:/dev/app" })).toBe("E:/dev/app/.codex/skills");
     expect(previewPath("cursor", { kind: "project", projectPath: "/home/me/app" })).toBe(
       "/home/me/app/.cursor/skills",

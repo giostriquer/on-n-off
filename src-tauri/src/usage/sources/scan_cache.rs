@@ -138,6 +138,7 @@ fn encode_scan_cache(cache: &ScanCache) -> Value {
                 p: match entry.provider {
                     UsageProvider::Claude => "claude".into(),
                     UsageProvider::Codex => "codex".into(),
+                    UsageProvider::Muse => "muse".into(),
                 },
                 r: rows,
             },
@@ -171,6 +172,7 @@ fn decode_scan_cache(document: &Value) -> ScanCache {
         let provider = match entry.p.as_str() {
             "claude" => UsageProvider::Claude,
             "codex" => UsageProvider::Codex,
+            "muse" => UsageProvider::Muse,
             _ => continue,
         };
         let mut records = Vec::new();

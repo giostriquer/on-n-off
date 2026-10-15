@@ -1,6 +1,6 @@
 import type { AgentId, AppSettings, GithubPollSeconds, LimitsPollMinutes, ResetAlert } from "./types";
 
-export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity", "cursor"];
+export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity", "cursor", "muse"];
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   hiddenAgents: [],

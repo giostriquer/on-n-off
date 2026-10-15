@@ -182,7 +182,7 @@ export function Usage() {
       ) : bothMissing ? (
         <>
           {error ? <p className="text-[13px] text-[var(--trip)]">{error}</p> : null}
-          <p className="text-[13px] text-[var(--mute)]">No Claude or Codex session transcripts found on this machine.</p>
+          <p className="text-[13px] text-[var(--mute)]">No Claude, Codex or Muse session transcripts found on this machine.</p>
         </>
       ) : summary ? (
         <>

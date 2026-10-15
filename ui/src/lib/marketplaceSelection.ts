@@ -258,7 +258,11 @@ export function previewPath(provider: AgentId, scope: ItemScope): string {
         return `${base}/.agents/skills`;
       case "cursor":
         return `${base}/.cursor/skills`;
+      case "muse":
+        return `${base}/.agents/skills`;
     }
   }
-  return provider === "antigravity" ? "~/.gemini/antigravity-cli/skills" : `${agentRoot(provider)}/skills`;
+  if (provider === "antigravity") return "~/.gemini/antigravity-cli/skills";
+  if (provider === "muse") return "~/.config/muse/skills";
+  return `${agentRoot(provider)}/skills`;
 }

@@ -431,6 +431,7 @@ pub fn agent_info(id: AgentId) -> AgentInfo {
             AgentId::Codex => true,
             AgentId::Antigravity => cli_ok,
             AgentId::Cursor => false,
+            AgentId::Muse => cli_ok,
         },
         reads_hooks: false,
     }

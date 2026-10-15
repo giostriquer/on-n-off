@@ -26,7 +26,7 @@ function deferred<T>() {
 }
 
 function answer(claude: ProviderLimits[], codex: ProviderLimits[]) {
-  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : codex));
+  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? codex : []));
 }
 
 function renderLimits() {

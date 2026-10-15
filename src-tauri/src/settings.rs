@@ -13,11 +13,12 @@ use crate::cli_locate::{
 use crate::dto::{AdapterError, AgentId};
 use crate::paths;
 
-const ALL_AGENTS: [AgentId; 4] = [
+const ALL_AGENTS: [AgentId; 5] = [
     AgentId::Claude,
     AgentId::Codex,
     AgentId::Antigravity,
     AgentId::Cursor,
+    AgentId::Muse,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,6 +228,7 @@ fn save_settings_to(
         AgentId::Codex => 1,
         AgentId::Antigravity => 2,
         AgentId::Cursor => 3,
+        AgentId::Muse => 4,
     });
     settings.hidden_agents.dedup();
     if hidden_covers_all(&settings.hidden_agents) {
@@ -325,6 +327,7 @@ fn agent_for_binary(cli_name: &str) -> Option<AgentId> {
         "codex" => Some(AgentId::Codex),
         "agy" => Some(AgentId::Antigravity),
         "agent" | "cursor-agent" => Some(AgentId::Cursor),
+        "muse" => Some(AgentId::Muse),
         _ => None,
     }
 }
@@ -335,6 +338,7 @@ fn home_for(id: AgentId) -> Result<PathBuf, AdapterError> {
         AgentId::Codex => paths::codex_root(),
         AgentId::Antigravity => paths::gemini_root(),
         AgentId::Cursor => paths::cursor_root(),
+        AgentId::Muse => paths::muse_config_root(),
     }
 }
 

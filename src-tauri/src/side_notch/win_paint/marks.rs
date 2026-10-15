@@ -604,6 +604,22 @@ const ANTIGRAVITY: Shape = Shape {
     }],
 };
 
+const MUSE: Shape = Shape {
+    even_odd: false,
+    subs: &[Sub {
+        start: (12.0, 1.0),
+        segs: &[
+            Seg::Line((14.5, 9.5)),
+            Seg::Line((23.0, 12.0)),
+            Seg::Line((14.5, 14.5)),
+            Seg::Line((12.0, 23.0)),
+            Seg::Line((9.5, 14.5)),
+            Seg::Line((1.0, 12.0)),
+            Seg::Line((9.5, 9.5)),
+        ],
+    }],
+};
+
 fn fill(
     shape: &Shape,
     box_: (f32, f32, f32, f32),
@@ -642,6 +658,7 @@ pub(super) fn provider(
         Id::Codex => fill(&CODEX, (0.0, 0.0, 24.0, 24.0), rect, color, pixmap),
         Id::Cursor => fill(&CURSOR, (0.0, 0.0, 466.73, 532.09), rect, color, pixmap),
         Id::Antigravity => fill(&ANTIGRAVITY, (13.0, 14.5, 85.0, 85.0), rect, color, pixmap),
+        Id::Muse => fill(&MUSE, (0.0, 0.0, 24.0, 24.0), rect, color, pixmap),
     }
 }
 

@@ -12,6 +12,7 @@ struct ProviderMark: Shape {
       return fitted(Self.cursor, box: CGRect(x: 0, y: 0, width: 466.73, height: 532.09), in: rect)
     case .antigravity:
       return fitted(Self.antigravity, box: CGRect(x: 13, y: 14.5, width: 85, height: 85), in: rect)
+    case .muse: return fitted(Self.muse, box: Self.square, in: rect)
     }
   }
 
@@ -435,6 +436,19 @@ extension ProviderMark {
     path.addCurve(
       to: CGPoint(x: 89.6992, y: 93.6950), control1: CGPoint(x: 72.7825, y: 59.8617),
       control2: CGPoint(x: 71.6159, y: 81.4450))
+    path.closeSubpath()
+    return path
+  }()
+  private static let muse: Path = {
+    var path = Path()
+    path.move(to: CGPoint(x: 12, y: 1))
+    path.addLine(to: CGPoint(x: 14.5, y: 9.5))
+    path.addLine(to: CGPoint(x: 23, y: 12))
+    path.addLine(to: CGPoint(x: 14.5, y: 14.5))
+    path.addLine(to: CGPoint(x: 12, y: 23))
+    path.addLine(to: CGPoint(x: 9.5, y: 14.5))
+    path.addLine(to: CGPoint(x: 1, y: 12))
+    path.addLine(to: CGPoint(x: 9.5, y: 9.5))
     path.closeSubpath()
     return path
   }()

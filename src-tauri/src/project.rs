@@ -246,6 +246,11 @@ fn project_skill_dirs(project: &Path, agent: AgentId) -> Vec<PathBuf> {
         ],
         AgentId::Antigravity => vec![project.join(".agents").join("skills")],
         AgentId::Cursor => vec![project.join(".cursor").join("skills")],
+        AgentId::Muse => vec![
+            project.join(".agents").join("skills"),
+            project.join(".claude").join("skills"),
+            project.join(".codex").join("skills"),
+        ],
     }
 }
 
@@ -256,7 +261,7 @@ pub(crate) fn project_item_roots(project: &Path, agent: AgentId) -> crate::adapt
         .unwrap_or_else(|| project.join(".agents").join("skills"));
     let agents = match agent {
         AgentId::Claude => Some(project.join(".claude").join("agents")),
-        AgentId::Codex | AgentId::Antigravity | AgentId::Cursor => None,
+        AgentId::Codex | AgentId::Antigravity | AgentId::Cursor | AgentId::Muse => None,
     };
     crate::adapter::ItemRoots { skills, agents }
 }
@@ -264,7 +269,7 @@ pub(crate) fn project_item_roots(project: &Path, agent: AgentId) -> crate::adapt
 fn scan_project_skills(dir: &Path, agent: AgentId) -> Vec<crate::scanner::ScannedSkill> {
     match agent {
         AgentId::Antigravity => crate::scanner::scan_antigravity_skills(dir),
-        AgentId::Claude | AgentId::Codex | AgentId::Cursor => scan_user_skills(dir),
+        AgentId::Claude | AgentId::Codex | AgentId::Cursor | AgentId::Muse => scan_user_skills(dir),
     }
 }
 
@@ -276,6 +281,7 @@ fn project_mcp_servers(project: &Path, agent: AgentId) -> Vec<McpServerDto> {
     }
     match agent {
         AgentId::Claude => {}
+        AgentId::Muse => {}
         AgentId::Codex => {
             let config = project.join(".codex").join("config.toml");
             if let Ok(text) = fs::read_to_string(&config) {

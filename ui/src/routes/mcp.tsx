@@ -10,7 +10,13 @@ export function McpRoute() {
       servers={session.filtered?.mcpServers ?? []}
       filterQuery={session.currentTab.filter}
       busy={session.currentTab.inFlight}
-      notice={session.currentAgent.id === "cursor" ? copy.cursorMcpReadOnly : undefined}
+      notice={
+        session.currentAgent.id === "cursor"
+          ? copy.cursorMcpReadOnly
+          : session.currentAgent.id === "muse"
+            ? copy.museMcpReadOnly
+            : undefined
+      }
       onToggle={session.toggleMcp}
     />
   );

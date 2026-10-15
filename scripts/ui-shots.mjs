@@ -28,6 +28,7 @@ const ARCHIVED_OPEN = [
 const ARCHIVE_ACTION = "role=group[name='Actions for person@acme.example'] >> role=button[name='Archive account']";
 
 const SCENES = [
+  { name: "all-providers", url: "/overview?mock=ok&allProviders", viewport: { width: 960, height: 760 } },
   { name: "github-ok", url: "/github?mock=ok" },
   { name: "github-ok-light", url: "/github?mock=ok", theme: "light" },
   { name: "github-stale", url: "/github?mock=stale" },
@@ -164,6 +165,14 @@ async function runScene(browser, scene) {
     await page.waitForTimeout(120);
   }
   if (!shots) await shot(scene.name);
+  for (const tab of await page.getByRole("tab").all()) {
+    const clipped = await tab.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const group = element.closest('[role="tablist"]').getBoundingClientRect();
+      return rect.left < Math.max(0, group.left) - 1 || rect.right > Math.min(innerWidth, group.right) + 1;
+    });
+    if (clipped) problems.push(`provider tab clipped: ${await tab.textContent()}`);
+  }
   await context.close();
   return problems;
 }

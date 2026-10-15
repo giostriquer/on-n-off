@@ -181,6 +181,45 @@ impl InstallSource {
         vec!["plugin".into(), "uninstall".into(), name]
     }
 
+    pub fn muse_install_argv(&self) -> Vec<String> {
+        match self {
+            Self::LocalDir(path) => vec![
+                "plugins".into(),
+                "install".into(),
+                path.display().to_string(),
+                "--scope".into(),
+                "user".into(),
+                "--json".into(),
+            ],
+            _ => vec![
+                "plugins".into(),
+                "install".into(),
+                self.as_cli_source(),
+                "--json".into(),
+            ],
+        }
+    }
+
+    pub fn muse_uninstall_argv(plugin_id: &str) -> Vec<String> {
+        let (name, _) = crate::paths::plugin_id_parts(plugin_id);
+        vec!["plugins".into(), "remove".into(), name, "--json".into()]
+    }
+
+    pub fn muse_marketplace_update_argv(marketplace: &str) -> Vec<String> {
+        vec![
+            "plugins".into(),
+            "marketplace".into(),
+            "update".into(),
+            marketplace.to_string(),
+            "--json".into(),
+        ]
+    }
+
+    pub fn muse_update_argv(plugin_id: &str) -> Vec<String> {
+        let (name, _) = crate::paths::plugin_id_parts(plugin_id);
+        vec!["plugins".into(), "update".into(), name, "--json".into()]
+    }
+
     pub fn plugin_marketplace(plugin_id: &str) -> Option<&str> {
         plugin_id
             .split_once('@')

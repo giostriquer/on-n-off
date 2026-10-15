@@ -7,6 +7,7 @@ pub enum AgentId {
     Codex,
     Antigravity,
     Cursor,
+    Muse,
 }
 
 impl AgentId {
@@ -16,6 +17,7 @@ impl AgentId {
             Self::Codex => "Codex",
             Self::Antigravity => "Antigravity",
             Self::Cursor => "Cursor",
+            Self::Muse => "Muse",
         }
     }
 
@@ -25,6 +27,7 @@ impl AgentId {
             Self::Codex => "codex",
             Self::Antigravity => "antigravity",
             Self::Cursor => "cursor",
+            Self::Muse => "muse",
         }
     }
 
@@ -34,6 +37,7 @@ impl AgentId {
             Self::Codex => "codex",
             Self::Antigravity => "agy",
             Self::Cursor => "agent",
+            Self::Muse => "muse",
         }
     }
 }
