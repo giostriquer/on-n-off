@@ -120,6 +120,7 @@ function readPng(path) {
   return { width, height, at: (x, y) => [...pixels.subarray((y * width + x) * 4, (y * width + x) * 4 + 4)] };
 }
 const renderRoot = resolve(process.env.NOTCH_RENDER_DIR ?? '.tmp/notch-render');
+const popoverSizes = {};
 for (const edge of ['right', 'left', 'top', 'bottom']) {
   const dir = resolve(renderRoot, edge);
   mkdirSync(dir, { recursive: true });
@@ -140,11 +141,24 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
     const pixel = png.at(edge === 'left' ? png.width - 1 - 6 * scale : 6 * scale, Math.floor(png.height / 2));
     const ink = [14, 14, 17, 255];
     assert.ok(pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
-    // A line 4 pt in from the tail's side crosses the tail and nothing else.
+    // A line 4 pt in from the tail's side crosses only the tail, 7 pt wide there. The fixture's
+    // popovers are not clamped to the display, so the tail sits mid-popover, at its cell's centre.
     const line = { right: png.width - 4 * scale, left: 4 * scale - 1, top: 4 * scale - 1, bottom: png.height - 4 * scale }[edge];
-    let tail = 0;
-    for (let i = 0; i < (vertical ? png.height : png.width); i++) if (png.at(vertical ? line : i, vertical ? i : line)[3] > 0) tail++;
-    assert.ok(tail > 0 && tail <= 14 * scale, `render ${edge}: ${name}.png has ${tail} opaque px 4 pt in from its tail side, not one tail`);
+    const length = vertical ? png.height : png.width;
+    const opaque = [];
+    for (let i = 0; i < length; i++) if (png.at(vertical ? line : i, vertical ? i : line)[3] > 0) opaque.push(i);
+    const [first, last] = [opaque[0], opaque.at(-1)];
+    assert.ok(opaque.length >= 5 * scale && opaque.length <= 9 * scale && last - first + 1 === opaque.length, `render ${edge}: ${name}.png has ${opaque.length} opaque px 4 pt in from its tail side, not one tail`);
+    assert.ok(Math.abs((first + last) / 2 - length / 2) <= 2, `render ${edge}: ${name}.png tail is centred at ${(first + last) / 2} px, not mid-popover at ${length / 2}`);
+    (popoverSizes[name] ??= {})[edge] = [png.width, png.height];
   }
   console.log(`PASS render ${edge} → ${dir}`);
 }
+// Every edge draws the same card plus one 8 pt tail on its own side.
+const tailPx = 8 * fixture('right').snapshot.displays[0].scale;
+for (const [name, size] of Object.entries(popoverSizes)) {
+  assert.deepEqual(size.left, size.right, `${name}: the left and right popovers differ in size`);
+  assert.deepEqual(size.bottom, size.top, `${name}: the top and bottom popovers differ in size`);
+  assert.deepEqual([size.right[0] - size.top[0], size.top[1] - size.right[1]], [tailPx, tailPx], `${name}: a popover is not its card plus one 8 pt tail (right ${size.right}, top ${size.top})`);
+}
+console.log('PASS popovers are one card plus a tail on every edge');
