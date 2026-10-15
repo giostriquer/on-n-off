@@ -140,13 +140,14 @@ it("offers four edges and three size presets and persists the choice", async () 
 it("offers Liquid Glass or solid details only where macOS draws glass, and saves the choice", async () => {
   snapshot.liquidGlass = false;
   const first = mount();
-  await screen.findByRole("group", { name: "Edge" });
+  await waitFor(() => expect(button("Right")).not.toBeDisabled());
   expect(screen.queryByRole("group", { name: "Details" })).toBeNull();
   first.unmount();
   snapshot.liquidGlass = true;
   mount();
   await screen.findByRole("group", { name: "Details" });
   await waitFor(() => expect(button("Liquid Glass")).toHaveAttribute("aria-pressed", "true"));
+  expect(button("Solid")).toHaveAttribute("aria-pressed", "false");
   fireEvent.click(button("Solid"));
   await waitFor(() =>
     expect(calls.save).toHaveBeenLastCalledWith(expect.objectContaining({ popoverStyle: "solid" })),

@@ -174,6 +174,10 @@ fn popovers_default_to_liquid_glass_and_save_a_solid_choice() {
     let legacy: NotchSettings =
         serde_json::from_str(r#"{"enabled":true,"displayId":"main","edge":"right"}"#).unwrap();
     assert_eq!(legacy.popover_style, PopoverStyle::Glass);
+    assert_eq!(
+        serde_json::to_value(&legacy).unwrap()["popoverStyle"],
+        "glass"
+    );
     let solid: NotchSettings = serde_json::from_str(
         r#"{"enabled":true,"displayId":"main","edge":"right","popoverStyle":"solid"}"#,
     )
@@ -189,6 +193,18 @@ fn popovers_default_to_liquid_glass_and_save_a_solid_choice() {
 fn liquid_glass_starts_at_macos_26() {
     assert!(!liquid_glass_on(25));
     assert!(liquid_glass_on(26));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_snapshot_reports_liquid_glass_for_the_running_macos() {
+    let output = std::process::Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .unwrap();
+    let version = String::from_utf8(output.stdout).unwrap();
+    let major: isize = version.trim().split('.').next().unwrap().parse().unwrap();
+    assert_eq!(super::super::liquid_glass(), liquid_glass_on(major));
 }
 
 #[test]

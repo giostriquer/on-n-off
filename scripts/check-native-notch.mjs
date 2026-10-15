@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { inflateSync } from 'node:zlib';
 
 const executable = resolve(process.argv[2] ?? 'src-tauri/target/debug/on-n-off-notch');
+const protocolVersion = Number(/PROTOCOL_VERSION: u64 = (\d+);/.exec(readFileSync(resolve('src-tauri/src/side_notch/protocol.rs'), 'utf8'))[1]);
 
 const infoPlist = resolve('src-tauri/macos/SideNotch/Info.plist');
 const embedded = spawnSync('/usr/bin/segedit', [executable, '-extract', '__TEXT', '__info_plist', '/dev/stdout'], { maxBuffer: 1 << 20 });
@@ -14,7 +15,7 @@ assert.equal(embedded.status, 0, `segedit could not read the helper's embedded I
 assert.ok(embedded.stdout.equals(readFileSync(infoPlist)), `${executable} embeds another Info.plist than ${infoPlist}: the helper was not relinked`);
 console.log('PASS helper embeds the current Info.plist');
 const settings = { enabled: false, displayId: null, edge: 'right', size: 'standard', show: 'always', providers: ['claude', 'codex', 'antigravity', 'cursor'], pullRequests: { enabled: true, lists: ['mine'] }, popoverStyle: 'glass' };
-const snapshot = { version: 5, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
+const snapshot = { version: protocolVersion, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
 async function check(name, input, expectedAck, args = []) {
   const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   const timer = setTimeout(() => child.kill('SIGKILL'), 20000);
@@ -45,7 +46,7 @@ async function check(name, input, expectedAck, args = []) {
 }
 await check('disabled snapshot acknowledged, parent EOF exits', JSON.stringify(snapshot) + '\n', true);
 await check('unsupported protocol rejected', JSON.stringify({ ...snapshot, version: 1 }) + '\n', false);
-await check('previous protocol rejected', JSON.stringify({ ...snapshot, version: 4 }) + '\n', false);
+await check('previous protocol rejected', JSON.stringify({ ...snapshot, version: protocolVersion - 1 }) + '\n', false);
 await check('oversize frame rejected', ' '.repeat(262145), false);
 await check('parent closes before first snapshot', '', false);
 await check('parent EOF exits with the main queue unresponsive', '', false, ['--check-unresponsive-main']);
@@ -60,7 +61,7 @@ const pull = (number, title, ci, reviewDecision, mergeKind, isDraft) => ({
   author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z',
 });
 const fixture = edge => ({
-  version: 5, sequence: 1,
+  version: protocolVersion, sequence: 1,
   snapshot: {
     settings: { enabled: true, displayId: 'fixture', edge, size: 'standard', show: 'onHover', providers: ['claude', 'codex', 'antigravity', 'cursor'], pullRequests: { enabled: true, lists: ['mine', 'reviewRequested'] }, popoverStyle: 'glass' },
     displays: [{ id: 'fixture', name: 'Fixture', x: 0, y: 0, width: 1920, height: 1080, workY: 25, workHeight: 1055, scale: 2, mirrored: false }],
