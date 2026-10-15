@@ -1,4 +1,4 @@
-export type AgentId = "claude" | "codex" | "antigravity" | "cursor";
+export type AgentId = "claude" | "codex" | "antigravity" | "cursor" | "muse";
 
 export type ErrorKind = "cli_missing" | "cli_too_old" | "parse" | "write" | "message";
 
@@ -234,7 +234,7 @@ export type ItemStatus = {
 
 export type UpdateItemMode = "overwrite" | "dismiss";
 
-export type SharedReadSource = "accounts" | "limits:claude" | "limits:codex" | "github:prs" | "limits:reset-spends";
+export type SharedReadSource = "accounts" | "limits:claude" | "limits:codex" | "limits:muse" | "github:prs" | "limits:reset-spends";
 
 export type SharedReadChanged = {
   source: SharedReadSource;

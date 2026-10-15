@@ -226,7 +226,7 @@ fn probe_real_home_limits() {
 
 fn print_real_home_limits() {
     let home = crate::paths::probe_home();
-    for provider in [AgentId::Claude, AgentId::Codex] {
+    for provider in [AgentId::Claude, AgentId::Codex, AgentId::Muse] {
         for dto in read_limits_at(provider, false, &home) {
             println!(
                     "{:?}: current_account={} account={:?} status={:?} plan={:?} message={:?} credits={:?}",

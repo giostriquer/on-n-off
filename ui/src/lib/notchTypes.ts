@@ -1,6 +1,8 @@
 import type { GithubListId } from "./githubTypes";
 import type { AgentId } from "./types";
 
+export const NOTCH_PROVIDER_ORDER: readonly AgentId[] = ["claude", "codex", "muse", "antigravity", "cursor"];
+
 export type NotchEdge = "left" | "right" | "top" | "bottom";
 export type NotchSize = "compact" | "standard" | "large";
 export type NotchShowMode = "always" | "onHover";
@@ -22,7 +24,7 @@ export function defaultNotchSettings(overrides: Partial<NotchSettings> = {}): No
     edge: "right",
     size: "standard",
     show: "always",
-    providers: ["claude", "codex", "antigravity", "cursor"],
+    providers: [...NOTCH_PROVIDER_ORDER],
     pullRequests: { enabled: true, lists: ["mine"] },
     popoverStyle: "glass",
     ...overrides,

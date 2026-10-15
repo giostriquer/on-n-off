@@ -41,9 +41,9 @@ fn follows_the_selected_uuid_across_reordering_and_mixed_scales() {
         layout(&settings("retina", Edge::Right), &displays),
         Some(Layout {
             x: -76.0,
-            y: 377.0,
+            y: 336.5,
             width: 76.0,
-            height: 396.0
+            height: 477.0
         })
     );
     let reversed: Vec<_> = displays.into_iter().rev().collect();
@@ -51,9 +51,9 @@ fn follows_the_selected_uuid_across_reordering_and_mixed_scales() {
         layout(&settings("retina", Edge::Left), &reversed),
         Some(Layout {
             x: -1728.0,
-            y: 377.0,
+            y: 336.5,
             width: 76.0,
-            height: 396.0
+            height: 477.0
         })
     );
 }
@@ -75,15 +75,37 @@ fn top_and_bottom_edges_center_a_horizontal_rail_inside_the_work_area() {
     assert_eq!(
         top,
         Layout {
-            x: 100.0 + (1728.0 - 408.0) / 2.0,
+            x: 100.0 + (1728.0 - 492.0) / 2.0,
             y: 33.0,
-            width: 408.0,
+            width: 492.0,
             height: 73.0
         }
     );
     let bottom = layout(&settings("main", Edge::Bottom), &displays).unwrap();
     assert_eq!(bottom.y, 33.0 + 1084.0 - 73.0);
     assert_eq!(bottom.x, top.x);
+}
+
+#[test]
+fn muse_follows_codex_even_when_other_integrations_are_selected() {
+    let mut selected = settings("main", Edge::Right);
+    selected.providers = vec![
+        AgentId::Cursor,
+        AgentId::Muse,
+        AgentId::Antigravity,
+        AgentId::Codex,
+        AgentId::Claude,
+    ];
+    assert_eq!(
+        selected.rail_providers(),
+        [
+            AgentId::Claude,
+            AgentId::Codex,
+            AgentId::Muse,
+            AgentId::Antigravity,
+            AgentId::Cursor,
+        ]
+    );
 }
 
 #[test]
@@ -115,12 +137,12 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let defaults = NotchSettings::default();
     assert!(defaults.pull_requests.enabled);
     assert_eq!(defaults.pull_requests.lists, [GithubList::Mine]);
-    assert_eq!(defaults.cell_count(), 3, "two providers plus the cell");
+    assert_eq!(defaults.cell_count(), 4, "three providers plus the cell");
     let legacy: NotchSettings =
         serde_json::from_str(r#"{"enabled":true,"displayId":"main","edge":"right"}"#).unwrap();
     assert_eq!(
         legacy.cell_count(),
-        5,
+        6,
         "older documents gain the cell and keep their providers"
     );
     let mut current = settings("main", Edge::Right);
@@ -135,7 +157,7 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let displays = [display("main", 0.0, 1.0)];
     assert_eq!(
         layout(&current, &displays).unwrap().height,
-        rail_length(5, CELL_HEIGHT)
+        rail_length(6, CELL_HEIGHT)
     );
     let json = serde_json::to_value(&current).unwrap();
     assert_eq!(json["pullRequests"]["enabled"], true);
@@ -219,7 +241,7 @@ fn presets_scale_the_whole_rail() {
         current.size = size;
         let rail = layout(&current, &displays).unwrap();
         assert_eq!(rail.width, CELL_WIDTH * scale);
-        assert_eq!(rail.height, rail_length(4, CELL_HEIGHT) * scale);
+        assert_eq!(rail.height, rail_length(5, CELL_HEIGHT) * scale);
     }
 }
 
@@ -267,8 +289,8 @@ fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
     let fresh = NotchSettings::default();
     assert_eq!(
         fresh.providers,
-        vec![AgentId::Claude, AgentId::Codex],
-        "the two with quotas to draw"
+        vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
+        "the three with quotas to draw"
     );
     let chosen = NotchSettings {
         providers: RAIL_ORDER.to_vec(),
@@ -276,7 +298,7 @@ fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
     };
     assert_eq!(
         chosen.rail_providers().len(),
-        4,
+        5,
         "an explicit choice stands"
     );
 }

@@ -11,7 +11,7 @@ vi.mock("$lib/api", () => ({
   onNotchChanged: async () => () => undefined,
 }));
 let snapshot: NotchSnapshot;
-const ALL = ["claude", "codex", "antigravity", "cursor"] as const;
+const ALL = ["claude", "codex", "muse", "antigravity", "cursor"] as const;
 
 beforeEach(() => {
   snapshot = {
@@ -52,6 +52,16 @@ function mount() {
 }
 
 const button = (name: string) => screen.getByRole("button", { name });
+
+it("offers Muse immediately after Codex in rail order", async () => {
+  mount();
+  await screen.findByRole("button", { name: "Show Muse in the notch" });
+  expect(screen.getAllByRole("button", { name: /^Show .+ in the notch$/ }).map(node => node.getAttribute("aria-label"))).toEqual([
+    "Show Claude in the notch", "Show Codex in the notch", "Show Muse in the notch",
+    "Show Antigravity in the notch", "Show Cursor in the notch",
+    "Show pull requests in the notch",
+  ]);
+});
 
 it("requires an explicit display before the rail can be shown, then saves its identity and each show choice", async () => {
   mount();

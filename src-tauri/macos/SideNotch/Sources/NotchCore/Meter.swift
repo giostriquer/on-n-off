@@ -22,6 +22,7 @@ public let claudeInk = Ink(r: 217, g: 119, b: 87)
 public let codexInk = Ink(r: 238, g: 240, b: 242)
 public let cursorInk = Ink(r: 122, g: 162, b: 255)
 public let antigravityInk = Ink(r: 140, g: 147, b: 157)
+public let museInk = Ink(r: 0, g: 130, b: 251)
 public let fableInk = Ink(r: 204, g: 98, b: 64)
 public let creditsInk = Ink(r: 168, g: 176, b: 186)
 public let tripInk = Ink(r: 226, g: 89, b: 76)
@@ -33,6 +34,7 @@ public func providerInk(_ id: ProviderId) -> Ink {
   case .codex: return codexInk
   case .cursor: return cursorInk
   case .antigravity: return antigravityInk
+  case .muse: return museInk
   }
 }
 

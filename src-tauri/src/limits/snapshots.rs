@@ -202,7 +202,7 @@ impl StoredSnapshot {
         match self.provider {
             AgentId::Codex => super::codex::drop_hidden(&mut reading.windows),
             AgentId::Claude => reading.reset_credits = None,
-            AgentId::Antigravity | AgentId::Cursor => {}
+            AgentId::Antigravity | AgentId::Cursor | AgentId::Muse => {}
         }
         ProviderLimitsDto {
             provider: self.provider,

@@ -133,13 +133,13 @@ export function AppShell() {
 
   return (
     <div className="app-frame bg-[var(--void)] text-[var(--silkscreen)]">
-      <header className="flex shrink-0 items-center gap-3.5 border-b border-[var(--hair)] bg-[var(--plate)] px-4 py-[11px]">
+      <header className="flex shrink-0 flex-wrap items-center gap-3.5 border-b border-[var(--hair)] bg-[var(--plate)] px-4 py-[11px]">
         <div className="flex shrink-0 items-center gap-2.5">
           <img src={markUrl} alt="" className="size-7 rounded-md" width={28} height={28} />
           <div className="text-[15px] font-bold tracking-[0.09em]">ON-N-OFF</div>
         </div>
         <div
-          className="inline-grid grid-flow-col overflow-hidden rounded-lg border border-[var(--hair)]"
+          className="inline-grid shrink-0 grid-flow-col overflow-hidden rounded-lg border border-[var(--hair)]"
           role="tablist"
           aria-label="Agent"
           tabIndex={-1}

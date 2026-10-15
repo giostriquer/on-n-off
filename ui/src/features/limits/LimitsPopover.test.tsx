@@ -70,10 +70,15 @@ beforeEach(() => {
             limits("claude", "claude-current", "current@claude.example", true),
             limits("claude", "claude-kept", "kept@claude.example", false),
           ]
-        : [
-            limits("codex", "codex-current", "current@codex.example", true),
-            limits("codex", "codex-kept", "kept@codex.example", false),
-          ],
+        : provider === "codex"
+          ? [
+              limits("codex", "codex-current", "current@codex.example", true),
+              limits("codex", "codex-kept", "kept@codex.example", false),
+            ]
+          : [
+              limits("muse", "muse-current", "current@muse.example", true),
+              limits("muse", "muse-kept", "kept@muse.example", false),
+            ],
     ),
   );
   onLimitsPopoverOpened.mockReset();
@@ -133,7 +138,12 @@ describe("LimitsPopover", () => {
       "Codex limits · current@codex.example",
       "Codex limits · kept@codex.example",
     ]);
-    expect(screen.getAllByText("Remembered account")).toHaveLength(2);
+    const muse = screen.getByRole("region", { name: "Muse accounts" });
+    expect(within(muse).getAllByRole("article").map((entry) => entry.getAttribute("aria-label"))).toEqual([
+      "Muse limits · current@muse.example",
+      "Muse limits · kept@muse.example",
+    ]);
+    expect(screen.getAllByText("Remembered account")).toHaveLength(3);
     expect(screen.queryByText("Refresh paused")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Forget/ })).toBeNull();
   });
@@ -204,23 +214,24 @@ describe("LimitsPopover", () => {
     expect(within(account).getAllByText(/Latest observation/)).toHaveLength(1);
   });
 
-  it("forces both provider reads when Refresh is selected", async () => {
+  it("forces every provider read when Refresh is selected", async () => {
     renderPopover();
-    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(4));
+    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(6));
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh limits" }));
 
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
-    expect(readLimits.mock.calls.slice(2)).toEqual([
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(6));
+    expect(readLimits.mock.calls.slice(3)).toEqual([
       ["claude", true],
       ["codex", true],
+      ["muse", true],
     ]);
-    expect(screen.getAllByRole("article")).toHaveLength(4);
+    expect(screen.getAllByRole("article")).toHaveLength(6);
   });
 
   it("keeps cached accounts visible and shows a provider refresh error", async () => {
     renderPopover();
-    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(4));
+    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(6));
     readLimits.mockRejectedValueOnce({ kind: "message", message: "Claude refresh failed" });
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh limits" }));
@@ -228,7 +239,7 @@ describe("LimitsPopover", () => {
     expect(await screen.findByRole("alert", { name: "Claude refresh error" })).toHaveTextContent(
       "Claude refresh failed",
     );
-    expect(screen.getAllByRole("article")).toHaveLength(4);
+    expect(screen.getAllByRole("article")).toHaveLength(6);
   });
 
   it("hides the popover when Escape is pressed", async () => {
@@ -268,19 +279,20 @@ describe("LimitsPopover", () => {
 
   it("refetches stale provider data when the retained popover reopens", async () => {
     renderPopover();
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(openedHandler).not.toBeNull());
 
     vi.setSystemTime(new Date("2026-08-18T13:00:30Z"));
     await act(async () => openedHandler?.());
-    expect(readLimits).toHaveBeenCalledTimes(2);
+    expect(readLimits).toHaveBeenCalledTimes(3);
 
     vi.setSystemTime(new Date("2026-08-18T13:05:01Z"));
     await act(async () => openedHandler?.());
-    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(4));
-    expect(readLimits.mock.calls.slice(2)).toEqual([
+    await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(6));
+    expect(readLimits.mock.calls.slice(3)).toEqual([
       ["claude", false],
       ["codex", false],
+      ["muse", false],
     ]);
   });
 
@@ -332,7 +344,9 @@ it("says under a row why it shows no reset, as the Limits screen does", async ()
 it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
     ? [{ provider: "claude", status: "failed", message: "Could not reach the Claude usage service (HTTP 503).", currentAccount: true, windows: [] }]
-    : [{ provider: "codex", status: "signedOut", message: "Sign in with `codex` to see subscription limits.", currentAccount: true, windows: [] }]));
+    : provider === "codex"
+      ? [{ provider: "codex", status: "signedOut", message: "Sign in with `codex` to see subscription limits.", currentAccount: true, windows: [] }]
+      : []));
   renderPopover();
   const failed = await screen.findByText("Could not reach the Claude usage service (HTTP 503).");
   expect(failed).toHaveClass("text-[var(--trip)]");
@@ -343,7 +357,7 @@ it("draws a failed read's message as an error and a prompt to sign in as muted t
 
 it("says an answered read with no windows has none, as the Limits screen words it", async () => {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
-    ? [{ ...limits("claude", "claude-current", "current@claude.example", true), windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
+    ? [{ ...limits("claude", "claude-current", "current@claude.example", true), windows: [] }] : provider === "codex" ? [limits("codex", "codex-current", "current@codex.example", true)] : []));
   renderPopover();
   const account = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
   expect(within(account).getByText("Claude reported no rate-limit windows.")).toBeInTheDocument();

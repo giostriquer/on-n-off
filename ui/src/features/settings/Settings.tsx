@@ -50,6 +50,7 @@ const BINARY_NAME: Record<AgentId, string> = {
   codex: "codex",
   antigravity: "agy",
   cursor: "agent",
+  muse: "muse",
 };
 
 export function Settings({

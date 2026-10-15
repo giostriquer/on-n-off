@@ -195,6 +195,106 @@ fn codex_treats_a_transcript_still_being_written_as_work_without_boundaries_in_t
     fs::remove_dir_all(root).unwrap();
 }
 
+fn muse_transcript(
+    data: &Path,
+    now: DateTime<Utc>,
+    id: &str,
+    workspace: &str,
+    tail_kinds: &[&str],
+) {
+    let dir = day_dir(&data.join("sessions"), now.date_naive()).join(id);
+    fs::create_dir_all(&dir).unwrap();
+    let mut lines = vec![
+        serde_json::json!({"schema_version": 1, "id": "r1", "payload": {"record": {"workspace_root": workspace}}})
+            .to_string(),
+    ];
+    lines.extend(
+        tail_kinds
+            .iter()
+            .map(|kind| serde_json::json!({"payload": {"event": {"kind": kind}}}).to_string()),
+    );
+    fs::write(dir.join("session.jsonl"), lines.join("\n") + "\n").unwrap();
+}
+
+fn muse_registry(data: &Path, id: &str, name: Option<&str>, workspace_label: &str) {
+    let dir = data.join("runtime").join("muse").join("sessions");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join(format!("{id}.json")),
+        serde_json::json!({
+            "schema_version": 1,
+            "session_id": id,
+            "session_name": name,
+            "endpoint_hint": "ms-acme.sock",
+            "workspace_label": workspace_label,
+            "target_eligibility": "message_capable",
+            "process_generation_hint": "gen-1"
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn muse_lists_registered_and_recent_sessions_with_working_state() {
+    let data = crate::paths::scratch_dir("notch-muse-sessions");
+    let now = Utc::now();
+    muse_transcript(
+        &data,
+        now,
+        "aaaa-1111-2222-3333-444455556666",
+        "/Users/me/Documents/acme/webapp",
+        &["model_response_created", "started"],
+    );
+    muse_registry(
+        &data,
+        "aaaa-1111-2222-3333-444455556666",
+        Some("acme-grus"),
+        "webapp",
+    );
+    muse_transcript(
+        &data,
+        now,
+        "bbbb-1111-2222-3333-444455557777",
+        "/Users/me/Documents/acme",
+        &[
+            "model_response_created",
+            "model_completed",
+            "assistant_message_committed",
+        ],
+    );
+
+    let sessions = read_muse(&data, now);
+    assert_eq!(sessions.len(), 2);
+    let working = sessions
+        .iter()
+        .find(|session| session.id.starts_with("aaaa"))
+        .expect("registered session");
+    assert_eq!(working.name, "acme-grus");
+    assert_eq!(working.project, "webapp");
+    assert_eq!(working.place, "Terminal");
+    assert_eq!(working.status, SessionStatus::Working);
+    let idle = sessions
+        .iter()
+        .find(|session| session.id.starts_with("bbbb"))
+        .expect("recent session");
+    assert_eq!(idle.name, "acme-77");
+    assert_eq!(idle.project, "acme");
+    assert_eq!(idle.status, SessionStatus::Idle);
+
+    let later = read_muse(&data, now + Duration::minutes(90));
+    assert_eq!(later.len(), 1);
+    assert_eq!(later[0].status, SessionStatus::Idle);
+    fs::remove_dir_all(data).unwrap();
+}
+
+#[test]
+fn muse_missing_dirs_list_nothing() {
+    let data = crate::paths::scratch_dir("notch-muse-missing");
+    assert!(read_muse(&data, Utc::now()).is_empty());
+    fs::remove_dir_all(data).unwrap();
+}
+
 #[test]
 fn other_providers_have_no_sessions_and_ordering_caps_the_list() {
     let home = crate::paths::scratch_dir("notch-sessions-home");

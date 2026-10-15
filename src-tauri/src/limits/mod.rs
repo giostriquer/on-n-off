@@ -8,6 +8,7 @@ mod codex_sessions;
 pub(crate) mod credits_spent;
 pub(crate) mod json;
 pub(crate) mod login;
+mod muse;
 mod pipeline;
 mod reading;
 mod renewal;
@@ -36,6 +37,7 @@ use snapshots::SnapshotStore;
 const DEFAULT_ACCOUNT: &str = "default";
 static CLAUDE_READ_LOCK: Mutex<()> = Mutex::new(());
 static CODEX_READ_LOCK: Mutex<()> = Mutex::new(());
+static MUSE_READ_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Parsed {
@@ -129,7 +131,7 @@ pub fn forget_snapshot(
 
 fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<ProviderLimitsDto> {
     let _provider_guard = match agent {
-        AgentId::Claude | AgentId::Codex => Some(provider_read_guard(agent)),
+        AgentId::Claude | AgentId::Codex | AgentId::Muse => Some(provider_read_guard(agent)),
         AgentId::Antigravity | AgentId::Cursor => None,
     };
     let home = sources.home;
@@ -138,6 +140,7 @@ fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<Prov
     let current = match agent {
         AgentId::Claude => claude::claude_current(home),
         AgentId::Codex => codex::codex_limits(home, force),
+        AgentId::Muse => muse::muse_current(home),
         AgentId::Antigravity | AgentId::Cursor => {
             return vec![finish(
                 agent,
@@ -165,6 +168,7 @@ fn provider_read_lock(agent: AgentId) -> &'static Mutex<()> {
     match agent {
         AgentId::Claude => &CLAUDE_READ_LOCK,
         AgentId::Codex => &CODEX_READ_LOCK,
+        AgentId::Muse => &MUSE_READ_LOCK,
         AgentId::Antigravity | AgentId::Cursor => {
             unreachable!("unsupported providers do not run a limits read")
         }

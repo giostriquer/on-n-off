@@ -7,12 +7,12 @@ describe("appSettings", () => {
   });
 
   it("hides a provider from tabs without emptying the list", () => {
-    expect(visibleAgentIds(["antigravity"])).toEqual(["claude", "codex", "cursor"]);
+    expect(visibleAgentIds(["antigravity"])).toEqual(["claude", "codex", "cursor", "muse"]);
   });
 
   it("refuses to hide the last visible provider", () => {
-    const hidden = setAgentHidden(["codex", "antigravity", "cursor"], "claude", true);
-    expect(hidden).toEqual(["codex", "antigravity", "cursor"]);
+    const hidden = setAgentHidden(["codex", "antigravity", "cursor", "muse"], "claude", true);
+    expect(hidden).toEqual(["codex", "antigravity", "cursor", "muse"]);
     expect(visibleAgentIds(hidden)).toEqual(["claude"]);
   });
 

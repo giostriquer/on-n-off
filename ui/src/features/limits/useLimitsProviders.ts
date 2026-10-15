@@ -6,7 +6,7 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import type { LimitsPollMinutes } from "$lib/types";
 
-type SharedLimitsProvider = Extract<AgentId, "claude" | "codex">;
+type SharedLimitsProvider = Extract<AgentId, "claude" | "codex" | "muse">;
 
 export function limitsRefreshMs(pollMinutes: LimitsPollMinutes): number {
   // The shared cache decides which accounts are due, including active accounts near exhaustion.
@@ -56,6 +56,7 @@ export function useLimitsProviders(pollMinutes: LimitsPollMinutes = 5) {
   const providers = [
     useProviderLimits("claude", pollMinutes),
     useProviderLimits("codex", pollMinutes),
+    useProviderLimits("muse", pollMinutes),
   ];
   const loading = providers.some(({ query }) => query.isFetching);
 
@@ -69,7 +70,7 @@ export function useLimitsProviders(pollMinutes: LimitsPollMinutes = 5) {
 }
 
 export async function refreshLimits(client: QueryClient) {
-  await Promise.allSettled((["claude", "codex"] as const).map(async provider => {
+  await Promise.allSettled((["claude", "codex", "muse"] as const).map(async provider => {
     const queryKey = ["limits", provider];
     let existing = client.getQueryCache().find({ queryKey, exact: true });
     while (existing?.state.fetchStatus === "fetching" && existing.promise) {

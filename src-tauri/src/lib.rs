@@ -26,6 +26,7 @@ mod limits_monitor;
 mod limits_refresh;
 mod mcp;
 mod monitor;
+mod muse;
 mod notifications;
 mod paths;
 mod plugin_files;

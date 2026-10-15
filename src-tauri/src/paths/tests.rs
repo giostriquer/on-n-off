@@ -48,12 +48,14 @@ fn normalize_skill_path_unifies_slash_and_skill_md() {
 fn a_test_build_resolves_no_user_home() {
     assert!(user_home().is_err(), "a test build resolved a user home");
     type Helper = fn() -> Result<PathBuf, AdapterError>;
-    let helpers: [(&str, Helper); 16] = [
+    let helpers: [(&str, Helper); 18] = [
         ("claude_root", claude_root),
         ("codex_root", codex_root),
         ("agents_skills_root", agents_skills_root),
         ("gemini_root", gemini_root),
         ("cursor_root", cursor_root),
+        ("muse_config_root", muse_config_root),
+        ("muse_data_root", muse_data_root),
         ("antigravity_cli_root", antigravity_cli_root),
         ("antigravity_config_plugins", antigravity_config_plugins),
         ("antigravity_cli_plugins", antigravity_cli_plugins),
@@ -103,7 +105,15 @@ fn a_running_app_takes_its_home_from_on_n_off_home_then_userprofile_then_home() 
 
 #[test]
 fn only_the_paths_module_reads_the_process_home() {
-    const ALLOWED: [(&str, &str, &[&str]); 3] = [
+    const ALLOWED: [(&str, &str, &[&str]); 4] = [
+        (
+            "limits/muse.rs",
+            "hands a Muse serve child the home its roots were resolved from: sets, never reads",
+            &[
+                r#".env("HOME", home);"#,
+                r#"command.env("USERPROFILE", home);"#,
+            ],
+        ),
         (
             "accounts/claude.rs",
             "hands a Claude child a disposable OS home: sets, never reads",
@@ -191,5 +201,37 @@ fn only_the_paths_module_reads_the_process_home() {
     assert!(
         unmatched.is_empty(),
         "allowed lines no file holds any more: {unmatched:?}"
+    );
+}
+
+#[test]
+fn muse_qa_home_rejects_inherited_xdg_roots() {
+    let external = std::env::temp_dir().join("acme-external");
+    let lookup = |name: &str| match name {
+        "ON_N_OFF_HOME" => Some(OsString::from("acme-qa")),
+        "XDG_CONFIG_HOME" | "XDG_DATA_HOME" => Some(external.clone().into_os_string()),
+        _ => None,
+    };
+    for name in ["XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
+        assert_eq!(
+            muse_xdg(name, &lookup),
+            None,
+            "QA must stay in its injected home"
+        );
+    }
+}
+
+#[test]
+fn muse_xdg_accepts_only_absolute_native_overrides() {
+    let external = std::env::temp_dir().join("acme-xdg");
+    assert_eq!(
+        muse_xdg("XDG_DATA_HOME", &|name| (name == "XDG_DATA_HOME")
+            .then(|| external.clone().into_os_string())),
+        Some(external.join("muse"))
+    );
+    assert_eq!(
+        muse_xdg("XDG_DATA_HOME", &|name| (name == "XDG_DATA_HOME")
+            .then(|| OsString::from("relative"))),
+        None
     );
 }

@@ -1,8 +1,8 @@
 {
   "name": "on-n-off",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "private": true,
-  "description": "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration",
+  "description": "Desktop manager for Claude, Codex, Antigravity, Cursor, and Muse plugins, skills, MCP servers, and agent configuration",
   "type": "module",
   "homepage": "https://github.com/giostriquer/on-n-off#readme",
   "repository": {

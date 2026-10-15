@@ -1,6 +1,6 @@
 # on-n-off
 
-Manage your **Claude Code, Codex, Antigravity, and Cursor** setup from one desktop
+Manage your **Claude Code, Codex, Antigravity, Cursor, and Muse** setup from one desktop
 app for Windows and macOS.
 
 [Download](https://github.com/giostriquer/on-n-off/releases/latest) ·
@@ -11,7 +11,7 @@ app for Windows and macOS.
 
 - **Plugins, skills, and MCP servers** — see what's installed and enable or disable items where supported.
 - **Accounts** — save Claude and Codex logins, switch accounts, and optionally remember new sign-ins automatically.
-- **Usage and limits** — view usage estimates, subscription limits, and reset times for Claude and Codex.
+- **Usage and limits** — view usage estimates, subscription limits, and reset times for Claude, Codex, and Muse.
 - **Pull requests** — follow your GitHub reviews, CI checks, and merge status.
 - **Side notch** — keep usage and pull requests visible at the edge of your screen.
 - **Project scope** — inspect agent configuration globally or for a specific project.

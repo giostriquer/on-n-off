@@ -324,6 +324,8 @@ export function agentRoot(agentId: AgentId): string {
       return "~/.gemini";
     case "cursor":
       return "~/.cursor";
+    case "muse":
+      return "~/.local/share/muse";
   }
 }
 
@@ -337,6 +339,8 @@ export function mcpConfigPath(agentId: AgentId): string {
       return "~/.gemini/config/mcp_config.json";
     case "cursor":
       return "~/.cursor/mcp.json";
+    case "muse":
+      return "~/.config/muse/settings.json";
   }
 }
 
@@ -350,6 +354,8 @@ export function scopeConfigPath(agentId: AgentId): string {
       return "~/.gemini/antigravity-cli/";
     case "cursor":
       return "~/.cursor/";
+    case "muse":
+      return "~/.config/muse/settings.json";
   }
 }
 

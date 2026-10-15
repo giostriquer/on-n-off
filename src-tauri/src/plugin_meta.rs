@@ -81,6 +81,7 @@ pub(crate) const PLUGIN_MANIFESTS: &[&str] = &[
     ".cursor-plugin/plugin.json",
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
+    ".muse-plugin/plugin.json",
     "plugin.json",
 ];
 

@@ -22,9 +22,10 @@ pub const CELL_SPACING: f64 = 8.0;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const RAIL_INSET: f64 = 40.0;
 
-pub const RAIL_ORDER: [AgentId; 4] = [
+pub const RAIL_ORDER: [AgentId; 5] = [
     AgentId::Claude,
     AgentId::Codex,
+    AgentId::Muse,
     AgentId::Antigravity,
     AgentId::Cursor,
 ];
@@ -154,7 +155,7 @@ impl Default for NotchSettings {
             edge: Edge::default(),
             size: NotchSize::default(),
             show: ShowMode::default(),
-            providers: vec![AgentId::Claude, AgentId::Codex],
+            providers: vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
             pull_requests: NotchPullRequests::default(),
             popover_style: PopoverStyle::default(),
         }

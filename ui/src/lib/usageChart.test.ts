@@ -38,6 +38,7 @@ describe("buildChartSeries", () => {
             codex: { costUsd: 0, totalTokens: 0 },
             antigravity: { costUsd: 0, totalTokens: 0 },
             cursor: { costUsd: 0, totalTokens: 0 },
+            muse: { costUsd: 0, totalTokens: 0 },
           },
         },
         {
@@ -49,6 +50,7 @@ describe("buildChartSeries", () => {
             codex: { costUsd: 2, totalTokens: 200 },
             antigravity: { costUsd: 0, totalTokens: 0 },
             cursor: { costUsd: 0, totalTokens: 0 },
+            muse: { costUsd: 0, totalTokens: 0 },
           },
         },
       ],

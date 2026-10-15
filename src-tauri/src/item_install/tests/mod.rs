@@ -20,6 +20,7 @@ use crate::dto::{
     AgentId, ErrorKind, InstallItemsRequest, ItemKind, ItemOutcomeStatus, ItemPick, ItemScope,
     ItemSourceDto, ItemTarget, ItemUpstream, UpdateItemMode,
 };
+use crate::muse::MuseAdapter;
 use crate::paths::scratch_dir;
 
 const SHA_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -235,6 +236,7 @@ impl Harness {
             AgentId::Cursor => {
                 CursorAdapter::at(self.home.join(".cursor")).item_roots(&target.scope)
             }
+            AgentId::Muse => MuseAdapter::at(self.home.clone()).item_roots(&target.scope),
         }
     }
 

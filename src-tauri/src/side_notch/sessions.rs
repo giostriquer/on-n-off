@@ -44,8 +44,254 @@ pub fn read(agent: AgentId, home: &Path, now: DateTime<Utc>) -> Vec<LiveSession>
     match agent {
         AgentId::Claude => read_claude(&home.join(".claude").join("sessions"), now, live_pids),
         AgentId::Codex => read_codex(&home.join(".codex").join("sessions"), now),
+        AgentId::Muse => read_muse(&crate::paths::muse_data_for(home), now),
         AgentId::Antigravity | AgentId::Cursor => Vec::new(),
     }
+}
+
+#[derive(Deserialize)]
+struct MuseRegistryFile {
+    session_id: Option<String>,
+    session_name: Option<String>,
+    workspace_label: Option<String>,
+}
+
+struct MuseRegistered {
+    name: Option<String>,
+    workspace_label: Option<String>,
+    mtime_ms: i64,
+}
+
+const MUSE_MAX_FILES: usize = 48;
+const MUSE_TAIL_BYTES: u64 = 128 * 1024;
+const MUSE_HEAD_BYTES: u64 = 128 * 1024;
+const MUSE_RECENT_MINUTES: i64 = 60;
+const MUSE_WORKING_MINUTES: i64 = 15;
+const MUSE_ACTIVE_WRITE_MINUTES: i64 = 2;
+
+fn read_muse(data: &Path, now: DateTime<Utc>) -> Vec<LiveSession> {
+    let now_ms = now.timestamp_millis();
+    let registered = muse_registry(data);
+    let root = data.join("sessions");
+    let mut candidates: Vec<(String, PathBuf, i64)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for offset in 0..=1 {
+        let dir = day_dir(&root, (now - Duration::days(offset)).date_naive());
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let session_dir = entry.path();
+            if !session_dir.is_dir() {
+                continue;
+            }
+            let Some(id) = session_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.starts_with('.'))
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let transcript = session_dir.join("session.jsonl");
+            if !transcript.is_file() || !seen.insert(id.clone()) {
+                continue;
+            }
+            let mtime = mtime_ms(&transcript);
+            if registered.contains_key(&id) || now_ms - mtime <= MUSE_RECENT_MINUTES * 60_000 {
+                candidates.push((id, transcript, mtime));
+            }
+        }
+    }
+    candidates.sort_by_key(|(_, _, mtime)| std::cmp::Reverse(*mtime));
+    candidates.truncate(MUSE_MAX_FILES);
+    let observed = candidates
+        .into_iter()
+        .filter_map(|(id, transcript, mtime)| {
+            muse_session(&id, &transcript, mtime, registered.get(&id), now)
+        })
+        .collect();
+    finish(observed)
+}
+
+fn muse_registry(data: &Path) -> std::collections::HashMap<String, MuseRegistered> {
+    let mut out = std::collections::HashMap::new();
+    let dir = data.join("runtime").join("muse").join("sessions");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        if fs::metadata(&path)
+            .ok()
+            .is_none_or(|meta| meta.len() > CLAUDE_MAX_FILE_BYTES as u64)
+        {
+            continue;
+        }
+        let Ok(body) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(file) = serde_json::from_str::<MuseRegistryFile>(&body) else {
+            continue;
+        };
+        let Some(id) = file
+            .session_id
+            .filter(|id| !id.trim().is_empty())
+            .or_else(|| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::to_string)
+            })
+        else {
+            continue;
+        };
+        out.insert(
+            id,
+            MuseRegistered {
+                name: file.session_name.filter(|name| !name.trim().is_empty()),
+                workspace_label: file
+                    .workspace_label
+                    .filter(|label| !label.trim().is_empty()),
+                mtime_ms: mtime_ms(&path),
+            },
+        );
+    }
+    out
+}
+
+fn muse_session(
+    id: &str,
+    transcript: &Path,
+    mtime_ms: i64,
+    registered: Option<&MuseRegistered>,
+    now: DateTime<Utc>,
+) -> Option<Observed> {
+    let last_active_ms = registered.map_or(mtime_ms, |entry| entry.mtime_ms.max(mtime_ms));
+    let project = registered
+        .and_then(|entry| entry.workspace_label.clone())
+        .unwrap_or_else(|| project_name(muse_workspace_root(transcript).as_deref()));
+    let age_ms = now.timestamp_millis() - mtime_ms;
+    let boundary = muse_tail_boundary(transcript);
+    let status = match boundary {
+        Some(true) if age_ms <= MUSE_WORKING_MINUTES * 60_000 => SessionStatus::Working,
+        None if age_ms <= MUSE_ACTIVE_WRITE_MINUTES * 60_000 => SessionStatus::Working,
+        _ => SessionStatus::Idle,
+    };
+    let suffix: String = id
+        .chars()
+        .rev()
+        .take(2)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let name = registered
+        .and_then(|entry| entry.name.clone())
+        .unwrap_or_else(|| {
+            if suffix.is_empty() {
+                project.clone()
+            } else {
+                format!("{project}-{suffix}")
+            }
+        });
+    Some(Observed {
+        session: LiveSession {
+            id: id.to_string(),
+            name,
+            place: "Terminal".into(),
+            project,
+            status,
+            last_active_at: rfc3339(last_active_ms, now),
+        },
+        last_active_ms,
+    })
+}
+
+fn muse_workspace_root(transcript: &Path) -> Option<String> {
+    let file = fs::File::open(transcript).ok()?;
+    let mut head = Vec::new();
+    BufReader::new(file)
+        .take(MUSE_HEAD_BYTES)
+        .read_to_end(&mut head)
+        .ok()?;
+    for line in head.split(|byte| *byte == b'\n') {
+        let Ok(text) = std::str::from_utf8(line) else {
+            continue;
+        };
+        if !text.contains("workspace_root") && !text.contains("\"cwd\"") {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+            continue;
+        };
+        if let Some(root) = find_text(&value, "workspace_root")
+            .or_else(|| find_text(&value, "cwd"))
+            .filter(|root| !root.trim().is_empty())
+        {
+            return Some(root);
+        }
+    }
+    None
+}
+
+fn find_text(value: &serde_json::Value, key: &str) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(text) = map.get(key).and_then(|entry| entry.as_str()) {
+                return Some(text.to_string());
+            }
+            map.values().find_map(|entry| find_text(entry, key))
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|entry| find_text(entry, key)),
+        _ => None,
+    }
+}
+
+/// `Some(true)` when the newest turn marker in the tail starts a model call,
+/// `Some(false)` when it ends one. Muse has no explicit task boundary event,
+/// so this is the same order heuristic the Codex reader applies to its own.
+fn muse_tail_boundary(transcript: &Path) -> Option<bool> {
+    let mut file = fs::File::open(transcript).ok()?;
+    let length = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(MUSE_TAIL_BYTES)))
+        .ok()?;
+    let mut tail = Vec::new();
+    file.read_to_end(&mut tail).ok()?;
+    let mut state = None;
+    for line in tail.split(|byte| *byte == b'\n') {
+        let Ok(text) = std::str::from_utf8(line) else {
+            continue;
+        };
+        let starts = text.contains("\"model_response_created\"")
+            || text.contains("\"model_input_trace_recorded\"");
+        let ends = text.contains("\"model_completed\"")
+            || text.contains("\"assistant_message_committed\"")
+            || text.contains("\"terminal\"");
+        if !starts && !ends {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+            continue;
+        };
+        let kind = value
+            .get("payload")
+            .and_then(|payload| payload.get("event"))
+            .and_then(|event| event.get("kind"))
+            .and_then(|kind| kind.as_str());
+        match kind {
+            Some("model_response_created" | "model_input_trace_recorded") => {
+                state = Some(true);
+            }
+            Some("model_completed" | "assistant_message_committed" | "terminal") => {
+                state = Some(false);
+            }
+            _ => {}
+        }
+    }
+    state
 }
 
 #[derive(Deserialize)]

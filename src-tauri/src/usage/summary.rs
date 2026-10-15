@@ -73,6 +73,7 @@ fn provider_agent(provider: Provider) -> AgentId {
     match provider {
         Provider::Claude => AgentId::Claude,
         Provider::Codex => AgentId::Codex,
+        Provider::Muse => AgentId::Muse,
     }
 }
 

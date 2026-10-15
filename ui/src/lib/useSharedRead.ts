@@ -9,6 +9,7 @@ const QUERY_KEYS: Record<SharedReadSource, readonly QueryKey[]> = {
   accounts: [["accounts"], ["subscription", "codex"]],
   "limits:claude": [["limits", "claude"]],
   "limits:codex": [["limits", "codex"]],
+  "limits:muse": [["limits", "muse"]],
   "github:prs": [["github", "prs"]],
   "limits:reset-spends": [PENDING_RESET_SPENDS_KEY],
 };

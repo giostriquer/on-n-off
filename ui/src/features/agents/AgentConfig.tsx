@@ -28,6 +28,8 @@ function skillsValue(id: AgentId, rootPath: string): string {
       return `${rootPath}/skills · ~/.agents/skills`;
     case "cursor":
       return `${rootPath}/skills · .cursor/skills`;
+    case "muse":
+      return "~/.config/muse/skills · ~/.agents/skills";
   }
 }
 
@@ -41,6 +43,8 @@ function pluginToggleValue(id: AgentId): string {
       return "file patch · [plugins.*.enabled]";
     case "cursor":
       return "not implemented yet";
+    case "muse":
+      return "muse plugins enable/disable";
   }
 }
 
@@ -54,6 +58,8 @@ function mcpToggleValue(id: AgentId): string {
       return "file patch · [mcp_servers.*.enabled]";
     case "cursor":
       return "managed in Cursor · read-only here";
+    case "muse":
+      return "managed in Muse · read-only here";
   }
 }
 
@@ -391,7 +397,7 @@ export function AgentConfig({
               ok={agent.installFolder}
             />
             <Capability label="Plugin toggle" detail={pluginToggleValue(agent.id)} ok={agent.pluginToggle} />
-            <Capability label="MCP toggle" detail={mcpToggleValue(agent.id)} ok={agent.id !== "cursor"} />
+            <Capability label="MCP toggle" detail={mcpToggleValue(agent.id)} ok={agent.id !== "cursor" && agent.id !== "muse"} />
             <Capability label="Safe writes" detail="backup + rollback on every patch" ok />
           </section>
 

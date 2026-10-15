@@ -109,9 +109,10 @@ fn the_message_lists_selected_providers_in_rail_order_with_their_sessions() {
         inner_ring: None,
         workspace_credits: None,
     };
-    let providers = [
+    let providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] = [
         Poll::new(Some(entry(AgentId::Claude))),
         Poll::new(Some(entry(AgentId::Codex))),
+        Poll::new(Some(entry(AgentId::Muse))),
         Poll::new(None),
         Poll::new(Some(entry(AgentId::Cursor))),
     ];
@@ -123,13 +124,29 @@ fn the_message_lists_selected_providers_in_rail_order_with_their_sessions() {
         status: SessionStatus::Working,
         last_active_at: "2026-09-01T10:00:00Z".into(),
     };
-    let sessions = vec![vec![session.clone()], vec![], vec![], vec![]];
+    let muse_session = LiveSession {
+        id: "muse-session".into(),
+        name: "webapp-ab".into(),
+        ..session.clone()
+    };
+    let sessions: [Vec<LiveSession>; PROVIDER_COUNT] = [
+        vec![session.clone()],
+        vec![],
+        vec![muse_session.clone()],
+        vec![],
+        vec![],
+    ];
     let snapshot = NotchSnapshot {
         revision: 0,
         supported: true,
         liquid_glass: false,
         settings: NotchSettings {
-            providers: vec![AgentId::Cursor, AgentId::Claude, AgentId::Antigravity],
+            providers: vec![
+                AgentId::Cursor,
+                AgentId::Claude,
+                AgentId::Muse,
+                AgentId::Antigravity,
+            ],
             ..NotchSettings::default()
         },
         displays: Vec::new(),
@@ -141,11 +158,12 @@ fn the_message_lists_selected_providers_in_rail_order_with_their_sessions() {
             .iter()
             .map(|entry| entry.entry.provider)
             .collect::<Vec<_>>(),
-        [AgentId::Claude, AgentId::Cursor],
+        [AgentId::Claude, AgentId::Muse, AgentId::Cursor],
         "Codex is deselected and Antigravity has not been read yet"
     );
     assert_eq!(listed[0].sessions, [session]);
-    assert!(listed[1].sessions.is_empty());
+    assert_eq!(listed[1].sessions, [muse_session]);
+    assert!(listed[2].sessions.is_empty());
 }
 
 #[test]
