@@ -49,6 +49,22 @@ enum Render {
           to: out.appendingPathComponent("popover-\(name).png"))
         print("popover-\(name) at \(placement.frame)")
       }
+      if let styled = RailModel(settings: message.snapshot.settings, displays: displays) {
+        try write(
+          NotchRailView(
+            model: styled, entries: entries, pullRequests: message.pullRequests, now: now,
+            active: nil, capHovered: false, action: { _ in }, toggleShow: {}),
+          size: styled.frame.size, scale: styled.display.scale,
+          to: out.appendingPathComponent("rail-styled.png"))
+        if let placement = popoverPlacement(
+          rail: styled, message: message, cell: .provider(.claude), now: now, openLimits: {},
+          openPullRequests: {})
+        {
+          try write(
+            placement.view, size: placement.frame.size, scale: styled.display.scale,
+            to: out.appendingPathComponent("popover-claude-styled.png"))
+        }
+      }
       print("rail at \(rail.frame)")
       return 0
     } catch {
