@@ -5,7 +5,7 @@ public let protocolVersion = 5
 public let maxSessions = 12
 
 public enum ProviderId: String, Codable, CaseIterable, Sendable {
-  case claude, codex, antigravity, cursor, muse
+  case claude, codex, muse, antigravity, cursor
 }
 public let railProviderOrder = ProviderId.allCases
 

@@ -197,6 +197,7 @@ final class NotchTests {
     expectEqual(notchRailFrame(settings: two, displays: displays)?.height, 234)
     expectNil(notchRailFrame(settings: rail("main", providers: []), displays: displays))
     let defaults = Settings(enabled: true, displayId: "main")
+    expectEqual(defaults.railProviders, [.claude, .codex, .muse, .antigravity, .cursor])
     expectEqual(defaults.pullRequests.enabled, true)
     expectEqual(defaults.railCells.count, 6)
     expectEqual(defaults.railCells.last, RailCell.pullRequests)

@@ -25,9 +25,9 @@ pub const RAIL_INSET: f64 = 40.0;
 pub const RAIL_ORDER: [AgentId; 5] = [
     AgentId::Claude,
     AgentId::Codex,
+    AgentId::Muse,
     AgentId::Antigravity,
     AgentId::Cursor,
-    AgentId::Muse,
 ];
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

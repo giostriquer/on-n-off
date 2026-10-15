@@ -87,6 +87,28 @@ fn top_and_bottom_edges_center_a_horizontal_rail_inside_the_work_area() {
 }
 
 #[test]
+fn muse_follows_codex_even_when_other_integrations_are_selected() {
+    let mut selected = settings("main", Edge::Right);
+    selected.providers = vec![
+        AgentId::Cursor,
+        AgentId::Muse,
+        AgentId::Antigravity,
+        AgentId::Codex,
+        AgentId::Claude,
+    ];
+    assert_eq!(
+        selected.rail_providers(),
+        [
+            AgentId::Claude,
+            AgentId::Codex,
+            AgentId::Muse,
+            AgentId::Antigravity,
+            AgentId::Cursor,
+        ]
+    );
+}
+
+#[test]
 fn the_rail_shrinks_with_fewer_providers_and_hides_without_any() {
     let displays = [display("main", 0.0, 1.0)];
     let mut current = settings("main", Edge::Right);
