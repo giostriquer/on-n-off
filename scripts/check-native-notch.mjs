@@ -86,7 +86,6 @@ const fixture = edge => ({
   },
   actionError: null,
 });
-// The helper's renders are 8-bit RGBA without interlacing.
 function readPng(path) {
   const data = readFileSync(path);
   const chunks = [];

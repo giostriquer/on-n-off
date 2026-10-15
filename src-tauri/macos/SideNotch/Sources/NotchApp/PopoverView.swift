@@ -87,7 +87,6 @@ extension EnvironmentValues {
   }
 }
 
-/// The card and its tail: one Liquid Glass piece from macOS 26, the solid ink card before it.
 private struct PopoverSurface: ViewModifier {
   let model: PopoverModel
   @Environment(\.solidPopover) private var solid
