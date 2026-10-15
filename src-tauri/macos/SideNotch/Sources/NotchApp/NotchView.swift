@@ -11,6 +11,18 @@ let railInk = Color(white: 0.03)
 let popoverInk = Color(red: 0.055, green: 0.055, blue: 0.065)
 let mutedInk = Color(white: 0.6)
 
+extension View {
+  @ViewBuilder func notchSurface<S: Shape, Border: View>(
+    _ ink: Color, in shape: S, style: PopoverStyle, solidBorder: Border
+  ) -> some View {
+    if #available(macOS 26.0, *), style == .glass {
+      background(ink.opacity(0.55), in: shape).glassEffect(.regular, in: shape)
+    } else {
+      background(shape.fill(ink)).overlay(solidBorder)
+    }
+  }
+}
+
 func providerColor(_ id: ProviderId) -> Color { providerInk(id).color }
 
 func meterColor(_ quota: Quota?, provider: ProviderId, at now: Date) -> Color {
@@ -103,7 +115,9 @@ struct NotchRailView: View {
   var body: some View {
     let layout = model.layout
     ZStack {
-      NotchSilhouette(edge: model.edge, ear: CGFloat(layout.ear)).fill(railInk)
+      Color.clear.notchSurface(
+        railInk, in: NotchSilhouette(edge: model.edge, ear: CGFloat(layout.ear)),
+        style: model.settings.popoverStyle, solidBorder: EmptyView())
       if model.edge.isVertical {
         VStack(spacing: CGFloat(layout.cellSpacing)) {
           ForEach(model.cellIds, id: \.self) { cell($0) }

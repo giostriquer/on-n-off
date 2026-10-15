@@ -80,19 +80,16 @@ private struct PopoverSurface: ViewModifier {
   private var metrics: NotchMetrics { model.metrics }
   private var cornerRadius: CGFloat { metrics.value(12) }
 
-  @ViewBuilder func body(content: Content) -> some View {
-    let card = content.padding(tailPadding)
-    let outline = PopoverOutline(
-      edge: model.edge, tailLength: model.tailLength, tail: model.tail,
-      tailHalfWidth: metrics.value(7), cornerRadius: cornerRadius)
-    if #available(macOS 26.0, *), model.style == .glass {
-      card.background(popoverInk.opacity(0.55), in: outline).glassEffect(.regular, in: outline)
-    } else {
-      card.background(outline.fill(popoverInk)).overlay(
-        RoundedRectangle(cornerRadius: cornerRadius)
-          .strokeBorder(Color.white.opacity(0.11), lineWidth: metrics.value(1))
-          .padding(tailPadding))
-    }
+  func body(content: Content) -> some View {
+    content.padding(tailPadding).notchSurface(
+      popoverInk,
+      in: PopoverOutline(
+        edge: model.edge, tailLength: model.tailLength, tail: model.tail,
+        tailHalfWidth: metrics.value(7), cornerRadius: cornerRadius),
+      style: model.style,
+      solidBorder: RoundedRectangle(cornerRadius: cornerRadius)
+        .strokeBorder(Color.white.opacity(0.11), lineWidth: metrics.value(1))
+        .padding(tailPadding))
   }
 
   private var tailPadding: EdgeInsets {

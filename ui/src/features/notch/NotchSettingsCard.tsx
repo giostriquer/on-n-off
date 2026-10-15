@@ -77,7 +77,7 @@ const EDGE_OPTIONS: [NotchEdge, string][] = [
   ["bottom", "Bottom"],
 ];
 
-const DETAILS_OPTIONS: [NotchPopoverStyle, string][] = [
+const STYLE_OPTIONS: [NotchPopoverStyle, string][] = [
   ["glass", "Liquid Glass"],
   ["solid", "Solid"],
 ];
@@ -210,11 +210,11 @@ export function NotchSettingsCard() {
       </SettingRow>
       {state.data?.liquidGlass && (
         <SettingRow>
-          <span id="notch-details-label" className={rowLabel}>Details</span>
+          <span id="notch-style-label" className={rowLabel}>Style</span>
           <Segmented
             size="row"
-            ariaLabelledBy="notch-details-label"
-            options={DETAILS_OPTIONS.map(([value, label]) => ({ value, label }))}
+            ariaLabelledBy="notch-style-label"
+            options={STYLE_OPTIONS.map(([value, label]) => ({ value, label }))}
             pressed={(style) => settings?.popoverStyle === style}
             onPress={(popoverStyle) => change({ popoverStyle })}
             disabled={busy}

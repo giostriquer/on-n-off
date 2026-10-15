@@ -121,6 +121,21 @@ function readPng(path) {
   }
   return { width, height, at: (x, y) => [...pixels.subarray((y * width + x) * 4, (y * width + x) * 4 + 4)] };
 }
+const railInk = [8, 8, 8, 255];
+const popoverInk = [14, 14, 17, 255];
+const near = (pixel, ink) => pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3);
+const edgeLine = (png, edge, inset) => {
+  const vertical = edge === 'right' || edge === 'left';
+  const line = { right: png.width - 1 - inset, left: inset, top: inset, bottom: png.height - 1 - inset }[edge];
+  return Array.from({ length: vertical ? png.height : png.width }, (_, i) => png.at(vertical ? line : i, vertical ? i : line));
+};
+const railEdgeInk = (png, edge) => {
+  const pixels = edgeLine(png, edge, 0);
+  const middle = pixels.slice(Math.floor(pixels.length * 0.2), Math.floor(pixels.length * 0.8));
+  return middle.filter((pixel) => near(pixel, railInk)).length / middle.length;
+};
+const cardPixel = (png, edge, scale) => png.at(edge === 'left' ? png.width - 1 - 6 * scale : 6 * scale, Math.floor(png.height / 2));
+const glassHost = Number(spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8' }).stdout.split('.')[0]) >= 26;
 const renderRoot = resolve(process.env.NOTCH_RENDER_DIR ?? '.tmp/notch-render');
 const popoverSizes = {};
 for (const edge of ['right', 'left', 'top', 'bottom']) {
@@ -130,24 +145,29 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
   writeFileSync(message, JSON.stringify(fixture(edge)));
   const result = spawnSync(executable, ['--render', message, dir], { encoding: 'utf8', timeout: 20000 });
   assert.equal(result.status, 0, `render ${edge}: ${result.stderr}`);
-  for (const name of ['rail', 'rail-cap-hovered', 'pill', 'popover-claude', 'popover-codex', 'popover-antigravity', 'popover-cursor', 'popover-muse', 'popover-pull-requests']) {
+  for (const name of ['rail', 'rail-cap-hovered', 'rail-styled', 'pill', 'popover-claude', 'popover-claude-styled', 'popover-codex', 'popover-antigravity', 'popover-cursor', 'popover-muse', 'popover-pull-requests']) {
     const size = statSync(resolve(dir, `${name}.png`)).size;
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);
   }
   const { scale } = fixture(edge).snapshot.displays[0];
-  const vertical = edge === 'right' || edge === 'left';
+  for (const name of ['rail', 'rail-cap-hovered']) {
+    const ink = railEdgeInk(readPng(resolve(dir, `${name}.png`)), edge);
+    assert.equal(ink, 1, `render ${edge}: ${name}.png is ${Math.round(ink * 100)}% solid rail ink along its screen edge`);
+  }
+  if (glassHost) {
+    assert.ok(railEdgeInk(readPng(resolve(dir, 'rail-styled.png')), edge) < 0.5, `render ${edge}: rail-styled.png is solid rail ink, so the Liquid Glass rail is not drawn`);
+    const card = cardPixel(readPng(resolve(dir, 'popover-claude-styled.png')), edge, scale);
+    assert.ok(!near(card, popoverInk), `render ${edge}: popover-claude-styled.png card is solid popover ink, so the Liquid Glass popover is not drawn`);
+  }
   for (const name of ['popover-claude', 'popover-pull-requests']) {
     const png = readPng(resolve(dir, `${name}.png`));
-    const pixel = png.at(edge === 'left' ? png.width - 1 - 6 * scale : 6 * scale, Math.floor(png.height / 2));
-    const ink = [14, 14, 17, 255];
-    assert.ok(pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
-    const line = { right: png.width - 4 * scale, left: 4 * scale - 1, top: 4 * scale - 1, bottom: png.height - 4 * scale }[edge];
-    const length = vertical ? png.height : png.width;
-    const opaque = [];
-    for (let i = 0; i < length; i++) if (png.at(vertical ? line : i, vertical ? i : line)[3] > 0) opaque.push(i);
+    const pixel = cardPixel(png, edge, scale);
+    assert.ok(near(pixel, popoverInk), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
+    const line = edgeLine(png, edge, 4 * scale - 1);
+    const opaque = line.flatMap((pixel, i) => (pixel[3] > 0 ? [i] : []));
     const [first, last] = [opaque[0], opaque.at(-1)];
     assert.ok(opaque.length >= 5 * scale && opaque.length <= 9 * scale && last - first + 1 === opaque.length, `render ${edge}: ${name}.png has ${opaque.length} opaque px 4 pt in from its tail side, not one tail`);
-    assert.ok(Math.abs((first + last) / 2 - length / 2) <= 2, `render ${edge}: ${name}.png tail is centred at ${(first + last) / 2} px, not mid-popover at ${length / 2}`);
+    assert.ok(Math.abs((first + last) / 2 - line.length / 2) <= 2, `render ${edge}: ${name}.png tail is centred at ${(first + last) / 2} px, not mid-popover at ${line.length / 2}`);
     (popoverSizes[name] ??= {})[edge] = [png.width, png.height];
   }
   console.log(`PASS render ${edge} → ${dir}`);
