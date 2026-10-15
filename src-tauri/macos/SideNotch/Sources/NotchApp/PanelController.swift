@@ -66,7 +66,7 @@ struct PopoverPlacement {
 
 @MainActor
 func popoverPlacement(
-  rail: RailModel, message: HostMessage, cell: RailCell, now: Date, style: PopoverStyle,
+  rail: RailModel, message: HostMessage, cell: RailCell, now: Date,
   openLimits: @escaping () -> Void, openPullRequests: @escaping () -> Void
 ) -> PopoverPlacement? {
   guard let frame = rail.cellFrame(of: cell) else { return nil }
@@ -85,7 +85,7 @@ func popoverPlacement(
   func model(tailAt: CGFloat) -> PopoverModel {
     PopoverModel(
       content: content, now: now, edge: rail.edge, metrics: metrics, width: width,
-      maxHeight: maxHeight, tailLength: tail, tail: tailAt, style: style,
+      maxHeight: maxHeight, tailLength: tail, tail: tailAt, style: rail.settings.popoverStyle,
       actionError: message.actionError, openLimits: openLimits, openPullRequests: openPullRequests)
   }
   let probe = NSHostingView(rootView: NotchPopoverView(model: model(tailAt: 0)))
@@ -408,7 +408,7 @@ final class PanelController: NSObject, NSWindowDelegate {
   private func refreshPopover(transition: PopoverTransition = .none) {
     guard let id = activeCell, let rail = rail, let message = message,
       let placement = popoverPlacement(
-        rail: rail, message: message, cell: id, now: now, style: rail.settings.popoverStyle,
+        rail: rail, message: message, cell: id, now: now,
         openLimits: { [weak self] in
           self?.emit(.openLimits)
           self?.dismissAfterAction()

@@ -135,6 +135,19 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
   }
   const { scale } = fixture(edge).snapshot.displays[0];
   const vertical = edge === 'right' || edge === 'left';
+  for (const name of ['rail', 'rail-cap-hovered']) {
+    const png = readPng(resolve(dir, `${name}.png`));
+    const line = { right: png.width - 1 - scale, left: scale, top: scale, bottom: png.height - 1 - scale }[edge];
+    const length = vertical ? png.height : png.width;
+    const ink = [8, 8, 8, 255];
+    let solid = 0;
+    let sampled = 0;
+    for (let i = Math.floor(length * 0.2); i < Math.floor(length * 0.8); i++, sampled++) {
+      const pixel = png.at(vertical ? line : i, vertical ? i : line);
+      if (pixel.every((value, j) => Math.abs(value - ink[j]) <= 3)) solid++;
+    }
+    assert.ok(solid >= sampled / 2, `render ${edge}: ${name}.png has ${solid} of ${sampled} px of solid rail ink along its screen edge`);
+  }
   for (const name of ['popover-claude', 'popover-pull-requests']) {
     const png = readPng(resolve(dir, `${name}.png`));
     const pixel = png.at(edge === 'left' ? png.width - 1 - 6 * scale : 6 * scale, Math.floor(png.height / 2));

@@ -102,7 +102,7 @@ struct NotchRailView: View {
   var body: some View {
     let layout = model.layout
     ZStack {
-      NotchSilhouette(edge: model.edge, ear: CGFloat(layout.ear)).fill(railInk)
+      surface(NotchSilhouette(edge: model.edge, ear: CGFloat(layout.ear)))
       if model.edge.isVertical {
         VStack(spacing: CGFloat(layout.cellSpacing)) {
           ForEach(model.cellIds, id: \.self) { cell($0) }
@@ -117,6 +117,14 @@ struct NotchRailView: View {
     .overlay(ShowToggleCap(model: model, hovered: capHovered, action: toggleShow))
     .foregroundColor(.white)
     .preferredColorScheme(.dark)
+  }
+
+  @ViewBuilder private func surface(_ shape: NotchSilhouette) -> some View {
+    if #available(macOS 26.0, *), model.settings.popoverStyle == .glass {
+      Color.clear.background(railInk.opacity(0.55), in: shape).glassEffect(.regular, in: shape)
+    } else {
+      shape.fill(railInk)
+    }
   }
 
   @ViewBuilder private func cell(_ id: RailCell) -> some View {

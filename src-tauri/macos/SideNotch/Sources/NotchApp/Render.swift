@@ -7,7 +7,8 @@ enum Render {
   static func run(messagePath: String, outputDirectory: String) -> Int32 {
     do {
       let message = try HostMessage.decode(Data(contentsOf: URL(fileURLWithPath: messagePath)))
-      let settings = message.snapshot.settings
+      var settings = message.snapshot.settings
+      settings.popoverStyle = .solid
       let displays = message.snapshot.displays
       guard let rail = RailModel(settings: settings, displays: displays) else {
         FileHandle.standardError.write(Data("The fixture does not show a rail.\n".utf8))
@@ -36,8 +37,7 @@ enum Render {
       for cell in rail.cellIds {
         guard
           let placement = popoverPlacement(
-            rail: rail, message: message, cell: cell, now: now, style: .solid, openLimits: {},
-            openPullRequests: {})
+            rail: rail, message: message, cell: cell, now: now, openLimits: {}, openPullRequests: {})
         else { continue }
         let name: String
         switch cell {

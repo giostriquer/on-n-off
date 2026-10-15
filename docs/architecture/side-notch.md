@@ -70,15 +70,17 @@ Things that are easy to get wrong:
 - **Nothing sensitive crosses the pipe** — current-account numbers, session rows, PR rows. No
   credentials, no network listener. PR rows open in the browser and copy a link to the pasteboard;
   the helper never writes to GitHub.
-- **Popovers are Liquid Glass from macOS 26.** `PopoverView.swift` draws the card and its tail as
-  one outline. On macOS 26 it is glass with a translucent ink layer over it, which keeps the muted
-  text readable on a bright desktop; earlier systems fill it with solid ink. The settings card's
-  Details choice (`popoverStyle`, glass by default) asks for solid ink on macOS 26 as well. The card
-  offers it only when the snapshot's `liquidGlass` reports macOS 26 or later. The Windows painter
-  draws its own solid card and ignores the choice.
-- **Renders show the layout, not the glass.** Offscreen there is nothing behind a popover for the
-  glass to sample, so `--render` asks for the solid style and fills the same outline with solid ink.
-  `scripts/check-native-notch.mjs` fails if a rendered card is anything else, if its tail is
+- **The notch is Liquid Glass from macOS 26.** `NotchRailView` fills the rail's silhouette and
+  `PopoverView.swift` draws each popover's card and tail as one outline. On macOS 26 both are glass
+  with a translucent layer of their ink over it, which keeps the figures and muted text readable on
+  a bright desktop; earlier systems fill them with solid ink. The settings card's Style choice
+  (`popoverStyle`, glass by default) asks for solid ink on macOS 26 as well, for the rail and the
+  popovers together. The card offers it only when the snapshot's `liquidGlass` reports macOS 26 or
+  later. The Windows painter draws its own solid rail and card and ignores the choice.
+- **Renders show the layout, not the glass.** Offscreen there is nothing behind the notch for the
+  glass to sample, so `--render` sets the style to solid and draws the rail and popovers in solid
+  ink. `scripts/check-native-notch.mjs` fails if the rail's screen edge is not mostly rail ink, if a
+  rendered card is anything else, if its tail is
   missing, off its cell's centre or the wrong width, or if a popover is not the same card on every
   edge plus one tail. The fixture keeps popovers clear of the display's edges so the tail sits
   mid-popover. Judge the glass from a `screencapture -R` of the popover on screen. Computer-use
