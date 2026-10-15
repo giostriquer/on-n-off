@@ -124,7 +124,7 @@ Design and accessibility work on a screen is judged from those captures — and,
 fidelity, from a `screencapture -l <window id>` of the running app — never from reading the
 markup. The notch helper is invisible to computer-use screenshots; use its `--render` path and
 `scripts/check-native-notch.mjs` for its layout, and a `screencapture -R` of the helper on screen
-for its Liquid Glass popovers, which `--render` draws as the solid card.
+for its Liquid Glass rail and popovers, which `--render` draws in solid ink.
 
 The Windows notch draws its own pixels, so
 `cargo test --lib side_notch::win_paint::visual -- --ignored` dumps the rail, every popover and a
