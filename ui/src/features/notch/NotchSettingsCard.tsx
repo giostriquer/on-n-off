@@ -2,7 +2,7 @@ import { GitPullRequest, RefreshCw } from "lucide-react";
 import { ALL_AGENTS } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
 import { GITHUB_LIST_IDS, type GithubListId } from "$lib/githubTypes";
-import type { NotchDisplay, NotchEdge, NotchPopoverStyle, NotchSettings } from "$lib/notchTypes";
+import type { NotchDisplay, NotchEdge, NotchStyle, NotchSettings } from "$lib/notchTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { providerLabel } from "$lib/usageMerge";
 import { Rocker } from "@/components/Rocker";
@@ -78,7 +78,7 @@ const EDGE_OPTIONS: [NotchEdge, string][] = [
   ["bottom", "Bottom"],
 ];
 
-const STYLE_OPTIONS: [NotchPopoverStyle, string][] = [
+const STYLE_OPTIONS: [NotchStyle, string][] = [
   ["glass", "Liquid Glass"],
   ["solid", "Solid"],
 ];

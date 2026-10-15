@@ -235,7 +235,7 @@ final class NotchTests {
     expectEqual(document.edge, Edge.top)
     expectEqual(document.size, NotchSize.compact)
     expectEqual(document.railProviders, [.codex])
-    expectEqual(document.popoverStyle, PopoverStyle.solid)
+    expectEqual(document.popoverStyle, NotchStyle.solid)
     expectThrows(
       try JSONDecoder().decode(
         Settings.self,
