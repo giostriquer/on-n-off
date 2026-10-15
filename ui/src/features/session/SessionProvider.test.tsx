@@ -62,6 +62,16 @@ const AGENTS: AgentInfo[] = [
     pluginToggle: false,
     readsHooks: false,
   },
+  {
+    id: "muse",
+    displayName: "Muse",
+    cliOk: true,
+    cliError: null,
+    installGit: false,
+    installFolder: true,
+    pluginToggle: true,
+    readsHooks: false,
+  },
 ];
 
 const CODEX_TAB: AgentTabDto = {
@@ -196,8 +206,9 @@ describe("SessionProvider startup", () => {
       codex: CODEX_TAB,
       antigravity: EMPTY_TAB,
       cursor: EMPTY_TAB,
+      muse: EMPTY_TAB,
     };
-    state.projectResults = { claude: [], codex: [], antigravity: [], cursor: [] };
+    state.projectResults = { claude: [], codex: [], antigravity: [], cursor: [], muse: [] };
     state.hiddenAgents = [];
   });
 
@@ -229,7 +240,7 @@ describe("SessionProvider startup", () => {
 
     state.resolveSelected?.(EMPTY_TAB);
     await waitFor(() =>
-      expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor"]),
+      expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor", "muse"]),
     );
   });
 
@@ -241,7 +252,7 @@ describe("SessionProvider startup", () => {
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);
-    await waitFor(() => expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor"]));
+    await waitFor(() => expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor", "muse"]));
     await waitFor(() => expect(screen.getByTestId("filtered-plugins")).toHaveTextContent("workbench@workshop"));
     const baseline = Number(screen.getByTestId("catalog-derivations").textContent);
 
@@ -270,7 +281,7 @@ describe("SessionProvider startup", () => {
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);
-    await waitFor(() => expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor"]));
+    await waitFor(() => expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor", "muse"]));
 
     fireEvent.change(screen.getByRole("textbox", { name: "Session filter" }), {
       target: { value: "workbench" },
@@ -295,7 +306,7 @@ describe("SessionProvider startup", () => {
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);
-    await waitFor(() => expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor"]));
+    await waitFor(() => expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor", "muse"]));
     const baseline = screen.getByTestId("project-derivations").textContent;
     expect(screen.getByTestId("scope-label")).toHaveTextContent("all projects");
 
@@ -304,7 +315,7 @@ describe("SessionProvider startup", () => {
     ];
     fireEvent.click(screen.getByRole("button", { name: "Reload Claude" }));
     await waitFor(() =>
-      expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor", "claude"]),
+      expect(state.refreshOrder).toEqual(["codex", "claude", "antigravity", "cursor", "muse", "claude"]),
     );
 
     expect(screen.getByTestId("project-derivations")).toHaveTextContent(baseline ?? "0");

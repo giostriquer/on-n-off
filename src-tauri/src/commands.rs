@@ -24,6 +24,7 @@ pub struct AppState {
     codex: Arc<dyn AgentAdapter>,
     antigravity: Arc<dyn AgentAdapter>,
     cursor: Arc<dyn AgentAdapter>,
+    muse: Arc<dyn AgentAdapter>,
     items: Result<Arc<ItemService>, AdapterError>,
 }
 
@@ -34,6 +35,7 @@ impl AppState {
             codex: Arc::new(crate::codex::CodexAdapter::new()),
             antigravity: Arc::new(crate::antigravity::AntigravityAdapter::new()),
             cursor: Arc::new(crate::cursor::CursorAdapter::new()),
+            muse: Arc::new(crate::muse::MuseAdapter::new()),
             items: ItemService::production().map(Arc::new),
         }
     }
@@ -44,6 +46,7 @@ impl AppState {
             AgentId::Codex => Arc::clone(&self.codex),
             AgentId::Antigravity => Arc::clone(&self.antigravity),
             AgentId::Cursor => Arc::clone(&self.cursor),
+            AgentId::Muse => Arc::clone(&self.muse),
         }
     }
 
@@ -156,6 +159,7 @@ pub async fn list_agents(
         Arc::clone(&state.codex),
         Arc::clone(&state.antigravity),
         Arc::clone(&state.cursor),
+        Arc::clone(&state.muse),
     ];
     blocking("provider health", move || {
         Ok(adapters.into_iter().map(|adapter| adapter.info()).collect())

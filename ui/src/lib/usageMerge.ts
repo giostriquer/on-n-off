@@ -58,7 +58,7 @@ export type FoldedUsage = {
   hourly: readonly PeriodTotals[];
 };
 
-const PROVIDERS: AgentId[] = ["claude", "codex"];
+const PROVIDERS: AgentId[] = ["claude", "codex", "muse"];
 
 function emptyByProvider(): Record<AgentId, PeriodProviderSlice> {
   return {
@@ -66,6 +66,7 @@ function emptyByProvider(): Record<AgentId, PeriodProviderSlice> {
     codex: { costUsd: 0, totalTokens: 0 },
     antigravity: { costUsd: 0, totalTokens: 0 },
     cursor: { costUsd: 0, totalTokens: 0 },
+    muse: { costUsd: 0, totalTokens: 0 },
   };
 }
 
@@ -264,6 +265,8 @@ export function providerLabel(provider: AgentId): string {
       return "Antigravity";
     case "cursor":
       return "Cursor";
+    case "muse":
+      return "Muse";
   }
 }
 

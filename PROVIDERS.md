@@ -1,7 +1,7 @@
 # PROVIDERS.md — how each agent stores what on-n-off reads and writes
 
 One section per provider: home folder, CLI, plugin layout, skills, MCP config, and what the app may
-mutate. Adapters live in `src-tauri/src/{claude,codex,antigravity,cursor}.rs`; keep provider quirks
+mutate. Adapters live in `src-tauri/src/{claude,codex,antigravity,cursor,muse}.rs`; keep provider quirks
 there behind `AgentAdapter`. Everything the app writes goes through `ConfigIo` (backup → atomic
 replace → validate → rollback). Agent homes are real user data — see AGENTS.md "Constraints".
 
@@ -12,10 +12,13 @@ adapter assumes today (change the adapter and this file together).
 
 - Home: `~/.<provider>` under `user_home()` — `ON_N_OFF_HOME` overrides the home for **all**
   providers (QA fixtures). `%USERPROFILE%` on Windows, `$HOME` elsewhere. A test build has no
-  user home; tests hand each adapter its root.
+  user home; tests hand each adapter its root. Muse is the exception: its state splits the
+  XDG way, so it has a config root and a data root (`paths::muse_config_for` /
+  `paths::muse_data_for`, Muse below).
 - Plugin id: `<name>@<marketplace>`; `local` when there is no marketplace (`paths::plugin_id_parts`).
 - Manifest lookup order for versions (`plugin_meta.rs`): `.cursor-plugin/plugin.json`,
-  `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `plugin.json`, then a version-looking
+  `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.muse-plugin/plugin.json`,
+  `plugin.json`, then a version-looking
   folder name.
 - MCP DTO: `enabled` is derived per provider (see below); the UI toggle calls
   `AgentAdapter::set_mcp_enabled`.
@@ -38,14 +41,15 @@ adapter assumes today (change the adapter and this file together).
   its own because the sort is stable and every reader emits rows in file order. A file that will not
   parse contributes no rows instead of failing the tab. Claude and Codex only, which each adapter
   answers for itself through `AgentAdapter::reads_hooks`, carried to the screen as
-  `AgentInfo.readsHooks`; the other two say the provider has no hooks rather than showing an empty
+  `AgentInfo.readsHooks`; the others say the provider has no hooks rather than showing an empty
   list as if none were configured.
 - Project scope: `project.rs` reads `.claude/`, `.codex/`, `.cursor/` inside a project for skills
   and `.cursor/mcp.json` for project MCP.
 - Local items (`item_install/`): on-n-off can copy individual skills (and, for Claude, subagents)
   out of a GitHub marketplace repository without the provider CLI. It downloads one
   `codeload.github.com` tarball, writes the item under `AgentAdapter::item_roots(scope)` (skills:
-  `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity-cli/skills`, `~/.cursor/skills`;
+  `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity-cli/skills`, `~/.cursor/skills`,
+  `~/.config/muse/skills`;
   project scope: the first dir of `project_skill_dirs`; agents: `~/.claude/agents` /
   `.claude/agents`, Claude only), and records provenance (repo, ref, commit sha, plugin version,
   per-file sha256) in `~/.on-n-off/installed-items.json`. Item folders stay byte-identical to
@@ -154,6 +158,21 @@ adapter assumes today (change the adapter and this file together).
 | Usage / Limits | not covered (Cursor tab reads inventory only) |
 | Hooks | None, as for Antigravity. |
 | Togglable | nothing (inventory only) |
+
+## Muse (Muse Code)
+
+| | |
+|---|---|
+| Home | Split the XDG way on every Unix, macOS included: config `$XDG_CONFIG_HOME/muse` else `~/.config/muse` (`settings.json`, `auth.json`, user skills), data `$XDG_DATA_HOME/muse` else `~/.local/share/muse` (plugins, sessions, runtime registry). Only absolute XDG values count; `ON_N_OFF_HOME` suppresses inherited XDG overrides for QA. Inventory, limits, usage and live sessions share this resolution. **verified** (2026-10, real home and throwaway `HOME`/`XDG_*` fixtures): both dirs, XDG winning, and `muse init` writing only `AGENTS.md`. **code** (assumed): the Windows split, config `%APPDATA%\muse`, data `%LOCALAPPDATA%\muse`, which no Windows machine has confirmed. |
+| CLI | `muse` — a launcher script in `~/.local/bin` that fetches a versioned real binary (`muse-bin-<version>`). Used for every plugin/skill write, always with `--json`: `muse plugins enable\|disable\|remove\|update <name>`, `muse plugins install <path>\|<name>@<marketplace>`, `muse plugins marketplace update <name>`, `muse skills enable\|disable <id> --scope user\|plugin`. **verified** (2026-10, throwaway home): each argv end to end, including that a disabled plugin's skills are not selectable until it is enabled again. A git marketplace cannot be added from the install sheet (`muse plugins marketplace add` needs a name it does not collect), so `install_git` is false and the error names the command; npx-skill sources are refused the same way. |
+| Plugins | Data `plugins/installed.json` is the truth (`version`, `plugins.<id>` = id, display name, version, `enabled`, `trust`, `source.{provenance,path}`, `cache_path`, `manifest_family`; a malformed file is a parse error). Package copies under `plugins/cache/local/<id>/<sha>/package`. Marketplaces in `plugins/marketplaces.json` (`source{kind,path}`, `snapshot_path` — absolute **or relative to the data root**, both **verified** 2026-10) with `plugins/marketplaces/<name>/snapshot.json` (`plugins[].name/version`). A plugin's marketplace is credited only when the snapshot lists it *and* its recorded source path sits inside the marketplace's own source; the snapshot version is the upstream the update badge compares against. Bundled plugins (a `threejs` shows in `muse skills list` with no installed record) are not listed, as Cursor's built-ins are not. |
+| Enable state | Plugins: the record's own `enabled`. Skills: config `settings.json` → `skills.activation.<scope> { "<display path>": "on" \| "off" \| "user-invocable-only" }`, where the display path is `plugin://<plugin>/skills/<rel>/SKILL.md`, `$CONFIG_DIR/skills/<name>/SKILL.md` or `$HOME/.agents/skills/<name>/SKILL.md`. Skills of a disabled plugin are inactive and cannot be toggled until the plugin is enabled. Otherwise only `off` reads disabled; a user-invocable-only skill counts as enabled because the row has one bit. Skill rows carry Muse's own ids (`plugin:<plugin>:<name>`, bare name for user skills), which is what the CLI toggles take. **verified** (2026-10, throwaway home): the three activation values and both key forms. Bundled skills (`bundled://…`, toggled by Muse with `--scope built-in`) are not listed. |
+| Skills | Plugin `skills/` (scanned; the manifest's `capabilities.skills` is not needed to find them); user skills `$CONFIG_DIR/skills/<name>/SKILL.md` — where `muse skills install` writes (**verified**) — and the shared `~/.agents/skills`, the config copy winning a name both hold. Project scope: `.agents/skills`, then the foreign `.claude/skills` and `.codex/skills` Muse also reads (**verified** 2026-10 with `muse skills list --source project`); there is no `.muse/skills`. |
+| MCP | Config `settings.json` → `mcpServers`. **Listed read-only** (`muse::MCP_READ_ONLY`, with a notice like Cursor's): Muse has no MCP enable/disable CLI (only `muse mcp login\|logout`) and no documented disable key on-n-off could patch truthfully. Plugin-declared servers are not read. |
+| Hooks | None, as for Antigravity (`reads_hooks` false). Muse plugins can carry hooks, but on-n-off reads no Muse hook source. |
+| Usage / Limits | Usage: transcripts under data `sessions/YYYY/MM/DD/<id>/session.jsonl` (subagent transcripts nested as `<id>/subagent/<child>/session.jsonl` count too). One record per `payload.event.kind === "model_completed"` line, which carries `model` and its `usage`; its `goal_usage_attribution` twin line (quantity only, no model) is skipped, so each call counts once. `recorded_at` is epoch **microseconds**; the session id is the line's `stream.id`; the line's own `id` is the dedupe key. Meta reports the cached share inside `input_tokens`, so uncached = input − `cache_read_tokens` (or `cached_tokens` when no read split) − `cache_write_tokens`. No reported cost, and Muse models have no price in the table yet, so they read as unpriced. Parser v3. **verified** (2026-10, real sessions): both line shapes, the cache-in-input arithmetic, and no line-id overlap between a parent and its subagents. Limits (`limits/muse.rs`): `muse serve --no-session-log --disable-shell --disable-write`, MSP over newline JSON-RPC (`"jsonrpc": "2.0"` required; without it the host answers `-32600`, **verified** live 2026-10), `HOME`/`XDG_*` pinned to the provider home in hand. `initialize` asks for the **experimental** API (`capabilities.experimentalApi`, `userInputDialogs: false`) and must grant it, and its `museHome` must be the expected data root, or the read fails. `account/read` gives the account and is read again after `usage/read`; a change fails the card. `usage/read` returns `{ tier, window { usedPercent, windowDurationMins, resetsAtMs }, weekly { usedPercent, resetsAtMs }, observedAtMs }` — the session window's label comes from its duration ("5 hour · all models" at 300), the plan is the tier when it reads as a name (in practice it arrives as an opaque numeric id, which is not shown), and each window's `observed_at` is the host's own `observedAtMs`. The host only reports usage it has **observed from a provider frame**: a fresh `muse serve`, a durable one, one that resumed an old session, `model/list`, `session/start`, a validation-rejected turn, and a turn interrupted before its first frame all answer `{}`, while one completed one-word turn in that host populates it at once; the observation is in-memory only and lands nowhere on disk (not the session log, view snapshots, tracing or catalogs), and there is no other MSP method, CLI or attach path to fetch it (**verified** 2026-10, Muse 1.4.8 and 1.4.9, including the completed-turn probe). on-n-off never spends a turn to make one, so until Muse retains or fetches usage the card keeps its account and reads "Muse has not observed subscription usage yet. This version does not expose usage to external readers." Signed out (`loggedOut`) reads signed out; an API key (`apiKey`/`envKey`) or a keyless endpoint (`credentialRequired: false`) reads unsupported; a missing `usage/read` (`-32601`) or a host that will not grant the experimental API fails with update guidance. The account id is `email:<lowercased label>` when the label is one, else the default account. on-n-off opens no Muse credential; its snapshots and account id are its own, and saved-account support is Claude/Codex only, so the column has no account controls. The read joins the shared Limits cache (`limits:muse`), the monitor's watched providers, the tray popover (its sections follow the providers the hook returns) and the side notch rail like the other two. |
+| Live sessions | Data `runtime/muse/sessions/<id>.json` (written by the running host: `session_name`, `workspace_label`) marks a session live; transcripts under data `sessions/YYYY/MM/DD/<id>/session.jsonl` modified in the last hour are listed too (today and yesterday, newest 48). Project is the registry's workspace label, else the folder of the first `workspace_root`/`cwd` in the transcript head; the name is the registry's session name, else `<project>-<last two id characters>` — the names Muse itself claims live in SQLite stores on-n-off does not open. Working is the Codex order heuristic over Muse's markers: the last `model_response_created`/`model_input_trace_recorded` after the last `model_completed`/`assistant_message_committed`/`terminal` in the final 128 KiB (stale after 15 minutes, a file written in the last two minutes counts even without markers). Place is always Terminal. Read-only; feeds the side notch popover. |
+| Togglable | plugins and skills (via CLI); MCP read-only |
 
 ## When adding a provider
 

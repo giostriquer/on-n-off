@@ -28,6 +28,7 @@ const ARCHIVED_OPEN = [
 const ARCHIVE_ACTION = "role=group[name='Actions for person@acme.example'] >> role=button[name='Archive account']";
 
 const SCENES = [
+  { name: "all-providers", url: "/overview?mock=ok&allProviders", viewport: { width: 960, height: 760 } },
   { name: "github-ok", url: "/github?mock=ok" },
   { name: "github-ok-light", url: "/github?mock=ok", theme: "light" },
   { name: "github-stale", url: "/github?mock=stale" },
@@ -52,6 +53,15 @@ const SCENES = [
   { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
   { name: "limits-sign-in", url: "/limits?mock=claudeSignIn", steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }, { hover: "role=button[name='Claude sign-in ends Aug 27']" }, { wait: "role=tooltip" }] },
   { name: "limits-sign-in-light", url: "/limits?mock=claudeSignIn", theme: "light", steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }] },
+  ...[960, 1024, 1120, 1440].map(width => ({
+    name: `limits-sign-in-${width}`, url: "/limits?mock=claudeSignIn", viewport: { width, height: 980 },
+    limitsColumns: 3,
+    steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }],
+  })),
+  ...["light", "dark"].map(theme => ({
+    name: `usage-muse-${theme}`, url: "/usage?mock=ok", theme, checkMuseChart: true,
+    steps: [{ wait: "role=region[name='Usage over time'] >> svg path[stroke] >> nth=0" }],
+  })),
   { name: "limits-popover", url: "/?surface=limits-popover&mock=ok", viewport: { width: 350, height: 480 }, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
   { name: "limits-archived", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: [{ wait: `${ARCHIVED.claude} >> role=button[name='Archived (2)']` }] },
   { name: "limits-archived-open", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
@@ -164,6 +174,49 @@ async function runScene(browser, scene) {
     await page.waitForTimeout(120);
   }
   if (!shots) await shot(scene.name);
+  for (const tab of await page.getByRole("tab").all()) {
+    const clipped = await tab.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const group = element.closest('[role="tablist"]').getBoundingClientRect();
+      return rect.left < Math.max(0, group.left) - 1 || rect.right > Math.min(innerWidth, group.right) + 1;
+    });
+    if (clipped) problems.push(`provider tab clipped: ${await tab.textContent()}`);
+  }
+  if (scene.limitsColumns) {
+    const headers = page.locator('[data-testid="limits-screen"] header').filter({ has: page.locator(".truncate") });
+    const columns = await headers.evaluateAll(elements => new Set(elements.map(element => Math.round(element.getBoundingClientRect().left))).size);
+    if (columns !== scene.limitsColumns) problems.push(`expected ${scene.limitsColumns} provider columns, got ${columns}`);
+    for (const header of await headers.all()) {
+      const issues = await header.evaluate(element => {
+        const title = element.querySelector(".truncate");
+        const bounds = element.getBoundingClientRect();
+        const issues = [];
+        if (title.getBoundingClientRect().width < Math.min(100, title.scrollWidth)) {
+          issues.push(`account name has less than 100px to display: ${title.textContent}`);
+        }
+        for (const button of element.querySelectorAll("button")) {
+          const rect = button.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
+          if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1) {
+            issues.push(`account header action overflows: ${button.getAttribute("aria-label") ?? button.textContent}`);
+          }
+        }
+        return issues;
+      });
+      problems.push(...issues);
+    }
+  }
+  if (scene.checkMuseChart) {
+    const blueLine = page.locator('.usage-chart-host path[stroke="#0082fb"]');
+    if (await blueLine.count() === 0) problems.push("Muse chart line is not blue");
+    await page.locator(".usage-chart-host svg").hover();
+    const museRow = page.locator(".usage-chart-tooltip .ts-chart-tooltip__row")
+      .filter({ has: page.getByText("Muse", { exact: true }) });
+    await museRow.waitFor();
+    const color = await museRow.locator(".ts-chart-tooltip__swatch")
+      .evaluate(element => getComputedStyle(element).backgroundColor);
+    if (color !== "rgb(0, 130, 251)") problems.push(`Muse chart series is not blue: ${color}`);
+  }
   await context.close();
   return problems;
 }

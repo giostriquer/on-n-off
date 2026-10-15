@@ -218,6 +218,7 @@ fn refuses_hiding_every_provider() {
             AgentId::Codex,
             AgentId::Antigravity,
             AgentId::Cursor,
+            AgentId::Muse,
         ],
         ..AppSettings::default()
     });

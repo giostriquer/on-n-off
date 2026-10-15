@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::transcripts::{
-    might_carry_usage, parse_claude_line, parse_codex_line, CodexScanState, UsageProvider,
-    UsageRecord,
+    might_carry_usage, parse_claude_line, parse_codex_line, parse_muse_line, CodexScanState,
+    UsageProvider, UsageRecord,
 };
 
 pub const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
@@ -116,6 +116,14 @@ fn read_transcript_records_from_lines(
                     continue;
                 }
                 if let Some(record) = parse_claude_line(&line) {
+                    records.push(record);
+                }
+            }
+            UsageProvider::Muse => {
+                if !might_carry_usage(&line, provider) {
+                    continue;
+                }
+                if let Some(record) = parse_muse_line(&line) {
                     records.push(record);
                 }
             }

@@ -76,7 +76,7 @@ export function pathToScreen(pathname: string): Screen {
 
 function readAgent(): AgentId {
   const value = localStorage.getItem(AGENT_KEY);
-  if (value === "codex" || value === "antigravity" || value === "cursor") {
+  if (value === "codex" || value === "antigravity" || value === "cursor" || value === "muse") {
     return value;
   }
   return "claude";
@@ -224,6 +224,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     codex: readScope("codex"),
     antigravity: readScope("antigravity"),
     cursor: readScope("cursor"),
+    muse: readScope("muse"),
   });
 
   const tabsRef = useRef(tabs);

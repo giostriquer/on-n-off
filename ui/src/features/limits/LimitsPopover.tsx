@@ -24,7 +24,6 @@ export function LimitsPopover() {
   });
   const pollMinutes = settings.data?.limitsPollMinutes ?? DEFAULT_APP_SETTINGS.limitsPollMinutes;
   const { providers, loading, now, refresh } = useLimitsProviders(pollMinutes);
-  const [claude, codex] = providers;
 
   useLayoutEffect(() => {
     applyStoredTheme();
@@ -100,8 +99,9 @@ export function LimitsPopover() {
         </button>
       </header>
       <div className="limits-popover-scroll flex min-h-0 flex-1 flex-col gap-3 px-2.5 py-2.5">
-        <PopoverProviderSection provider={claude.provider} query={claude.query} now={now} />
-        <PopoverProviderSection provider={codex.provider} query={codex.query} now={now} />
+        {providers.map(({ provider, query }) => (
+          <PopoverProviderSection key={provider} provider={provider} query={query} now={now} />
+        ))}
       </div>
       {actionError ? (
         <p className="shrink-0 border-t border-[var(--popover-hair)] px-3 py-2 text-[11px] text-[var(--trip)]" role="alert">

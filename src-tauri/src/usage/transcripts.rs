@@ -2,13 +2,14 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 2;
+pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UsageProvider {
     Claude,
     Codex,
+    Muse,
 }
 
 impl UsageProvider {
@@ -16,6 +17,7 @@ impl UsageProvider {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Muse => "muse",
         }
     }
 }
@@ -123,7 +125,73 @@ pub fn might_carry_usage(line: &str, provider: UsageProvider) -> bool {
     match provider {
         UsageProvider::Claude => line.contains("\"usage\""),
         UsageProvider::Codex => line.contains("\"token_count\""),
+        UsageProvider::Muse => line.contains("\"model_completed\""),
     }
+}
+
+/// Muse writes two usage-bearing lines per model call: a
+/// `goal_usage_attribution` record (quantity only, no model) and the
+/// `model_completed` event (model plus the full cache split). Counting the
+/// event alone counts each call once; the line's own id is the dedupe key,
+/// so a transcript copied under a second root does not double-count.
+pub fn parse_muse_line(line: &str) -> Option<UsageRecord> {
+    let parsed: Value = serde_json::from_str(line).ok()?;
+    let obj = parsed.as_object()?;
+    let event = obj.get("payload")?.get("event")?.as_object()?;
+    if event.get("kind").and_then(|v| v.as_str()) != Some("model_completed") {
+        return None;
+    }
+    let usage = event.get("usage")?.as_object()?;
+    let model = event.get("model")?.as_str()?.to_string();
+    if model.is_empty() {
+        return None;
+    }
+    // `recorded_at` is epoch microseconds.
+    let timestamp_ms = obj.get("recorded_at").and_then(|v| v.as_i64())? / 1_000;
+    let session_id = obj
+        .get("stream")
+        .and_then(|stream| stream.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let dedupe_key = obj
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+
+    let get = |key: &str| positive_int(usage.get(key).unwrap_or(&Value::Null));
+    let input_tokens = get("input_tokens");
+    let cache_read_tokens = match usage.get("cache_read_tokens") {
+        Some(_) => get("cache_read_tokens"),
+        None => get("cached_tokens"),
+    };
+    let cache_creation_tokens = get("cache_write_tokens");
+    let output_tokens = get("output_tokens");
+    let totals = TokenTotals {
+        // Meta reports the cached share inside `input_tokens`.
+        uncached_input_tokens: input_tokens
+            .saturating_sub(cache_read_tokens)
+            .saturating_sub(cache_creation_tokens),
+        cached_input_tokens: cache_read_tokens,
+        cache_creation_tokens,
+        cache_creation_1h_tokens: 0,
+        output_tokens,
+        reasoning_tokens: get("reasoning_tokens").min(output_tokens),
+    };
+    if totals.total_tokens() == 0 {
+        return None;
+    }
+
+    Some(UsageRecord {
+        provider: UsageProvider::Muse,
+        timestamp_ms,
+        model,
+        session_id,
+        totals,
+        reported_cost_usd: None,
+        dedupe_key,
+    })
 }
 
 fn positive_int(value: &Value) -> u64 {

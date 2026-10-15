@@ -169,7 +169,7 @@ pub struct FilesRead {
 
 pub struct SeenSources {
     source_index: PathBuf,
-    source_roots: [(UsageProvider, Vec<SourceRoot>); 2],
+    source_roots: [(UsageProvider, Vec<SourceRoot>); 3],
     snapshot: SourceSnapshot,
 }
 
@@ -199,7 +199,7 @@ impl SeenSources {
     }
 }
 
-fn source_roots_for(home: &Path) -> [(UsageProvider, Vec<SourceRoot>); 2] {
+fn source_roots_for(home: &Path) -> [(UsageProvider, Vec<SourceRoot>); 3] {
     [
         (
             UsageProvider::Claude,
@@ -212,6 +212,7 @@ fn source_roots_for(home: &Path) -> [(UsageProvider, Vec<SourceRoot>); 2] {
                 resolve_codex_archive_dir(home),
             ],
         ),
+        (UsageProvider::Muse, vec![resolve_muse_transcript_dir(home)]),
     ]
     .map(|(provider, paths)| {
         let roots: Vec<SourceRoot> = paths
@@ -247,6 +248,10 @@ fn resolve_codex_transcript_dir(home: &Path) -> PathBuf {
 
 fn resolve_codex_archive_dir(home: &Path) -> PathBuf {
     codex_root_for(home).join("archived_sessions")
+}
+
+fn resolve_muse_transcript_dir(home: &Path) -> PathBuf {
+    crate::paths::muse_data_for(home).join("sessions")
 }
 
 #[cfg(all(test, unix))]

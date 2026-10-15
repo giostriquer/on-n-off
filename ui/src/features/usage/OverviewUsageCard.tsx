@@ -75,7 +75,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
         <p className="px-3.5 py-4 text-[13px] text-[var(--trip)]">{error}</p>
       ) : bothMissing ? (
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">
-          No Claude or Codex session transcripts found on this machine.{" "}
+          No Claude, Codex or Muse session transcripts found on this machine.{" "}
           <OpenUsageLink className="text-[var(--silkscreen)] underline-offset-2 hover:underline" />
         </p>
       ) : (

@@ -59,6 +59,58 @@ pub fn cursor_root() -> Result<PathBuf, AdapterError> {
     Ok(user_home()?.join(".cursor"))
 }
 
+// Muse splits its state the XDG way on every Unix, macOS included:
+// settings under the config dir, plugins/sessions under the data dir.
+// The Windows split is assumed to follow the same config/data distinction.
+#[cfg(not(windows))]
+pub fn muse_config_for(home: &std::path::Path) -> PathBuf {
+    if let Some(root) = muse_xdg("XDG_CONFIG_HOME", &process_env) {
+        return root;
+    }
+    home.join(".config").join("muse")
+}
+
+#[cfg(windows)]
+pub fn muse_config_for(home: &std::path::Path) -> PathBuf {
+    if let Some(root) = muse_xdg("XDG_CONFIG_HOME", &process_env) {
+        return root;
+    }
+    home.join("AppData").join("Roaming").join("muse")
+}
+
+#[cfg(not(windows))]
+pub fn muse_data_for(home: &std::path::Path) -> PathBuf {
+    if let Some(root) = muse_xdg("XDG_DATA_HOME", &process_env) {
+        return root;
+    }
+    home.join(".local").join("share").join("muse")
+}
+
+#[cfg(windows)]
+pub fn muse_data_for(home: &std::path::Path) -> PathBuf {
+    if let Some(root) = muse_xdg("XDG_DATA_HOME", &process_env) {
+        return root;
+    }
+    home.join("AppData").join("Local").join("muse")
+}
+
+fn muse_xdg(name: &str, lookup: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    if lookup("ON_N_OFF_HOME").is_some() {
+        return None;
+    }
+    let value = lookup(name)?;
+    let path = PathBuf::from(value);
+    path.is_absolute().then(|| path.join("muse"))
+}
+
+pub fn muse_config_root() -> Result<PathBuf, AdapterError> {
+    Ok(muse_config_for(&user_home()?))
+}
+
+pub fn muse_data_root() -> Result<PathBuf, AdapterError> {
+    Ok(muse_data_for(&user_home()?))
+}
+
 pub fn antigravity_cli_root() -> Result<PathBuf, AdapterError> {
     Ok(gemini_root()?.join("antigravity-cli"))
 }

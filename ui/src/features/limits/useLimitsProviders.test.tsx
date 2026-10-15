@@ -30,12 +30,12 @@ describe("limits refresh policy", () => {
     const hook = renderHook(() => useLimitsProviders(30), { wrapper });
     try {
       await act(() => vi.advanceTimersByTimeAsync(1));
-      expect(calls.readLimits.mock.calls).toEqual([["claude", false], ["codex", false]]);
+      expect(calls.readLimits.mock.calls).toEqual([["claude", false], ["codex", false], ["muse", false]]);
       calls.readLimits.mockClear();
       await act(() => vi.advanceTimersByTimeAsync(299_000));
       expect(calls.readLimits).not.toHaveBeenCalled();
       await act(() => vi.advanceTimersByTimeAsync(1_000));
-      expect(calls.readLimits.mock.calls).toEqual([["claude", false], ["codex", false]]);
+      expect(calls.readLimits.mock.calls).toEqual([["claude", false], ["codex", false], ["muse", false]]);
     } finally {
       hook.unmount();
       client.clear();
@@ -51,15 +51,16 @@ describe("limits refresh policy", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     renderHook(() => useLimitsProviders(5), { wrapper });
-    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
     expect(calls.readLimits.mock.calls).toEqual([
       ["claude", false],
       ["codex", false],
+      ["muse", false],
     ]);
 
     for (const listener of calls.listeners) listener({ source: "limits:codex" });
 
-    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(4));
     expect(calls.readLimits).toHaveBeenLastCalledWith("codex", false);
   });
 });
@@ -80,10 +81,10 @@ describe("refreshLimits", () => {
     calls.readLimits.mockReset().mockImplementation((provider: AgentId) => Promise.resolve(reading(provider)));
     const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
     await refreshLimits(client);
-    expect(calls.readLimits.mock.calls.map(call => call[1])).toEqual([true, true]);
+    expect(calls.readLimits.mock.calls.map(call => call[1])).toEqual([true, true, true]);
     calls.readLimits.mockClear();
     await client.refetchQueries({queryKey: ["limits"], type: "all"});
-    expect(calls.readLimits.mock.calls.map(call => call[1])).toEqual([false, false]);
+    expect(calls.readLimits.mock.calls.map(call => call[1])).toEqual([false, false, false]);
     client.clear();
   });
 
@@ -91,7 +92,7 @@ describe("refreshLimits", () => {
     const first = deferred<ProviderLimits[]>();
     const replacement = deferred<ProviderLimits[]>();
     let reads = 0;
-    calls.readLimits.mockReset().mockImplementation((provider: AgentId, force: boolean) => provider === "claude" && !force ? (++reads === 1 ? first.promise : replacement.promise) : Promise.resolve(provider === "claude" ? reading("claude", []) : reading("codex")));
+    calls.readLimits.mockReset().mockImplementation((provider: AgentId, force: boolean) => provider === "claude" && !force ? (++reads === 1 ? first.promise : replacement.promise) : Promise.resolve(provider === "claude" ? reading("claude", []) : reading(provider)));
     const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
     const queryKey = ["limits", "claude"];
     client.setQueryData(queryKey, reading("claude"));

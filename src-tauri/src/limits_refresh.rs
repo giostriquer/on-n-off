@@ -43,6 +43,7 @@ impl Cache {
 
 static CLAUDE_CACHE: Cache = Cache::new(Source::LimitsClaude);
 static CODEX_CACHE: Cache = Cache::new(Source::LimitsCodex);
+static MUSE_CACHE: Cache = Cache::new(Source::LimitsMuse);
 static POLL_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 pub fn set_poll_minutes(minutes: u16) {
@@ -303,6 +304,7 @@ fn cache_for(agent: AgentId) -> Option<&'static Cache> {
     match agent {
         AgentId::Claude => Some(&CLAUDE_CACHE),
         AgentId::Codex => Some(&CODEX_CACHE),
+        AgentId::Muse => Some(&MUSE_CACHE),
         AgentId::Antigravity | AgentId::Cursor => None,
     }
 }

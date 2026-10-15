@@ -178,16 +178,16 @@ final class NotchTests {
     let displays = [display("external"), display("retina", x: -1728)]
     expectEqual(
       notchRailFrame(settings: rail("retina"), displays: displays),
-      CGRect(x: -76, y: 377, width: 76, height: 396))
+      CGRect(x: -76, y: 336.5, width: 76, height: 477))
     expectEqual(
       notchRailFrame(settings: rail("retina", edge: .left), displays: displays.reversed()),
-      CGRect(x: -1728, y: 377, width: 76, height: 396))
+      CGRect(x: -1728, y: 336.5, width: 76, height: 477))
     expectEqual(
       notchRailFrame(settings: rail("external", edge: .top), displays: displays),
-      CGRect(x: 660, y: 33, width: 408, height: 73))
+      CGRect(x: 618, y: 33, width: 492, height: 73))
     expectEqual(
       notchRailFrame(settings: rail("external", edge: .bottom), displays: displays),
-      CGRect(x: 660, y: 33 + 1084 - 73, width: 408, height: 73))
+      CGRect(x: 618, y: 33 + 1084 - 73, width: 492, height: 73))
   }
 
   func testTheRailShrinksWithFewerProvidersAndHidesWithoutAnyOrWithoutRoom() {
@@ -197,8 +197,9 @@ final class NotchTests {
     expectEqual(notchRailFrame(settings: two, displays: displays)?.height, 234)
     expectNil(notchRailFrame(settings: rail("main", providers: []), displays: displays))
     let defaults = Settings(enabled: true, displayId: "main")
+    expectEqual(defaults.railProviders, [.claude, .codex, .muse, .antigravity, .cursor])
     expectEqual(defaults.pullRequests.enabled, true)
-    expectEqual(defaults.railCells.count, 5)
+    expectEqual(defaults.railCells.count, 6)
     expectEqual(defaults.railCells.last, RailCell.pullRequests)
     expectEqual(
       PullRequestSettings(enabled: true, lists: [.assigned, .mine, .assigned]).selectedLists,
@@ -264,7 +265,7 @@ final class NotchTests {
       let frame = notchRailFrame(settings: settings, displays: displays)
       expectEqual(frame.map { Double($0.width) }, (76 * scale).rounded())
       let layout = railLayout(size: size, displayScale: 1, edge: .right)
-      expectEqual(frame.map { Double($0.height) }, layout.length(count: 4))
+      expectEqual(frame.map { Double($0.height) }, layout.length(count: 5))
       for value in [frame?.minX, frame?.minY, frame?.width, frame?.height] {
         expectEqual(value, value?.rounded())
       }

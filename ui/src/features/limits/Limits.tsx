@@ -62,7 +62,7 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
         <AddAccount buttonRef={node => { addAccount.current = node; }} />
       </header>
 
-      <div className="grid items-start gap-3 lg:grid-cols-2">
+      <div className="grid grid-cols-3 items-start gap-3">
         {providers.map(({ provider, query }) => (
           <div key={provider} className="flex flex-col gap-3">
             {(provider === "claude" || provider === "codex") ? <AccountManager provider={provider}>
@@ -202,8 +202,10 @@ function CardHeader({ card, provider, title, subscription, menu }: { card?: Limi
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-semibold" title={title}>{title}</div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         {card?.active && !card.headline && <ActiveAccountDot />}
+        {menu}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-6 empty:hidden">
         {subscription}
         <SignInBadge signIn={card?.signIn ?? null} />
         {status?.kind === "savedRefresh" && <UsageStatusBadge detail={status.detail} />}
@@ -212,8 +214,6 @@ function CardHeader({ card, provider, title, subscription, menu }: { card?: Limi
             {card.plan}
           </span>
         ) : null}
-        </div>
-        {menu}
       </div>
       {card?.identity.category && <div className="mt-0.5 break-words pl-6 text-[11px] text-[var(--mute)]">{card.identity.category}</div>}
       {updatedAt ? <p className="sr-only">Latest observation {updatedAt}</p> : null}

@@ -140,6 +140,12 @@ fn pinned(home: &Path, summary: &UsageSummaryDto) -> Value {
     value["readAt"] = json!("<read at>");
     value["scanDurationMs"] = json!("<scan duration>");
     for source in value["sources"].as_array_mut().unwrap() {
+        // Muse's data root is the one provider path that differs by OS
+        // (AppData on Windows, ~/.local/share elsewhere), so pin it by name.
+        if source["provider"] == json!("muse") {
+            source["resolvedPath"] = json!("<muse sessions>");
+            continue;
+        }
         let path = PathBuf::from(source["resolvedPath"].as_str().unwrap());
         let parts: Vec<String> = path
             .strip_prefix(home)
@@ -235,6 +241,16 @@ fn expected(cache_hit: bool) -> Value {
                 "malformedRecords": 0,
                 "distinctSessions": 2,
                 "resolvedPath": "~/.codex/sessions"
+            },
+            {
+                "provider": "muse",
+                "status": "missing",
+                "scannedFiles": 0,
+                "skippedFiles": 0,
+                "malformedRecords": 0,
+                "distinctSessions": 0,
+                "message": "No transcript directory on this environment.",
+                "resolvedPath": "<muse sessions>"
             }
         ],
         "pricing": {

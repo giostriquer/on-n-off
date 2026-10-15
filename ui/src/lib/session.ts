@@ -50,6 +50,16 @@ export const LOCKED_AGENTS: AgentInfo[] = [
     pluginToggle: false,
     readsHooks: false,
   },
+  {
+    id: "muse",
+    displayName: "Muse",
+    cliOk: false,
+    cliError: null,
+    installGit: false,
+    installFolder: false,
+    pluginToggle: false,
+    readsHooks: false,
+  },
 ];
 
 export function emptyAgentRecord<T>(value: () => T): Record<AgentId, T> {
@@ -58,6 +68,7 @@ export function emptyAgentRecord<T>(value: () => T): Record<AgentId, T> {
     codex: value(),
     antigravity: value(),
     cursor: value(),
+    muse: value(),
   };
 }
 

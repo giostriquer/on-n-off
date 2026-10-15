@@ -1,8 +1,7 @@
 import { GitPullRequest, RefreshCw } from "lucide-react";
-import { ALL_AGENTS } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
 import { GITHUB_LIST_IDS, type GithubListId } from "$lib/githubTypes";
-import type { NotchDisplay, NotchEdge, NotchSettings, NotchStyle } from "$lib/notchTypes";
+import { NOTCH_PROVIDER_ORDER, type NotchDisplay, type NotchEdge, type NotchSettings, type NotchStyle } from "$lib/notchTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { providerLabel } from "$lib/usageMerge";
 import { Rocker } from "@/components/Rocker";
@@ -226,7 +225,7 @@ export function NotchSettingsCard() {
         <h4 id="notch-providers-label" className={`m-0 ${caption}`}>Integrations</h4>
       </SettingRow>
       <ul className="m-0 list-none p-0" aria-labelledby="notch-providers-label">
-        {ALL_AGENTS.map((id) => {
+        {NOTCH_PROVIDER_ORDER.map((id) => {
           const shown = settings?.providers.includes(id) ?? false;
           const last = shown && cells === 1;
           return (
@@ -241,7 +240,7 @@ export function NotchSettingsCard() {
                   ariaLabel={`Show ${providerLabel(id)} in the notch`}
                   onToggle={() =>
                     settings &&
-                    change({ providers: toggleOrdered(ALL_AGENTS, settings.providers, id, !shown) })
+                    change({ providers: toggleOrdered(NOTCH_PROVIDER_ORDER, settings.providers, id, !shown) })
                   }
                 />
               </SettingRow>

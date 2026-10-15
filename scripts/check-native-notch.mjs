@@ -14,7 +14,7 @@ const embedded = spawnSync('/usr/bin/segedit', [executable, '-extract', '__TEXT'
 assert.equal(embedded.status, 0, `segedit could not read the helper's embedded Info.plist: ${embedded.stderr}`);
 assert.ok(embedded.stdout.equals(readFileSync(infoPlist)), `${executable} embeds another Info.plist than ${infoPlist}: the helper was not relinked`);
 console.log('PASS helper embeds the current Info.plist');
-const settings = { enabled: false, displayId: null, edge: 'right', size: 'standard', show: 'always', providers: ['claude', 'codex', 'antigravity', 'cursor'], pullRequests: { enabled: true, lists: ['mine'] }, popoverStyle: 'glass' };
+const settings = { enabled: false, displayId: null, edge: 'right', size: 'standard', show: 'always', providers: ['claude', 'codex', 'antigravity', 'cursor', 'muse'], pullRequests: { enabled: true, lists: ['mine'] }, popoverStyle: 'glass' };
 const snapshot = { version: protocolVersion, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
 async function check(name, input, expectedAck, args = []) {
   const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -63,7 +63,7 @@ const pull = (number, title, ci, reviewDecision, mergeKind, isDraft) => ({
 const fixture = edge => ({
   version: protocolVersion, sequence: 1,
   snapshot: {
-    settings: { enabled: true, displayId: 'fixture', edge, size: 'standard', show: 'onHover', providers: ['claude', 'codex', 'antigravity', 'cursor'], pullRequests: { enabled: true, lists: ['mine', 'reviewRequested'] }, popoverStyle: 'glass' },
+    settings: { enabled: true, displayId: 'fixture', edge, size: 'standard', show: 'onHover', providers: ['claude', 'codex', 'antigravity', 'cursor', 'muse'], pullRequests: { enabled: true, lists: ['mine', 'reviewRequested'] }, popoverStyle: 'glass' },
     displays: [{ id: 'fixture', name: 'Fixture', x: 0, y: 0, width: 1920, height: 1080, workY: 25, workHeight: 1055, scale: 2, mirrored: false }],
     error: null,
   },
@@ -71,6 +71,7 @@ const fixture = edge => ({
     { provider: 'claude', status: 'ok', currentAccount: true, windows: [quota('weekly_all', 'Weekly · all models', 'weekly', 7, 100), quota('session', '5 hour · all models', 'session', 32, 3), quota('weekly_scoped:Fable', 'Weekly · Fable', 'model', 13, 100)], headlineWindowId: 'weekly_all', innerRing: { kind: 'fable', windowId: 'weekly_scoped:Fable' }, sessions: [session('a', 'repo-28', 'Desktop', 'repo', 'idle', 0), session('b', 'tool-d2', 'Terminal', 'tool', 'working', 2)] },
     { provider: 'codex', status: 'ok', currentAccount: true, windows: [quota('primary', 'Weekly · all models', 'weekly', 49, 140)], headlineWindowId: 'primary', innerRing: { kind: 'workspaceShare' }, workspaceCredits: { usedPercent: 32, resetsAt: at(7 * 86_400_000), left: '17,000 of 25,000 left', renewed: '25,000 of 25,000 left' }, sessions: [session('c', 'tool-42', 'Desktop', 'tool', 'working', 0)] },
     { provider: 'antigravity', status: 'unsupported', currentAccount: true, message: 'Antigravity has no subscription limits to show.', windows: [], sessions: [] },
+    { provider: 'muse', status: 'ok', currentAccount: true, windows: [quota('weekly', 'Weekly · all models', 'weekly', 22, 100), quota('session', '5 hour · all models', 'session', 41, 3)], headlineWindowId: 'weekly', sessions: [session('acme-session', 'webapp-ab', 'Terminal', 'webapp', 'working', 0)] },
     { provider: 'cursor', status: 'unsupported', currentAccount: true, message: 'Cursor has no subscription limits to show.', windows: [], sessions: [] },
   ],
   pullRequests: {
@@ -150,7 +151,7 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
   writeFileSync(message, JSON.stringify(fixture(edge)));
   const result = spawnSync(executable, ['--render', message, dir], { encoding: 'utf8', timeout: 20000 });
   assert.equal(result.status, 0, `render ${edge}: ${result.stderr}`);
-  for (const name of ['rail', 'rail-cap-hovered', 'rail-styled', 'pill', 'popover-claude', 'popover-claude-styled', 'popover-codex', 'popover-antigravity', 'popover-cursor', 'popover-pull-requests']) {
+  for (const name of ['rail', 'rail-cap-hovered', 'rail-styled', 'pill', 'popover-claude', 'popover-claude-styled', 'popover-codex', 'popover-antigravity', 'popover-cursor', 'popover-muse', 'popover-pull-requests']) {
     const size = statSync(resolve(dir, `${name}.png`)).size;
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);
   }

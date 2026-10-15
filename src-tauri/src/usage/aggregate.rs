@@ -210,6 +210,7 @@ impl UsageAggregator {
             let hour = parts.next().unwrap_or("");
             let provider = match parts.next().unwrap_or("") {
                 "codex" => UsageProvider::Codex,
+                "muse" => UsageProvider::Muse,
                 _ => UsageProvider::Claude,
             };
             let model = parts.next().unwrap_or("").to_string();
@@ -250,6 +251,7 @@ fn provider_ord(provider: UsageProvider) -> u8 {
     match provider {
         UsageProvider::Claude => 0,
         UsageProvider::Codex => 1,
+        UsageProvider::Muse => 2,
     }
 }
 
