@@ -10,7 +10,9 @@ enum Render {
       var settings = message.snapshot.settings
       settings.popoverStyle = .solid
       let displays = message.snapshot.displays
-      guard let rail = RailModel(settings: settings, displays: displays) else {
+      guard let rail = RailModel(settings: settings, displays: displays),
+        let styled = RailModel(settings: message.snapshot.settings, displays: displays)
+      else {
         FileHandle.standardError.write(Data("The fixture does not show a rail.\n".utf8))
         return 2
       }
@@ -18,53 +20,40 @@ enum Render {
       let entries = Dictionary(uniqueKeysWithValues: message.providers.map { ($0.provider, $0) })
       let out = URL(fileURLWithPath: outputDirectory, isDirectory: true)
       try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-      try write(
-        NotchRailView(
-          model: rail, entries: entries, pullRequests: message.pullRequests, now: now, active: nil,
-          capHovered: false, action: { _ in }, toggleShow: {}),
-        size: rail.frame.size, scale: rail.display.scale, to: out.appendingPathComponent("rail.png"))
-      try write(
-        NotchRailView(
-          model: rail, entries: entries, pullRequests: message.pullRequests, now: now, active: nil,
-          capHovered: true, action: { _ in }, toggleShow: {}),
-        size: rail.frame.size, scale: rail.display.scale,
-        to: out.appendingPathComponent("rail-cap-hovered.png"))
+      func writeRail(_ model: RailModel, capHovered: Bool, name: String) throws {
+        try write(
+          NotchRailView(
+            model: model, entries: entries, pullRequests: message.pullRequests, now: now,
+            active: nil, capHovered: capHovered, action: { _ in }, toggleShow: {}),
+          size: model.frame.size, scale: model.display.scale,
+          to: out.appendingPathComponent("\(name).png"))
+      }
+      func writePopover(_ model: RailModel, _ cell: RailCell, name: String) throws {
+        guard
+          let placement = popoverPlacement(
+            rail: model, message: message, cell: cell, now: now, openLimits: {},
+            openPullRequests: {})
+        else { return }
+        try write(
+          placement.view, size: placement.frame.size, scale: model.display.scale,
+          to: out.appendingPathComponent("\(name).png"))
+        print("\(name) at \(placement.frame)")
+      }
+      try writeRail(rail, capHovered: false, name: "rail")
+      try writeRail(rail, capHovered: true, name: "rail-cap-hovered")
       if let pill = notchPillFrame(settings: settings, displays: displays) {
         try write(
           NotchPillView(vertical: settings.edge.isVertical), size: pill.size,
           scale: rail.display.scale, to: out.appendingPathComponent("pill.png"))
       }
       for cell in rail.cellIds {
-        guard
-          let placement = popoverPlacement(
-            rail: rail, message: message, cell: cell, now: now, openLimits: {}, openPullRequests: {})
-        else { continue }
-        let name: String
         switch cell {
-        case .provider(let id): name = id.rawValue
-        case .pullRequests: name = "pull-requests"
-        }
-        try write(
-          placement.view, size: placement.frame.size, scale: rail.display.scale,
-          to: out.appendingPathComponent("popover-\(name).png"))
-        print("popover-\(name) at \(placement.frame)")
-      }
-      if let styled = RailModel(settings: message.snapshot.settings, displays: displays) {
-        try write(
-          NotchRailView(
-            model: styled, entries: entries, pullRequests: message.pullRequests, now: now,
-            active: nil, capHovered: false, action: { _ in }, toggleShow: {}),
-          size: styled.frame.size, scale: styled.display.scale,
-          to: out.appendingPathComponent("rail-styled.png"))
-        if let placement = popoverPlacement(
-          rail: styled, message: message, cell: .provider(.claude), now: now, openLimits: {},
-          openPullRequests: {})
-        {
-          try write(
-            placement.view, size: placement.frame.size, scale: styled.display.scale,
-            to: out.appendingPathComponent("popover-claude-styled.png"))
+        case .provider(let id): try writePopover(rail, cell, name: "popover-\(id.rawValue)")
+        case .pullRequests: try writePopover(rail, cell, name: "popover-pull-requests")
         }
       }
+      try writeRail(styled, capHovered: false, name: "rail-styled")
+      try writePopover(styled, .provider(.claude), name: "popover-claude-styled")
       print("rail at \(rail.frame)")
       return 0
     } catch {
