@@ -107,6 +107,7 @@ function readPng(path) {
   const pixels = Buffer.alloc(stride * height);
   for (let y = 0; y < height; y++) {
     const filter = raw[y * (stride + 1)];
+    assert.ok(filter <= 4, `${path} uses an unknown PNG filter ${filter}`);
     for (let x = 0; x < stride; x++) {
       const a = x >= 4 ? pixels[y * stride + x - 4] : 0;
       const b = y > 0 ? pixels[(y - 1) * stride + x] : 0;
@@ -116,10 +117,10 @@ function readPng(path) {
       pixels[y * stride + x] = (raw[y * (stride + 1) + 1 + x] + [0, a, b, (a + b) >> 1, paeth][filter]) & 0xff;
     }
   }
-  return { height, at: (x, y) => [...pixels.subarray((y * width + x) * 4, (y * width + x) * 4 + 4)] };
+  return { width, height, at: (x, y) => [...pixels.subarray((y * width + x) * 4, (y * width + x) * 4 + 4)] };
 }
 const renderRoot = resolve(process.env.NOTCH_RENDER_DIR ?? '.tmp/notch-render');
-for (const edge of ['right', 'top']) {
+for (const edge of ['right', 'left', 'top', 'bottom']) {
   const dir = resolve(renderRoot, edge);
   mkdirSync(dir, { recursive: true });
   const message = resolve(dir, 'message.json');
@@ -131,12 +132,19 @@ for (const edge of ['right', 'top']) {
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);
   }
   // Offscreen there is nothing behind a popover for Liquid Glass to sample, so a render draws the
-  // solid card: the card's padding is opaque popover ink.
+  // solid card: the card's padding, on the side away from the tail, is opaque popover ink.
+  const { scale } = fixture(edge).snapshot.displays[0];
+  const vertical = edge === 'right' || edge === 'left';
   for (const name of ['popover-claude', 'popover-pull-requests']) {
     const png = readPng(resolve(dir, `${name}.png`));
-    const pixel = png.at(12, Math.floor(png.height / 2));
+    const pixel = png.at(edge === 'left' ? png.width - 1 - 6 * scale : 6 * scale, Math.floor(png.height / 2));
     const ink = [14, 14, 17, 255];
-    assert.ok(pixel.every((value, i) => Math.abs(value - ink[i]) <= 3), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
+    assert.ok(pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
+    // A line 4 pt in from the tail's side crosses the tail and nothing else.
+    const line = { right: png.width - 4 * scale, left: 4 * scale - 1, top: 4 * scale - 1, bottom: png.height - 4 * scale }[edge];
+    let tail = 0;
+    for (let i = 0; i < (vertical ? png.height : png.width); i++) if (png.at(vertical ? line : i, vertical ? i : line)[3] > 0) tail++;
+    assert.ok(tail > 0 && tail <= 14 * scale, `render ${edge}: ${name}.png has ${tail} opaque px 4 pt in from its tail side, not one tail`);
   }
   console.log(`PASS render ${edge} → ${dir}`);
 }

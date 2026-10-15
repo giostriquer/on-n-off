@@ -74,13 +74,13 @@ private struct PopoverCard: View {
   }
 }
 
-/// Draws the popover's solid ink card even where Liquid Glass is available. Offscreen renders set
-/// it: they have no desktop behind them for the glass to sample.
-struct SolidPopoverKey: EnvironmentKey {
+private struct SolidPopoverKey: EnvironmentKey {
   static let defaultValue = false
 }
 
 extension EnvironmentValues {
+  /// Fills the popover with solid ink even where Liquid Glass is available. Offscreen renders set
+  /// it: they have no desktop behind them for the glass to sample.
   var solidPopover: Bool {
     get { self[SolidPopoverKey.self] }
     set { self[SolidPopoverKey.self] = newValue }
@@ -91,25 +91,21 @@ private struct PopoverSurface: ViewModifier {
   let model: PopoverModel
   @Environment(\.solidPopover) private var solid
   private var metrics: NotchMetrics { model.metrics }
+  private var cornerRadius: CGFloat { metrics.value(12) }
 
   @ViewBuilder func body(content: Content) -> some View {
+    let card = content.padding(tailPadding)
+    let outline = PopoverOutline(
+      edge: model.edge, tailLength: model.tailLength, tail: model.tail,
+      tailHalfWidth: metrics.value(7), cornerRadius: cornerRadius)
     if #available(macOS 26.0, *), !solid {
-      let outline = PopoverOutline(
-        edge: model.edge, tailLength: model.tailLength, tail: model.tail,
-        tailHalfWidth: metrics.value(7), cornerRadius: metrics.value(12))
-      // Bare glass over a bright desktop loses the muted text; the ink layer keeps it readable.
-      content.padding(tailPadding)
-        .background(popoverInk.opacity(0.55), in: outline)
-        .glassEffect(.regular, in: outline)
+      // Ink over the glass: bare glass over a bright desktop loses the muted text.
+      card.background(popoverInk.opacity(0.55), in: outline).glassEffect(.regular, in: outline)
     } else {
-      content
-        .background(
-          RoundedRectangle(cornerRadius: metrics.value(12)).fill(popoverInk))
-        .overlay(
-          RoundedRectangle(cornerRadius: metrics.value(12)).strokeBorder(
-            Color.white.opacity(0.11), lineWidth: metrics.value(1)))
-        .overlay(tail)
-        .padding(tailPadding)
+      card.background(outline.fill(popoverInk)).overlay(
+        RoundedRectangle(cornerRadius: cornerRadius)
+          .strokeBorder(Color.white.opacity(0.11), lineWidth: metrics.value(1))
+          .padding(tailPadding))
     }
   }
 
@@ -123,34 +119,10 @@ private struct PopoverSurface: ViewModifier {
     }
     return insets
   }
-
-  private var tail: some View {
-    GeometryReader { geometry in
-      let size = geometry.size
-      let length = model.tailLength
-      let half = metrics.value(7)
-      TailShape(edge: model.edge).fill(popoverInk)
-        .frame(
-          width: model.edge.isVertical ? length : half * 2,
-          height: model.edge.isVertical ? half * 2 : length
-        )
-        .position(tailPosition(in: size, length: length))
-    }
-  }
-
-  private func tailPosition(in size: CGSize, length: CGFloat) -> CGPoint {
-    switch model.edge {
-    case .right: return CGPoint(x: size.width + length / 2, y: model.tail)
-    case .left: return CGPoint(x: -length / 2, y: model.tail)
-    case .top: return CGPoint(x: model.tail, y: -length / 2)
-    case .bottom: return CGPoint(x: model.tail, y: size.height + length / 2)
-    }
-  }
 }
 
-/// The card and its tail as a single outline, so the glass has one rim and no seam where the
-/// tail meets the card. `tail` is measured along the edge from the card's top or left.
-@available(macOS 26.0, *)
+/// The card and its tail as one outline, so the glass has one rim with no seam where the tail
+/// meets the card. `tail` is measured along the edge from the card's top or left.
 private struct PopoverOutline: Shape {
   let edge: NotchCore.Edge
   let tailLength: CGFloat
@@ -166,29 +138,50 @@ private struct PopoverOutline: Shape {
     case .top: card.origin.y += tailLength; card.size.height -= tailLength
     case .bottom: card.size.height -= tailLength
     }
-    // The tail's base overlaps the card by a point so the union merges into one contour.
+    let body = Path(roundedRect: card, cornerRadius: cornerRadius)
+    if #available(macOS 14.0, *) {
+      // A one-point foot inside the card makes the union a single contour.
+      return body.union(tailPath(card: card, in: rect, foot: 1))
+    }
+    var path = body
+    path.addPath(tailPath(card: card, in: rect, foot: 0))
+    return path
+  }
+
+  private func tailPath(card: CGRect, in rect: CGRect, foot: CGFloat) -> Path {
     let along = edge.isVertical ? card.minY + tail : card.minX + tail
-    var arrow = Path()
+    let half = tailHalfWidth
+    let points: [CGPoint]
     switch edge {
     case .right:
-      arrow.move(to: CGPoint(x: card.maxX - 1, y: along - tailHalfWidth))
-      arrow.addLine(to: CGPoint(x: rect.maxX, y: along))
-      arrow.addLine(to: CGPoint(x: card.maxX - 1, y: along + tailHalfWidth))
+      points = [
+        CGPoint(x: card.maxX - foot, y: along - half), CGPoint(x: card.maxX, y: along - half),
+        CGPoint(x: rect.maxX, y: along), CGPoint(x: card.maxX, y: along + half),
+        CGPoint(x: card.maxX - foot, y: along + half),
+      ]
     case .left:
-      arrow.move(to: CGPoint(x: card.minX + 1, y: along - tailHalfWidth))
-      arrow.addLine(to: CGPoint(x: rect.minX, y: along))
-      arrow.addLine(to: CGPoint(x: card.minX + 1, y: along + tailHalfWidth))
+      points = [
+        CGPoint(x: card.minX + foot, y: along - half), CGPoint(x: card.minX, y: along - half),
+        CGPoint(x: rect.minX, y: along), CGPoint(x: card.minX, y: along + half),
+        CGPoint(x: card.minX + foot, y: along + half),
+      ]
     case .top:
-      arrow.move(to: CGPoint(x: along - tailHalfWidth, y: card.minY + 1))
-      arrow.addLine(to: CGPoint(x: along, y: rect.minY))
-      arrow.addLine(to: CGPoint(x: along + tailHalfWidth, y: card.minY + 1))
+      points = [
+        CGPoint(x: along - half, y: card.minY + foot), CGPoint(x: along - half, y: card.minY),
+        CGPoint(x: along, y: rect.minY), CGPoint(x: along + half, y: card.minY),
+        CGPoint(x: along + half, y: card.minY + foot),
+      ]
     case .bottom:
-      arrow.move(to: CGPoint(x: along - tailHalfWidth, y: card.maxY - 1))
-      arrow.addLine(to: CGPoint(x: along, y: rect.maxY))
-      arrow.addLine(to: CGPoint(x: along + tailHalfWidth, y: card.maxY - 1))
+      points = [
+        CGPoint(x: along - half, y: card.maxY - foot), CGPoint(x: along - half, y: card.maxY),
+        CGPoint(x: along, y: rect.maxY), CGPoint(x: along + half, y: card.maxY),
+        CGPoint(x: along + half, y: card.maxY - foot),
+      ]
     }
-    arrow.closeSubpath()
-    return Path(roundedRect: card, cornerRadius: cornerRadius).union(arrow)
+    var path = Path()
+    path.addLines(points)
+    path.closeSubpath()
+    return path
   }
 }
 
@@ -485,32 +478,5 @@ enum Actions {
     pasteboard.clearContents()
     pasteboard.setString(reviewRequestHtml(title: pull.title, url: url), forType: .html)
     pasteboard.setString(reviewRequestText(title: pull.title, url: url), forType: .string)
-  }
-}
-
-private struct TailShape: Shape {
-  let edge: NotchCore.Edge
-  func path(in rect: CGRect) -> Path {
-    var path = Path()
-    switch edge {
-    case .right:
-      path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-      path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-      path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-    case .left:
-      path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
-      path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
-      path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-    case .top:
-      path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-      path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
-      path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-    case .bottom:
-      path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-      path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-      path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-    }
-    path.closeSubpath()
-    return path
   }
 }

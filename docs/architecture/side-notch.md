@@ -71,12 +71,14 @@ Things that are easy to get wrong:
   credentials, no network listener. PR rows open in the browser and copy a link to the pasteboard;
   the helper never writes to GitHub.
 - **Popovers are Liquid Glass from macOS 26.** `PopoverView.swift` draws the card and its tail as
-  one glass outline over a translucent ink layer, which keeps the muted text readable on a bright
-  desktop. Earlier systems keep the solid ink card, as does the Windows painter.
+  one outline. On macOS 26 it is glass with a translucent ink layer over it, which keeps the muted
+  text readable on a bright desktop; earlier systems fill it with solid ink. The Windows painter
+  draws its own solid card.
 - **Renders show the layout, not the glass.** Offscreen there is nothing behind a popover for the
-  glass to sample, so `--render` sets `solidPopover` and draws the solid card;
-  `scripts/check-native-notch.mjs` fails if a rendered card is anything else. Judge the glass from
-  a `screencapture -R` of the popover on screen. Computer-use screenshots never show the helper.
+  glass to sample, so `--render` sets `solidPopover` and fills the same outline with solid ink.
+  `scripts/check-native-notch.mjs` fails if a rendered card is anything else or its tail is
+  missing. Judge the glass from a `screencapture -R` of the popover on screen. Computer-use
+  screenshots never show the helper.
 
 Built by `native_build.rs` on macOS only and bundled through `tauri.macos.conf.json`. Native
 checks run without an Xcode XCTest dependency:
