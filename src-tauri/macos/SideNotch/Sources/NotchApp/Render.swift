@@ -28,7 +28,12 @@ enum Render {
           size: model.frame.size, scale: model.display.scale,
           to: out.appendingPathComponent("\(name).png"))
       }
-      func writePopover(_ model: RailModel, _ cell: RailCell, name: String) throws {
+      func writePopover(_ model: RailModel, _ cell: RailCell, suffix: String = "") throws {
+        let name: String
+        switch cell {
+        case .provider(let id): name = "popover-\(id.rawValue)\(suffix)"
+        case .pullRequests: name = "popover-pull-requests\(suffix)"
+        }
         guard
           let placement = popoverPlacement(
             rail: model, message: message, cell: cell, now: now, openLimits: {},
@@ -47,13 +52,10 @@ enum Render {
           scale: rail.display.scale, to: out.appendingPathComponent("pill.png"))
       }
       for cell in rail.cellIds {
-        switch cell {
-        case .provider(let id): try writePopover(rail, cell, name: "popover-\(id.rawValue)")
-        case .pullRequests: try writePopover(rail, cell, name: "popover-pull-requests")
-        }
+        try writePopover(rail, cell)
       }
       try writeRail(styled, capHovered: false, name: "rail-styled")
-      try writePopover(styled, .provider(.claude), name: "popover-claude-styled")
+      try writePopover(styled, .provider(.claude), suffix: "-styled")
       print("rail at \(rail.frame)")
       return 0
     } catch {

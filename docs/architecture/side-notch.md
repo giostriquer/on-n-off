@@ -81,11 +81,11 @@ Things that are easy to get wrong:
 - **Renders show the layout, not the glass.** Offscreen there is nothing behind the notch for the
   glass to sample, so `--render` draws the rail and popovers in solid ink. It also writes
   `rail-styled.png` and `popover-claude-styled.png` in the fixture's own style.
-  `scripts/check-native-notch.mjs` fails if the rail's screen edge is not rail ink, if a rendered
-  card is not solid popover ink, if its tail is missing, off its cell's centre or the wrong width,
-  if a popover is not the same card on every edge plus one tail, and, on macOS 26 or later, if a
-  styled render is solid ink. The fixture keeps popovers clear of the display's edges so the tail
-  sits mid-popover. Judge the glass from a
+  `scripts/check-native-notch.mjs` fails if the rail's screen edge is not rail ink, if the hovered
+  cap changes nothing, if a rendered card is not solid popover ink or lacks its 1 pt border, if its
+  tail is missing, off its cell's centre or the wrong width, if a popover is not the same card on
+  every edge plus one tail, and, on macOS 26 or later, if a styled render is solid ink. The fixture
+  keeps popovers clear of the display's edges so the tail sits mid-popover. Judge the glass from a
   `screencapture -R` of the rail and popovers on screen. Computer-use screenshots never show the
   helper.
 

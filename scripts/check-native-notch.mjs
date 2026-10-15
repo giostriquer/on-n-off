@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
@@ -135,12 +135,16 @@ const railEdgeInk = (png, edge) => {
   const middle = pixels.slice(Math.floor(pixels.length * 0.2), Math.floor(pixels.length * 0.8));
   return middle.filter((pixel) => near(pixel, railInk)).length / middle.length;
 };
-const cardPixel = (png, edge, scale) => png.at(edge === 'left' ? png.width - 1 - 6 * scale : 6 * scale, Math.floor(png.height / 2));
+const awayFromTail = (png, edge, inset) => {
+  const line = edgeLine(png, oppositeEdge[edge], inset);
+  return line[Math.floor(line.length / 2)];
+};
 const glassHost = Number(spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8' }).stdout.split('.')[0]) >= 26;
 const renderRoot = resolve(process.env.NOTCH_RENDER_DIR ?? '.tmp/notch-render');
 const popoverSizes = {};
 for (const edge of ['right', 'left', 'top', 'bottom']) {
   const dir = resolve(renderRoot, edge);
+  rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const message = resolve(dir, 'message.json');
   writeFileSync(message, JSON.stringify(fixture(edge)));
@@ -151,22 +155,24 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);
   }
   const { scale } = fixture(edge).snapshot.displays[0];
+  assert.ok(!readFileSync(resolve(dir, 'rail.png')).equals(readFileSync(resolve(dir, 'rail-cap-hovered.png'))), `render ${edge}: rail-cap-hovered.png shows no hovered cap`);
   for (const name of ['rail', 'rail-cap-hovered']) {
     const ink = railEdgeInk(readPng(resolve(dir, `${name}.png`)), edge);
     assert.equal(ink, 1, `render ${edge}: ${name}.png is ${Math.round(ink * 100)}% solid rail ink along its screen edge`);
   }
   if (glassHost) {
     assert.ok(railEdgeInk(readPng(resolve(dir, 'rail-styled.png')), edge) < 0.5, `render ${edge}: rail-styled.png is solid rail ink, so the Liquid Glass rail is not drawn`);
-    const card = cardPixel(readPng(resolve(dir, 'popover-claude-styled.png')), edge, scale);
+    const card = awayFromTail(readPng(resolve(dir, 'popover-claude-styled.png')), edge, 6 * scale);
     assert.ok(!near(card, popoverInk), `render ${edge}: popover-claude-styled.png card is solid popover ink, so the Liquid Glass popover is not drawn`);
   }
   for (const name of ['popover-claude', 'popover-pull-requests']) {
     const png = readPng(resolve(dir, `${name}.png`));
-    const pixel = cardPixel(png, edge, scale);
+    const pixel = awayFromTail(png, edge, 6 * scale);
     assert.ok(near(pixel, popoverInk), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
-    const rim = edgeLine(png, oppositeEdge[edge], 0);
-    const rimPixel = rim[Math.floor(rim.length / 2)];
-    assert.ok(near(rimPixel, popoverBorder), `render ${edge}: ${name}.png edge is rgba(${rimPixel}), not the solid card's border`);
+    for (let inset = 0; inset <= scale; inset++) {
+      const rim = awayFromTail(png, edge, inset);
+      assert.ok(near(rim, inset < scale ? popoverBorder : popoverInk), `render ${edge}: ${name}.png is rgba(${rim}) ${inset} px in from its far edge, not a 1 pt border then card ink`);
+    }
     const line = edgeLine(png, edge, 4 * scale - 1);
     const opaque = line.flatMap((pixel, i) => (pixel[3] > 0 ? [i] : []));
     const [first, last] = [opaque[0], opaque.at(-1)];

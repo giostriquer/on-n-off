@@ -170,7 +170,7 @@ fn legacy_documents_default_to_always_show_all_providers_and_the_standard_size()
 }
 
 #[test]
-fn popovers_default_to_liquid_glass_and_save_a_solid_choice() {
+fn notch_style_defaults_to_liquid_glass_and_saves_a_solid_choice() {
     let legacy: NotchSettings =
         serde_json::from_str(r#"{"enabled":true,"displayId":"main","edge":"right"}"#).unwrap();
     assert_eq!(legacy.popover_style, NotchStyle::Glass);
