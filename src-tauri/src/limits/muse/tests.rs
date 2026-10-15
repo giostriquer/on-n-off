@@ -122,6 +122,16 @@ fn handshake_requests_the_experimental_api_and_reads_usage() {
 }
 
 #[test]
+fn an_opaque_numeric_tier_is_not_a_plan_name() {
+    let mut transport = happy_transport();
+    transport.received[3]["result"]["usage"]["tier"] = json!("27681631238169137");
+    let session = query_serve(&data_home(), &mut transport).expect("query");
+    let parsed = normalize(session).expect("normalize");
+    assert_eq!(parsed.reading.plan, None);
+    assert_eq!(parsed.reading.windows.len(), 2, "windows still read");
+}
+
+#[test]
 fn a_different_muse_home_fails_the_read() {
     let mut transport = FakeTransport {
         received: VecDeque::from([json!({"id": 1, "result": {

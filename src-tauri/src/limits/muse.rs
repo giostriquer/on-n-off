@@ -335,7 +335,10 @@ fn normalize(session: ServeSession) -> Result<Parsed, ServeFailure> {
     Ok(Parsed {
         account: Some(account_dto),
         reading: Reading {
-            plan: Some(usage.tier.trim().to_string()).filter(|tier| !tier.is_empty()),
+            // The tier arrives as an opaque numeric id, not a plan name;
+            // keep it only when it reads as one.
+            plan: Some(usage.tier.trim().to_string())
+                .filter(|tier| tier.chars().any(|c| c.is_alphabetic())),
             windows: vec![weekly_window, session_window],
             ..Reading::default()
         },
