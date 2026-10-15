@@ -122,6 +122,8 @@ function readPng(path) {
 }
 const railInk = [8, 8, 8, 255];
 const popoverInk = [14, 14, 17, 255];
+const popoverBorder = [40, 40, 43, 255];
+const oppositeEdge = { right: 'left', left: 'right', top: 'bottom', bottom: 'top' };
 const near = (pixel, ink) => pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3);
 const edgeLine = (png, edge, inset) => {
   const vertical = edge === 'right' || edge === 'left';
@@ -162,6 +164,9 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
     const png = readPng(resolve(dir, `${name}.png`));
     const pixel = cardPixel(png, edge, scale);
     assert.ok(near(pixel, popoverInk), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
+    const rim = edgeLine(png, oppositeEdge[edge], 0);
+    const rimPixel = rim[Math.floor(rim.length / 2)];
+    assert.ok(near(rimPixel, popoverBorder), `render ${edge}: ${name}.png edge is rgba(${rimPixel}), not the solid card's border`);
     const line = edgeLine(png, edge, 4 * scale - 1);
     const opaque = line.flatMap((pixel, i) => (pixel[3] > 0 ? [i] : []));
     const [first, last] = [opaque[0], opaque.at(-1)];
