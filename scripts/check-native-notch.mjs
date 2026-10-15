@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
+import { inflateSync } from 'node:zlib';
 
 const executable = resolve(process.argv[2] ?? 'src-tauri/target/debug/on-n-off-notch');
 
@@ -85,6 +86,39 @@ const fixture = edge => ({
   },
   actionError: null,
 });
+// The helper's renders are 8-bit RGBA without interlacing.
+function readPng(path) {
+  const data = readFileSync(path);
+  const chunks = [];
+  let width;
+  let height;
+  for (let at = 8; at < data.length;) {
+    const length = data.readUInt32BE(at);
+    const type = data.toString('latin1', at + 4, at + 8);
+    const body = data.subarray(at + 8, at + 8 + length);
+    if (type === 'IHDR') {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      assert.deepEqual([...body.subarray(8, 13)], [8, 6, 0, 0, 0], `${path} is not 8-bit RGBA without interlacing`);
+    } else if (type === 'IDAT') chunks.push(body);
+    at += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(chunks));
+  const stride = width * 4;
+  const pixels = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x++) {
+      const a = x >= 4 ? pixels[y * stride + x - 4] : 0;
+      const b = y > 0 ? pixels[(y - 1) * stride + x] : 0;
+      const c = x >= 4 && y > 0 ? pixels[(y - 1) * stride + x - 4] : 0;
+      const p = a + b - c;
+      const paeth = Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - c) ? a : Math.abs(p - b) <= Math.abs(p - c) ? b : c;
+      pixels[y * stride + x] = (raw[y * (stride + 1) + 1 + x] + [0, a, b, (a + b) >> 1, paeth][filter]) & 0xff;
+    }
+  }
+  return { height, at: (x, y) => [...pixels.subarray((y * width + x) * 4, (y * width + x) * 4 + 4)] };
+}
 const renderRoot = resolve(process.env.NOTCH_RENDER_DIR ?? '.tmp/notch-render');
 for (const edge of ['right', 'top']) {
   const dir = resolve(renderRoot, edge);
@@ -96,6 +130,14 @@ for (const edge of ['right', 'top']) {
   for (const name of ['rail', 'rail-cap-hovered', 'pill', 'popover-claude', 'popover-codex', 'popover-antigravity', 'popover-cursor', 'popover-pull-requests']) {
     const size = statSync(resolve(dir, `${name}.png`)).size;
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);
+  }
+  // Offscreen there is nothing behind a popover for Liquid Glass to sample, so a render draws the
+  // solid card: the card's padding is opaque popover ink.
+  for (const name of ['popover-claude', 'popover-pull-requests']) {
+    const png = readPng(resolve(dir, `${name}.png`));
+    const pixel = png.at(12, Math.floor(png.height / 2));
+    const ink = [14, 14, 17, 255];
+    assert.ok(pixel.every((value, i) => Math.abs(value - ink[i]) <= 3), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
   }
   console.log(`PASS render ${edge} → ${dir}`);
 }

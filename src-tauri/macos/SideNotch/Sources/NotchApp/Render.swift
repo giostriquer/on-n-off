@@ -45,7 +45,8 @@ enum Render {
         case .pullRequests: name = "pull-requests"
         }
         try write(
-          placement.view, size: placement.frame.size, scale: rail.display.scale,
+          placement.view.environment(\.solidPopover, true), size: placement.frame.size,
+          scale: rail.display.scale,
           to: out.appendingPathComponent("popover-\(name).png"))
         print("popover-\(name) at \(placement.frame)")
       }

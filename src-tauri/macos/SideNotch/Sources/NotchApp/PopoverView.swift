@@ -68,15 +68,50 @@ private struct PopoverCard: View {
     }
     .padding(metrics.value(12))
     .frame(width: model.width, alignment: .topLeading)
-    .background(
-      RoundedRectangle(cornerRadius: metrics.value(12)).fill(popoverInk))
-    .overlay(
-      RoundedRectangle(cornerRadius: metrics.value(12)).strokeBorder(
-        Color.white.opacity(0.11), lineWidth: metrics.value(1)))
-    .overlay(tail)
-    .padding(tailPadding)
+    .modifier(PopoverSurface(model: model))
     .foregroundColor(.white)
     .preferredColorScheme(.dark)
+  }
+}
+
+/// Draws the popover's solid ink card even where Liquid Glass is available. Offscreen renders set
+/// it: they have no desktop behind them for the glass to sample.
+struct SolidPopoverKey: EnvironmentKey {
+  static let defaultValue = false
+}
+
+extension EnvironmentValues {
+  var solidPopover: Bool {
+    get { self[SolidPopoverKey.self] }
+    set { self[SolidPopoverKey.self] = newValue }
+  }
+}
+
+/// The card and its tail: one Liquid Glass piece from macOS 26, the solid ink card before it.
+private struct PopoverSurface: ViewModifier {
+  let model: PopoverModel
+  @Environment(\.solidPopover) private var solid
+  private var metrics: NotchMetrics { model.metrics }
+
+  @ViewBuilder func body(content: Content) -> some View {
+    if #available(macOS 26.0, *), !solid {
+      let outline = PopoverOutline(
+        edge: model.edge, tailLength: model.tailLength, tail: model.tail,
+        tailHalfWidth: metrics.value(7), cornerRadius: metrics.value(12))
+      // Bare glass over a bright desktop loses the muted text; the ink layer keeps it readable.
+      content.padding(tailPadding)
+        .background(popoverInk.opacity(0.55), in: outline)
+        .glassEffect(.regular, in: outline)
+    } else {
+      content
+        .background(
+          RoundedRectangle(cornerRadius: metrics.value(12)).fill(popoverInk))
+        .overlay(
+          RoundedRectangle(cornerRadius: metrics.value(12)).strokeBorder(
+            Color.white.opacity(0.11), lineWidth: metrics.value(1)))
+        .overlay(tail)
+        .padding(tailPadding)
+    }
   }
 
   private var tailPadding: EdgeInsets {
@@ -111,6 +146,50 @@ private struct PopoverCard: View {
     case .top: return CGPoint(x: model.tail, y: -length / 2)
     case .bottom: return CGPoint(x: model.tail, y: size.height + length / 2)
     }
+  }
+}
+
+/// The card and its tail as a single outline, so the glass has one rim and no seam where the
+/// tail meets the card. `tail` is measured along the edge from the card's top or left.
+@available(macOS 26.0, *)
+private struct PopoverOutline: Shape {
+  let edge: NotchCore.Edge
+  let tailLength: CGFloat
+  let tail: CGFloat
+  let tailHalfWidth: CGFloat
+  let cornerRadius: CGFloat
+
+  func path(in rect: CGRect) -> Path {
+    var card = rect
+    switch edge {
+    case .right: card.size.width -= tailLength
+    case .left: card.origin.x += tailLength; card.size.width -= tailLength
+    case .top: card.origin.y += tailLength; card.size.height -= tailLength
+    case .bottom: card.size.height -= tailLength
+    }
+    // The tail's base overlaps the card by a point so the union merges into one contour.
+    let along = edge.isVertical ? card.minY + tail : card.minX + tail
+    var arrow = Path()
+    switch edge {
+    case .right:
+      arrow.move(to: CGPoint(x: card.maxX - 1, y: along - tailHalfWidth))
+      arrow.addLine(to: CGPoint(x: rect.maxX, y: along))
+      arrow.addLine(to: CGPoint(x: card.maxX - 1, y: along + tailHalfWidth))
+    case .left:
+      arrow.move(to: CGPoint(x: card.minX + 1, y: along - tailHalfWidth))
+      arrow.addLine(to: CGPoint(x: rect.minX, y: along))
+      arrow.addLine(to: CGPoint(x: card.minX + 1, y: along + tailHalfWidth))
+    case .top:
+      arrow.move(to: CGPoint(x: along - tailHalfWidth, y: card.minY + 1))
+      arrow.addLine(to: CGPoint(x: along, y: rect.minY))
+      arrow.addLine(to: CGPoint(x: along + tailHalfWidth, y: card.minY + 1))
+    case .bottom:
+      arrow.move(to: CGPoint(x: along - tailHalfWidth, y: card.maxY - 1))
+      arrow.addLine(to: CGPoint(x: along, y: rect.maxY))
+      arrow.addLine(to: CGPoint(x: along + tailHalfWidth, y: card.maxY - 1))
+    }
+    arrow.closeSubpath()
+    return Path(roundedRect: card, cornerRadius: cornerRadius).union(arrow)
   }
 }
 
