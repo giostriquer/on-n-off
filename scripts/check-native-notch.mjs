@@ -132,8 +132,6 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
     const size = statSync(resolve(dir, `${name}.png`)).size;
     assert.ok(size > (name === 'pill' ? 100 : 2000), `render ${edge}: ${name}.png is empty (${size} bytes)`);
   }
-  // Offscreen there is nothing behind a popover for Liquid Glass to sample, so a render draws the
-  // solid card: the card's padding, on the side away from the tail, is opaque popover ink.
   const { scale } = fixture(edge).snapshot.displays[0];
   const vertical = edge === 'right' || edge === 'left';
   for (const name of ['popover-claude', 'popover-pull-requests']) {
@@ -141,8 +139,6 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
     const pixel = png.at(edge === 'left' ? png.width - 1 - 6 * scale : 6 * scale, Math.floor(png.height / 2));
     const ink = [14, 14, 17, 255];
     assert.ok(pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3), `render ${edge}: ${name}.png card is rgba(${pixel}), not solid popover ink`);
-    // A line 4 pt in from the tail's side crosses only the tail, 7 pt wide there. The fixture's
-    // popovers are not clamped to the display, so the tail sits mid-popover, at its cell's centre.
     const line = { right: png.width - 4 * scale, left: 4 * scale - 1, top: 4 * scale - 1, bottom: png.height - 4 * scale }[edge];
     const length = vertical ? png.height : png.width;
     const opaque = [];
@@ -154,7 +150,6 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
   }
   console.log(`PASS render ${edge} → ${dir}`);
 }
-// Every edge draws the same card plus one 8 pt tail on its own side.
 const tailPx = 8 * fixture('right').snapshot.displays[0].scale;
 for (const [name, size] of Object.entries(popoverSizes)) {
   assert.deepEqual(size.left, size.right, `${name}: the left and right popovers differ in size`);

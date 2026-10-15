@@ -76,8 +76,10 @@ Things that are easy to get wrong:
   draws its own solid card.
 - **Renders show the layout, not the glass.** Offscreen there is nothing behind a popover for the
   glass to sample, so `--render` sets `solidPopover` and fills the same outline with solid ink.
-  `scripts/check-native-notch.mjs` fails if a rendered card is anything else or its tail is
-  missing. Judge the glass from a `screencapture -R` of the popover on screen. Computer-use
+  `scripts/check-native-notch.mjs` fails if a rendered card is anything else, if its tail is
+  missing, off its cell's centre or the wrong width, or if a popover is not the same card on every
+  edge plus one tail. The fixture keeps popovers clear of the display's edges so the tail sits
+  mid-popover. Judge the glass from a `screencapture -R` of the popover on screen. Computer-use
   screenshots never show the helper.
 
 Built by `native_build.rs` on macOS only and bundled through `tauri.macos.conf.json`. Native

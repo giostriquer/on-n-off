@@ -79,8 +79,6 @@ private struct SolidPopoverKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-  /// Fills the popover with solid ink even where Liquid Glass is available. Offscreen renders set
-  /// it: they have no desktop behind them for the glass to sample.
   var solidPopover: Bool {
     get { self[SolidPopoverKey.self] }
     set { self[SolidPopoverKey.self] = newValue }
@@ -99,7 +97,6 @@ private struct PopoverSurface: ViewModifier {
       edge: model.edge, tailLength: model.tailLength, tail: model.tail,
       tailHalfWidth: metrics.value(7), cornerRadius: cornerRadius)
     if #available(macOS 26.0, *), !solid {
-      // Ink over the glass: bare glass over a bright desktop loses the muted text.
       card.background(popoverInk.opacity(0.55), in: outline).glassEffect(.regular, in: outline)
     } else {
       card.background(outline.fill(popoverInk)).overlay(
@@ -121,8 +118,6 @@ private struct PopoverSurface: ViewModifier {
   }
 }
 
-/// The card and its tail as one outline, so the glass has one rim with no seam where the tail
-/// meets the card. `tail` is measured along the edge from the card's top or left.
 private struct PopoverOutline: Shape {
   let edge: NotchCore.Edge
   let tailLength: CGFloat
@@ -140,7 +135,6 @@ private struct PopoverOutline: Shape {
     }
     let body = Path(roundedRect: card, cornerRadius: cornerRadius)
     if #available(macOS 14.0, *) {
-      // A one-point foot inside the card makes the union a single contour.
       return body.union(tailPath(card: card, in: rect, foot: 1))
     }
     var path = body
