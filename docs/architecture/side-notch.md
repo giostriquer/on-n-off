@@ -51,7 +51,7 @@ current account's card, and both notches only draw it:
   (`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
   reset.
 
-The macOS helper receives these over the pipe (`headlineWindowId`, `innerRing`; protocol version 4)
+The macOS helper receives these over the pipe (`headlineWindowId`, `innerRing`; protocol version 5)
 and refuses a message naming a window it did not send; the Windows painter gets them in memory.
 What depends on the clock stays with each, since they redraw between reads: a window's percent now
 and its reset note.
@@ -70,8 +70,19 @@ Things that are easy to get wrong:
 - **Nothing sensitive crosses the pipe** — current-account numbers, session rows, PR rows. No
   credentials, no network listener. PR rows open in the browser and copy a link to the pasteboard;
   the helper never writes to GitHub.
-- **The helper is invisible to ordinary screenshots.** Verify it with the `--render` PNG path and
-  `scripts/check-native-notch.mjs`, not with `screencapture`.
+- **Popovers are Liquid Glass from macOS 26.** `PopoverView.swift` draws the card and its tail as
+  one outline. On macOS 26 it is glass with a translucent ink layer over it, which keeps the muted
+  text readable on a bright desktop; earlier systems fill it with solid ink. The settings card's
+  Details choice (`popoverStyle`, glass by default) asks for solid ink on macOS 26 as well. The card
+  offers it only when the snapshot's `liquidGlass` reports macOS 26 or later. The Windows painter
+  draws its own solid card and ignores the choice.
+- **Renders show the layout, not the glass.** Offscreen there is nothing behind a popover for the
+  glass to sample, so `--render` asks for the solid style and fills the same outline with solid ink.
+  `scripts/check-native-notch.mjs` fails if a rendered card is anything else, if its tail is
+  missing, off its cell's centre or the wrong width, or if a popover is not the same card on every
+  edge plus one tail. The fixture keeps popovers clear of the display's edges so the tail sits
+  mid-popover. Judge the glass from a `screencapture -R` of the popover on screen. Computer-use
+  screenshots never show the helper.
 
 Built by `native_build.rs` on macOS only and bundled through `tauri.macos.conf.json`. Native
 checks run without an Xcode XCTest dependency:

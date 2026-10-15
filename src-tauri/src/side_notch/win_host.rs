@@ -292,6 +292,7 @@ fn initial_snapshot() -> NotchSnapshot {
         Ok(settings) => NotchSnapshot {
             revision,
             supported: true,
+            liquid_glass: false,
             settings,
             displays: Vec::new(),
             error: None,
@@ -299,6 +300,7 @@ fn initial_snapshot() -> NotchSnapshot {
         Err(error) => NotchSnapshot {
             revision,
             supported: true,
+            liquid_glass: false,
             settings: Default::default(),
             displays: Vec::new(),
             error: Some(error),

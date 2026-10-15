@@ -1,6 +1,6 @@
 [package]
 name = "on-n-off"
-version = "0.29.0"
+version = "0.30.0"
 description = "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration"
 authors = ["Giovanne Striquer"]
 edition = "2021"
@@ -83,7 +83,7 @@ windows = { version = "0.61", features = [
 core-graphics = "0.25"
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSBundle", "NSError", "NSString", "NSUUID"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSBundle", "NSError", "NSProcessInfo", "NSString", "NSUUID"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = [
     "block2",
     "UNNotificationContent",

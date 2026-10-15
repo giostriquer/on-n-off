@@ -167,6 +167,7 @@ let usageHistory: UsageHistoryStatus = {
 let notch: NotchSnapshot = {
   revision: 0,
   supported: true,
+  liquidGlass: true,
   settings: defaultNotchSettings({ enabled: true, displayId: "studio" }),
   displays: [
     { id: "built-in", name: "Built-in Retina Display", x: -1728, y: 0, width: 1728, height: 1117, workY: 33, workHeight: 1084, scale: 2, mirrored: false },

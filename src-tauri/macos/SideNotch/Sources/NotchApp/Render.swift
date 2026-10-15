@@ -36,7 +36,7 @@ enum Render {
       for cell in rail.cellIds {
         guard
           let placement = popoverPlacement(
-            rail: rail, message: message, cell: cell, now: now, openLimits: {},
+            rail: rail, message: message, cell: cell, now: now, style: .solid, openLimits: {},
             openPullRequests: {})
         else { continue }
         let name: String
