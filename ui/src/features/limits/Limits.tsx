@@ -62,7 +62,7 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
         <AddAccount buttonRef={node => { addAccount.current = node; }} />
       </header>
 
-      <div className="grid items-start gap-3 lg:grid-cols-2">
+      <div className="grid items-start gap-3 lg:grid-cols-3">
         {providers.map(({ provider, query }) => (
           <div key={provider} className="flex flex-col gap-3">
             {(provider === "claude" || provider === "codex") ? <AccountManager provider={provider}>

@@ -80,6 +80,14 @@ afterEach(() => {
 });
 
 describe("Limits", () => {
+  it("lays the provider columns out three across on wide windows", async () => {
+    answer([okClaude()], [okCodex()]);
+    const { container } = renderLimits();
+    await screen.findByText("me@claude.example");
+    expect(container.querySelector(".lg\\:grid-cols-3")).not.toBeNull();
+    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
+  });
+
   it("renders the Muse column from its own read, with no account controls", async () => {
     readLimits.mockImplementation((agentId: AgentId) =>
       Promise.resolve(
