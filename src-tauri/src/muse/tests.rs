@@ -241,7 +241,10 @@ fn skill_toggles_use_muse_scopes_and_ids() {
         .set_skill_enabled("plugin:acme-tools:acme-review", true)
         .expect("plugin toggle");
     assert_eq!(
-        argv(&fixture).lines().collect::<Vec<_>>(),
+        argv(&fixture)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>(),
         [
             "skills disable acme-notes --scope user --json",
             "skills enable plugin:acme-tools:acme-review --scope plugin --json"
@@ -327,7 +330,10 @@ fn uninstall_and_local_update_use_bare_name() {
         .uninstall_plugin("acme-tools@local")
         .expect("uninstall");
     assert_eq!(
-        argv(&fixture).lines().collect::<Vec<_>>(),
+        argv(&fixture)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>(),
         [
             "plugins update acme-tools --json",
             "plugins remove acme-tools --json"
@@ -347,10 +353,18 @@ fn install_accepts_folder_and_marketplace_id_but_not_git() {
     adapter
         .install_plugin("acme-tools@acme")
         .expect("marketplace install");
+    let folder_arg = if cfg!(windows) {
+        format!("\"{}\"", folder.display())
+    } else {
+        folder.display().to_string()
+    };
     assert_eq!(
-        argv(&fixture).lines().collect::<Vec<_>>(),
+        argv(&fixture)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>(),
         [
-            format!("plugins install {} --scope user --json", folder.display()),
+            format!("plugins install {folder_arg} --scope user --json"),
             "plugins install acme-tools@acme --json".to_string()
         ]
     );
@@ -428,7 +442,10 @@ fn marketplace_matching_uses_source_before_selecting_same_named_plugin() {
     assert!(plugin.out_of_sync);
     adapter.update_plugin(&plugin.id).unwrap();
     assert_eq!(
-        argv(&fixture).lines().collect::<Vec<_>>(),
+        argv(&fixture)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>(),
         [
             "plugins marketplace update acme --json",
             "plugins install acme-tools@acme --json"
