@@ -13,8 +13,11 @@ locates the subsystems. Module doc-comments explain their implementation.
   `accounts/{claude,codex}_store.rs`), never through `AgentAdapter`, which accounts reach only
   through `supports_accounts`.
 - A list of providers, or a fact about one (key, names, binaries, which screens it has): drawn
-  from the provider catalogue (`provider_catalogue.rs`), never written out again in Rust. The UI
-  and the notch helper still keep their own; `PROVIDERS.md` names them.
+  from the provider catalogue (`provider_catalogue.rs`), never written out again in Rust. In the UI
+  it comes from `ui/src/lib/providers.ts`, which derives it from the catalogue fixture Rust asserts
+  it writes; a fact Rust does not own (colours, MCP notice, display paths) is a `Record<AgentId, …>`
+  row there, never a `switch` with a `default` or a string compare. Only the notch helper still
+  keeps its own list; `PROVIDERS.md` names it.
 - UI → Rust: `$lib/api`. Feature components never invoke Tauri directly; only `ui/src/lib/api.ts`
   and the updater client (`ui/src/features/updater/tauriUpdaterClient.ts`) import a
   `@tauri-apps/*` package, which `scripts/ipc-commands.test.mjs` checks.

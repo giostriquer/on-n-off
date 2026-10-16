@@ -13,7 +13,7 @@ Where each term lives in code: the Glossary in
 **Provider catalogue**:
 Every provider on-n-off knows, in tab order, with one row of facts about each: its key, names and
 CLI, and which of Limits, Usage and saved accounts it has, beside the side notch's order. Every list
-of providers the Rust side keeps is drawn from it; the UI and the notch helper still keep their own.
+of providers the Rust side and the UI keep is drawn from it; the notch helper still keeps its own.
 _Avoid_: registry, provider list
 
 ### Limits
