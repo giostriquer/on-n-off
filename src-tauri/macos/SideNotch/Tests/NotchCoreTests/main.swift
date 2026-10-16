@@ -13,11 +13,8 @@ final class NotchTests {
       id: id, label: label, kind: kind, usedPercent: percent, resetsAt: reset,
       observedAt: "2026-08-31T12:00:00Z")
   }
-  func reading(
-    windows: [Quota], status: String = "ok", headline: String? = nil, inner: InnerRing? = nil
-  ) -> Reading {
-    Reading(
-      status: status, message: nil, windows: windows, headlineWindowId: headline, innerRing: inner)
+  func reading(windows: [Quota], headline: String? = nil, inner: InnerRing? = nil) -> Reading {
+    Reading(windows: windows, headlineWindowId: headline, innerRing: inner)
   }
   func rail(_ displayId: String, edge: Edge = .right, size: NotchSize = .standard) -> Settings {
     Settings(enabled: true, displayId: displayId, edge: edge, size: size)
@@ -86,7 +83,6 @@ final class NotchTests {
 
   func testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside() {
     let entry = Reading(
-      status: "ok", message: nil,
       windows: [quota("weekly", 31, label: "Weekly · all models", id: "primary")],
       headlineWindowId: "primary", innerRing: .workspaceShare, workspaceCredits: credits(32))
     expectEqual(entry.headline?.usedPercent, 31)
@@ -109,15 +105,6 @@ final class NotchTests {
     expectEqual(renewed.quota.isReached(at: now), false)
     expectEqual(renewed.amounts(at: now), "25,000 of 25,000 left")
     expectEqual(renewed.note(at: now), "Reset \(localDate("2026-06-15T12:00:00Z"))")
-  }
-
-  func testAPausedRingSaysItsReadingIsTheLastObserved() {
-    let weekly = [quota("weekly", 46)]
-    for status in ["failed", "signedOut", "unauthenticated", "unsupported"] {
-      expectEqual(reading(windows: weekly, status: status, headline: "weekly").ringIsLastObserved, true)
-    }
-    expectEqual(reading(windows: weekly, status: "ok", headline: "weekly").ringIsLastObserved, false)
-    expectEqual(reading(windows: weekly, status: "failed").ringIsLastObserved, false)
   }
 
   func testWindowsRenewIndependentlyAndUnknownResetRemainsUsable() {
@@ -289,17 +276,17 @@ final class NotchTests {
     expectThrows(
       try HostMessage.decode(Data((message + String(repeating: " ", count: 262_144)).utf8)))
     let invalid = withCells(
-      #"{"kind":"provider","provider":"claude","reading":{"status":"ok","windows":[{"id":"w","label":"Weekly","kind":"weekly","usedPercent":101,"observedAt":""}]},"sessions":[]}"#
+      #"{"kind":"provider","provider":"claude","reading":{"windows":[{"id":"w","label":"Weekly","kind":"weekly","usedPercent":101,"observedAt":""}]},"sessions":[]}"#
     )
     expectThrows(try HostMessage.decode(Data(invalid.utf8)))
     let withSessions = withCells(
-      #"{"kind":"provider","provider":"cursor","reading":{"status":"unsupported","windows":[]},"sessions":[{"id":"1","name":"repo-1a","place":"Terminal","project":"repo","status":"working","lastActiveAt":"2026-09-01T10:00:00Z"}]}"#
+      #"{"kind":"provider","provider":"cursor","reading":{"windows":[]},"sessions":[{"id":"1","name":"repo-1a","place":"Terminal","project":"repo","status":"working","lastActiveAt":"2026-09-01T10:00:00Z"}]}"#
     )
     let decoded = try HostMessage.decode(Data(withSessions.utf8))
     expectEqual(providerCell(decoded)?.sessions.first?.isWorking, true)
     expectNil(providerCell(decoded)?.reading?.workspaceCredits)
     let withCredits = withCells(
-      #"{"kind":"provider","provider":"codex","reading":{"status":"ok","windows":[],"innerRing":{"kind":"workspaceShare"},"workspaceCredits":{"usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"}},"sessions":[]}"#
+      #"{"kind":"provider","provider":"codex","reading":{"windows":[],"innerRing":{"kind":"workspaceShare"},"workspaceCredits":{"usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"}},"sessions":[]}"#
     )
     expectEqual(
       providerCell(try HostMessage.decode(Data(withCredits.utf8)))?.reading?.inner?.quota.percent(
@@ -324,7 +311,7 @@ final class NotchTests {
       .replacingOccurrences(of: "\"providers\":[\"claude\"]", with: "\"providers\":[\"gemini\",\"claude\"]")
       .replacingOccurrences(of: "\"pullRequests\":{\"enabled\":true", with: "\"pullRequests\":{\"enabled\":false")
     let claude = #"{"kind":"provider","provider":"claude","notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]}"#
-    let gemini = #"{"kind":"provider","provider":"gemini","reading":{"status":"ok","windows":[]},"sessions":[]}"#
+    let gemini = #"{"kind":"provider","provider":"gemini","reading":{"windows":[]},"sessions":[]}"#
     let decoded = try HostMessage.decode(
       Data(rail.replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(gemini),\(claude)]").utf8))
     expectEqual(decoded.cells.map(\.id), [RailCell.provider(.claude)])
@@ -342,7 +329,7 @@ final class NotchTests {
 
   func testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames() throws {
     let valid = withCells(
-      #"{"kind":"provider","provider":"claude","reading":{"status":"ok","windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7,"observedAt":""},{"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13,"observedAt":""}],"headlineWindowId":"weekly_all","innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"}},"sessions":[]}"#
+      #"{"kind":"provider","provider":"claude","reading":{"windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7,"observedAt":""},{"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13,"observedAt":""}],"headlineWindowId":"weekly_all","innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"}},"sessions":[]}"#
     )
     let entry = providerCell(try HostMessage.decode(Data(valid.utf8)))?.reading
     expectEqual(entry?.headline?.usedPercent, 7)
@@ -457,7 +444,6 @@ final class NotchTests {
     expectEqual(claude?.sessions.map(\.isWorking), [true, false])
 
     let codex = providerCell(golden, 1)
-    expectEqual(codex?.reading?.status, "failed")
     expectEqual(codex?.notice, Notice(text: "Codex did not answer.", tone: .muted))
     expectEqual(
       codex?.paused, Notice(text: "Refresh paused. Last observed values below.", tone: .amber))
@@ -511,7 +497,7 @@ final class NotchTests {
       "Claude, weekly, 46% used, Fable weekly, 100% used, limit reached")
     expectEqual(
       ProviderCell(
-        provider: .claude, reading: reading(windows: [weekly], status: "failed", headline: "weekly"),
+        provider: .claude, reading: reading(windows: [weekly], headline: "weekly"),
         notice: Notice(text: "Claude Code reported no usage.", tone: .muted),
         paused: Notice(text: "Refresh paused. Last observed values below.", tone: .amber)
       ).spoken(name: "Claude", at: now),
@@ -519,17 +505,22 @@ final class NotchTests {
     expectEqual(
       ProviderCell(
         provider: .cursor,
-        reading: Reading(
-          status: "unsupported", message: "Cursor has no subscription limits to show.", windows: []),
+        reading: Reading(windows: []),
         notice: Notice(text: "Cursor has no subscription limits to show.", tone: .muted)
       ).spoken(name: "Cursor", at: now),
       "Cursor, Cursor has no subscription limits to show.")
     expectEqual(
       ProviderCell(
-        provider: .codex, reading: reading(windows: [], status: "signedOut"),
+        provider: .codex, reading: reading(windows: []),
         notice: Notice(text: "Usage unavailable.", tone: .muted)
       ).spoken(name: "Codex", at: now),
-      "Codex, unavailable")
+      "Codex, Usage unavailable.")
+    expectEqual(
+      ProviderCell(
+        provider: .muse,
+        reading: Reading(windows: [])
+      ).spoken(name: "Muse", at: now),
+      "Muse, unavailable")
 
     let attention = Attention(conflicts: 1, failing: 2, changesRequested: 0, ready: 1)
     expectEqual(PullRequestCell(label: "—", reading: nil).spoken, "Pull requests, updating")
@@ -667,7 +658,6 @@ checks.testTheMeterRampOnlyEverMovesTowardTheTripRed()
 checks.testTheRingsShowTheWindowsTheHostNamed()
 checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
 checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
-checks.testAPausedRingSaysItsReadingIsTheLastObserved()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testSessionAgesReadLikeTheReferenceApp()
 try checks.testRailFramesAndPillsMatchTheSharedCases()
@@ -683,5 +673,5 @@ try checks.testTheGoldenMessagesDecodeToTheCellsTheHostDecided()
 checks.testVoiceOverSpeaksEachCellFromWhatTheHostDecided()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("20 native check groups; \(failures) failures")
+print("19 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

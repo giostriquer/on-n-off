@@ -129,8 +129,6 @@
         "kind": "provider",
         "provider": "claude",
         "reading": {
-          "status": "ok",
-          "message": null,
           "windows": [
             {
               "id": "weekly_all",
@@ -186,8 +184,6 @@
         "kind": "provider",
         "provider": "codex",
         "reading": {
-          "status": "failed",
-          "message": "Codex did not answer.",
           "windows": [
             {
               "id": "weekly",

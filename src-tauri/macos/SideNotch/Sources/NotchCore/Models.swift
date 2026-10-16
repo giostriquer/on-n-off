@@ -159,19 +159,15 @@ public enum InnerQuota: Equatable, Sendable {
 }
 
 public struct Reading: Codable, Equatable, Sendable {
-  public let status: String
-  public let message: String?
   public let windows: [Quota]
   public let headlineWindowId: String?
   public let innerRing: InnerRing?
   public let workspaceCredits: WorkspaceCredits?
 
   public init(
-    status: String, message: String?, windows: [Quota], headlineWindowId: String? = nil,
-    innerRing: InnerRing? = nil, workspaceCredits: WorkspaceCredits? = nil
+    windows: [Quota], headlineWindowId: String? = nil, innerRing: InnerRing? = nil,
+    workspaceCredits: WorkspaceCredits? = nil
   ) {
-    self.status = status
-    self.message = message
     self.windows = windows
     self.headlineWindowId = headlineWindowId
     self.innerRing = innerRing
@@ -193,8 +189,6 @@ public struct Reading: Codable, Equatable, Sendable {
   public var referencesAreSent: Bool {
     (headlineWindowId == nil || headline != nil) && (innerRing == nil || inner != nil)
   }
-
-  public var ringIsLastObserved: Bool { status != "ok" && headline != nil }
 }
 
 public enum Tone: String, Codable, Sendable {
@@ -253,14 +247,14 @@ public struct ProviderCell: Codable, Equatable, Sendable {
     let headline = reading?.headline
     let period =
       headline.map { _ in "weekly" }
-      ?? (reading == nil ? "updating" : (reading?.message ?? "unavailable"))
+      ?? (reading == nil ? "updating" : (notice?.text ?? "unavailable"))
     guard let headline = headline else { return "\(name), \(period)" }
     let reached = headline.isReached(at: now) ? ", limit reached" : ""
     let inner = reading?.inner.map {
       ", \($0.spokenName), \($0.quota.text(at: now)) used"
         + ($0.quota.isReached(at: now) ? ", limit reached" : "")
     } ?? ""
-    let paused = reading?.ringIsLastObserved == true ? ", refresh paused, last observed" : ""
+    let paused = self.paused == nil ? "" : ", refresh paused, last observed"
     return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + inner + paused
   }
 }

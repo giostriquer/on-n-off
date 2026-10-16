@@ -84,8 +84,14 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
     );
     assert_eq!(cell["provider"], "claude");
     assert_eq!(cell["sessions"], serde_json::json!([]));
+    assert_eq!(
+        cell["notice"],
+        serde_json::json!({"text":"Usage unavailable.","tone":"muted"}),
+        "the signed-out read is spoken for by its notice"
+    );
     let reading = &cell["reading"];
-    assert_eq!(reading["status"], "signedOut");
+    assert!(reading.get("status").is_none());
+    assert!(reading.get("message").is_none());
     assert!(reading.get("account").is_none());
     assert!(
         reading.get("plan").is_none(),

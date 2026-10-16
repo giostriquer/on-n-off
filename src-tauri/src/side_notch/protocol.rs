@@ -1,7 +1,7 @@
 use super::model::frame::{CellData, Notice, PrCell, RailData};
 use super::model::{workspace_share_wording, InnerRing, NotchProvider, NotchSnapshot, ShowMode};
 use super::sessions::LiveSession;
-use crate::dto::{AgentId, LimitWindowDto, LimitsStatus};
+use crate::dto::{AgentId, LimitWindowDto};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_MESSAGE: usize = 262_144;
@@ -81,8 +81,6 @@ struct MessageProvider<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeReading {
-    status: LimitsStatus,
-    message: Option<String>,
     windows: Vec<LimitWindowDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     headline_window_id: Option<String>,
@@ -105,8 +103,6 @@ struct NativeWorkspaceCredits {
 impl From<&NotchProvider> for NativeReading {
     fn from(reading: &NotchProvider) -> Self {
         Self {
-            status: reading.status,
-            message: reading.message.clone(),
             windows: reading.windows.clone(),
             headline_window_id: reading.headline_window_id().map(str::to_owned),
             inner_ring: reading.inner_ring().cloned(),
