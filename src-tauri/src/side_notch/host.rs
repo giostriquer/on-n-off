@@ -79,19 +79,17 @@ pub(super) trait App: Clone + Send + 'static {
 
 struct Poll<T> {
     value: T,
-    loading: bool,
-    started: Option<Instant>,
+    reading_since: Option<Instant>,
     last_read: Option<Instant>,
     force: bool,
     read_at: u64,
 }
 
-impl<T> Poll<T> {
+impl<T: PartialEq> Poll<T> {
     fn new(value: T) -> Self {
         Self {
             value,
-            loading: false,
-            started: None,
+            reading_since: None,
             last_read: None,
             force: false,
             read_at: 0,
@@ -99,7 +97,10 @@ impl<T> Poll<T> {
     }
 
     fn due(&self, now: Instant, interval: Duration, latest: u64) -> bool {
-        !self.loading
+        let reading = self
+            .reading_since
+            .is_some_and(|started| now.saturating_duration_since(started) <= READ_DEADLINE);
+        !reading
             && (self.force
                 || self.read_at != latest
                 || self
@@ -108,26 +109,17 @@ impl<T> Poll<T> {
     }
 
     fn start(&mut self, now: Instant) -> bool {
-        self.loading = true;
-        self.started = Some(now);
+        self.reading_since = Some(now);
         std::mem::take(&mut self.force)
     }
 
-    fn finish(&mut self, value: T, now: Instant, read_at: u64) {
+    fn finish(&mut self, value: T, now: Instant, read_at: u64) -> bool {
+        let changed = self.value != value;
         self.value = value;
-        self.loading = false;
+        self.reading_since = None;
         self.last_read = Some(now);
         self.read_at = read_at;
-    }
-
-    fn release_stale(&mut self, now: Instant) {
-        if self.loading
-            && self
-                .started
-                .is_some_and(|started| now.saturating_duration_since(started) > READ_DEADLINE)
-        {
-            self.loading = false;
-        }
+        changed
     }
 }
 
@@ -216,7 +208,7 @@ impl<T: Transport, A: App> Host<T, A> {
     }
 
     pub fn desire(&mut self, next: NotchSnapshot) {
-        if next.revision == self.app.settings_revision() {
+        if self.current(&next) {
             self.snapshot = next;
             self.transport.settings_changed();
             self.delivery.mark_dirty();
@@ -232,29 +224,19 @@ impl<T: Transport, A: App> Host<T, A> {
 
     fn collect(&mut self, now: Instant) {
         for read in self.reads.try_iter() {
-            match read {
+            let changed = match read {
                 Read::Limits {
                     index,
                     revision,
                     entry,
-                } => {
-                    if self.providers[index].value != entry {
-                        self.delivery.mark_dirty();
-                    }
-                    self.providers[index].finish(entry, now, revision);
-                }
-                Read::Sessions(latest) => {
-                    if latest != self.sessions.value {
-                        self.delivery.mark_dirty();
-                    }
-                    self.sessions.finish(latest, now, 0);
-                }
+                } => self.providers[index].finish(entry, now, revision),
+                Read::Sessions(latest) => self.sessions.finish(latest, now, 0),
                 Read::PullRequests { revision, dto } => {
-                    if self.pulls.value.as_ref() != Some(&*dto) {
-                        self.delivery.mark_dirty();
-                    }
-                    self.pulls.finish(Some(*dto), now, revision);
+                    self.pulls.finish(Some(*dto), now, revision)
                 }
+            };
+            if changed {
+                self.delivery.mark_dirty();
             }
         }
     }
@@ -325,7 +307,7 @@ impl<T: Transport, A: App> Host<T, A> {
             #[cfg(any(target_os = "macos", test))]
             Inbound::Action(Action::ScreensChanged) => {
                 let next = self.app.reread();
-                if next.revision == self.app.settings_revision() {
+                if self.current(&next) {
                     self.snapshot = next;
                     self.delivery.mark_dirty();
                 }
@@ -360,10 +342,6 @@ impl<T: Transport, A: App> Host<T, A> {
 
     fn start_reads(&mut self, now: Instant) {
         let selected = self.snapshot.settings.rail_providers();
-        for poll in &mut self.providers {
-            poll.release_stale(now);
-        }
-        self.sessions.release_stale(now);
         let interval = self.app.limits_interval();
         for (index, agent) in RAIL_ORDER.into_iter().enumerate() {
             if !selected.contains(&agent)
@@ -372,25 +350,19 @@ impl<T: Transport, A: App> Host<T, A> {
                 continue;
             }
             let force = self.providers[index].start(now);
-            let (app, sender) = (self.app.clone(), self.sender.clone());
-            self.app.spawn(move || {
+            self.spawn_read(move |app| {
                 let (entries, revision) = app.read_limits(agent, force);
-                let _ = sender.send(Read::Limits {
+                Read::Limits {
                     index,
                     revision,
                     entry: NotchProvider::current(entries),
-                });
+                }
             });
         }
         if self.sessions.due(now, SESSIONS_INTERVAL, 0) {
             self.sessions.start(now);
-            let (app, sender) = (self.app.clone(), self.sender.clone());
-            let selected = selected.clone();
-            self.app.spawn(move || {
-                let _ = sender.send(Read::Sessions(read_sessions(&app, &selected)));
-            });
+            self.spawn_read(move |app| Read::Sessions(read_sessions(app, &selected)));
         }
-        self.pulls.release_stale(now);
         if self.snapshot.settings.pull_requests.enabled
             && self
                 .pulls
@@ -398,15 +370,25 @@ impl<T: Transport, A: App> Host<T, A> {
         {
             let force = self.pulls.start(now);
             self.pulls_interval = self.app.pull_requests_interval();
-            let (app, sender) = (self.app.clone(), self.sender.clone());
-            self.app.spawn(move || {
+            self.spawn_read(move |app| {
                 let (dto, revision) = app.read_pull_requests(force);
-                let _ = sender.send(Read::PullRequests {
+                Read::PullRequests {
                     revision,
                     dto: Box::new(dto),
-                });
+                }
             });
         }
+    }
+
+    fn spawn_read(&self, read: impl FnOnce(&A) -> Read + Send + 'static) {
+        let (app, sender) = (self.app.clone(), self.sender.clone());
+        self.app.spawn(move || {
+            let _ = sender.send(read(&app));
+        });
+    }
+
+    fn current(&self, snapshot: &NotchSnapshot) -> bool {
+        snapshot.revision == self.app.settings_revision()
     }
 
     pub fn publish(&mut self) {
@@ -414,9 +396,7 @@ impl<T: Transport, A: App> Host<T, A> {
         if status.error.is_none() {
             status.error = self.runtime_error.clone();
         }
-        if self.last_emitted.as_ref() != Some(&status)
-            && status.revision == self.app.settings_revision()
-        {
+        if self.last_emitted.as_ref() != Some(&status) && self.current(&status) {
             self.app.publish(&status);
             self.last_emitted = Some(status);
         }
