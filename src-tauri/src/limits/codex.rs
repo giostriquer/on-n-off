@@ -22,6 +22,8 @@ use crate::reset_alert::ResetSpend;
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
+const RESET_TOLERANCE_SECONDS: i64 = 2;
+
 const HIDDEN_BUCKETS: [&str; 2] = ["base_model_inference", "codex_bengalfox"];
 const HIDDEN_NAMES: [&str; 2] = ["gpt-reserve", "gpt-5.3-codex-spark"];
 
@@ -280,6 +282,10 @@ fn workspace_credits(
             .and_then(rfc3339_from_epoch),
         reached,
     })
+}
+
+pub(crate) fn same_reset_instant(one: DateTime<Utc>, other: DateTime<Utc>) -> bool {
+    (one - other).num_seconds().abs() <= RESET_TOLERANCE_SECONDS
 }
 
 fn rfc3339_from_epoch(epoch: i64) -> Option<String> {

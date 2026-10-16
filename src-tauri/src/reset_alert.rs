@@ -7,6 +7,7 @@ use crate::dto::{
     AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, PendingResetSpendDto,
     ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
+use crate::limits::same_reset_instant;
 
 const SPEND_CAP_PERCENT: u8 = 5;
 const LOWEST_SHARE_PERCENT: u8 = 1;
@@ -14,7 +15,6 @@ const DEFAULT_HOURS_TO_RENEWAL: u16 = 24;
 const MOST_HOURS_TO_RENEWAL: u16 = 7 * 24;
 const SPEND_DELAY_MINUTES: i64 = 10;
 const LATE_AFTER_MINUTES: i64 = 15;
-const CYCLE_TOLERANCE_SECONDS: i64 = 2;
 
 pub type Notice = (String, String);
 
@@ -282,12 +282,8 @@ fn instant(value: &str) -> Option<DateTime<Utc>> {
         .map(|at| at.with_timezone(&Utc))
 }
 
-fn same_cycle(one: DateTime<Utc>, other: DateTime<Utc>) -> bool {
-    (one - other).num_seconds().abs() <= CYCLE_TOLERANCE_SECONDS
-}
-
 fn saved_cycle_is(saved: &str, cycle: DateTime<Utc>) -> bool {
-    instant(saved).is_some_and(|saved| same_cycle(saved, cycle))
+    instant(saved).is_some_and(|saved| same_reset_instant(saved, cycle))
 }
 
 fn is_newer(later: &str, earlier: &str) -> bool {
@@ -336,7 +332,8 @@ impl Waiting {
                 let deciding_alert = match codex {
                     CodexNow::Live(card) => alerts.get(&account).filter(|alert| {
                         low_reading(card, alert, now).is_some_and(|(_, offer)| {
-                            offer.account_id == account && same_cycle(offer.renews_at, spend.cycle)
+                            offer.account_id == account
+                                && same_reset_instant(offer.renews_at, spend.cycle)
                         })
                     }),
                     CodexNow::NobodySignedIn | CodexNow::Unknown => None,

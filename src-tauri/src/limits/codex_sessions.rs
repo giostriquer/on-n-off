@@ -10,7 +10,6 @@ use crate::dto::{LimitWindowKind, ProviderLimitsDto};
 const LOOKBACK_DAYS: i64 = 8;
 const MAX_SESSION_FILES: usize = 512;
 const SESSION_FILE_TAIL_BYTES: u64 = 256 * 1024;
-const RESET_TOLERANCE_SECONDS: i64 = 2;
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
 struct SessionWindow {
@@ -272,7 +271,7 @@ fn matches_window(window: &crate::dto::LimitWindowDto, observation: &SessionWind
     else {
         return false;
     };
-    if (reset - observation.resets_at).num_seconds().abs() > RESET_TOLERANCE_SECONDS {
+    if !super::codex::same_reset_instant(reset, observation.resets_at) {
         return false;
     }
     DateTime::parse_from_rfc3339(&window.observed_at)
