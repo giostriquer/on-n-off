@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use crate::dto::AgentId;
-use crate::usage::UsageProvider;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderFacts {
@@ -99,6 +98,38 @@ impl AgentId {
             let facts = id.facts();
             facts.binary == name || facts.binary_aliases.contains(&name.as_str())
         })
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum UsageProvider {
+    Claude,
+    Codex,
+    Muse,
+}
+
+impl UsageProvider {
+    pub fn agent(self) -> AgentId {
+        match self {
+            Self::Claude => AgentId::Claude,
+            Self::Codex => AgentId::Codex,
+            Self::Muse => AgentId::Muse,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.agent().key()
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        AgentId::from_key(key)?.facts().usage
+    }
+
+    pub fn all() -> impl Iterator<Item = Self> {
+        AgentId::ALL.into_iter().filter_map(|id| id.facts().usage)
     }
 }
 

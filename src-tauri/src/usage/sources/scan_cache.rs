@@ -8,10 +8,11 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::provider_catalogue::UsageProvider;
 use crate::usage::cache_io::atomic_write;
 use crate::usage::history::Watermark;
 use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
-use crate::usage::transcripts::{richest_copies, TokenTotals, UsageProvider, UsageRecord};
+use crate::usage::transcripts::{richest_copies, TokenTotals, UsageRecord};
 
 pub(crate) const USAGE_SCAN_CACHE_VERSION: u32 = 4;
 

@@ -11,4 +11,3 @@ mod transcripts;
 
 pub use folding::{clear_usage_history, spawn_history_folding, usage_history_status};
 pub use summary::read_summary;
-pub(crate) use transcripts::UsageProvider;

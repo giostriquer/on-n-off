@@ -22,7 +22,7 @@ use super::history::{history_fingerprint, history_path_for, HistoryStore};
 use super::pricing::{ensure_rates, LITELLM_RATES_URL};
 use super::sources::{lock_usage_files, Sources};
 use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_for, summary_key};
-use super::transcripts::UsageProvider as Provider;
+use crate::provider_catalogue::UsageProvider as Provider;
 
 const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 

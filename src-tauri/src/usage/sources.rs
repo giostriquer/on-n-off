@@ -8,7 +8,8 @@ use crate::paths::{claude_root_for, codex_root_for};
 
 use super::history::Watermark;
 use super::reader::MTIME_SLACK_MS;
-use super::transcripts::{richest_copies, UsageProvider, UsageRecord};
+use super::transcripts::{richest_copies, UsageRecord};
+use crate::provider_catalogue::UsageProvider;
 use scan_cache::{load_scan_cache, prune_and_save, scan_cache_path_for, ScanCache};
 use source_index::{
     inventory_sources, prepare_sources, reconcile_inventory, source_index_path_for,

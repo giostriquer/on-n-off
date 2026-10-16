@@ -6,7 +6,8 @@ use chrono_tz::Tz;
 
 use super::history::FoldedRow;
 use super::pricing::{cache_savings_usd, price_usage, RateTable};
-use super::transcripts::{TokenTotals, UsageProvider, UsageRecord};
+use super::transcripts::{TokenTotals, UsageRecord};
+use crate::provider_catalogue::UsageProvider;
 
 pub use super::pricing::CostSource;
 
