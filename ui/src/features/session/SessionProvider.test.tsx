@@ -11,7 +11,8 @@ import {
   useAgentSession,
 } from "./SessionProvider";
 import { AppSettingsProvider } from "$lib/useAppSettings";
-import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
+import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
+import type { AgentId, AgentInfo, AgentTabDto, AppSettings, ProjectDto } from "$lib/types";
 
 const state = vi.hoisted(() => ({
   refreshOrder: [] as AgentId[],
@@ -120,7 +121,7 @@ const CLAUDE_TAB: AgentTabDto = {
 
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
-  loadAppSettings: () => Promise.resolve({ hiddenAgents: state.hiddenAgents, binaryPaths: {} }),
+  loadAppSettings: () => Promise.resolve({ ...DEFAULT_APP_SETTINGS, hiddenAgents: state.hiddenAgents } satisfies AppSettings),
   listAgents: () => Promise.resolve(AGENTS),
   listProjects: (agentId: AgentId) => Promise.resolve(state.projectResults[agentId] ?? []),
   listLocalPlugins: (agentId: AgentId) => {

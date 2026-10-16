@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_KEY, SCOPE_KEY, SessionProvider, useAgentSession } from "./SessionProvider";
 import { AppSettingsProvider } from "$lib/useAppSettings";
-import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
+import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
+import type { AgentId, AgentInfo, AgentTabDto, AppSettings, ProjectDto } from "$lib/types";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -135,8 +136,7 @@ const AGENTS: AgentInfo[] = [
 
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
-  loadAppSettings: () =>
-    Promise.resolve({ hiddenAgents: state.hiddenAgents, binaryPaths: {}, automaticUpdates: true }),
+  loadAppSettings: () => Promise.resolve({ ...DEFAULT_APP_SETTINGS, hiddenAgents: state.hiddenAgents } satisfies AppSettings),
   listAgents: () => {
     state.events.push("agents");
     return Promise.resolve(AGENTS);

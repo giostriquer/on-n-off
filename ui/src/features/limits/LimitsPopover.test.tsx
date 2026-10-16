@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
+import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId } from "$lib/types";
 import { AppSettingsProvider } from "$lib/useAppSettings";
 import { LimitsPopover } from "./LimitsPopover";
@@ -97,7 +98,7 @@ beforeEach(() => {
   quitApp.mockReset();
   quitApp.mockResolvedValue(undefined);
   loadAppSettings.mockReset();
-  loadAppSettings.mockResolvedValue({ limitsPollMinutes: 5 });
+  loadAppSettings.mockResolvedValue(DEFAULT_APP_SETTINGS);
 });
 
 afterEach(() => {
