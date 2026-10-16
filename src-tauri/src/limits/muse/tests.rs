@@ -234,3 +234,221 @@ fn a_missing_usage_method_asks_for_an_update() {
     assert!(error.message.contains("Update Muse"), "{error:?}");
     assert!(error.message.contains("usage/read"), "{error:?}");
 }
+
+fn serve(
+    stub: crate::cli_stub::CliStub,
+    name: &str,
+    timeout: std::time::Duration,
+    line_limit: usize,
+) -> ProcessTransport {
+    let root = crate::paths::scratch_dir(name);
+    let mut command = stub.cli(&root).command();
+    match ProcessTransport::spawn_command(&mut command, timeout, line_limit) {
+        Ok(transport) => transport,
+        Err(error) => panic!("{error:?}"),
+    }
+}
+
+fn read_failure(mut transport: impl JsonLineTransport) -> String {
+    let error = query_serve(&data_home(), &mut transport).unwrap_err();
+    let status = transport.finish();
+    classify_query_failure(error, status)
+}
+
+fn scripted(received: Vec<Value>) -> FakeTransport {
+    FakeTransport {
+        received: received.into(),
+        sent: Vec::new(),
+    }
+}
+
+#[test]
+fn a_missing_muse_cli_reads_as_not_installed() {
+    let root = crate::paths::scratch_dir("muse-serve-missing");
+    let mut command = std::process::Command::new(root.join("muse"));
+
+    let error =
+        ProcessTransport::spawn_command(&mut command, crate::cli_stub::ANSWER_DEADLINE, 1024).err();
+    let card = finish_read(Err(ServeFailure::NotInstalled));
+
+    assert_eq!(error, Some(ServeFailure::NotInstalled));
+    assert_eq!(card.status, LimitsStatus::SignedOut);
+    assert_eq!(
+        card.message.as_deref(),
+        Some("Install Muse Code and sign in with `muse` to see subscription limits.")
+    );
+}
+
+#[test]
+fn a_muse_serve_that_never_answers_times_out_by_name() {
+    let transport = serve(
+        crate::cli_stub::CliStub::new("muse").sleep(5),
+        "muse-serve-timeout-message",
+        std::time::Duration::from_millis(100),
+        1024,
+    );
+
+    assert_eq!(read_failure(transport), "Muse serve timed out.");
+}
+
+#[test]
+fn an_oversized_muse_serve_line_is_named_with_its_limit() {
+    let transport = serve(
+        crate::cli_stub::CliStub::new("muse")
+            .stdout(&"x".repeat(128))
+            .sleep(1),
+        "muse-serve-line-message",
+        crate::cli_stub::ANSWER_DEADLINE,
+        64,
+    );
+
+    assert_eq!(
+        read_failure(transport),
+        "Muse serve output line exceeded 64 bytes."
+    );
+}
+
+#[test]
+fn muse_serve_output_that_is_not_json_is_named() {
+    let transport = serve(
+        crate::cli_stub::CliStub::new("muse")
+            .stdout("not-json")
+            .sleep(1),
+        "muse-serve-json-message",
+        crate::cli_stub::ANSWER_DEADLINE,
+        1024,
+    );
+
+    let message = read_failure(transport);
+
+    assert!(
+        message.starts_with("Muse serve returned invalid JSON: "),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_muse_serve_that_closes_cleanly_before_answering_says_so() {
+    let transport = serve(
+        crate::cli_stub::CliStub::new("muse").sleep(1),
+        "muse-serve-closed-message",
+        crate::cli_stub::ANSWER_DEADLINE,
+        1024,
+    );
+
+    assert_eq!(
+        read_failure(transport),
+        "Muse serve closed before returning limits."
+    );
+}
+
+#[test]
+fn a_muse_cli_that_exits_unsuccessfully_before_initializing_is_asked_to_update() {
+    let transport = serve(
+        crate::cli_stub::CliStub::new("muse").exit(2),
+        "muse-serve-exit-message",
+        crate::cli_stub::ANSWER_DEADLINE,
+        1024,
+    );
+
+    assert_eq!(
+        read_failure(transport),
+        "Muse CLI exited before `muse serve` initialized. This version may not support `muse serve`; update Muse Code, then refresh here."
+    );
+}
+
+#[test]
+fn a_malformed_muse_answer_names_its_method() {
+    let message = read_failure(scripted(vec![
+        initialized(),
+        json!({"id": 2, "result": account("accountLogin", Some("you@example.com"))}),
+        json!({"id": 3, "result": {"usage": {"tier": 7}}}),
+    ]));
+
+    assert!(
+        message.starts_with("Muse serve `usage/read` returned a malformed response: "),
+        "{message}"
+    );
+}
+
+#[test]
+fn muse_protocol_errors_name_the_method_the_code_and_any_update_guidance() {
+    let signed_in = json!({"id": 2, "result": account("accountLogin", Some("you@example.com"))});
+    for (reply, expected) in [
+        (
+            json!({"id": 3, "error": {"code": -32601, "message": "method not found"}}),
+            "Muse serve `usage/read` failed (code -32601): method not found. Update Muse to a version that reports subscription usage, then refresh here.",
+        ),
+        (
+            json!({"id": 3, "error": {"code": -32000, "message": "busy"}}),
+            "Muse serve `usage/read` failed (code -32000): busy.",
+        ),
+        (
+            json!({"id": 3, "error": {}}),
+            "Muse serve `usage/read` failed: unknown protocol error.",
+        ),
+    ] {
+        assert_eq!(
+            read_failure(scripted(vec![initialized(), signed_in.clone(), reply])),
+            expected
+        );
+    }
+    assert_eq!(
+        read_failure(scripted(vec![
+            initialized(),
+            json!({"id": 2, "error": {"code": -32601, "message": "method not found"}}),
+        ])),
+        "Muse serve `account/read` failed (code -32601): method not found."
+    );
+}
+
+#[test]
+fn muse_handshake_and_account_refusals_read_exactly() {
+    assert_eq!(
+        read_failure(scripted(vec![json!({"id": 1, "result": {
+            "museHome": "/somewhere/else/muse",
+            "experimentalApi": true
+        }})])),
+        "Muse serve used /somewhere/else/muse, expected /fixture/.local/share/muse."
+    );
+    assert_eq!(
+        read_failure(scripted(vec![json!({"id": 1, "result": {
+            "museHome": "/fixture/.local/share/muse"
+        }})])),
+        "Update Muse: this version cannot report subscription usage to on-n-off."
+    );
+    let mut changed = happy_transport();
+    let last = changed.received.len() - 1;
+    changed.received[last] =
+        json!({"id": 4, "result": account("accountLogin", Some("other@example.com"))});
+    assert_eq!(
+        read_failure(changed),
+        "The signed-in Muse account changed while its usage was read."
+    );
+}
+
+#[test]
+fn a_muse_read_writes_these_exact_lines() {
+    let mut transport = happy_transport();
+
+    query_serve(&data_home(), &mut transport).unwrap();
+
+    let lines: Vec<String> = transport
+        .sent
+        .iter()
+        .map(|message| serde_json::to_string(message).unwrap())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"clientInfo":{{"name":"on_n_off","title":"on-n-off","version":"{}"}},"capabilities":{{"experimentalApi":true,"userInputDialogs":false}}}}}}"#,
+                env!("CARGO_PKG_VERSION")
+            ),
+            r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+            r#"{"jsonrpc":"2.0","id":2,"method":"account/read","params":{}}"#.to_string(),
+            r#"{"jsonrpc":"2.0","id":3,"method":"usage/read","params":{}}"#.to_string(),
+            r#"{"jsonrpc":"2.0","id":4,"method":"account/read","params":{}}"#.to_string(),
+        ]
+    );
+}

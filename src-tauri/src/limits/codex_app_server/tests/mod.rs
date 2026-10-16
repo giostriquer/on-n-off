@@ -1,3 +1,4 @@
+mod messages;
 mod normalize;
 mod spend_rule;
 
