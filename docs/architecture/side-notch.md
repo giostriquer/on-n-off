@@ -119,10 +119,20 @@ Things that are easy to get wrong:
   directly, and never picks a window: the host names the headline and inner-ring windows.
 - **The display is chosen explicitly, by UUID.** A disconnected or mirrored selection hides the
   notch rather than falling back to another screen — silently moving it is worse than not showing.
-- **The layout maths exists twice on purpose**, in `NotchCore` (Swift) and `side_notch/model.rs`
-  (Rust), so Rust can reason about geometry without calling into AppKit. `NotchCoreChecks` exists
-  to keep the two in step; if you change one, change both. Windows draws straight from
-  `model.rs`, so a change there moves both platforms.
+- **The rail's geometry exists twice on purpose**, in `NotchCore` (Swift, `Models.swift`) and
+  `side_notch/model.rs` (Rust), so Rust can reason about it without calling into AppKit. They
+  mirror each other function for function: `railLayout` is `rail_metrics`, `RailLayout.length` is
+  `RailMetrics::length`, `notchRailFrame` is `layout`, `railCellFrames` is `rail_cell_frames`,
+  `notchPillFrame` is `pill_frame`, and `selectedDisplay` and `pixelAligned` keep their names.
+  Both round every measurement to the display's pixel grid before adding them up, so a rail is
+  exactly as long as its cells, their spacing and two ears, and lands on whole device pixels.
+  The helper draws from the Swift copy. Rust's copy decides whether the rail has room (`save` and
+  the host's reads) and is what the Windows painter draws its silhouette, cells, cap and pill
+  from. A change to `model.rs` alone therefore moves the Windows notch and the macOS room check,
+  never the macOS helper: change a measurement in both, and in both checks, which assert the same
+  cases with the same numbers (`NotchCoreChecks`, and `model/tests/notch_core.rs` for Rust).
+  Popovers are not in `model.rs`: the Windows painter places them with its own copy of
+  `popoverFrame` (`popover_frame`) and lays out what is in them itself.
 - **Nothing sensitive crosses the pipe** — current-account numbers, session rows, PR rows. No
   credentials, no network listener. PR rows open in the browser and copy a link to the pasteboard;
   the helper never writes to GitHub.
@@ -157,9 +167,9 @@ bun scripts/check-native-notch.mjs   # after a Rust build
 
 There is no helper and no second executable. `win_window.rs` owns one transparent, always-on-top,
 non-activating `tao` window per selected display and presents it with `UpdateLayeredWindow`;
-`win_paint.rs` draws the rail, the marks and the popovers into a tiny-skia pixmap; `win_displays.rs`
-enumerates monitors; and `win_transport.rs` is the host's Windows transport, in-process channels
-where macOS has pipes. The display is chosen by device name rather than UUID, and the same rule holds —
+`win_paint.rs` draws the rail (from `model.rs`'s metrics and frames), the marks and the popovers
+into a tiny-skia pixmap; `win_displays.rs` enumerates monitors; and `win_transport.rs` is the
+host's Windows transport, in-process channels where macOS has pipes. The display is chosen by device name rather than UUID, and the same rule holds —
 a disconnected or mirrored selection hides the notch. Windows 11 is the floor
 (`CurrentBuildNumber` >= 22000); the settings card says so on older builds.
 

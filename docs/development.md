@@ -32,6 +32,10 @@ locates the subsystems. Module doc-comments explain their implementation.
   endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
   accents it would replace, so a meter stepping into it reads as cooling down just as it runs out.
   Change the shape and change all three, each of which has a test pinning it.
+- The side notch rail's sizes and frames: `rail_metrics` and the frames built from it in
+  `side_notch/model.rs`, mirrored by `NotchCore/Models.swift`. Never a second set of numbers in
+  the Windows painter; change a measurement in both files and both checks
+  ([why](architecture/side-notch.md#on-macos)).
 
 For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
 `ui/src/components/`; do not introduce a parallel checkbox or switch.
