@@ -274,8 +274,7 @@ impl Native for FakeIsolated {
 }
 impl IsolatedSignIn for FakeIsolated {
     fn sign_in(&self) -> std::process::Command {
-        #[cfg(unix)]
-        if self.0 .0.sign_in_needs_a_line.get() {
+        if cfg!(unix) && self.0 .0.sign_in_needs_a_line.get() {
             let mut command = std::process::Command::new("sh");
             command.args(["-c", "IFS= read -r _line || exit 1"]);
             return command;
