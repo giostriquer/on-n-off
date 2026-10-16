@@ -167,7 +167,14 @@ fn poll_with(
         store.recheck(&held).ok()?;
         Some(store)
     });
-    hold_back(attempts, key, fingerprint, previous.as_ref(), outcome);
+    hold_back(
+        attempts,
+        key,
+        fingerprint,
+        previous.as_ref(),
+        outcome,
+        crate::limits_refresh::poll_interval(),
+    );
     published
 }
 
@@ -211,16 +218,14 @@ fn hold_back(
     fingerprint: String,
     previous: Option<&Attempt>,
     outcome: AttemptOutcome,
+    interval: Duration,
 ) {
     let failures = if outcome.error.is_some() {
         previous.map_or(1, |a| a.failures.saturating_add(1))
     } else {
         0
     };
-    let delay = crate::limits_refresh::poll_interval()
-        .saturating_mul(1_u32 << failures.min(4))
-        .min(Duration::from_secs(3600))
-        .max(outcome.retry);
+    let delay = crate::limits_refresh::failure_backoff(interval, failures).max(outcome.retry);
     if let Ok(mut attempts) = attempts.lock() {
         attempts.insert(
             key,
@@ -323,7 +328,14 @@ fn poll_home(
         store.recheck(&held).ok()?;
         Some(store)
     });
-    hold_back(attempts, key, generation, previous.as_ref(), outcome);
+    hold_back(
+        attempts,
+        key,
+        generation,
+        previous.as_ref(),
+        outcome,
+        crate::limits_refresh::poll_interval(),
+    );
     published
 }
 

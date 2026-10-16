@@ -1,6 +1,5 @@
-import type { AgentId, AppSettings, GithubPollSeconds, LimitsPollMinutes, ResetAlert } from "./types";
-
-export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity", "cursor", "muse"];
+import { PROVIDER_IDS } from "./providers";
+import type { AgentId, AppSettings, ResetAlert } from "./types";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   hiddenAgents: [],
@@ -17,7 +16,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 export const CODEX_RESET_MAX_LEFT_PERCENT = 5;
 
+export const RESET_ALERT_MIN_LEFT_PERCENT = 1;
+
 export const RESET_AUTO_SPEND_DELAY_MINUTES = 10;
+
+export const RESET_ALERT_MIN_HOURS = 0;
 
 export const RESET_ALERT_MAX_HOURS = 7 * 24;
 
@@ -37,44 +40,32 @@ export function withResetAlert(alerts: Record<string, ResetAlert>, accountId: st
   return next;
 }
 
-export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefined): AppSettings {
-  return {
-    hiddenAgents: overlay?.hiddenAgents ?? [],
-    binaryPaths: overlay?.binaryPaths ?? {},
-    automaticUpdates: overlay?.automaticUpdates ?? true,
-    limitNotifications: overlay?.limitNotifications ?? false,
-    limitsPollMinutes: normalizeLimitsPollMinutes(overlay?.limitsPollMinutes),
-    githubScopes: overlay?.githubScopes ?? [],
-    githubNotifications: overlay?.githubNotifications ?? false,
-    githubPollSeconds: normalizeGithubPollSeconds(overlay?.githubPollSeconds),
-    closeToTray: overlay?.closeToTray ?? false,
-    resetAlerts: overlay?.resetAlerts ?? {},
-  };
-}
-
-function normalizeLimitsPollMinutes(value: number | undefined): LimitsPollMinutes {
-  return value === 5 || value === 10 || value === 15 || value === 30 ? value : 5;
-}
-
-function normalizeGithubPollSeconds(value: number | undefined): GithubPollSeconds {
-  return value === 30 || value === 60 || value === 120 || value === 300 ? value : 60;
+export function withBinaryPath(
+  paths: AppSettings["binaryPaths"],
+  id: AgentId,
+  path: string,
+): AppSettings["binaryPaths"] {
+  const next = { ...paths };
+  if (path.trim()) next[id] = path.trim();
+  else delete next[id];
+  return next;
 }
 
 export function visibleAgentIds(hidden: readonly AgentId[]): AgentId[] {
   const set = new Set(hidden);
-  const visible = ALL_AGENTS.filter((id) => !set.has(id));
-  return visible.length > 0 ? [...visible] : ["claude"];
+  const visible = PROVIDER_IDS.filter((id) => !set.has(id));
+  return visible.length > 0 ? visible : PROVIDER_IDS.slice(0, 1);
 }
 
 export function setAgentHidden(hidden: readonly AgentId[], id: AgentId, hide: boolean): AgentId[] {
   const next = new Set(hidden);
   if (hide) {
     next.add(id);
-    if (ALL_AGENTS.every((agent) => next.has(agent))) {
-      return ALL_AGENTS.filter((agent) => hidden.includes(agent));
+    if (PROVIDER_IDS.every((agent) => next.has(agent))) {
+      return PROVIDER_IDS.filter((agent) => hidden.includes(agent));
     }
   } else {
     next.delete(id);
   }
-  return ALL_AGENTS.filter((agent) => next.has(agent));
+  return PROVIDER_IDS.filter((agent) => next.has(agent));
 }

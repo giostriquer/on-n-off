@@ -40,6 +40,52 @@ fn encode_decode_round_trip() {
 }
 
 #[test]
+fn each_file_names_its_provider_by_key_and_a_provider_no_reader_knows_is_dropped() {
+    let files = [
+        ("/claude.jsonl", UsageProvider::Claude, "claude"),
+        ("/codex.jsonl", UsageProvider::Codex, "codex"),
+        ("/muse.jsonl", UsageProvider::Muse, "muse"),
+    ];
+    let mut cache = ScanCache::new();
+    for (path, provider, _) in files {
+        cache.insert(
+            path.into(),
+            CachedFile {
+                size: 100,
+                mtime_ms: 50,
+                provider,
+                records: Arc::new(vec![UsageRecord {
+                    provider,
+                    ..sample_record()
+                }]),
+            },
+        );
+    }
+
+    let mut encoded = encode_scan_cache(&cache);
+    for (path, _, key) in files {
+        assert_eq!(
+            encoded["files"][path]["p"],
+            serde_json::json!(key),
+            "{path}"
+        );
+    }
+    let mut unknown = encoded["files"]["/codex.jsonl"].clone();
+    unknown["p"] = serde_json::json!("gemini");
+    encoded["files"]["/gemini.jsonl"] = unknown;
+
+    let restored = decode_scan_cache(&encoded);
+    let mut paths: Vec<&str> = restored.keys().map(String::as_str).collect();
+    paths.sort_unstable();
+    assert_eq!(paths, ["/claude.jsonl", "/codex.jsonl", "/muse.jsonl"]);
+    for (path, provider, _) in files {
+        let file = &restored[path];
+        assert_eq!(file.provider, provider, "{path}");
+        assert_eq!(file.records[0].provider, provider, "{path}");
+    }
+}
+
+#[test]
 fn a_one_hour_share_larger_than_its_cache_writes_decodes_clamped() {
     let mut cache = ScanCache::new();
     cache.insert(

@@ -1,0 +1,19 @@
+{
+  "hiddenAgents": ["antigravity"],
+  "binaryPaths": { "codex": "/opt/acme/bin/codex" },
+  "automaticUpdates": false,
+  "limitNotifications": true,
+  "limitsPollMinutes": 15,
+  "githubScopes": ["org:acme"],
+  "githubNotifications": true,
+  "githubPollSeconds": 300,
+  "closeToTray": true,
+  "resetAlerts": {
+    "acct-a": {
+      "label": "you@example.com",
+      "maxLeftPercent": 4,
+      "minHoursToRenewal": 36,
+      "automatic": true
+    }
+  }
+}

@@ -3,7 +3,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
-import { refreshLimits } from "./useLimitsProviders";
+import { SharedReads } from "$lib/sharedReads/announcements";
+import { refreshLimits } from "$lib/sharedReads/limits";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 
@@ -52,6 +53,7 @@ function renderLimits(pollMinutes: LimitsPollMinutes = 5) {
   });
   const view = render(
     <QueryClientProvider client={client}>
+      <SharedReads />
       <Limits pollMinutes={pollMinutes} resetAlerts={{}} onResetAlertsChange={async () => undefined} />
     </QueryClientProvider>,
   );
@@ -513,6 +515,18 @@ it("refuses an already-open sign-out confirmation after the native identity chan
  expect(accountAction).not.toHaveBeenCalled();
 });
 
+it("lays out one column per provider with limits, in tab order, and offers to add an account only where accounts can be saved", async () => {
+  answer([okClaude()], [okCodex()]);
+  renderLimits();
+  await screen.findByRole("region", { name: /^Codex limits/ });
+  const columns = screen.getByTestId("limits-screen").querySelector(".grid")!.children;
+  expect([...columns].map((column) => within(column as HTMLElement).getAllByRole("region")[0]?.getAttribute("aria-label")?.split(" ")[0])).toEqual(["Claude", "Codex", "Muse"]);
+
+  fireEvent.click(screen.getByRole("button", {name: "Add account"}));
+  const picker = screen.getByRole("group", {name: "Add account"});
+  expect(within(picker).getAllByRole("button", { name: /^(Claude|Codex|Antigravity|Cursor|Muse)$/ }).map((button) => button.lastChild?.textContent)).toEqual(["Claude", "Codex"]);
+});
+
 it.each(["claude", "codex"])("adds only the %s account selected in the shared picker", async provider => {
   answer([okClaude()], [okCodex()]);
   renderLimits();
@@ -760,6 +774,29 @@ describe("archiving", () => {
 
     await act(async () => { for (const handler of sharedReadHandlers) handler({ source: "limits:codex" }); });
     await waitFor(() => expect(readLimits.mock.calls.slice(reads)).toEqual([["codex", false]]));
+  });
+
+  it("unarchives an account in the Muse column, which has no account manager, and hands focus to the next archived row", async () => {
+    const weekly = { id: "weekly", label: "Weekly · all models", kind: "weekly" as const, usedPercent: 30, resetsAt: "2026-08-24T20:00:00Z", observedAt: NOW };
+    const archived = new Set(["muse-old", "muse-spare"]);
+    const muse = (id: string, label: string, currentAccount = false): ProviderLimits =>
+      ({ provider: "muse", status: "ok", account: { id, label }, currentAccount, plan: "wonder", windows: [weekly], archived: archived.has(id) });
+    readLimits.mockImplementation(async (provider: AgentId) => provider === "muse"
+      ? [muse("muse-now", "now@muse.example", true), muse("muse-old", "old@muse.example"), muse("muse-spare", "spare@muse.example")]
+      : provider === "claude" ? [okClaude()] : [okCodex()]);
+    setLimitsArchived.mockImplementation(async (_provider: AgentId, ids: string[]) => { for (const id of ids) archived.delete(id); });
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (2)" }));
+    const unarchive = screen.getByRole("button", { name: "Unarchive old@muse.example" });
+    unarchive.focus();
+
+    fireEvent.click(unarchive);
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("muse", ["muse-old"], false));
+    expect(await screen.findByRole("region", { name: "Muse limits · old@muse.example" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archived (1)" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Unarchive spare@muse.example" })).toHaveFocus());
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("removes an archived account as Remove account does: the saved login, then its history first", async () => {

@@ -1,6 +1,6 @@
 use super::super::test_support::*;
 use super::super::*;
-use crate::dto::UsageHistoryState;
+use crate::dto::{AgentId, UsageHistoryState};
 use crate::paths::scratch_dir;
 use crate::usage::folding::{clear_history_in, fold_history_in, history_status_in, FoldChecks};
 use crate::usage::history::{history_path_for, FoldedRow, HistoryStore, Watermark};

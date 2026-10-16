@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ScopeBar } from "./ScopeBar";
 
@@ -50,6 +50,32 @@ describe("ScopeBar", () => {
     expect(screen.getByText("acme")).toBeTruthy();
     await fireEvent.click(screen.getByText("on-n-off"));
     expect(onSelect).toHaveBeenCalledWith(String.raw`E:\dev\on-n-off`);
+  });
+
+  it.each([
+    ["claude", "~/.claude/settings.json"],
+    ["codex", "~/.codex/config.toml"],
+    ["antigravity", "~/.gemini/antigravity-cli/"],
+    ["cursor", "~/.cursor/"],
+    ["muse", "~/.config/muse/settings.json"],
+  ] as const)("shows %s's global config when no project is selected", (agentId, path) => {
+    render(
+      <ScopeBar
+        agentId={agentId}
+        projects={projects}
+        selectedPath={null}
+        tally=""
+        globalItems={0}
+        onSelect={() => undefined}
+        onPickFolder={() => undefined}
+        onOpenPath={() => undefined}
+      />,
+    );
+    expect(screen.getByTitle(path)).toHaveTextContent(path);
+
+    fireEvent.click(screen.getByRole("button", { name: /All projects/i }));
+    const global = screen.getByText("GLOBAL").closest("button")!;
+    expect(within(global).getByTitle(path).textContent).toBe(path);
   });
 
   it("filters projects and pastes a folder path", async () => {

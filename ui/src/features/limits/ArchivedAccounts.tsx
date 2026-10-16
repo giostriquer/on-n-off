@@ -5,7 +5,7 @@ import { accountButton as button } from "@/features/accounts/AccountManager";
 import { parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { AgentId } from "$lib/types";
-import { providerLabel } from "$lib/usageMerge";
+import { providerLabel } from "$lib/providers";
 import type { CardAccount, LimitCard } from "./limitCards";
 
 type RowAction = "unarchive" | "remove";

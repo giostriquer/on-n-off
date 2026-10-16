@@ -635,7 +635,7 @@ fn popover_entries(
                 y,
                 inner_w - v(13.0) - v(7.0),
                 line_h(13.0, TextWeight::Semibold),
-                format!("{} Usage", provider_name(provider.cell.provider)),
+                format!("{} Usage", provider.cell.provider.display_name()),
                 v(13.0),
                 TextWeight::Semibold,
                 [255, 255, 255, 255],
@@ -1339,16 +1339,6 @@ fn badge_color(badge: Badge) -> Color {
         Badge::Green => LIVE_GREEN,
         Badge::Red => TRIP_RED,
         Badge::Amber => WARN_AMBER,
-    }
-}
-
-fn provider_name(provider: AgentId) -> &'static str {
-    match provider {
-        AgentId::Claude => "Claude",
-        AgentId::Codex => "Codex",
-        AgentId::Antigravity => "Antigravity",
-        AgentId::Cursor => "Cursor",
-        AgentId::Muse => "Muse",
     }
 }
 

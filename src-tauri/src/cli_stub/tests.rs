@@ -212,3 +212,54 @@ fn a_foreign_file_under_a_launchers_name_is_never_run() {
     let _ = fs::remove_file(&shared);
     assert_eq!(out.unwrap().trim(), token);
 }
+
+#[test]
+fn a_stub_that_awaits_a_line_answers_only_once_one_arrives() {
+    use std::io::{Read, Write};
+    let dir = scratch_dir("cli-stub-awaits-line");
+    let mut child = CliStub::new("awaiting")
+        .awaits_line()
+        .stdout("answered")
+        .cli(&dir)
+        .command()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    std::thread::sleep(Duration::from_millis(300));
+    let waiting = child.try_wait().unwrap().is_none();
+    child.stdin.take().unwrap().write_all(b"go\n").unwrap();
+    let mut answer = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut answer)
+        .unwrap();
+    let status = child.wait().unwrap();
+
+    assert!(waiting, "the stub ran on without its line");
+    assert_eq!(answer.trim_end(), "answered");
+    assert!(status.success());
+}
+
+#[test]
+fn a_stub_writes_a_file_to_stderr() {
+    let dir = scratch_dir("cli-stub-stderr-file");
+    fs::write(dir.join("noise.txt"), "noise-1\nnoise-2\n").unwrap();
+
+    let output = CliStub::new("noisy")
+        .stderr_file("noise.txt")
+        .cli(&dir)
+        .command()
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),
+        "noise-1\nnoise-2\n"
+    );
+    assert!(output.stdout.is_empty());
+}

@@ -2,25 +2,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::provider_catalogue::UsageProvider;
+
 pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 3;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UsageProvider {
-    Claude,
-    Codex,
-    Muse,
-}
-
-impl UsageProvider {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::Muse => "muse",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TokenTotals {

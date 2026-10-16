@@ -12,10 +12,6 @@ export const copy = {
   hooksScope: "user settings + plugins · listed, never run",
   hooksUnread: (agent: string) =>
     `on-n-off doesn’t read hooks for ${agent}. Claude and Codex only, for now — this is not the same as ${agent} having none.`,
-  cursorMcpReadOnly:
-    "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`.",
-  museMcpReadOnly:
-    "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`.",
   filterMiss: (q: string) => `Nothing matches “${q}”.`,
   skillLocked: "Claude only enables this with the whole plugin.",
   skillProject: "Local to this project. Presence is on; no disable yet.",

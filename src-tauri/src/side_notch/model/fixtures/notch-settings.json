@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "displayId": "display-1",
+  "edge": "left",
+  "size": "large",
+  "show": "onHover",
+  "providers": ["claude", "codex"],
+  "pullRequests": { "enabled": false, "lists": ["mine", "assigned"] },
+  "popoverStyle": "solid"
+}

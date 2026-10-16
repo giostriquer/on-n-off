@@ -25,6 +25,7 @@ mod clients;
 pub use clients::activation_blockers;
 
 use crate::dto::AgentId;
+use crate::provider_catalogue::WITH_SAVED_ACCOUNTS as PROVIDERS;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use transaction::{Native, NativeGuard};
@@ -59,8 +60,6 @@ pub struct AccountsDto {
 fn home() -> Result<PathBuf, String> {
     crate::paths::user_home().map_err(|_| "Cannot resolve account storage home.".into())
 }
-
-const PROVIDERS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 
 trait Adapter: Sync {
     fn native(&self, home: &Path) -> Result<Box<dyn NativeAccount>, String>;

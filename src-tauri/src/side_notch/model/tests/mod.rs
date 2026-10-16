@@ -96,16 +96,7 @@ fn muse_follows_codex_even_when_other_integrations_are_selected() {
         AgentId::Codex,
         AgentId::Claude,
     ];
-    assert_eq!(
-        selected.rail_providers(),
-        [
-            AgentId::Claude,
-            AgentId::Codex,
-            AgentId::Muse,
-            AgentId::Antigravity,
-            AgentId::Cursor,
-        ]
-    );
+    assert_eq!(selected.rail_providers(), RAIL_ORDER);
 }
 
 #[test]
@@ -162,6 +153,36 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let json = serde_json::to_value(&current).unwrap();
     assert_eq!(json["pullRequests"]["enabled"], true);
     assert_eq!(json["pullRequests"]["lists"][0], "assigned");
+}
+
+#[test]
+fn the_document_the_ui_checks_its_notch_settings_against_is_the_one_rust_writes() {
+    let settings = NotchSettings {
+        enabled: true,
+        display_id: Some("display-1".into()),
+        edge: Edge::Left,
+        size: NotchSize::Large,
+        show: ShowMode::OnHover,
+        providers: vec![AgentId::Claude, AgentId::Codex],
+        pull_requests: NotchPullRequests {
+            enabled: false,
+            lists: vec![GithubList::Mine, GithubList::Assigned],
+        },
+        popover_style: NotchStyle::Solid,
+    };
+    let fixture = include_str!("../fixtures/notch-settings.json");
+    let written = serde_json::to_value(&settings).unwrap();
+
+    assert_eq!(
+        written,
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap(),
+        "src-tauri/src/side_notch/model/fixtures/notch-settings.json must read:\n{}",
+        serde_json::to_string_pretty(&written).unwrap()
+    );
+    assert_eq!(
+        serde_json::from_str::<NotchSettings>(fixture).unwrap(),
+        settings
+    );
 }
 
 #[test]
@@ -289,16 +310,16 @@ fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
     let fresh = NotchSettings::default();
     assert_eq!(
         fresh.providers,
-        vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
-        "the three with quotas to draw"
+        crate::provider_catalogue::WITH_LIMITS,
+        "the ones with quotas to draw"
     );
     let chosen = NotchSettings {
         providers: RAIL_ORDER.to_vec(),
         ..NotchSettings::default()
     };
     assert_eq!(
-        chosen.rail_providers().len(),
-        5,
+        chosen.rail_providers(),
+        RAIL_ORDER,
         "an explicit choice stands"
     );
 }

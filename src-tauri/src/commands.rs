@@ -154,13 +154,10 @@ pub async fn open_url(url: String, app: tauri::AppHandle) -> Result<(), AdapterE
 pub async fn list_agents(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<AgentInfo>, AdapterError> {
-    let adapters = [
-        Arc::clone(&state.claude),
-        Arc::clone(&state.codex),
-        Arc::clone(&state.antigravity),
-        Arc::clone(&state.cursor),
-        Arc::clone(&state.muse),
-    ];
+    let adapters: Vec<_> = AgentId::ALL
+        .into_iter()
+        .map(|id| state.adapter(id))
+        .collect();
     blocking("provider health", move || {
         Ok(adapters.into_iter().map(|adapter| adapter.info()).collect())
     })
@@ -384,26 +381,20 @@ pub async fn consume_codex_reset_credit(
     idempotency_key: String,
 ) -> Result<ResetCreditOutcome, AdapterError> {
     blocking("banked reset", move || {
-        let outcome = crate::limits_refresh::consume_codex_reset_credit(
-            &account_id,
-            &idempotency_key,
-            crate::limits::ResetSpend::ByHand,
-        )
-        .map_err(AdapterError::message)?;
-        crate::limits_monitor::auto_spend::used_by_hand(&account_id, outcome);
-        Ok(outcome)
+        crate::limits_monitor::spend_reset_by_hand(&account_id, &idempotency_key)
+            .map_err(AdapterError::message)
     })
     .await
 }
 
 #[tauri::command]
 pub fn pending_reset_spends() -> Vec<PendingResetSpendDto> {
-    crate::limits_monitor::auto_spend::listed()
+    crate::limits_monitor::pending_reset_spends()
 }
 
 #[tauri::command]
 pub fn cancel_reset_spend(account_id: String) -> bool {
-    crate::limits_monitor::auto_spend::cancel_listed(&account_id)
+    crate::limits_monitor::cancel_reset_spend(&account_id)
 }
 
 #[tauri::command]
@@ -599,3 +590,6 @@ pub async fn add_account(
 pub fn cancel_account_login(operation_id: String) {
     crate::accounts::cancel(&operation_id);
 }
+
+#[cfg(test)]
+mod tests;

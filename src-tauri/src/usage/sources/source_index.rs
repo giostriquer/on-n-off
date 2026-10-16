@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 use super::scan_cache::{
     dedupe_within_file, CachedFile, PruneOptions, ScanCache, USAGE_SCAN_CACHE_VERSION,
 };
+use crate::provider_catalogue::UsageProvider;
 use crate::usage::cache_io::atomic_write;
 use crate::usage::history::Watermark;
 use crate::usage::reader::{inventory_transcript_files, read_transcript_records, TranscriptFile};
-use crate::usage::transcripts::{UsageProvider, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
+use crate::usage::transcripts::{UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
 
 pub(crate) const USAGE_SOURCE_INDEX_VERSION: u32 = 3;
 

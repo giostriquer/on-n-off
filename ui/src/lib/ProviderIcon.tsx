@@ -1,4 +1,5 @@
 import type { SVGProps } from "react";
+import { providerIconColor } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 
 type IconProps = SVGProps<SVGSVGElement> & {
@@ -50,6 +51,14 @@ export function MuseIcon({ title = "Muse", ...props }: IconProps) {
   );
 }
 
+const ICONS: Readonly<Record<AgentId, typeof ClaudeIcon>> = {
+  claude: ClaudeIcon,
+  codex: ChatGptIcon,
+  antigravity: AntigravityIcon,
+  cursor: CursorIcon,
+  muse: MuseIcon,
+};
+
 export function ProviderIcon({
   provider,
   className = "size-3.5 shrink-0",
@@ -59,22 +68,6 @@ export function ProviderIcon({
   className?: string;
   title?: string;
 }) {
-  switch (provider) {
-    case "claude":
-      return <ClaudeIcon className={className} title={title ?? "Claude"} style={{ color: "#d97757" }} />;
-    case "codex":
-      return <ChatGptIcon className={className} title={title ?? "ChatGPT"} style={{ color: "var(--silkscreen)" }} />;
-    case "cursor":
-      return <CursorIcon className={className} title={title ?? "Cursor"} style={{ color: "var(--silkscreen)" }} />;
-    case "antigravity":
-      return <AntigravityIcon className={className} title={title ?? "Antigravity"} style={{ color: "#3186ff" }} />;
-    case "muse":
-      return <MuseIcon className={className} title={title ?? "Muse"} style={{ color: "#0082fb" }} />;
-    default:
-      return (
-        <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-          <circle cx="12" cy="12" r="8" fill="var(--mute)" />
-        </svg>
-      );
-  }
+  const Icon = ICONS[provider];
+  return <Icon className={className} title={title} style={{ color: providerIconColor(provider) }} />;
 }
