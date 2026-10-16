@@ -698,19 +698,6 @@ fn every_mint_miss_falls_back_to_the_serve_read() {
 #[test]
 fn a_serve_fallback_names_the_account_as_the_mint_reading_does() {
     let root = crate::paths::scratch_dir("muse-identity-fallback");
-    let mut replies = happy_replies();
-    replies[1]["result"]["museHome"] = json!(crate::paths::muse_data_for(&root).to_string_lossy());
-    replies[2]["result"]["label"] = json!("Display Name");
-    replies[4]["result"]["label"] = json!("Display Name");
-    let fallback = read_current(
-        &root,
-        move |_, _, _| Ok(Script::new(replies).session(SERVE)),
-        |_| signed_in(Some("You@Example.com")),
-        |_| None,
-    )
-    .expect("serve fallback")
-    .account
-    .expect("account");
     let minted = read_current(
         &root,
         serve_must_not_run,
@@ -720,8 +707,24 @@ fn a_serve_fallback_names_the_account_as_the_mint_reading_does() {
     .expect("mint reading")
     .account
     .expect("account");
-    assert_eq!(fallback.id, "email:you@example.com");
-    assert_eq!(fallback, minted);
+    assert_eq!(minted.id, "email:you@example.com");
+    for serve_label in ["Display Name", "Other@Example.org"] {
+        let mut replies = happy_replies();
+        replies[1]["result"]["museHome"] =
+            json!(crate::paths::muse_data_for(&root).to_string_lossy());
+        replies[2]["result"]["label"] = json!(serve_label);
+        replies[4]["result"]["label"] = json!(serve_label);
+        let fallback = read_current(
+            &root,
+            move |_, _, _| Ok(Script::new(replies).session(SERVE)),
+            |_| signed_in(Some("You@Example.com")),
+            |_| None,
+        )
+        .expect("serve fallback")
+        .account
+        .expect("account");
+        assert_eq!(fallback, minted, "{serve_label}");
+    }
 }
 
 #[test]

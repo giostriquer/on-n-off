@@ -159,8 +159,10 @@ fn the_keychain_is_read_again_only_when_auth_json_changes() {
         keychain_token()
     };
     let cache = LoginCache::new();
-    assert!(cache.login(&config, NOW, &lookup).is_some());
-    assert!(cache.login(&config, NOW, &lookup).is_some());
+    for _ in 0..2 {
+        let login = cache.login(&config, NOW, &lookup).expect("login");
+        assert_eq!(bearer(&login).as_deref(), Some("Bearer keychain-token"));
+    }
     assert_eq!(calls.get(), 1, "one Keychain lookup while auth.json stands");
 
     std::fs::write(
