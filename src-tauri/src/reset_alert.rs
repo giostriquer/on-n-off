@@ -127,7 +127,6 @@ struct LowReading {
 pub struct Offer {
     account_id: String,
     account_label: Option<String>,
-    cycle: String,
     left_percent: f64,
     renews_at: DateTime<Utc>,
     automatic: bool,
@@ -140,7 +139,7 @@ pub struct Waiting(HashMap<String, WaitingSpend>);
 pub struct WaitingSpend {
     account_id: String,
     account_label: Option<String>,
-    cycle: String,
+    cycle: DateTime<Utc>,
     due_at: DateTime<Utc>,
     idempotency_key: String,
 }
@@ -208,13 +207,13 @@ impl AlertMemory {
                 None => entry.low = None,
                 Some((reading, offer)) => {
                     let confirmed = entry.low.as_ref().is_some_and(|low| {
-                        same_cycle(&low.cycle, &reading.cycle)
+                        saved_cycle_is(&low.cycle, offer.renews_at)
                             && is_newer(&reading.observed_at, &low.observed_at)
                     });
                     let offered = entry
                         .offered_cycle
                         .as_deref()
-                        .is_some_and(|offered| same_cycle(offered, &reading.cycle));
+                        .is_some_and(|offered| saved_cycle_is(offered, offer.renews_at));
                     if confirmed && !offered {
                         entry.offered_cycle = Some(reading.cycle.clone());
                         offers.push(offer);
@@ -270,7 +269,6 @@ fn low_reading(
         Offer {
             account_id: account.id.clone(),
             account_label: account.label.clone(),
-            cycle: cycle.to_string(),
             left_percent: left,
             renews_at,
             automatic: alert.automatic,
@@ -284,10 +282,12 @@ fn instant(value: &str) -> Option<DateTime<Utc>> {
         .map(|at| at.with_timezone(&Utc))
 }
 
-fn same_cycle(one: &str, other: &str) -> bool {
-    instant(one)
-        .zip(instant(other))
-        .is_some_and(|(one, other)| (one - other).num_seconds().abs() <= CYCLE_TOLERANCE_SECONDS)
+fn same_cycle(one: DateTime<Utc>, other: DateTime<Utc>) -> bool {
+    (one - other).num_seconds().abs() <= CYCLE_TOLERANCE_SECONDS
+}
+
+fn saved_cycle_is(saved: &str, cycle: DateTime<Utc>) -> bool {
+    instant(saved).is_some_and(|saved| same_cycle(saved, cycle))
 }
 
 fn is_newer(later: &str, earlier: &str) -> bool {
@@ -336,7 +336,7 @@ impl Waiting {
                 let deciding_alert = match codex {
                     CodexNow::Live(card) => alerts.get(&account).filter(|alert| {
                         low_reading(card, alert, now).is_some_and(|(_, offer)| {
-                            offer.account_id == account && same_cycle(&offer.cycle, &spend.cycle)
+                            offer.account_id == account && same_cycle(offer.renews_at, spend.cycle)
                         })
                     }),
                     CodexNow::NobodySignedIn | CodexNow::Unknown => None,
@@ -354,7 +354,7 @@ impl Waiting {
             let spend = WaitingSpend {
                 account_id: offer.account_id.clone(),
                 account_label: offer.account_label.clone(),
-                cycle: offer.cycle.clone(),
+                cycle: offer.renews_at,
                 due_at: now + chrono::Duration::minutes(SPEND_DELAY_MINUTES),
                 idempotency_key: uuid::Uuid::new_v4().to_string(),
             };

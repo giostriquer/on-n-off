@@ -16,7 +16,6 @@ fn offer() -> Offer {
     Offer {
         account_id: "acct".into(),
         account_label: Some("you@example.com".into()),
-        cycle: RENEWS.into(),
         left_percent: 5.0,
         renews_at: at(RENEWS),
         automatic: true,
@@ -44,7 +43,7 @@ fn an_offer_is_spent_ten_minutes_later_under_its_own_key() {
     let spend = &waiting.0["acct"];
 
     assert_eq!(spend.account_id, "acct");
-    assert_eq!(spend.cycle, RENEWS);
+    assert_eq!(spend.cycle, at(RENEWS));
     assert_eq!(spend.due_at, minutes_after_now(10));
     assert!(!spend.idempotency_key.is_empty());
     assert_ne!(

@@ -53,7 +53,6 @@ fn an_account_found_low_on_two_polls_in_a_row_is_offered_its_reset_once() {
         let offer = Offer {
             account_id: "acct".into(),
             account_label: Some("you@example.com".into()),
-            cycle: RENEWS.into(),
             left_percent: 4.0,
             renews_at: at(RENEWS),
             automatic,
@@ -267,7 +266,6 @@ fn the_notification_names_the_account_what_is_left_and_when_it_renews() {
     let offer = Offer {
         account_id: "acct".into(),
         account_label: Some("you@example.com".into()),
-        cycle: RENEWS.into(),
         left_percent: 6.0,
         renews_at: at("2026-10-05T15:00:00Z"),
         automatic: false,
@@ -334,4 +332,29 @@ fn a_reset_time_more_than_two_seconds_away_is_another_weekly_cycle() {
     ]);
 
     assert_eq!(offers, [0, 1, 0, 1]);
+}
+
+#[test]
+fn a_saved_cycle_that_does_not_read_as_a_time_is_another_cycle() {
+    let mut memory: AlertMemory = serde_json::from_value(serde_json::json!({
+        "acct": {
+            "low": {"cycle": "next week", "observedAt": "2026-10-01T11:40:00Z"},
+            "offeredCycle": "next week"
+        }
+    }))
+    .unwrap();
+    let alerts = opted_in("acct");
+
+    let offers: Vec<usize> = ["2026-10-01T11:50:00Z", "2026-10-01T12:00:00Z"]
+        .into_iter()
+        .map(|observed_at| {
+            offered(
+                &mut memory,
+                &card("acct", 96.0, RENEWS, observed_at, 1),
+                &alerts,
+            )
+        })
+        .collect();
+
+    assert_eq!(offers, [0, 1]);
 }
