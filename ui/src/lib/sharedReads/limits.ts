@@ -17,8 +17,10 @@ export const limitsAnnouncements = {
   "limits:muse": [limitsKey("muse")],
 } satisfies Record<Extract<SharedReadSource, `limits:${LimitsProvider}`>, readonly QueryKey[]>;
 
+export const LIMITS_CHECK_MINUTES = 5;
+
 function limitsRefreshMs(pollMinutes: LimitsPollMinutes): number {
-  return Math.min(pollMinutes, 5) * 60_000;
+  return Math.min(pollMinutes, LIMITS_CHECK_MINUTES) * 60_000;
 }
 
 export function limitsQuery(provider: LimitsProvider, pollMinutes: LimitsPollMinutes) {

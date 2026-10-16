@@ -2,11 +2,11 @@ use super::*;
 
 #[test]
 fn a_reset_used_by_hand_is_spent_without_reading_the_limit() {
-    let (outcome, transport) = spend_as(
+    let (outcome, script) = spend_as(
         "acct-1",
         ResetSpend::ByHand,
         |_| signed_in_as("acct-1"),
-        consume_transport_at(
+        consume_replies_at(
             chatgpt_account(),
             40.0,
             Some(json!({"id": 4, "result": {"outcome": "reset"}})),
@@ -14,12 +14,11 @@ fn a_reset_used_by_hand_is_spent_without_reading_the_limit() {
     );
 
     assert_eq!(outcome, Ok(ResetCreditOutcome::Reset));
-    let methods: Vec<&Value> = transport
-        .as_ref()
+    let methods: Vec<Value> = script
         .unwrap()
-        .sent
+        .sent()
         .iter()
-        .map(|message| &message["method"])
+        .map(|message| message["method"].clone())
         .collect();
     assert_eq!(
         methods,
@@ -34,33 +33,29 @@ fn a_reset_used_by_hand_is_spent_without_reading_the_limit() {
 
 #[test]
 fn a_reset_used_by_hand_is_spent_where_the_limit_cannot_be_read() {
-    let mut transport = consume_transport(chatgpt_account(), None);
-    transport.received.pop_back();
-    transport
-        .received
-        .push_back(json!({"id": 3, "error": {"code": -32601, "message": "Method not found"}}));
-    transport
-        .received
-        .push_back(json!({"id": 4, "result": {"outcome": "reset"}}));
+    let mut replies = consume_replies(chatgpt_account(), None);
+    replies.pop();
+    replies.push(json!({"id": 3, "error": {"code": -32601, "message": "Method not found"}}));
+    replies.push(json!({"id": 4, "result": {"outcome": "reset"}}));
 
-    let (outcome, transport) = spend_as(
+    let (outcome, script) = spend_as(
         "acct-1",
         ResetSpend::ByHand,
         |_| signed_in_as("acct-1"),
-        transport,
+        replies,
     );
 
     assert_eq!(outcome, Ok(ResetCreditOutcome::Reset));
-    assert_eq!(consume_requests(&transport.unwrap()).len(), 1);
+    assert_eq!(consume_requests(&script.unwrap()).len(), 1);
 }
 
 #[test]
 fn a_reset_is_spent_automatically_when_no_more_than_the_allowed_share_is_left() {
     for used in [95.0, 97.0, 100.0] {
-        let (outcome, transport) = spend(
+        let (outcome, script) = spend(
             "acct-1",
             |_| signed_in_as("acct-1"),
-            consume_transport_at(
+            consume_replies_at(
                 chatgpt_account(),
                 used,
                 Some(json!({"id": 4, "result": {"outcome": "reset"}})),
@@ -68,16 +63,16 @@ fn a_reset_is_spent_automatically_when_no_more_than_the_allowed_share_is_left() 
         );
 
         assert_eq!(outcome, Ok(ResetCreditOutcome::Reset), "{used}");
-        assert_eq!(consume_requests(&transport.unwrap()).len(), 1, "{used}");
+        assert_eq!(consume_requests(&script.unwrap()).len(), 1, "{used}");
     }
 }
 
 #[test]
 fn a_reset_is_never_spent_automatically_while_more_than_the_allowed_share_is_left() {
-    let (outcome, transport) = spend(
+    let (outcome, script) = spend(
         "acct-1",
         |_| signed_in_as("acct-1"),
-        consume_transport_at(
+        consume_replies_at(
             chatgpt_account(),
             94.0,
             Some(json!({"id": 4, "result": {"outcome": "reset"}})),
@@ -88,18 +83,22 @@ fn a_reset_is_never_spent_automatically_while_more_than_the_allowed_share_is_lef
         outcome.unwrap_err(),
         "A banked reset can be used once 5% or less of the current limit is left, and 6% is left."
     );
-    assert!(consume_requests(&transport.unwrap()).is_empty());
+    assert!(consume_requests(&script.unwrap()).is_empty());
 }
 
 #[test]
 fn an_accounts_lower_share_is_the_one_kept() {
-    let (outcome, transport) = spend_as(
+    let (outcome, script) = spend_as(
         "acct-1",
-        ResetSpend::Automatic {
-            max_left_percent: 3,
-        },
+        ResetSpend::Automatic(
+            ResetAlert {
+                max_left_percent: 3,
+                ..ResetAlert::default()
+            }
+            .spend_share(),
+        ),
         |_| signed_in_as("acct-1"),
-        consume_transport_at(
+        consume_replies_at(
             chatgpt_account(),
             96.0,
             Some(json!({"id": 4, "result": {"outcome": "reset"}})),
@@ -110,7 +109,7 @@ fn an_accounts_lower_share_is_the_one_kept() {
         outcome.unwrap_err(),
         "A banked reset can be used once 3% or less of the current limit is left, and 4% is left."
     );
-    assert!(consume_requests(&transport.unwrap()).is_empty());
+    assert!(consume_requests(&script.unwrap()).is_empty());
 }
 
 #[test]
@@ -118,7 +117,7 @@ fn the_fullest_main_window_decides() {
     let (outcome, _) = spend(
         "acct-1",
         |_| signed_in_as("acct-1"),
-        consume_transport_reading(
+        consume_replies_reading(
             chatgpt_account(),
             json!({"rateLimits": {
                 "limitId": "codex",
@@ -134,10 +133,10 @@ fn the_fullest_main_window_decides() {
 
 #[test]
 fn one_models_own_limit_never_decides() {
-    let (outcome, transport) = spend(
+    let (outcome, script) = spend(
         "acct-1",
         |_| signed_in_as("acct-1"),
-        consume_transport_reading(
+        consume_replies_reading(
             chatgpt_account(),
             json!({
                 "rateLimits": {
@@ -157,25 +156,21 @@ fn one_models_own_limit_never_decides() {
         outcome.unwrap_err(),
         "A banked reset can be used once 5% or less of the current limit is left, and 60% is left."
     );
-    assert!(consume_requests(&transport.unwrap()).is_empty());
+    assert!(consume_requests(&script.unwrap()).is_empty());
 }
 
 #[test]
 fn a_reset_is_never_spent_automatically_when_how_much_is_left_cannot_be_read() {
-    let mut transport = consume_transport(chatgpt_account(), None);
-    transport.received.pop_back();
-    transport
-        .received
-        .push_back(json!({"id": 3, "result": {"rateLimits": {}}}));
-    transport
-        .received
-        .push_back(json!({"id": 4, "result": {"outcome": "reset"}}));
+    let mut replies = consume_replies(chatgpt_account(), None);
+    replies.pop();
+    replies.push(json!({"id": 3, "result": {"rateLimits": {}}}));
+    replies.push(json!({"id": 4, "result": {"outcome": "reset"}}));
 
-    let (outcome, transport) = spend("acct-1", |_| signed_in_as("acct-1"), transport);
+    let (outcome, script) = spend("acct-1", |_| signed_in_as("acct-1"), replies);
 
     assert_eq!(
         outcome.unwrap_err(),
         "on-n-off can't tell how much of the Codex limit is left, so it won't spend a reset."
     );
-    assert!(consume_requests(&transport.unwrap()).is_empty());
+    assert!(consume_requests(&script.unwrap()).is_empty());
 }

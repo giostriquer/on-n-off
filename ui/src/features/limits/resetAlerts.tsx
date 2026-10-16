@@ -1,7 +1,15 @@
 import { createContext, useContext, useId, useState } from "react";
 import { Segmented } from "@/components/Segmented";
 import { SwitchRow } from "@/components/SettingsCard";
-import { CODEX_RESET_MAX_LEFT_PERCENT, RESET_ALERT_MAX_HOURS, RESET_AUTO_SPEND_DELAY_MINUTES, defaultResetAlert, resetSpendLimit } from "$lib/appSettings";
+import {
+  CODEX_RESET_MAX_LEFT_PERCENT,
+  RESET_ALERT_MAX_HOURS,
+  RESET_ALERT_MIN_HOURS,
+  RESET_ALERT_MIN_LEFT_PERCENT,
+  RESET_AUTO_SPEND_DELAY_MINUTES,
+  defaultResetAlert,
+  resetSpendLimit,
+} from "$lib/appSettings";
 import { notificationPermissionProblem } from "$lib/notificationPermission";
 import type { ResetAlert } from "$lib/types";
 
@@ -40,8 +48,8 @@ export function ResetAlertForm({ accountId, label, onDone }: {
   const modeId = useId();
   const leftValue = Number(left);
   const hoursValue = Number(hours);
-  const valid = Number.isInteger(leftValue) && leftValue >= 1 && leftValue <= CODEX_RESET_MAX_LEFT_PERCENT
-    && Number.isInteger(hoursValue) && hoursValue >= 0 && hoursValue <= RESET_ALERT_MAX_HOURS;
+  const valid = Number.isInteger(leftValue) && leftValue >= RESET_ALERT_MIN_LEFT_PERCENT && leftValue <= CODEX_RESET_MAX_LEFT_PERCENT
+    && Number.isInteger(hoursValue) && hoursValue >= RESET_ALERT_MIN_HOURS && hoursValue <= RESET_ALERT_MAX_HOURS;
 
   async function submit() {
     setBusy(true);
@@ -81,12 +89,12 @@ export function ResetAlertForm({ accountId, label, onDone }: {
       </div>
       <div className="flex items-center gap-2">
         <label htmlFor={leftId} className="min-w-0 flex-1">With this much of the limit left or less (%)</label>
-        <input id={leftId} type="number" inputMode="numeric" min={1} max={CODEX_RESET_MAX_LEFT_PERCENT} step={1}
+        <input id={leftId} type="number" inputMode="numeric" min={RESET_ALERT_MIN_LEFT_PERCENT} max={CODEX_RESET_MAX_LEFT_PERCENT} step={1}
           disabled={!enabled} value={left} onChange={event => setLeft(event.target.value)} className={field} />
       </div>
       <div className="flex items-center gap-2">
         <label htmlFor={hoursId} className="min-w-0 flex-1">And at least this many hours before it renews by itself</label>
-        <input id={hoursId} type="number" inputMode="numeric" min={0} max={RESET_ALERT_MAX_HOURS} step={1}
+        <input id={hoursId} type="number" inputMode="numeric" min={RESET_ALERT_MIN_HOURS} max={RESET_ALERT_MAX_HOURS} step={1}
           disabled={!enabled} value={hours} onChange={event => setHours(event.target.value)} className={field} />
       </div>
       <p className="m-0 text-[11px] leading-snug text-[var(--mute)]">
@@ -96,7 +104,7 @@ export function ResetAlertForm({ accountId, label, onDone }: {
       </p>
       {enabled && !valid ? (
         <p role="alert" className="m-0 text-[11px] text-[var(--trip)]">
-          Use 1 to {CODEX_RESET_MAX_LEFT_PERCENT}% left and 0 to {RESET_ALERT_MAX_HOURS} hours.
+          Use {RESET_ALERT_MIN_LEFT_PERCENT} to {CODEX_RESET_MAX_LEFT_PERCENT}% left and {RESET_ALERT_MIN_HOURS} to {RESET_ALERT_MAX_HOURS} hours.
         </p>
       ) : null}
       {problem ? <p role="alert" className="m-0 text-[11px] text-[var(--trip)]">{problem}</p> : null}

@@ -178,20 +178,6 @@ impl Reading {
             .as_ref()
             .is_some_and(|resets| resets.available_count > 0)
     }
-
-    pub fn limit_left_percent(&self) -> Option<f64> {
-        self.windows
-            .iter()
-            .filter(|window| {
-                matches!(
-                    window.kind,
-                    LimitWindowKind::Weekly | LimitWindowKind::Session
-                )
-            })
-            .map(|window| window.used_percent)
-            .reduce(f64::max)
-            .map(|used| (100.0 - used).max(0.0))
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

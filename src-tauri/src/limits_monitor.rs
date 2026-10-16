@@ -1,11 +1,23 @@
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{LazyLock, Mutex, PoisonError},
+    time::Duration,
+};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle};
 
-use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{
+    AgentId, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome,
+};
 use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
+use crate::read_revision::{announce, Source};
+use crate::reset_alert::{
+    self, AlertMemory, Due, Notice, Plan, ResetSpend, SpendShare, Waiting, WaitingSpend,
+};
 
 const DISABLED_WAKE_MINUTES: u16 = 60;
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
@@ -17,7 +29,7 @@ struct MonitorState {
     schema_version: u8,
     providers: HashMap<AgentId, ProviderObservation>,
     #[serde(default)]
-    reset_alerts: HashMap<String, reset_alerts::AlertState>,
+    reset_alerts: AlertMemory,
 }
 
 impl Default for MonitorState {
@@ -25,7 +37,7 @@ impl Default for MonitorState {
         Self {
             schema_version: MONITOR_STATE_SCHEMA_VERSION,
             providers: HashMap::new(),
-            reset_alerts: HashMap::new(),
+            reset_alerts: AlertMemory::default(),
         }
     }
 }
@@ -68,6 +80,133 @@ pub fn wake(app: &AppHandle) {
     monitor::wake::<LimitsMonitor>(app);
 }
 
+#[derive(Default)]
+struct Queue(Mutex<Waiting>);
+
+static WAITING: LazyLock<Queue> = LazyLock::new(Queue::default);
+
+impl Queue {
+    fn read<R>(&self, look: impl FnOnce(&Waiting) -> R) -> R {
+        look(&self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    fn change<R>(&self, change: impl FnOnce(&mut Waiting) -> R) -> R {
+        let mut waiting = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = waiting.clone();
+        let result = change(&mut waiting);
+        let changed = *waiting != before;
+        drop(waiting);
+        if changed {
+            announce(Source::ResetSpends);
+        }
+        result
+    }
+
+    fn spend_by_hand(
+        &self,
+        account_id: &str,
+        spend: impl FnOnce(ResetSpend) -> Result<ResetCreditOutcome, String>,
+    ) -> Result<ResetCreditOutcome, String> {
+        let outcome = spend(ResetSpend::ByHand)?;
+        self.change(|waiting| waiting.used_by_hand(account_id, outcome));
+        Ok(outcome)
+    }
+}
+
+pub fn pending_reset_spends() -> Vec<PendingResetSpendDto> {
+    WAITING.read(Waiting::listed)
+}
+
+pub fn cancel_reset_spend(account_id: &str) -> bool {
+    WAITING.change(|waiting| waiting.cancel(account_id))
+}
+
+pub fn spend_reset_by_hand(
+    account_id: &str,
+    idempotency_key: &str,
+) -> Result<ResetCreditOutcome, String> {
+    WAITING.spend_by_hand(account_id, |how| {
+        crate::limits_refresh::consume_codex_reset_credit(account_id, idempotency_key, how)
+    })
+}
+
+trait Io {
+    async fn read(
+        &self,
+        providers: &[AgentId],
+        fresh: Option<AgentId>,
+    ) -> Result<Vec<ProviderLimitsDto>, String>;
+    async fn save(&self, state: &MonitorState) -> Result<(), String>;
+    async fn spend(
+        &self,
+        spend: &WaitingSpend,
+        share: SpendShare,
+    ) -> Result<ResetCreditOutcome, String>;
+    fn notify(&self, notice: Notice);
+    fn now(&self) -> DateTime<Utc>;
+}
+
+struct App {
+    app: AppHandle,
+    state_path: PathBuf,
+}
+
+impl Io for App {
+    async fn read(
+        &self,
+        providers: &[AgentId],
+        fresh: Option<AgentId>,
+    ) -> Result<Vec<ProviderLimitsDto>, String> {
+        let tasks: Vec<_> = providers
+            .iter()
+            .map(|&provider| {
+                let force = fresh == Some(provider);
+                async_runtime::spawn_blocking(move || {
+                    crate::limits_refresh::read_limits(provider, force)
+                })
+            })
+            .collect();
+        let mut snapshots = Vec::new();
+        for task in tasks {
+            snapshots.extend(
+                task.await
+                    .map_err(|error| format!("provider worker failed: {error}"))?,
+            );
+        }
+        Ok(snapshots)
+    }
+
+    async fn save(&self, state: &MonitorState) -> Result<(), String> {
+        monitor::persist_state(&self.state_path, state).await
+    }
+
+    async fn spend(
+        &self,
+        spend: &WaitingSpend,
+        share: SpendShare,
+    ) -> Result<ResetCreditOutcome, String> {
+        let account_id = spend.account_id().to_string();
+        let idempotency_key = spend.idempotency_key().to_string();
+        async_runtime::spawn_blocking(move || {
+            crate::limits_refresh::consume_codex_reset_credit(
+                &account_id,
+                &idempotency_key,
+                ResetSpend::Automatic(share),
+            )
+        })
+        .await
+        .unwrap_or_else(|error| Err(format!("The banked reset could not be used: {error}")))
+    }
+
+    fn notify(&self, (title, body): Notice) {
+        monitor::notify(&self.app, "limits monitor", title, body, Sound::Default);
+    }
+
+    fn now(&self) -> DateTime<Utc> {
+        Utc::now()
+    }
+}
+
 async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
     let state_path = match crate::paths::limits_monitor_state_path() {
         Ok(path) => path,
@@ -83,37 +222,43 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
     let mut state = async_runtime::spawn_blocking(move || load_state(&load_path))
         .await
         .unwrap_or_default();
+    let io = App { app, state_path };
+    let waiting: &Queue = &WAITING;
     loop {
         let settings = async_runtime::spawn_blocking(crate::settings::load_settings)
             .await
             .unwrap_or_default();
         let watched = watched_providers(&settings);
-        let polled_at = chrono::Utc::now();
+        let polled_at = Utc::now();
         let poll_delay = if !watched.is_empty() {
             if let Err(error) =
-                poll_once(&app, &state_path, &mut state, &settings, watched, polled_at).await
+                poll_once(&io, waiting, &mut state, &settings, watched, polled_at).await
             {
                 eprintln!("limits monitor poll failed: {error}");
             }
             crate::limits_refresh::check_interval(minutes(settings.limits_poll_minutes))
         } else {
-            auto_spend::clear();
-            if !state.providers.is_empty() || !state.reset_alerts.is_empty() {
-                observe_poll(&mut state, &[], &settings, chrono::Utc::now());
-                if let Err(error) = monitor::persist_state(&state_path, &state).await {
-                    eprintln!("limits monitor could not clear its state: {error}");
-                }
-            }
+            rest(&io, waiting, &mut state).await;
             minutes(DISABLED_WAKE_MINUTES)
         };
 
         let delay = next_wake(
             poll_delay,
-            auto_spend::next_due(),
+            waiting.read(Waiting::next_due),
             polled_at,
-            chrono::Utc::now(),
+            Utc::now(),
         );
         wait_for_wake_or_deadline(&mut wake_receiver, delay).await;
+    }
+}
+
+async fn rest(io: &impl Io, waiting: &Queue, state: &mut MonitorState) {
+    waiting.change(Waiting::clear);
+    if !state.providers.is_empty() || !state.reset_alerts.is_empty() {
+        *state = MonitorState::default();
+        if let Err(error) = io.save(state).await {
+            eprintln!("limits monitor could not clear its state: {error}");
+        }
     }
 }
 
@@ -123,9 +268,9 @@ fn minutes(minutes: u16) -> Duration {
 
 fn next_wake(
     poll_delay: Duration,
-    next_due: Option<chrono::DateTime<chrono::Utc>>,
-    polled_at: chrono::DateTime<chrono::Utc>,
-    now: chrono::DateTime<chrono::Utc>,
+    next_due: Option<DateTime<Utc>>,
+    polled_at: DateTime<Utc>,
+    now: DateTime<Utc>,
 ) -> Duration {
     next_due
         .filter(|due| *due > polled_at)
@@ -145,108 +290,64 @@ fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [Agent
 }
 
 async fn poll_once(
-    app: &AppHandle,
-    state_path: &Path,
+    io: &impl Io,
+    waiting: &Queue,
     state: &mut MonitorState,
     settings: &crate::settings::AppSettings,
     watched: &[AgentId],
-    now: chrono::DateTime<chrono::Utc>,
+    polled_at: DateTime<Utc>,
 ) -> Result<(), String> {
-    let snapshots = poll_providers(watched, auto_spend::any_due(now)).await?;
-    let due = auto_spend::take_due(&snapshots, &settings.reset_alerts, now);
+    let fresh = waiting
+        .read(|waiting| waiting.any_due(polled_at))
+        .then_some(AgentId::Codex);
+    let readings = io.read(watched, fresh).await?;
     let previous = state.clone();
-    let outcome = observe_poll(state, &snapshots, settings, now);
-    let saved = monitor::persist_state(state_path, state).await;
+    let mut notices = limit_notices(state, &readings, settings);
+    let Plan { offered, due } = waiting.change(|waiting| {
+        reset_alert::plan(
+            &mut state.reset_alerts,
+            waiting,
+            &readings,
+            &settings.reset_alerts,
+            polled_at,
+        )
+    });
+    let saved = io.save(state).await;
     if saved.is_err() {
         *state = previous;
     } else {
-        let scheduled = auto_spend::schedule_all(&outcome.automatic_offers, chrono::Utc::now());
-        for (title, body) in outcome.notices.into_iter().chain(scheduled) {
-            monitor::notify(app, "limits monitor", title, body, Sound::Default);
+        notices.extend(waiting.change(|waiting| offered.commit(waiting, io.now())));
+        for notice in notices {
+            io.notify(notice);
         }
     }
     for due in due {
-        let (title, body) = match due {
-            auto_spend::Due::Spend(spend, how) => {
-                let (account_id, key) = (spend.account_id.clone(), spend.idempotency_key.clone());
-                let spent = async_runtime::spawn_blocking(move || {
-                    crate::limits_refresh::consume_codex_reset_credit(&account_id, &key, how)
-                })
-                .await
-                .unwrap_or_else(|error| {
-                    Err(format!("The banked reset could not be used: {error}"))
-                });
-                auto_spend::outcome_copy(&spend, &spent)
-            }
-            auto_spend::Due::Kept(spend, why) => auto_spend::kept_copy(&spend, why),
+        let notice = match due {
+            Due::Spend(spend, share) => spend.outcome_notice(&io.spend(&spend, share).await),
+            Due::Kept(notice) => notice,
         };
-        monitor::notify(app, "limits monitor", title, body, Sound::Default);
+        io.notify(notice);
     }
-    saved.map_err(|error| format!("could not save state: {error}"))?;
-    Ok(())
+    saved.map_err(|error| format!("could not save state: {error}"))
 }
 
-struct PollOutcome {
-    notices: Vec<(String, String)>,
-    automatic_offers: Vec<reset_alerts::Offer>,
-}
-
-fn observe_poll(
+fn limit_notices(
     state: &mut MonitorState,
-    snapshots: &[ProviderLimitsDto],
+    readings: &[ProviderLimitsDto],
     settings: &crate::settings::AppSettings,
-    now: chrono::DateTime<chrono::Utc>,
-) -> PollOutcome {
-    let events = if settings.limit_notifications {
-        observe(state, snapshots)
+) -> Vec<Notice> {
+    if settings.limit_notifications {
+        observe(state, readings)
+            .iter()
+            .map(notification_copy)
+            .collect()
     } else {
         state.providers.clear();
         Vec::new()
-    };
-    let mut notices: Vec<(String, String)> = events.iter().map(notification_copy).collect();
-    let (automatic_offers, offers): (Vec<_>, Vec<_>) = reset_alerts::observe(
-        &mut state.reset_alerts,
-        snapshots,
-        &settings.reset_alerts,
-        now,
-    )
-    .into_iter()
-    .partition(|offer| offer.automatic);
-    notices.extend(
-        offers
-            .iter()
-            .map(|offer| reset_alerts::notification_copy(offer, now)),
-    );
-    PollOutcome {
-        notices,
-        automatic_offers,
     }
 }
 
-async fn poll_providers(
-    watched: &[AgentId],
-    fresh_codex: bool,
-) -> Result<Vec<ProviderLimitsDto>, String> {
-    let tasks: Vec<_> = watched
-        .iter()
-        .map(|&provider| {
-            let force = fresh_codex && provider == AgentId::Codex;
-            async_runtime::spawn_blocking(move || {
-                crate::limits_refresh::read_limits(provider, force)
-            })
-        })
-        .collect();
-    let mut snapshots = Vec::new();
-    for task in tasks {
-        snapshots.extend(
-            task.await
-                .map_err(|error| format!("provider worker failed: {error}"))?,
-        );
-    }
-    Ok(snapshots)
-}
-
-fn notification_copy(event: &LimitEvent) -> (String, String) {
+fn notification_copy(event: &LimitEvent) -> Notice {
     let account = event
         .account_label
         .as_deref()
@@ -377,9 +478,6 @@ fn load_state(path: &Path) -> MonitorState {
         state.schema_version == MONITOR_STATE_SCHEMA_VERSION
     })
 }
-
-pub mod auto_spend;
-mod reset_alerts;
 
 #[cfg(test)]
 mod tests;

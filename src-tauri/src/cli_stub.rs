@@ -23,6 +23,8 @@ pub struct CliStub {
     copy: Option<(String, String)>,
     args_log: Option<(String, bool)>,
     env_log: Option<(String, String)>,
+    awaits_line: bool,
+    stderr_file: Option<String>,
     chatty_lines: usize,
     print_env: Option<String>,
     stdout: Option<String>,
@@ -52,6 +54,16 @@ impl CliStub {
 
     pub fn log_env(mut self, name: &str, file: &str) -> Self {
         self.env_log = Some((name.to_string(), file.to_string()));
+        self
+    }
+
+    pub fn awaits_line(mut self) -> Self {
+        self.awaits_line = true;
+        self
+    }
+
+    pub fn stderr_file(mut self, file: &str) -> Self {
+        self.stderr_file = Some(file.to_string());
         self
     }
 
@@ -147,6 +159,12 @@ impl CliStub {
                 windows_relative(file)
             ));
         }
+        if self.awaits_line {
+            lines.push("set /p _line=".to_string());
+        }
+        if let Some(file) = &self.stderr_file {
+            lines.push(format!("type \"%~dp0{}\" 1>&2", windows_relative(file)));
+        }
         if self.chatty_lines > 0 {
             lines.push(format!(
                 "for /L %%i in (1,1,{}) do @(echo stdout-%%i-{CHATTY_PAYLOAD}& echo stderr-%%i-{CHATTY_PAYLOAD} 1>&2)",
@@ -187,6 +205,12 @@ impl CliStub {
         }
         if let Some((name, file)) = &self.env_log {
             lines.push(format!("printf '%s\\n' \"${name}\" > \"$here/{file}\""));
+        }
+        if self.awaits_line {
+            lines.push("IFS= read -r _line".to_string());
+        }
+        if let Some(file) = &self.stderr_file {
+            lines.push(format!("cat \"$here/{file}\" >&2"));
         }
         if self.chatty_lines > 0 {
             lines.push(format!(

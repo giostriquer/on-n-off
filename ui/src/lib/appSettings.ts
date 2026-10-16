@@ -16,7 +16,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 export const CODEX_RESET_MAX_LEFT_PERCENT = 5;
 
+export const RESET_ALERT_MIN_LEFT_PERCENT = 1;
+
 export const RESET_AUTO_SPEND_DELAY_MINUTES = 10;
+
+export const RESET_ALERT_MIN_HOURS = 0;
 
 export const RESET_ALERT_MAX_HOURS = 7 * 24;
 

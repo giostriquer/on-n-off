@@ -1,5 +1,7 @@
 use super::*;
 use crate::http::{never_asked, refused_url, serve_once, was_asked};
+
+const INTERVAL: Duration = Duration::from_secs(60);
 use serde_json::json;
 use std::time::Duration;
 
@@ -114,11 +116,11 @@ fn asks_with_the_workspace_in_the_query_and_the_token_in_the_header() {
 fn a_refusal_is_no_term_and_is_not_asked_again_at_once() {
     let account = projection("renewal-refused");
     MEMO.forget(&account.observation_key);
-    assert!(read_backed_off(&account, &refused_url(), now()).is_none());
+    assert!(read_backed_off(&account, &refused_url(), INTERVAL, now()).is_none());
     let (url, served) = serve_once("200 OK", &term(true).to_string());
-    assert!(read_backed_off(&account, &url, now()).is_none());
+    assert!(read_backed_off(&account, &url, INTERVAL, now()).is_none());
     MEMO.forget(&account.observation_key);
-    assert!(read_backed_off(&account, &url, now()).is_some());
+    assert!(read_backed_off(&account, &url, INTERVAL, now()).is_some());
     served.join().unwrap();
 }
 
@@ -127,7 +129,7 @@ fn an_answer_stands_for_a_day_then_is_asked_again_and_replaced() {
     let account = projection("renewal-day");
     MEMO.forget(&account.observation_key);
     let (url, served) = serve_once("200 OK", &term(true).to_string());
-    let first = read_backed_off(&account, &url, now()).unwrap();
+    let first = read_backed_off(&account, &url, INTERVAL, now()).unwrap();
     served.join().unwrap();
 
     MEMO.age_answer(
@@ -135,13 +137,18 @@ fn an_answer_stands_for_a_day_then_is_asked_again_and_replaced() {
         Duration::from_secs(23 * 3600 + 59 * 60),
     );
     let (listener, quiet) = never_asked();
-    assert_eq!(read_backed_off(&account, &quiet, now()), Some(first));
+    assert_eq!(
+        read_backed_off(&account, &quiet, INTERVAL, now()),
+        Some(first)
+    );
     assert!(!was_asked(&listener), "asked again within the day");
 
     MEMO.age_answer(&account.observation_key, Duration::from_secs(120));
     let (url, served) = serve_once("200 OK", &term(false).to_string());
     assert!(
-        !read_backed_off(&account, &url, now()).unwrap().will_renew,
+        !read_backed_off(&account, &url, INTERVAL, now())
+            .unwrap()
+            .will_renew,
         "a day-old answer is read again and replaced"
     );
     served.join().unwrap();
