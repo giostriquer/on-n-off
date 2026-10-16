@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
-import { LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
+import { hasSavedAccounts, LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
@@ -139,6 +139,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     const confirm = screen.getByRole("button", { name: "Confirm removal" });
     fireEvent.click(confirm);
     await waitFor(() => expect(confirm).toBeDisabled());
+    if (hasSavedAccounts(provider)) expect(within(old).getByRole("button", { name: "Sign in" })).toBeDisabled();
     fireEvent.click(confirm);
     expect(forgetLimitsSnapshot).toHaveBeenCalledTimes(1);
     await act(async () => fail(new Error("history is locked")));
@@ -146,17 +147,36 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     expect(confirm).toBeEnabled();
   });
 
-  it("checks only its own provider again, with force, from Check limits now", async () => {
+  it("checks only its own provider again, with force, and offers it again once that read ends", async () => {
     answer(read => [CURRENT[read]()]);
     renderLimits();
     const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(LIMITS_PROVIDERS.length));
+    let finish!: () => void;
+    readLimits.mockImplementation((read: LimitsProvider, force: boolean) => force
+      ? new Promise<ProviderLimits[]>(resolve => { finish = () => resolve([CURRENT[read]()]); })
+      : Promise.resolve([CURRENT[read]()]));
     openMenu(current, label(provider));
     fireEvent.click(screen.getByRole("button", { name: "Check limits now" }));
     await waitFor(() => expect(readLimits).toHaveBeenCalledWith(provider, true));
     expect(readLimits.mock.calls.filter(([, force]) => force)).toEqual([[provider, true]]);
     expect(screen.queryByRole("group", { name: `Actions for ${label(provider)}` })).toBeNull();
+    openMenu(current, label(provider));
+    await waitFor(() => expect(within(current).getByRole("button", { name: "Check limits now" })).toBeDisabled());
+    await act(async () => finish());
+    await waitFor(() => expect(within(current).getByRole("button", { name: "Check limits now" })).toBeEnabled());
   });
+});
+
+it("puts a saved login's items between Check limits now and the card's history items", async () => {
+  const old = okCodex({ currentAccount: false, account: { id: "codex-old", label: "old@codex.example" } });
+  const profile = { id: "saved-old", observationId: "codex-old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, needsLogin: false };
+  readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+  answer(read => read === "codex" ? [okCodex(), old] : [CURRENT[read]()]);
+  renderLimits();
+  const card = await screen.findByRole("region", { name: "Codex limits · old@codex.example" });
+  await waitFor(() => expect(within(card).getByRole("button", { name: "Use account" })).toBeInTheDocument());
+  expect(openMenu(card, "old@codex.example")).toEqual(["Check limits now", "Edit category", "Sign in again", "Archive account", "Banked reset alert", "Remove account"]);
 });
 
 describe("card header", () => {

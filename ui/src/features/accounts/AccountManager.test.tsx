@@ -106,6 +106,16 @@ it("asks before removing the signed-in account's saved login, which leaves it si
   expect(api.accountAction).not.toHaveBeenCalled();
   fireEvent.click(within(confirm).getByRole("button", { name: "Confirm removal" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a", undefined));
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull());
+});
+it.each([
+  [false, ["Edit category", "Sign in again"]],
+  [true, ["Edit category", "Sign in again", "Remove saved login", "Sign out"]],
+])("offers a saved login (signed in: %s) exactly its own items, with Remove saved login and Sign out only when signed in", async (signedIn, items) => {
+  setup({ signedIn });
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
+  expect(within(within(card).getByRole("group", { name: "Actions for person@example.com" })).getAllByRole("button").map(item => item.textContent)).toEqual(items);
 });
 it("keeps email as the account name and allows a free-text category to be edited or cleared", async () => {
   setup(); await screen.findByText("person@example.com");
