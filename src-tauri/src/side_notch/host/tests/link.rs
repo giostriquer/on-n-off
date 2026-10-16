@@ -351,3 +351,41 @@ fn only_settings_that_are_taken_tell_the_surface() {
     rig.host.desire(snapshot());
     assert_eq!(rig.wire.wire().settings_changed, 1);
 }
+
+#[test]
+fn what_the_surface_reported_before_its_link_failed_is_still_handled() {
+    let app = FakeApp::default();
+    let mut rig = Rig::started(app.clone());
+    {
+        let mut wire = rig.wire.wire();
+        wire.inbound
+            .push(Inbound::Action(Action::SetShow(ShowMode::OnHover)));
+        wire.fail_receive = Some(STOPPED.into());
+    }
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(app.world().saved.len(), 1);
+    assert_eq!(rig.host.runtime_error().as_deref(), Some(STOPPED));
+
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(rig.last_frame().settings.show, ShowMode::OnHover);
+}
+
+#[test]
+fn the_status_shows_the_settings_error_before_the_surfaces() {
+    let broken = NotchSnapshot {
+        error: Some("Cannot read side-notch settings.".into()),
+        ..snapshot()
+    };
+    let mut rig = Rig::new(FakeApp::default(), broken);
+    rig.wire.wire().refuse = Some("The native notch is missing from this app.".into());
+    rig.tick(Duration::ZERO);
+
+    assert_eq!(
+        rig.host.runtime_error().as_deref(),
+        Some("The native notch is missing from this app.")
+    );
+    assert_eq!(
+        rig.published().pop().unwrap().error.as_deref(),
+        Some("Cannot read side-notch settings.")
+    );
+}
