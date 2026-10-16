@@ -255,7 +255,13 @@ describe.each(LIMITS_PROVIDERS)("a %s card's category", (provider) => {
     renderLimits();
     const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
     await waitFor(() => expect(readAccountCategories).toHaveBeenCalled());
-    expect(await openEditor(current)).toHaveValue("");
+    const editor = await openEditor(current);
+    expect(editor).toHaveValue("");
+    fireEvent.change(editor, { target: { value: "Work" } });
+    fireEvent.click(within(current).getByRole("button", { name: "Save category" }));
+    await waitFor(() => expect(setAccountCategory).toHaveBeenCalledWith(provider, accountId(provider), "Work"));
+    await waitFor(() => expect(within(current).queryByRole("textbox")).toBeNull());
+    expect(within(current).queryByRole("alert")).toBeNull();
   });
 });
 

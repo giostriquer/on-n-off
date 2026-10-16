@@ -148,12 +148,18 @@ fn forgetting_accounts_drops_their_categories_only() {
         .set_account_category(AgentId::Codex, "old", "Gone")
         .unwrap();
     accounts
+        .set_account_category(AgentId::Codex, "also-old", "Gone too")
+        .unwrap();
+    accounts
         .set_account_category(AgentId::Codex, "kept", "Kept")
         .unwrap();
     harness.heard();
 
     accounts
-        .forget_categories(AgentId::Codex, &["old".into(), "never-set".into()])
+        .forget_categories(
+            AgentId::Codex,
+            &["old".into(), "also-old".into(), "never-set".into()],
+        )
         .unwrap();
 
     let categories = accounts.categories().unwrap().0;

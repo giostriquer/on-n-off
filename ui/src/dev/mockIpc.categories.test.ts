@@ -12,4 +12,3 @@ it("keeps the category a card saves and clears it on a blank, beside the saved l
   expect(await setAccountCategory("muse", "email:you@example.com", " ")).toBeNull();
   expect((await readAccountCategories()).muse).toEqual({});
 });
-
