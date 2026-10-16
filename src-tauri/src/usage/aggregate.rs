@@ -209,9 +209,10 @@ impl UsageAggregator {
             let day = parts.next().unwrap_or("").to_string();
             let hour = parts.next().unwrap_or("");
             let provider = match parts.next().unwrap_or("") {
+                "claude" => UsageProvider::Claude,
                 "codex" => UsageProvider::Codex,
                 "muse" => UsageProvider::Muse,
-                _ => UsageProvider::Claude,
+                _ => continue,
             };
             let model = parts.next().unwrap_or("").to_string();
             let cost_source = resolve_cost_source(&bucket);

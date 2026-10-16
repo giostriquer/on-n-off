@@ -89,9 +89,8 @@ fn hourly_requires_bounds() {
     }
 }
 
-#[test]
-fn add_says_whether_the_record_was_counted() {
-    let mut agg = UsageAggregator::new(AggregateOptions {
+fn august_by_day() -> UsageAggregator {
+    UsageAggregator::new(AggregateOptions {
         time_zone: "UTC".into(),
         since_day: "2026-08-01".into(),
         until_day: "2026-08-31".into(),
@@ -100,7 +99,25 @@ fn add_says_whether_the_record_was_counted() {
         until_time_ms: None,
         rates: sample_rates(),
     })
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn a_bucket_for_a_provider_usage_does_not_know_is_left_out_rather_than_counted_as_claude() {
+    let mut agg = august_by_day();
+    agg.add(&record(|r| r.provider = UsageProvider::Codex));
+    let (key, bucket) = agg.buckets.drain().next().unwrap();
+    agg.buckets
+        .insert(key.replace("\0codex\0", "\0acme\0"), bucket);
+
+    let result = agg.finish();
+
+    assert_eq!(result.buckets, []);
+}
+
+#[test]
+fn add_says_whether_the_record_was_counted() {
+    let mut agg = august_by_day();
     assert!(agg.add(&record(|r| r.dedupe_key = Some("msg_1:".into()))));
     assert!(!agg.add(&record(|r| {
         r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
