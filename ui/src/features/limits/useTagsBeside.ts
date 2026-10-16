@@ -18,7 +18,7 @@ export function useTagsBeside() {
   return { beside, line, name, tags };
 }
 
-function fitsBeside(line: HTMLElement | null, name: HTMLElement | null, tags: HTMLElement | null): boolean {
+export function fitsBeside(line: HTMLElement | null, name: HTMLElement | null, tags: HTMLElement | null): boolean {
   if (!line || !name || !tags) return true;
   const widths = [...tags.children].map((child) => child.getBoundingClientRect().width);
   if (widths.length === 0) return true;

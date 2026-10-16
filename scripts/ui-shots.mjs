@@ -162,6 +162,9 @@ function accountHeaderIssues(element) {
     if (!inline && tags.getBoundingClientRect().right < contentRight - 1) {
       issues.push(`account tags on their own row stop short of the header's edge: ${title.textContent}`);
     }
+    if (!inline && Math.abs(tagRects[0].left - name.left) > 1) {
+      issues.push(`account tags on their own row do not start under the name: ${title.textContent}`);
+    }
   }
   return { measured: true, issues };
 }

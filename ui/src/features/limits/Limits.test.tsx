@@ -114,11 +114,11 @@ describe("Limits", () => {
     vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(widths.line);
     vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(widths.name);
     answer([okClaude({ plan: "max ×5" })], [okCodex()]);
-    renderLimits();
+    const { unmount } = renderLimits();
     const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
     const tags = within(claude).getByTestId("account-tags");
     expect(within(tags).getByText("Max ×5")).toBeTruthy();
-    return { claude, tags, line: within(claude).getByTitle("me@claude.example").parentElement! };
+    return { claude, tags, line: within(claude).getByTitle("me@claude.example").parentElement!, unmount };
   }
 
   it("lays an account's tags on its name's line when they fit there", async () => {
@@ -138,11 +138,13 @@ describe("Limits", () => {
       disconnect() { watching.clear(); }
     });
     try {
-      const { claude, tags, line } = await claudeTags({ line: 300, name: 120 });
+      const { claude, tags, line, unmount } = await claudeTags({ line: 300, name: 120 });
       expect(tags.parentElement).toBe(line);
       vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(400);
       act(() => watching.get(within(claude).getByTitle("me@claude.example"))?.());
       expect(within(claude).getByTestId("account-tags").parentElement).toBe(claude.querySelector("header"));
+      unmount();
+      expect(watching.size, "every observer lets go of its nodes on unmount").toBe(0);
     } finally {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
