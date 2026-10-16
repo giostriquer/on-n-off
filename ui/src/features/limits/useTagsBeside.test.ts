@@ -31,6 +31,7 @@ describe("fitsBeside", () => {
     { case: "the line's gap alone tips it over", line: 300, name: 140, chips: [80, 60], lineGap: 14, tagsGap: 6, beside: false },
     { case: "the tags' gap alone tips it over", line: 300, name: 140, chips: [80, 60], lineGap: 10, tagsGap: 10, beside: false },
     { case: "a lone tag adds no gap of its own", line: 300, name: 143, chips: [146], lineGap: 10, tagsGap: 6, beside: true },
+    { case: "a lone tag a pixel over counts the line's gap, not the tags'", line: 300, name: 144, chips: [146], lineGap: 10, tagsGap: 6, beside: false },
     { case: "a third tag adds its width and one more gap", line: 300, name: 120, chips: [80, 60, 20], lineGap: 10, tagsGap: 6, beside: false },
     { case: "no gaps reported reads as none", line: 300, name: 150, chips: [80, 60], lineGap: Number.NaN, tagsGap: Number.NaN, beside: true },
   ])("$case", ({ line, name, chips, lineGap, tagsGap, beside }) => {
