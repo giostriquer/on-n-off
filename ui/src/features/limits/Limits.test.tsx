@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
+import { SharedReads } from "$lib/useSharedRead";
 import { refreshLimits } from "./useLimitsProviders";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
@@ -52,6 +53,7 @@ function renderLimits(pollMinutes: LimitsPollMinutes = 5) {
   });
   const view = render(
     <QueryClientProvider client={client}>
+      <SharedReads />
       <Limits pollMinutes={pollMinutes} resetAlerts={{}} onResetAlertsChange={async () => undefined} />
     </QueryClientProvider>,
   );

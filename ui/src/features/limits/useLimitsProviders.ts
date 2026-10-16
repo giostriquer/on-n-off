@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import { readForced } from "$lib/sharedReads/forcedRead";
-import { useSharedRead } from "$lib/useSharedRead";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import type { LimitsPollMinutes } from "$lib/types";
@@ -34,7 +33,6 @@ function useProviderLimits(
     refetchOnWindowFocus: true,
     placeholderData: keepPreviousData,
   });
-  useSharedRead(`limits:${provider}`);
   function refresh() {
     void forceLimits(client, provider).catch(() => undefined);
   }

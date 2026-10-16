@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { SessionProvider, useAgentSession } from "@/features/session/SessionProvider";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
 import { AppSettingsProvider, useAppSettings } from "$lib/useAppSettings";
+import { SharedReads } from "$lib/useSharedRead";
 import type { ReactNode } from "react";
 import { router } from "./router";
 
@@ -18,6 +19,7 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <SharedReads />
       <AppSettingsProvider>
         <SessionProvider>
           <SessionUpdates>

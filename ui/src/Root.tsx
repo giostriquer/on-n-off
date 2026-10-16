@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { lazy, Suspense, useLayoutEffect } from "react";
 const LimitsPopover = lazy(() => import("@/features/limits/LimitsPopover").then(module => ({ default: module.LimitsPopover })));
 import { AppSettingsProvider } from "$lib/useAppSettings";
+import { SharedReads } from "$lib/useSharedRead";
 import { App } from "./App";
 
 const popoverQueryClient = new QueryClient({
@@ -29,6 +30,7 @@ export function Root({ search = window.location.search }: { search?: string }) {
   if (surface === "limits-popover") {
     return (
       <QueryClientProvider client={popoverQueryClient}>
+        <SharedReads />
         <AppSettingsProvider>
           <Suspense fallback={null}><LimitsPopover /></Suspense>
         </AppSettingsProvider>

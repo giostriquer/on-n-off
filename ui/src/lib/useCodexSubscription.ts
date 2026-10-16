@@ -1,9 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import * as api from "$lib/api";
-import { useSharedRead } from "$lib/useSharedRead";
 
 export function useCodexSubscription(accountId: string, refresh = true) {
-  useSharedRead("accounts");
   return useQuery({
     queryKey: ["subscription", "codex", accountId],
     queryFn: () => api.readCodexSubscription(accountId),

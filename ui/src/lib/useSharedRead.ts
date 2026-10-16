@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import type { SharedReadSource } from "$lib/types";
 
@@ -14,26 +14,28 @@ const QUERY_KEYS: Record<SharedReadSource, readonly QueryKey[]> = {
   "limits:reset-spends": [PENDING_RESET_SPENDS_KEY],
 };
 
-export function useSharedRead(source: SharedReadSource): void {
+export function connectSharedReads(client: QueryClient): () => void {
+  let disposed = false;
+  let stop: (() => void) | undefined;
+  void api
+    .onSharedReadChanged((change) => {
+      for (const queryKey of QUERY_KEYS[change.source] ?? []) {
+        void client.invalidateQueries({ queryKey });
+      }
+    })
+    .then((unlisten) => {
+      if (disposed) unlisten();
+      else stop = unlisten;
+    })
+    .catch(() => undefined);
+  return () => {
+    disposed = true;
+    stop?.();
+  };
+}
+
+export function SharedReads(): null {
   const client = useQueryClient();
-  useEffect(() => {
-    let disposed = false;
-    let stop: (() => void) | undefined;
-    void api
-      .onSharedReadChanged((change) => {
-        if (change.source !== source) return;
-        for (const queryKey of QUERY_KEYS[source]) {
-          void client.invalidateQueries({ queryKey });
-        }
-      })
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else stop = unlisten;
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-      stop?.();
-    };
-  }, [client, source]);
+  useEffect(() => connectSharedReads(client), [client]);
+  return null;
 }

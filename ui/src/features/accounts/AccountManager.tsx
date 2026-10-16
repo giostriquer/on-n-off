@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import type { AccountAction, AccountProvider } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
-import { useSharedRead } from "$lib/useSharedRead";
 
 export const accountButton = "rounded-md border border-[var(--hair)] px-2.5 py-1.5 text-[11px] hover:bg-[var(--wash)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)] disabled:opacity-45 aria-disabled:opacity-45";
 function useController(provider: AccountProvider) {
@@ -21,7 +20,6 @@ function useController(provider: AccountProvider) {
   }, []);
   const client = useQueryClient();
   const query = useQuery({ queryKey: ["accounts", provider], queryFn: () => api.readAccounts(provider), retry: false });
-  useSharedRead("accounts");
   async function refresh() {
     await Promise.all([client.invalidateQueries({ queryKey: ["accounts"] }), client.invalidateQueries({ queryKey: ["limits", provider] }), client.invalidateQueries({ queryKey: ["subscription", "codex"] })]);
   }

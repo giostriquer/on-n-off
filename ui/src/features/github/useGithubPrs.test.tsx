@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GithubPrs } from "$lib/githubTypes";
 import type { SharedReadChanged } from "$lib/types";
+import { SharedReads } from "$lib/useSharedRead";
 import { githubQueryOptions, useGithubPrs } from "./useGithubPrs";
 
 const calls = vi.hoisted(() => ({
@@ -32,7 +33,7 @@ describe("githubQueryOptions", () => {
     calls.readGithubPrs.mockReset().mockResolvedValue({ status: "ok" });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
     );
     renderHook(() => useGithubPrs(60), { wrapper });
     await waitFor(() => expect(calls.readGithubPrs).toHaveBeenCalledTimes(1));
@@ -51,7 +52,7 @@ describe("githubQueryOptions", () => {
       .mockResolvedValue({ status: "ok" });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
     );
     const hook = renderHook(() => useGithubPrs(60), { wrapper });
     await waitFor(() => expect(calls.readGithubPrs).toHaveBeenCalledTimes(1));

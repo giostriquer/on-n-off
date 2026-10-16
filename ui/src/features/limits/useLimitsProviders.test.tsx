@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, SharedReadChanged } from "$lib/types";
+import { SharedReads } from "$lib/useSharedRead";
 import { refreshLimits, useLimitsProviders } from "./useLimitsProviders";
 
 const calls = vi.hoisted(() => ({
@@ -25,7 +26,7 @@ describe("limits refresh policy", () => {
     calls.readLimits.mockReset().mockResolvedValue([]);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
     );
     const hook = renderHook(() => useLimitsProviders(30), { wrapper });
     try {
@@ -48,7 +49,7 @@ describe("limits refresh policy", () => {
     calls.readLimits.mockReset().mockResolvedValue([]);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
     );
     renderHook(() => useLimitsProviders(5), { wrapper });
     await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
@@ -72,7 +73,7 @@ describe("limits refresh policy", () => {
       provider === "claude" && ++claudeReads === 1 ? first.promise : Promise.resolve(reading(provider)));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
     );
     const hook = renderHook(() => useLimitsProviders(5), { wrapper });
     await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));

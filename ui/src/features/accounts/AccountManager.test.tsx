@@ -7,7 +7,6 @@ import { AccountControllers, AccountManager, useAccountManagement } from "./Acco
 import { AccountCardActions } from "./AccountCardActions";
 import { AccountPreferences } from "./AccountPreferences";
 vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn() }));
-vi.mock("$lib/useSharedRead", () => ({ useSharedRead: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "team" };
 const forget = vi.fn().mockResolvedValue(undefined);

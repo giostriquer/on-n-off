@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatClock } from "$lib/limitsFormat";
+import { SharedReads } from "$lib/useSharedRead";
 import { AutomaticSpend } from "./AutomaticSpend";
 
 const pendingResetSpends = vi.hoisted(() => vi.fn());
@@ -25,6 +26,7 @@ function renderSpend(...accountIds: string[]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
+      <SharedReads />
       {(accountIds.length ? accountIds : ["acct-work"]).map((accountId) => <AutomaticSpend key={accountId} accountId={accountId} now={NOW} />)}
     </QueryClientProvider>,
   );
