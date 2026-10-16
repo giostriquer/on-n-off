@@ -82,9 +82,9 @@ fn a_failure_holds_the_account_back_doubling_each_time_and_a_success_clears_it()
 }
 
 #[test]
-fn a_backend_figure_that_keeps_failing_waits_one_two_four_then_sixteen_intervals() {
+fn a_backend_figure_that_keeps_failing_waits_two_four_eight_then_sixteen_intervals() {
     let interval = crate::limits_refresh::poll_interval();
-    for (failures, intervals) in [(1, 1), (2, 2), (3, 4), (5, 16)] {
+    for (failures, intervals) in [(1, 2), (2, 4), (3, 8), (5, 16)] {
         let memo: PerAccount<u8> = PerAccount::new(None);
         if failures > 1 {
             memo.failed_before("a", failures - 1);
@@ -106,7 +106,7 @@ fn a_backend_figure_that_keeps_failing_waits_one_two_four_then_sixteen_intervals
 #[test]
 fn each_failure_in_a_row_doubles_the_wait_up_to_sixteen_intervals_and_an_hour() {
     let minute = Duration::from_secs(60);
-    for (count, intervals) in [(0, 1), (1, 1), (2, 2), (3, 4), (5, 16), (9, 16)] {
+    for (count, intervals) in [(0, 1), (1, 2), (2, 4), (3, 8), (4, 16), (5, 16), (9, 16)] {
         assert_eq!(backoff_delay(count, minute), minute * intervals, "{count}");
     }
     assert_eq!(

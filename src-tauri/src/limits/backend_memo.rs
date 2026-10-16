@@ -97,7 +97,7 @@ impl<T: Clone> PerAccount<T> {
 
 pub(super) fn backoff_delay(count: u32, interval: Duration) -> Duration {
     interval
-        .saturating_mul(1 << count.saturating_sub(1).min(4))
+        .saturating_mul(1 << count.min(4))
         .min(Duration::from_secs(3600))
 }
 
