@@ -2,7 +2,6 @@ import { AccountPreferences } from "@/features/accounts/AccountPreferences";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, X } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { CardToggle, SettingRow, SettingsCard, caption, cardButton, cardIconButton, cardSelect, rowLabel } from "@/components/SettingsCard";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
 import { NotchSettingsCard } from "@/features/notch/NotchSettingsCard";
@@ -12,6 +11,7 @@ import { FOCUS_RING } from "$lib/a11y";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { RESET_AUTO_SPEND_DELAY_MINUTES, visibleAgentIds, withResetAlert } from "$lib/appSettings";
 import { notificationPermissionProblem } from "$lib/notificationPermission";
+import type { AppSettingsChange } from "$lib/appSettingsDocument";
 import * as api from "$lib/api";
 import type {
   AgentId,
@@ -28,15 +28,14 @@ type SettingsProps = {
   settings: AppSettings;
   onToggleVisible: (id: AgentId, hidden: boolean) => void;
   onSaveBinary: (id: AgentId, path: string) => void;
-  onAutomaticUpdatesChange: (enabled: boolean) => void;
-  onLimitNotificationsChange: (enabled: boolean) => void;
-  onLimitsPollMinutesChange: (minutes: LimitsPollMinutes) => void;
-  onSettingsChange: (patch: Partial<AppSettings>) => void;
+  onSettingsChange: (change: AppSettingsChange) => void;
 };
 
 export type GithubSettingsPatch = Partial<
   Pick<AppSettings, "githubScopes" | "githubNotifications" | "githubPollSeconds">
 >;
+
+type GithubSettingsChange = GithubSettingsPatch | ((latest: AppSettings) => GithubSettingsPatch);
 
 const GITHUB_POLL_OPTIONS: [GithubPollSeconds, string][] = [
   [30, "30 seconds"],
@@ -58,9 +57,6 @@ export function Settings({
   settings,
   onToggleVisible,
   onSaveBinary,
-  onAutomaticUpdatesChange,
-  onLimitNotificationsChange,
-  onLimitsPollMinutesChange,
   onSettingsChange,
 }: SettingsProps) {
   const health = agents.map((agent) => `${agent.id}:${agent.cliOk}`).join(",");
@@ -84,19 +80,21 @@ export function Settings({
 
       <UpdaterSettingsCard
         automaticUpdates={settings.automaticUpdates}
-        onAutomaticUpdatesChange={onAutomaticUpdatesChange}
+        onAutomaticUpdatesChange={(enabled) => onSettingsChange({ automaticUpdates: enabled })}
       />
 
       <LimitNotificationsCard
         enabled={settings.limitNotifications}
         pollMinutes={settings.limitsPollMinutes}
-        onEnabledChange={onLimitNotificationsChange}
-        onPollMinutesChange={onLimitsPollMinutesChange}
+        onEnabledChange={(enabled) => onSettingsChange({ limitNotifications: enabled })}
+        onPollMinutesChange={(minutes) => onSettingsChange({ limitsPollMinutes: minutes })}
       />
 
       <ResetAlertsCard
         alerts={settings.resetAlerts}
-        onChange={(resetAlerts) => onSettingsChange({ resetAlerts })}
+        onTurnOff={(accountId) =>
+          onSettingsChange((latest) => ({ resetAlerts: withResetAlert(latest.resetAlerts, accountId, null) }))
+        }
       />
 
       <TraySettingsCard
@@ -166,7 +164,7 @@ function GithubSettingsCard({
   scopes: string[];
   enabled: boolean;
   pollSeconds: GithubPollSeconds;
-  onChange: (patch: GithubSettingsPatch) => void;
+  onChange: (change: GithubSettingsChange) => void;
 }) {
   const { requestingPermission, permissionMessage, toggle } = useNotificationGate(enabled, (value) =>
     onChange({ githubNotifications: value }),
@@ -178,7 +176,9 @@ function GithubSettingsCard({
     if (!scope) return;
     setDraft("");
     if (!scopes.includes(scope)) {
-      onChange({ githubScopes: [...scopes, scope] });
+      onChange((latest) => ({
+        githubScopes: latest.githubScopes.includes(scope) ? latest.githubScopes : [...latest.githubScopes, scope],
+      }));
     }
   }
 
@@ -217,7 +217,9 @@ function GithubSettingsCard({
                 type="button"
                 className={`inline-flex size-6 items-center justify-center rounded-sm border-0 bg-transparent p-0 text-[var(--mute)] hover:text-[var(--trip)] ${FOCUS_RING}`}
                 aria-label={`Remove ${scope}`}
-                onClick={() => onChange({ githubScopes: scopes.filter((item) => item !== scope) })}
+                onClick={() =>
+                  onChange((latest) => ({ githubScopes: latest.githubScopes.filter((item) => item !== scope) }))
+                }
               >
                 <X className="size-3" aria-hidden="true" />
               </button>
@@ -321,9 +323,9 @@ function LimitNotificationsCard({
   );
 }
 
-function ResetAlertsCard({ alerts, onChange }: {
+function ResetAlertsCard({ alerts, onTurnOff }: {
   alerts: Record<string, ResetAlert>;
-  onChange: (alerts: Record<string, ResetAlert>) => void;
+  onTurnOff: (accountId: string) => void;
 }) {
   const entries = Object.entries(alerts);
   return (
@@ -347,7 +349,7 @@ function ResetAlertsCard({ alerts, onChange }: {
                     type="button"
                     aria-label={`Turn off the banked reset alert for ${name}`}
                     className={cardButton}
-                    onClick={() => onChange(withResetAlert(alerts, accountId, null))}
+                    onClick={() => onTurnOff(accountId)}
                   >
                     Turn off
                   </button>
@@ -387,11 +389,8 @@ function ProviderCard({
   }, [binaryPath]);
 
   async function pickBinary() {
-    const picked = await open({
-      multiple: false,
-      filters: [{ name: "CLI", extensions: ["exe", "cmd", "bat"] }],
-    });
-    if (typeof picked !== "string") {
+    const picked = await api.pickCliBinary();
+    if (picked === null) {
       return;
     }
     setDraft(picked);

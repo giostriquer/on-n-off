@@ -156,6 +156,36 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
 }
 
 #[test]
+fn the_document_the_ui_checks_its_notch_settings_against_is_the_one_rust_writes() {
+    let settings = NotchSettings {
+        enabled: true,
+        display_id: Some("display-1".into()),
+        edge: Edge::Left,
+        size: NotchSize::Large,
+        show: ShowMode::OnHover,
+        providers: vec![AgentId::Claude, AgentId::Codex],
+        pull_requests: NotchPullRequests {
+            enabled: false,
+            lists: vec![GithubList::Mine, GithubList::Assigned],
+        },
+        popover_style: NotchStyle::Solid,
+    };
+    let fixture = include_str!("../fixtures/notch-settings.json");
+    let written = serde_json::to_value(&settings).unwrap();
+
+    assert_eq!(
+        written,
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap(),
+        "src-tauri/src/side_notch/model/fixtures/notch-settings.json must read:\n{}",
+        serde_json::to_string_pretty(&written).unwrap()
+    );
+    assert_eq!(
+        serde_json::from_str::<NotchSettings>(fixture).unwrap(),
+        settings
+    );
+}
+
+#[test]
 fn remains_hidden_until_explicitly_enabled() {
     assert_eq!(
         layout(&NotchSettings::default(), &[display("main", 0.0, 1.0)]),

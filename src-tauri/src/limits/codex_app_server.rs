@@ -1,26 +1,24 @@
-use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::process::Command;
 
-use serde::{de::DeserializeOwned, Deserialize};
-use serde_json::Value;
+use serde::Deserialize;
+use serde_json::{json, Value};
 
-use super::codex::ResetSpend;
 use super::Parsed;
 use crate::accounts::codex_store::CodexAccess;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
 use crate::dto::{AgentId, ResetCreditOutcome};
+use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
+use crate::reset_alert::ResetSpend;
 
-const APP_SERVER_TIMEOUT: Duration = Duration::from_secs(30);
-const STDOUT_LINE_LIMIT: usize = 1024 * 1024;
-const MESSAGE_QUEUE_LIMIT: usize = 32;
+const APP_SERVER: Peer = Peer::jsonrpc_lite(
+    "Codex app-server",
+    "Codex CLI exited before app-server initialized. This version may not support `codex app-server`; update Codex CLI, then refresh here.",
+);
 
 #[derive(Debug)]
-struct AppServerResult {
+struct AppServerAnswers {
     codex_home: PathBuf,
     account: AccountReadResponse,
     rate_limits: super::codex::RateLimitsResponse,
@@ -55,58 +53,9 @@ pub(super) enum AppServerFailure {
     Failed(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QueryStage {
-    Initialize,
-    Account,
-    RateLimits,
-    ResetCredit,
-}
-
 #[derive(Debug, Deserialize)]
 struct ConsumeResetCreditResponse {
     outcome: ResetCreditOutcome,
-}
-
-enum SpendFailure {
-    Refused(String),
-    Query(QueryError),
-}
-
-impl From<QueryError> for SpendFailure {
-    fn from(error: QueryError) -> Self {
-        Self::Query(error)
-    }
-}
-
-#[derive(Debug)]
-struct QueryError {
-    stage: QueryStage,
-    kind: QueryErrorKind,
-    message: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QueryErrorKind {
-    TransportClosed,
-    Timeout,
-    InvalidOutput,
-    Protocol,
-    Other,
-}
-
-#[derive(Debug)]
-struct TransportError {
-    kind: QueryErrorKind,
-    message: String,
-}
-
-trait JsonLineTransport {
-    fn send(&mut self, message: &Value) -> Result<(), TransportError>;
-    fn receive(&mut self) -> Result<Value, TransportError>;
-    fn finish(&mut self) -> Option<ExitStatus> {
-        None
-    }
 }
 
 pub(super) fn consume_reset_credit(
@@ -121,33 +70,35 @@ pub(super) fn consume_reset_credit(
         idempotency_key,
         how,
         crate::accounts::codex_store::metadata,
-        ProcessTransport::spawn,
+        start,
     )
 }
 
-fn spend_reset_credit<T: JsonLineTransport>(
+fn spend_reset_credit(
     codex_home: &Path,
     account_id: &str,
     idempotency_key: &str,
     how: ResetSpend,
     identity: impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
-    spawn: impl FnOnce(&Path) -> Result<T, String>,
+    start: impl FnOnce(&Path) -> Result<Session, String>,
 ) -> Result<ResetCreditOutcome, String> {
     reset_target_matches(identity(codex_home)?, account_id)?;
-    let mut transport = spawn(codex_home)?;
-    let spent = spend_in_session(
+    open_account(
+        start(codex_home)?,
         codex_home,
-        account_id,
-        idempotency_key,
-        how,
-        &identity,
-        &mut transport,
-    );
-    let exit_status = transport.finish();
-    spent.map_err(|failure| match failure {
-        SpendFailure::Refused(message) => message,
-        SpendFailure::Query(error) => classify_query_failure(error, exit_status),
-    })
+        false,
+        |_, account, conversation| {
+            spend_in_session(
+                codex_home,
+                account_id,
+                idempotency_key,
+                how,
+                &identity,
+                &account,
+                conversation,
+            )
+        },
+    )
 }
 
 fn spend_in_session(
@@ -156,55 +107,34 @@ fn spend_in_session(
     idempotency_key: &str,
     how: ResetSpend,
     identity: &impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
-    transport: &mut impl JsonLineTransport,
-) -> Result<ResetCreditOutcome, SpendFailure> {
-    let (_, account) = handshake(codex_home, false, transport)?;
-    require_chatgpt(&account).map_err(|failure| {
-        SpendFailure::Refused(match failure {
+    account: &AccountReadResponse,
+    conversation: &mut Conversation,
+) -> Result<ResetCreditOutcome, Failure> {
+    require_chatgpt(account).map_err(|failure| {
+        Failure::new(match failure {
             AppServerFailure::SignedOut => {
-                "Codex is not signed in, so there is no banked reset to use.".to_string()
+                "Codex is not signed in, so there is no banked reset to use."
             }
-            _ => {
-                "Banked resets belong to a ChatGPT sign-in, and Codex is not using one.".to_string()
-            }
+            _ => "Banked resets belong to a ChatGPT sign-in, and Codex is not using one.",
         })
     })?;
     identity(codex_home)
         .and_then(|current| reset_target_matches(current, account_id))
-        .map_err(SpendFailure::Refused)?;
-    if let ResetSpend::Automatic { max_left_percent } = how {
-        let rate_limits = read_rate_limits(transport)?;
-        spend_allowed(&super::codex::parse_codex(&rate_limits), max_left_percent)
-            .map_err(SpendFailure::Refused)?;
+        .map_err(Failure::new)?;
+    if let ResetSpend::Automatic(share) = how {
+        let rate_limits = read_rate_limits(conversation)?;
+        share
+            .allows(&super::codex::parse_codex(&rate_limits))
+            .map_err(Failure::new)?;
     }
-    query_step(
-        QueryStage::ResetCredit,
-        transport.send(&serde_json::json!({
-            "id": 4,
-            "method": "account/rateLimitResetCredit/consume",
-            "params": {"idempotencyKey": idempotency_key},
-        })),
-    )?;
-    let response: ConsumeResetCreditResponse = receive_response(
-        QueryStage::ResetCredit,
-        transport,
-        4,
-        "account/rateLimitResetCredit/consume",
+    let response: ConsumeResetCreditResponse = conversation.request(
+        Request::new(4, "account/rateLimitResetCredit/consume")
+            .params(json!({"idempotencyKey": idempotency_key}))
+            .when_missing(
+                "Update Codex CLI to a version that supports banked resets, then try again.",
+            ),
     )?;
     Ok(response.outcome)
-}
-
-fn spend_allowed(reading: &crate::dto::Reading, max_left_percent: u8) -> Result<(), String> {
-    let left = reading.limit_left_percent().ok_or(
-        "on-n-off can't tell how much of the Codex limit is left, so it won't spend a reset.",
-    )?;
-    if left <= f64::from(max_left_percent) {
-        return Ok(());
-    }
-    Err(format!(
-        "A banked reset can be used once {max_left_percent}% or less of the current limit is left, and {}% is left.",
-        left.round()
-    ))
 }
 
 fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> Result<(), String> {
@@ -220,407 +150,112 @@ pub(super) fn read(
     force: bool,
     after_identity: impl FnOnce(&mut Parsed, Option<&CodexAccess>),
 ) -> Result<Parsed, AppServerFailure> {
-    read_with(home, force, ProcessTransport::spawn, after_identity)
+    read_with(home, force, start, after_identity)
 }
 
-fn read_with<T: JsonLineTransport>(
+fn read_with(
     home: &Path,
     force: bool,
-    spawn: impl FnOnce(&Path) -> Result<T, String>,
+    start: impl FnOnce(&Path) -> Result<Session, String>,
     after_identity: impl FnOnce(&mut Parsed, Option<&CodexAccess>),
 ) -> Result<Parsed, AppServerFailure> {
     let expected_codex_home = home.join(".codex");
     let before = crate::accounts::codex_store::metadata(&expected_codex_home)
         .map_err(AppServerFailure::Failed)?;
-    let mut transport = spawn(&expected_codex_home).map_err(AppServerFailure::Failed)?;
-    let session = query_app_server(&expected_codex_home, force, &mut transport);
-    let exit_status = transport.finish();
-    let session = session
-        .map_err(|error| AppServerFailure::Failed(classify_query_failure(error, exit_status)))?;
-    let (mut parsed, access) = normalize_app_server(session, before)?;
+    let answers = start(&expected_codex_home)
+        .and_then(|session| query_app_server(session, &expected_codex_home, force))
+        .map_err(AppServerFailure::Failed)?;
+    let (mut parsed, access) = normalize_app_server(answers, before)?;
     after_identity(&mut parsed, access.as_ref());
     Ok(parsed)
 }
 
-struct ProcessTransport {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    messages: Option<Receiver<Result<Value, TransportError>>>,
-    stdout_thread: Option<JoinHandle<()>>,
-    stderr_thread: Option<JoinHandle<()>>,
-    deadline: Instant,
+fn start(codex_home: &Path) -> Result<Session, String> {
+    let binary = resolve_provider_cli(AgentId::Codex, "codex")
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "codex".to_string());
+    let mut command: Command = AgentCli::new(binary).command();
+    command
+        .args(["app-server", "--stdio"])
+        .env("CODEX_HOME", codex_home);
+    begin(APP_SERVER, command)
 }
 
-impl ProcessTransport {
-    fn spawn(codex_home: &Path) -> Result<Self, String> {
-        let binary = resolve_provider_cli(AgentId::Codex, "codex")
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "codex".to_string());
-        let mut command: Command = AgentCli::new(binary).command();
-        command
-            .args(["app-server", "--stdio"])
-            .env("CODEX_HOME", codex_home);
-        Self::spawn_command(&mut command, APP_SERVER_TIMEOUT, STDOUT_LINE_LIMIT)
-    }
-
-    fn spawn_command(
-        command: &mut Command,
-        timeout: Duration,
-        stdout_line_limit: usize,
-    ) -> Result<Self, String> {
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| {
-                if error.kind() == std::io::ErrorKind::NotFound {
-                    "Codex CLI not found. Install or configure `codex`, then refresh Limits."
-                        .to_string()
-                } else {
-                    format!("Could not start Codex app-server: {error}")
-                }
-            })?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Codex app-server stdin was not available.".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Codex app-server stdout was not available.".to_string())?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| "Codex app-server stderr was not available.".to_string())?;
-        let (send, messages) = mpsc::sync_channel(MESSAGE_QUEUE_LIMIT);
-        let stdout_thread = thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            let mut line = Vec::new();
-            loop {
-                let message = match read_bounded_line(&mut reader, &mut line, stdout_line_limit) {
-                    Ok(None) => break,
-                    Ok(Some(true)) => Err(TransportError {
-                        kind: QueryErrorKind::InvalidOutput,
-                        message: format!(
-                            "Codex app-server output line exceeded {stdout_line_limit} bytes."
-                        ),
-                    }),
-                    Ok(Some(false)) => {
-                        serde_json::from_slice::<Value>(&line).map_err(|error| TransportError {
-                            kind: QueryErrorKind::InvalidOutput,
-                            message: format!("Codex app-server returned invalid JSON: {error}"),
-                        })
-                    }
-                    Err(error) => Err(TransportError {
-                        kind: QueryErrorKind::Other,
-                        message: format!("Could not read Codex app-server output: {error}"),
-                    }),
-                };
-                if send.send(message).is_err() {
-                    break;
-                }
-            }
-        });
-        let stderr_thread = thread::spawn(move || {
-            let _ = io::copy(&mut BufReader::new(stderr), &mut io::sink());
-        });
-        Ok(Self {
-            child,
-            stdin: Some(stdin),
-            messages: Some(messages),
-            stdout_thread: Some(stdout_thread),
-            stderr_thread: Some(stderr_thread),
-            deadline: Instant::now() + timeout,
-        })
-    }
-}
-
-impl JsonLineTransport for ProcessTransport {
-    fn finish(&mut self) -> Option<ExitStatus> {
-        self.stdin.take();
-        self.messages.take();
-        let mut status = None;
-        while Instant::now() < self.deadline {
-            match self.child.try_wait() {
-                Ok(Some(exit_status)) => {
-                    status = Some(exit_status);
-                    break;
-                }
-                Ok(None) => thread::sleep(Duration::from_millis(10)),
-                Err(_) => break,
-            }
+fn begin(peer: Peer, command: Command) -> Result<Session, String> {
+    Session::start(peer, command).map_err(|failure| match failure {
+        NotStarted::Missing => {
+            "Codex CLI not found. Install or configure `codex`, then refresh Limits.".to_string()
         }
-        let detach_drainers = status.is_none();
-        if detach_drainers {
-            let _ = self.child.kill();
-            status = self.child.wait().ok();
-        }
-        if detach_drainers {
-            self.stdout_thread.take();
-            self.stderr_thread.take();
-            return status;
-        }
-        if let Some(thread) = self.stdout_thread.take() {
-            let _ = thread.join();
-        }
-        if let Some(thread) = self.stderr_thread.take() {
-            let _ = thread.join();
-        }
-        status
-    }
-
-    fn send(&mut self, message: &Value) -> Result<(), TransportError> {
-        let stdin = self.stdin.as_mut().ok_or_else(|| TransportError {
-            kind: QueryErrorKind::TransportClosed,
-            message: "Codex app-server input is closed.".to_string(),
-        })?;
-        serde_json::to_writer(&mut *stdin, message).map_err(|error| TransportError {
-            kind: QueryErrorKind::Other,
-            message: format!("Could not encode Codex app-server request: {error}"),
-        })?;
-        stdin
-            .write_all(b"\n")
-            .and_then(|()| stdin.flush())
-            .map_err(|error| TransportError {
-                kind: if matches!(
-                    error.kind(),
-                    io::ErrorKind::BrokenPipe
-                        | io::ErrorKind::ConnectionAborted
-                        | io::ErrorKind::ConnectionReset
-                        | io::ErrorKind::NotConnected
-                ) {
-                    QueryErrorKind::TransportClosed
-                } else {
-                    QueryErrorKind::Other
-                },
-                message: format!("Could not write to Codex app-server: {error}"),
-            })
-    }
-
-    fn receive(&mut self) -> Result<Value, TransportError> {
-        let remaining = self.deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(TransportError {
-                kind: QueryErrorKind::Timeout,
-                message: "Codex app-server timed out.".to_string(),
-            });
-        }
-        self.messages
-            .as_ref()
-            .ok_or_else(|| TransportError {
-                kind: QueryErrorKind::TransportClosed,
-                message: "Codex app-server output is closed.".to_string(),
-            })?
-            .recv_timeout(remaining)
-            .map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => TransportError {
-                    kind: QueryErrorKind::Timeout,
-                    message: "Codex app-server timed out.".to_string(),
-                },
-                mpsc::RecvTimeoutError::Disconnected => TransportError {
-                    kind: QueryErrorKind::TransportClosed,
-                    message: "Codex app-server closed before returning limits.".to_string(),
-                },
-            })?
-    }
-}
-
-impl Drop for ProcessTransport {
-    fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
-    }
-}
-
-fn read_bounded_line(
-    reader: &mut impl BufRead,
-    output: &mut Vec<u8>,
-    limit: usize,
-) -> io::Result<Option<bool>> {
-    output.clear();
-    let mut oversized = false;
-    let mut saw_bytes = false;
-    loop {
-        let available = reader.fill_buf()?;
-        if available.is_empty() {
-            return Ok(saw_bytes.then_some(oversized));
-        }
-        saw_bytes = true;
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let consumed = newline.map_or(available.len(), |index| index + 1);
-        if !oversized {
-            let remaining = limit.saturating_sub(output.len());
-            let copied = consumed.min(remaining);
-            output.extend_from_slice(&available[..copied]);
-            oversized = copied < consumed;
-        }
-        reader.consume(consumed);
-        if newline.is_some() {
-            return Ok(Some(oversized));
-        }
-    }
+        NotStarted::Failed(message) => message,
+    })
 }
 
 fn query_app_server(
+    session: Session,
     expected_codex_home: &Path,
     force: bool,
-    transport: &mut impl JsonLineTransport,
-) -> Result<AppServerResult, QueryError> {
-    let (codex_home, account) = handshake(expected_codex_home, force, transport)?;
-    let rate_limits = read_rate_limits(transport)?;
-    Ok(AppServerResult {
-        codex_home,
-        account,
-        rate_limits,
-    })
-}
-
-fn read_rate_limits(
-    transport: &mut impl JsonLineTransport,
-) -> Result<super::codex::RateLimitsResponse, QueryError> {
-    query_step(
-        QueryStage::RateLimits,
-        transport
-            .send(&serde_json::json!({"id": 3, "method": "account/rateLimits/read", "params": {}})),
-    )?;
-    receive_response(
-        QueryStage::RateLimits,
-        transport,
-        3,
-        "account/rateLimits/read",
+) -> Result<AppServerAnswers, String> {
+    open_account(
+        session,
+        expected_codex_home,
+        force,
+        |codex_home, account, conversation| {
+            let rate_limits = read_rate_limits(conversation)?;
+            Ok(AppServerAnswers {
+                codex_home,
+                account,
+                rate_limits,
+            })
+        },
     )
 }
 
-fn handshake(
-    expected_codex_home: &Path,
-    force: bool,
-    transport: &mut impl JsonLineTransport,
-) -> Result<(PathBuf, AccountReadResponse), QueryError> {
-    query_step(
-        QueryStage::Initialize,
-        transport.send(&serde_json::json!({
-            "id": 1,
-            "method": "initialize",
-            "params": {"clientInfo": {
-                "name": "on_n_off",
-                "title": "on-n-off",
-                "version": env!("CARGO_PKG_VERSION"),
-            }},
-        })),
-    )?;
-    let initialize: InitializeResponse =
-        receive_response(QueryStage::Initialize, transport, 1, "initialize")?;
-    let codex_home = initialize.codex_home;
-    if !paths_are_equivalent(&codex_home, expected_codex_home) {
-        return Err(QueryError {
-            stage: QueryStage::Initialize,
-            kind: QueryErrorKind::Protocol,
-            message: format!(
-                "Codex app-server used {}, expected {}.",
-                codex_home.display(),
-                expected_codex_home.display()
-            ),
-        });
-    }
-
-    query_step(
-        QueryStage::Account,
-        transport.send(&serde_json::json!({"method": "initialized", "params": {}})),
-    )?;
-    query_step(
-        QueryStage::Account,
-        transport.send(&serde_json::json!({
-            "id": 2,
-            "method": "account/read",
-            "params": {"refreshToken": force},
-        })),
-    )?;
-    let account = receive_response(QueryStage::Account, transport, 2, "account/read")?;
-    Ok((codex_home, account))
-}
-
-fn query_step<T>(stage: QueryStage, result: Result<T, TransportError>) -> Result<T, QueryError> {
-    result.map_err(|error| QueryError {
-        stage,
-        kind: error.kind,
-        message: error.message,
-    })
-}
-
-fn classify_query_failure(error: QueryError, exit_status: Option<ExitStatus>) -> String {
-    if error.stage == QueryStage::Initialize
-        && error.kind == QueryErrorKind::TransportClosed
-        && exit_status.is_some_and(|status| !status.success())
-    {
-        return "Codex CLI exited before app-server initialized. This version may not support `codex app-server`; update Codex CLI, then refresh here."
-            .to_string();
-    }
-    error.message
-}
-
-fn receive_response<T: DeserializeOwned>(
-    stage: QueryStage,
-    transport: &mut impl JsonLineTransport,
-    expected_id: u64,
-    method: &str,
-) -> Result<T, QueryError> {
-    loop {
-        let message = query_step(stage, transport.receive())?;
-        if message.get("id").and_then(Value::as_u64) == Some(expected_id) {
-            return response_result(&message, method).map_err(|message| QueryError {
-                stage,
-                kind: QueryErrorKind::Protocol,
-                message,
-            });
-        }
-    }
-}
-
-fn response_result<T: DeserializeOwned>(message: &Value, method: &str) -> Result<T, String> {
-    if let Some(result) = message.get("result") {
-        return serde_json::from_value(result.clone()).map_err(|error| {
-            format!("Codex app-server `{method}` returned a malformed response: {error}")
-        });
-    }
-    let error = message.get("error");
-    let code = error
-        .and_then(|error| error.get("code"))
-        .and_then(Value::as_i64);
-    let message = error
-        .and_then(|error| error.get("message"))
-        .and_then(Value::as_str)
-        .unwrap_or("unknown protocol error");
-    let method_missing = code == Some(-32601);
-    let code = code.map_or_else(String::new, |code| format!(" (code {code})"));
-    let guidance = match method {
-        "account/rateLimits/read" if method_missing => {
-            " Update Codex CLI to a version that supports subscription limits, then refresh here."
-        }
-        "account/rateLimitResetCredit/consume" if method_missing => {
-            " Update Codex CLI to a version that supports banked resets, then try again."
-        }
-        _ => "",
-    };
-    Err(format!(
-        "Codex app-server `{method}` failed{code}: {message}.{guidance}"
+fn read_rate_limits(
+    conversation: &mut Conversation,
+) -> Result<super::codex::RateLimitsResponse, Failure> {
+    conversation.request(Request::new(3, "account/rateLimits/read").when_missing(
+        "Update Codex CLI to a version that supports subscription limits, then refresh here.",
     ))
 }
 
+fn open_account<T>(
+    session: Session,
+    expected_codex_home: &Path,
+    force: bool,
+    then: impl FnOnce(PathBuf, AccountReadResponse, &mut Conversation) -> Result<T, Failure>,
+) -> Result<T, String> {
+    session.run(
+        None,
+        |initialize: &InitializeResponse| {
+            if crate::paths::equivalent(&initialize.codex_home, expected_codex_home) {
+                return Ok(());
+            }
+            Err(format!(
+                "Codex app-server used {}, expected {}.",
+                initialize.codex_home.display(),
+                expected_codex_home.display()
+            ))
+        },
+        |initialize, conversation| {
+            let account = conversation
+                .request(Request::new(2, "account/read").params(json!({"refreshToken": force})))?;
+            then(initialize.codex_home, account, conversation)
+        },
+    )
+}
+
 fn normalize_app_server(
-    session: AppServerResult,
+    answers: AppServerAnswers,
     before: Option<(String, Value)>,
 ) -> Result<(Parsed, Option<CodexAccess>), AppServerFailure> {
-    let account = require_chatgpt(&session.account)?;
+    let account = require_chatgpt(&answers.account)?;
     let email = account
         .email
         .as_deref()
         .map(str::trim)
         .filter(|email| !email.is_empty())
         .map(str::to_string);
-    let mut reading = super::codex::parse_codex(&session.rate_limits);
+    let mut reading = super::codex::parse_codex(&answers.rate_limits);
     reading.plan = account
         .plan_type
         .as_deref()
@@ -628,7 +263,7 @@ fn normalize_app_server(
         .filter(|plan| !plan.is_empty())
         .map(str::to_string)
         .or(reading.plan);
-    let (after, access) = crate::accounts::codex_store::metadata_and_access(&session.codex_home)
+    let (after, access) = crate::accounts::codex_store::metadata_and_access(&answers.codex_home)
         .map_err(AppServerFailure::Failed)?
         .map_or((None, None), |(metadata, access)| (Some(metadata), access));
     if before.as_ref().map(|(id, _)| id) != after.as_ref().map(|(id, _)| id) {
@@ -674,30 +309,6 @@ fn require_chatgpt(read: &AccountReadResponse) -> Result<&CodexAccount, AppServe
             "Codex account type `{other}` has no subscription limits to show."
         ))),
     }
-}
-
-fn paths_are_equivalent(left: &Path, right: &Path) -> bool {
-    let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
-    let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
-    path_values_are_equivalent(&left, &right)
-}
-
-#[cfg(windows)]
-fn path_values_are_equivalent(left: &Path, right: &Path) -> bool {
-    left.to_string_lossy()
-        .trim_start_matches(r"\\?\")
-        .replace('\\', "/")
-        .eq_ignore_ascii_case(
-            &right
-                .to_string_lossy()
-                .trim_start_matches(r"\\?\")
-                .replace('\\', "/"),
-        )
-}
-
-#[cfg(not(windows))]
-fn path_values_are_equivalent(left: &Path, right: &Path) -> bool {
-    left == right
 }
 
 #[cfg(test)]

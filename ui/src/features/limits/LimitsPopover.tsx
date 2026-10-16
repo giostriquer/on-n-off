@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from "react";
-import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { UsageStatusBadge } from "./UsageStatusBadge";
 import { RefreshCw } from "lucide-react";
 import * as api from "$lib/api";
@@ -8,22 +8,18 @@ import { usageFillStyle } from "$lib/limitsFormat";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
-import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
+import { useAppSettings } from "$lib/useAppSettings";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
+import { refetchStaleLimits, refreshLimits } from "$lib/sharedReads/limits";
 import { limitColumn, type CardWindow, type LimitCard } from "./limitCards";
-import { limitsRefreshMs, useLimitsProviders } from "./useLimitsProviders";
+import { useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
-  const settings = useQuery({
-    queryKey: ["app-settings"],
-    queryFn: api.loadAppSettings,
-    staleTime: Infinity,
-  });
-  const pollMinutes = settings.data?.limitsPollMinutes ?? DEFAULT_APP_SETTINGS.limitsPollMinutes;
-  const { providers, loading, now, refresh } = useLimitsProviders(pollMinutes);
+  const { settings, load: loadSettings } = useAppSettings();
+  const { providers, loading, now } = useLimitsProviders(settings.limitsPollMinutes);
 
   useLayoutEffect(() => {
     applyStoredTheme();
@@ -45,17 +41,7 @@ export function LimitsPopover() {
     void api
       .onLimitsPopoverOpened(() => {
         applyStoredTheme();
-        void settings.refetch().then(({ data }) => {
-          const currentPollMinutes = data?.limitsPollMinutes ?? DEFAULT_APP_SETTINGS.limitsPollMinutes;
-          return queryClient.refetchQueries({
-            queryKey: ["limits"],
-            type: "active",
-            predicate: (query) =>
-              query.state.dataUpdatedAt > 0 &&
-              Date.now() - query.state.dataUpdatedAt >=
-                limitsRefreshMs(currentPollMinutes),
-          });
-        });
+        void loadSettings().then(({ settings: latest }) => refetchStaleLimits(queryClient, latest.limitsPollMinutes));
       })
       .then((stop) => {
         if (disposed) {
@@ -68,7 +54,7 @@ export function LimitsPopover() {
       disposed = true;
       unlisten?.();
     };
-  }, [queryClient, settings.refetch]);
+  }, [loadSettings, queryClient]);
 
   async function runAction(label: string, action: () => Promise<void>) {
     setActionError(null);
@@ -93,7 +79,7 @@ export function LimitsPopover() {
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border-0 bg-[var(--popover-control)] text-[var(--mute)] transition-colors hover:text-[var(--silkscreen)] disabled:opacity-45"
           disabled={loading}
           aria-label="Refresh limits"
-          onClick={refresh}
+          onClick={() => void refreshLimits(queryClient)}
         >
           <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
         </button>

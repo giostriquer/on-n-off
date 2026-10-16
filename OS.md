@@ -26,7 +26,10 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
 - Test doubles: `cli_stub.rs` writes a `.cmd` on Windows and an executable `sh` script elsewhere.
   Never hand-write batch files in tests.
 - Child processes: drain stdout and stderr concurrently from spawn (`process.rs`); waiting for exit
-  first deadlocks on full pipes on both platforms.
+  first deadlocks on full pipes on both platforms. A CLI kept running and spoken to over stdio in
+  line-delimited JSON-RPC (`codex app-server`, `muse serve`) goes through `json_line_session.rs`,
+  which drains stderr from spawn, reads stdout one bounded line at a time within one deadline, and
+  kills the child when the session is dropped.
 
 ## Filesystem
 

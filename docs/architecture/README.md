@@ -160,30 +160,55 @@ provider's own client:
   holds the Codex activity lease. The card always asks first, and above 5% of the current limit
   left, or the lower share the account's banked reset alert names (`resetSpendLimit`), or with
   no telling how much is left, it warns before the spend rather than refusing it. An automatic
-  spend is held to its alert's share (`ResetAlert::spend_limit`): it reads the limit again in the
-  same app-server session and refuses above it, or when it cannot tell
-  (`codex_app_server::spend_allowed`). A shared forced read follows every attempt that got past
-  that lease, a failed one included, since a request that timed out may still have reached Codex;
-  and the card reuses one idempotency key until Codex gives a definite answer, so a retry cannot
-  spend a second reset.
+  spend is held to its alert's share (`ResetSpend::Automatic`, carrying the `SpendShare` only an
+  alert gives): it reads the limit again in the same app-server session and refuses above it, or
+  when it cannot tell (`SpendShare::allows`). A shared forced read follows every attempt that got
+  past that lease, a failed one included, since a request that timed out may still have reached
+  Codex; and the card reuses one idempotency key until Codex gives a definite answer, so a retry
+  cannot spend a second reset.
 
-  A **banked reset alert** (`settings::ResetAlert`, turned on from a Codex card's menu and listed in
-  Settings) notifies, or uses the reset automatically. `limits_monitor` polls while any alert is on,
-  reading Codex alone when limit notifications are off (`watched_providers`), and
-  `limits_monitor/reset_alerts.rs` offers the reset when two polls in a row, each a newer reading of
-  the signed-in account in the same weekly cycle, find it at the alert's share or below, with its
-  weekly window at least the alert's hours from renewing and a banked reset that has not lapsed. It
-  offers once per weekly cycle, which a spent reset starts anew, and keeps its state in the
-  monitor's own file. An automatic alert's offer (`limits_monitor/auto_spend.rs`) is a notification
-  that the reset will be used in ten minutes, scheduled only once the offer is saved. The monitor
-  wakes then, reads Codex afresh, and spends it through the same
-  `limits_refresh::consume_codex_reset_credit` a click uses only if that read still finds the
-  signed-in account low in the same cycle; a read that fails leaves it waiting, and one found more
-  than fifteen minutes late, as after sleep, is kept. It says what came of it either way. Until
-  then the account's card shows the waiting spend with a Cancel (`pending_reset_spends`,
+  A **banked reset alert** (turned on from a Codex card's menu and listed in Settings) notifies,
+  or uses the reset automatically. One module, `reset_alert.rs`, owns the rule end to end and does
+  no I/O: the alert as the settings keep it (`ResetAlert`), its defaults and the bounds the
+  settings clamp applies (`keep_within_bounds`), how much of the limit is left (the fullest weekly
+  or session window), when a reset is worth using, once per weekly cycle, when a waiting spend
+  falls due, the share an automatic spend is held to, and the wording of every notification.
+  Given a poll's readings, the alerts, the monitor's saved state and the time, `reset_alert::plan`
+  returns what to do: the poll's offers, which once the state is saved tell the alerts that only
+  notify and schedule the automatic ones (`Offered::commit`), and the waiting spends that fell
+  due, each to spend at its alert's share or to keep with the notice that says why.
+
+  It offers the reset when two polls in a row, each a newer reading of the signed-in account in
+  the same weekly cycle, find it at the alert's share or below, with its weekly window at least
+  the alert's hours from renewing and a banked reset that has not lapsed. It offers once per weekly
+  cycle, which a spent reset starts anew. A cycle is the weekly window's reset time, and two within
+  two seconds of each other are the same cycle: Codex reports that time to the second, the same
+  window's time can differ by a second or two from one response to the next, and a remembered
+  window can spell the same instant differently, all of which an exact match took for a new week.
+  The tolerance is the one the Codex sessions merge matches a window by
+  (`limits::same_reset_instant`), and the saved cycle stays the string Codex sent; one that does
+  not read as a time is another cycle. An automatic alert's offer is a notification that the reset will be used in ten minutes. When that
+  time comes the reset is used only if a fresh read still finds the signed-in account low in the
+  same cycle; a read that fails leaves it waiting, and one found more than fifteen minutes late,
+  as after sleep, is kept. A spend that fails is not tried again.
+
+  `limits_monitor` is the loop that does the I/O around the rule (`poll_once`, over a small `Io`
+  trait its tests fake). It polls while any alert is on, reading Codex alone when limit
+  notifications are off (`watched_providers`) and reading it afresh when a spend is due. It saves
+  its state, in its own file, before it tells anyone or schedules anything, and rolls the state
+  back when the save fails, so the offer is made again. It spends through the same
+  `limits_refresh::consume_codex_reset_credit` a click uses and says what came of it either way.
+  Until then the account's card shows the waiting spend with a Cancel (`pending_reset_spends`,
   `cancel_reset_spend`, announced as the `limits:reset-spends` shared read), and a reset used by
-  hand clears it. A waiting spend lives in memory only, apart from the monitor's saved state, so
-  quitting on-n-off cancels it, and a spend that fails is not tried again.
+  hand clears it (`spend_reset_by_hand`). A waiting spend lives in memory only, apart from the
+  monitor's saved state, so quitting on-n-off cancels it.
+
+  The UI restates the rule's numbers in `ui/src/lib/appSettings.ts`: the 5% cap, a new alert, the
+  form's bounds, the ten-minute delay and an alert's share. `ui/src/lib/resetAlertRule.test.ts`
+  checks them against `src-tauri/src/reset_alert/fixtures/rule.json`, which a Rust test keeps
+  equal to what the rule does. The card's own "how much is left" (`usageLeft`,
+  `limitPresentation.ts`) counts a window past its reset as 0% used, because a reading ages on
+  screen; the rule judges live readings and does not.
 
 Saved profiles are read beside the signed-in account (`accounts/usage.rs`). A saved Claude account
 is read in its home ([accounts.md](accounts.md#homes)) by the same Claude Code report, expecting the
@@ -194,7 +219,10 @@ the accounts adapter dispatches (`Adapter::read_usage`): the backend body app-se
 app-server for a saved profile would write its credential to disk. Neither renews a login itself:
 Claude Code renews a home's login, a Codex login on-n-off owns renews before its read, and one it
 does not own is never renewed. A saved read tells a refused login, one that now signs in as another
-account and a rate limit apart (`SavedReadError`), and the poll backs off accordingly. Every card a
+account and a rate limit apart (`SavedReadError`), and the poll backs off accordingly: a vault
+login refused, or now signing in as another account, waits for a new login; any other failure waits
+the Limits failure backoff (`limits_refresh::failure_backoff`, [shared-reads.md](shared-reads.md#the-mechanism)),
+or a rate limit's Retry-After when that is longer. Every card a
 saved poll produces says so (`saved_profile`), which is how the UI knows a remembered reading from a
 saved profile read live.
 
@@ -321,15 +349,53 @@ gone nothing can rebuild it.
   how far back the history reaches and can clear it; clearing forgets what only the history held
   and counts what the transcripts still hold again.
 
+## App settings
+
+`settings.rs` owns `~/.on-n-off/settings.json`. It reads the file one field at a time, so a
+setting it cannot read falls back to its default and leaves the rest, normalises what it read, and
+validates and normalises again on save. `load_app_settings` and `save_app_settings` carry the whole
+document, and a save replaces the file with it.
+
+In the UI one module owns that document in each window: `AppSettingsProvider` and
+`useAppSettings` (`ui/src/lib/useAppSettings.tsx`) over `createAppSettingsDocument`
+(`ui/src/lib/appSettingsDocument.ts`). The main window and the menu-bar popover each mount their
+own, so they share its code and never its state.
+
+- **Verbatim.** The document is held exactly as Rust returned it, keys the UI has no type for
+  included, so a setting added on the Rust side survives the next save from a UI that does not
+  know it. The UI never re-normalises; Rust already has.
+- **One patch path, in order.** Every caller changes settings with `patch`, a partial document or
+  an updater given the latest one. Loads and saves run one at a time in the order asked, and each
+  change is applied to the document the save before it returned, so two quick changes both land
+  and a load answers with what every change asked before it saved. A change to a list or a map
+  (hidden providers, binary paths, GitHub scopes, a reset alert turned off in Settings) is an
+  updater, so two quick edits to the same one both land too. Limits' reset-alert form still hands
+  over the whole map it rendered.
+- **Defaults are a placeholder.** `DEFAULT_APP_SETTINGS` is shown until the first load answers. A
+  change made before then waits for it, and one made after a failed load reads the document first
+  and fails rather than save the placeholder over the user's file.
+- **One failure path.** A failed save resolves `null` for its caller and is reported once to
+  `onSaveFailed`, which the session turns into its trip-log note; Limits' reset-alert form says it
+  could not save the alert.
+
+The two sides agree on the document's keys through fixtures Rust writes:
+`src-tauri/src/settings/fixtures/app-settings.json` (every setting away from its default) and
+`app-settings.default.json`, which Rust's tests assert it serialises, and
+`ui/src/lib/settingsContract.test.ts` checks against `AppSettings` (at the type level),
+`DEFAULT_APP_SETTINGS` and `ResetAlert`. `NotchSettings` has the same key check through
+`src-tauri/src/side_notch/model/fixtures/notch-settings.json`. The dev mock saves as Rust does, keeping
+only the fixture's keys, so a setting added only in TypeScript snaps back in a `?mock` build too.
+
 ## Cross-cutting plumbing
 
 | Module | Why it exists |
 | --- | --- |
 | `cli_locate.rs` | A GUI app does not inherit a terminal's `PATH`. Builds one merged search list and hands it to spawned CLIs as their `PATH`. |
 | `process.rs` | Child-process draining with a hard deadline; stdout and stderr drained concurrently, or a full pipe deadlocks. |
+| `json_line_session.rs` | A provider CLI kept running and spoken to in line-delimited JSON-RPC: `codex app-server` and `muse serve`. See below. |
 | `config_io.rs`, `backup.rs` | Every provider-config write: backup → atomic replace → validate → rollback. |
-| `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. |
-| `read_revision.rs` | Tells every surface when a shared cached read has been replaced. See [shared-reads.md](shared-reads.md). |
+| `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. `paths::equivalent` decides whether two paths name the same directory (a CLI's reported home against the one on-n-off gave it). |
+| `read_revision.rs` | Tells every surface when a shared cached read has been replaced; in the UI, `ui/src/lib/sharedReads/` holds one module per source and one listener per window. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
 | `dto.rs` | The serialized shapes crossing the IPC boundary. Changing one is a compatibility event. |
 | `provider_catalogue.rs` | Every provider the app knows and one row of static facts each. Every Rust provider list is drawn from it; the UI's and the Swift helper's are still kept by hand. See below. |
@@ -363,6 +429,41 @@ The UI (`ui/src/lib/appSettings.ts`, `notchTypes.ts`, `usageMerge.ts`,
 `features/limits/useLimitsProviders.ts`, `features/accounts/AddAccount.tsx`) and the notch helper
 (`ProviderId` in `NotchCore/Models.swift`) keep their own provider lists, which no test compares
 with the catalogue; `PROVIDERS.md` lists them under "When adding a provider".
+
+### JSON-line sessions
+
+Codex's app-server and Muse's serve are read the same way, so one module, `json_line_session.rs`,
+owns the conversation and each reader keeps only what is its own: the command, its arguments and
+environment, the method names and answer types, the checks on what it is told, and the
+normalisation into a reading. A reader describes its CLI as a `Peer`: the name every message
+starts with ("Codex app-server", "Muse serve"), whether each line carries `"jsonrpc": "2.0"` (Muse
+requires it, Codex omits it), and what to say when the CLI exits before it answers `initialize`.
+
+- **One deadline and one line limit per session**, 30 seconds and 1 MiB, so a CLI that stops
+  answering or writes an unbounded line fails the read rather than hanging it or filling memory.
+  Its stderr is drained to nowhere from spawn and never reaches a message, since a provider's
+  diagnostics may be sensitive.
+- **Every session opens with its handshake.** `Session::run` sends request 1 (`initialize` with
+  on-n-off's `clientInfo`), hands the answer to the reader's check, sends the `initialized`
+  notification, and only then gives the reader a `Conversation`, the one thing that can send a
+  request. The reader numbers its own requests from 2, so a Codex spend by hand still sends its
+  consume as request 4 though it skips the limit read. A request waits for the answer with its id
+  and skips everything else the CLI says.
+- **An early exit is an old CLI.** A pipe that closes during `initialize`, from a CLI that then
+  exits unsuccessfully, is a CLI without the subcommand, and the card asks for an update. That
+  includes a request written after the CLI is gone: each line is encoded first and written whole,
+  so a broken pipe reads as closed rather than as a failure to encode. Every other failure keeps
+  its own message, and a failure the reader decided on (`Failure::new`: a different home, an
+  account that changed mid-read, a spend refused) is shown as the reader wrote it.
+- **Ending a session** closes stdin and waits for the child to exit until the deadline. A child
+  still running then is killed and its drainers are left behind, so a descendant still holding a
+  pipe cannot hold the read. A session dropped without ending kills its child too.
+
+Tests drive a reader through `json_line_session::Script`, which replays scripted answers and
+records what was sent and received, and the real child through `cli_stub.rs` stubs. A stub that
+answers waits for the request line first (`CliStub::awaits_line`) instead of sleeping, so a slow
+host cannot let it exit before the request is written and turn the failure under test into a
+broken pipe.
 
 ## Where the state lives
 
@@ -402,7 +503,8 @@ the code today; a change that moves one updates its row.
 | Account details | `plan` on `Reading`; a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when it is neither `currentAccount` nor `savedProfile` (`presentLimitAccount`, `ui/src/features/limits/limitPresentation.ts`), and an archived one is listed apart |
 | Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list`; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
-| Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id (`settings.rs`); offered by `limits_monitor/reset_alerts.rs`, and spent by `limits_monitor/auto_spend.rs` when `automatic`; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the spend rule both sides keep is `ResetAlert::spend_limit` and `resetSpendLimit` (`ui/src/lib/appSettings.ts`) |
+| Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id; the rule (its bounds, offers once a weekly cycle, waiting spends and the share a spend is held to) is `reset_alert.rs`, whose `plan` `limits_monitor.rs` performs; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the numbers the UI restates (`ui/src/lib/appSettings.ts`, `resetSpendLimit` among them) are checked against `src-tauri/src/reset_alert/fixtures/rule.json` |
+| Failure backoff | `limits_refresh::failure_backoff`, asked with each read's own failure count and interval by the shared cache for the native read (`cache_is_fresh`), by a saved profile's poll (`hold_back` in `accounts/usage.rs`, with the Retry-After floor) and by the Codex backend figures' per-account memo (`PerAccount::read_backed_off`, `limits/backend_memo.rs`), which asks with the failures before its latest one, so it starts one doubling behind |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects) |
 | Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs`: a Claude profile's in its home by Claude Code's own report (`Home::read_usage`, `read_usage` in `limits/claude_cli.rs`), a Codex profile's through Codex's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`), and its card carries `saved_profile` |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |

@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, useAgentSession } from "./SessionProvider";
-import type { AgentId, AgentInfo, AgentTabDto, InstallItemsRequest, InstallItemsResult } from "$lib/types";
+import { AppSettingsProvider } from "$lib/useAppSettings";
+import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
+import type { AgentId, AgentInfo, AgentTabDto, AppSettings, InstallItemsRequest, InstallItemsResult } from "$lib/types";
 
 const state = vi.hoisted(() => ({
   listCalls: [] as AgentId[],
@@ -21,13 +23,9 @@ const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as con
   readsHooks: id === "claude" || id === "codex",
 }));
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: () => Promise.resolve(null),
-}));
-
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
-  loadAppSettings: () => Promise.resolve({ hiddenAgents: [], binaryPaths: {} }),
+  loadAppSettings: () => Promise.resolve({ ...DEFAULT_APP_SETTINGS } satisfies AppSettings),
   listAgents: () => Promise.resolve(AGENTS),
   listProjects: () => Promise.resolve([]),
   listLocalPlugins: (agentId: AgentId) => {
@@ -115,6 +113,7 @@ describe("SessionProvider.installItems", () => {
       <SessionProvider>
         <Probe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.listCalls.length).toBeGreaterThanOrEqual(4));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
@@ -140,6 +139,7 @@ describe("SessionProvider.installItems", () => {
       <SessionProvider>
         <Probe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.listCalls.length).toBeGreaterThanOrEqual(4));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));

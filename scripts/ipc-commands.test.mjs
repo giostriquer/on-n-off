@@ -90,9 +90,20 @@ function uiSources(directory = join(root, "ui", "src")) {
   });
 }
 
+function uiFilesNaming(pattern) {
+  return uiSources()
+    .filter((path) => pattern.test(withoutComments(readFileSync(path, "utf8"))))
+    .map((path) => relative(root, path).split("\\").join("/"))
+    .sort();
+}
+
 test("no UI file but api.ts reaches Tauri's invoke", () => {
-  const callers = uiSources()
-    .filter((path) => /@tauri-apps\/api\/core/.test(withoutComments(readFileSync(path, "utf8"))))
-    .map((path) => relative(root, path).split("\\").join("/"));
-  assert.deepEqual(callers, ["ui/src/lib/api.ts"]);
+  assert.deepEqual(uiFilesNaming(/@tauri-apps\/api\/core/), ["ui/src/lib/api.ts"]);
+});
+
+test("no UI file but api.ts and the updater client uses a Tauri package", () => {
+  assert.deepEqual(uiFilesNaming(/["'`]@tauri-apps\//), [
+    "ui/src/features/updater/tauriUpdaterClient.ts",
+    "ui/src/lib/api.ts",
+  ]);
 });

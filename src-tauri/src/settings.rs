@@ -12,6 +12,7 @@ use crate::cli_locate::{
 };
 use crate::dto::{AdapterError, AgentId};
 use crate::paths;
+use crate::reset_alert::ResetAlert;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,37 +37,6 @@ pub struct AppSettings {
     pub close_to_tray: bool,
     #[serde(default)]
     pub reset_alerts: HashMap<String, ResetAlert>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResetAlert {
-    #[serde(default)]
-    pub label: Option<String>,
-    #[serde(default = "reset_max_left_default")]
-    pub max_left_percent: u8,
-    #[serde(default = "reset_min_hours_default")]
-    pub min_hours_to_renewal: u16,
-    #[serde(default)]
-    pub automatic: bool,
-}
-
-pub const CODEX_RESET_MAX_LEFT_PERCENT: u8 = 5;
-
-pub const RESET_ALERT_MAX_HOURS: u16 = 7 * 24;
-
-impl ResetAlert {
-    pub fn spend_limit(&self) -> u8 {
-        self.max_left_percent.min(CODEX_RESET_MAX_LEFT_PERCENT)
-    }
-}
-
-const fn reset_max_left_default() -> u8 {
-    CODEX_RESET_MAX_LEFT_PERCENT
-}
-
-const fn reset_min_hours_default() -> u16 {
-    24
 }
 
 const fn automatic_updates_default() -> bool {
@@ -150,14 +120,18 @@ fn read_settings(document: &Map<String, Value>) -> AppSettings {
 
 fn read_reset_alert(alert: &Value) -> Option<ResetAlert> {
     let alert = alert.as_object()?;
+    let defaults = ResetAlert::default();
     let figure = |key: &str| alert.get(key).and_then(Value::as_f64).map(f64::round);
     Some(ResetAlert {
         label: alert.get("label").and_then(read),
         max_left_percent: figure("maxLeftPercent")
-            .map_or_else(reset_max_left_default, |percent| percent as u8),
+            .map_or(defaults.max_left_percent, |percent| percent as u8),
         min_hours_to_renewal: figure("minHoursToRenewal")
-            .map_or_else(reset_min_hours_default, |hours| hours as u16),
-        automatic: alert.get("automatic").and_then(read).unwrap_or(false),
+            .map_or(defaults.min_hours_to_renewal, |hours| hours as u16),
+        automatic: alert
+            .get("automatic")
+            .and_then(read)
+            .unwrap_or(defaults.automatic),
     })
 }
 
@@ -251,10 +225,7 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     scopes.retain(|scope| seen.insert(scope.clone()));
     settings.github_scopes = scopes;
     for alert in settings.reset_alerts.values_mut() {
-        alert.max_left_percent = alert
-            .max_left_percent
-            .clamp(1, CODEX_RESET_MAX_LEFT_PERCENT);
-        alert.min_hours_to_renewal = alert.min_hours_to_renewal.min(RESET_ALERT_MAX_HOURS);
+        alert.keep_within_bounds();
     }
     settings
 }

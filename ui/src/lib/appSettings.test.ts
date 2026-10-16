@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { visibleAgentIds, setAgentHidden, ALL_AGENTS, mergeAppSettings, resetSpendLimit } from "./appSettings";
+import { visibleAgentIds, setAgentHidden, ALL_AGENTS, resetSpendLimit, withBinaryPath } from "./appSettings";
 
 describe("appSettings", () => {
   it("defaults to every provider visible", () => {
@@ -20,60 +20,15 @@ describe("appSettings", () => {
     expect(setAgentHidden(["antigravity"], "antigravity", false)).toEqual([]);
   });
 
-  it("enables automatic updates by default and preserves an opt-out", () => {
-    expect((mergeAppSettings(null) as unknown as Record<string, unknown>).automaticUpdates).toBe(true);
-    expect(
-      (mergeAppSettings(JSON.parse('{"automaticUpdates":false}')) as unknown as Record<string, unknown>)
-        .automaticUpdates,
-    ).toBe(false);
-  });
+  it("sets a provider's binary path trimmed and drops one left blank", () => {
+    const paths = { claude: "/opt/acme/bin/claude" };
 
-  it("keeps limit notifications off at a five-minute default", () => {
-    const settings = mergeAppSettings(null) as unknown as Record<string, unknown>;
-
-    expect(settings.limitNotifications).toBe(false);
-    expect(settings.limitsPollMinutes).toBe(5);
-  });
-
-  it("normalizes unsupported limit polling intervals", () => {
-    const settings = mergeAppSettings(
-      JSON.parse('{"limitNotifications":true,"limitsPollMinutes":7}'),
-    ) as unknown as Record<string, unknown>;
-
-    expect(settings.limitNotifications).toBe(true);
-    expect(settings.limitsPollMinutes).toBe(5);
-  });
-
-  it("keeps the GitHub screen unscoped, quiet, and polling every sixty seconds by default", () => {
-    const settings = mergeAppSettings(null) as unknown as Record<string, unknown>;
-
-    expect(settings.githubScopes).toEqual([]);
-    expect(settings.githubNotifications).toBe(false);
-    expect(settings.githubPollSeconds).toBe(60);
-  });
-
-  it("normalizes unsupported GitHub polling intervals and keeps the scopes", () => {
-    const settings = mergeAppSettings(
-      JSON.parse('{"githubScopes":["org:acme"],"githubNotifications":true,"githubPollSeconds":45}'),
-    ) as unknown as Record<string, unknown>;
-
-    expect(settings.githubScopes).toEqual(["org:acme"]);
-    expect(settings.githubNotifications).toBe(true);
-    expect(settings.githubPollSeconds).toBe(60);
-  });
-
-  it("keeps the app out of the tray on close by default and preserves an opt-in", () => {
-    expect((mergeAppSettings(null) as unknown as Record<string, unknown>).closeToTray).toBe(false);
-    expect(
-      (mergeAppSettings(JSON.parse('{"closeToTray":true}')) as unknown as Record<string, unknown>)
-        .closeToTray,
-    ).toBe(true);
-  });
-  it("keeps no banked reset alert by default and keeps the ones saved", () => {
-    const saved = { "acct-work": { label: "you@example.com", maxLeftPercent: 5, minHoursToRenewal: 48, automatic: false } };
-
-    expect(mergeAppSettings(null).resetAlerts).toEqual({});
-    expect(mergeAppSettings({ resetAlerts: saved }).resetAlerts).toEqual(saved);
+    expect(withBinaryPath(paths, "codex", "  /opt/acme/bin/codex ")).toEqual({
+      claude: "/opt/acme/bin/claude",
+      codex: "/opt/acme/bin/codex",
+    });
+    expect(withBinaryPath(paths, "claude", "   ")).toEqual({});
+    expect(paths).toEqual({ claude: "/opt/acme/bin/claude" });
   });
 
   it("warns before, and spends automatically only at, 5% left or an account's lower share", () => {

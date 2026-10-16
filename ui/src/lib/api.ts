@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AgentId,
   AgentInfo,
@@ -108,6 +109,16 @@ export function removeItem(id: string): Promise<void> {
 
 export function openUrl(url: string): Promise<void> {
   return invoke("open_url", { url });
+}
+
+export async function pickFolder(): Promise<string | null> {
+  const picked = await open({ directory: true, multiple: false });
+  return typeof picked === "string" ? picked : null;
+}
+
+export async function pickCliBinary(): Promise<string | null> {
+  const picked = await open({ multiple: false, filters: [{ name: "CLI", extensions: ["exe", "cmd", "bat"] }] });
+  return typeof picked === "string" ? picked : null;
 }
 
 export function uninstallPlugin(agentId: AgentId, pluginId: string): Promise<AgentTabDto> {

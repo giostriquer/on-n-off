@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
+import type { SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
+import { cachedAccountList } from "$lib/sharedReads/accounts";
 import { accountButton as button, useAccountManagement } from "./AccountManager";
 
 export type AccountFooterState = { current: boolean; blocked: boolean; unconfirmedCurrent: boolean };
@@ -66,7 +67,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     void use(profileId).then(running => setClients(running.length ? running : null)).catch(() => {});
   }
   async function confirm() {
-    if (confirmation === "signOut" && (!current || !nativeMatches || client.getQueryData<AccountsReading>(["accounts", provider])?.nativeObservationId !== accountId)) { setPanel(null); return; }
+    if (confirmation === "signOut" && (!current || !nativeMatches || cachedAccountList(client, provider)?.nativeObservationId !== accountId)) { setPanel(null); return; }
     setError(null); setRemoving(true);
     try {
       if (confirmation === "signOut") await action("signOut");

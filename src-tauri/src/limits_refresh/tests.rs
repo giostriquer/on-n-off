@@ -108,6 +108,59 @@ fn automatic_failures_back_off_for_every_consumer() {
 }
 
 #[test]
+fn a_failing_limits_read_waits_twice_as_long_each_time_up_to_sixteen_intervals_and_an_hour() {
+    let minute = Duration::from_secs(60);
+    for (failures, intervals) in [
+        (0, 1),
+        (1, 2),
+        (2, 4),
+        (3, 8),
+        (4, 16),
+        (5, 16),
+        (9, 16),
+        (u32::MAX, 16),
+    ] {
+        assert_eq!(
+            failure_backoff(minute, failures),
+            minute * intervals,
+            "{failures}"
+        );
+    }
+    for (interval, failures) in [(300, 5), (1000, 3), (7200, 1), (7200, 0)] {
+        assert_eq!(
+            failure_backoff(Duration::from_secs(interval), failures),
+            Duration::from_secs(3600),
+            "{failures} failures at {interval} s"
+        );
+    }
+}
+
+#[test]
+fn a_native_read_that_keeps_failing_waits_the_limits_failure_backoff() {
+    let refreshed_at = Instant::now();
+    let second = Duration::from_secs(1);
+    for interval in [Duration::from_secs(60), Duration::from_secs(300)] {
+        for failures in [0, 1, 2, 3, 5] {
+            let wait = failure_backoff(interval, failures);
+            assert!(
+                cache_is_fresh(
+                    refreshed_at,
+                    refreshed_at + wait - second,
+                    interval,
+                    failures,
+                    false
+                ),
+                "{failures} failures at {interval:?}"
+            );
+            assert!(
+                !cache_is_fresh(refreshed_at, refreshed_at + wait, interval, failures, false),
+                "{failures} failures at {interval:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
     let cache = Arc::new(Cache::new(Source::LimitsClaude));
     let calls = Arc::new(AtomicUsize::new(0));
