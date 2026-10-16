@@ -46,6 +46,10 @@ fn the_frame_lists_selected_providers_in_rail_order_with_their_sessions_and_prs_
         ],
         "Codex is deselected and Antigravity has not been read"
     );
+    assert!(
+        matches!(&frame.cells[2], CellData::Provider(cell) if cell.provider == AgentId::Antigravity && cell.reading.is_none()),
+        "Antigravity keeps its slot, checking"
+    );
     let sessions: Vec<Vec<LiveSession>> = frame
         .cells
         .iter()
@@ -56,7 +60,12 @@ fn the_frame_lists_selected_providers_in_rail_order_with_their_sessions_and_prs_
         .collect();
     assert_eq!(
         sessions,
-        [vec![session("claude")], vec![session("muse")], vec![]]
+        [
+            vec![session("claude")],
+            vec![session("muse")],
+            vec![],
+            vec![]
+        ]
     );
     assert!(
         matches!(frame.cells.last(), Some(CellData::Provider(_))),
@@ -108,8 +117,12 @@ fn a_frame_carries_the_settings_and_the_action_error() {
     let frame = rig.last_frame();
     assert_eq!(frame.settings, snapshot().settings);
     assert_eq!(frame.action_error.as_deref(), Some("boom"));
+    assert_eq!(frame.cells.len(), snapshot().settings.cell_count());
     assert!(
-        frame.cells.is_empty(),
-        "nothing has been read yet, so nothing renders"
+        frame.cells.iter().all(|cell| match cell {
+            CellData::Provider(cell) => cell.reading.is_none(),
+            CellData::PullRequests(cell) => cell.reading.is_none(),
+        }),
+        "nothing has been read yet, so every cell is checking"
     );
 }

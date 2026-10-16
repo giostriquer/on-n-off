@@ -78,23 +78,19 @@ pub fn rail(
     let mut cells: Vec<CellData> = settings
         .rail_providers()
         .into_iter()
-        .filter_map(|provider| {
+        .map(|provider| {
             let (reading, sessions) = read(provider);
-            reading.map(|reading| {
-                CellData::Provider(ProviderCell {
-                    provider,
-                    reading: Some(reading),
-                    sessions,
-                })
+            CellData::Provider(ProviderCell {
+                provider,
+                reading,
+                sessions,
             })
         })
         .collect();
     if settings.pull_requests.enabled {
-        if let Some(dto) = pulls {
-            cells.push(CellData::PullRequests(PrCell {
-                reading: Some(pr_reading(dto, &settings.pull_requests.selected_lists())),
-            }));
-        }
+        cells.push(CellData::PullRequests(PrCell {
+            reading: pulls.map(|dto| pr_reading(dto, &settings.pull_requests.selected_lists())),
+        }));
     }
     RailData {
         settings: settings.clone(),

@@ -708,3 +708,70 @@ fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon()
     );
     assert_eq!(painted[2], (0, 0), "an unread row's copy icon stays muted");
 }
+
+#[test]
+fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
+    let selected = NotchSettings {
+        providers: vec![AgentId::Claude, AgentId::Codex],
+        ..settings()
+    };
+    let claude = NotchProvider::current(vec![signed_in(
+        AgentId::Claude,
+        vec![window(
+            "weekly",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            41.0,
+        )],
+    )]);
+    let data = frame::rail(
+        &selected,
+        |agent| match agent {
+            AgentId::Claude => (claude.clone(), Vec::new()),
+            _ => (None, Vec::new()),
+        },
+        None,
+        None,
+    );
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let rail = plan(&selected, &displays, &data, Hover::default()).expect("fits");
+    let labels: Vec<String> = rail
+        .cells
+        .iter()
+        .map(|cell| match &cell.content {
+            CellContent::Provider { label, .. } => label.clone(),
+            CellContent::PullRequests { readable, .. } => {
+                assert!(!readable, "nothing about the pull requests is known yet");
+                "—".into()
+            }
+        })
+        .collect();
+    assert_eq!(
+        labels,
+        ["41%", "—", "—"],
+        "Codex and the pull requests keep their slots until they are read"
+    );
+    for (index, checking) in [(1, "Checking usage…"), (2, "Checking pull requests…")] {
+        let planned = plan(
+            &selected,
+            &displays,
+            &data,
+            Hover {
+                active: Some(index),
+                ..Hover::default()
+            },
+        )
+        .expect("fits");
+        let texts: Vec<String> = planned
+            .popover
+            .expect("the popover is open")
+            .entries
+            .into_iter()
+            .filter_map(|(item, _)| match item {
+                PopItem::Text { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.contains(&checking.to_string()), "{texts:?}");
+    }
+}

@@ -1,5 +1,6 @@
 use super::*;
-use crate::dto::{CiState, MergeKind, ReviewDecision};
+use crate::dto::{CiState, LimitWindowDto, LimitWindowKind, MergeKind, Reading, ReviewDecision};
+use crate::side_notch::sessions::SessionStatus;
 
 fn pr(number: u64) -> serde_json::Value {
     serde_json::json!({
@@ -141,7 +142,12 @@ fn the_pr_cell_is_there_only_while_it_is_on() {
     let dto = prs(vec![pr(1)]);
     let mut off = settings(vec![GithubList::Mine]);
     off.pull_requests.enabled = false;
-    assert!(rail(&off, unread, Some(&dto), None).cells.is_empty());
+    let without = rail(&off, unread, Some(&dto), None);
+    assert_eq!(without.cells.len(), off.cell_count());
+    assert!(without
+        .cells
+        .iter()
+        .all(|cell| matches!(cell, CellData::Provider(_))));
     let on = rail(
         &settings(vec![GithubList::Mine]),
         unread,
@@ -151,4 +157,73 @@ fn the_pr_cell_is_there_only_while_it_is_on() {
     assert_eq!(on.settings, settings(vec![GithubList::Mine]));
     assert_eq!(on.action_error.as_deref(), Some("boom"));
     assert!(matches!(on.cells.last(), Some(CellData::PullRequests(_))));
+}
+
+fn claude() -> NotchProvider {
+    NotchProvider::current(vec![crate::limits::signed_in_card(
+        AgentId::Claude,
+        "acct",
+        Reading {
+            windows: vec![LimitWindowDto {
+                id: "weekly".into(),
+                label: "Weekly · all models".into(),
+                kind: LimitWindowKind::Weekly,
+                used_percent: 41.0,
+                resets_at: None,
+                window_seconds: None,
+                observed_at: "2026-09-01T10:00:00Z".into(),
+            }],
+            ..Reading::default()
+        },
+    )])
+    .expect("a signed-in account")
+}
+
+fn cells(frame: &RailData) -> Vec<(Option<AgentId>, bool)> {
+    frame
+        .cells
+        .iter()
+        .map(|cell| match cell {
+            CellData::Provider(cell) => (Some(cell.provider), cell.reading.is_some()),
+            CellData::PullRequests(cell) => (None, cell.reading.is_some()),
+        })
+        .collect()
+}
+
+#[test]
+fn every_selected_provider_has_a_cell_in_rail_order_and_one_not_yet_read_is_checking() {
+    let session = LiveSession {
+        id: "claude-1".into(),
+        name: "webapp-1a".into(),
+        place: "Terminal".into(),
+        project: "webapp".into(),
+        status: SessionStatus::Working,
+        last_active_at: "2026-09-01T10:00:00Z".into(),
+    };
+    let mut selected = settings(vec![GithubList::Mine]);
+    selected.providers = vec![AgentId::Cursor, AgentId::Claude, AgentId::Muse];
+    let frame = rail(
+        &selected,
+        |agent| match agent {
+            AgentId::Claude => (Some(claude()), vec![session.clone()]),
+            _ => (None, Vec::new()),
+        },
+        None,
+        None,
+    );
+    assert_eq!(
+        cells(&frame),
+        [
+            (Some(AgentId::Claude), true),
+            (Some(AgentId::Muse), false),
+            (Some(AgentId::Cursor), false),
+            (None, false),
+        ],
+        "a cell for every selected provider in rail order, then the pull requests; only Claude was read"
+    );
+    assert_eq!(frame.cells.len(), selected.cell_count());
+    let CellData::Provider(first) = &frame.cells[0] else {
+        panic!("Claude leads the rail");
+    };
+    assert_eq!(first.sessions, [session]);
 }
