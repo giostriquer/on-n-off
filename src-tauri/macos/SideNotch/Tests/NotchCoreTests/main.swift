@@ -447,12 +447,31 @@ final class NotchTests {
     expectEqual(rows?.allSatisfy(\.badges.isEmpty), true)
   }
 
-  func testTheGoldenMessageDecodesToTheCellsTheHostDecided() throws {
+  func goldenMessages() throws -> [HostMessage] {
     let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
       .appendingPathComponent("host-message.json")
-    let golden = try HostMessage.decode(Data(contentsOf: url))
-    expectEqual(golden.version, protocolVersion)
-    expectEqual(golden.sequence, 1)
+    let messages = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [Any] ?? []
+    return try messages.map { try HostMessage.decode(JSONSerialization.data(withJSONObject: $0)) }
+  }
+
+  func testTheGoldenMessagesDecodeToTheCellsTheHostDecided() throws {
+    let messages = try goldenMessages()
+    expectEqual(messages.map(\.sequence), [1, 2])
+    expectEqual(messages.map(\.version), [protocolVersion, protocolVersion])
+    let first = messages[0]
+    expectEqual(
+      first.cells.map(\.id),
+      [.provider(.claude), .provider(.codex), .provider(.muse), .pullRequests])
+    for index in 0..<3 {
+      expectNil(providerCell(first, index)?.reading)
+      expectEqual(providerCell(first, index)?.notice, Notice(text: "Checking usage…", tone: .muted))
+    }
+    expectNil(pullRequestCell(first)?.reading)
+    expectEqual(
+      pullRequestCell(first)?.notice, Notice(text: "Checking pull requests…", tone: .muted))
+    expectNil(first.actionError)
+
+    let golden = messages[1]
     expectEqual(golden.actionError, "Cannot open the Limits window.")
     expectEqual(
       golden.cells.map(\.id),
@@ -489,7 +508,7 @@ final class NotchTests {
       [
         Segment(ci: .success, passingWithConflicts: false),
         Segment(ci: .failure, passingWithConflicts: false),
-        Segment(ci: .pending, passingWithConflicts: false),
+        Segment(ci: .success, passingWithConflicts: true),
       ])
     expectEqual(reading?.attention, Attention(conflicts: 1, failing: 1, changesRequested: 1, ready: 1))
     expectEqual(reading?.lists.map(\.title), ["Mine", "Review requested"])
@@ -639,7 +658,7 @@ try checks.testACellForAProviderTheHelperDoesNotKnowIsSkippedNotFatal()
 try checks.testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames()
 try checks.testPullRequestsValidateLinksListsSegmentsAndCaps()
 try checks.testRowsCarryTheirTagAndBadgesInTheTonesTheHostChose()
-try checks.testTheGoldenMessageDecodesToTheCellsTheHostDecided()
+try checks.testTheGoldenMessagesDecodeToTheCellsTheHostDecided()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
 print("20 native check groups; \(failures) failures")

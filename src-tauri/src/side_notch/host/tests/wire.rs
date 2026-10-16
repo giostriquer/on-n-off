@@ -110,7 +110,6 @@ fn pinned_pull_requests() -> GithubPrsDto {
     let mut offsite = pr(3, "acme/webapp");
     offsite["url"] = "http://example.com/pull/3".into();
     let mut unread = pr(4, "acme/api");
-    unread["ci"] = "pending".into();
     unread["mergeKind"] = "conflicts".into();
     serde_json::from_value(serde_json::json!({
         "status": "rateLimited", "hint": "Showing the pull requests read at 10:00.", "stale": true,
@@ -127,7 +126,7 @@ const PINNED_ACTION_ERROR: &str = "Cannot open the Limits window.";
 const GOLDEN: &str =
     include_str!("../../../../macos/SideNotch/Tests/NotchCoreTests/host-message.json");
 
-fn sent() -> String {
+fn sent() -> Vec<String> {
     let app = FakeApp::default();
     for agent in RAIL_ORDER {
         app.world().limits.insert(agent, pinned_limits(agent));
@@ -135,23 +134,42 @@ fn sent() -> String {
     }
     app.world().pull_requests = Some(pinned_pull_requests());
     app.world().open_error = Some(PINNED_ACTION_ERROR.into());
-    let mut rig = Rig::new(app, pinned_snapshot());
+    app.world().hold = true;
+    let mut rig = Rig::new(app.clone(), pinned_snapshot());
     rig.tick(Duration::ZERO);
+    app.world().hold = false;
+    app.release();
     rig.act(Inbound::Action(Action::OpenLimits));
     let wire = rig.wire.wire();
-    let snapshot = wire.snapshots.last().expect("a frame was sent");
-    let frame = wire.frames.last().expect("a frame was sent");
-    String::from_utf8(crate::side_notch::protocol::encode(1, snapshot, frame).unwrap()).unwrap()
+    let first = (&wire.snapshots[0], &wire.frames[0]);
+    let last = (
+        wire.snapshots.last().expect("a frame was sent"),
+        wire.frames.last().expect("a frame was sent"),
+    );
+    [first, last]
+        .into_iter()
+        .zip(1..)
+        .map(|((snapshot, frame), sequence)| {
+            String::from_utf8(
+                crate::side_notch::protocol::encode(sequence, snapshot, frame).unwrap(),
+            )
+            .unwrap()
+        })
+        .collect()
 }
 
 #[test]
-fn the_helper_receives_exactly_the_golden_protocol_7_message() {
+fn the_helper_receives_exactly_the_golden_protocol_7_messages() {
     assert_eq!(PROTOCOL_VERSION, 7);
-    let golden: serde_json::Value = serde_json::from_str(GOLDEN).expect("the golden message");
+    let golden: Vec<serde_json::Value> = serde_json::from_str(GOLDEN).expect("the golden messages");
     assert_eq!(
         sent(),
-        serde_json::to_string(&golden).unwrap(),
-        "the encoder's bytes, key for key, are the golden message NotchCoreChecks decodes"
+        golden
+            .iter()
+            .map(|message| serde_json::to_string(message).unwrap())
+            .collect::<Vec<_>>(),
+        "the encoder's bytes, key for key, are the first frame and a frame after every read, \
+         the golden messages NotchCoreChecks decodes"
     );
     assert_eq!(
         serde_json::to_string_pretty(&golden).unwrap() + "\n",

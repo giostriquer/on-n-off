@@ -1,294 +1,377 @@
-{
-  "version": 7,
-  "sequence": 1,
-  "snapshot": {
-    "revision": 0,
-    "supported": true,
-    "liquidGlass": true,
-    "settings": {
-      "enabled": true,
-      "displayId": "display-a",
-      "edge": "left",
-      "size": "large",
-      "show": "onHover",
-      "providers": [
-        "muse",
-        "codex",
-        "claude"
-      ],
-      "pullRequests": {
+[
+  {
+    "version": 7,
+    "sequence": 1,
+    "snapshot": {
+      "revision": 0,
+      "supported": true,
+      "liquidGlass": true,
+      "settings": {
         "enabled": true,
-        "lists": [
-          "reviewRequested",
-          "mine"
-        ]
+        "displayId": "display-a",
+        "edge": "left",
+        "size": "large",
+        "show": "onHover",
+        "providers": [
+          "muse",
+          "codex",
+          "claude"
+        ],
+        "pullRequests": {
+          "enabled": true,
+          "lists": [
+            "reviewRequested",
+            "mine"
+          ]
+        },
+        "popoverStyle": "solid"
       },
-      "popoverStyle": "solid"
+      "displays": [
+        {
+          "id": "display-a",
+          "name": "Built-in Display",
+          "x": 0.0,
+          "y": 0.0,
+          "width": 1512.0,
+          "height": 982.0,
+          "workY": 33.0,
+          "workHeight": 949.0,
+          "scale": 2.0,
+          "mirrored": false
+        }
+      ],
+      "error": null
     },
-    "displays": [
+    "cells": [
       {
-        "id": "display-a",
-        "name": "Built-in Display",
-        "x": 0.0,
-        "y": 0.0,
-        "width": 1512.0,
-        "height": 982.0,
-        "workY": 33.0,
-        "workHeight": 949.0,
-        "scale": 2.0,
-        "mirrored": false
+        "kind": "provider",
+        "provider": "claude",
+        "notice": {
+          "text": "Checking usage…",
+          "tone": "muted"
+        },
+        "sessions": []
+      },
+      {
+        "kind": "provider",
+        "provider": "codex",
+        "notice": {
+          "text": "Checking usage…",
+          "tone": "muted"
+        },
+        "sessions": []
+      },
+      {
+        "kind": "provider",
+        "provider": "muse",
+        "notice": {
+          "text": "Checking usage…",
+          "tone": "muted"
+        },
+        "sessions": []
+      },
+      {
+        "kind": "pullRequests",
+        "notice": {
+          "text": "Checking pull requests…",
+          "tone": "muted"
+        }
       }
     ],
-    "error": null
+    "actionError": null
   },
-  "cells": [
-    {
-      "kind": "provider",
-      "provider": "claude",
-      "reading": {
-        "status": "ok",
-        "message": null,
-        "windows": [
-          {
-            "id": "weekly_all",
-            "label": "Weekly · all models",
-            "kind": "weekly",
-            "usedPercent": 41.5,
-            "resetsAt": "2026-09-05T08:00:00Z",
-            "windowSeconds": 604800,
-            "observedAt": "2026-09-01T10:00:00Z"
-          },
-          {
-            "id": "session",
-            "label": "5 hour · all models",
-            "kind": "session",
-            "usedPercent": 12.0,
-            "resetsAt": "2026-09-01T13:00:00Z",
-            "observedAt": "2026-09-01T10:00:00Z"
-          },
-          {
-            "id": "weekly_scoped:Fable",
-            "label": "Weekly · Fable",
-            "kind": "model",
-            "usedPercent": 63.0,
-            "observedAt": "2026-09-01T10:00:00Z"
-          }
+  {
+    "version": 7,
+    "sequence": 2,
+    "snapshot": {
+      "revision": 0,
+      "supported": true,
+      "liquidGlass": true,
+      "settings": {
+        "enabled": true,
+        "displayId": "display-a",
+        "edge": "left",
+        "size": "large",
+        "show": "onHover",
+        "providers": [
+          "muse",
+          "codex",
+          "claude"
         ],
-        "headlineWindowId": "weekly_all",
-        "innerRing": {
-          "kind": "fable",
-          "windowId": "weekly_scoped:Fable"
-        }
-      },
-      "sessions": [
-        {
-          "id": "claude-1",
-          "name": "webapp-1a",
-          "place": "Terminal",
-          "project": "webapp",
-          "status": "working",
-          "lastActiveAt": "2026-09-01T09:58:00Z"
+        "pullRequests": {
+          "enabled": true,
+          "lists": [
+            "reviewRequested",
+            "mine"
+          ]
         },
+        "popoverStyle": "solid"
+      },
+      "displays": [
         {
-          "id": "claude-2",
-          "name": "webapp-2b",
-          "place": "Terminal",
-          "project": "webapp",
-          "status": "idle",
-          "lastActiveAt": "2026-09-01T09:58:00Z"
+          "id": "display-a",
+          "name": "Built-in Display",
+          "x": 0.0,
+          "y": 0.0,
+          "width": 1512.0,
+          "height": 982.0,
+          "workY": 33.0,
+          "workHeight": 949.0,
+          "scale": 2.0,
+          "mirrored": false
         }
-      ]
+      ],
+      "error": null
     },
-    {
-      "kind": "provider",
-      "provider": "codex",
-      "reading": {
-        "status": "failed",
-        "message": "Codex did not answer.",
-        "windows": [
-          {
-            "id": "weekly",
-            "label": "Weekly",
-            "kind": "weekly",
-            "usedPercent": 22.0,
-            "resetsAt": "2026-09-04T00:00:00Z",
-            "observedAt": "2026-09-01T09:30:00Z"
+    "cells": [
+      {
+        "kind": "provider",
+        "provider": "claude",
+        "reading": {
+          "status": "ok",
+          "message": null,
+          "windows": [
+            {
+              "id": "weekly_all",
+              "label": "Weekly · all models",
+              "kind": "weekly",
+              "usedPercent": 41.5,
+              "resetsAt": "2026-09-05T08:00:00Z",
+              "windowSeconds": 604800,
+              "observedAt": "2026-09-01T10:00:00Z"
+            },
+            {
+              "id": "session",
+              "label": "5 hour · all models",
+              "kind": "session",
+              "usedPercent": 12.0,
+              "resetsAt": "2026-09-01T13:00:00Z",
+              "observedAt": "2026-09-01T10:00:00Z"
+            },
+            {
+              "id": "weekly_scoped:Fable",
+              "label": "Weekly · Fable",
+              "kind": "model",
+              "usedPercent": 63.0,
+              "observedAt": "2026-09-01T10:00:00Z"
+            }
+          ],
+          "headlineWindowId": "weekly_all",
+          "innerRing": {
+            "kind": "fable",
+            "windowId": "weekly_scoped:Fable"
           }
-        ],
-        "headlineWindowId": "weekly",
-        "innerRing": {
-          "kind": "workspaceShare"
         },
-        "workspaceCredits": {
-          "usedPercent": 32.0,
-          "resetsAt": "2026-10-01T12:00:00+00:00",
-          "left": "16,999.5 of 25,000 left",
-          "renewed": "25,000 of 25,000 left"
-        }
-      },
-      "notice": {
-        "text": "Codex did not answer.",
-        "tone": "muted"
-      },
-      "paused": {
-        "text": "Refresh paused. Last observed values below.",
-        "tone": "amber"
-      },
-      "sessions": []
-    },
-    {
-      "kind": "provider",
-      "provider": "muse",
-      "notice": {
-        "text": "Checking usage…",
-        "tone": "muted"
-      },
-      "sessions": [
-        {
-          "id": "muse-1",
-          "name": "webapp-mu",
-          "place": "Terminal",
-          "project": "webapp",
-          "status": "working",
-          "lastActiveAt": "2026-09-01T09:58:00Z"
-        }
-      ]
-    },
-    {
-      "kind": "pullRequests",
-      "reading": {
-        "readable": true,
-        "count": 3,
-        "segments": [
+        "sessions": [
           {
-            "ci": "success",
-            "passingWithConflicts": false
+            "id": "claude-1",
+            "name": "webapp-1a",
+            "place": "Terminal",
+            "project": "webapp",
+            "status": "working",
+            "lastActiveAt": "2026-09-01T09:58:00Z"
           },
           {
-            "ci": "failure",
-            "passingWithConflicts": false
-          },
-          {
-            "ci": "pending",
-            "passingWithConflicts": false
-          }
-        ],
-        "attention": {
-          "conflicts": 1,
-          "failing": 1,
-          "changesRequested": 1,
-          "ready": 1
-        },
-        "lists": [
-          {
-            "id": "mine",
-            "title": "Mine",
-            "total": 3,
-            "items": [
-              {
-                "id": "node-1",
-                "number": 1,
-                "title": "Fix #1",
-                "url": "https://github.com/acme/webapp/pull/1",
-                "repo": "acme/webapp",
-                "author": "octocat",
-                "ci": "success",
-                "updatedAt": "2026-09-01T10:00:00Z",
-                "badges": [
-                  {
-                    "label": "Approved",
-                    "tone": "green"
-                  },
-                  {
-                    "label": "Ready to merge",
-                    "tone": "green"
-                  }
-                ],
-                "tag": {
-                  "label": "Work",
-                  "tone": "work"
-                }
-              },
-              {
-                "id": "node-2",
-                "number": 2,
-                "title": "Fix #2",
-                "url": "https://github.com/octocat/dotfiles/pull/2",
-                "repo": "octocat/dotfiles",
-                "author": "octocat",
-                "ci": "failure",
-                "updatedAt": "2026-09-01T10:00:00Z",
-                "badges": [
-                  {
-                    "label": "Draft",
-                    "tone": "muted"
-                  },
-                  {
-                    "label": "Changes requested",
-                    "tone": "red"
-                  }
-                ],
-                "tag": {
-                  "label": "Personal",
-                  "tone": "personal"
-                }
-              }
-            ]
-          },
-          {
-            "id": "reviewRequested",
-            "title": "Review requested",
-            "total": 2,
-            "items": [
-              {
-                "id": "node-4",
-                "number": 4,
-                "title": "Fix #4",
-                "url": "https://github.com/acme/api/pull/4",
-                "repo": "acme/api",
-                "author": "octocat",
-                "ci": "pending",
-                "updatedAt": "2026-09-01T10:00:00Z",
-                "badges": [
-                  {
-                    "label": "Conflicts",
-                    "tone": "red"
-                  }
-                ]
-              },
-              {
-                "id": "node-1",
-                "number": 1,
-                "title": "Fix #1",
-                "url": "https://github.com/acme/webapp/pull/1",
-                "repo": "acme/webapp",
-                "author": "octocat",
-                "ci": "success",
-                "updatedAt": "2026-09-01T10:00:00Z",
-                "badges": [
-                  {
-                    "label": "Approved",
-                    "tone": "green"
-                  },
-                  {
-                    "label": "Ready to merge",
-                    "tone": "green"
-                  }
-                ],
-                "tag": {
-                  "label": "Work",
-                  "tone": "work"
-                }
-              }
-            ]
+            "id": "claude-2",
+            "name": "webapp-2b",
+            "place": "Terminal",
+            "project": "webapp",
+            "status": "idle",
+            "lastActiveAt": "2026-09-01T09:58:00Z"
           }
         ]
       },
-      "notice": {
-        "text": "Showing the pull requests read at 10:00.",
-        "tone": "amber"
+      {
+        "kind": "provider",
+        "provider": "codex",
+        "reading": {
+          "status": "failed",
+          "message": "Codex did not answer.",
+          "windows": [
+            {
+              "id": "weekly",
+              "label": "Weekly",
+              "kind": "weekly",
+              "usedPercent": 22.0,
+              "resetsAt": "2026-09-04T00:00:00Z",
+              "observedAt": "2026-09-01T09:30:00Z"
+            }
+          ],
+          "headlineWindowId": "weekly",
+          "innerRing": {
+            "kind": "workspaceShare"
+          },
+          "workspaceCredits": {
+            "usedPercent": 32.0,
+            "resetsAt": "2026-10-01T12:00:00+00:00",
+            "left": "16,999.5 of 25,000 left",
+            "renewed": "25,000 of 25,000 left"
+          }
+        },
+        "notice": {
+          "text": "Codex did not answer.",
+          "tone": "muted"
+        },
+        "paused": {
+          "text": "Refresh paused. Last observed values below.",
+          "tone": "amber"
+        },
+        "sessions": []
+      },
+      {
+        "kind": "provider",
+        "provider": "muse",
+        "notice": {
+          "text": "Checking usage…",
+          "tone": "muted"
+        },
+        "sessions": [
+          {
+            "id": "muse-1",
+            "name": "webapp-mu",
+            "place": "Terminal",
+            "project": "webapp",
+            "status": "working",
+            "lastActiveAt": "2026-09-01T09:58:00Z"
+          }
+        ]
+      },
+      {
+        "kind": "pullRequests",
+        "reading": {
+          "readable": true,
+          "count": 3,
+          "segments": [
+            {
+              "ci": "success",
+              "passingWithConflicts": false
+            },
+            {
+              "ci": "failure",
+              "passingWithConflicts": false
+            },
+            {
+              "ci": "success",
+              "passingWithConflicts": true
+            }
+          ],
+          "attention": {
+            "conflicts": 1,
+            "failing": 1,
+            "changesRequested": 1,
+            "ready": 1
+          },
+          "lists": [
+            {
+              "id": "mine",
+              "title": "Mine",
+              "total": 3,
+              "items": [
+                {
+                  "id": "node-1",
+                  "number": 1,
+                  "title": "Fix #1",
+                  "url": "https://github.com/acme/webapp/pull/1",
+                  "repo": "acme/webapp",
+                  "author": "octocat",
+                  "ci": "success",
+                  "updatedAt": "2026-09-01T10:00:00Z",
+                  "badges": [
+                    {
+                      "label": "Approved",
+                      "tone": "green"
+                    },
+                    {
+                      "label": "Ready to merge",
+                      "tone": "green"
+                    }
+                  ],
+                  "tag": {
+                    "label": "Work",
+                    "tone": "work"
+                  }
+                },
+                {
+                  "id": "node-2",
+                  "number": 2,
+                  "title": "Fix #2",
+                  "url": "https://github.com/octocat/dotfiles/pull/2",
+                  "repo": "octocat/dotfiles",
+                  "author": "octocat",
+                  "ci": "failure",
+                  "updatedAt": "2026-09-01T10:00:00Z",
+                  "badges": [
+                    {
+                      "label": "Draft",
+                      "tone": "muted"
+                    },
+                    {
+                      "label": "Changes requested",
+                      "tone": "red"
+                    }
+                  ],
+                  "tag": {
+                    "label": "Personal",
+                    "tone": "personal"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "reviewRequested",
+              "title": "Review requested",
+              "total": 2,
+              "items": [
+                {
+                  "id": "node-4",
+                  "number": 4,
+                  "title": "Fix #4",
+                  "url": "https://github.com/acme/api/pull/4",
+                  "repo": "acme/api",
+                  "author": "octocat",
+                  "ci": "success",
+                  "updatedAt": "2026-09-01T10:00:00Z",
+                  "badges": [
+                    {
+                      "label": "Conflicts",
+                      "tone": "red"
+                    }
+                  ]
+                },
+                {
+                  "id": "node-1",
+                  "number": 1,
+                  "title": "Fix #1",
+                  "url": "https://github.com/acme/webapp/pull/1",
+                  "repo": "acme/webapp",
+                  "author": "octocat",
+                  "ci": "success",
+                  "updatedAt": "2026-09-01T10:00:00Z",
+                  "badges": [
+                    {
+                      "label": "Approved",
+                      "tone": "green"
+                    },
+                    {
+                      "label": "Ready to merge",
+                      "tone": "green"
+                    }
+                  ],
+                  "tag": {
+                    "label": "Work",
+                    "tone": "work"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "notice": {
+          "text": "Showing the pull requests read at 10:00.",
+          "tone": "amber"
+        }
       }
-    }
-  ],
-  "actionError": "Cannot open the Limits window."
-}
+    ],
+    "actionError": "Cannot open the Limits window."
+  }
+]
