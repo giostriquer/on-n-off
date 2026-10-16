@@ -144,7 +144,7 @@ fn turning_the_notch_off_sets_the_wait_back_to_one_second() {
 
 #[test]
 fn only_the_awaited_ack_confirms_the_frame_and_lets_the_next_one_go() {
-    let (mut pipe, _lifetime) = Pipe::new();
+    let mut pipe = stopped_pipe();
     let at = Instant::now();
     let helper = attach(&mut pipe, at);
     assert_eq!(pipe.connect(at), Ok(Link::Open));
@@ -170,7 +170,7 @@ fn only_the_awaited_ack_confirms_the_frame_and_lets_the_next_one_go() {
 
 #[test]
 fn the_helpers_actions_reach_the_host_in_order() {
-    let (mut pipe, _lifetime) = Pipe::new();
+    let mut pipe = stopped_pipe();
     let at = Instant::now();
     let helper = attach(&mut pipe, at);
     for action in [
@@ -200,7 +200,7 @@ fn the_helpers_actions_reach_the_host_in_order() {
 
 #[test]
 fn a_frame_unanswered_for_ten_seconds_restarts_the_helper() {
-    let (mut pipe, _lifetime) = Pipe::new();
+    let mut pipe = stopped_pipe();
     let at = Instant::now();
     let helper = attach(&mut pipe, at);
     pipe.send(at, &snapshot(), frame()).unwrap();
@@ -223,7 +223,7 @@ fn a_frame_unanswered_for_ten_seconds_restarts_the_helper() {
 
 #[test]
 fn a_helper_that_breaks_or_goes_away_is_restarted_after_a_wait() {
-    let (mut pipe, _lifetime) = Pipe::new();
+    let mut pipe = stopped_pipe();
     let at = Instant::now();
     let helper = attach(&mut pipe, at);
     helper
@@ -248,7 +248,7 @@ fn a_helper_that_breaks_or_goes_away_is_restarted_after_a_wait() {
 
 #[test]
 fn a_helper_that_is_not_reading_is_restarted() {
-    let (mut pipe, _lifetime) = Pipe::new();
+    let mut pipe = stopped_pipe();
     let at = Instant::now();
     let helper = attach(&mut pipe, at);
     pipe.send(at, &snapshot(), frame()).unwrap();
@@ -285,7 +285,7 @@ fn an_ack_thirty_seconds_after_the_start_sets_the_wait_back_to_one_second() {
 
 #[test]
 fn frames_go_out_numbered_one_two_three() {
-    let (mut pipe, _lifetime) = Pipe::new();
+    let mut pipe = stopped_pipe();
     let at = Instant::now();
     let helper = attach(&mut pipe, at);
     for sequence in 1..=3 {
@@ -298,7 +298,7 @@ fn frames_go_out_numbered_one_two_three() {
 
 #[test]
 fn a_pipe_without_a_helper_neither_sends_nor_receives() {
-    let (mut pipe, _lifetime) = Pipe::new();
+    let mut pipe = stopped_pipe();
     let at = Instant::now();
     assert_eq!(received(&mut pipe, at).0, Err(STOPPED.into()));
     assert_eq!(pipe.send(at, &snapshot(), frame()), Err(STOPPED.into()));
