@@ -484,12 +484,7 @@ fn monitor_state_without_observation_times_is_discarded_instead_of_migrated() {
 
 #[test]
 fn the_monitor_reads_only_what_its_settings_watch() {
-    let alert = crate::settings::ResetAlert {
-        label: None,
-        max_left_percent: 5,
-        min_hours_to_renewal: 24,
-        automatic: false,
-    };
+    let alert = crate::reset_alert::ResetAlert::default();
     let settings = |limit_notifications: bool, alerts: bool| crate::settings::AppSettings {
         limit_notifications,
         reset_alerts: if alerts {
@@ -539,107 +534,10 @@ fn alerts_only() -> crate::settings::AppSettings {
         limit_notifications: false,
         reset_alerts: HashMap::from([(
             "acct-codex".to_string(),
-            crate::settings::ResetAlert {
-                label: None,
-                max_left_percent: 5,
-                min_hours_to_renewal: 24,
-                automatic: false,
-            },
+            crate::reset_alert::ResetAlert::default(),
         )]),
         ..crate::settings::AppSettings::default()
     }
-}
-
-#[test]
-fn an_alert_offers_its_reset_while_limit_notifications_stay_quiet() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    let mut state = MonitorState::default();
-    let settings = alerts_only();
-
-    let first = notices_of(
-        &mut state,
-        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
-        &settings,
-        now,
-    );
-    let second = notices_of(
-        &mut state,
-        &[codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
-        &settings,
-        now,
-    );
-
-    assert!(first.is_empty());
-    assert_eq!(
-        second
-            .iter()
-            .map(|(title, _)| title.as_str())
-            .collect::<Vec<_>>(),
-        ["Codex: a banked reset is available"]
-    );
-    assert!(state.providers.is_empty(), "limit baselines kept while off");
-}
-
-#[test]
-fn with_limit_notifications_on_the_limit_is_notified_too() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    let mut state = MonitorState::default();
-    let settings = crate::settings::AppSettings {
-        limit_notifications: true,
-        ..alerts_only()
-    };
-
-    notices_of(
-        &mut state,
-        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
-        &settings,
-        now,
-    );
-    let notices = notices_of(
-        &mut state,
-        &[codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
-        &settings,
-        now,
-    );
-
-    let titles: Vec<&str> = notices.iter().map(|(title, _)| title.as_str()).collect();
-    assert_eq!(
-        titles,
-        ["Codex limit reached", "Codex: a banked reset is available"]
-    );
-}
-
-#[test]
-fn a_poll_of_nothing_forgets_every_observation() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    let mut state = MonitorState::default();
-    let on = crate::settings::AppSettings {
-        limit_notifications: true,
-        ..alerts_only()
-    };
-    notices_of(
-        &mut state,
-        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
-        &on,
-        now,
-    );
-    assert!(!state.providers.is_empty() && !state.reset_alerts.is_empty());
-
-    let notices = notices_of(
-        &mut state,
-        &[],
-        &crate::settings::AppSettings::default(),
-        now,
-    );
-
-    assert!(notices.is_empty());
-    assert!(state.providers.is_empty() && state.reset_alerts.is_empty());
 }
 
 #[test]
@@ -660,53 +558,34 @@ fn a_state_written_before_alerts_keeps_its_limit_baselines() {
 }
 
 #[test]
-fn an_offer_is_not_made_again_after_a_restart() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    let root = scratch_dir("limits-monitor-offer-restart");
+fn a_state_file_with_alerts_reads_and_writes_back_as_it_was() {
+    let root = scratch_dir("limits-monitor-alert-shape");
     let path = root.join("monitor.json");
-    let settings = alerts_only();
-    let mut state = MonitorState::default();
-    notices_of(
-        &mut state,
-        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
-        &settings,
-        now,
-    );
-    assert_eq!(
-        notices_of(
-            &mut state,
-            &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
-            &settings,
-            now
-        )
-        .len(),
-        1
-    );
+    let document = serde_json::json!({
+        "schema_version": 2,
+        "providers": {"codex": {"account_id": "acct-codex", "windows": {"weekly": {
+            "used_percent": 95.0,
+            "resets_at": "2026-08-24T12:00:00+00:00",
+            "observed_at": "2026-08-19T12:00:00Z",
+            "exhausted": false
+        }}}},
+        "reset_alerts": {
+            "acct-codex": {
+                "low": {"cycle": "2026-08-24T12:00:00+00:00", "observedAt": "2026-08-19T12:00:00Z"},
+                "offeredCycle": "2026-08-17T12:00:00+00:00"
+            },
+            "acct-other": {"low": null, "offeredCycle": null}
+        }
+    });
+    fs::write(&path, document.to_string()).unwrap();
+
+    let state = load_state(&path);
     monitor::save_state(&path, &state).unwrap();
 
-    let mut reloaded = load_state(&path);
-
-    assert!(notices_of(
-        &mut reloaded,
-        &[codex_with_a_reset(97.0, "2026-08-19T12:20:00Z")],
-        &settings,
-        now
-    )
-    .is_empty());
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written, document);
     let _ = fs::remove_dir_all(root);
-}
-
-fn notices_of(
-    state: &mut MonitorState,
-    snapshots: &[ProviderLimitsDto],
-    settings: &crate::settings::AppSettings,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Vec<(String, String)> {
-    let outcome = observe_poll(state, snapshots, settings, now);
-    assert!(outcome.automatic_offers.is_empty());
-    outcome.notices
 }
 
 fn automatic_only() -> crate::settings::AppSettings {
@@ -723,30 +602,6 @@ fn at(value: &str) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::parse_from_rfc3339(value)
         .unwrap()
         .with_timezone(&chrono::Utc)
-}
-
-#[test]
-fn an_automatic_alerts_offer_is_handed_on_to_be_scheduled() {
-    let now = at("2026-08-19T13:00:00Z");
-    let mut state = MonitorState::default();
-    let settings = automatic_only();
-
-    observe_poll(
-        &mut state,
-        &[codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
-        &settings,
-        now,
-    );
-    let outcome = observe_poll(
-        &mut state,
-        &[codex_with_a_reset(96.0, "2026-08-19T12:10:00Z")],
-        &settings,
-        now,
-    );
-
-    assert!(outcome.notices.is_empty(), "offered as well as scheduled");
-    assert_eq!(outcome.automatic_offers.len(), 1);
-    assert_eq!(outcome.automatic_offers[0].account_id, "acct-codex");
 }
 
 #[test]
@@ -794,3 +649,5 @@ fn limits_checks_wake_the_monitor_in_five_minutes_without_delaying_a_reset() {
     let faster = crate::limits_refresh::check_interval(minutes(2));
     assert_eq!(next_wake(faster, None, now, now), Duration::from_secs(120));
 }
+
+mod poll;

@@ -53,6 +53,7 @@ impl<T: Clone> PerAccount<T> {
     pub(super) fn read_backed_off(
         &self,
         account: &str,
+        interval: Duration,
         read: impl FnOnce() -> Option<T>,
     ) -> Option<T> {
         {
@@ -84,21 +85,13 @@ impl<T: Clone> PerAccount<T> {
                 }
             }
             None => {
-                let count = entry
-                    .failure
-                    .map_or(1, |(_, count)| count.saturating_add(1));
-                let delay = backoff_delay(count, crate::limits_refresh::poll_interval());
-                entry.failure = Some((Instant::now() + delay, count));
+                let failures_before = entry.failure.map_or(0, |(_, count)| count);
+                let delay = crate::limits_refresh::failure_backoff(interval, failures_before);
+                entry.failure = Some((Instant::now() + delay, failures_before.saturating_add(1)));
             }
         }
         answer
     }
-}
-
-pub(super) fn backoff_delay(count: u32, interval: Duration) -> Duration {
-    interval
-        .saturating_mul(1 << count.saturating_sub(1).min(4))
-        .min(Duration::from_secs(3600))
 }
 
 #[cfg(test)]
