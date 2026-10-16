@@ -1,9 +1,10 @@
-// Muse subscription limits, read the way Muse exposes them: `muse serve`
-// speaks MSP over stdio, and its experimental `usage/read` reports the last
-// subscription usage the host observed from a provider frame. on-n-off opens
-// no Muse credential and never starts a model turn to poll: when the fresh
-// host has observed nothing, the card says so and keeps its account so the
-// remembered reading stands in.
+// Muse subscription limits from the CLI's own key-mint call (`mint`), which
+// reports both windows for the stored device login with no model turn spent.
+// When no device token can be read, or the mint answer carries no window,
+// the read falls back to `muse serve`: its experimental `usage/read`
+// reports the last subscription usage that host observed from a provider
+// frame, and when the fresh host has observed nothing, the card says so and
+// keeps its account so the remembered reading stands in.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -20,6 +21,8 @@ use crate::dto::{
     Reading,
 };
 use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
+
+mod mint;
 
 const SERVE: Peer = Peer::jsonrpc(
     "Muse serve",
@@ -164,15 +167,7 @@ fn normalize(answers: ServeAnswers) -> Result<Parsed, ServeFailure> {
         .map(str::trim)
         .filter(|label| !label.is_empty())
         .map(str::to_string);
-    let account_dto = LimitsAccountDto {
-        legacy_id: None,
-        id: label
-            .as_deref()
-            .filter(|label| label.contains('@'))
-            .map(|label| format!("email:{}", label.to_lowercase()))
-            .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
-        label: label.clone(),
-    };
+    let account_dto = account_dto(label);
     let Some(usage) = answers.usage else {
         return Err(ServeFailure::NoUsageYet(account_dto));
     };
@@ -205,6 +200,18 @@ fn normalize(answers: ServeAnswers) -> Result<Parsed, ServeFailure> {
             ..Reading::default()
         },
     })
+}
+
+fn account_dto(label: Option<String>) -> LimitsAccountDto {
+    LimitsAccountDto {
+        legacy_id: None,
+        id: label
+            .as_deref()
+            .filter(|label| label.contains('@'))
+            .map(|label| format!("email:{}", label.to_lowercase()))
+            .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
+        label,
+    }
 }
 
 fn session_label(minutes: u64) -> String {
@@ -286,7 +293,51 @@ fn finish_read(read: Result<Parsed, ServeFailure>) -> ProviderLimitsDto {
 }
 
 pub(super) fn muse_current(home: &Path) -> ProviderLimitsDto {
-    finish_read(read_with(home, start))
+    finish_read(read_current(
+        home,
+        start,
+        |config| mint::load_login_cached(config, &keychain_token),
+        |login| mint::fetch(mint::KEY_ENDPOINT, &login.token),
+    ))
+}
+
+/// The mint read answers first when a device login can be read; a rejected
+/// login is signed out, and any other mint failure — or an answer with no
+/// window — falls back to the serve read, which still names the account
+/// states the mint cannot see.
+fn read_current(
+    home: &Path,
+    start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure>,
+    login: impl FnOnce(&Path) -> Option<mint::DeviceLogin>,
+    mint: impl FnOnce(&mint::DeviceLogin) -> Result<mint::MintResponse, mint::MintError>,
+) -> Result<Parsed, ServeFailure> {
+    let config = crate::paths::muse_config_for(home);
+    if let Some(device) = login(&config) {
+        match mint(&device) {
+            Ok(response) => {
+                if let Some(parsed) = mint::normalize(&device, &response) {
+                    return parsed;
+                }
+            }
+            Err(mint::MintError::Unauthorized) => {
+                return Err(ServeFailure::SignedOut);
+            }
+            Err(mint::MintError::Unavailable) => {}
+        }
+    }
+    read_with(home, start)
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_token() -> Option<String> {
+    crate::accounts::keychain_find_password(mint::KEYCHAIN_SERVICE, Some(mint::KEYCHAIN_ACCOUNT))
+        .ok()
+        .flatten()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_token() -> Option<String> {
+    None
 }
 
 fn read_with(

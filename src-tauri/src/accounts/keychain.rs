@@ -101,7 +101,7 @@ fn run(command: &str) -> Result<(), String> {
 const PASSWORD_DEADLINE: std::time::Duration = std::time::Duration::from_secs(90);
 
 #[cfg(target_os = "macos")]
-pub(super) fn find_password(
+pub(crate) fn find_password(
     service: &str,
     account: Option<&str>,
 ) -> Result<Option<String>, String> {

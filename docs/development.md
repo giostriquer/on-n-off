@@ -186,7 +186,9 @@ overlay. Its typography is not judged by eye at all — see
 - Smoke Overview, Plugins, Skills, MCP, Usage, Limits, Pull requests, Agent Config, Settings,
   search/filtering, and every provider switch — without mutating live configuration. Note that
   Limits runs `claude -p /usage --safe-mode` and `codex app-server` and makes outbound HTTPS calls
-  for Codex; on-n-off itself sends nothing to Anthropic. On macOS the account controls on Limits
+  for Codex and for Muse (its key-mint call to `api.meta.ai` with the stored device login, read
+  on macOS from Muse's own Keychain item through `/usr/bin/security`, which can prompt once per
+  app run); on-n-off itself sends nothing to Anthropic. On macOS the account controls on Limits
   read Claude Code's Keychain item through `/usr/bin/security`, which can prompt once, though the
   Claude usage read opens no credential; Pull requests runs `gh auth token` once and calls
   `api.github.com` on every refresh.

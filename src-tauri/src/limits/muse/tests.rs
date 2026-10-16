@@ -412,3 +412,256 @@ fn a_muse_read_writes_these_exact_lines() {
         ]
     );
 }
+
+fn config_with_auth(body: &str) -> PathBuf {
+    let config = crate::paths::scratch_dir("muse-mint-auth");
+    std::fs::create_dir_all(&config).expect("config dir");
+    std::fs::write(config.join("auth.json"), body).expect("auth.json");
+    config
+}
+
+fn no_keychain() -> Option<String> {
+    None
+}
+
+#[test]
+fn an_inline_device_token_is_loaded_with_its_email() {
+    let config = config_with_auth(
+        r#"{"schema_version":2,"providers":{"meta":{"mechanism":"oauth","access_token":"device-token","user_email":"You@Example.com"}}}"#,
+    );
+    let login = mint::load_login(&config, &no_keychain).expect("login");
+    assert_eq!(login.token, "device-token");
+    assert_eq!(login.email.as_deref(), Some("You@Example.com"));
+}
+
+#[test]
+fn a_keychain_login_uses_the_keychain_when_no_token_is_inline() {
+    let config = config_with_auth(
+        r#"{"schema_version":2,"providers":{"meta":{"mechanism":"oauth","storage":"keychain","user_email":"you@example.com"}}}"#,
+    );
+    let login = mint::load_login(&config, &|| Some("keychain-token".to_string())).expect("login");
+    assert_eq!(login.token, "keychain-token");
+    assert!(mint::load_login(&config, &no_keychain).is_none());
+}
+
+#[test]
+fn a_keychain_bundle_yields_only_its_access_token() {
+    let config = config_with_auth(
+        r#"{"schema_version":2,"providers":{"meta":{"mechanism":"oauth","storage":"keychain","user_email":"you@example.com"}}}"#,
+    );
+    let bundle = r#"{
+        "secret_schema_version": 1,
+        "access_token": "bundle-access-token",
+        "refresh_token": "bundle-refresh-secret",
+        "api_key": "LLM|bundle-minted-secret"
+    }"#;
+    let login = mint::load_login(&config, &|| Some(bundle.to_string())).expect("login");
+    assert_eq!(login.token, "bundle-access-token");
+    let formatted = format!("{login:?}");
+    assert!(!formatted.contains("bundle-access-token"), "{formatted}");
+    assert!(!formatted.contains("bundle-refresh-secret"), "{formatted}");
+    assert!(!formatted.contains("bundle-minted-secret"), "{formatted}");
+
+    let tokenless = r#"{"secret_schema_version":1,"refresh_token":"bundle-refresh-secret"}"#;
+    assert!(mint::load_login(&config, &|| Some(tokenless.to_string())).is_none());
+}
+
+#[test]
+fn the_cached_login_is_reread_only_when_auth_json_changes() {
+    mint::reset_cache();
+    let body = r#"{"schema_version":2,"providers":{"meta":{"mechanism":"oauth","storage":"keychain","user_email":"you@example.com"}}}"#;
+    let config = config_with_auth(body);
+    let calls = std::cell::Cell::new(0);
+    let keychain = || {
+        calls.set(calls.get() + 1);
+        Some("keychain-token".to_string())
+    };
+    assert!(mint::load_login_cached(&config, &keychain).is_some());
+    assert!(mint::load_login_cached(&config, &keychain).is_some());
+    assert_eq!(calls.get(), 1, "one Keychain lookup while auth.json stands");
+
+    let before = std::fs::metadata(config.join("auth.json"))
+        .and_then(|metadata| metadata.modified())
+        .ok();
+    for _ in 0..100 {
+        std::fs::write(config.join("auth.json"), body).expect("rewrite auth.json");
+        let after = std::fs::metadata(config.join("auth.json"))
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        if after != before {
+            break;
+        }
+    }
+    assert!(mint::load_login_cached(&config, &keychain).is_some());
+    assert_eq!(calls.get(), 2, "a rewritten auth.json re-reads the login");
+    mint::reset_cache();
+}
+
+#[test]
+fn no_login_means_no_mint() {
+    let missing = crate::paths::scratch_dir("muse-mint-missing");
+    assert!(mint::load_login(&missing, &|| Some("unused".to_string())).is_none());
+    let api_key = config_with_auth(r#"{"providers":{"meta":{"mechanism":"apiKey"}}}"#);
+    assert!(mint::load_login(&api_key, &|| Some("unused".to_string())).is_none());
+    let corrupt = config_with_auth("{not json");
+    assert!(mint::load_login(&corrupt, &no_keychain).is_none());
+}
+
+fn mint_body() -> Value {
+    json!({
+        "is_subs_active": true,
+        "require_payment": false,
+        "subs_tier_name": "Wonder",
+        "subs_usage": {
+            "tier": "27681631238169137",
+            "window": {"used_percent": 41, "window_duration_mins": 300, "resets_at": 1_760_000_000i64},
+            "weekly": {"used_percent": 22, "resets_at": 1_760_500_000i64}
+        }
+    })
+}
+
+#[test]
+fn a_mint_response_normalizes_to_the_same_card_as_serve() {
+    let login = mint::DeviceLogin {
+        token: "device-token".to_string(),
+        email: Some("You@Example.com".to_string()),
+    };
+    let response: mint::MintResponse = serde_json::from_value(mint_body()).expect("parse");
+    let parsed = mint::normalize(&login, &response)
+        .expect("mint reading")
+        .expect("parsed");
+    let account = parsed.account.expect("account");
+    assert_eq!(account.id, "email:you@example.com");
+    assert_eq!(account.label.as_deref(), Some("You@Example.com"));
+    assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
+    assert_eq!(parsed.reading.windows.len(), 2);
+    let weekly = parsed
+        .reading
+        .windows
+        .iter()
+        .find(|window| window.kind == LimitWindowKind::Weekly)
+        .expect("weekly");
+    assert_eq!(weekly.used_percent, 22.0);
+    assert_eq!(
+        weekly.resets_at.as_deref(),
+        Some("2025-10-15T03:46:40.000Z")
+    );
+    let session = parsed
+        .reading
+        .windows
+        .iter()
+        .find(|window| window.kind == LimitWindowKind::Session)
+        .expect("session");
+    assert_eq!(session.label, "5 hour · all models");
+    assert_eq!(session.used_percent, 41.0);
+    assert_eq!(session.window_seconds, Some(18_000));
+    assert_eq!(
+        session.resets_at.as_deref(),
+        Some("2025-10-09T08:53:20.000Z")
+    );
+}
+
+#[test]
+fn an_idle_or_inactive_mint_response_maps_without_fake_windows() {
+    let login = mint::DeviceLogin {
+        token: "device-token".to_string(),
+        email: None,
+    };
+    let idle: mint::MintResponse = serde_json::from_value(json!({
+        "is_subs_active": true, "subs_tier_name": "Wonder", "subs_usage": null
+    }))
+    .expect("parse idle");
+    assert!(mint::normalize(&login, &idle).is_none(), "idle falls back");
+
+    let inactive: mint::MintResponse = serde_json::from_value(json!({
+        "is_subs_active": false, "subs_tier_name": "Wonder"
+    }))
+    .expect("parse inactive");
+    assert!(matches!(
+        mint::normalize(&login, &inactive),
+        Some(Err(ServeFailure::Unsupported(_)))
+    ));
+
+    let billing: mint::MintResponse = serde_json::from_value(json!({
+        "is_subs_active": true, "require_payment": true
+    }))
+    .expect("parse billing");
+    assert!(matches!(
+        mint::normalize(&login, &billing),
+        Some(Err(ServeFailure::Unsupported(_)))
+    ));
+}
+
+#[test]
+fn a_minted_key_in_the_response_is_never_kept() {
+    let mut body = mint_body();
+    body["api_key"] = json!("LLM|secret-minted-key");
+    body["account"] = json!({"id": "acct-1"});
+    let response: mint::MintResponse = serde_json::from_value(body).expect("parse");
+    let debug = format!("{response:?}");
+    assert!(!debug.contains("secret-minted-key"), "{debug}");
+    assert!(!debug.contains("acct-1"), "{debug}");
+}
+
+#[test]
+fn the_mint_call_sends_the_device_token_and_reads_the_quota_block() {
+    mint::reset_cache();
+    let (url, request) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        &serde_json::to_string(&mint_body()).expect("body"),
+    );
+    let response = mint::fetch(&url, "device-token").expect("fetch");
+    assert_eq!(response.subs_tier_name, "Wonder");
+    let captured = request.join().expect("captured");
+    assert_eq!(
+        crate::http::head_header(&captured.head, "authorization"),
+        Some("Bearer device-token"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(
+        crate::http::head_header(&captured.head, "x-api-version"),
+        Some("1.0.0"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(captured.body, "{}");
+}
+
+#[test]
+fn a_rejected_mint_login_is_signed_out_and_other_failures_fall_back() {
+    mint::reset_cache();
+    let root = crate::paths::scratch_dir("muse-mint-orchestration");
+    let login = mint::DeviceLogin {
+        token: "device-token".to_string(),
+        email: Some("you@example.com".to_string()),
+    };
+    let serve_must_not_run = |_: &Path, _: &Path, _: &Path| -> Result<Session, ServeFailure> {
+        panic!("serve must not run")
+    };
+    let rejected = read_current(
+        &root,
+        serve_must_not_run,
+        |_| Some(login.clone()),
+        |_| Err(mint::MintError::Unauthorized),
+    );
+    assert_eq!(rejected, Err(ServeFailure::SignedOut));
+
+    let home_data = root.join(".local").join("share").join("muse");
+    let mut replies = happy_replies();
+    replies[1]["result"]["museHome"] = json!(home_data.to_string_lossy());
+    let network = read_current(
+        &root,
+        |_, _, _| Ok(Script::new(replies.clone()).session(SERVE)),
+        |_| Some(login.clone()),
+        |_| Err(mint::MintError::Unavailable),
+    )
+    .expect("serve fallback");
+    assert_eq!(network.reading.windows.len(), 2);
+
+    let response: mint::MintResponse = serde_json::from_value(mint_body()).expect("parse");
+    let minted = read_current(&root, serve_must_not_run, |_| Some(login), |_| Ok(response))
+        .expect("mint reading");
+    assert_eq!(minted.reading.plan.as_deref(), Some("Wonder"));
+}
