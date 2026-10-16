@@ -25,6 +25,7 @@ vi.mock("$lib/api", () => ({
 type ForcedSource = {
   name: string;
   source: SharedReadSource;
+  queryKey: readonly unknown[];
   show: () => unknown;
   refresh: (client: QueryClient) => Promise<void>;
   read: ReturnType<typeof vi.fn>;
@@ -38,6 +39,7 @@ const FORCED_SOURCES: ForcedSource[] = [
   {
     name: "Claude's limits",
     source: "limits:claude",
+    queryKey: limitsQuery("claude", 5).queryKey,
     show: () => useQuery(limitsQuery("claude", 5)),
     refresh: refreshLimits,
     read: calls.readLimits,
@@ -49,6 +51,7 @@ const FORCED_SOURCES: ForcedSource[] = [
   {
     name: "the pull requests",
     source: "github:prs",
+    queryKey: githubPrsQuery(60).queryKey,
     show: () => useQuery(githubPrsQuery(60)),
     refresh: refreshGithubPrs,
     read: calls.readGithubPrs,
@@ -95,6 +98,23 @@ it.each(CASES)(
     for (const listener of calls.listeners) listener({ source });
     await waitFor(() => expect(reads()).toEqual([unforced, forced, unforced]));
     hook.unmount();
+    client.clear();
+  },
+);
+
+it.each(CASES)(
+  "$name, in the $window, with no screen showing it: a refresh reads forced every time it is asked, and the read it leaves behind is unforced",
+  async ({ queryKey, refresh, read, shown, answer, unforced, forced, client: createClient }) => {
+    read.mockReset().mockResolvedValue(answer);
+    const client = createClient();
+    const reads = () => read.mock.calls.filter(shown);
+
+    await act(async () => { await refresh(client); });
+    expect(reads()).toEqual([forced]);
+    await act(async () => { await client.refetchQueries({ queryKey, type: "all" }); });
+    expect(reads()).toEqual([forced, unforced]);
+    await act(async () => { await refresh(client); });
+    expect(reads()).toEqual([forced, unforced, forced]);
     client.clear();
   },
 );
