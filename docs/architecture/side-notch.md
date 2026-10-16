@@ -176,9 +176,10 @@ There is no helper and no second executable. `win_window.rs` owns one transparen
 non-activating `tao` window per selected display and presents it with `UpdateLayeredWindow`;
 `win_paint.rs` draws the rail (from `model.rs`'s metrics and frames), the marks and the popovers
 into a tiny-skia pixmap; `win_displays.rs` enumerates monitors; and `win_transport.rs` is the
-host's Windows transport, in-process channels where macOS has pipes. The display is chosen by device name rather than UUID, and the same rule holds —
-a disconnected or mirrored selection hides the notch. Windows 11 is the floor
-(`CurrentBuildNumber` >= 22000); the settings card says so on older builds.
+host's Windows transport, in-process channels where macOS has pipes. The display is chosen by
+device name rather than UUID, and the same rule holds — a disconnected or mirrored selection
+hides the notch. Windows 11 is the floor (`CurrentBuildNumber` >= 22000); the settings card says
+so on older builds.
 
 `OS.md` carries the Windows behaviours that decide whether this works at all — the bare `WS_POPUP`
 style, per-pixel-alpha hit testing, the pointer poll that stands in for the `CursorMoved` events
